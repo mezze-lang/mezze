@@ -39,10 +39,17 @@ import kotlin.test.assertEquals
  * calls are MONOMORPHIZED, and a spec now resolves the instance from its own
  * recorded type arguments instead of falling through to the primitive node.
  *
- * The sorted-container paths still fail, and the reason is specific: their
- * comparator lives in a PRELOWERED stdlib function that monomorphization never
- * respecializes, so no compile happens for the fix to apply to. The remaining
- * cases are @Disabled pointing at that, and are the acceptance criteria for it.
+ * The sorted-container paths still fail, and tracing them produced a sharper
+ * statement than "prelowered": **whether the element's Ord is used depends on
+ * what ELSE is in the program.** `sorted_set::from_seq` followed by `size` alone
+ * passes; the SAME construction in a program that also calls `min` fails. The
+ * data structure's `min()` is just `elements[0]` and does no comparison, and
+ * `addObject` compares during construction — so construction itself resolved the
+ * instance in one program and not in the other. Mono seeded differently.
+ *
+ * That instability is the thing tasks C.1–C.4 remove: an instance decided per
+ * call site from surface types can change when an unrelated site is added. The
+ * remaining cases are @Disabled pointing at it and are its acceptance criteria.
  */
 class SortedContainerReadBackTest {
 
@@ -68,7 +75,7 @@ class SortedContainerReadBackTest {
     """.trimIndent()
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
     fun `min of a sorted set of records, field read off the result`() {
         assertEquals(
             10L,
@@ -85,7 +92,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
     fun `max of a sorted set of records`() {
         assertEquals(
             30L,
@@ -102,7 +109,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `to_seq then first, field read off the result`() {
         assertEquals(
             10L,
@@ -119,7 +125,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
     fun `the ordering actually used is the element's own Ord`() {
         // P orders by `k` only. If the sorted set fell back to a structural or
         // insertion order, min would be the first-inserted element (tag 30).
@@ -162,7 +168,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
     fun `step 3 - to_seq then size (no element read)`() {
         assertEquals(
             2L,
@@ -238,7 +243,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
     fun `contrast - a VARIANT element with its own Ord`() {
         assertEquals(
             1L,
@@ -292,7 +297,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: the comparator lives in a PRELOWERED stdlib function that mono never respecializes, so the spec-evidence fix does not reach it — see known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
     fun `contrast - a newtype whose Ord is REVERSED`() {
         // The plain newtype case passes, but a newtype wraps an Int at runtime, so
         // a primitive fallback would give the same answer and the test could not
@@ -433,6 +438,47 @@ class SortedContainerReadBackTest {
                 let xs: [P] = [{ k = 3, tag = 30 }, { k = 1, tag = 10 }]
                 match seq::min { xs = xs } is
                   Some { val = p } -> p.tag
+                  None -> 0
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    @Test
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    fun `sorted_set min called as a FUNCTION rather than a method`() {
+        // `min()` on the data structure is just `elements[0]` — no comparison — and
+        // construction succeeds (step 2 passes). So a crash in `s.min {}` means the
+        // method form is not reaching the sorted-set native at all.
+        assertEquals(
+            10L,
+            MezzeTestHelper.run(
+                """
+                $prelude
+                let s = sorted_set::from_seq { xs = [{ k = 3, tag = 30 }, { k = 1, tag = 10 }] }
+                match sorted_set::min { s = s } is
+                  Some { val = p } -> p.tag
+                  None -> 0
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    @Test
+    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    fun `construct and size then min, in ONE program`() {
+        // Step 2 (construct + size) passes and `min()` on the data structure is
+        // just elements[0]. Doing both in one program removes any possibility that
+        // the two test methods compiled the construction differently.
+        assertEquals(
+            10L,
+            MezzeTestHelper.run(
+                """
+                $prelude
+                let s = sorted_set::from_seq { xs = [{ k = 3, tag = 30 }, { k = 1, tag = 10 }] }
+                let n = s.size {}
+                match sorted_set::min { s = s } is
+                  Some { val = p } -> p.tag + n - n
                   None -> 0
                 """.trimIndent(),
             ),

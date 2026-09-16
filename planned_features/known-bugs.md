@@ -579,7 +579,19 @@ takes over and the fallback can go.
 
 ### What remains, and why
 
-**The sorted containers.** Narrowed but not closed. What the probes establish:
+**The sorted containers.** Narrowed much further, and the sharp version is worse
+than the original framing: **whether a sorted container uses the element's Ord
+depends on WHAT ELSE IS IN THE PROGRAM.**
+
+`sorted_set::from_seq { xs = [records] }` followed by `size` passes. The SAME
+construction, in a program that later calls `min`, fails. The data structure's
+`min()` is just `elements[0]` and compares nothing; `addObject` compares during
+construction — so construction itself resolved the instance in one program and
+not in the other. Adding an unrelated call site changed the monomorphizer's seeds
+and with them the instance a earlier call resolves to. That is precisely what
+C.1–C.4 remove.
+
+Earlier probe results, still true:
 
 - `sorted_set::from_seq` IS monomorphized — the user call goes to a specialized
   hash with `typeArgs=[P]`, so the spec exists and the call reaches it.
@@ -608,6 +620,36 @@ get inferred preconditions is the design question behind a complete fix.
 
 `SortedContainerReadBackTest` — 17 cases, 7 still `@Disabled` pointing here (was
 10). The 10 that pass are what narrow what is left.
+
+---
+
+## BUG 8 — FIXED: the fused LONG pipeline fired on a seq of records
+
+Found 2026-09-16 while tracing BUG 7 — the sorted-container round trip was dying
+here rather than in any comparison.
+
+`FusedLongPipeline` is a numeric fast path: its loop reads every element with
+`((Number) raw).longValue()`. The classifier that chooses it works from the SHAPE
+of the call chain, and `SinkIR.ToSeq` / `ToList` mapped unconditionally to
+`FusedSinkMode.Materialize`, which on its own admitted a chain into the pipeline.
+
+Materialize is the odd sink out. Every other one that enters here — sum, a
+numeric fold, a reduce with a long op — only makes sense over numbers.
+`to_seq`/`to_list` are TYPE-PRESERVING and say nothing about the element, so a
+seq of records reached the loop and died with `MezzeRecord cannot be cast to
+Number`.
+
+Fix: a Materialize sink is not by itself a reason to fuse. With STAGES present
+the pipeline is constrained back to numbers anyway —
+`tryBuildFusedLongPipeline` rejects any stage whose operand is not a long
+literal — so the term now requires one, which makes it redundant with `hasStages`
+and is deliberately written that way so the condition reads as the rule.
+
+`FusedPipelineElementTypeTest` covers it, including the numeric case the fusion
+exists for (still fused) and the `sorted_set` of Ints control (still works). Note
+the plain chains — `size`, `fold`, `filter`, a generic element type — all passed
+BEFORE the fix; only the sorted-container route reached the bad path, which is
+why this survived the perf suites.
 
 ---
 

@@ -4624,7 +4624,21 @@ public final class BytecodeCompiler {
                 && a2.elemOp() != null;
         boolean hasShortCircuitSink = sinkMode instanceof FusedSinkMode.ShortCircuit;
         boolean hasReduceSink = sinkMode instanceof FusedSinkMode.ReduceOpt;
-        boolean hasMaterializeSink = sinkMode instanceof FusedSinkMode.Materialize;
+        // BUG 8: a Materialize sink (`to_seq` / `to_list`) is TYPE-PRESERVING — it
+        // says nothing about the element type, unlike every other sink here (sum,
+        // a numeric fold, a reduce with a long op), which only make sense over
+        // numbers. On its own it therefore admitted a seq of records into
+        // FusedLongPipeline, whose loop reads each element as
+        // `((Number) raw).longValue()`: `sorted_set::from_seq { xs = [records] }`
+        // then `to_seq` died with "MezzeRecord cannot be cast to Number".
+        //
+        // With STAGES present the pipeline is constrained back to numbers —
+        // tryBuildFusedLongPipeline rejects any stage whose operand is not a long
+        // literal — so the sink is only unsafe when it stands alone. Requiring a
+        // stage makes this term redundant with `hasStages` and is deliberately
+        // written that way: the condition should read as "a Materialize sink is
+        // not by itself a reason to fuse".
+        boolean hasMaterializeSink = sinkMode instanceof FusedSinkMode.Materialize && hasStages;
         if (hasStages || rawListExpr != null || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
