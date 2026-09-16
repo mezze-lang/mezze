@@ -911,6 +911,72 @@ monomorphization change cannot quietly reintroduce the lossy path.
 
 ---
 
+## BUG 13 — OPEN: collections reach Eq on a newtype that has none
+
+Found 2026-09-16 by testing the owner's stated rule rather than assuming the
+compiler enforced it.
+
+### The rule
+
+**A newtype derives `Inspect` and NOTHING else.** `Eq`, `Ord`, `Hash`, codecs and
+every other ability must be a hand-written `impl`. A newtype is a DISTINCT type
+from what it wraps, so wrapping an `Int` does not make it comparable, ordered or
+hashable — the author says what those mean. It is the rule that makes BUG 7, 10
+and 11's reversed-`Ord` tests meaningful in the first place.
+
+### Symptom — the rule holds for operators and not for collections
+
+```mezze
+newtype UserId = Int
+
+UserId.(1) == UserId.(1)     # correctly REJECTED: "Cannot use '==' with UserId"
+UserId.(1) < UserId.(2)      # correctly REJECTED
+UserId.(1).to_dbg {}         # correctly WORKS — Inspect is the one freebie
+
+set::from_seq { xs = [UserId.(1), UserId.(1)] }.size {}   # 1  — DEDUPED
+set::from_seq { xs = [UserId.(1)] }.contains { x = UserId.(1) }   # true
+map::empty {}.insert { k = UserId.(1), v = 1 }.size {}    # 1  — accepted
+```
+
+A `Set` cannot decide membership without `Eq`, and `UserId` has none — so it
+compared STRUCTURALLY, using an equality the author never wrote. That is the
+same silent substitution as BUG 7/10/11, reached through a different door: the
+collection natives get to `Eq` without passing through
+`DerivabilityRules.canDeriveAbilityStructurally`, which is where the newtype rule
+is enforced.
+
+Codec flavour of the same gap:
+
+```mezze
+UserId.(1).encode { config = json::json_default }
+# RuntimeException: Expected record for field 'encode', got: Long
+```
+
+A missing `Encode` impl surfaces as a RUNTIME crash on the erased payload rather
+than a compile error.
+
+### Fix
+
+This is T1.4's real content, now with a concrete failing case behind it:
+`Map 'k` / `Set 'a` must REQUIRE `Hash + Eq` on their element, so a newtype
+without those impls is rejected at the call rather than silently compared. Note
+the owner's decision closes T1.4's other half: there is NO opt-in syntax — no
+`deriving` clause, no structural Hash for newtypes. The author writes
+`impl Hash for UserId where { … }` like any other ability.
+
+Sequencing caution: adding `with Eq 'a` to the collection signatures moves these
+from silently-wrong to loudly-rejected, which is the safe direction, but it is a
+stdlib-wide signature change and every call site that relies on the current
+permissiveness will surface at once.
+
+### Acceptance
+
+`NewtypeDerivesOnlyInspectTest` — 3 enabled cases pinning the rule where it holds
+(Inspect works, `==` and `<` rejected), 4 `@Disabled` on the collection and codec
+gaps.
+
+---
+
 ## BUG 8 — FIXED: the fused LONG pipeline fired on a seq of records
 
 Found 2026-09-16 while tracing BUG 7 — the sorted-container round trip was dying
