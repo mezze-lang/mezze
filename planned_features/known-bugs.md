@@ -1373,6 +1373,43 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   the `Decode` target variable, so the target participates in inference instead
   of being excluded from it. Once it does, (1) and (2) above discharge it with no
   further machinery, and `DecodeTargetResolver`'s 423 lines come out.
+
+  **A.3 LANDED.** Three defects in a row, each hiding the next.
+
+  1. **The obligation was dropped at every call site.** All three places that
+     turn a callee's written `with` into a call-site constraint read it as
+
+         val head = constraint.typeArgs.firstOrNull()
+         if (head is MezzeType.VarType) { …emit… }      // else: silently dropped
+
+     — the plain-call path, the inherent-method path and the ability-method path.
+     That assumes the variable an obligation is ABOUT is its first type argument.
+     True for `Ord 'a` and `FromJson 'a for 'in`, which is why the shape survived;
+     false for `Decode 'config 'a for 'in`, where `with Decode JsonC 'a` has a
+     CONCRETE head. Scanning for the variable at any position is now one shared
+     helper (`abilityObligationAtCallSite`) that all three call.
+
+  2. **The obligation named a variable its own signature did not contain.** An
+     op's `with` constraints are converted from the ANNOTATION while its arrow is
+     built by INFERENCE, and the two conversions share no variable map — so the
+     `'a` of `with Decode JsonC 'a` and the `'a` of `-> Result 'a DecodeError`
+     became two unrelated `TypeVar`s (`'a` vs `'t81`, measured). The link from the
+     obligation to the signature was severed before codegen ever saw it.
+     `linkDeclaredVars` re-links them by walking declared against inferred in
+     parallel — position is what relates them.
+
+  3. **Dispatch matched the wrong slot of the tuple.** `tryResolveAbilityOp`
+     matches a receiver against `targetTypes.LAST` — the `for` type, which for a
+     codec is the WIRE type, `Str` for every JSON decoder there is. Two decodes of
+     different shapes have identical receivers and identical last slots; what
+     separates them is the slot the obligation's variable occupies.
+     `resolveOpFromObligation` matches the whole tuple position by position.
+
+  With all three fixed the call node carries its own concrete target
+  (`Result {name: Str} DecodeError` vs `Result {n: Int} DecodeError`, measured at
+  the same op), both codec impls are derived, and each site resolves its own.
+  `DecodeConstraintAtCallSiteTest` pins it, including the no-annotation case that
+  A.2 was blocked on.
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with

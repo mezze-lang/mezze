@@ -1229,17 +1229,12 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
         val funcType = functionResult.type as MezzeType.FunctionType
         if (funcType.abilityConstraints.isNotEmpty()) {
             val methodLevelConstraints = funcType.abilityConstraints.mapNotNull { constraint ->
-                val constrainedType = constraint.typeArgs.firstOrNull()
-                if (constrainedType is MezzeType.VarType) {
-                    Constraint.AbilityRequired(
-                        typeVar = constrainedType.variable,
-                        abilityName = constraint.abilityName,
-                        abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
-                        typeArgs = constraint.typeArgs.drop(1),
-                        context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
-                        loc = expr.loc
-                    )
-                } else null
+                abilityObligationAtCallSite(
+                    constraint = constraint,
+                    abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
+                    context = "Method-level constraint: ${constraint.abilityName}",
+                    loc = expr.loc,
+                )
             }
             collector.abilityConstraints.addAll(methodLevelConstraints)
 

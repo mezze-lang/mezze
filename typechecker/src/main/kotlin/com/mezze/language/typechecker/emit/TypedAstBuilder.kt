@@ -463,6 +463,67 @@ class TypedAstBuilder(
         buildAbilityImpl(decl, "<codec-generated>", impls, seedOpParams = decl.derived)
     }
 
+    /**
+     * Map each variable of a DECLARED arrow to whatever stands in its place on the
+     * arrow that was actually inferred, by walking the two in parallel.
+     *
+     * An op's `with` obligations are converted from the ANNOTATION while its arrow
+     * is built by inference, and the two conversions share no variable map — so
+     * the `'a` written in `with Decode JsonC 'a` and the `'a` written in
+     * `-> Result 'a DecodeError` become two unrelated `TypeVar`s. The obligation
+     * then constrains a variable occurring NOWHERE in the signature it is attached
+     * to, and anything downstream asking what the obligation is about finds
+     * nothing to match it against. (That is why a `from_json` call could not say
+     * which shape it decodes into: the link from `Decode … 'a` to the `'a` in the
+     * return type was severed before codegen ever saw it.)
+     *
+     * Position is what relates the two, and a parallel walk is what recovers it.
+     */
+    private fun linkDeclaredVars(declared: MezzeType, inferred: MezzeType, out: MutableMap<String, MezzeType>) {
+        when (declared) {
+            is MezzeType.VarType -> out.putIfAbsent(declared.variable.name, inferred)
+            is MezzeType.FunctionType -> if (inferred is MezzeType.FunctionType) {
+                linkDeclaredVars(declared.paramType, inferred.paramType, out)
+                linkDeclaredVars(declared.returnType, inferred.returnType, out)
+            }
+            is MezzeType.RecordType -> if (inferred is MezzeType.RecordType) {
+                for ((k, t) in declared.fields) inferred.fields[k]?.let { linkDeclaredVars(t, it, out) }
+            }
+            is MezzeType.SeqType -> if (inferred is MezzeType.SeqType)
+                linkDeclaredVars(declared.elementType, inferred.elementType, out)
+            is MezzeType.ListType -> if (inferred is MezzeType.ListType)
+                linkDeclaredVars(declared.elementType, inferred.elementType, out)
+            is MezzeType.MapType -> if (inferred is MezzeType.MapType) {
+                linkDeclaredVars(declared.keyType, inferred.keyType, out)
+                linkDeclaredVars(declared.valueType, inferred.valueType, out)
+            }
+            is MezzeType.TypeApplication -> if (inferred is MezzeType.TypeApplication &&
+                declared.args.size == inferred.args.size
+            ) {
+                for (i in declared.args.indices) linkDeclaredVars(declared.args[i], inferred.args[i], out)
+            }
+            is MezzeType.ParametricBuiltin -> if (inferred is MezzeType.ParametricBuiltin &&
+                declared.typeArgs.size == inferred.typeArgs.size
+            ) {
+                for (i in declared.typeArgs.indices) linkDeclaredVars(declared.typeArgs[i], inferred.typeArgs[i], out)
+            }
+            is MezzeType.NewtypeType -> if (inferred is MezzeType.NewtypeType)
+                linkDeclaredVars(declared.wrappedType, inferred.wrappedType, out)
+            else -> Unit
+        }
+    }
+
+    /** Rewrite a converted obligation's variables through [linkDeclaredVars]'s map. */
+    private fun relinkType(type: MezzeType, link: Map<String, MezzeType>): MezzeType = when (type) {
+        is MezzeType.VarType -> link[type.variable.name] ?: type
+        is MezzeType.SeqType -> MezzeType.SeqType(relinkType(type.elementType, link))
+        is MezzeType.ListType -> MezzeType.ListType(relinkType(type.elementType, link))
+        is MezzeType.MapType -> MezzeType.MapType(relinkType(type.keyType, link), relinkType(type.valueType, link))
+        is MezzeType.TypeApplication -> type.copy(args = type.args.map { relinkType(it, link) })
+        is MezzeType.RecordType -> type.copy(fields = type.fields.mapValues { (_, t) -> relinkType(t, link) })
+        else -> type
+    }
+
     private fun attachAbilityConstraints(
         expr: TypedExpr,
         constraints: List<MezzeType.FunctionAbilityConstraint>
@@ -620,7 +681,19 @@ class TypedAstBuilder(
                         }
                     )
                 }
-                attachAbilityConstraints(opExpr, converted)
+                // Re-link the obligation's variables to the arrow they constrain.
+                // `converted` and `opExpr.type` were built by separate conversions,
+                // so without this the obligation names variables the signature does
+                // not contain. `declaredOpType` is the bridge: it shares the
+                // annotation's variable map with `converted`, and matching it
+                // against the inferred arrow says which inferred variable each
+                // written one became.
+                val link = HashMap<String, MezzeType>()
+                if (declaredOpType != null) linkDeclaredVars(declaredOpType, opExpr.type, link)
+                val relinked =
+                    if (link.isEmpty()) converted
+                    else converted.map { c -> c.copy(typeArgs = c.typeArgs.map { relinkType(it, link) }) }
+                attachAbilityConstraints(opExpr, relinked)
             } else opExpr
             op.name to opWithConstraints
         }

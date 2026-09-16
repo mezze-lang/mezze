@@ -472,19 +472,13 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
 
         if (instantiatedMethodType.abilityConstraints.isNotEmpty()) {
             for (constraint in instantiatedMethodType.abilityConstraints) {
-                val constrainedType = constraint.typeArgs.firstOrNull()
-                if (constrainedType is MezzeType.VarType) {
-                    val normalizedName = constrainedType.variable.name.removePrefix("'")
-                    val freshTypeVar = originalToFresh[normalizedName] ?: constrainedType.variable
-                    abilityConstraints.add(Constraint.AbilityRequired(
-                        typeVar = freshTypeVar,
-                        abilityName = constraint.abilityName,
-                        abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
-                        typeArgs = constraint.typeArgs.drop(1),
-                        context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",
-                        loc = expr.loc
-                    ))
-                }
+                abilityObligationAtCallSite(
+                    constraint = constraint,
+                    abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
+                    context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",
+                    loc = expr.loc,
+                    freshen = { v -> originalToFresh[v.name.removePrefix("'")] ?: v },
+                )?.let { abilityConstraints.add(it) }
             }
         }
     } else {
@@ -1231,17 +1225,12 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     // return var; pinning the return at the call site pins the codec target.
     val inherentMethodAbilityConstraints = mutableListOf<Constraint.AbilityRequired>()
     (freshMethodType as? MezzeType.FunctionType)?.abilityConstraints?.forEach { c ->
-        val head = c.typeArgs.firstOrNull()
-        if (head is MezzeType.VarType) {
-            inherentMethodAbilityConstraints.add(Constraint.AbilityRequired(
-                typeVar = head.variable,
-                abilityName = c.abilityName,
-                abilityHash = c.abilityHash ?: context.abilityDeclarations[c.abilityName]?.contentHash,
-                typeArgs = c.typeArgs.drop(1),
-                context = "Inherent-method constraint: ${c.abilityName} on ${methodInfo?.targetTypeName}.${methodInfo?.methodName}",
-                loc = expr.loc,
-            ))
-        }
+        abilityObligationAtCallSite(
+            constraint = c,
+            abilityHash = c.abilityHash ?: context.abilityDeclarations[c.abilityName]?.contentHash,
+            context = "Inherent-method constraint: ${c.abilityName} on ${methodInfo?.targetTypeName}.${methodInfo?.methodName}",
+            loc = expr.loc,
+        )?.let { inherentMethodAbilityConstraints.add(it) }
     }
 
     return ConstraintResult(

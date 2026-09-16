@@ -236,6 +236,13 @@ class TypedASTCompiler(
      */
     private val decodeImplByOpHash = mutableMapOf<Hash, TypedAbilityImpl>()
 
+    /**
+     * An ability op's own DECLARED arrow, by op hash — kept so a call site can
+     * match it against the call's instantiated type and bind the variables the
+     * op's `with` obligations are about. See [obligationDispatchTypes].
+     */
+    private val declaredOpTypeByHash = mutableMapOf<Hash, MezzeType>()
+
     /** Codec entry points that dispatch their inner decode on the target type.
      *  DERIVED (never literals): ops/lets whose signatures carry a constraint
      *  on a decode-flavored ability HASH, plus wrappers that call them by hash
@@ -301,6 +308,7 @@ class TypedASTCompiler(
      */
     private fun prescanForDictMethods(modules: List<TypedModule>) {
         dictMethodsForHash.clear()
+        declaredOpTypeByHash.clear()
         // Seed with pre-lowered stdlib dict methods so call sites in the user
         // module correctly inject dicts for stdlib functions whose modules are
         // NOT in `additionalModules` during user compilation.
@@ -346,6 +354,7 @@ class TypedASTCompiler(
                 val opHash = computeOpHash(impl.hash, opName)
                 val bodyExpr = if (opBody is TypedLambda) opBody.body else opBody
                 implOpBodies.add(opHash to bodyExpr)
+                declaredOpTypeByHash[opHash] = opBody.type
                 val constrained = arrowHasAbilityConstraint(opBody.type)
                 val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained)
                 if (methods.isNotEmpty()) {
@@ -642,6 +651,66 @@ class TypedASTCompiler(
      *  is [opHash] has target `T 'a 'e…`; unify it against each of [types] (the
      *  receiver / arg types at the site) and collect `'a → …`. Empty when the op
      *  is not an impl op or nothing binds. */
+    /**
+     * The (ability hash, concrete type) pairs a called op's own `with` obligations
+     * resolve to AT THIS CALL SITE.
+     *
+     * An obligation names a type variable — `with Decode JsonC 'a` names `'a` —
+     * and that variable also appears in the op's declared return type
+     * (`Result 'a DecodeError`). The call's return type is concrete here, so
+     * matching the declared return against it binds the variable to THIS call's
+     * own value for it.
+     *
+     * That binding is the only thing at a decode site that distinguishes two calls
+     * of the same op: `"…".from_json {}` twice has identical receiver and argument
+     * types (both `Str`) and differs ONLY in what it decodes INTO. Resolving the
+     * dict from the receiver therefore hands both calls the same decoder, and the
+     * second one decodes against the first one's shape.
+     *
+     * Structural throughout — no ability, type or op name is matched. An obligation
+     * whose variable does not appear in the return type simply yields no pair, and
+     * the caller falls through to its existing receiver/argument resolution.
+     */
+    private fun obligationDispatchTypes(opHash: Hash, callType: MezzeType): List<Pair<Hash?, List<MezzeType>>> {
+        val declared = declaredOpTypeByHash[opHash] as? FunctionType ?: return emptyList()
+        if (declared.abilityConstraints.isEmpty()) return emptyList()
+        val bindings = HashMap<String, MezzeType>()
+        harvestVarBindings(declared.returnType, substitution.apply(callType), bindings)
+        if (bindings.isEmpty()) return emptyList()
+        return declared.abilityConstraints.mapNotNull { constraint ->
+            val args = constraint.typeArgs.map { arg ->
+                if (arg is VarType) {
+                    bindings[arg.variable.name] ?: bindings[arg.variable.name.removePrefix("'")] ?: arg
+                } else arg
+            }
+            // Partially-bound obligations dispatch nothing: a tuple with a hole in
+            // it matches more than one impl, which is the ambiguity this exists to
+            // remove. Leave those to the caller's existing resolution.
+            if (args.any { it is VarType || containsVarType(it) }) null
+            else constraint.abilityHash to args
+        }
+    }
+
+    /**
+     * The op a resolved obligation designates: the impl of that ability whose
+     * class-argument tuple agrees with the obligation's, POSITION BY POSITION.
+     *
+     * The ordinary receiver-based lookup matches only the tuple's LAST slot (the
+     * `for` type), which for a codec ability is the WIRE type — `Str` for every
+     * JSON decoder there is. Two `from_json` calls decoding different shapes have
+     * identical receivers and therefore identical last slots; what separates them
+     * sits at the slot the obligation's variable occupies. Matching the whole
+     * tuple uses that slot instead of discarding it.
+     */
+    private fun resolveOpFromObligation(method: String, abilityHash: Hash?, args: List<MezzeType>): Hash? {
+        if (abilityHash == null || args.isEmpty()) return null
+        val candidates = abilityOpIndex[method]?.filter { it.abilityHash == abilityHash } ?: return null
+        return candidates.firstOrNull { op ->
+            args.size <= op.targetTypes.size &&
+                args.indices.all { i -> typeMatchesTarget(args[i], op.targetTypes[i]) }
+        }?.opHash
+    }
+
     private fun bindImplVarsForOp(opHash: Hash, types: List<MezzeType>): Map<String, MezzeType> {
         val op = abilityOpIndex.values.asSequence().flatten().firstOrNull { it.opHash == opHash } ?: return emptyMap()
         val pattern = op.targetTypes.lastOrNull() ?: return emptyMap()
@@ -2035,6 +2104,12 @@ class TypedASTCompiler(
                     // one for both. DecodeTargetResolver recovered the concrete target
                     // per call site from usage; use its decoder hash directly.
                     val perSiteDecode = decodeOpBySite[expr.loc]
+                    // A.3: the called op's own `with` obligations, resolved against
+                    // THIS call's return type. `from_json`'s target is now pinned by
+                    // a real `Decode` constraint at the call site, so the concrete
+                    // shape is on the call node and the dict resolves from it — the
+                    // usage-recovery above is what that replaces.
+                    val obligationTypes = obligationDispatchTypes(opHash, expr.type)
                     // STRUCTURAL element binding — how Haskell/Rust resolve this.
                     // `instance Eq a => Eq [a]` peels exactly ONE constructor per step:
                     // the instance HEAD is matched against the type and `a` is bound,
@@ -2063,12 +2138,23 @@ class TypedASTCompiler(
                         val perSiteMatchesSlot = perSiteDecode != null &&
                             decodeImplByOpHash[perSiteDecode]
                                 ?.let { computeOpHash(it.hash, dictMethod) == perSiteDecode } == true
-                        val resolvedHash = if (perSiteMatchesSlot) {
-                            perSiteDecode
-                        } else {
-                            (perVarBound?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
-                                ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypesForDict))
+                        // A.3: an obligation the op DECLARED, bound to a concrete type
+                        // by this call's own return, and whose ability declares this
+                        // very slot's method. That is the op's written requirement
+                        // resolved against the call's actual types — strictly more
+                        // specific than the receiver/argument pile below, which cannot
+                        // see the target at all. A slot no obligation covers resolves
+                        // exactly as before.
+                        val fromObligation = obligationTypes.firstNotNullOfOrNull { (ability, args) ->
+                            resolveOpFromObligation(dictMethod, ability, args)
                         }
+                        val resolvedHash = fromObligation
+                            ?: if (perSiteMatchesSlot) {
+                                perSiteDecode
+                            } else {
+                                (perVarBound?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
+                                    ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypesForDict))
+                            }
                         if (resolvedHash != null) {
                             // refToDictedOp wraps the resolved op when IT needs its
                             // own dicts (nested containers: `[[[P]]]`). Seed it with the
