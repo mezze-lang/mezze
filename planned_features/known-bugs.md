@@ -737,6 +737,15 @@ Silent wrongness, not a crash — the same shape as BUG 7 and BUG 10. A newtype 
 erased to its wrapped value at runtime, so a primitive comparison agrees with the
 WRAPPED type's ordering and quietly contradicts the one the author wrote.
 
+**SCOPE, widened 2026-09-16.** This is not confined to `min_by`-shaped calls or
+to any particular position. ANY comparison in a generic `with Ord` body is
+affected — `{ x, y } -> if x < y then 1 else 2` at `'a = R` answers 1 where 2 is
+correct, and it answers the same wrong way whether the comparison sits in a plain
+body, inside an `if`, or inside a `perform`'s handler parameters. A concrete
+annotation on the same function is correct. That makes this the broadest
+remaining soundness defect in the plan: every generic ordering over a newtype
+whose `Ord` disagrees with the type it wraps is silently wrong.
+
 ### Cause
 
 Compiling the impl op shows the generic's `<` lowered to

@@ -516,7 +516,13 @@ class TypedASTCompiler(
                     if (e is TypedRecordEntry.Field) scanExprForDictFunctionCalls(e.value, out)
                 }
             }
-            is TypedPerform -> scanExprForDictFunctionCalls(expr.body, out)
+            is TypedPerform -> {
+                // Handler PARAMS are expressions too. Skipping them under-reports
+                // what a function needs, and under-reporting a dict is BUG 7's
+                // shape: the callee finds no dict and falls to the primitive op.
+                for (h in expr.handlers) h.params?.let { scanExprForDictFunctionCalls(it, out) }
+                scanExprForDictFunctionCalls(expr.body, out)
+            }
             is TypedPerformOp -> scanExprForDictFunctionCalls(expr.arg, out)
             is TypedPipe -> {
                 scanExprForDictFunctionCalls(expr.left, out)
@@ -932,7 +938,12 @@ class TypedASTCompiler(
                     if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, paramEnv)
                 }
             }
-            is TypedPerform -> scanExprForVarTypeMethods(expr.body, out, arrowIsConstrained, paramEnv)
+            is TypedPerform -> {
+                for (h in expr.handlers) {
+                    h.params?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
+                }
+                scanExprForVarTypeMethods(expr.body, out, arrowIsConstrained, paramEnv)
+            }
             is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, paramEnv)
             is TypedPipe -> {
                 scanExprForVarTypeMethods(expr.left, out, arrowIsConstrained, paramEnv)
