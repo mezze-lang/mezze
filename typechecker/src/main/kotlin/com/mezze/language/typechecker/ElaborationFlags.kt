@@ -18,13 +18,25 @@ object ElaborationFlags {
     /**
      * A.1 — keep the impl-operation body solves instead of discarding them.
      *
-     * `ImplValidator` already runs a full solve of every impl operation to check
-     * its body against the declared return type, then throws the result away;
-     * emit rebuilds those bodies from nothing, which is where 566 of the 983
-     * gaps the elaboration-invariant gate measures come from. With this on, those
-     * solves are merged into the module's side tables and substitution.
+     * `ImplValidator` runs a full solve of every impl operation to check its body
+     * against the declared return type. Without this flag that result is thrown
+     * away and emit rebuilds those bodies from nothing; with it, the solves are
+     * merged into the module's side tables and substitution.
+     *
+     * MEASURED 2026-09-16, re-checked because the figure here had gone stale:
+     * running both gates with `MEZZE_ELAB=0` produces **22 new elaboration gaps**
+     * and turns 3 baseline entries stale, so carrying the solves is load-bearing
+     * and `ElaborationInvariantGateTest` is what proves it. (The previous note
+     * claimed "566 of the 983 gaps"; that was true when A.1 landed, and later
+     * fixes — BUG 11's newtype impl bodies among them — closed most of that
+     * distance from the other side. The baseline is now 882.)
      *
      * Defaults ON. Set `MEZZE_ELAB=0` to fall back to discarding them.
+     *
+     * Note what this flag does NOT do: the solve still happens TWICE, once here
+     * and once in the module solve. Carrying the result is strictly better than
+     * discarding it, but "ImplValidator consumes elaboration rather than
+     * producing it" needs A.1's remainder, which is blocked on A.3.
      */
     val carryImplOpSolves: Boolean = System.getenv("MEZZE_ELAB") != "0"
 
