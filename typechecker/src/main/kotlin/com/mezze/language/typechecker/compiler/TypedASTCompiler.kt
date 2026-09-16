@@ -4782,8 +4782,15 @@ class TypedASTCompiler(
             // recurse into the inner literal and rebuild the concrete container
             // type, so `[[Low]]` recovers `SeqType(Sev)` and each nesting level's
             // dict resolves against the right element impl.
+            // B.1, matchers-first: ask whether the element type IS a sequence in
+            // either representation, not whether it is the dedicated node. A
+            // name-carried `TypeApplication("Seq", [T])` with a concrete T is a
+            // perfectly usable element type; `!is SeqType` called it unusable and
+            // rebuilt it, discarding the application's identity on the way.
+            val elemSeqElement =
+                com.mezze.language.ast.BuiltinTypes.sequenceElementType(elemType)
             if (element is com.mezze.language.typedast.TypedSeq &&
-                (elemType !is SeqType || elemType.elementType is VarType)) {
+                (elemSeqElement == null || elemSeqElement is VarType)) {
                 extractConcreteElementTypeFromExpr(element)?.let { return SeqType(it) }
             }
             if (elemType !is VarType) return elemType
