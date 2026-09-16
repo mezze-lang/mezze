@@ -17,6 +17,29 @@ enum class SlotKind {
     LONG, DOUBLE, BOOLEAN, OBJECT
 }
 
+/**
+ * Whether a value can be ordered by the Direct{LessThan,GreaterThan,Le,Ge}
+ * nodes, or needs its type's own `Ord` instance.
+ *
+ * This is a DECISION carried from where the type was known, not a type to be
+ * re-derived — [SlotKind] cannot answer it, because `Str` and a record are both
+ * OBJECT while only the first is directly comparable.
+ *
+ * A fused sink that compares values it did not prove [DIRECT] silently
+ * substitutes a primitive `<` for the instance the program asked for: a crash
+ * for a record or variant, and a WRONG ANSWER for a newtype whose Ord disagrees
+ * with the type it wraps. Absent (null) means the compiler could not decide, and
+ * callers must treat that exactly like [INSTANCE] — never fuse on a guess.
+ */
+@Serializable
+enum class OrdKind {
+    /** long / double / Str / Frac — what the Direct comparison nodes specialize. */
+    DIRECT,
+
+    /** Ordering requires the type's `Ord` impl. */
+    INSTANCE,
+}
+
 @Serializable
 data class SourceInfo(
     val fileIndex: Int,
@@ -47,7 +70,11 @@ data class FunctionIR(
     val sourceFile: String,
     val sourceSection: SourceInfo,
     /** Optional return type descriptor, populated when type info is available from Resolver */
-    val returnType: String? = null
+    val returnType: String? = null,
+    /** How this function's RESULT can be ordered — see [OrdKind]. Decided by the
+     *  compiler, where the solved type is in hand, so a consumer never has to
+     *  reconstruct it. Null when undecidable; treat as [OrdKind.INSTANCE]. */
+    val returnOrd: OrdKind? = null,
 )
 
 

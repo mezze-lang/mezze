@@ -5,6 +5,7 @@ import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
+import com.mezze.language.truffleir.OrdKind;
 import com.mezze.language.truffleir.BoolLitIR;
 import com.mezze.language.truffleir.CallDirectIR;
 import com.mezze.language.truffleir.CallIndirectIR;
@@ -5626,8 +5627,31 @@ public final class BytecodeCompiler {
         return new FusedSinkMode.ShortCircuit(predPeel, kind);
     }
 
-    /** Classify min_by/max_by: resolve the key-extractor function. */
+    /** Classify min_by/max_by: resolve the key-extractor function.
+     *
+     *  Only valid when the KEY was proven directly comparable. The fused sink
+     *  compares keys with DirectLessThan, which specializes long/double/String/
+     *  Frac and nothing else, while `min_by` itself hands `min_by_with_cmp` a
+     *  comparator built from the key's own `Ord` — fusing discards it. For a
+     *  record key that crashes; for a newtype key whose Ord disagrees with the
+     *  type it wraps it silently returns the WRONG element.
+     *
+     *  Nothing in the IR used to distinguish those from an Int key: an Int-keyed
+     *  and a record-keyed lambda both lower to `ReadFieldIR(ReadLocalIR(slot=0,
+     *  OBJECT), fieldName=…)`, differing only in the field NAME. So the compiler
+     *  now decides it where the solved type is in hand and carries the answer as
+     *  {@link FunctionIR#getReturnOrd()}. Undecided (null) declines the fusion
+     *  exactly like INSTANCE — never fuse on a guess.
+     *
+     *  See known-bugs.md BUG 10; BUG 7 and BUG 8 were the same family. */
     private FusedSinkMode classifyMinMaxByMode(MakeLambdaIR keyLambda, boolean isMax, boolean dbg) {
+        var keyIR = language == null ? null : language.lookupFunctionIR(keyLambda.getFunctionHash());
+        if (keyIR == null || keyIR.getReturnOrd() != OrdKind.DIRECT) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: min/max_by key not proven"
+                    + " directly comparable (returnOrd="
+                    + (keyIR == null ? "<no ir>" : String.valueOf(keyIR.getReturnOrd())) + ")");
+            return null;
+        }
         com.oracle.truffle.api.CallTarget target = null;
         boolean scalarABI = false;
         String fieldName = null;

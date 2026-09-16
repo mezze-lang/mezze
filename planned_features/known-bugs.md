@@ -614,7 +614,55 @@ supplied comparator is discarded.**
 Same family as BUG 7's sorted-container half and BUG 8: a fused fast path
 substituting a primitive operation for one that needed an instance.
 
-### Why it is not fixed alongside BUG 7
+### Layer 1 — the fusion half — FIXED
+
+The decision needs the KEY'S TYPE, so the compiler now makes it where the solved
+type is in hand and CARRIES it: `FunctionIR.returnOrd: OrdKind?`
+(`DIRECT` = long/double/Str/Frac, what the Direct comparison nodes specialize;
+`INSTANCE` = needs the type's own `Ord`; null = undecided). `ordKindOf` in
+`TypedASTCompiler` computes it from the body's solved type, and
+`classifyMinMaxByMode` declines the fusion unless it is `DIRECT` — null declines
+too, because fusing on a guess is what caused this.
+
+A NEWTYPE answers `INSTANCE` even when it wraps an Int. That is the whole point:
+`newtype R = Int` with a reversed `Ord` compares as a long at runtime, so the
+primitive path agrees with the WRAPPED type's order and silently contradicts the
+one the author wrote.
+
+Verified: the primitive-key fast path still fuses (`min_by`/`max_by` on an Int
+key pass), and the record-key path no longer silently discards the comparator.
+
+### Layer 2 — the fallback is equally wrong — OPEN, and this is C.1
+
+Declining the fusion is not enough, because the NON-fused path loses the
+instance too. Measured:
+
+```
+[spec] min_by@seq.mz:310  typeArgs=[P{k: K{n: Int}}, K{n: Int}]  impls=0
+```
+
+The type arguments are fully concrete — `'a = P`, `'b = K` — and yet the
+specialization carries **no evidence at all**. So inside it, `specEvidenceOpHash`
+has nothing in `Specialization.abilityImpls` to consult, and its type-args
+fallback declines because there are TWO arguments and the receiver's variable
+could be either. The comparator's `<` then reaches the primitive node.
+
+The gap is precisely located:
+
+- `MonoDriver.seedFromMethodCall` builds its `SpecRequest` with
+  `abilityImpls = emptyList()` — method-style calls record no evidence.
+- `Monomorphizer`'s transitive worklist passes `r.inst?.abilityImpls` — the
+  ENCLOSING instance's evidence — instead of resolving the CALLEE'S OWN
+  constraints against the callee's now-concrete type arguments. Instrumenting
+  `resolveAbilityConstraints` shows only the impl op `min_by@677` ever reaches
+  it; the module-level `min_by@310`, the one that actually carries
+  `with Ord 'b`, never does.
+
+Both sites need to resolve the callee's constraints the way
+`MonoDriver:380` already does. That is task **C.1**, and this is its first
+concrete failing case.
+
+### Why it was not fixed alongside BUG 7
 
 BUG 7's half was fixable by refusing to fuse, because
 `__native_sorted_set_{min,max}` are the only bare min/max element natives and the
@@ -643,9 +691,9 @@ as their acceptance test.
 
 ### Acceptance
 
-`KeyedFusionOrdTest` — 3 enabled cases guarding the primitive-key fast path that
-must survive any fix, and 4 `@Disabled` cases pointing here, one of which is the
-silent reversed-newtype case.
+`KeyedFusionOrdTest` — 3 enabled cases guarding the primitive-key fast path
+(which still fuses), and 4 `@Disabled` on layer 2, one of which is the silent
+reversed-newtype case. They go green when C.1 lands.
 
 ---
 

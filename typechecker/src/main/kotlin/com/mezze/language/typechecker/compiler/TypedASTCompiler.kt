@@ -1317,9 +1317,31 @@ class TypedASTCompiler(
             captureNames = captureInfo.map { it.first },
             body = bodyIR,
             sourceFile = loc.file,
-            sourceSection = locToSourceInfo(loc)
+            sourceSection = locToSourceInfo(loc),
+            returnOrd = ordKindOf(body.type),
         )
         return fnIR
+    }
+
+    /**
+     * How a value of [type] can be ordered — decided HERE, where the solved type
+     * is in hand, and carried on the FunctionIR so no later stage has to guess.
+     *
+     * Deliberately conservative: anything not provably one of the types the
+     * Direct comparison nodes specialize answers INSTANCE, and anything the
+     * compiler cannot pin down answers null. A wrong DIRECT silently replaces a
+     * user's `Ord` with a primitive `<`; a wrong INSTANCE only declines a
+     * fusion.
+     *
+     * A NEWTYPE is INSTANCE even when it wraps an Int. That is the whole point:
+     * `newtype R = Int` with a reversed `Ord` compares as a long at runtime, so
+     * the primitive path agrees with the WRAPPED type's order and silently
+     * contradicts the one the author wrote. See known-bugs.md BUG 10.
+     */
+    private fun ordKindOf(type: MezzeType): OrdKind? = when (type) {
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType -> OrdKind.DIRECT
+        is MezzeType.VarType -> null // unsolved here; caller treats null as INSTANCE
+        else -> OrdKind.INSTANCE
     }
 
     private fun compilePerformerDecl(pd: TypedPerformerDecl) {

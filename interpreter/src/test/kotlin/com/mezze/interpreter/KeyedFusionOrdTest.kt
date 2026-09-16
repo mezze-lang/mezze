@@ -142,10 +142,7 @@ class KeyedFusionOrdTest {
 
     @Test
     @Disabled(
-        "BUG 10 — the fused MinBy sink compares the KEY with DirectLessThan, " +
-            "discarding the comparator the stdlib built from the key's Ord. " +
-            "Blocked on the key type being carried into the IR (C.1 / A.2): an " +
-            "Int key and a record key compile to structurally identical IR.",
+        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
     )
     fun `min_by with a record key uses the key's own Ord`() {
         assertEquals(
@@ -162,7 +159,9 @@ class KeyedFusionOrdTest {
     }
 
     @Test
-    @Disabled("BUG 10 — as above, for max_by.")
+    @Disabled(
+        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
+    )
     fun `max_by with a record key uses the key's own Ord`() {
         assertEquals(
             30L,
@@ -178,7 +177,9 @@ class KeyedFusionOrdTest {
     }
 
     @Test
-    @Disabled("BUG 10 — as above, for sort_by_key.")
+    @Disabled(
+        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
+    )
     fun `sort_by_key with a record key uses the key's own Ord`() {
         assertEquals(
             10L,
@@ -195,9 +196,7 @@ class KeyedFusionOrdTest {
 
     @Test
     @Disabled(
-        "BUG 10, the SILENT case — a newtype key whose Ord is reversed. This " +
-            "does not crash; it returns the wrong element, which is why the " +
-            "crashing cases above matter less than this one.",
+        "BUG 10, layer 2 — the FUSION half is fixed (the key's OrdKind is now\n        carried and the fused sink declines unless it is DIRECT), but the\n        non-fused fallback is equally wrong: min_by's comparator loses the\n        key's instance because the spec carries NO evidence. Blocked on C.1 —\n        see known-bugs.md BUG 10."
     )
     fun `min_by with a REVERSED newtype key returns the largest`() {
         // R's Ord is reversed, so the "minimum" by that ordering is R.(3) — the
