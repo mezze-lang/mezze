@@ -551,23 +551,62 @@ class TypedASTCompiler(
      *  consults is keyed on the name and by construction cannot tell them apart.
      *  The CONCRETE-receiver half of the same bug is already fixed in emit. */
     private fun normalizeDictKeys(raw: Set<String>): Set<String> =
-        raw.groupBy { com.mezze.language.ast.MagicParams.methodOfKey(it) }.flatMap { (method, keys) ->
+        // Grouped by (ABILITY, method). Grouping by method alone was BUG 9: a
+        // function constrained `with Weigh 'a, Price 'a` raises `rank@a` from both
+        // calls, they grouped under `rank`, vars.size was 1, and the result was ONE
+        // plain `rank` slot serving both abilities — whichever filled it answered
+        // for the other, silently. A key with no ability segment groups under null
+        // exactly as before, so nothing unambiguous changes shape.
+        raw.groupBy {
+            com.mezze.language.ast.MagicParams.abilityOfKey(it) to
+                com.mezze.language.ast.MagicParams.methodOfKey(it)
+        }.flatMap { (group, keys) ->
+            val (ability, method) = group
             val vars = keys.mapNotNull { com.mezze.language.ast.MagicParams.typeVarOfKey(it) }.toSet()
-            if (vars.size >= 2) keys.filter { com.mezze.language.ast.MagicParams.typeVarOfKey(it) != null } else listOf(method)
+            when {
+                vars.size >= 2 -> keys.filter { com.mezze.language.ast.MagicParams.typeVarOfKey(it) != null }
+                // One variable but a DISAMBIGUATING ability: keep the ability, drop
+                // the variable — the slot must stay distinct from the other
+                // ability's, and the plain shape would collide again.
+                ability != null -> listOf("$method${com.mezze.language.ast.MagicParams.ABILITY_SEP}$ability")
+                else -> listOf(method)
+            }
         }.toSet()
 
     /** The dict slot NAME an enclosing function holds for [method] at type var
      *  [typeVar]: the per-var slot when it has one, else the plain slot, else any
      *  per-var slot of that method (a caller that only holds one). Null if none. */
-    private fun enclosingDictSlotIn(params: List<String>, captures: Map<String, Int>, method: String, typeVar: String?): String? {
+    private fun enclosingDictSlotIn(
+        params: List<String>,
+        captures: Map<String, Int>,
+        method: String,
+        typeVar: String?,
+        abilityHash: String? = null,
+    ): String? {
         fun has(n: String) = params.indexOf(n) >= 0 || captures.containsKey(n)
-        if (typeVar != null) com.mezze.language.ast.MagicParams.dictParamName(com.mezze.language.ast.MagicParams.dictKey(method, typeVar)).let { if (has(it)) return it }
-        com.mezze.language.ast.MagicParams.dictParamName(method).let { if (has(it)) return it }
-        val prefix = com.mezze.language.ast.MagicParams.dictParamName(method) + com.mezze.language.ast.MagicParams.VAR_SEP
-        return (params + captures.keys).firstOrNull { it.startsWith(prefix) }
+        val mp = com.mezze.language.ast.MagicParams
+        // BUG 9 / C.2: an ABILITY-qualified slot is looked up first and, when the
+        // caller asked for one, ONLY. Falling back to the plain slot would hand
+        // back the other ability's dictionary — which is the bug, not a fallback.
+        if (abilityHash != null) {
+            val ability = abilityHash.take(12)
+            if (typeVar != null) {
+                mp.dictParamName(mp.dictKey(method, typeVar, abilityHash)).let { if (has(it)) return it }
+            }
+            mp.dictParamName("$method${mp.ABILITY_SEP}$ability").let { if (has(it)) return it }
+            return null
+        }
+        if (typeVar != null) mp.dictParamName(mp.dictKey(method, typeVar)).let { if (has(it)) return it }
+        mp.dictParamName(method).let { if (has(it)) return it }
+        val prefix = mp.dictParamName(method) + mp.VAR_SEP
+        (params + captures.keys).firstOrNull { it.startsWith(prefix) }?.let { return it }
+        // An ability-qualified slot still serves an UNqualified request: the
+        // caller simply had no ambiguity to resolve at its own site.
+        val abilityPrefix = mp.dictParamName(method) + mp.ABILITY_SEP
+        return (params + captures.keys).firstOrNull { it.startsWith(abilityPrefix) }
     }
-    private fun enclosingDictSlot(method: String, typeVar: String?): String? =
-        enclosingDictSlotIn(currentParamNames, currentCaptureNames, method, typeVar)
+    private fun enclosingDictSlot(method: String, typeVar: String?, abilityHash: String? = null): String? =
+        enclosingDictSlotIn(currentParamNames, currentCaptureNames, method, typeVar, abilityHash)
 
     /** Bind an op's impl type variables from the instance head: the impl whose op
      *  is [opHash] has target `T 'a 'e…`; unify it against each of [types] (the
@@ -797,7 +836,17 @@ class TypedASTCompiler(
                     }
                     if (receiverType is VarType && !recoveredConcrete &&
                         shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
-                        out.add(com.mezze.language.ast.MagicParams.dictKey(methodName, receiverType.variable.name))
+                        // BUG 9 / C.2: include the ABILITY the emitted node carries.
+                        // Without it two abilities declaring this operation raise the
+                        // SAME key for the same variable, normalizeDictKeys groups
+                        // them, and one slot serves both. `fn.abilityHash` is set only
+                        // where the name is ambiguous, so unambiguous calls keep the
+                        // byte-identical key they always had.
+                        out.add(
+                            com.mezze.language.ast.MagicParams.dictKey(
+                                methodName, receiverType.variable.name, fn.abilityHash?.hex,
+                            ),
+                        )
                     }
                     scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, paramEnv)
                 } else {
@@ -1833,10 +1882,22 @@ class TypedASTCompiler(
             val viaEnclosingDecodeDict = receiverType !is VarType &&
                 enclosingDictSlot(methodName, null) != null &&
                 abilityOpIndex[methodName]?.any { decodeImplByOpHash.containsKey(it.opHash) } == true
-            val opHashConcrete = if (viaEnclosingDecodeDict) null else tryResolveAbilityOp(methodName, receiverType, expr.arg)
+            // BUG 9 / C.2: pass the ability the node carries. Inside a mono spec the
+            // receiver becomes concrete, so this concrete path runs — and without the
+            // ability it picks whichever impl of that operation name was registered
+            // first, which is the whole bug.
+            val opHashConcrete = if (viaEnclosingDecodeDict) null
+                else tryResolveAbilityOp(
+                    methodName, receiverType, expr.arg,
+                    abilityHash = (fn as? TypedFieldAccess)?.abilityHash,
+                )
             val opHash = opHashConcrete
                 ?: if (receiverType is VarType) {
+                    // Same rule for the single-candidate shortcut: "only one op of
+                    // this NAME" is not "only one op of this ability".
+                    val nodeAbility = (fn as? TypedFieldAccess)?.abilityHash
                     val candidates = abilityOpIndex[methodName]
+                        ?.let { all -> if (nodeAbility != null) all.filter { it.abilityHash == nodeAbility } else all }
                     if (candidates != null && candidates.size == 1) candidates.first().opHash
                     else tryResolveAbilityOpByArgs(methodName, expr.arg)
                 } else null
@@ -2051,9 +2112,10 @@ class TypedASTCompiler(
                 }
             }
             val opIsInlineable = methodName in inlineableOps
+            val callAbilityHex = (fn as? TypedFieldAccess)?.abilityHash?.hex
             val inlineableNeedsDict = opIsInlineable &&
                 abilityOpIndex[methodName]?.isNotEmpty() == true &&
-                enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name) != null
+                enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name, callAbilityHex) != null
             if ((receiverType is VarType || viaEnclosingDecodeDict) && (!opIsInlineable || inlineableNeedsDict)) {
                 val opCandidates = abilityOpIndex[methodName]
                 // Bug B (#86): also enter this branch when there are no impl
@@ -2065,7 +2127,7 @@ class TypedASTCompiler(
                 // "Field not found: <method>".
                 // The slot for THIS receiver's type variable when the function holds
                 // one per variable, else the plain slot.
-                val dictParamName = enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name)
+                val dictParamName = enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name, callAbilityHex)
                     ?: com.mezze.language.ast.MagicParams.dictParamName(methodName)
                 val hasDictParam =
                     currentParamNames.indexOf(dictParamName) >= 0 ||
@@ -2676,22 +2738,31 @@ class TypedASTCompiler(
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
             val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
             val keyVar = com.mezze.language.ast.MagicParams.typeVarOfKey(methodName)
+            // BUG 9 / C.2: the ability this slot belongs to, when the key carries
+            // one. Every resolution below must stay inside it — an ability-qualified
+            // slot filled from another ability's impl is precisely the bug.
+            val keyAbility = com.mezze.language.ast.MagicParams.abilityOfKey(methodName)
+            val keyAbilityHash: Hash? = keyAbility?.let { prefix ->
+                abilityOpIndex[dictMethod]?.firstNotNullOfOrNull { op ->
+                    op.abilityHash?.takeIf { it.hex.startsWith(prefix) }
+                }
+            }
             // The caller's own slot for this key (per-var when it holds one).
-            val callerSlot = enclosingDictSlot(dictMethod, keyVar) ?: dictParamName
+            val callerSlot = enclosingDictSlot(dictMethod, keyVar, keyAbilityHash?.hex) ?: dictParamName
             // A per-var key: the callee wants THIS variable's dict. Bound to a
             // concrete type here → resolve that type's impl; bound to one of the
             // caller's own variables → forward the caller's slot for it.
             if (keyVar != null) {
                 val boundHere = boundTypeForKey(methodName, varBindings)
                 if (boundHere != null) {
-                    val perVarHash = resolveOpHashFromConcreteTypes(dictMethod, listOf(boundHere))
+                    val perVarHash = resolveOpHashFromConcreteTypes(dictMethod, listOf(boundHere), keyAbilityHash)
                     if (perVarHash != null) {
                         dictFields.add(FieldIR(dictParamName, refToDictedOp(perVarHash, listOf(boundHere), src)))
                         continue
                     }
                 }
                 val boundVar = (varBindings[keyVar] ?: varBindings["'$keyVar"]) as? VarType
-                val forwardSlot = enclosingDictSlot(dictMethod, boundVar?.variable?.name)
+                val forwardSlot = enclosingDictSlot(dictMethod, boundVar?.variable?.name, keyAbilityHash?.hex)
                 if (forwardSlot != null) {
                     val idx = currentParamNames.indexOf(forwardSlot)
                     if (idx >= 0) {
@@ -2817,11 +2888,19 @@ class TypedASTCompiler(
         else -> null
     }
 
-    private fun resolveOpHashFromConcreteTypes(methodName: String, concreteTypes: List<MezzeType>): Hash? {
+    private fun resolveOpHashFromConcreteTypes(
+        methodName: String,
+        concreteTypes: List<MezzeType>,
+        /** BUG 9 / C.2: confine the search to ONE ability when the caller knows
+         *  which. The op index is keyed on the operation name, so without this a
+         *  type implementing two abilities that both declare it gets whichever
+         *  impl was registered first. */
+        abilityHash: Hash? = null,
+    ): Hash? {
         // First pass: direct match.
         for (concreteType in concreteTypes) {
             if (concreteType is VarType) continue
-            val opHash = tryResolveAbilityOp(methodName, concreteType)
+            val opHash = tryResolveAbilityOp(methodName, concreteType, abilityHash = abilityHash)
             if (opHash != null) return opHash
         }
         // Second pass (#195 B3): descend into container types. When the caller

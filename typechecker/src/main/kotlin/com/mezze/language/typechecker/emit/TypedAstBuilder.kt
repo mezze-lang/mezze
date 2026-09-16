@@ -1246,22 +1246,30 @@ class TypedAstBuilder(
         // than one ability in scope. Where the name is unambiguous the existing
         // path already resolves correctly, and every ability method call is far
         // too much surface to change for a bug that needs the ambiguity.
-        val ambiguousAbilityOpHash: Hash? = run {
-            if (methodInfo.methodHash != null || methodInfo.isInherentMethod) return@run null
+        // The ability this call resolved to, but ONLY when the operation name is
+        // ambiguous — more than one ability DECLARATION in scope has an operation
+        // of that name. Where the name is unambiguous nothing downstream can get
+        // it wrong, and tagging every ability call would be far more surface than
+        // the bug needs. Read from the declarations, not the impls: that is where
+        // "who declares this operation" actually lives.
+        val ambiguousAbilityHash: Hash? = run {
+            if (methodInfo.isInherentMethod) return@run null
             val abilityName = methodInfo.abilityName ?: return@run null
             val abilityHash = registry.lookupAbility(abilityName)
                 ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
                 ?: importContext?.importedAbilities?.get(abilityName)
                     ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
                 ?: return@run null
-            // Ambiguous only if more than one ABILITY DECLARATION in scope has an
-            // operation of this name. Read from the declarations, not the impls:
-            // that is where "who declares this operation" actually lives.
             val declaringAbilities = registry.abilityDeclarations.values
                 .filter { ad -> ad.operations.any { it.name == methodInfo.methodName } }
                 .mapNotNull { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
                 .distinct()
-            if (declaringAbilities.size < 2) return@run null
+            if (declaringAbilities.size < 2) null else abilityHash
+        }
+
+        val ambiguousAbilityOpHash: Hash? = run {
+            if (methodInfo.methodHash != null || methodInfo.isInherentMethod) return@run null
+            val abilityHash = ambiguousAbilityHash ?: return@run null
 
             val receiverType = staticReceiverValue?.let { substitution.apply(it.type) } ?: return@run null
             val receiverName = com.mezze.language.typechecker.util.receiverTypeName(receiverType)
@@ -1310,9 +1318,21 @@ class TypedAstBuilder(
             // Built-in (or otherwise unresolved) static ability call: rebuild the
             // field-access on the real receiver VALUE so the compiler's receiverType
             // (fn.record.type) is the element type, giving the correct dispatch.
-            TypedFieldAccess(staticReceiverValue, methodInfo.methodName, -1, solvedFnType ?: substitution.apply(contextType), memberAccess.memberLoc)
+            // Tagged with the ability when the operation name is ambiguous — for a
+            // GENERIC receiver the impl is genuinely unknown here (it arrives through
+            // the caller's dictionary), so the ability is the only thing that can be
+            // carried, and it is exactly what the dict key needs to stop two
+            // abilities sharing one slot.
+            TypedFieldAccess(
+                staticReceiverValue, methodInfo.methodName, -1,
+                solvedFnType ?: substitution.apply(contextType), memberAccess.memberLoc,
+                abilityHash = ambiguousAbilityHash,
+            )
         } else {
-            buildExpr(expr.function, file)
+            val built = buildExpr(expr.function, file)
+            if (ambiguousAbilityHash != null && built is TypedFieldAccess) {
+                built.copy(abilityHash = ambiguousAbilityHash)
+            } else built
         }
 
         // #226: the STATIC ability-call form `Ability.method { it = v, ... }`

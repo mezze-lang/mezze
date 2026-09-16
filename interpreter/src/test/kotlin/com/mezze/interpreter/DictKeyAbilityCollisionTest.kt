@@ -34,7 +34,6 @@ class DictKeyAbilityCollisionTest {
     }
 
     @Test
-    @Disabled("BUG 9 / task C.2: dict slots are keyed on the method NAME, so two abilities declaring the same op name collide and one silently answers for both — see known-bugs.md")
     fun `two abilities declaring the same op name, both constrained on one type var`() {
         // `Weigh.rank` and `Price.rank` are different abilities with the same op
         // name. `describe` needs both for 'a. Keyed on the name alone, the two

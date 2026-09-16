@@ -35,9 +35,36 @@ object MagicParams {
      * variable keeps the plain `eq` / `__dict_eq` (byte-identical to before).
      */
     const val VAR_SEP = "@"
-    fun dictKey(methodName: String, typeVar: String): String = "$methodName$VAR_SEP${typeVar.removePrefix("'")}"
-    fun methodOfKey(key: String): String = key.substringBefore(VAR_SEP)
-    fun typeVarOfKey(key: String): String? = key.substringAfter(VAR_SEP, "").ifEmpty { null }
+
+    /**
+     * BUG 9 / C.2: keys may also carry the ABILITY that owns the operation —
+     * `rank@a#3f9c1b`. Without it, two abilities declaring the same operation
+     * name raise the SAME key for the same type variable, `normalizeDictKeys`
+     * groups them, and one slot ends up serving both: `Weigh.rank {…} +
+     * Price.rank {…}` ran Weigh twice and returned 6 where 106 was required, with
+     * no error. The method name alone was never an identity.
+     *
+     * The segment is OPTIONAL and appended last so `methodOfKey` — which feeds the
+     * op index and the runtime's primitive fallback — keeps reading the same
+     * prefix it always did.
+     */
+    const val ABILITY_SEP = "#"
+
+    fun dictKey(methodName: String, typeVar: String, abilityHash: String? = null): String {
+        val base = "$methodName$VAR_SEP${typeVar.removePrefix("'")}"
+        return if (abilityHash == null) base else "$base$ABILITY_SEP${abilityHash.take(12)}"
+    }
+
+    fun methodOfKey(key: String): String = key.substringBefore(VAR_SEP).substringBefore(ABILITY_SEP)
+
+    fun typeVarOfKey(key: String): String? =
+        key.substringAfter(VAR_SEP, "").substringBefore(ABILITY_SEP).ifEmpty { null }
+
+    /** The ability segment of a key, or null when it carries none. */
+    fun abilityOfKey(key: String): String? = key.substringAfter(ABILITY_SEP, "").ifEmpty { null }
+
+    /** The key with its ability segment removed — the shape callers forward. */
+    fun keyWithoutAbility(key: String): String = key.substringBefore(ABILITY_SEP)
 
     /** Build the dict-param name for a dict KEY (plain method or `method@var`). */
     fun dictParamName(methodName: String): String = "$DICT_PREFIX$methodName"

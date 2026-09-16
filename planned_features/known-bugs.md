@@ -674,7 +674,7 @@ why this survived the perf suites.
 
 ---
 
-## BUG 9 — HALF FIXED: two abilities with the same operation name collide
+## BUG 9 — FIXED: two abilities with the same operation name collided
 
 Found 2026-09-16 while assessing task C.2. **Silent wrong answer, no error.**
 
@@ -714,7 +714,7 @@ ability.
 
 This is the shape **C.3** generalizes: emit the evidence, do not re-resolve.
 
-### Still broken: the GENERIC receiver — and that is task C.2
+### Also fixed: the GENERIC receiver — task C.2 landed
 
 `MagicParams.dictKey(methodName, typeVar)` builds `"rank@a"` — method name plus
 type variable, no ability. `Weigh.rank@a` and `Price.rank@a` are therefore the
@@ -725,7 +725,7 @@ The per-VARIABLE half of the keying already works — one ability's `rank` on tw
 different type variables resolves correctly (`__dict_rank@a` vs `__dict_rank@b`),
 which the second test in `DictKeyAbilityCollisionTest` pins.
 
-### What the remaining fix needs — located to one function
+### How (C.2)
 
 `TypedASTCompiler.normalizeDictKeys` is where the two collapse:
 
@@ -768,9 +768,7 @@ runtime's primitive fallback.
 
 ### Acceptance
 
-`DictKeyAbilityCollisionTest` — the CONCRETE case passes, the GENERIC one is
-`@Disabled` pointing here, and the per-variable case passes and must keep doing
-so.
+`DictKeyAbilityCollisionTest` — all three pass, nothing disabled.
 
 ---
 
@@ -977,11 +975,18 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   keeps them as forward protection for when B.1 moves these types around.
 - **C.1** Solver records per constraint per node
   `Evidence = Impl(hash, sub) | Param(abilityHash, typeVar) | Structural(type)`.
-- **C.2** Dict params identified by `(abilityHash, typeVar)`; prescan
-  (`dictMethodsForHash`, `scanExprForVarTypeMethods`) replaced by declared
-  constraints. **Now has a live failing case: BUG 9** — two abilities declaring
-  the same op name share one dict slot and one silently answers for both (6 where
-  106 is required). The per-variable half already works.
+- **C.2** DONE for the identity half. Dict keys are now `(ability, method, var)`:
+  `MagicParams.dictKey` takes an optional ability segment (`rank@a#3f9c1b`),
+  `normalizeDictKeys` groups by `(ability, method)` instead of method alone,
+  `enclosingDictSlotIn` looks up ability-qualified slots first and — when the
+  caller asked for one — ONLY (falling back to the plain slot would hand over the
+  other ability's dictionary, which is the bug), and both injection sites plus
+  `resolveOpHashFromConcreteTypes`/`tryResolveAbilityOp` confine resolution to the
+  key's ability. `TypedFieldAccess.abilityHash` carries the ability from emit,
+  set only where the operation name is ambiguous, so unambiguous calls keep
+  byte-identical keys. **BUG 9 fixed end to end** — 106, concrete and generic.
+  Still open in C.2: replacing the prescan itself with declared constraints
+  (`C.5`).
 - **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
   re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
   site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.

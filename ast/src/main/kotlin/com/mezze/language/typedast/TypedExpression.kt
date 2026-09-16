@@ -126,7 +126,21 @@ data class TypedFieldAccess(
     val field: String,
     val fieldIndex: Int,
     override val type: MezzeType,
-    override val loc: Loc
+    override val loc: Loc,
+    /**
+     * BUG 9 / C.3: when this field access is the callee of an ABILITY method
+     * call, the ability the typechecker resolved for it.
+     *
+     * The typechecker always knew — `MethodCallInfo.abilityName` is correct per
+     * call site — and emit used to drop it, leaving the compiler to re-resolve
+     * against an index keyed on the operation NAME. Two abilities declaring the
+     * same operation then shared one answer, and one silently served both.
+     *
+     * Null for an ordinary record field access, and for an ability call whose
+     * operation name only one ability in scope declares (where the name is
+     * already unambiguous).
+     */
+    val abilityHash: Hash? = null,
 ) : TypedExpr
 
 @Serializable
