@@ -883,6 +883,24 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 - **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
   re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
   site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.
+- **D.3** INVESTIGATED; no change made, and that is the finding. Inherent impl
+  operations are excluded from parameter seeding (`!isInherent` in
+  `TypedAstBuilder.buildAbilityImpl`) because they have no ability declaration to
+  read a signature from — the same asymmetry that produced BUG 7. But the
+  receiver's type IS known there: the builder already constructs the op's context
+  type as `{ it: <target> } -> <solved return>`. I added seeding from that source,
+  confirmed it fires **762 times** across the stdlib supplying real types
+  (`it=TypeApplication`, `key=StringType`, `f=FunctionType`), and could not make
+  any program behave differently with it on or off — including the shapes it
+  should most affect, a component `==` inside an inherent op. Reverted: an
+  unjustified change to impl-op body typing is not worth carrying on the path
+  whose last such change caused a StackOverflow (the newtype-seeding incident).
+  A.1's merged impl-op solves are the likely reason those cases already work.
+  `InherentImplBodyTypedTest` keeps the shapes as coverage. **D.3's remaining
+  value needs a case that FAILS first** — the untyped-parameter COUNT cannot
+  supply one, because for a seeded op the emitted parameter type is deliberately
+  a laundered fresh variable (mono specializes on it), so that metric partly
+  measures a design choice rather than a gap.
 - **D.1** PRECURSOR LANDED; the change itself is sized and not started.
   Inspect has no generated impl: it is an implicit "everything derives it" in the
   typechecker plus a deep-printer in the runtime, and the two agree only because

@@ -75,7 +75,7 @@ class SortedContainerReadBackTest {
     """.trimIndent()
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `min of a sorted set of records, field read off the result`() {
         assertEquals(
             10L,
@@ -92,7 +92,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `max of a sorted set of records`() {
         assertEquals(
             30L,
@@ -125,7 +125,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `the ordering actually used is the element's own Ord`() {
         // P orders by `k` only. If the sorted set fell back to a structural or
         // insertion order, min would be the first-inserted element (tag 30).
@@ -243,7 +243,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `contrast - a VARIANT element with its own Ord`() {
         assertEquals(
             1L,
@@ -297,7 +297,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `contrast - a newtype whose Ord is REVERSED`() {
         // The plain newtype case passes, but a newtype wraps an Int at runtime, so
         // a primitive fallback would give the same answer and the test could not
@@ -445,7 +445,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `sorted_set min called as a FUNCTION rather than a method`() {
         // `min()` on the data structure is just `elements[0]` — no comparison — and
         // construction succeeds (step 2 passes). So a crash in `s.min {}` means the
@@ -465,7 +465,7 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled("BUG 7, remaining half: a sorted container's element Ord resolves or not depending on WHAT ELSE is in the program — construct+size alone passes, the same construction with a later min fails, so mono seeds differently. See known-bugs.md")
+    @Disabled("BUG 7, remaining half: a sorted container element Ord resolves or not depending on WHAT ELSE is in the program. See known-bugs.md")
     fun `construct and size then min, in ONE program`() {
         // Step 2 (construct + size) passes and `min()` on the data structure is
         // just elements[0]. Doing both in one program removes any possibility that
