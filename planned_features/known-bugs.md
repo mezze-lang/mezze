@@ -1304,6 +1304,39 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   to the constraint system, and it is the largest single item left in this plan.
   Sequencing note: A.2's remaining 101 sites and A.1's `matchCaseBindings`
   exclusion both sit behind it.
+
+  **MEASURED 2026-09-16 — three things that narrow it, two of them encouraging.**
+
+  1. Synthesis-on-demand ALREADY EXISTS.
+     `AbilityChecker.checkAbilityImplementation` synthesises and registers a
+     codec impl (`generatedCodecImpls[implKey] = …`) when a `Decode` constraint is
+     checked with concrete type arguments. Nothing new has to be built for the
+     "synthesise" half.
+  2. A DEFERRAL PHASE ALREADY EXISTS. `ConstraintSolver.finalizeDeferredAbilities`
+     runs `abilityChecker.validateAbilityConstraints(substitution)` AFTER the main
+     worklist, with the complete substitution applied. That is the natural place
+     to discharge a deferred `Decode`.
+  3. THE BLOCKER: the target is still a bare var THERE. Probing the finalize
+     phase on `JsonDecodeExhaustiveTest` shows every `Decode` constraint reading
+
+         typeArgs = [ JsonC(…) concrete, VarType('c951), Json(…) concrete ]
+
+     — config and input pinned, DATA still a variable, after the whole solve.
+
+  And the obvious repair does not work either: **there are no `HasField`
+  constraints on that variable to close into a record.** Instrumenting the same
+  solves shows `HasField total=0` for the decode ones (the probe is sound — it
+  reports 10 and 11 on other solves, always resolving to a concrete
+  `RecordType`). So the decoded binder's field accesses never enter the
+  constraint system as requirements on the target at all; they exist only as
+  field accesses in the TYPED AST, which is precisely why `DecodeTargetResolver`
+  walks the AST rather than the constraints.
+
+  **So A.3's remaining work is in constraint GENERATION, not solving.** The
+  generator has to emit constraints tying the decoded binder's field accesses to
+  the `Decode` target variable, so the target participates in inference instead
+  of being excluded from it. Once it does, (1) and (2) above discharge it with no
+  further machinery, and `DecodeTargetResolver`'s 423 lines come out.
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with
