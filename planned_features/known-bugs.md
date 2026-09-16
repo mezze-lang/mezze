@@ -1410,6 +1410,37 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   the same op), both codec impls are derived, and each site resolves its own.
   `DecodeConstraintAtCallSiteTest` pins it, including the no-annotation case that
   A.2 was blocked on.
+
+  **`DecodeTargetResolver` does NOT come out yet — deletion attempted, measured,
+  reverted.** With the per-site pin disabled the interpreter gate fails exactly
+  4 of 6138: `JsonDecodeExhaustiveTest`'s `twoDifferentShapes_directStr`,
+  `_reverseOrder`, `_nestedInFlatMapChain` and `threeDifferentShapes`. Every one
+  is multi-shape decode inside a `do` block in a lambda:
+
+      let main = {} -> do
+        let a = "…".from_json {}.map { f = {val} -> val.n }.get_or { def = -1 }
+        let b = "…".from_json {}.map { f = {val} -> val.name }.get_or { def = "?" }
+
+  At those sites the call node's type is still `Result 'a DecodeError` AFTER the
+  final substitution — `'a` is bound in NEITHER the per-binding nor the global
+  solve — so there is nothing concrete for the obligation to resolve against.
+  The identical program written at top level DOES resolve (third case of
+  `DecodeConstraintAtCallSiteTest`), so the gap is specific: a decode target
+  pinned inside a lambda body does not reach the substitution codegen reads.
+
+  One candidate was tried and ruled out. `ConstraintGenerator` merges a binding's
+  own resolution into `perBindingSubstitution` but composes ONLY the
+  `HasConstructor` subset, deliberately excluding `HasField` because merging it
+  reopens records that must print closed (`RecordInferenceOpenClosedTest`) — and
+  `HasField` is exactly what pins a decode target. Merging the `HasField` solve
+  with every record CLOSED (so the shape propagates and the row hole does not)
+  changed nothing: all 4 still failed. The target var is unbound in that solve
+  too, so the loss is upstream of the substitution merge, not in it.
+
+  That is now A.2's concrete remaining question — not "125 fresh-var sites" but
+  one: **where does a lambda body's solved record shape get dropped between its
+  solve and the module substitution?** Answer it and the 4 cases above go green
+  with the pin already deleted.
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with
