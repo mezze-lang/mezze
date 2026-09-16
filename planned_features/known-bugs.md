@@ -1441,6 +1441,49 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   one: **where does a lambda body's solved record shape get dropped between its
   solve and the module substitution?** Answer it and the 4 cases above go green
   with the pin already deleted.
+- **D.1 / BUG 14 (new)** `PrintType.Dynamic` is not a harmless escape hatch, and
+  an inline type annotation used to make a program's answer WRONG.
+
+  Measured: the one arm that emits `Dynamic` (`is MezzeType.VarType`) fires 34
+  times from 17 distinct sites across the interpreter gate, every one a
+  `to_dbg`/`to_str` on a receiver that stayed a variable. A value of any of the
+  four types whose printed form is not a function of its runtime representation —
+  newtype (erased to its payload), `Nat` vs `Int` (both Long), `Frac` (a two-field
+  record), `Char` vs a one-character `Str` — then renders as the wrong thing,
+  silently. That is BUG 12's family, reached through the arm BUG 12's fix left
+  standing.
+
+  Writing the same generic several ways isolated the cause:
+
+  | form                                            | before  | now       |
+  |-------------------------------------------------|---------|-----------|
+  | `let show: { x: 'a } -> Str = { x } -> …`        | correct | correct   |
+  | `let show = { x: 'a } -> …` (inline annotation)  | WRONG   | **fixed** |
+  | `let show = { x } -> …`     (no annotation)      | correct | correct   |
+  | undeclared-variant payload binder                | WRONG   | WRONG     |
+
+  `TypedAstBuilder.buildLambdaParams` read an UNANNOTATED param's type off the
+  binding's solved context, but converted an ANNOTATED one's annotation afresh —
+  `typeVarCache.clear()` per field guaranteeing a new variable. That variable
+  occurs nowhere in the binding's own type, and monomorphization substitutes
+  quantified params BY NAME, so the annotated body could never be specialized:
+  the concrete type reached the spec request (`args=[Money]`) and had nothing to
+  bind to. FIXED in c8593a667 by reading the context first — which is what the
+  annotation already means, since the solve unified the two. The elaboration
+  ratchet confirms the improvement: 14 stdlib `impl Str` ops gained typed params,
+  baseline 882 -> 868.
+
+  This is the third instance this effort has found of ONE written type variable
+  becoming TWO unrelated `TypeVar`s — after A.3's `with` obligation vs its own
+  signature, and A.3's call-site emission. The pattern is always the same: a
+  parsed annotation converted independently of the type it is supposed to
+  describe. Worth a sweep of every `convertParsedTypeAnnotation` caller.
+
+  STILL OPEN: the payload binder of an UNDECLARED variant. `show { a = Grams { n
+  = Money.(4) } }` gives `n` no type of its own — it is not a quantified parameter
+  of `show`, so mono derives `args=null` for that call where a plain parameter
+  derives `[Money]`. Three `@Disabled` cases in `DynamicPrintTypeFidelityTest`
+  carry it. Closing it makes `PrintType` total and `Dynamic` deletable.
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with
