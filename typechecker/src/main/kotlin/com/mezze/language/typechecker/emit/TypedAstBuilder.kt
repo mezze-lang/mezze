@@ -1667,7 +1667,27 @@ class TypedAstBuilder(
             is ParsedWildcardPattern -> emptyMap()
             is ParsedLiteralPattern -> emptyMap()
             is ParsedStringInterpPattern -> emptyMap()
-            is ParsedNewtypePattern -> emptyMap()
+            // `B.(x)` binds `x` to what B WRAPS, so recurse into `inner` against
+            // the wrapped type. Returning nothing here left `x` untyped, and an
+            // untyped receiver makes `x < y` compile to a dynamic field read —
+            // `CallIndirect(ReadField(x, "lt"), …)` — against a value that is a
+            // raw long at runtime, because a newtype is erased. Inside
+            // `impl Ord for B` that silently produced the WRONG ANSWER rather
+            // than an error. See known-bugs.md BUG 11.
+            // `B.(x)` binds `x` to what B WRAPS, so recurse into `inner` against
+            // the wrapped type. This arm used to return nothing, dropping the
+            // inner pattern entirely and leaving `x` untyped — the same
+            // one-sidedness the seq arm below was hardened against.
+            //
+            // HONESTLY: this changed no observed behaviour. BUG 11's repro does
+            // not reach here (it arrives with `typingImplOpBody = false`, so the
+            // structural read is skipped altogether). Kept anyway, unlike other
+            // no-op experiments in this effort, because it has no downside — it
+            // only ADDS a type where there was none, on a path gated to impl
+            // bodies — and dropping a sub-pattern outright is a plain omission
+            // rather than a judgement call.
+            is ParsedNewtypePattern ->
+                patternBindingTypes(pattern.inner, (shape as? MezzeType.NewtypeType)?.wrappedType)
             is ParsedConstructorPattern -> {
                 val payloadType = (shape as? MezzeType.VariantType)?.constructors?.get(pattern.constructor)
                 pattern.payload?.let { patternBindingTypes(it, payloadType) } ?: emptyMap()

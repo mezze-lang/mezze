@@ -714,6 +714,74 @@ crash.
 
 ---
 
+## BUG 11 — OPEN: a generic `with Ord` body compares a newtype by its WRAPPED order
+
+Found 2026-09-16 while probing C.3's evidence selection. The probe was hunting a
+wrong ref being picked among several; what it found is that even a SINGLE
+constraint gets this wrong.
+
+### Symptom
+
+`B` wraps an Int and its `Ord` is deliberately REVERSED, so `B.(1) < B.(3)` is
+False. Every concrete path agrees. Only the generic one does not:
+
+| path | answer |
+|---|---|
+| `B.(1) < B.(3)` — operator, concrete | false |
+| `B.(1).lt { r = B.(3) }` — method, concrete | false |
+| `let f: { x: B, y: B } -> Bool = …` — concrete annotation | false |
+| `[B].min {}` — through seq (BUG 7's fix) | 3 |
+| `let g: { x: 'b, y: 'b } with Ord 'b -> Bool = { x, y } -> x < y` | **true** |
+
+Silent wrongness, not a crash — the same shape as BUG 7 and BUG 10. A newtype is
+erased to its wrapped value at runtime, so a primitive comparison agrees with the
+WRAPPED type's ordering and quietly contradicts the one the author wrote.
+
+### Cause
+
+Compiling the impl op shows the generic's `<` lowered to
+
+```
+CallIndirectIR(function=ReadFieldIR(record=ReadLocalIR(slot=2), fieldName="lt"),
+               arg=MakeRecordIR([it = x, r = y]))
+```
+
+— a DYNAMIC field read named `lt` off `x`, which at runtime is a raw long. The
+compiler emits that shape when the receiver has no type, and the receiver has no
+type because of `TypedAstBuilder`'s binding fallback:
+
+```kotlin
+else structuralBindings[name] ?: MezzeType.VarType(TypeVar.freshWithName(name))
+```
+
+When neither the solver nor the structural read supplies a type, the binding gets
+a FRESH VARIABLE — and a fresh variable is indistinguishable from a legitimately
+polymorphic one, so nothing downstream can tell that the compiler simply did not
+know. Instrumenting that site shows real cases arriving with
+`solver=[] structural=[]`.
+
+That fallback is exactly what task **A.2** removes ("builder reads types by
+NodeId; a miss is an ElaborationError, never a fresh var"). This is its first
+demonstrated silent-wrongness case and should be its acceptance test.
+
+Two halves need attention: the fresh-var fallback itself, and the fact that the
+structural read is gated on `typingImplOpBody`, which is FALSE on this path — so
+the structural recovery never even runs.
+
+Related and already fixed as part of this investigation:
+`patternBindingTypes`'s `ParsedNewtypePattern` arm returned `emptyMap()`,
+dropping the inner pattern entirely so `B.(x)` never typed `x` structurally. That
+is now recursive against the wrapped type. It does not fix this bug (the repro
+does not reach the structural read at all) but it closes the same one-sidedness
+the seq arm was hardened against.
+
+### Acceptance
+
+`GenericNewtypeOrdTest` — 4 enabled cases pinning the concrete paths that work,
+2 `@Disabled` on the generic paths.
+
+---
+
 ## BUG 8 — FIXED: the fused LONG pipeline fired on a seq of records
 
 Found 2026-09-16 while tracing BUG 7 — the sorted-container round trip was dying
