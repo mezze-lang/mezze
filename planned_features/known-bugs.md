@@ -470,12 +470,11 @@ is an inference bug (`feedback_no_required_type_annotations`).
 
 ---
 
-## BUG 7 — PARTLY FIXED: a hand-written `impl Ord` ignored by generic consumers
+## BUG 7 — FIXED: a hand-written `impl Ord` ignored by generic consumers
 
-**The most serious defect found in this effort, because it is SILENTLY WRONG and
-not only a crash.** Found 2026-09-15 while re-checking GAP #30, which turns out
-to have been mis-filed ("fails to type" — it type-checks and then misbehaves at
-runtime), and to be far narrower than the real problem.
+**The most serious defect found in this effort, because it was SILENTLY WRONG and
+not only a crash.** Found 2026-09-15 while re-checking GAP #30 (mis-filed as
+"fails to type" — it type-checks and then misbehaves at runtime).
 
 ### Symptom
 
@@ -484,394 +483,99 @@ type P = { k: Int, tag: Int }
 impl Ord for P where { lt = { it, r } -> it.k < r.k, le = …, gt = …, ge = … }
 
 let xs: [P] = [{ k = 3, tag = 30 }, { k = 1, tag = 10 }]
-xs.min {}                  # RuntimeException: Cannot compare MezzeRecord < MezzeRecord
-xs.sort {}                 # Cannot compare MezzeRecord <= MezzeRecord
-sorted_set::from_seq { xs = xs }.min {}   # same
+xs.min {}                                  # Cannot compare MezzeRecord < MezzeRecord
+sorted_set::from_seq { xs = xs }.min {}    # same
 ```
 
-For a newtype it does not crash — it returns the WRONG ANSWER:
+For a newtype it did not crash — it returned the WRONG ANSWER, because a newtype
+wraps an Int at runtime so the primitive fallback agrees with an ordinary
+ordering. A deliberately REVERSED newtype Ord returned the smallest where it must
+return the largest.
 
-```mezze
-newtype N = Int
-impl Ord for N where { lt = { it, r } -> match … -> a > b, … }   # deliberately REVERSED
-sorted_set::from_seq { xs = [N.(3), N.(1), N.(2)] }.min {}       # gives 1; must give 3
-```
+### Two separate causes
 
-A newtype wraps an Int at runtime, so the primitive fallback agrees with a normal
-ordering and the bug is invisible — until someone writes an ordering that is not
-the wrapped type's.
+**1. The seq operator paths** (`seq::min`, `seq::max`, `seq::sort` over records).
+Those calls are monomorphized. Inside a spec, a receiver typed by the generic's
+own variable has no dict slot (the spec strips it, the constraint being concrete)
+and cannot inline (not a primitive), so `x < acc` fell to the primitive node.
+`specEvidenceOpHash` now resolves it from the spec's own evidence:
+`Specialization.abilityImpls` first, then the spec's TYPE ARGUMENTS. Two
+narrowings are load-bearing and were found by regression — only for an INLINEABLE
+op with no dict slot, and only when the spec has exactly ONE type argument. A
+broader version resolved unrelated ops against the spec's type-arg pile and broke
+seven map/set filter tests, since `Map K V` has two arguments and the receiver's
+variable could be either.
 
-### What is and is not affected (measured; `SortedContainerReadBackTest`)
+Also needed: `prescanForDictMethods` phase 2 now propagates a callee's dict needs
+through IMPL-OP bodies, not only top-level lets.
 
-| case | result |
-|---|---|
-| the impl called directly (`a < b` on two records) | PASS |
-| primitive element (`[Int]`) | PASS |
-| newtype element, ordinary Ord | PASS — **by accident** |
-| newtype element, REVERSED Ord | **WRONG ANSWER** |
-| record element | CRASH |
-| variant element | CRASH |
-| a USER ability with a hand-written impl through a generic consumer | PASS |
-| the Ord METHOD (`a.lt { r = b }`) through a generic consumer | PASS |
-| `seq::min { xs = … }` as a FUNCTION | PASS |
-| `xs.min {}` as a METHOD | **FAIL** |
+**2. The sorted containers** — a completely different cause, and the long detour
+through "whether the element's Ord is used depends on what ELSE is in the
+program" was a red herring. **The element's Ord reached the container correctly
+all along.** Measured at the native boundary: the stored comparator is called,
+calls P's `lt`, returns the right answer, and the set is built correctly ordered
+(`to_seq` reads it back sorted, `contains` answers correctly).
 
-So the dict resolves correctly everywhere except across the INHERENT-METHOD
-boundary, and it is the OPERATOR that breaks while the method call does not.
+`ChainCanonicalizer` was rewriting `__native_sorted_set_min { s }` into
+`to_seq { s } |> Min`, and the fused `Min` sink compares with `DirectLessThan`,
+which only specializes long/double/String/Frac. So a sorted set built with the
+element's own `cmp` closure had that comparator swapped for a primitive `<` at
+the moment it was READ BACK. Adding a `min` call to a program is what introduced
+the fusable native — which is exactly why the same construction passed when the
+program stopped at `size`.
 
-### Root cause, as far as it is pinned
+**Fix**: `Min`/`Max` no longer fuse over a container that owns its ordering
+(`ownsItsOrdering` in `ChainCanonicalizer`). Nothing is lost —
+`__native_sorted_set_{min,max}` are the ONLY bare min/max element natives that
+exist (every other collection's `min` is a Mezze `reduce` over the element's Ord,
+which never reaches the canonicalizer), and the native reads `elements[0]` in
+O(1) where the fused form rescanned in O(n). BUG 8 was the same family: a fused
+numeric pipeline firing on values it cannot compare.
 
-`impl Seq 'a where { min = { it } -> min { xs = it } }` is an INHERENT impl whose
-op carries no `with Ord 'a` of its own. So `xs.min {}` passes no dict; inside the
-op, the call to the constrained `seq::min` has nothing to forward; and `x < acc`
-inside `seq::min` falls through to the primitive comparison node — correct for
-Int, a crash for a record or variant, and silently wrong for a newtype.
+### What the investigation ruled out
 
-Two contributing gaps found:
+Each of these was tested, not argued, and each is recorded because it looked
+convincing:
 
-1. **`prescanForDictMethods` phase 2 did not propagate through impl-op bodies.**
-   Phase 1b asks whether an op's body uses an ability op DIRECTLY; nothing asked
-   whether it CALLS something that needs a dict, which is exactly the inherent
-   forwarding shape. FIXED (impl operation bodies now take part in the transitive
-   propagation) — necessary but NOT sufficient: the cases above still fail.
-2. **The remaining hop is monomorphization.** With the propagation fixed, no dict
-   is missing at any `emitCallDirect` boundary, and 133 Ord dict entries are
-   seeded for user compilation — yet the call still reaches the primitive node.
-   The call site is rewritten to a mono-specialized hash
-   (`monoCallSiteRewrites`), and the specialized body is where the operator is
-   being lowered without the instance. That is the next thing to look at, and it
-   is C.4's territory ("mono keyed on the evidence at each site").
+- *A name collision on `min`.* Five of the stdlib's six `min` declarations carry
+  `with Ord 'a`, so resolving to the wrong one would explain it exactly. A
+  uniquely-named probe with the identical body failed identically.
+- *The lambda-hash collision.* `sorted_set.mz` holds EIGHT byte-identical
+  `{ a, b } -> if a < b …` comparators, `hashExpr` is type- and
+  environment-blind, and the dedupe is first-occurrence-wins — 15 declarations
+  across `sorted_set`/`deque`/`seq` collapse onto two hashes. Real, and measured,
+  but not this bug: salting them apart changed nothing. Not kept, because salting
+  by enclosing HASH also makes a `newtype` declaration change an otherwise
+  identical program's IR (`NewtypeErasureIRTest` catches that).
+- *The solver, monomorphizer and call-site rewriting.* All correct: `from_seq`
+  gets the same spec with `abilityImpls=1` in passing and failing programs, the
+  same site rewrite, and every specialized body is right — including `min`'s,
+  which is a clean `CallNativeIR(__native_sorted_set_min)`.
 
-`ImplValidator.validateAbilityImplementation` returns immediately for inherent
-impls (`if (impl.isInherent) return`), so the "asymmetry fix" that infers
-`with Ord 'a` preconditions from an ability impl's op body never runs for them.
-Whether inherent ops should get inferred preconditions is the design question
-behind a proper fix.
+### Tooling notes for anyone tracing something similar here
+
+Three false signals cost a round each: `NativeDispatch` and
+`NativeDispatchScalarNode` are NOT on the live path (natives are bytecode
+operations, so probes there never fire); `MezzeLanguage.getCachedStdlibCallTarget`
+serves USER functions too, at its route 2, so resolving through it does not mean
+"stdlib"; and IR dumps must filter on `op=LT` — `"LessThan"` is the runtime
+node's name and never appears in IR, so that filter reports a false negative.
+
+The probe that finally located it was dumping the entry FunctionIR at
+`MezzeLanguage.compileEntryFn`, where the `FusedChainIR(… sink=Min, fallback=
+CallNativeIR(__native_sorted_set_min))` is plainly visible.
 
 ### Why the existing gates missed it
 
 `ElementInstanceMatrixTest` has exactly the two blind spots that hide this: its
 element type is a NEWTYPE (where the primitive fallback agrees), and it exercises
 `min_by`/`max_by` (an explicit key function) rather than the operator-based
-`min`/`max`/`sort`. Both should be widened as part of the fix.
-
-### What is fixed (2026-09-15)
-
-**Every `seq` operator path.** `seq::min`, `seq::max` and `seq::sort` over records
-now dispatch the element's own Ord. Those calls are MONOMORPHIZED, and the spec
-now resolves the instance from evidence rather than falling through:
-`specEvidenceOpHash` consults, in order, the impls the monomorphizer recorded as
-discharging the spec's constraints (`Specialization.abilityImpls`) and then the
-spec's own TYPE ARGUMENTS — the latter only when there is exactly ONE of them,
-and only for an inlineable operator with no dict slot left. Both narrowings are
-load-bearing and were found by regression: a broader version resolved unrelated
-ops against the spec's type-arg pile and broke seven map/set filter tests, since
-`Map K V` has two arguments and the receiver's variable could be either. A receiver still typed by the generic's type variable
-had no dict slot (the spec strips it, the constraint being concrete) and could
-not inline (not a primitive), so it reached the primitive comparison node.
-
-Worth recording: **`Specialization.abilityImpls` is declared but almost always
-EMPTY** — the monomorphizer does not populate it, which is exactly disease 3
-("the solver already knows the evidence and discards it") and task **C.1**. Of 8
-specs in the repro, one carried an impl ref and seven carried none. The type-args
-fallback is what actually does the work today; when C.1 lands, the evidence arm
-takes over and the fallback can go.
-
-### What remains, and why
-
-**The sorted containers.** Narrowed much further, and the sharp version is worse
-than the original framing: **whether a sorted container uses the element's Ord
-depends on WHAT ELSE IS IN THE PROGRAM.**
-
-`sorted_set::from_seq { xs = [records] }` followed by `size` passes. The SAME
-construction, in a program that later calls `min`, fails. The data structure's
-`min()` is just `elements[0]` and compares nothing; `addObject` compares during
-construction — so construction itself resolved the instance in one program and
-not in the other. Adding an unrelated call site changed the monomorphizer's seeds
-and with them the instance a earlier call resolves to. That is precisely what
-C.1–C.4 remove.
-
-**Hypotheses eliminated** (2026-09-16), each by probing the real pipeline:
-
-- *The callee lost its ability constraints.* No — `sorted_set::singleton` and
-  `add` both carry `with Ord 'a` at mono time, and `min` correctly carries none.
-- *`resolveAbilityConstraints` fails to find the impl.* No — it matches. The
-  concrete type arrives as `RecordType{k, tag}` and the impl target as
-  `TypeApplication(P)`, which looks like disease 2, but `typeMatchesTarget`
-  handles it and the anonymous-record recovery never even has to fire.
-- *The spec carries no evidence.* No — the Ord-constrained specs DO carry an
-  `AbilityImplRef`. `Specialization.abilityImpls` being empty, noted above, is
-  true only of the specs whose callees have no constraints (`min`, `size`,
-  `get`, `is_empty`), which is correct.
-
-**What is left**: the spec HAS the right evidence and never consults it, because
-the comparator lambda inside it is not recompiled — no `lt`/`le`/`gt`/`ge`
-call site is compiled anywhere during user compilation, in or out of a spec. So
-the comparator reaching the runtime is the generic prelowered one. Why the spec's
-nested lambda is not compiled from `specializedBody` is the next question;
-`specLambdaSalt` exists to give that lambda a per-spec hash and its comment names
-this exact comparator.
-
-Earlier probe results, still true:
-
-- `sorted_set::from_seq` IS monomorphized — the user call goes to a specialized
-  hash with `typeArgs=[P]`, so the spec exists and the call reaches it.
-- Yet NO `lt`/`le`/`gt`/`ge` method-call site is compiled during user
-  compilation, so the comparator's `<` never reaches the dispatch branch the
-  `seq` fix works through.
-- Every callee at `emitCallDirect` is a specialized hash with no dict
-  requirement — correct, since a spec needs none.
-- So the comparator body reaching the runtime is NOT the one the spec compiled.
-
-**Three more hypotheses eliminated (2026-09-16), each by changing the compiler and
-measuring rather than by reading it:**
-
-- *The comparator closure is missing, so the container falls back to natural
-  ordering.* No. `ElementComparator.of(null)` returns null and the data structure
-  then compares with `((Comparable) a).compareTo(b)`, which throws
-  ClassCastException. The observed error is `Cannot compare MezzeRecord <
-  MezzeRecord`, raised by `DirectLessThanNode` — Mezze code. So a comparator
-  closure IS installed and IS being called; its `a < b` compiled to the primitive
-  node.
-- *The eight identical comparator lambdas in `sorted_set.mz` collide on one
-  FunctionIR.* They genuinely do collide — `singleton`, `from_list`, `add`,
-  `remove`, `contains`, `min_by`, `max_by` and `from_seq` each write the
-  byte-identical `{ a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0`,
-  `hashExpr` is type- and environment-blind, and only some of those declarations
-  carry `with Ord 'a`. First-registration-wins across that set is an exact-looking
-  explanation for "the answer depends on what else is in the program". It is
-  still not the cause: salting the lambda hash with `currentFunctionHash`
-  separates all eight and changes NOTHING — the same 7 cases fail. Reverted
-  rather than kept as hardening, because it also ties a nested lambda's identity
-  to its enclosing declaration's hash, and declaring a `newtype` changes that
-  hash, so two programs identical after newtype erasure would emit different IR.
-  `NewtypeErasureIRTest` catches that, correctly.
-- *The extracted comparator lambda is compiled in the later extracted-lambda
-  phase, after the spec loop's `finally` clears `specTypeArgs`.* No —
-  `compileLambda` compiles the extracted body eagerly, inside the spec's scope,
-  so the spec evidence is in scope when the comparator is lowered.
-
-### The comparator is NOT the culprit (measured 2026-09-16 — supersedes the above)
-
-Probing the runtime boundary directly, with two programs that differ only in
-whether they end at `size` (passes) or go on to `min` (fails):
-
-| measured at the native boundary | program A (passes) | program B (fails) |
-|---|---|---|
-| `cmp` argument | `LazyStub[lambda]` | `LazyStub[lambda]` |
-| its hash | `1880a62e…4c4c68` | `1880a62e…4c4c68` — **identical** |
-| closure values captured | 0 | 0 |
-| stub resolution route | 2, the prelowered stdlib cache | 2, the prelowered stdlib cache |
-| `ElementComparator.compare` calls | 1 | 1 |
-| what it compared | `MezzeRecord` vs `MezzeRecord` | `MezzeRecord` vs `MezzeRecord` |
-| outcome | returns normally | — |
-
-**The comparator is byte-for-byte the same function, resolved the same way, called
-once with two records, and it returns normally in the passing program.** So the
-whole "the spec's comparator is not the one installed" line of inquiry is wrong:
-there is only ever one comparator, it is the prelowered generic, and it handles
-records fine.
-
-More than that: the container is **correctly ordered**. `to_seq` on the same set
-and reading the first element back gives `tag = 10`, the element with the smaller
-`k` — so P's own `Ord` DID order the set. `contains` (which also runs the stored
-comparator) answers correctly too.
-
-### Where it actually is: only some result types
-
-Probing the natives directly, on one sorted set of records built the same way
-every time:
-
-| operation on `SortedSet P` | result type | outcome |
-|---|---|---|
-| `size` | `Int` | OK — 2 |
-| `contains` | `Bool` | OK — True |
-| `to_seq`, then read a field off the first element | `['a]` | **OK — 10, correctly sorted** |
-| `min` / `max` | `Option 'a` | THROWS |
-
-And `__native_sorted_set_min` is **never reached** — a probe inside it does not
-fire. The throw happens before the body runs: even `let m = min { s = s }`
-followed by an unrelated `1` throws.
-
-Three things this rules out, each tested:
-
-- **Not a name collision.** There are six `min` declarations in the stdlib and
-  five carry `with Ord 'a`, so `sorted_set::min` resolving to one of the others
-  would explain it exactly. It does not: adding
-  `pub let min_unique_probe: { s: SortedSet 'a } -> Option 'a` with the identical
-  body, under a name nothing else in the stdlib shares, fails identically.
-- **Not the constraint.** A probe declared `with Ord 'a` and one declared without
-  it both throw.
-- **Not `Option` itself, and not generics in general.** A plain user
-  `let wrap: { x: 'a } -> Option 'a = { x } -> Some { val = x }` applied to a
-  record with a hand-written `Ord` works, with or without the constraint. So does
-  a `SortedSet 'a` probe returning `['a]`.
-
-**The trigger is the combination**: an operation on `SortedSet 'a` whose result
-mentions `'a` inside a VARIANT (`Option 'a`). The same operation returning `['a]`
-is fine, and the same `Option 'a` signature away from a sorted container is fine.
-That is why "it depends on what else is in the program" looked true — adding
-`min` to a program is adding exactly this combination.
-
-### The monomorphizer is not where it goes wrong either
-
-Diffing the two programs' full mono output (`MEZZE_MONO_STATS`, plus a per-spec
-and per-call-site dump):
-
-- `from_seq` gets the SAME specialization in both — `gen=7a6dfcb8
-  spec=61432ce3`, `typeArgs=[P]`, `abilityImpls=1`. The Ord evidence is there.
-- The construction CALL SITE is rewritten to that spec in both, identically.
-- The only difference in the entire spec set is B's extra
-  `min@sorted_set.mz:96 spec=b4a217c5 typeArgs=[P] impls=0` — which is the
-  correct declaration (unconstrained, so `impls=0` is right).
-- Both specialized bodies are correct: `min`'s calls
-  `__native_sorted_set_min`, `from_seq`'s calls `from_seq_with_cmp`'s spec.
-
-So the solver, the monomorphizer and the call-site rewriting are all right, and
-the defect is downstream of them.
-
-Two further facts, each from a probe placed inside the method itself (the
-`NativeDispatch` and `NativeDispatchScalarNode` classes are NOT on the live path
-— natives are bytecode operations, so probes there never fire and are
-misleading):
-
-- **The comparator succeeds.** Wrapping `ElementComparator.compare`'s call in a
-  try/catch shows it RETURNS 1 — the correct answer for P's Ord on `k=3` vs
-  `k=1`. It is called exactly once, for the two-element construction, and does
-  not throw. The ordering works.
-- **`SortedSetNatives.min` never runs.** A probe on the first line of the method
-  never fires.
-
-And the guest frame in the crash is `__entry__` at the line of the
-CONSTRUCTION, not of the `min` call. So: construction completes correctly, the
-`min` body is never entered, and a record `<` is executed in the entry between
-them.
-
-Dumping the emitted IR narrows that last step too: **no function compiled during
-user compilation contains a DirectLessThan at all** — not the entry, not any
-spec, not any extracted lambda. So the `<` that throws belongs to the PRELOWERED
-stdlib, which is fixed at build time and cannot know about P.
-
-That is the whole shape of what is left. A prelowered generic body containing a
-primitive `<` is reached on this path, and the program never re-compiles it
-against the element's instance — while the comparator on the very same
-construction DOES get the instance and answers correctly. Two routes into the
-same stdlib, one carrying evidence and one not.
-
-**The culprit has an address.** Probing `LazyStubRootNode`'s inflate path records
-exactly three stub inflations for the failing program, in order:
-
-```
-INFLATE name=callee hash=61432ce3…   <- from_seq's SPECIALIZATION
-INFLATE name=lambda hash=1880a62e…   <- the comparator (runs, returns 1, correct)
-INFLATE name=callee hash=86e681d8…   <- ??? then the throw
-```
-
-`86e681d8…` resolves to a USER-compiled function named **`lt`** — P's own impl
-op. (Note `getCachedStdlibCallTarget` serves user functions too, at its route 2,
-so an earlier reading of "resolved from the prelowered stdlib cache" was wrong.)
-Its emitted IR is CORRECT:
-
-```
-FunctionIR(name=lt, paramNames=[it, r],
-  body=InlineBinaryOpIR(op=LT,
-    left=ReadFieldIR(ReadLocalIR(slot=0), "k"),
-    right=ReadFieldIR(ReadLocalIR(slot=1), "k")))
-```
-
-It reads `.k` off both operands and compares Ints. Nothing wrong with it.
-
-### Where it actually throws
-
-Printing the failing comparison's operands:
-
-```
-Cannot compare MezzeRecord < MezzeRecord [left={k = 3, tag = 30} right={k = 1, tag = 10}]
-```
-
-Those are **the two elements themselves**, compared whole by a primitive LT.
-Since `ElementComparator.compare` has already been called once and returned 1
-correctly, and `SortedSetNatives.min` never runs, the sequence is:
-
-1. construction runs the comparator once → it calls P's `lt` → returns 1 → the
-   set is built, correctly ordered;
-2. then Mezze code compares the same two elements AGAIN, this time with a
-   primitive `<` on the whole records, and throws.
-
-A second comparison of exactly the container's elements, outside the stored
-comparator, is a **fold**. So the `min` call is not reaching
-`sorted_set::min`/`__native_sorted_set_min` at all — it degenerates into a
-generic fold-style minimum whose `<` lost the element's instance. That is BUG
-7's original shape (a `with Ord 'a` consumer falling to the primitive node),
-reached here through the sorted-set surface rather than the seq one.
-
-### Narrowing the fold itself
-
-Dumping every function compiled during user compilation whose IR contains an LT
-node (filter on `op=LT` — an earlier pass filtered on `"LessThan"`, which is the
-runtime node's name and never appears in IR, so that pass wrongly reported none)
-gives exactly three for the failing program:
-
-| function | verdict |
-|---|---|
-| `lt` `86e681d8` | P's own impl op — CORRECT, `ReadField(k) < ReadField(k)` |
-| `sign` `ef0bd618` | `int::sign`, operates on Ints |
-| `lambda` `b9a9d73a` | a range/loop bound from `mutation.mz`, all LONG slots — unrelated |
-
-So no user-compiled function carries the offending record comparison. **The fold
-with the primitive `<` is a PRELOWERED stdlib function**, called with records it
-was never specialized for. It is also not reached through a lazy stub — only
-three stubs inflate (the `from_seq` spec, the comparator, and `lt`), so it is
-called directly.
-
-**The next action**: identify that prelowered function. The two shapes that fit
-are `set::min`-style fold bodies (`set.mz:129`, `seq.mz:293`, `list.mz:274`,
-`deque.mz:316` — all `{ container 'a } with Ord 'a -> Option 'a`, all folding
-with `<`) and the inherent impl ops that forward to them. Note `sorted_set::min`
-has the SAME shape modulo the container, which would explain why a uniquely
-named probe with that signature also fails while an `['a]`-returning one does
-not — a container mixed up at the type level (disease 2: `SetType` vs
-`SortedSetType` vs `TypeApplication`) rather than at the name level.
-
-### What the probing did turn up: extracted-lambda hash collisions, measured
-
-Printing every extracted `{ a, b }` comparator's hash during compilation:
-
-| source | `hashExpr` base | final hash |
-|---|---|---|
-| `sorted_set.mz:43` (`singleton`) | `841ac81a` | `956707da` |
-| `sorted_set.mz:50` (`from_list`) | `841ac81a` | `956707da` |
-| `sorted_set.mz:245` (`from_seq`) | `841ac81a` | **`956707da`** |
-| `sorted_set.mz:57, 64, 71, 127, 135` | `841ac81a` | `b14b0d60` |
-| `deque.mz:29, 31, 33, 35, 136, 144` | `841ac81a` | `b14b0d60` |
-| `seq.mz:47, 49, 51` | `841ac81a` | `b14b0d60` |
-
-**Fifteen distinct declarations across three modules collapse onto two hashes**,
-and the dedupe at the end of compilation is explicitly "first occurrence wins".
-Which copy survives therefore depends on compile order, and compile order shifts
-when a program adds a specialization — the exact shape of "the answer depends on
-what else is in the program".
-
-This is a real latent hazard and it is now measured. It is NOT, however, what
-breaks these 7 cases: separating all fifteen (by salting with the enclosing
-function) leaves the same 7 failing. Recorded here so the next person does not
-re-derive it, and so that if a fix is attempted it is done for the right reason —
-note that salting by enclosing HASH is not the right lever, since it makes a
-`newtype` declaration change an otherwise identical program's IR.
-
-Closing it is the same question C.3/C.4 answer: emit the evidence rather than
-re-deriving it per site.
-
-Also still open: `ImplValidator.validateAbilityImplementation` returns immediately
-for inherent impls, so the "asymmetry fix" that infers `with Ord 'a` preconditions
-from an ability impl's op body never runs for them. Whether inherent ops should
-get inferred preconditions is the design question behind a complete fix.
+`min`/`max`/`sort`.
 
 ### Acceptance
 
-`SortedContainerReadBackTest` — 19 cases, 7 still `@Disabled` pointing here (was
-10 of 17). The 12 that pass are what narrow what is left; every one of the 7 is a
-sorted container.
+`SortedContainerReadBackTest` — 19 cases, all passing, none disabled, including
+the REVERSED-Ord newtype that detects silent wrongness rather than a crash.
 
 ---
 

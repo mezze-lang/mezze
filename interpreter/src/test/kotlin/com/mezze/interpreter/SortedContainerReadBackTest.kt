@@ -34,22 +34,30 @@ import kotlin.test.assertEquals
  *
  * Severity: silent wrongness, not just a crash. See known-bugs.md "BUG 7".
  *
- * PARTLY FIXED. Every `seq` operator path now works — `seq::min`, `seq::max` and
- * `seq::sort` over records all dispatch the element's own Ord — because those
- * calls are MONOMORPHIZED, and a spec now resolves the instance from its own
- * recorded type arguments instead of falling through to the primitive node.
+ * FIXED, in two halves.
  *
- * The sorted-container paths still fail, and tracing them produced a sharper
- * statement than "prelowered": **whether the element's Ord is used depends on
- * what ELSE is in the program.** `sorted_set::from_seq` followed by `size` alone
- * passes; the SAME construction in a program that also calls `min` fails. The
- * data structure's `min()` is just `elements[0]` and does no comparison, and
- * `addObject` compares during construction — so construction itself resolved the
- * instance in one program and not in the other. Mono seeded differently.
+ * The `seq` operator paths — `seq::min`, `seq::max`, `seq::sort` over records —
+ * are monomorphized, and a spec now resolves the instance from its own recorded
+ * type arguments instead of falling through to the primitive node.
  *
- * That instability is the thing tasks C.1–C.4 remove: an instance decided per
- * call site from surface types can change when an unrelated site is added. The
- * remaining cases are @Disabled pointing at it and are its acceptance criteria.
+ * The sorted-container paths had a different cause, and the long detour through
+ * "it depends on what else is in the program" was a red herring: the element's
+ * Ord reached the container correctly all along. `ChainCanonicalizer` was fusing
+ * `__native_sorted_set_min { s }` into `to_seq { s } |> Min`, and the fused Min
+ * sink compares with DirectLessThan — which only specializes long/double/String/
+ * Frac. So a sorted set BUILT with the element's own `cmp` closure, and holding
+ * correctly ordered elements, had that comparator swapped for a primitive `<` at
+ * the moment it was read back. Adding a `min` call to a program is what
+ * introduced the fusable native, which is why the same construction passed alone.
+ *
+ * Min/Max no longer fuse over a container that owns its ordering. Nothing is
+ * lost: `__native_sorted_set_{min,max}` are the only bare min/max element natives
+ * that exist (every other collection's `min` is a Mezze `reduce`, which never
+ * reaches the canonicalizer), and the native reads `elements[0]` in O(1) where
+ * the fused form rescanned in O(n).
+ *
+ * All 19 cases pass, including the REVERSED-Ord newtype — the case that detects
+ * silent wrongness rather than a crash.
  */
 class SortedContainerReadBackTest {
 
@@ -75,9 +83,6 @@ class SortedContainerReadBackTest {
     """.trimIndent()
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `min of a sorted set of records, field read off the result`() {
         assertEquals(
             10L,
@@ -94,9 +99,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `max of a sorted set of records`() {
         assertEquals(
             30L,
@@ -129,9 +131,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `the ordering actually used is the element's own Ord`() {
         // P orders by `k` only. If the sorted set fell back to a structural or
         // insertion order, min would be the first-inserted element (tag 30).
@@ -249,9 +248,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `contrast - a VARIANT element with its own Ord`() {
         assertEquals(
             1L,
@@ -305,9 +301,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `contrast - a newtype whose Ord is REVERSED`() {
         // The plain newtype case passes, but a newtype wraps an Int at runtime, so
         // a primitive fallback would give the same answer and the test could not
@@ -455,9 +448,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `sorted_set min called as a FUNCTION rather than a method`() {
         // `min()` on the data structure is just `elements[0]` — no comparison — and
         // construction succeeds (step 2 passes). So a crash in `s.min {}` means the
@@ -477,9 +467,6 @@ class SortedContainerReadBackTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 7, remaining half — sorted containers only. The comparator closure IS\n        installed (a null one would throw ClassCastException from the natural\n        ordering, not this), it IS called, and its `a < b` compiled to the\n        primitive DirectLessThan instead of the element's `lt`. The same\n        construction compiles CORRECTLY when the program stops at `size` and\n        incorrectly once a later `min` is added, so the selection depends on the\n        whole program. Ruled out: a lambda-hash collision between sorted_set.mz's\n        eight identical comparator lambdas (salting by enclosing function changed\n        nothing), and extracted-lambda timing (they compile eagerly, inside the\n        spec's scope). See planned_features/known-bugs.md BUG 7."
-    )
     fun `construct and size then min, in ONE program`() {
         // Step 2 (construct + size) passes and `min()` on the data structure is
         // just elements[0]. Doing both in one program removes any possibility that

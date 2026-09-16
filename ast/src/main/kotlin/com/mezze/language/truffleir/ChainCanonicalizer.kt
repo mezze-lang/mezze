@@ -798,9 +798,28 @@ object ChainCanonicalizer {
                 buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.First)
             NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_LAST) ->
                 buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Last)
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MIN) ->
+            // Min/Max are NOT fused for a container that owns its ordering.
+            //
+            // The fused sink compares elements with DirectLessThan, which only
+            // specializes long/double/String/Frac and throws on anything else.
+            // A sorted container, though, was built with the ELEMENT'S OWN `cmp`
+            // closure and keeps it inside the data structure, so fusing rewrites
+            // `__native_sorted_set_min { s }` into `to_seq { s } |> Min` and
+            // silently swaps that comparator for a primitive `<` — a crash for a
+            // record or variant element, and a WRONG ANSWER for a newtype whose
+            // Ord disagrees with the wrapped type's. It is also slower: the
+            // native reads `elements[0]` in O(1), the fused form rescans in O(n).
+            //
+            // `__native_sorted_set_{min,max}` are in fact the only bare min/max
+            // element natives that exist — every other collection's `min` is a
+            // Mezze `reduce` over the element's Ord (see seq.mz), which never
+            // reaches here — so this guard costs no fusion that was ever
+            // profitable. See known-bugs.md BUG 7; BUG 8 was the same family.
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MIN) &&
+                !ownsItsOrdering(node.name) ->
                 buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Min)
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MAX) ->
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MAX) &&
+                !ownsItsOrdering(node.name) ->
                 buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, SinkIR.Max)
             // ── Function sinks: MinBy / MaxBy ──
             NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MIN_BY) ->
@@ -927,6 +946,14 @@ object ChainCanonicalizer {
         val candidate = FusedChainIR(effectiveSource, stages, sink, src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
+
+    /** True when the container keeps an ordering INSIDE the data structure — it
+     *  was handed the element's own comparator at construction and reuses it for
+     *  every later query. Any rewrite that reaches such a container's elements
+     *  through `to_seq` loses that comparator, so ordering-dependent sinks must
+     *  not fuse over one. */
+    private fun ownsItsOrdering(nativeName: String): Boolean =
+        NativeHofNames.isSortedSetNative(nativeName)
 
     /** Promote an Opaque source based on the native call's collection type.
      *  Seq natives → RawSeq, list natives → RawList, set/sorted_set/deque →
