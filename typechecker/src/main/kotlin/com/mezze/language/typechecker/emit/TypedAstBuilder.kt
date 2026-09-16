@@ -434,9 +434,20 @@ class TypedAstBuilder(
         val hash = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
 
         val ops = decl.operations.mapIndexed { idx, op ->
+            // One clear PER OP — ops are independent, so each may reuse `'a`. NOT
+            // between an op's param and its return: those are two halves of ONE
+            // signature, and clearing between them splits every variable they
+            // share. `map: { it: 'a, f: { x: 'a } -> 'b } -> 'b` would give the
+            // returned `'b` a different variable from the callback's.
+            //
+            // PREVENTATIVE — no program observes this today, and it was checked:
+            // an op's own type variables must be ability parameters (T0-level
+            // rejection otherwise), ability parameters must be concrete at an
+            // `impl`, and the receiver variable resolves through the impl's
+            // target types rather than the op's declared arrow. The shape that
+            // WOULD observe it becomes writable when #195 lifts the first two.
             typeVarCache.clear()
             val paramType = convertParsedTypeAnnotation(op.paramType)
-            typeVarCache.clear()
             val returnType = convertParsedTypeAnnotation(op.returnType)
             TypedAbilityOp(op.name, idx, paramType, returnType, op.loc)
         }
@@ -723,9 +734,9 @@ class TypedAstBuilder(
         val hash = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
 
         val ops = decl.operations.mapIndexed { idx, op ->
+            // Per OP, not between an op's param and return — see buildAbilityDecl.
             typeVarCache.clear()
             val paramType = convertParsedTypeAnnotation(op.paramType)
-            typeVarCache.clear()
             val returnType = convertParsedTypeAnnotation(op.returnType)
             TypedEffectOp(op.name, idx, paramType, returnType, op.loc)
         }
@@ -749,8 +760,11 @@ class TypedAstBuilder(
         val effectName = decl.effect.localName
         val effectHash = resolveEffectHash(effectName)
 
+        // One clear for the whole parameter LIST: a performer's params belong to
+        // one signature, so two of them written `'a` are the same `'a`. Clearing
+        // per param made them different variables.
+        typeVarCache.clear()
         val params = decl.params.map { param ->
-            typeVarCache.clear()
             TypedPerformerParam(param.name, convertParsedTypeAnnotation(param.type), param.loc)
         }
 
