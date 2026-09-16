@@ -414,7 +414,7 @@ object MonoDriver {
             // (receiver.type, methodName) pair to an ability op and seed
             // the op for specialization.
             if (fn is TypedFieldAccess) {
-                seedFromMethodCall(fn, expr, abilityOpIndex, out, outLocs, counters, recordShapes)
+                seedFromMethodCall(fn, expr, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
 
             collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
@@ -486,6 +486,7 @@ object MonoDriver {
         fa: TypedFieldAccess,
         call: TypedCall,
         abilityOpIndex: Map<String, List<AbilityOpEntry>>,
+        allImpls: List<TypedAbilityImpl>,
         out: MutableList<Monomorphizer.SpecRequest>,
         outLocs: MutableList<Loc>,
         counters: Counters,
@@ -598,8 +599,20 @@ object MonoDriver {
                 closureArgs = emptyMap()
                 closureBodies = emptyMap()
             }
+            // C.4 — a method-style seed records its evidence too. This was
+            // `emptyList()`: an op seeded through a method call carried NO record
+            // of which impls discharge its constraints, so a specialization cut
+            // from it had nothing to dispatch through and had to re-derive the
+            // instance from surface types further down.
+            val resolvedImpls = resolveAbilityConstraintsOf(
+                opBody.type as? MezzeType.FunctionType,
+                opTypeParams.map { it.name },
+                args,
+                allImpls,
+                recordShapes,
+            )
             out.add(Monomorphizer.SpecRequest(
-                match.opHash, args, emptyList(), closureArgs, closureBodies
+                match.opHash, args, resolvedImpls, closureArgs, closureBodies
             ))
             outLocs.add(callLoc)
             counters.methodSeeded++
@@ -931,14 +944,38 @@ object MonoDriver {
         typeArgs: List<MezzeType>,
         abilityImpls: List<TypedAbilityImpl>,
         recordShapes: Map<Hash, Map<String, MezzeType>>,
+    ): List<AbilityImplRef> = resolveAbilityConstraintsOf(
+        callee.scheme.type as? MezzeType.FunctionType,
+        callee.typeParams.map { it.name },
+        typeArgs,
+        abilityImpls,
+        recordShapes,
+    )
+
+    /**
+     * C.4 — the constraint-discharging rule, independent of whether the callee is
+     * a top-level `let` or an ability-impl OPERATION. A method-style call seeds a
+     * spec for an op, which has a declared arrow and type parameters of its own
+     * but no `TypedLetDecl` behind it, so it could not reach the decl-shaped entry
+     * point above and recorded NO evidence at all.
+     */
+    private fun resolveAbilityConstraintsOf(
+        fnType: MezzeType.FunctionType?,
+        typeParamNames: List<String>,
+        typeArgs: List<MezzeType>,
+        abilityImpls: List<TypedAbilityImpl>,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
     ): List<AbilityImplRef> {
-        val fnType = callee.scheme.type as? MezzeType.FunctionType ?: return emptyList()
+        if (fnType == null) return emptyList()
         if (fnType.abilityConstraints.isEmpty()) return emptyList()
 
-        // Build name → concrete-type map from the derived typeArgs.
-        val nameToConcrete = HashMap<String, MezzeType>(callee.typeParams.size)
-        for (i in callee.typeParams.indices) {
-            nameToConcrete[callee.typeParams[i].name] = typeArgs[i]
+        // Build name → concrete-type map from the derived typeArgs. A shorter
+        // typeArgs list than typeParams is not an error here — an op's recovered
+        // forall vars are appended, so only the prefix is bound.
+        val nameToConcrete = HashMap<String, MezzeType>(typeParamNames.size)
+        for (i in typeParamNames.indices) {
+            if (i >= typeArgs.size) break
+            nameToConcrete[typeParamNames[i]] = typeArgs[i]
         }
 
         val out = ArrayList<AbilityImplRef>(fnType.abilityConstraints.size)
