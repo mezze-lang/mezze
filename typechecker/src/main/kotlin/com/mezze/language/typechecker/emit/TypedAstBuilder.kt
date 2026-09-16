@@ -1230,7 +1230,61 @@ class TypedAstBuilder(
                     .firstOrNull { it.name == receiverFieldName }?.value
             } else null
 
-        val fn = if (methodInfo.methodHash != null) {
+        // BUG 9: when two abilities declare the SAME operation name and a type
+        // implements both, the emitted call carried neither a hash nor the
+        // ability, so the compiler re-resolved by name against an index keyed on
+        // the name — and `Weigh.rank {…} + Price.rank {…}` ran Weigh twice,
+        // returning 6 where 106 was required, silently.
+        //
+        // The typechecker already decided correctly (methodInfo.abilityName is
+        // `Weigh` for one call and `Price` for the other). Resolve the impl here
+        // and emit it by hash, so the decision survives to the compiler instead of
+        // being re-derived from a name that cannot distinguish them. This is the
+        // shape C.3 generalizes — emit the evidence, do not re-resolve.
+        //
+        // Deliberately NARROW: only when the operation name is declared by more
+        // than one ability in scope. Where the name is unambiguous the existing
+        // path already resolves correctly, and every ability method call is far
+        // too much surface to change for a bug that needs the ambiguity.
+        val ambiguousAbilityOpHash: Hash? = run {
+            if (methodInfo.methodHash != null || methodInfo.isInherentMethod) return@run null
+            val abilityName = methodInfo.abilityName ?: return@run null
+            val abilityHash = registry.lookupAbility(abilityName)
+                ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                ?: importContext?.importedAbilities?.get(abilityName)
+                    ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                ?: return@run null
+            // Ambiguous only if more than one ABILITY DECLARATION in scope has an
+            // operation of this name. Read from the declarations, not the impls:
+            // that is where "who declares this operation" actually lives.
+            val declaringAbilities = registry.abilityDeclarations.values
+                .filter { ad -> ad.operations.any { it.name == methodInfo.methodName } }
+                .mapNotNull { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                .distinct()
+            if (declaringAbilities.size < 2) return@run null
+
+            val receiverType = staticReceiverValue?.let { substitution.apply(it.type) } ?: return@run null
+            val receiverName = com.mezze.language.typechecker.util.receiverTypeName(receiverType)
+                ?: return@run null
+            // The ABILITY is matched by declaration hash — that is the part the
+            // name cannot distinguish and the whole reason this exists. The impl's
+            // target is only available here as a name (`AbilityImplInfo.targetTypes`
+            // is List<String>), which is the accepted fallback for a shape with no
+            // hash to compare; it only has to separate impls WITHIN one ability.
+            val implEntry = abilityImpls.entries.firstOrNull { (_, info) ->
+                info.abilityDeclHash == abilityHash && receiverName in info.targetTypes
+            } ?: return@run null
+            Hash.computeOpHash(implEntry.value.contentHash, methodInfo.methodName)
+        }
+
+        val fn = if (ambiguousAbilityOpHash != null) {
+            TypedVar(
+                name = methodInfo.methodName,
+                binding = BindingRef.ByHash(ambiguousAbilityOpHash),
+                type = solvedFnType ?: substitution.apply(contextType),
+                loc = memberAccess.memberLoc,
+            )
+        } else if (methodInfo.methodHash != null) {
             val hash = methodInfo.methodHash!!
             TypedVar(
                 name = methodInfo.methodName,

@@ -75,7 +75,15 @@ class TypedASTCompiler(
     private data class AbilityOp(
         val implHash: Hash,
         val targetTypes: List<MezzeType>,
-        val opHash: Hash
+        val opHash: Hash,
+        /** BUG 9: which ABILITY this op belongs to. The index is keyed on the
+         *  operation NAME, so two abilities declaring the same name land in one
+         *  bucket and a receiver implementing both matched whichever came first —
+         *  `Weigh.rank {…} + Price.rank {…}` ran Weigh twice. The typechecker
+         *  already decided the ability per call site
+         *  ([ConstraintResult.MethodCallInfo.abilityName]); carrying it here is
+         *  what lets the compiler USE that decision instead of re-deriving one. */
+        val abilityHash: Hash?
     )
     private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOp>>()
 
@@ -245,7 +253,7 @@ class TypedASTCompiler(
             for ((opName, _) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
                 abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
-                    AbilityOp(impl.hash, impl.targetTypes, opHash)
+                    AbilityOp(impl.hash, impl.targetTypes, opHash, impl.abilityHash)
                 )
                 // Codec decoder index — keyed by ABILITY CONTENT HASH
                 // (WellKnownHashConstants decode-flavored set), shared with
@@ -779,6 +787,14 @@ class TypedASTCompiler(
                     }
                     if (receiverType is VarType && !recoveredConcrete &&
                         shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
+                        if (System.getenv("MEZZE_PROBE_DICTKEY") == "1") {
+                            val cands = abilityOpIndex[methodName].orEmpty()
+                            System.err.println(
+                                "DICTKEY method=$methodName var=${receiverType.variable.name}" +
+                                    " candidates=${cands.size}" +
+                                    " impls=${cands.map { it.implHash.hex.take(6) }.distinct()}",
+                            )
+                        }
                         out.add(com.mezze.language.ast.MagicParams.dictKey(methodName, receiverType.variable.name))
                     }
                     scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, paramEnv)
@@ -4285,9 +4301,22 @@ class TypedASTCompiler(
         methodName: String,
         receiverType: MezzeType,
         argRecord: TypedExpr? = null,
+        /** BUG 9: the ability the TYPECHECKER resolved for this call site, when
+         *  it recorded one. The op index is keyed on the operation NAME, so two
+         *  abilities declaring the same name share a bucket; without this the
+         *  receiver alone decided, and a type implementing both got whichever
+         *  impl was registered first for every call — `Weigh.rank {…} +
+         *  Price.rank {…}` returned 6 instead of 106, silently. Narrowing by a
+         *  DECISION ALREADY MADE is not name dispatch; it is the opposite, and
+         *  it is what C.3 generalizes. */
+        abilityHash: Hash? = null,
     ): Hash? {
         val effectiveType = receiverType
-        val candidates = abilityOpIndex[methodName] ?: return null
+        val allCandidates = abilityOpIndex[methodName] ?: return null
+        val candidates =
+            if (abilityHash != null) allCandidates.filter { it.abilityHash == abilityHash }
+                .ifEmpty { allCandidates }
+            else allCandidates
         // `AbilityOp.targetTypes` is the impl's full class-arg tuple, positional to the
         // ability's type params with the receiver ("self") LAST (extra class params
         // first). Match the receiver against the receiver POSITION only, so a class-param

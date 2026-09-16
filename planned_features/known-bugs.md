@@ -674,7 +674,7 @@ why this survived the perf suites.
 
 ---
 
-## BUG 9 — two abilities with the same operation name share one dictionary slot
+## BUG 9 — HALF FIXED: two abilities with the same operation name collide
 
 Found 2026-09-16 while assessing task C.2. **Silent wrong answer, no error.**
 
@@ -694,7 +694,27 @@ both { x = { n = 3 } }      # returns 6; must return 106
 
 Both calls dispatched `Weigh.rank`. `Price`'s implementation never ran.
 
-### Cause
+### Fixed: the CONCRETE receiver
+
+The typechecker knew the ability per call site all along — `MethodCallInfo`
+carries `abilityName`, and it is `Weigh` for one call and `Price` for the other.
+Emit dropped it, leaving the compiler to re-resolve through
+`tryResolveAbilityOp`, whose index is keyed on the operation NAME: both impls
+target `Item`, so the receiver could not choose and the first won. Emit now
+resolves the impl from the recorded ability and writes it out by hash.
+
+Deliberately narrow — it applies only when more than one ability DECLARATION in
+scope has an operation of that name. Where the name is unambiguous the existing
+path is already right, and every ability method call is far too much surface to
+change for a bug that needs the ambiguity to exist. The ability is matched by
+declaration HASH (the part a name cannot distinguish, and the whole reason this
+exists); the impl's target is matched by name, which is all
+`AbilityImplInfo.targetTypes` holds and only has to separate impls within one
+ability.
+
+This is the shape **C.3** generalizes: emit the evidence, do not re-resolve.
+
+### Still broken: the GENERIC receiver — and that is task C.2
 
 `MagicParams.dictKey(methodName, typeVar)` builds `"rank@a"` — method name plus
 type variable, no ability. `Weigh.rank@a` and `Price.rank@a` are therefore the
@@ -705,7 +725,7 @@ The per-VARIABLE half of the keying already works — one ability's `rank` on tw
 different type variables resolves correctly (`__dict_rank@a` vs `__dict_rank@b`),
 which the second test in `DictKeyAbilityCollisionTest` pins.
 
-### Fix = task C.2
+### What the remaining fix needs
 
 The key must be `(ability hash, type variable)`. That means threading ability
 identity to three places: the prescan that mints the key
@@ -720,8 +740,9 @@ from the call, or from the enclosing arrow's declared constraints.
 
 ### Acceptance
 
-`DictKeyAbilityCollisionTest` — the colliding case is `@Disabled` pointing here;
-the per-variable case passes and must keep passing.
+`DictKeyAbilityCollisionTest` — the CONCRETE case passes, the GENERIC one is
+`@Disabled` pointing here, and the per-variable case passes and must keep doing
+so.
 
 ---
 
