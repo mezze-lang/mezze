@@ -743,10 +743,28 @@ exactly `[rank]`.
 
 The grouping key has to become `(ability, method)`. The obstacle is getting the
 ability THERE: the scan consults `abilityOpIndex`, which is keyed on the operation
-name and by construction cannot separate them, so the identity has to be carried
-on the emitted node — a typed-AST field, which is what C.3 ("the compiler emits
-evidence") means concretely. `methodOfKey` must keep working either way: it feeds
-the op index and the runtime's primitive fallback.
+name and by construction cannot separate them.
+
+**Both evidence channels already exist and are both empty** — which is C.3 stated
+as a fact rather than a plan:
+
+- `TypedCall.instantiation.abilityImpls` is on the emitted node and serialized.
+  Probed at the failing call sites: `[]`. And `grep '\.instantiation'` in
+  `TypedASTCompiler` returns NOTHING — the compiler never reads it even when it is
+  populated.
+- `ConstraintResult.MethodCallInfo.abilityImpls` is the typechecker-side twin.
+  Also empty. Its sibling `abilityName` IS populated and correct per call site,
+  which is what the concrete-receiver fix uses.
+
+For a GENERIC receiver the IMPL genuinely is not known at the call — it arrives
+through the caller's dict — so `AbilityImplRef`, which requires an impl hash, is
+the wrong shape. What has to be carried is the ABILITY. `MethodCallInfo`
+already has it and the builder drops it; one optional `abilityHash` on the emitted
+method-call node would carry it to the compiler, and then five coordinated reads
+follow: the prescan key (`scanExprForVarTypeMethods`), `normalizeDictKeys`'
+grouping, `enclosingDictSlotIn`'s match, and the two injection sites.
+`methodOfKey` must keep working throughout — it feeds the op index and the
+runtime's primitive fallback.
 
 ### Acceptance
 
