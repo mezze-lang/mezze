@@ -674,6 +674,57 @@ why this survived the perf suites.
 
 ---
 
+## BUG 9 — two abilities with the same operation name share one dictionary slot
+
+Found 2026-09-16 while assessing task C.2. **Silent wrong answer, no error.**
+
+```mezze
+ability Weigh for 'a where { rank: { it: 'a } -> Int }
+ability Price for 'a where { rank: { it: 'a } -> Int }
+
+type Item = { n: Int }
+impl Weigh for Item where { rank = { it } -> it.n }
+impl Price for Item where { rank = { it } -> it.n + 100 }
+
+let both: { x: 'a } with Weigh 'a, Price 'a -> Int = { x } ->
+  Weigh.rank { it = x } + Price.rank { it = x }
+
+both { x = { n = 3 } }      # returns 6; must return 106
+```
+
+Both calls dispatched `Weigh.rank`. `Price`'s implementation never ran.
+
+### Cause
+
+`MagicParams.dictKey(methodName, typeVar)` builds `"rank@a"` — method name plus
+type variable, no ability. `Weigh.rank@a` and `Price.rank@a` are therefore the
+same slot, and whichever is filled first answers for both. It is the same class
+as BUG 1: a NAME standing in for an identity.
+
+The per-VARIABLE half of the keying already works — one ability's `rank` on two
+different type variables resolves correctly (`__dict_rank@a` vs `__dict_rank@b`),
+which the second test in `DictKeyAbilityCollisionTest` pins.
+
+### Fix = task C.2
+
+The key must be `(ability hash, type variable)`. That means threading ability
+identity to three places: the prescan that mints the key
+(`scanExprForVarTypeMethods`, which today has only the method name), the lookup
+(`enclosingDictSlotIn`), and the call-site injection. The method name must remain
+recoverable from the key — `methodOfKey` feeds the op index and the runtime's
+primitive fallback.
+
+Note the prescan cannot recover the ability from the name alone: when two
+abilities in scope declare it, that ambiguity IS the bug. The identity has to come
+from the call, or from the enclosing arrow's declared constraints.
+
+### Acceptance
+
+`DictKeyAbilityCollisionTest` — the colliding case is `@Disabled` pointing here;
+the per-variable case passes and must keep passing.
+
+---
+
 ## BUG 6 — Types are RECONSTRUCTED, not carried; instances decided by shape, name, or Java
 
 **This is the class BUG 1 and the `.size {}` crash are instances of.** Landed
@@ -879,7 +930,9 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   `Evidence = Impl(hash, sub) | Param(abilityHash, typeVar) | Structural(type)`.
 - **C.2** Dict params identified by `(abilityHash, typeVar)`; prescan
   (`dictMethodsForHash`, `scanExprForVarTypeMethods`) replaced by declared
-  constraints.
+  constraints. **Now has a live failing case: BUG 9** — two abilities declaring
+  the same op name share one dict slot and one silently answers for both (6 where
+  106 is required). The per-variable half already works.
 - **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
   re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
   site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.
