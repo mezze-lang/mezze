@@ -591,6 +591,27 @@ not in the other. Adding an unrelated call site changed the monomorphizer's seed
 and with them the instance a earlier call resolves to. That is precisely what
 C.1–C.4 remove.
 
+**Hypotheses eliminated** (2026-09-16), each by probing the real pipeline:
+
+- *The callee lost its ability constraints.* No — `sorted_set::singleton` and
+  `add` both carry `with Ord 'a` at mono time, and `min` correctly carries none.
+- *`resolveAbilityConstraints` fails to find the impl.* No — it matches. The
+  concrete type arrives as `RecordType{k, tag}` and the impl target as
+  `TypeApplication(P)`, which looks like disease 2, but `typeMatchesTarget`
+  handles it and the anonymous-record recovery never even has to fire.
+- *The spec carries no evidence.* No — the Ord-constrained specs DO carry an
+  `AbilityImplRef`. `Specialization.abilityImpls` being empty, noted above, is
+  true only of the specs whose callees have no constraints (`min`, `size`,
+  `get`, `is_empty`), which is correct.
+
+**What is left**: the spec HAS the right evidence and never consults it, because
+the comparator lambda inside it is not recompiled — no `lt`/`le`/`gt`/`ge`
+call site is compiled anywhere during user compilation, in or out of a spec. So
+the comparator reaching the runtime is the generic prelowered one. Why the spec's
+nested lambda is not compiled from `specializedBody` is the next question;
+`specLambdaSalt` exists to give that lambda a per-spec hash and its comment names
+this exact comparator.
+
 Earlier probe results, still true:
 
 - `sorted_set::from_seq` IS monomorphized — the user call goes to a specialized
