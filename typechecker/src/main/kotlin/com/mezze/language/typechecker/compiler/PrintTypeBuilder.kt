@@ -41,13 +41,44 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
      */
     private val building = HashSet<String>()
 
+    /** Completed shapes for every named type built during this call, so a [PrintType.Ref]
+     *  emitted at a cycle has something to resolve to. */
+    private val defs = HashMap<String, PrintType>()
+
+    /** Names a cycle actually referred back to. Only these need to travel with
+     *  the result, so a non-recursive type's PrintType is byte-identical to before. */
+    private val referenced = HashSet<String>()
+
     private inline fun guardedByName(name: String?, body: () -> PrintType): PrintType {
         if (name == null) return body()
-        if (!building.add(name)) return PrintType.Dynamic
-        try { return body() } finally { building.remove(name) }
+        // Re-entering a name already on the stack is a CYCLE, not an unknown.
+        // Emit a back-reference the printer can follow rather than cutting to
+        // Dynamic, which renders from the runtime value and loses exactly the
+        // distinctions PrintType exists to make (BUG 12).
+        if (!building.add(name)) {
+            referenced.add(name)
+            return PrintType.Ref(name)
+        }
+        try {
+            val built = body()
+            defs[name] = built
+            return built
+        } finally {
+            building.remove(name)
+        }
     }
 
-    fun build(type: MezzeType): PrintType = when (type) {
+    /**
+     * The shape [type] renders against. Wrapped in [PrintType.Recursive] only
+     * when a cycle was encountered, so non-recursive shapes are unchanged.
+     */
+    fun build(type: MezzeType): PrintType {
+        val root = buildShape(type)
+        if (referenced.isEmpty()) return root
+        return PrintType.Recursive(defs.filterKeys { it in referenced }, root)
+    }
+
+    private fun buildShape(type: MezzeType): PrintType = when (type) {
         is MezzeType.IntType -> PrintType.Scalar(PrintType.ScalarKind.Int)
         is MezzeType.FloatType -> PrintType.Scalar(PrintType.ScalarKind.Float)
         is MezzeType.StringType -> PrintType.Scalar(PrintType.ScalarKind.Str)
@@ -58,23 +89,23 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
         is MezzeType.FracType -> PrintType.Frac
 
         is MezzeType.NewtypeType -> guardedByName(type.name) {
-            PrintType.Newtype(type.name, build(type.wrappedType))
+            PrintType.Newtype(type.name, buildShape(type.wrappedType))
         }
 
         is MezzeType.RecordType -> guardedByName(type.identity.displayNameOrNull()) {
-            PrintType.Record(type.fields.map { (name, ft) -> PrintType.Field(name, build(ft)) })
+            PrintType.Record(type.fields.map { (name, ft) -> PrintType.Field(name, buildShape(ft)) })
         }
 
         is MezzeType.VariantType -> guardedByName(type.identity.displayNameOrNull()) {
             buildVariant(type)
         }
 
-        is MezzeType.ListType -> PrintType.MzList(build(type.elementType))
-        is MezzeType.SeqType -> PrintType.MzSeq(build(type.elementType))
-        is MezzeType.SetType -> PrintType.MzSet(build(type.elementType))
-        is MezzeType.SortedSetType -> PrintType.MzSortedSet(build(type.elementType))
-        is MezzeType.MapType -> PrintType.MzMap(build(type.keyType), build(type.valueType))
-        is MezzeType.SortedMapType -> PrintType.MzSortedMap(build(type.keyType), build(type.valueType))
+        is MezzeType.ListType -> PrintType.MzList(buildShape(type.elementType))
+        is MezzeType.SeqType -> PrintType.MzSeq(buildShape(type.elementType))
+        is MezzeType.SetType -> PrintType.MzSet(buildShape(type.elementType))
+        is MezzeType.SortedSetType -> PrintType.MzSortedSet(buildShape(type.elementType))
+        is MezzeType.MapType -> PrintType.MzMap(buildShape(type.keyType), buildShape(type.valueType))
+        is MezzeType.SortedMapType -> PrintType.MzSortedMap(buildShape(type.keyType), buildShape(type.valueType))
 
         is MezzeType.TypeApplication -> buildApplication(type)
 
@@ -98,7 +129,7 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
             return PrintType.Scalar(PrintType.ScalarKind.Bool)
         }
         val arms = type.constructors.map { (ctor, payload) ->
-            PrintType.Arm(ctor, payload?.let { build(it) })
+            PrintType.Arm(ctor, payload?.let { buildShape(it) })
         }
         return PrintType.Variant(arms)
     }
@@ -106,19 +137,19 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
     private fun buildApplication(type: MezzeType.TypeApplication): PrintType {
         val args = type.args
         return when (type.constructor) {
-            BuiltinTypes.LIST -> PrintType.MzList(build(args[0]))
-            BuiltinTypes.SEQ -> PrintType.MzSeq(build(args[0]))
-            BuiltinTypes.SET -> PrintType.MzSet(build(args[0]))
-            BuiltinTypes.SORTED_SET -> PrintType.MzSortedSet(build(args[0]))
-            BuiltinTypes.DEQUE -> PrintType.MzDeque(build(args[0]))
-            BuiltinTypes.NON_EMPTY_LIST -> PrintType.MzNonEmptyList(build(args[0]))
-            BuiltinTypes.MAP -> PrintType.MzMap(build(args[0]), build(args[1]))
-            BuiltinTypes.SORTED_MAP -> PrintType.MzSortedMap(build(args[0]), build(args[1]))
+            BuiltinTypes.LIST -> PrintType.MzList(buildShape(args[0]))
+            BuiltinTypes.SEQ -> PrintType.MzSeq(buildShape(args[0]))
+            BuiltinTypes.SET -> PrintType.MzSet(buildShape(args[0]))
+            BuiltinTypes.SORTED_SET -> PrintType.MzSortedSet(buildShape(args[0]))
+            BuiltinTypes.DEQUE -> PrintType.MzDeque(buildShape(args[0]))
+            BuiltinTypes.NON_EMPTY_LIST -> PrintType.MzNonEmptyList(buildShape(args[0]))
+            BuiltinTypes.MAP -> PrintType.MzMap(buildShape(args[0]), buildShape(args[1]))
+            BuiltinTypes.SORTED_MAP -> PrintType.MzSortedMap(buildShape(args[0]), buildShape(args[1]))
             BuiltinTypes.OPTION -> PrintType.Variant(
                 listOf(
                     PrintType.Arm(
                         BuiltinTypes.SOME,
-                        PrintType.Record(listOf(PrintType.Field(BuiltinTypes.VAL_FIELD, build(args[0]))))
+                        PrintType.Record(listOf(PrintType.Field(BuiltinTypes.VAL_FIELD, buildShape(args[0]))))
                     ),
                     PrintType.Arm(BuiltinTypes.NONE, null)
                 )
@@ -127,17 +158,17 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
                 listOf(
                     PrintType.Arm(
                         BuiltinTypes.OK,
-                        PrintType.Record(listOf(PrintType.Field(BuiltinTypes.VAL_FIELD, build(args[0]))))
+                        PrintType.Record(listOf(PrintType.Field(BuiltinTypes.VAL_FIELD, buildShape(args[0]))))
                     ),
                     PrintType.Arm(
                         BuiltinTypes.ERR,
-                        PrintType.Record(listOf(PrintType.Field(BuiltinTypes.ERROR_FIELD, build(args[1]))))
+                        PrintType.Record(listOf(PrintType.Field(BuiltinTypes.ERROR_FIELD, buildShape(args[1]))))
                     )
                 )
             )
             // Iter has no printable runtime value distinct from its element
             // stream; treat as a list of its element for rendering purposes.
-            BuiltinTypes.ITER -> PrintType.MzList(build(args[0]))
+            BuiltinTypes.ITER -> PrintType.MzList(buildShape(args[0]))
             // Bytes-as-application (no args): the Bytes scalar.
             BuiltinTypes.BYTES -> PrintType.Scalar(PrintType.ScalarKind.Bytes)
             // A user-declared nominal type (newtype/record/variant/alias): the
@@ -152,7 +183,7 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
                 // name) handles recursion.
                 val underlying = typeDefs[type.constructor]
                     ?: throw NotAConcreteValueType(type)
-                build(underlying)
+                buildShape(underlying)
             }
         }
     }

@@ -842,6 +842,75 @@ to prevent does not return.
 
 ---
 
+## BUG 12 — FIXED: a value rendered differently depending on its DEPTH
+
+Found 2026-09-16 while starting D.1, by testing a claim rather than accepting it.
+
+### Symptom
+
+```mezze
+newtype Money = Int
+type Tree = | Node { child: Tree, amt: Money }, Leaf |
+
+Node { child = Leaf, amt = Money.(5) }.to_dbg {}
+# Node { child = Leaf, amt = Money.(5) }                          correct
+
+Node { child = Node { child = Leaf, amt = Money.(7) }, amt = Money.(5) }.to_dbg {}
+# Node { child = Node { child = Leaf, amt = 7 }, amt = Money.(5) }   WRONG
+```
+
+The same value, one level deeper, loses its newtype rendering.
+
+### Cause — a documented invariant that was not true
+
+`PrintType`'s own header claimed:
+
+> TOTAL BY CONSTRUCTION: there is deliberately no Opaque / fallback case.
+
+and of `Dynamic`:
+
+> This is NOT a fallback for concrete types: the builder emits it ONLY for a
+> genuine VarType … Nat/Frac/Newtype/Char can only reach here behind an
+> unconstrained type variable — i.e. never as an actual runtime value.
+
+The VarType half is TRUE, and is now pinned by a test: a generic `'a` carrying a
+newtype renders correctly, because the call is monomorphized and the builder sees
+`Money`.
+
+But `Dynamic` had a SECOND emitter the claim did not mention —
+`PrintTypeBuilder.guardedByName` cut recursion with it:
+
+```kotlin
+if (!building.add(name)) return PrintType.Dynamic
+```
+
+That fires for a CONCRETE type, and everything below the cut renders from the
+runtime value alone. Which is lossy for exactly the four shapes `PrintType`
+exists to disambiguate: a newtype erased to its payload, `Nat` vs `Int` (both
+Long), `Frac` vs an ordinary two-field record, and a one-character `Str` vs
+`Char`.
+
+### Fix
+
+Not a wider `Dynamic`. A cyclic TYPE still has a finite SHAPE, so the cut now
+emits a BACK-REFERENCE the printer follows: `PrintType.Ref(name)` marks the
+cycle and `PrintType.Recursive(defs, root)` carries the definitions it resolves
+against. The wrapper is produced only when a cycle was actually encountered, so
+every non-recursive shape is byte-identical to before — confirmed across
+`InspectRenderingGoldenTest`'s 617 pinned assertion sites.
+
+The printer threads the definition table through `render` and its helpers, and an
+unresolvable `Ref` throws rather than degrading, so a builder that emits a
+back-reference without its table fails loudly.
+
+### Acceptance
+
+`RecursivePrintTypeTest` — 3 cases: above the cut, below the cut, and the VarType
+half of the original claim, which is kept as a guard so a future
+monomorphization change cannot quietly reintroduce the lossy path.
+
+---
+
 ## BUG 8 — FIXED: the fused LONG pipeline fired on a seq of records
 
 Found 2026-09-16 while tracing BUG 7 — the sorted-container round trip was dying

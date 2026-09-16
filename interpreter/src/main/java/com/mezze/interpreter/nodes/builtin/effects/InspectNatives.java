@@ -50,6 +50,25 @@ public final class InspectNatives {
      */
     @TruffleBoundary
     public static String render(Object value, PrintType printType, boolean dbgStyle) {
+        return render(value, printType, dbgStyle, java.util.Map.of());
+    }
+
+    /** [defs] resolves {@link PrintType.Ref} back-references inside a recursive
+     *  shape. Empty for every non-recursive type, so nothing else changes. */
+    private static String render(Object value, PrintType printType, boolean dbgStyle, java.util.Map<String, PrintType> defs) {
+        if (printType instanceof PrintType.Recursive rec) {
+            // Carry the definitions down; the root itself may be any shape.
+            return render(value, rec.getRoot(), dbgStyle, rec.getDefs());
+        }
+        if (printType instanceof PrintType.Ref ref) {
+            PrintType target = defs.get(ref.getName());
+            if (target == null) {
+                throw new IllegalStateException(
+                    "PrintType.Ref('" + ref.getName() + "') with no definition in scope — "
+                        + "the builder emitted a back-reference without its table.");
+            }
+            return render(value, target, dbgStyle, defs);
+        }
         if (printType instanceof PrintType.Scalar sc) {
             return renderScalar(value, sc.getKind(), dbgStyle);
         }
@@ -58,39 +77,39 @@ public final class InspectNatives {
         }
         if (printType instanceof PrintType.Newtype nt) {
             // Newtype is erased at runtime — `value` IS the underlying value.
-            return nt.getName() + ".(" + render(value, nt.getInner(), dbgStyle) + ")";
+            return nt.getName() + ".(" + render(value, nt.getInner(), dbgStyle, defs) + ")";
         }
         if (printType instanceof PrintType.Record rec) {
-            return renderRecord(value, rec, dbgStyle);
+            return renderRecord(value, rec, dbgStyle, defs);
         }
         if (printType instanceof PrintType.Variant var) {
-            return renderVariant(value, var, dbgStyle);
+            return renderVariant(value, var, dbgStyle, defs);
         }
         if (printType instanceof PrintType.MzList l) {
             // List renders `List(1, 2, 3)` / `List()` — distinct from Seq, whose
             // `[...]` syntax is Seq's alone (matches the NonEmptyList(...) form).
-            return renderElements(iterableOf(value), l.getInner(), dbgStyle, "List(", ")");
+            return renderElements(iterableOf(value), l.getInner(), dbgStyle, defs, "List(", ")");
         }
         if (printType instanceof PrintType.MzSeq s) {
-            return renderElements(iterableOf(value), s.getInner(), dbgStyle, "[", "]");
+            return renderElements(iterableOf(value), s.getInner(), dbgStyle, defs, "[", "]");
         }
         if (printType instanceof PrintType.MzSet s) {
-            return renderElements(iterableOf(value), s.getInner(), dbgStyle, "Set{", "}");
+            return renderElements(iterableOf(value), s.getInner(), dbgStyle, defs, "Set{", "}");
         }
         if (printType instanceof PrintType.MzSortedSet s) {
-            return renderElements(iterableOf(value), s.getInner(), dbgStyle, "SortedSet{", "}");
+            return renderElements(iterableOf(value), s.getInner(), dbgStyle, defs, "SortedSet{", "}");
         }
         if (printType instanceof PrintType.MzDeque d) {
-            return renderElements(iterableOf(value), d.getInner(), dbgStyle, "Deque[", "]");
+            return renderElements(iterableOf(value), d.getInner(), dbgStyle, defs, "Deque[", "]");
         }
         if (printType instanceof PrintType.MzNonEmptyList nel) {
-            return renderElements(iterableOf(value), nel.getInner(), dbgStyle, "NonEmptyList(", ")");
+            return renderElements(iterableOf(value), nel.getInner(), dbgStyle, defs, "NonEmptyList(", ")");
         }
         if (printType instanceof PrintType.MzMap m) {
-            return renderMap(value, m.getKey(), m.getValue(), dbgStyle, "Map");
+            return renderMap(value, m.getKey(), m.getValue(), dbgStyle, defs, "Map");
         }
         if (printType instanceof PrintType.MzSortedMap m) {
-            return renderMap(value, m.getKey(), m.getValue(), dbgStyle, "SortedMap");
+            return renderMap(value, m.getKey(), m.getValue(), dbgStyle, defs, "SortedMap");
         }
         if (printType instanceof PrintType.Function) {
             return renderFunction(value);
@@ -147,7 +166,7 @@ public final class InspectNatives {
         return num + "//" + den;
     }
 
-    private static String renderRecord(Object value, PrintType.Record rec, boolean dbgStyle) {
+    private static String renderRecord(Object value, PrintType.Record rec, boolean dbgStyle, java.util.Map<String, PrintType> defs) {
         java.util.List<PrintType.Field> fields = rec.getFields();
         if (fields.isEmpty()) {
             return "{}";
@@ -159,13 +178,13 @@ public final class InspectNatives {
             if (!first) sb.append(", ");
             first = false;
             Object fv = record.getField(record.getFieldIndex(f.getName()));
-            sb.append(f.getName()).append(" = ").append(render(fv, f.getType(), dbgStyle));
+            sb.append(f.getName()).append(" = ").append(render(fv, f.getType(), dbgStyle, defs));
         }
         sb.append(" }");
         return sb.toString();
     }
 
-    private static String renderVariant(Object value, PrintType.Variant var, boolean dbgStyle) {
+    private static String renderVariant(Object value, PrintType.Variant var, boolean dbgStyle, java.util.Map<String, PrintType> defs) {
         MezzeVariant variant = (MezzeVariant) value;
         String ctor = variant.getConstructorName();
         for (PrintType.Arm arm : var.getArms()) {
@@ -173,7 +192,7 @@ public final class InspectNatives {
                 if (arm.getPayload() == null || !variant.hasPayload()) {
                     return ctor;
                 }
-                return ctor + " " + render(variant.getPayloadValue(), arm.getPayload(), dbgStyle);
+                return ctor + " " + render(variant.getPayloadValue(), arm.getPayload(), dbgStyle, defs);
             }
         }
         // Constructor not in the compile-time PrintType — the value came
@@ -182,21 +201,21 @@ public final class InspectNatives {
         return valueToString(value);
     }
 
-    private static String renderElements(Iterable<?> elems, PrintType inner, boolean dbgStyle,
+    private static String renderElements(Iterable<?> elems, PrintType inner, boolean dbgStyle, java.util.Map<String, PrintType> defs,
                                          String open, String close) {
         StringBuilder sb = new StringBuilder(open);
         boolean first = true;
         for (Object e : elems) {
             if (!first) sb.append(", ");
             first = false;
-            sb.append(render(e, inner, dbgStyle));
+            sb.append(render(e, inner, dbgStyle, defs));
         }
         sb.append(close);
         return sb.toString();
     }
 
     private static String renderMap(Object value, PrintType keyType, PrintType valType,
-                                    boolean dbgStyle, String tag) {
+                                    boolean dbgStyle, java.util.Map<String, PrintType> defs, String tag) {
         if (value instanceof MezzeMap map) {
             if (map.isEmpty()) return tag + "{}";
             StringBuilder sb = new StringBuilder(tag).append("{ ");
@@ -204,9 +223,9 @@ public final class InspectNatives {
             for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
                 if (!first) sb.append(", ");
                 first = false;
-                sb.append(render(entry.key(), keyType, dbgStyle))
+                sb.append(render(entry.key(), keyType, dbgStyle, defs))
                   .append(" = ")
-                  .append(render(entry.value(), valType, dbgStyle));
+                  .append(render(entry.value(), valType, dbgStyle, defs));
             }
             sb.append(" }");
             return sb.toString();
@@ -218,9 +237,9 @@ public final class InspectNatives {
             for (MezzeSortedMap.RawEntry entry : map.rawEntries()) {
                 if (!first) sb.append(", ");
                 first = false;
-                sb.append(render(entry.key(), keyType, dbgStyle))
+                sb.append(render(entry.key(), keyType, dbgStyle, defs))
                   .append(" = ")
-                  .append(render(entry.value(), valType, dbgStyle));
+                  .append(render(entry.value(), valType, dbgStyle, defs));
             }
             sb.append(" }");
             return sb.toString();

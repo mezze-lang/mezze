@@ -14,6 +14,8 @@ import kotlinx.serialization.Serializable
  * as a constant into the IR (see PrintTypeBuilder.build).
  *
  * TOTAL BY CONSTRUCTION: there is deliberately no Opaque / fallback case.
+ * Recursion is represented by [Ref] into a [Recursive] definition table rather
+ * than truncated — a cyclic TYPE still has a finite SHAPE.
  * Every constructor names a real Mezze value shape, `Function` included, so a
  * `MezzeType` with no PrintType case is a builder bug — not something the
  * printer silently laundres. The builder's `when` over the sealed MezzeType is
@@ -96,4 +98,27 @@ sealed interface PrintType {
      */
     @Serializable
     object Dynamic : PrintType
+
+    /**
+     * A back-reference to a named type currently being built — how a RECURSIVE
+     * type is represented without an infinite tree. Resolved by the printer
+     * through the [Recursive.defs] table it is always carried inside.
+     *
+     * This replaces cutting recursion with [Dynamic]. Dynamic renders from the
+     * runtime value alone, which is lossy for exactly the shapes PrintType
+     * exists to disambiguate — a newtype erased to its payload, Nat vs Int, Frac
+     * vs a two-field record, Char vs a one-character Str — so below the cut
+     * `Money.(7)` printed as `7` while the identical value one level higher
+     * printed as `Money.(7)`. See known-bugs.md BUG 12.
+     */
+    @Serializable
+    data class Ref(val name: String) : PrintType
+
+    /**
+     * A shape containing at least one [Ref], paired with the definitions those
+     * refs resolve to. Only produced when a cycle was actually encountered, so a
+     * non-recursive type's PrintType is unchanged.
+     */
+    @Serializable
+    data class Recursive(val defs: Map<String, PrintType>, val root: PrintType) : PrintType
 }
