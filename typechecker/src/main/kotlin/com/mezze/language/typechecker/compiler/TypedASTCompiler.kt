@@ -283,15 +283,21 @@ class TypedASTCompiler(
     fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
 
     /**
-     * C.5 measured the third guess and it is NOT deletable yet. Bypassing this
-     * pass entirely breaks `SeqUserTypeCompareTest` (nestedSort, variantSort,
-     * nestedLtFalse, nested3Sort, variantLtFalse …) — so it is load-bearing.
+     * Which functions need a `__dict_*` parameter, transitively.
      *
-     * The reason it survives C.1 is that it answers a DIFFERENT question.
-     * Evidence says WHICH IMPL discharges a constraint; the prescan says WHICH
-     * FUNCTIONS need a `__dict_*` parameter at all, transitively. Nothing emitted
-     * so far carries that, so deleting the prescan is blocked on C.3/C.4 emitting
-     * per-site dict requirements, not on more evidence.
+     * This is load-bearing — bypassing it breaks `SeqUserTypeCompareTest`
+     * (nestedSort, variantSort, nestedLtFalse, nested3Sort, variantLtFalse) —
+     * and it survives C.1 because it answers a DIFFERENT question than evidence
+     * does. Evidence says WHICH IMPL discharges a constraint; this says WHICH
+     * FUNCTIONS need a dict at all. Nothing emitted so far carries that, so
+     * retiring the pass is blocked on C.3/C.4 emitting per-site dict
+     * requirements.
+     *
+     * Its remaining guess is that it DERIVES the requirement by scanning bodies
+     * for var-typed method calls, rather than reading it off the declared
+     * constraints — which is where the answer actually lives for a well-typed
+     * program. The magic iteration cap is gone (see the fixpoint below); the
+     * body scan is what C.3/C.4 should replace.
      */
     private fun prescanForDictMethods(modules: List<TypedModule>) {
         dictMethodsForHash.clear()
@@ -357,12 +363,25 @@ class TypedASTCompiler(
         // fixpoint converges in 1-2 passes; we cap at MAX_PASSES as a
         // defensive guard against degenerate cases. If we ever hit the cap
         // it means there's a deep call chain that needs investigation.
-        val maxPasses = 3
-        var passes = 0
+        // A REAL fixpoint, run to convergence. This used to stop after three
+        // passes and log a warning if it was still changing — a magic bound that
+        // could silently leave a function short of a dict it needs, which is the
+        // shape of BUG 7 (an inherent op that never learned it must forward
+        // `__dict_lt`, so `x < acc` fell to the primitive comparison node).
+        //
+        // Termination is structural, not by counting: `dictMethodsForHash` only
+        // ever GROWS, and it is bounded by (functions x method names), so the
+        // loop cannot run forever. That is the anti-hang invariant satisfied for
+        // the right reason.
+        //
+        // Measured: converges in 1-2 passes today (98 compiles at 1, 16 at 2), so
+        // the cap was never actually reached and removing it changes nothing now.
+        // It goes anyway — a bound that silently truncates is the exact shape of
+        // the defect above, and "it has not bitten yet" is not a termination
+        // argument.
         var changed = true
-        while (changed && passes < maxPasses) {
+        while (changed) {
             changed = false
-            passes++
             fun propagate(hash: Hash, body: TypedExpr) {
                 val calleeDictMethods = scanExprForCallsToDictFunctions(body)
                 if (calleeDictMethods.isEmpty()) return
@@ -388,12 +407,6 @@ class TypedASTCompiler(
             // variant element, and a SILENTLY WRONG answer for a newtype whose
             // ordering differs from the type it wraps.
             for ((opHash, body) in implOpBodies) propagate(opHash, body)
-        }
-        if (changed && System.getenv("MEZZE_DEBUG") != null) {
-            System.err.println(
-                "[prescanForDictMethods] hit cap of $maxPasses iterations — " +
-                "deep dict-propagation chain detected, may indicate a bug"
-            )
         }
     }
 
