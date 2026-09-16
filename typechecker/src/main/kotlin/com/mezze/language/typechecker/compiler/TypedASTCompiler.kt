@@ -3290,28 +3290,28 @@ class TypedASTCompiler(
      */
     private fun specEvidenceOpHash(methodName: String): Hash? {
         val candidates = abilityOpIndex[methodName] ?: return null
-        // Preferred source: the impls the monomorphizer recorded as discharging
+        // The ONLY source: the impls the monomorphizer recorded as discharging
         // this spec's constraints. Cross-checked against the op index rather than
         // trusted on the name, so a spec carrying several constraints cannot have
         // one ability's evidence answer for another's identically-named op.
-        // (`Specialization.abilityImpls` is declared but currently always empty —
-        // the monomorphizer does not fill it in. That is task C.1, and when it
-        // does, this arm takes over from the type-args fallback below.)
+        //
+        // There used to be a fallback here that resolved the op against the
+        // spec's TYPE ARGUMENTS — what the generic was specialized to — gated to
+        // specs with exactly ONE argument, because with two (`map::filter` at
+        // `Map K V`) the receiver's variable could be either and resolving
+        // against the pile picked the wrong op, breaking seven map/set filter
+        // tests. It was a guess with a guard on it.
+        //
+        // C.1 removed the need for it: a specialization now resolves its OWN
+        // ability constraints instead of inheriting its caller's, so the evidence
+        // is present wherever it is meaningful. Deleting the fallback outright —
+        // not broadening it — leaves both gates green. Anything this declines had
+        // no recorded instance, and declining sends it to the structural default,
+        // which is the honest answer rather than a shape-based guess.
         for (ref in specAbilityImpls) {
             candidates.firstOrNull { it.implHash == ref.implHash }?.let { return it.opHash }
         }
-        // Fallback: the spec's TYPE ARGUMENTS say what the generic was specialized
-        // to, which identifies the instance — but only unambiguously when there is
-        // exactly ONE of them. With two (`map::filter` at `Map K V`) the receiver's
-        // variable could be either, and resolving against the pile picked the wrong
-        // op: seven map/set filter tests failed that way. One type argument, one
-        // possible answer.
-        //
-        // Element-first so a container spec resolves the ELEMENT's impl before the
-        // container's, matching every other dict-resolution path.
-        val args = specTypeArgs ?: return null
-        val only = args.singleOrNull() ?: return null
-        return resolveOpHashFromConcreteTypes(methodName, elementFirst(listOf(only)))
+        return null
     }
 
     private var specTypeArgs: List<MezzeType>? = null
