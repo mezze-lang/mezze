@@ -767,14 +767,47 @@ INFLATE name=lambda hash=1880a62e…   <- the comparator (runs, returns 1, corre
 INFLATE name=callee hash=86e681d8…   <- ??? then the throw
 ```
 
-`86e681d8…` is inflated after the comparator has already answered correctly and
-immediately before `Cannot compare MezzeRecord < MezzeRecord`. **Naming that hash
-is the next action** — it is the function that carries the primitive `<`. A
-lookup over `PrecompiledStdlib.stdlibTypedModules` (decl hashes, plus
-`Hash.computeOpHash(impl.hash, op)` for impl ops) should identify it; note that
-the first attempt at such a lookup printed nothing at all, including for hashes
-known to be present, so verify the modules are actually loaded in whatever
-context the lookup runs.
+`86e681d8…` resolves to a USER-compiled function named **`lt`** — P's own impl
+op. (Note `getCachedStdlibCallTarget` serves user functions too, at its route 2,
+so an earlier reading of "resolved from the prelowered stdlib cache" was wrong.)
+Its emitted IR is CORRECT:
+
+```
+FunctionIR(name=lt, paramNames=[it, r],
+  body=InlineBinaryOpIR(op=LT,
+    left=ReadFieldIR(ReadLocalIR(slot=0), "k"),
+    right=ReadFieldIR(ReadLocalIR(slot=1), "k")))
+```
+
+It reads `.k` off both operands and compares Ints. Nothing wrong with it.
+
+### Where it actually throws
+
+Printing the failing comparison's operands:
+
+```
+Cannot compare MezzeRecord < MezzeRecord [left={k = 3, tag = 30} right={k = 1, tag = 10}]
+```
+
+Those are **the two elements themselves**, compared whole by a primitive LT.
+Since `ElementComparator.compare` has already been called once and returned 1
+correctly, and `SortedSetNatives.min` never runs, the sequence is:
+
+1. construction runs the comparator once → it calls P's `lt` → returns 1 → the
+   set is built, correctly ordered;
+2. then Mezze code compares the same two elements AGAIN, this time with a
+   primitive `<` on the whole records, and throws.
+
+A second comparison of exactly the container's elements, outside the stored
+comparator, is a **fold**. So the `min` call is not reaching
+`sorted_set::min`/`__native_sorted_set_min` at all — it degenerates into a
+generic fold-style minimum whose `<` lost the element's instance. That is BUG
+7's original shape (a `with Ord 'a` consumer falling to the primitive node),
+reached here through the sorted-set surface rather than the seq one.
+
+**The next action** is to find what the `min` call site actually emits — the
+mono spec `min@sorted_set.mz:96` exists and the site is rewritten to it, so the
+divergence is in `TypedASTCompiler`'s emission for that site, not in mono.
 
 ### What the probing did turn up: extracted-lambda hash collisions, measured
 
