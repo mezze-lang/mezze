@@ -2056,9 +2056,34 @@ class TypedAstBuilder(
         val resolvedContext = substitution.apply(contextType)
         return when (params) {
             is ParsedLambdaParams.Typed -> {
+                // Read the param's type off the SOLVED context first, exactly as the
+                // untyped branch below does.
+                //
+                // Converting the annotation here instead mints a variable that exists
+                // NOWHERE in the binding's own type — `typeVarCache.clear()` per field
+                // guarantees it is fresh — so `{ x: 'a } -> …` and `{ x } -> …`
+                // disagreed about which variable the parameter is. Monomorphization
+                // substitutes a binding's quantified params BY NAME, so a body holding
+                // the annotation's private variable is never specialized: the two forms
+                // below print the same value differently.
+                //
+                //     let show = { x } -> x.to_dbg {}          -- Money.(4)
+                //     let show = { x: 'a } -> x.to_dbg {}      -- 4
+                //
+                // An annotation must never change what a program means, and here
+                // writing one made the answer WRONG rather than merely redundant. The
+                // annotation has already done its work — the solve unified it with the
+                // context, so the context is at least as specific — and is consulted
+                // below only where there is no context to read (a lambda in a position
+                // with no expected type), which is the one case it carries information
+                // the context does not.
+                val contextParamFields =
+                    ((resolvedContext as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType)?.fields
                 params.fields.map { field ->
-                    typeVarCache.clear()
-                    val type = substitution.apply(convertParsedTypeAnnotation(field.type))
+                    val type = contextParamFields?.get(field.name) ?: run {
+                        typeVarCache.clear()
+                        substitution.apply(convertParsedTypeAnnotation(field.type))
+                    }
                     TypedParam(field.name, type, field.loc)
                 }
             }

@@ -811,20 +811,6 @@ UNTYPED_PARAM	impl SortedSet.head_set
 UNTYPED_PARAM	impl SortedSet.range
 UNTYPED_PARAM	impl SortedSet.remove
 UNTYPED_PARAM	impl SortedSet.tail_set
-UNTYPED_PARAM	impl Str.char_at
-UNTYPED_PARAM	impl Str.contains
-UNTYPED_PARAM	impl Str.ends_with
-UNTYPED_PARAM	impl Str.glob_match
-UNTYPED_PARAM	impl Str.index_of
-UNTYPED_PARAM	impl Str.last_index_of
-UNTYPED_PARAM	impl Str.pad_left
-UNTYPED_PARAM	impl Str.pad_right
-UNTYPED_PARAM	impl Str.repeat
-UNTYPED_PARAM	impl Str.replace
-UNTYPED_PARAM	impl Str.replace_all
-UNTYPED_PARAM	impl Str.split
-UNTYPED_PARAM	impl Str.starts_with
-UNTYPED_PARAM	impl Str.substring
 UNTYPED_PARAM	let:add
 UNTYPED_PARAM	let:append
 UNTYPED_PARAM	let:binary_search
