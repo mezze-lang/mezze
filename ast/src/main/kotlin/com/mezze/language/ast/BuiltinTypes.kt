@@ -112,6 +112,30 @@ object BuiltinTypes {
      * `NonEmptyList` has no structural variant (it is always a TypeApplication),
      * so it is intentionally absent.
      */
+    /**
+     * The ELEMENT type of a sequence-like container, in EITHER representation —
+     * the dedicated node (`SeqType`/`ListType`) or the name-carried
+     * `TypeApplication("Seq"|"List", [elem])`.
+     *
+     * The reverse of [builtinConstructorName], and here for the same reason: a
+     * consumer that knows only one representation silently disagrees with one
+     * that knows the other. `DerivabilityRules` was exactly that — it had
+     * `is SeqType` / `is ListType` arms and no TypeApplication arm, so
+     * `let a: Seq P = …; a == b` was REJECTED ("implement: impl Eq for Seq P")
+     * while the identical `let a: [P] = …` derived Eq fine.
+     *
+     * Deliberately limited to Seq/List, matching the only shapes the derive rule
+     * already accepted — this closes a representation gap, it does not widen
+     * which types derive.
+     */
+    fun sequenceElementType(type: MezzeType): MezzeType? = when (type) {
+        is MezzeType.SeqType -> type.elementType
+        is MezzeType.ListType -> type.elementType
+        is MezzeType.TypeApplication ->
+            if (type.constructor in sequenceConstructors) type.args.firstOrNull() else null
+        else -> null
+    }
+
     fun builtinConstructorName(type: MezzeType): String? = when (type) {
         is MezzeType.SeqType -> SEQ
         is MezzeType.ListType -> LIST

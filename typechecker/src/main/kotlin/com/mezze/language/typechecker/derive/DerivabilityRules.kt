@@ -80,14 +80,15 @@ internal fun canDeriveAbilityStructurally(
                 (unwrappedType is MezzeType.VariantType &&
                     (unwrappedType as MezzeType.VariantType).constructors.values
                         .all { it == null || componentSatisfies(abilityName, it, abilityHash, seen) }) ||
-                (unwrappedType is MezzeType.ListType &&
-                    componentSatisfies(
-                        abilityName, (unwrappedType as MezzeType.ListType).elementType, abilityHash, seen,
-                    )) ||
-                (unwrappedType is MezzeType.SeqType &&
-                    componentSatisfies(
-                        abilityName, (unwrappedType as MezzeType.SeqType).elementType, abilityHash, seen,
-                    ))
+                // BOTH container representations, via the single source in
+                // BuiltinTypes. These used to be `is ListType` / `is SeqType`
+                // arms only, so a seq that arrived name-carried
+                // (`TypeApplication("Seq", [P])`, the DOMINANT form — 5722 vs
+                // 1546 across the typed stdlib) did not derive Eq at all:
+                // `let a: Seq P = …; a == b` was rejected while the identical
+                // `let a: [P] = …` worked. Disease 2, and user-visible.
+                (com.mezze.language.ast.BuiltinTypes.sequenceElementType(unwrappedType)
+                    ?.let { componentSatisfies(abilityName, it, abilityHash, seen) } == true)
 
         WellKnownHashConstants.isOrd(abilityHash) ->
             // Ord is NOT structurally derivable for composite types. Unlike Eq —

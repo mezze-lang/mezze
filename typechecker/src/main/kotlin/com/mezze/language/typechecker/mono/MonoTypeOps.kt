@@ -137,6 +137,15 @@ internal fun typeMatchesTarget(
         // Name mapping is the single source in BuiltinTypes.builtinConstructorName.
         target is MezzeType.TypeApplication &&
             com.mezze.language.ast.BuiltinTypes.builtinConstructorName(concrete) == target.constructor -> true
+        // …and the SAME alias in the other direction. A container arrives
+        // name-carried far more often than structurally (5722 vs 1546 across the
+        // typed stdlib), so a receiver `TypeApplication("Seq", [P])` meeting an
+        // impl written `for ['a]` — a STRUCTURAL target — had no arm at all and
+        // simply missed. The user-visible effect was that `let a: Seq P = …;
+        // a == b` compared structurally and answered FALSE where the identical
+        // `let a: [P] = …` used P's own Eq and answered true. Disease 2, B.1.
+        concrete is MezzeType.TypeApplication &&
+            com.mezze.language.ast.BuiltinTypes.builtinConstructorName(target) == concrete.constructor -> true
         // Structural-to-structural: an impl written `for ['a]` / `for {Map,Set,…} 'a` has a
         // STRUCTURAL target (MezzeType.SeqType/MezzeType.MapType/…), so a same-kind receiver must match element-
         // agnostically (the target's element is a VarType). Without this, `impl Sized for ['a]`
