@@ -3050,26 +3050,40 @@ class TypedASTCompiler(
      * Returns a bare `ReadGlobalFnByHashIR` when no dicts are needed or a sub-dict
      * can't be resolved concretely (runtime DictFallback still covers primitives).
      */
-    private fun refToDictedOp(opHash: Hash, concreteTypes: List<MezzeType>, src: SourceInfo, depth: Int = 0): NodeIR {
+    private fun refToDictedOp(
+        opHash: Hash,
+        concreteTypes: List<MezzeType>,
+        src: SourceInfo,
+        onPath: Set<Hash> = emptySet(),
+    ): NodeIR {
         val needed = dictMethodsForHash[opHash] ?: emptySet()
-        // The depth bound is a HANG GUARD, not a type guess: a cyclic impl graph
-        // would otherwise recurse forever, and the project's anti-hang invariant
-        // says never hang. It is reached (twice in a two-suite run), so it is not
-        // dead — but what it bounds is recursion, not a guess about types, so
-        // C.5 leaves it. See project_anti_hang_invariant.
-        if (needed.isEmpty() || depth > 8) return ReadGlobalFnByHashIR(opHash, src)
+        // Termination is by CYCLE DETECTION, not by a counter. This was
+        // `depth > 8` — an arbitrary bound that also truncated deep but perfectly
+        // finite chains and could not tell the two cases apart. Re-entering an op
+        // already on the path is the real condition, so the anti-hang invariant
+        // is satisfied for the right reason instead of because a counter ran out.
+        // Real cycles DO occur — three distinct ops in a three-suite run. On one,
+        // the un-wrapped op is not a degraded guess but the only correct answer:
+        // a cyclic dict requirement has no finite wrapper, so the dictionary has
+        // to come from the caller's frame instead.
+        if (opHash in onPath) return ReadGlobalFnByHashIR(opHash, src)
+        if (needed.isEmpty()) return ReadGlobalFnByHashIR(opHash, src)
         // Descend one container level: the sub-op dispatches on the ELEMENT of the
-        // current element (element placed FIRST so it wins over the container impl).
+        // current element, so the element is placed FIRST and its impl wins over
+        // the container's. Not a fallback and not a preference — MEASURED
+        // load-bearing: passing `concreteTypes` unordered breaks every nested
+        // comparison in SeqUserTypeCompareTest (nested3Sort, nested3SeqEq,
+        // variantNestedSeqEq, variantNestedLt, nested3Lt, newtypeNested3Eq …).
+        // For `[[P]]` the inner seq's dict must come from P, not from Seq.
         val deeper = elementFirst(concreteTypes)
-        val opVarBindings = bindImplVarsForOp(opHash, concreteTypes)
         val resolvedDicts = mutableListOf<Pair<String, NodeIR>>()
         for (methodName in needed.sorted()) {
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
             val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
-            val subTypes = boundTypeForKey(methodName, opVarBindings)?.let { listOf(it) } ?: deeper
+            val subTypes = deeper
             val subHash = resolveOpHashFromConcreteTypes(dictMethod, subTypes)
             if (subHash != null) {
-                resolvedDicts.add(dictParamName to refToDictedOp(subHash, subTypes, src, depth + 1))
+                resolvedDicts.add(dictParamName to refToDictedOp(subHash, subTypes, src, onPath + opHash))
             } else {
                 // Unresolvable concretely; forwarding from the enclosing frame would
                 // be invalid inside the wrapper's own frame — leave the op bare.
