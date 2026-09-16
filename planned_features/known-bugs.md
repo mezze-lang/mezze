@@ -1324,13 +1324,26 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
      — config and input pinned, DATA still a variable, after the whole solve.
 
   And the obvious repair does not work either: **there are no `HasField`
-  constraints on that variable to close into a record.** Instrumenting the same
-  solves shows `HasField total=0` for the decode ones (the probe is sound — it
-  reports 10 and 11 on other solves, always resolving to a concrete
-  `RecordType`). So the decoded binder's field accesses never enter the
-  constraint system as requirements on the target at all; they exist only as
-  field accesses in the TYPED AST, which is precisely why `DecodeTargetResolver`
-  walks the AST rather than the constraints.
+  constraints on the TARGET to close into a record.**
+
+  Measured by correlating both within a single solve (an earlier pass of this
+  note said "HasField total=0 on the decode solves", which was wrong — it counted
+  constraints from solves that carried no `Decode` at all. Corrected here). The
+  solve that actually carries the `Decode` constraint contains FIVE `HasField`s,
+  and every one belongs to the envelope rather than the payload:
+
+      val@VarType  error@VarType          — the Result accessors
+      path, reason, input_ref @RecordType — DecodeError's own fields
+
+  The program's real target fields — `n`, `name`, `flag` in
+  `from_json {}.map { f = { val } -> val.n }` — appear NOWHERE in that solve.
+
+  So the decoded binder's field accesses never enter the constraint system as
+  requirements on the target; they exist only as field accesses in the TYPED AST,
+  which is precisely why `DecodeTargetResolver` walks the AST rather than the
+  constraints. The next question for whoever continues: those accesses sit inside
+  the `.map` callback, so find out which solve (if any) they land in and why the
+  constraint is not tied back to the `Decode` target variable.
 
   **So A.3's remaining work is in constraint GENERATION, not solving.** The
   generator has to emit constraints tying the decoded binder's field accesses to
