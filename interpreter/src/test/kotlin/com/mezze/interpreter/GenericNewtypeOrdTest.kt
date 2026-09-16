@@ -126,11 +126,7 @@ class GenericNewtypeOrdTest {
 
     @Test
     @Disabled(
-        "BUG 11 — a generic `with Ord 'b` body compares the newtype by its " +
-            "WRAPPED order. Silent: returns true where false is correct. The " +
-            "binding gets a fresh TypeVar from TypedAstBuilder's fallback, so " +
-            "the receiver is untyped and `<` lowers to a dynamic field read. " +
-            "Blocked on A.2 — see known-bugs.md BUG 11.",
+        "BUG 11 — still open. NOT the match-binding fresh-var fallback: the\n        receiver here is a LAMBDA PARAM typed 'b, which is legitimately\n        polymorphic, so the dict path owns it. Ungating the structural read\n        (A.2) recovers 101 of 125 elaboration misses but leaves this failing.\n        See known-bugs.md BUG 11."
     )
     fun `a generic with one Ord constraint uses the impl`() {
         assertEquals(
@@ -146,7 +142,9 @@ class GenericNewtypeOrdTest {
     }
 
     @Test
-    @Disabled("BUG 11 — as above, with a second unrelated constraint in scope.")
+    @Disabled(
+        "BUG 11 — still open. NOT the match-binding fresh-var fallback: the\n        receiver here is a LAMBDA PARAM typed 'b, which is legitimately\n        polymorphic, so the dict path owns it. Ungating the structural read\n        (A.2) recovers 101 of 125 elaboration misses but leaves this failing.\n        See known-bugs.md BUG 11."
+    )
     fun `a generic with two Ord constraints uses each variable's impl`() {
         assertEquals(
             false,

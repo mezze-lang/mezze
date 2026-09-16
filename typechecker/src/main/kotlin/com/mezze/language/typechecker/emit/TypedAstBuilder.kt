@@ -1600,13 +1600,34 @@ class TypedAstBuilder(
         // pattern against the scrutinee's declared shape (`Wrap { p = l }` on a
         // `W` scrutinee binds `l : P`). Untyped bindings made every `==` on a
         // payload inside an impl body fall to the structural default.
+        // A.2, MEASURED: ungating this (dropping `!typingImplOpBody`) recovers 101
+        // of the 125 elaboration misses the census counts — and breaks exactly
+        // four codec tests (JsonDecodeExhaustiveTest x3, UserDecodeAbilityTest),
+        // the same four A.1 hit. Codec decode bodies depend on these bindings
+        // being FRESH VARIABLES; preferring ground types, preferring the declared
+        // shape, and a strictly-additive merge were all tried during A.1 and all
+        // broke them. The dependency goes away when codec impls are generated
+        // into the resolved module like derived impls, so this half of A.2 is
+        // blocked on A.3 — not on a better heuristic here.
         val structuralBindings: Map<String, MezzeType> =
             if (scrutineeType == null || !typingImplOpBody) emptyMap()
             else case.patterns.fold(emptyMap()) { acc, p -> acc + patternBindingTypes(p, scrutineeType) }
         val resolvedTypes = bindingNames.associateWith { name ->
             val solverTy = solverBindings[name]
             if (solverTy != null) substitution.apply(solverTy)
-            else structuralBindings[name] ?: MezzeType.VarType(TypeVar.freshWithName(name))
+            else structuralBindings[name] ?: run {
+                // A.2 — the compiler does not know this binding's type, and says
+                // so by minting a fresh variable. That is indistinguishable from
+                // a legitimately polymorphic binding, so nothing downstream can
+                // tell the difference: `x < y` on such a binding lowers to a
+                // dynamic field read and, for an erased newtype, silently uses
+                // the WRAPPED type's ordering (known-bugs.md BUG 11).
+                //
+                // Counted before it is made an error, so the blast radius is a
+                // measurement rather than a guess. See ElaborationMissCensus.
+                ElaborationMissCensus.recordMatchBindingMiss(name, case.loc)
+                MezzeType.VarType(TypeVar.freshWithName(name))
+            }
         }
 
         val bindings = bindingNames.map { name ->

@@ -761,12 +761,29 @@ know. Instrumenting that site shows real cases arriving with
 `solver=[] structural=[]`.
 
 That fallback is exactly what task **A.2** removes ("builder reads types by
-NodeId; a miss is an ElaborationError, never a fresh var"). This is its first
-demonstrated silent-wrongness case and should be its acceptance test.
+NodeId; a miss is an ElaborationError, never a fresh var").
 
-Two halves need attention: the fresh-var fallback itself, and the fact that the
-structural read is gated on `typingImplOpBody`, which is FALSE on this path — so
-the structural recovery never even runs.
+**A.2 measured it (2026-09-16).** `ElaborationMissCensus` counts every fresh var
+the builder mints: **125 distinct sites**, all in the stdlib (`async.mz`,
+`json.mz`, `jvm.mz`, `stm.mz`, `http.mz`, `channel.mz`), each a match-case
+binding. So a hard `ElaborationError` today would fail 125 sites at once —
+measured, not guessed.
+
+Ungating the structural read (dropping `typingImplOpBody`) recovers **101 of the
+125** and breaks exactly **four** codec tests: `JsonDecodeExhaustiveTest` ×3 and
+`UserDecodeAbilityTest`. Those are the same four A.1 hit, because codec decode
+bodies depend on these bindings being FRESH VARIABLES; preferring ground types,
+preferring the declared shape, and a strictly-additive merge were all tried
+during A.1 and all broke them. So that half is blocked on **A.3** (generate codec
+impls into the resolved module, like derived impls), not on a better heuristic.
+
+**And it does not fix THIS bug.** With the structural read ungated, both generic
+cases still fail — because the receiver here is a LAMBDA PARAM typed `'b`, not a
+match binding. A lambda param typed by a constraint variable is legitimately
+polymorphic, so the dict path owns it, and the defect is in how that path lowers
+`<` for an erased newtype. BUG 11 therefore is NOT an instance of the
+match-binding fresh-var hole, which the first writeup assumed; the two are
+neighbours, not the same thing.
 
 Related and already fixed as part of this investigation:
 `patternBindingTypes`'s `ParsedNewtypePattern` arm returned `emptyMap()`,
