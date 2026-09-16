@@ -713,11 +713,48 @@ is fine, and the same `Option 'a` signature away from a sorted container is fine
 That is why "it depends on what else is in the program" looked true — adding
 `min` to a program is adding exactly this combination.
 
-This is C.4's territory: the failing call carries no evidence of its own, and its
-presence changes how the EARLIER `from_seq` comparator was compiled. The next
-step is to diff the monomorphizer's spec set for the two programs — same source,
-same set, one extra `Option 'a` call site — rather than to look at comparators
-again.
+### The monomorphizer is not where it goes wrong either
+
+Diffing the two programs' full mono output (`MEZZE_MONO_STATS`, plus a per-spec
+and per-call-site dump):
+
+- `from_seq` gets the SAME specialization in both — `gen=7a6dfcb8
+  spec=61432ce3`, `typeArgs=[P]`, `abilityImpls=1`. The Ord evidence is there.
+- The construction CALL SITE is rewritten to that spec in both, identically.
+- The only difference in the entire spec set is B's extra
+  `min@sorted_set.mz:96 spec=b4a217c5 typeArgs=[P] impls=0` — which is the
+  correct declaration (unconstrained, so `impls=0` is right).
+- Both specialized bodies are correct: `min`'s calls
+  `__native_sorted_set_min`, `from_seq`'s calls `from_seq_with_cmp`'s spec.
+
+So the solver, the monomorphizer and the call-site rewriting are all right, and
+the defect is downstream of them.
+
+### What the probing did turn up: extracted-lambda hash collisions, measured
+
+Printing every extracted `{ a, b }` comparator's hash during compilation:
+
+| source | `hashExpr` base | final hash |
+|---|---|---|
+| `sorted_set.mz:43` (`singleton`) | `841ac81a` | `956707da` |
+| `sorted_set.mz:50` (`from_list`) | `841ac81a` | `956707da` |
+| `sorted_set.mz:245` (`from_seq`) | `841ac81a` | **`956707da`** |
+| `sorted_set.mz:57, 64, 71, 127, 135` | `841ac81a` | `b14b0d60` |
+| `deque.mz:29, 31, 33, 35, 136, 144` | `841ac81a` | `b14b0d60` |
+| `seq.mz:47, 49, 51` | `841ac81a` | `b14b0d60` |
+
+**Fifteen distinct declarations across three modules collapse onto two hashes**,
+and the dedupe at the end of compilation is explicitly "first occurrence wins".
+Which copy survives therefore depends on compile order, and compile order shifts
+when a program adds a specialization — the exact shape of "the answer depends on
+what else is in the program".
+
+This is a real latent hazard and it is now measured. It is NOT, however, what
+breaks these 7 cases: separating all fifteen (by salting with the enclosing
+function) leaves the same 7 failing. Recorded here so the next person does not
+re-derive it, and so that if a fix is attempted it is done for the right reason —
+note that salting by enclosing HASH is not the right lever, since it makes a
+`newtype` declaration change an otherwise identical program's IR.
 
 Closing it is the same question C.3/C.4 answer: emit the evidence rather than
 re-deriving it per site.
