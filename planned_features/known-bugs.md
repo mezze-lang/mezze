@@ -1338,12 +1338,35 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   The program's real target fields — `n`, `name`, `flag` in
   `from_json {}.map { f = { val } -> val.n }` — appear NOWHERE in that solve.
 
-  So the decoded binder's field accesses never enter the constraint system as
-  requirements on the target; they exist only as field accesses in the TYPED AST,
-  which is precisely why `DecodeTargetResolver` walks the AST rather than the
-  constraints. The next question for whoever continues: those accesses sit inside
-  the `.map` callback, so find out which solve (if any) they land in and why the
-  constraint is not tied back to the `Decode` target variable.
+  **ANSWERED, and it is not what the paragraph above guessed.** The field access
+  DOES generate a constraint — instrumenting the generation site shows
+  `HasField('n', VarType(id=3683))` and `HasField('name', …)` emitted exactly as
+  any other field access would be. The problem is WHERE each one lives.
+  Correlating by type-variable id across solves:
+
+  | solve                    | Decode constraint | user field vars      |
+  |--------------------------|-------------------|----------------------|
+  | stdlib `from_json`'s own | 2180, 2231, …     | — (none)             |
+  | the user's `main`        | — (none)          | n:3683, name:3831    |
+
+  They are DISJOINT. Every solve carrying a `Decode` constraint has no user field
+  access in it, and every solve carrying the field accesses has no `Decode`
+  constraint in it.
+
+  So the `Decode` constraint the solver sees belongs to `from_json`'s own
+  DECLARATION, where `'a` is genuinely universally quantified and correctly stays
+  a variable. **The CALL SITE never emits a `Decode` constraint at all.** Nothing
+  there asks "can this target be decoded?", so nothing ever requires the target to
+  be concrete, so it remains a bare var — and `DecodeTargetResolver` exists to
+  recover at emit what was never asked for during the solve.
+
+  That makes A.3's remaining work specific: **emit an instantiated `Decode`
+  constraint at the `from_json` call site**, carrying the call's own target
+  variable. It then lands in the caller's solve alongside the `HasField`
+  constraints that pin that variable, and the two halves that already exist —
+  `finalizeDeferredAbilities` running post-substitution, and
+  `checkAbilityImplementation` synthesising for concrete args — discharge it with
+  no further machinery. `DecodeTargetResolver`'s 423 lines then come out.
 
   **So A.3's remaining work is in constraint GENERATION, not solving.** The
   generator has to emit constraints tying the decoded binder's field accesses to
