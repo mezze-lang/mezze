@@ -745,8 +745,36 @@ misleading):
 And the guest frame in the crash is `__entry__` at the line of the
 CONSTRUCTION, not of the `min` call. So: construction completes correctly, the
 `min` body is never entered, and a record `<` is executed in the entry between
-them. Locating that `<` needs the entry function's emitted IR — which is where
-this should resume.
+them.
+
+Dumping the emitted IR narrows that last step too: **no function compiled during
+user compilation contains a DirectLessThan at all** — not the entry, not any
+spec, not any extracted lambda. So the `<` that throws belongs to the PRELOWERED
+stdlib, which is fixed at build time and cannot know about P.
+
+That is the whole shape of what is left. A prelowered generic body containing a
+primitive `<` is reached on this path, and the program never re-compiles it
+against the element's instance — while the comparator on the very same
+construction DOES get the instance and answers correctly. Two routes into the
+same stdlib, one carrying evidence and one not.
+
+**The culprit has an address.** Probing `LazyStubRootNode`'s inflate path records
+exactly three stub inflations for the failing program, in order:
+
+```
+INFLATE name=callee hash=61432ce3…   <- from_seq's SPECIALIZATION
+INFLATE name=lambda hash=1880a62e…   <- the comparator (runs, returns 1, correct)
+INFLATE name=callee hash=86e681d8…   <- ??? then the throw
+```
+
+`86e681d8…` is inflated after the comparator has already answered correctly and
+immediately before `Cannot compare MezzeRecord < MezzeRecord`. **Naming that hash
+is the next action** — it is the function that carries the primitive `<`. A
+lookup over `PrecompiledStdlib.stdlibTypedModules` (decl hashes, plus
+`Hash.computeOpHash(impl.hash, op)` for impl ops) should identify it; note that
+the first attempt at such a lookup printed nothing at all, including for hashes
+known to be present, so verify the modules are actually loaded in whatever
+context the lookup runs.
 
 ### What the probing did turn up: extracted-lambda hash collisions, measured
 
