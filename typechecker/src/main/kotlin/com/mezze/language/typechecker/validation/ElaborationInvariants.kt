@@ -127,13 +127,21 @@ object ElaborationInvariants {
 
             reportUnbound(expr.type, expr.loc, where, Kind.UNBOUND_TYPE_VAR, inner, out)
             for (param in expr.params) {
-                if (param.type is MezzeType.VarType) {
-                    out.add(Finding(
-                        Kind.UNTYPED_PARAM, where,
-                        "param '${param.name}' has no type beyond a fresh variable",
-                        param.loc,
-                    ))
-                }
+                // A var-typed parameter is only a GAP when the variable is bound
+                // nowhere above it. `pair_up: { a: 'a, b: 'a } -> ['a]` has
+                // var-typed parameters and is perfectly well typed — `'a` is its
+                // own scheme's variable. Testing against `bound` (the ENCLOSING
+                // binders, before this lambda's own signature was folded into
+                // `inner`) separates that from an impl operation whose parameters
+                // were never given the ability signature's types and came back as
+                // variables belonging to no signature at all.
+                val paramVar = param.type as? MezzeType.VarType ?: continue
+                if (bound.contains(paramVar.variable.name)) continue
+                out.add(Finding(
+                    Kind.UNTYPED_PARAM, where,
+                    "param '${param.name}' has no type beyond a fresh variable",
+                    param.loc,
+                ))
             }
             walk(expr.body, where, inner, out)
             return

@@ -20,7 +20,7 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 689 UNBOUND_TYPE_VAR, 272 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
+# Counts: 689 UNBOUND_TYPE_VAR, 193 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
@@ -713,7 +713,6 @@ UNBOUND_TYPE_VAR	let:zip_go
 UNBOUND_TYPE_VAR	let:zip_maps
 UNBOUND_TYPE_VAR	let:zip_with
 UNBOUND_TYPE_VAR	let:zip_with_index
-UNTYPED_PARAM	impl 4b3f5af3.nel
 UNTYPED_PARAM	impl Bool.iff
 UNTYPED_PARAM	impl Bool.implies
 UNTYPED_PARAM	impl Bool.xor
@@ -721,12 +720,8 @@ UNTYPED_PARAM	impl Bytes.fold
 UNTYPED_PARAM	impl Deque.contains
 UNTYPED_PARAM	impl Deque.enqueue
 UNTYPED_PARAM	impl Deque.fold
-UNTYPED_PARAM	impl Deque.ge
-UNTYPED_PARAM	impl Deque.gt
 UNTYPED_PARAM	impl Deque.index_of
 UNTYPED_PARAM	impl Deque.intersperse
-UNTYPED_PARAM	impl Deque.le
-UNTYPED_PARAM	impl Deque.lt
 UNTYPED_PARAM	impl Deque.push
 UNTYPED_PARAM	impl Deque.push_back
 UNTYPED_PARAM	impl Deque.push_front
@@ -756,19 +751,13 @@ UNTYPED_PARAM	impl List.binary_search
 UNTYPED_PARAM	impl List.binary_search_by
 UNTYPED_PARAM	impl List.binary_search_insert_point
 UNTYPED_PARAM	impl List.contains
-UNTYPED_PARAM	impl List.eq
 UNTYPED_PARAM	impl List.equal_range
 UNTYPED_PARAM	impl List.fold_left
 UNTYPED_PARAM	impl List.fold_right
-UNTYPED_PARAM	impl List.ge
-UNTYPED_PARAM	impl List.gt
 UNTYPED_PARAM	impl List.index_of
 UNTYPED_PARAM	impl List.intersperse
 UNTYPED_PARAM	impl List.last_index_of
-UNTYPED_PARAM	impl List.le
 UNTYPED_PARAM	impl List.lower_bound
-UNTYPED_PARAM	impl List.lt
-UNTYPED_PARAM	impl List.neq
 UNTYPED_PARAM	impl List.push
 UNTYPED_PARAM	impl List.scan
 UNTYPED_PARAM	impl List.upper_bound
@@ -801,15 +790,9 @@ UNTYPED_PARAM	impl Nat.neq
 UNTYPED_PARAM	impl Nat.sub
 UNTYPED_PARAM	impl Nat.subtract_to_int
 UNTYPED_PARAM	impl NonEmptyList.contains
-UNTYPED_PARAM	impl NonEmptyList.eq
 UNTYPED_PARAM	impl NonEmptyList.fold_left
 UNTYPED_PARAM	impl NonEmptyList.fold_right
-UNTYPED_PARAM	impl NonEmptyList.ge
-UNTYPED_PARAM	impl NonEmptyList.gt
 UNTYPED_PARAM	impl NonEmptyList.intersperse
-UNTYPED_PARAM	impl NonEmptyList.le
-UNTYPED_PARAM	impl NonEmptyList.lt
-UNTYPED_PARAM	impl NonEmptyList.neq
 UNTYPED_PARAM	impl Option.get_or
 UNTYPED_PARAM	impl Option.to_result
 UNTYPED_PARAM	impl Result.get_or
@@ -819,19 +802,13 @@ UNTYPED_PARAM	impl Seq.binary_search_by
 UNTYPED_PARAM	impl Seq.binary_search_insert_point
 UNTYPED_PARAM	impl Seq.contains
 UNTYPED_PARAM	impl Seq.count_element
-UNTYPED_PARAM	impl Seq.eq
 UNTYPED_PARAM	impl Seq.equal_range
 UNTYPED_PARAM	impl Seq.fold
-UNTYPED_PARAM	impl Seq.ge
-UNTYPED_PARAM	impl Seq.gt
 UNTYPED_PARAM	impl Seq.index_of
 UNTYPED_PARAM	impl Seq.insert_at
 UNTYPED_PARAM	impl Seq.intersperse
 UNTYPED_PARAM	impl Seq.last_index_of
-UNTYPED_PARAM	impl Seq.le
 UNTYPED_PARAM	impl Seq.lower_bound
-UNTYPED_PARAM	impl Seq.lt
-UNTYPED_PARAM	impl Seq.neq
 UNTYPED_PARAM	impl Seq.push
 UNTYPED_PARAM	impl Seq.push_front
 UNTYPED_PARAM	impl Seq.replace
@@ -877,70 +854,36 @@ UNTYPED_PARAM	impl Str.replace_all
 UNTYPED_PARAM	impl Str.split
 UNTYPED_PARAM	impl Str.starts_with
 UNTYPED_PARAM	impl Str.substring
-UNTYPED_PARAM	impl a13918d6.seq
-UNTYPED_PARAM	impl acf5535d.some
-UNTYPED_PARAM	impl c3d08106.list
-UNTYPED_PARAM	impl f2314388.ok
-UNTYPED_PARAM	impl f4608be5.err
 UNTYPED_PARAM	let:add
-UNTYPED_PARAM	let:add_with_cmp
 UNTYPED_PARAM	let:append
 UNTYPED_PARAM	let:binary_search
-UNTYPED_PARAM	let:binary_search_by
 UNTYPED_PARAM	let:binary_search_insert_point
-UNTYPED_PARAM	let:binary_search_insert_point_cmp
-UNTYPED_PARAM	let:binary_search_insert_point_with_cmp
-UNTYPED_PARAM	let:binary_search_with_cmp
-UNTYPED_PARAM	let:ceiling_key
 UNTYPED_PARAM	let:compare
-UNTYPED_PARAM	let:cons
 UNTYPED_PARAM	let:contains
 UNTYPED_PARAM	let:contains_key
-UNTYPED_PARAM	let:contains_key_with_cmp
 UNTYPED_PARAM	let:contains_value
-UNTYPED_PARAM	let:contains_value_with_eq
-UNTYPED_PARAM	let:contains_with_cmp
 UNTYPED_PARAM	let:count_element
 UNTYPED_PARAM	let:dedup
 UNTYPED_PARAM	let:dedup_by
 UNTYPED_PARAM	let:distinct
 UNTYPED_PARAM	let:ends_with
-UNTYPED_PARAM	let:enqueue
 UNTYPED_PARAM	let:enumerate
 UNTYPED_PARAM	let:equal_range
-UNTYPED_PARAM	let:equal_range_with_cmp
 UNTYPED_PARAM	let:equals
-UNTYPED_PARAM	let:fill
-UNTYPED_PARAM	let:floor_key
-UNTYPED_PARAM	let:fold
-UNTYPED_PARAM	let:fold_go
-UNTYPED_PARAM	let:fold_left
-UNTYPED_PARAM	let:fold_right
-UNTYPED_PARAM	let:from_head_tail
 UNTYPED_PARAM	let:from_list
 UNTYPED_PARAM	let:from_map
-UNTYPED_PARAM	let:from_option
 UNTYPED_PARAM	let:from_seq
 UNTYPED_PARAM	let:get
-UNTYPED_PARAM	let:get_or
-UNTYPED_PARAM	let:get_with_cmp
 UNTYPED_PARAM	let:group_consecutive
 UNTYPED_PARAM	let:group_consecutive_by
-UNTYPED_PARAM	let:head_map
-UNTYPED_PARAM	let:head_set
 UNTYPED_PARAM	let:index_of
 UNTYPED_PARAM	let:insert
-UNTYPED_PARAM	let:insert_at
-UNTYPED_PARAM	let:insert_with_cmp
 UNTYPED_PARAM	let:intersperse
 UNTYPED_PARAM	let:is_sorted
 UNTYPED_PARAM	let:is_sorted_by
-UNTYPED_PARAM	let:is_sorted_by_go
 UNTYPED_PARAM	let:is_sorted_descending
 UNTYPED_PARAM	let:last_index_of
-UNTYPED_PARAM	let:last_index_of_with_eq
 UNTYPED_PARAM	let:lower_bound
-UNTYPED_PARAM	let:lower_bound_with_cmp
 UNTYPED_PARAM	let:max
 UNTYPED_PARAM	let:max_by
 UNTYPED_PARAM	let:max_key
@@ -949,42 +892,20 @@ UNTYPED_PARAM	let:min
 UNTYPED_PARAM	let:min_by
 UNTYPED_PARAM	let:min_key
 UNTYPED_PARAM	let:min_value
-UNTYPED_PARAM	let:of
-UNTYPED_PARAM	let:prepend
-UNTYPED_PARAM	let:prepend_list
-UNTYPED_PARAM	let:push
-UNTYPED_PARAM	let:push_back
-UNTYPED_PARAM	let:push_front
-UNTYPED_PARAM	let:range
 UNTYPED_PARAM	let:remove
-UNTYPED_PARAM	let:remove_with_cmp
-UNTYPED_PARAM	let:repeat
-UNTYPED_PARAM	let:repeat_go
 UNTYPED_PARAM	let:replace
 UNTYPED_PARAM	let:replace_all
-UNTYPED_PARAM	let:replace_all_with_eq
-UNTYPED_PARAM	let:replace_with_eq
-UNTYPED_PARAM	let:scan
-UNTYPED_PARAM	let:set
 UNTYPED_PARAM	let:singleton
-UNTYPED_PARAM	let:singleton_with_cmp
 UNTYPED_PARAM	let:sort
 UNTYPED_PARAM	let:sort_by
 UNTYPED_PARAM	let:sort_by_key
 UNTYPED_PARAM	let:split
-UNTYPED_PARAM	let:split_with_eq
 UNTYPED_PARAM	let:starts_with
-UNTYPED_PARAM	let:sub_map
-UNTYPED_PARAM	let:tail_map
-UNTYPED_PARAM	let:tail_set
-UNTYPED_PARAM	let:to_result
 UNTYPED_PARAM	let:to_sorted_map
 UNTYPED_PARAM	let:to_sorted_set
 UNTYPED_PARAM	let:unique
 UNTYPED_PARAM	let:unzip
-UNTYPED_PARAM	let:update
 UNTYPED_PARAM	let:upper_bound
-UNTYPED_PARAM	let:upper_bound_with_cmp
 VARTYPE_RECEIVER	impl Nat.is_even
 VARTYPE_RECEIVER	impl Nat.is_odd
 VARTYPE_RECEIVER	let:enumerate

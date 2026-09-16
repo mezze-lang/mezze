@@ -788,13 +788,19 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   synthesized match AND both of its cases the same `loc` as the original `if` —
   harmless only because those cases bind nothing.
 - **0.2** DONE — `ElaborationInvariants` + a ratchet in both gates.
-  Measured over the typed stdlib: **687** declarations with an unbound type
-  variable, **272** with an untyped parameter, **24** reading a field off a
-  receiver with no type (baseline:
+  Measured over the typed stdlib, and corrected twice since: **689** declarations
+  with an unbound type variable, **193** with an untyped parameter, **3** reading
+  a field off a receiver with no type (baseline:
   `typechecker/src/test/resources/elaboration-invariant-baseline.txt`). Almost
   all of it is in impl operations, which is what A.1 changes. The 24 include
   `impl NumAdd Int for Float { add = { it, r } -> it + r.to_float {} }` —
   `r.to_float` dispatching on something the compiler cannot name.
+  Two corrections to the CHECK itself, both of which mattered: a lambda's own
+  signature binds for its body (without that it flagged every generic function in
+  the stdlib, since a scheme is normalized to `'a` while its body carries the
+  solver's `'m802`), and a var-typed PARAMETER is only a gap when the variable is
+  bound nowhere — `pair_up: { a: 'a, b: 'a }` is correct code, and treating it as
+  untyped accounted for 79 of the original 272.
   `UserCodeElaborationGateTest` asks the same of ordinary programs and states
   each one's gaps inline: a match-arm-bound seq still types as literal
   `unknown` at `.size {}`, a fully annotated polymorphic helper's parameters

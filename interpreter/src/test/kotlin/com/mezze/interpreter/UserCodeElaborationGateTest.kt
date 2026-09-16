@@ -18,14 +18,16 @@ import kotlin.test.fail
  * TODAY, inline, so the gap is readable next to the code that produces it. With
  * six programs that is worth more than a separate baseline file.
  *
- * Three results are worth knowing on their own. A seq bound out of a match arm
+ * Two results are worth knowing on their own. A seq bound out of a match arm
  * still types as the literal `unknown` at `items.size {}` — the crash it used to
  * cause is gone, but the hole that caused it is not, and this is what A.2 turns
- * into a compile error. A polymorphic helper's parameters come out as bare fresh
- * variables, the same untyped-parameter shape the stdlib's impl bodies have. And
- * a single chained call with an inline lambda leaves SEVEN nodes without a type,
- * which is the clearest measure here of how much the compiler reconstructs
- * rather than carries.
+ * into a compile error. And a single chained call with an inline lambda leaves
+ * SEVEN nodes without a type, which is the clearest measure here of how much the
+ * compiler reconstructs rather than carries.
+ *
+ * `pair_up`'s parameters were listed here as untyped until the check was
+ * corrected: a var-typed parameter is only a gap when the variable is bound
+ * NOWHERE, and `{ a: 'a, b: 'a }` binds it in the declaration's own scheme.
  *
  * The programs cover what the elaboration plan is about — generics, ability
  * dispatch, containers of user types, match-bound receivers, chained calls —
@@ -162,7 +164,6 @@ class UserCodeElaborationGateTest {
         // bare fresh variables — the same shape the stdlib's impl bodies have —
         // and both call sites keep an open variable.
         listOf(
-            "UNTYPED_PARAM let:pair_up x2",
             "UNBOUND_TYPE_VAR let:ints",
             "UNBOUND_TYPE_VAR let:strs",
         ),
