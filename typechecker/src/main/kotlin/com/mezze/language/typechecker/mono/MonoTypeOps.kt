@@ -60,76 +60,179 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
  *
  *  Mirrors [com.mezze.language.typechecker.compiler.TypedASTCompiler]'s
  *  `typeMatchesTarget`; kept private to mono for clarity. */
-internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean {
+/**
+ * Task F — THE receiver-vs-target matching rule. There were two: this one and a
+ * near-copy in `TypedASTCompiler`, each carrying arms the other lacked, and each
+ * commented as "mirrors the other". The compiler's had the Bool-variant
+ * normalisation (both directions), the newtype arms, and the declared-variant
+ * lookup; mono's had the VariantType-vs-VariantType subset rule. Both were right
+ * about what the other missed, so this is their union and the copies are gone.
+ *
+ * [variantDeclHasConstructors] is the one genuine capability difference, passed
+ * in rather than stubbed: it asks whether a declared variant NAMED by the target
+ * has the concrete's constructor set. Each caller supplies a real
+ * implementation — the compiler from its decl index, mono from its declared
+ * shapes — so neither side silently loses the check.
+ */
+internal fun typeMatchesTarget(
+    concrete: MezzeType,
+    target: MezzeType,
+    variantDeclHasConstructors: (String, Set<String>) -> Boolean,
+): Boolean {
     if (concrete == target) return true
-    // Prim-to-prim
-    if (concrete is MezzeType.IntType && target is MezzeType.IntType) return true
-    if (concrete is MezzeType.FloatType && target is MezzeType.FloatType) return true
-    if (concrete is MezzeType.StringType && target is MezzeType.StringType) return true
-    if (concrete is MezzeType.BoolType && target is MezzeType.BoolType) return true
-    if (concrete is MezzeType.CharType && target is MezzeType.CharType) return true
-    if (concrete is MezzeType.FracType && target is MezzeType.FracType) return true
-    // TypeApp constructor match. Hash is the authoritative nominal identity:
-    // when BOTH sides carry a declaration content hash and those hashes DIFFER,
-    // they are distinct declarations (two modules' `Widget`, a version skew) and
-    // MUST NOT match — even when their names coincide. Mirrors the solver's
-    // unifyTypeApplications veto (#278/F0). Without this the mono layer would
-    // dispatch by NAME ALONE, matching where unify would reject.
-    if (concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication) {
-        if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
-        // A name match, or the SAME concrete declaration under differing names
-        // (a rename-safe alias: equal Declared hash / equal Builtin name), matches.
-        // Identity only ever ADDS a match — the DISTINCT reject above handled the
-        // distinct-declaration case.
-        return concrete.constructor == target.constructor ||
-            sameDeclaredIdentity(concrete.identity, target.identity)
-    }
-    // Container-to-TypeApp aliases. The structural-container name mapping is the
-    // single source in BuiltinTypes.builtinConstructorName (must agree with the
-    // compiler's typeMatchesTarget). RecordType/VariantType keep their own rules.
-    if (target is MezzeType.TypeApplication) {
-        BuiltinTypes.builtinConstructorName(concrete)?.let { return it == target.constructor }
-        return when (concrete) {
-            is MezzeType.RecordType -> concrete.identity.displayNameOrNull() == target.constructor
-            is MezzeType.VariantType -> {
-                if (concrete.identity.displayNameOrNull() == target.constructor) return true
-                VariantAliases.aliasFor(concrete.constructors.keys) == target.constructor
-            }
-            else -> false
+    return when {
+        concrete is MezzeType.IntType && target is MezzeType.IntType -> true
+        concrete is MezzeType.FloatType && target is MezzeType.FloatType -> true
+        concrete is MezzeType.StringType && target is MezzeType.StringType -> true
+        concrete is MezzeType.BoolType && target is MezzeType.BoolType -> true
+        concrete is MezzeType.CharType && target is MezzeType.CharType -> true
+        concrete is MezzeType.FracType && target is MezzeType.FracType -> true
+        // Bool has two surface types — the primitive `MezzeType.BoolType` and the
+        // constructor-form `MezzeType.VariantType({True, False})`. A codec-generated
+        // `impl … for Bool` registers its target as `MezzeType.BoolType`, but the
+        // receiver at a bare `True.encode {…}` call keeps its constructor
+        // form. Normalise both directions so ability dispatch on a Bool
+        // constant routes through the generated impl.
+        concrete is MezzeType.VariantType && target is MezzeType.BoolType &&
+            com.mezze.language.ast.PrimitiveTypes.isBoolVariant(concrete) -> true
+        concrete is MezzeType.BoolType && target is MezzeType.VariantType &&
+            com.mezze.language.ast.PrimitiveTypes.isBoolVariant(target) -> true
+        // Hash is authoritative nominal identity: two same-named TypeApplications
+        // from DIFFERENT declarations (differing content hash) must NOT match —
+        // mirrors the solver's unifyTypeApplications veto (#278/F0). Name match,
+        // or the same concrete decl under a rename-safe alias, still matches;
+        // identity only ADDS a match after the DISTINCT reject.
+        concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication &&
+            identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT -> false
+        concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication ->
+            concrete.constructor == target.constructor ||
+                sameDeclaredIdentity(concrete.identity, target.identity)
+        concrete is MezzeType.VariantType && target is MezzeType.TypeApplication &&
+            concrete.constructors.size == 1 &&
+            concrete.constructors.keys.first() == target.constructor -> true
+        concrete is MezzeType.VariantType && target is MezzeType.TypeApplication -> {
+            concrete.identity.displayNameOrNull() == target.constructor ||
+                VariantAliases.aliasFor(concrete.constructors.keys) == target.constructor ||
+                // The receiver may have had its identity stripped: AliasStripper
+                // sets Anonymous when the declaring name is not in the caller's
+                // scope, which is what lets two same-shaped variants from
+                // different modules unify structurally (#148 rule 6).
+                //
+                // Dispatch still has to find the impl. `Json` from
+                // std::codec::json arrives as a bare seven-constructor variant
+                // while `impl FromJson 'a for Json` targets
+                // MezzeType.TypeApplication(Json), so `j.from_json {}` failed with
+                // `Field not found: from_json` — though the identical call
+                // through an annotated binding worked.
+                //
+                // The constructor SET survives stripping, and for a variant it
+                // is what the declaration is. Comparing the target's declared
+                // arms against the receiver's recovers the link without
+                // restoring a nominal wall that unification relies on being
+                // absent.
+                variantDeclHasConstructors(target.constructor, concrete.constructors.keys)
         }
+        // A structural container receiver (MezzeType.SeqType/MezzeType.MapType/…) matches an
+        // `impl … for Seq`/`Map`/… whose target is MezzeType.TypeApplication("Seq"/…).
+        // Name mapping is the single source in BuiltinTypes.builtinConstructorName.
+        target is MezzeType.TypeApplication &&
+            com.mezze.language.ast.BuiltinTypes.builtinConstructorName(concrete) == target.constructor -> true
+        // Structural-to-structural: an impl written `for ['a]` / `for {Map,Set,…} 'a` has a
+        // STRUCTURAL target (MezzeType.SeqType/MezzeType.MapType/…), so a same-kind receiver must match element-
+        // agnostically (the target's element is a VarType). Without this, `impl Sized for ['a]`
+        // never dispatches to a seq receiver and `seq.size {}` degrades to a field read (#279).
+        concrete is MezzeType.SeqType && target is MezzeType.SeqType -> true
+        concrete is MezzeType.ListType && target is MezzeType.ListType -> true
+        concrete is MezzeType.SetType && target is MezzeType.SetType -> true
+        concrete is MezzeType.MapType && target is MezzeType.MapType -> true
+        concrete is MezzeType.SortedSetType && target is MezzeType.SortedSetType -> true
+        concrete is MezzeType.SortedMapType && target is MezzeType.SortedMapType -> true
+        concrete is MezzeType.RecordType && target is MezzeType.TypeApplication &&
+            concrete.identity.displayNameOrNull() == target.constructor -> true
+        // MezzeType.RecordType-to-MezzeType.RecordType. Compare structurally, guarded by an
+        // identity DISTINCT reject so two DIFFERENT named records with the
+        // same field shape do NOT collide. Fields differ → miss.
+        //
+        // Fixes the (anonymous impl target, alias-tagged receiver) combo:
+        // `impl Summary for { user: Str }` registers an Anonymous target;
+        // `let p : Post = { user = "dev" }` where `type Post = { user: Str }`
+        // carries a Declared identity. identityVerdict(Declared, Anonymous)
+        // is UNDETERMINED, so the receiver reaches the field comparison and
+        // matches. Two distinct Declared records with the same fields (rare
+        // — the parser also rejects same-shape aliases) still hash-mismatch
+        // and are correctly rejected.
+        concrete is MezzeType.RecordType && target is MezzeType.RecordType -> {
+            identityVerdict(concrete.identity, target.identity) != IdentityVerdict.DISTINCT &&
+                concrete.fields == target.fields
+        }
+        // Newtype receivers dispatch to `impl … for <NewtypeName>` whose target
+        // is built as a MezzeType.TypeApplication (see ContextBuilder ParsedNewtypeDef →
+        // WellKnownTypeApp.of). Prefer hash identity (module-distinct, #278);
+        // fall back to name when either hash is absent (builtins/pre-hash).
+        concrete is MezzeType.NewtypeType && target is MezzeType.TypeApplication -> {
+            val cHash = (concrete.identity as? TypeIdentity.Declared)?.hash
+            val tHash = (target.identity as? TypeIdentity.Declared)?.hash
+            if (cHash != null && tHash != null) cHash == tHash
+            else concrete.name == target.constructor
+        }
+        concrete is MezzeType.TypeApplication && target is MezzeType.NewtypeType -> {
+            val cHash = (concrete.identity as? TypeIdentity.Declared)?.hash
+            val tHash = (target.identity as? TypeIdentity.Declared)?.hash
+            if (cHash != null && tHash != null) cHash == tHash
+            else concrete.constructor == target.name
+        }
+        // MezzeType.VariantType to MezzeType.VariantType: match if constructors overlap or type names match.
+        //
+        // Guarded by an identity DISTINCT reject FIRST, mirroring the sibling
+        // MezzeType.TypeApplication (3316) and MezzeType.RecordType (3375) arms and the solver's
+        // unifyVariants veto (#12): two DIFFERENT Declared variants (differing
+        // content hash) must NOT match even when one's constructor set is a
+        // subset of the other's — otherwise a sub-variant `| A |` from module X
+        // dispatches an impl written for `| A, B, C |` in module Y (wrong-dispatch,
+        // ledger L-36/L-55). Anonymous/UNDETERMINED identities (e.g. an
+        // identity-stripped cross-module `Json` receiver) are NOT DISTINCT, so the
+        // structural subset match below still recovers those links.
+        concrete is MezzeType.VariantType && target is MezzeType.VariantType &&
+            identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT -> false
+        concrete is MezzeType.VariantType && target is MezzeType.VariantType -> {
+            // Same type name (e.g., both are "Json")
+            val concreteName = concrete.identity.displayNameOrNull()
+            if (concreteName != null && concreteName == target.identity.displayNameOrNull()) return true
+            // Same constructor set
+            if (concrete.constructors.keys == target.constructors.keys) return true
+            // Concrete has subset of target constructors (e.g., concrete is a single constructor variant)
+            if (concrete.constructors.keys.all { it in target.constructors }) return true
+            false
+        }
+        // A bare VarType target is an UNCONSTRAINED impl position — a blanket
+        // `impl X for 'a` where the receiver self is a type variable, so it
+        // legitimately matches ANY concrete receiver. This is the whole point
+        // of a generic wrapper like `impl Somable for 'a` / `impl Okable 'e for
+        // 'a`: `x.some {}` / `x.ok {}` must dispatch for every receiver type.
+        // Matching here only ADDS a candidate for a blanket impl; disambiguation
+        // among multiple matches is handled by the caller (co-operand match +
+        // opHash dedup in tryResolveAbilityOp). A concrete target still requires
+        // an exact structural match above, so this never widens a non-blanket impl.
+        target is MezzeType.VarType -> true
+        // VariantType vs VariantType. Mono had this arm and the compiler did not,
+        // so it is part of the union rather than a mono-only rule: two variants
+        // match by declared name, by identical constructor sets, or when the
+        // concrete's constructors are a SUBSET of the target's — gated on identity
+        // NOT being DISTINCT first, so two different Declared variants cannot match
+        // via the subset branch (that would dispatch a superset impl to a
+        // sub-variant; ledger L-56, and the solver's unifyVariants veto #12).
+        concrete is MezzeType.VariantType && target is MezzeType.VariantType -> {
+            if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) {
+                false
+            } else {
+                val concreteName = concrete.identity.displayNameOrNull()
+                (concreteName != null && concreteName == target.identity.displayNameOrNull()) ||
+                    concrete.constructors.keys == target.constructors.keys ||
+                    concrete.constructors.keys.all { it in target.constructors }
+            }
+        }
+        else -> false
     }
-    // RecordType-to-RecordType. Match structurally, gated on identity NOT being
-    // DISTINCT so two different Declared records with the same fields don't
-    // collide. Mirrors the compiler's typeMatchesTarget rule so mono dispatch
-    // agrees on the (anonymous impl target, alias-tagged receiver) combo.
-    if (concrete is MezzeType.RecordType && target is MezzeType.RecordType) {
-        if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
-        return concrete.fields == target.fields
-    }
-    // VariantType vs VariantType: typeName or constructor-set overlap, gated on
-    // identity NOT being DISTINCT FIRST — mirrors the compiler's typeMatchesTarget
-    // (TypedASTCompiler VariantType arm) and the solver's unifyVariants veto (#12).
-    // Two different Declared variants (differing content hash) must not match via
-    // the subset branch, else mono dispatches a superset impl to a sub-variant
-    // (wrong-dispatch, ledger L-56). Anonymous/UNDETERMINED identities still fall
-    // through to the structural match, keeping cross-module stripped variants working.
-    if (concrete is MezzeType.VariantType && target is MezzeType.VariantType) {
-        if (identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT) return false
-        val concreteName = concrete.identity.displayNameOrNull()
-        if (concreteName != null && concreteName == target.identity.displayNameOrNull()) return true
-        if (concrete.constructors.keys == target.constructors.keys) return true
-        if (concrete.constructors.keys.all { it in target.constructors }) return true
-    }
-    // Structural-to-structural: an impl `for ['a]` / `for {Map,Set,…} 'a` has a STRUCTURAL
-    // target, so a same-kind receiver matches element-agnostically. Mirrors the compiler's
-    // typeMatchesTarget so mono dispatch agrees (#279 — else `seq.size {}` degrades to a field read).
-    if (concrete is MezzeType.SeqType && target is MezzeType.SeqType) return true
-    if (concrete is MezzeType.ListType && target is MezzeType.ListType) return true
-    if (concrete is MezzeType.SetType && target is MezzeType.SetType) return true
-    if (concrete is MezzeType.MapType && target is MezzeType.MapType) return true
-    if (concrete is MezzeType.SortedSetType && target is MezzeType.SortedSetType) return true
-    if (concrete is MezzeType.SortedMapType && target is MezzeType.SortedMapType) return true
-    return false
 }
 
 /** Structural unification: match `pattern` (with TypeVars) against

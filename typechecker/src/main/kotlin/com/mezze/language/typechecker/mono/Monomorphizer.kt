@@ -941,7 +941,7 @@ class Monomorphizer(
             // impl target (exactly one match, else leave untouched — a no/ambiguous
             // match means this wasn't a deferred call on this concrete type).
             if (receiverType !is MezzeType.VarType) {
-                val matches = cands.filter { c -> c.targets.any { typeMatchesTarget(receiverType, it) } }
+                val matches = cands.filter { c -> c.targets.any { typeMatchesTarget(receiverType, it, MonoDriver::variantDeclHasConstructors) } }
                 matches.singleOrNull()?.let { return it }
                 // No structural match — but the receiver may be the EXPANDED form of
                 // the impl's nominal target (e.g. `Item` inlined to its RecordType
@@ -1067,7 +1067,7 @@ class Monomorphizer(
         if (entries.size == 1) return entries.first()
         val matches = entries.filter { e ->
             val recvTarget = e.impl.targetTypes.lastOrNull() ?: return@filter false
-            typeMatchesTarget(receiverType, recvTarget)
+            typeMatchesTarget(receiverType, recvTarget, MonoDriver::variantDeclHasConstructors)
         }
         val unique = matches.distinctBy { it.opHash }
         return if (unique.size == 1) unique.first() else null

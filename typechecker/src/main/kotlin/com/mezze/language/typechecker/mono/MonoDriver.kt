@@ -68,6 +68,23 @@ object MonoDriver {
      */
     private val currentDeclShapes = ThreadLocal<Map<String, Pair<List<String>, MezzeType>>>()
 
+    /**
+     * Whether a declared variant NAMED [name] has all of [ctors] among its
+     * constructors. Task F's shared `typeMatchesTarget` takes this as a
+     * parameter because it is the one capability the two merged copies did not
+     * share — the compiler could consult its decl index and mono could not. Mono
+     * answers it from the declared shapes it already collects, so the check is
+     * really performed on both sides rather than stubbed away.
+     *
+     * False means "no declared variant by that name, or it lacks a constructor" —
+     * an answer, not a shrug.
+     */
+    internal fun variantDeclHasConstructors(name: String, ctors: Set<String>): Boolean {
+        val shape = currentDeclShapes.get()?.get(name)?.second ?: return false
+        val variant = shape as? MezzeType.VariantType ?: return false
+        return ctors.isNotEmpty() && ctors.all { it in variant.constructors }
+    }
+
     private fun openDeclaredTarget(target: MezzeType): MezzeType {
         if (target !is MezzeType.TypeApplication) return target
         val (params, shape) = currentDeclShapes.get()?.get(target.constructor) ?: return target
@@ -530,7 +547,7 @@ object MonoDriver {
         }
 
         val match = genericCandidates.firstOrNull { entry ->
-            entry.impl.targetTypes.any { typeMatchesTarget(receiverType, it) }
+            entry.impl.targetTypes.any { typeMatchesTarget(receiverType, it, MonoDriver::variantDeclHasConstructors) }
         } ?: run {
             if (genericCandidates.size == 1) genericCandidates.first()
             // BUG B / #333: an identity-less record receiver never matches a nominal
@@ -899,7 +916,7 @@ object MonoDriver {
                 it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
             }
             val match = candidates.firstOrNull { impl ->
-                impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target) }
+                impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target, MonoDriver::variantDeclHasConstructors) }
             }
             val m = match ?: continue
             // The impl's associatedTypeBindings hold the concrete `out` for this
@@ -998,7 +1015,7 @@ object MonoDriver {
             if (concreteArgs.any { it is MezzeType.VarType } && abilityImplsForHash.size != 1) continue
             val match = abilityImplsForHash.firstOrNull { impl ->
                 impl.targetTypes.zip(concreteArgs).all { (target, concrete) ->
-                    typeMatchesTarget(concrete, target)
+                    typeMatchesTarget(concrete, target, MonoDriver::variantDeclHasConstructors)
                 }
             }
             // BUG B / #333: an identity-less record receiver (a `{..}` literal that

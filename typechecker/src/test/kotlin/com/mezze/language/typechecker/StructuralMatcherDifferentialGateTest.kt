@@ -15,6 +15,10 @@ import com.mezze.language.typechecker.mono.unify as monoUnify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
+/** No declaration registry in these tests: types are built directly, so "no
+ *  declared variant by that name" is the TRUE answer, not a stub. */
+private val noDeclaredVariants: (String, Set<String>) -> Boolean = { _, _ -> false }
+
 /**
  * Move-4 (#24) — the DIFFERENTIAL GATE for the structural matchers.
  *
@@ -34,10 +38,13 @@ import org.junit.jupiter.api.Assertions.*
  *
  * A future refactor (Move-5) that collapses these onto one `Unification.unify`
  * must keep this green; a regression that reintroduces a name-only decider breaks
- * it here with the exact offending pair. (`TypedASTCompiler.typeMatchesTarget` is
- * `private` and not directly callable from a test; the callable trio —
- * MonoTypeOps.typeMatchesTarget, MonoTypeOps.unify, Unification.unify — covers the
- * identity-veto invariant that governs it too.)
+ * it here with the exact offending pair.
+ *
+ * Task F CLOSED the one gap this note used to carry. `TypedASTCompiler`'s
+ * `typeMatchesTarget` was a private 139-line near-copy that no test could call
+ * directly, so this gate could only cover the invariant that "governs it too".
+ * It is now a delegate to THIS function — the merged union of the two copies —
+ * so the gate covers the compiler's matcher directly rather than by proxy.
  */
 class StructuralMatcherDifferentialGateTest {
 
@@ -71,7 +78,7 @@ class StructuralMatcherDifferentialGateTest {
         RecordType(fields = fields, identity = TypeIdentity.Declared(hash(hashSeed), name))
 
     // The three callable matchers, each reduced to a Boolean "does A match B?".
-    private fun monoTMT(a: MezzeType, b: MezzeType): Boolean = monoTypeMatchesTarget(a, b)
+    private fun monoTMT(a: MezzeType, b: MezzeType): Boolean = monoTypeMatchesTarget(a, b, noDeclaredVariants)
     private fun monoUn(a: MezzeType, b: MezzeType): Boolean = monoUnify(a, b, mutableMapOf())
     private fun solverUn(a: MezzeType, b: MezzeType): Boolean =
         unify(a, b, DeclarationRegistry.EMPTY) is UnificationResult.Success

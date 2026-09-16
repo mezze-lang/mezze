@@ -7,6 +7,10 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** No declaration registry in these tests: types are built directly, so "no
+ *  declared variant by that name" is the TRUE answer, not a stub. */
+private val noDeclaredVariants: (String, Set<String>) -> Boolean = { _, _ -> false }
+
 /**
  * A5 regression (hash-driven identity): monomorphization's impl-target matcher
  * [typeMatchesTarget] must key nominal identity on the declaration content HASH,
@@ -30,7 +34,7 @@ class MonoTypeMatchHashIdentityTest {
         val concrete = app("Widget", TypeIdentity.Declared(hashA, "Widget"))
         val target = app("Widget", TypeIdentity.Declared(hashB, "Widget"))
         assertFalse(
-            typeMatchesTarget(concrete, target),
+            typeMatchesTarget(concrete, target, noDeclaredVariants),
             "two modules' `Widget` (different content hash) must NOT match at the mono layer — hash is authoritative",
         )
     }
@@ -38,7 +42,7 @@ class MonoTypeMatchHashIdentityTest {
     @Test fun `same declaration matches itself`() {
         val concrete = app("Widget", TypeIdentity.Declared(hashA, "Widget"))
         val target = app("Widget", TypeIdentity.Declared(hashA, "Widget"))
-        assertTrue(typeMatchesTarget(concrete, target), "same declaration must match")
+        assertTrue(typeMatchesTarget(concrete, target, noDeclaredVariants), "same declaration must match")
     }
 
     @Test fun `differently-named applications with the SAME hash match (rename-safe alias)`() {
@@ -46,7 +50,7 @@ class MonoTypeMatchHashIdentityTest {
         val concrete = app("Widget", TypeIdentity.Declared(hashA, "Widget"))
         val target = app("Gadget", TypeIdentity.Declared(hashA, "Gadget"))
         assertTrue(
-            typeMatchesTarget(concrete, target),
+            typeMatchesTarget(concrete, target, noDeclaredVariants),
             "equal content hash under differing names is the same declaration — a rename-safe alias must match",
         )
     }
@@ -56,6 +60,6 @@ class MonoTypeMatchHashIdentityTest {
         // their identity, so a name match is correct here (no veto fires).
         val concrete = app("List", TypeIdentity.Builtin("List"))
         val target = app("List", TypeIdentity.Builtin("List"))
-        assertTrue(typeMatchesTarget(concrete, target), "hashless builtin TypeApps match by reserved name")
+        assertTrue(typeMatchesTarget(concrete, target, noDeclaredVariants), "hashless builtin TypeApps match by reserved name")
     }
 }
