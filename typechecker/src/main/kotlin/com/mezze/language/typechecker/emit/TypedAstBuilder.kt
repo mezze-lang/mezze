@@ -572,15 +572,23 @@ class TypedAstBuilder(
                     ?: importContext?.importedAbilities?.get(c.abilityName)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
                 WellKnownHashConstants.isCodecAbility(h)
             }
-            // A NEWTYPE receiver is never seeded. Its impl bodies exist to UNWRAP
-            // (`match it is Money.(a) -> a < b`), and with `it` typed as Money the
-            // binding `a` is not the wrapped Int, so the body's `a < b` dispatches
-            // Money's OWN lt through the enclosing dict slot — unbounded recursion,
-            // StackOverflow (NewtypeInUseRuntimeTest). Records and variants, where
-            // the payload types are read off the declaration, are unaffected.
-            val receiverIsNewtype = (decl.targetTypes.lastOrNull() as? ParsedNamedType)
-                ?.let { registry.lookupType(it.name)?.definition is ParsedNewtypeDef } == true
-            val seedThisOp = !receiverIsNewtype && seedOpParams && !isInherent && op.implementation is ParsedLambda &&
+            // A newtype receiver USED to be excluded here. The reason was real:
+            // its impl bodies exist to UNWRAP (`match it is Money.(a) -> a < b`),
+            // and `patternBindingTypes` did not type `a` as the wrapped Int, so
+            // the body's `a < b` dispatched Money's OWN lt through the enclosing
+            // dict slot — unbounded recursion, StackOverflow
+            // (NewtypeInUseRuntimeTest).
+            //
+            // The premise no longer holds. That arm returned `emptyMap()`,
+            // dropping the inner pattern entirely; it now resolves the newtype's
+            // payload through the registry, so `a` really is the wrapped type and
+            // `a < b` is an Int comparison that cannot re-enter Money's lt.
+            //
+            // Leaving the exclusion in place was BUG 11: an unseeded body means an
+            // untyped receiver, an untyped receiver lowers `<` to a dynamic field
+            // read, and for a newtype — erased to its payload at runtime — that
+            // silently used the WRAPPED type's ordering instead of the author's.
+            val seedThisOp = seedOpParams && !isInherent && op.implementation is ParsedLambda &&
                 declaredOpType != null &&
                 // Codec-flavored abilities (Encode/Decode/Format…) dispatch through
                 // `config` and were shaped for untyped bodies — leave them as they are.
@@ -1707,8 +1715,29 @@ class TypedAstBuilder(
             // only ADDS a type where there was none, on a path gated to impl
             // bodies — and dropping a sub-pattern outright is a plain omission
             // rather than a judgement call.
-            is ParsedNewtypePattern ->
-                patternBindingTypes(pattern.inner, (shape as? MezzeType.NewtypeType)?.wrappedType)
+            is ParsedNewtypePattern -> {
+                // `B.(x)` binds `x` to what B WRAPS. `declaredShape` opens a
+                // newtype into a VARIANT with one constructor — NOT a
+                // NewtypeType — so the wrapped type is that constructor's
+                // payload. The registry says which of the two payload shapes the
+                // expansion produced: a newtype over a RECORD carries that record
+                // directly, anything else is wrapped as `{ val: T }`. Reading the
+                // declaration rather than guessing from the shape is what keeps
+                // `newtype W = { val: Int }` distinguishable from
+                // `newtype N = Int`.
+                val payload = (shape as? MezzeType.VariantType)?.constructors?.get(pattern.typeName)
+                val wrapsRecord = (
+                    registry.lookupType(pattern.typeName)
+                        ?: com.mezze.language.typechecker.ModuleResolver
+                            .lookupTypeDeclaration(pattern.typeName)
+                    )?.let { (it.definition as? ParsedNewtypeDef)?.wrappedType is ParsedRecordType }
+                val wrapped = when {
+                    payload == null -> null
+                    wrapsRecord == true -> payload
+                    else -> (payload as? MezzeType.RecordType)?.fields?.get("val")
+                }
+                patternBindingTypes(pattern.inner, wrapped)
+            }
             is ParsedConstructorPattern -> {
                 val payloadType = (shape as? MezzeType.VariantType)?.constructors?.get(pattern.constructor)
                 pattern.payload?.let { patternBindingTypes(it, payloadType) } ?: emptyMap()

@@ -609,7 +609,7 @@ xs.min_by { f = { x } -> x.tag }      # OK — primitive key
 And the serious case, which does not crash: a NEWTYPE key whose Ord disagrees
 with the wrapped type's returns the WRONG ELEMENT, exactly as BUG 7 did.
 
-### Cause
+### Cause — a deliberate exclusion whose premise had rotted
 
 `min_by`/`max_by`/`sort_by_key` are `{ xs: ['a], f: { x: 'a } -> 'b }
 with Ord 'b`. The stdlib implements each by handing `*_with_cmp` an explicit
@@ -714,7 +714,7 @@ crash.
 
 ---
 
-## BUG 11 — OPEN: a generic `with Ord` body compares a newtype by its WRAPPED order
+## BUG 11 — FIXED: a generic `with Ord` body compares a newtype by its WRAPPED order
 
 Found 2026-09-16 while probing C.3's evidence selection. The probe was hunting a
 wrong ref being picked among several; what it found is that even a SINGLE
@@ -801,10 +801,44 @@ is now recursive against the wrapped type. It does not fix this bug (the repro
 does not reach the structural read at all) but it closes the same one-sidedness
 the seq arm was hardened against.
 
+### The actual cause, and the fix
+
+`TypedAstBuilder` deliberately refused to type any impl-op body whose receiver is
+a NEWTYPE:
+
+```kotlin
+val seedThisOp = !receiverIsNewtype && …
+```
+
+The reason was real and written down: a newtype's impl bodies exist to UNWRAP
+(`match it is Money.(a) -> a < b`), and with `it` typed as Money the binding `a`
+was NOT the wrapped Int, so `a < b` dispatched Money's OWN `lt` through the
+enclosing dict slot — unbounded recursion, StackOverflow
+(`NewtypeInUseRuntimeTest`).
+
+But the premise was a second defect, not a law. `patternBindingTypes`'s
+`ParsedNewtypePattern` arm returned `emptyMap()`, dropping the inner pattern
+entirely, so `a` was never typed from the payload at all. It now resolves the
+newtype's payload through the registry — note `declaredShape` opens a newtype
+into a VARIANT with one constructor, not a `NewtypeType`, and the registry says
+whether the payload is the wrapped record directly or the synthesized
+`{ val: T }`.
+
+With `a` correctly typed as the wrapped Int, `a < b` is an Int comparison that
+CANNOT re-enter Money's `lt`, so the exclusion is unnecessary and is gone. And
+with it gone, newtype impl bodies are typed, the receiver is typed, `<` no longer
+lowers to a dynamic field read, and the author's ordering is the one used.
+
+Removing the exclusion also typed **29 previously-untyped impl-op parameters**
+(`Int`, `Float`, `Nat`, `MutBytes`, `MutString` — every builtin newtype), which
+the 0.2 ratchet caught as stale baseline entries. The baseline is down from 911
+to 882.
+
 ### Acceptance
 
-`GenericNewtypeOrdTest` — 4 enabled cases pinning the concrete paths that work,
-2 `@Disabled` on the generic paths.
+`GenericNewtypeOrdTest` — 6 cases, all passing, none disabled.
+`NewtypeInUseRuntimeTest` still green, so the StackOverflow the exclusion existed
+to prevent does not return.
 
 ---
 

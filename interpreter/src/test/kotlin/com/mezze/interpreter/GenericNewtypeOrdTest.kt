@@ -1,7 +1,6 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
@@ -125,9 +124,6 @@ class GenericNewtypeOrdTest {
     // ── BUG 11 ────────────────────────────────────────────────────────────
 
     @Test
-    @Disabled(
-        "BUG 11 — still open. NOT the match-binding fresh-var fallback: the\n        receiver here is a LAMBDA PARAM typed 'b, which is legitimately\n        polymorphic, so the dict path owns it. Ungating the structural read\n        (A.2) recovers 101 of 125 elaboration misses but leaves this failing.\n        See known-bugs.md BUG 11."
-    )
     fun `a generic with one Ord constraint uses the impl`() {
         assertEquals(
             false,
@@ -142,9 +138,6 @@ class GenericNewtypeOrdTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 11 — still open. NOT the match-binding fresh-var fallback: the\n        receiver here is a LAMBDA PARAM typed 'b, which is legitimately\n        polymorphic, so the dict path owns it. Ungating the structural read\n        (A.2) recovers 101 of 125 elaboration misses but leaves this failing.\n        See known-bugs.md BUG 11."
-    )
     fun `a generic with two Ord constraints uses each variable's impl`() {
         assertEquals(
             false,
