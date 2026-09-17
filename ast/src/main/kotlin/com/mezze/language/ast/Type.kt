@@ -537,3 +537,19 @@ sealed interface MezzeType {
     }
 
 }
+/**
+ * True iff this type still holds an unresolved type VARIABLE anywhere in it.
+ *
+ * The complement — "fully concrete" — is what several passes need before they may
+ * treat a declared shape as this value's actual shape, or specialize on it. It was
+ * written out separately in `AbilityChecker`, in `TypedASTCompiler` (twice, at
+ * different depths) and inline at a handful of call sites; they disagree only by
+ * accident, so it lives here on the type itself.
+ *
+ * Traversal goes through [MezzeType.anyChild], which is the one walker that knows
+ * about every child position — including a variant's `typeArgs` and an effect
+ * row's associated types, both of which a hand-rolled recursion has forgotten
+ * before.
+ */
+fun MezzeType.holdsTypeVar(): Boolean =
+    this is MezzeType.VarType || anyChild { it.holdsTypeVar() }

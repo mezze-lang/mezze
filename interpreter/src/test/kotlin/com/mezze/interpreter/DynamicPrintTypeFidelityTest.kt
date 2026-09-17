@@ -36,17 +36,25 @@ import kotlin.test.assertEquals
  * | `let show: { x: 'a } -> Str = { x } -> …`        | correct | correct   |
  * | `let show = { x: 'a } -> …` (inline annotation)  | WRONG   | **fixed** |
  * | `let show = { x } -> …`     (no annotation)      | correct | correct   |
- * | undeclared-variant payload binder                | WRONG   | WRONG     |
+ * | match-arm binder, DECLARED payload, in a lambda   | WRONG   | **fixed** |
+ * | match-arm binder, UNDECLARED payload              | WRONG   | WRONG     |
  *
- * The inline-annotation row is fixed here, and it was the worse of the two:
- * adding a type annotation turned a correct answer into a wrong one. Its cause is
- * in `TypedAstBuilder.buildLambdaParams` — an ANNOTATED param took its type from
- * a fresh conversion of the annotation, so its variable existed nowhere in the
- * binding's own type, while an UNANNOTATED param read the binding's solved type.
- * Monomorphization substitutes a binding's quantified params by name, so the
- * annotated form could never be specialized.
+ * Two independent causes, each of which made a correct program print the wrong
+ * thing:
  *
- * The undeclared-variant row remains, and is what still holds `Dynamic` in place.
+ *  - The inline annotation. `TypedAstBuilder.buildLambdaParams` took an ANNOTATED
+ *    param's type from a fresh conversion of the annotation, so its variable
+ *    existed nowhere in the binding's own type, while an UNANNOTATED param read
+ *    the binding's solved type. Monomorphization substitutes a binding's
+ *    quantified params BY NAME, so the annotated form could never be specialized —
+ *    writing a type annotation turned a correct answer into a wrong one.
+ *
+ *  - The match-arm binder. Its type came from the solver, and the solver leaves it
+ *    an unresolved variable inside a lambda body. That hole was preferred over the
+ *    scrutinee's own declared shape, which — the scrutinee being concrete —
+ *    DETERMINES the binder's type. An absent answer was outranking a real one.
+ *
+ * The last row remains, and is what still holds `Dynamic` in place
  */
 class DynamicPrintTypeFidelityTest {
 
@@ -113,48 +121,70 @@ class DynamicPrintTypeFidelityTest {
         )
     }
 
-    // ── What still reaches Dynamic ────────────────────────────────────────
-    //
-    // The payload binder of an UNDECLARED variant. `show { a = Grams { n = … } }`
-    // gives `n` no type of its own: it is not a quantified parameter of `show`, so
-    // monomorphization has nothing to substitute and the printed position stays a
-    // variable. Measured: mono visits that call and derives `args=null`, where the
-    // same program over a plain parameter derives `[Money]`.
+    // ── Through a match-arm payload binder, inside a lambda ───────────────
 
-    private fun throughUndeclaredVariant(value: String, prelude: String = money) =
+    private fun throughDeclaredVariant(payloadType: String, value: String, prelude: String = "") =
         MezzeTestHelper.run(
             """
             $prelude
-            let show = { a } -> match a is
+            type Amt = | Grams { n: $payloadType } |
+            let show = { a: Amt } -> match a is
               Grams { n } -> n.to_dbg {}
             show { a = Grams { n = $value } }
             """.trimIndent(),
         )
 
     @Test
-    @Disabled(
-        "D.1 — renders `4`: a newtype erased to its payload. The payload binder " +
-            "of an undeclared variant is not a specialization parameter, so " +
-            "PrintTypeBuilder sees a VarType and Dynamic renders from the value.",
-    )
-    fun `a newtype through an undeclared-variant payload keeps its wrapper`() {
-        assertEquals("Money.(4)", throughUndeclaredVariant("Money.(4)"))
+    fun `a newtype through a match-arm binder inside a lambda keeps its wrapper`() {
+        // Was `4`. The solver leaves this binder an unresolved variable, and that
+        // was preferred over the scrutinee's own declared shape — which, `Amt`
+        // being concrete, DETERMINES that `n` is a `Money`. A hole was winning
+        // over an answer. The identical match at top level was always correct,
+        // because there the solver does resolve it.
+        assertEquals("Money.(4)", throughDeclaredVariant("Money", "Money.(4)", money))
     }
 
     @Test
-    @Disabled("D.1 — renders `4`: Nat and Int are both Long at runtime, so the value cannot say which.")
-    fun `a Nat through an undeclared-variant payload stays a Nat`() {
-        assertEquals("Nat.(4)", throughUndeclaredVariant("4n", prelude = ""))
+    fun `a Nat through a match-arm binder inside a lambda stays a Nat`() {
+        assertEquals("Nat.(4)", throughDeclaredVariant("Nat", "4n"))
     }
 
     @Test
-    @Disabled("D.1 — renders `{ numerator = 1, denominator = 2 }`: Frac is an ordinary two-field record at runtime.")
-    fun `a Frac through an undeclared-variant payload is not printed as a record`() {
+    fun `a Frac through a match-arm binder inside a lambda is not printed as a record`() {
         assertEquals(
             "1//2",
-            throughUndeclaredVariant(
+            throughDeclaredVariant(
+                "Frac",
                 "frac::make { numerator = 1, denominator = 2 }",
                 prelude = "use std::frac",
+            ),
+        )
+    }
+
+    // ── What still reaches Dynamic ────────────────────────────────────────
+
+    @Test
+    @Disabled(
+        "D.1 — the payload of an UNDECLARED variant. `show { a = Grams { n = " +
+            "Money.(4) } }` gives `n` no declared type, so the scrutinee's own " +
+            "type holds a variable and determines nothing. The type is known only " +
+            "at the CALL, and mono cannot use it: measured, the argument's type " +
+            "reaches MonoDriver as `VariantType([Grams])` with payload `{ n: 'y }` " +
+            "— the constructed value's own payload type is a variable — so " +
+            "deriving the type argument yields `args=null` and no specialization " +
+            "happens. Closing it means the constructor application recording its " +
+            "payload's type, which is upstream of PrintType entirely.",
+    )
+    fun `a newtype through an UNDECLARED-variant payload keeps its wrapper`() {
+        assertEquals(
+            "Money.(4)",
+            MezzeTestHelper.run(
+                """
+                $money
+                let show = { a } -> match a is
+                  Grams { n } -> n.to_dbg {}
+                show { a = Grams { n = Money.(4) } }
+                """.trimIndent(),
             ),
         )
     }

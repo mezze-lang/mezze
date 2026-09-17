@@ -1479,11 +1479,42 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   parsed annotation converted independently of the type it is supposed to
   describe. Worth a sweep of every `convertParsedTypeAnnotation` caller.
 
+  SECOND CAUSE, ALSO FIXED — a match-arm payload binder inside a lambda. Its type
+  came from the solver, and inside a lambda body the solver leaves it an
+  unresolved VARIABLE. That hole was preferred over the scrutinee's declared
+  shape, which — the scrutinee being concrete — DETERMINES the binder's type:
+
+  ```mezze
+  type Amt = | Grams { n: Money } |
+  let show = { a: Amt } -> match a is
+    Grams { n } -> n.to_dbg {}        -- printed `4`, not `Money.(4)`
+  ```
+
+  The identical match at top level was correct, because there the solver does
+  resolve it. An absent answer was outranking a real one. Fixed by consulting the
+  scrutinee's shape when the solver's binding still holds a variable AND the
+  scrutinee is fully concrete — it never overrides an answer, only a hole.
+
+  That is deliberately NOT the same as widening the structural FILL (supplying a
+  binder the solver never mentioned), which stays gated to impl op bodies.
+  Widening the fill was tried five ways — unconditional, "prefer ground types",
+  "prefer the declared shape", strictly-additive merge, and
+  concrete-scrutinee-only — and every one fails `JsonDecodeExhaustiveTest` x3 and
+  `UserDecodeAbilityTest` the same way. The mechanism is now known: a dict slot is
+  keyed on the receiver BEING a variable (per-var slots, C.2), so a binder that
+  stops being one loses its slot, the call degrades to a name-based field read,
+  and `CallIndirect` dies on `[MezzeRecord, Object[]]`. Codec decode bodies need
+  those binders to stay variables.
+
   STILL OPEN: the payload binder of an UNDECLARED variant. `show { a = Grams { n
-  = Money.(4) } }` gives `n` no type of its own — it is not a quantified parameter
-  of `show`, so mono derives `args=null` for that call where a plain parameter
-  derives `[Money]`. Three `@Disabled` cases in `DynamicPrintTypeFidelityTest`
-  carry it. Closing it makes `PrintType` total and `Dynamic` deletable.
+  = Money.(4) } }` gives `n` no declared type, so the scrutinee's own type holds a
+  variable and determines nothing; the type is known only at the CALL, and mono
+  cannot use it — measured, the argument reaches `MonoDriver` as
+  `VariantType([Grams])` with payload `{ n: 'y }`, i.e. the CONSTRUCTED VALUE's own
+  payload type is a variable, so deriving the type argument yields `args=null`.
+  Closing it means the constructor application recording its payload's type, which
+  is upstream of `PrintType` entirely. One `@Disabled` case in
+  `DynamicPrintTypeFidelityTest` carries it.
 - **BUG 15 (new, SOUNDNESS)** A type variable written twice in one parameter list
   was two variables, so the parameters were never required to agree:
 

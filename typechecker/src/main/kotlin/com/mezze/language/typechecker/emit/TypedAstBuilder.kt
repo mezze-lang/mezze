@@ -1704,13 +1704,42 @@ class TypedAstBuilder(
         // broke them. The dependency goes away when codec impls are generated
         // into the resolved module like derived impls, so this half of A.2 is
         // blocked on A.3 — not on a better heuristic here.
+        // Two distinct uses of the scrutinee's declared shape, with two rules.
+        //
+        // FILL — supply a binder the solver never mentioned. Only inside an impl op
+        // body. Widening it was measured and does not work: the codec decode
+        // bodies depend on such binders staying FRESH VARIABLES (a dict slot is
+        // keyed on the receiver BEING a variable — per-var slots, C.2 — so a binder
+        // that stops being one loses its slot, the call degrades to a name-based
+        // field read, and CallIndirect dies on [MezzeRecord, Object[]]).
+        // JsonDecodeExhaustiveTest x3 and UserDecodeAbilityTest fail that way for
+        // every widening tried: unconditional, "prefer ground types", "prefer the
+        // declared shape", strictly-additive merge, and concrete-scrutinee-only.
         val structuralBindings: Map<String, MezzeType> =
             if (scrutineeType == null || !typingImplOpBody) emptyMap()
             else case.patterns.fold(emptyMap()) { acc, p -> acc + patternBindingTypes(p, scrutineeType) }
+
+        // OVERRIDE — replace a solver binding that resolved to nothing. When the
+        // scrutinee's type is fully CONCRETE, its pattern determines each binder's
+        // type, so a solver entry that is still a bare variable is not a competing
+        // answer, it is the absence of one. Preferring it lost real types:
+        //
+        //     let show = { a: Amt } -> match a is Grams { n } -> n.to_dbg {}
+        //
+        // typed `n` as a variable even though `Amt`'s payload says `Money`, so the
+        // newtype printed as its erased payload (`4`, not `Money.(4)`) — while the
+        // same match at top level was correct, because there the solver did resolve
+        // it. This never overrides an answer, only a hole, and only where the
+        // scrutinee is concrete enough to determine one.
+        val determinedBindings: Map<String, MezzeType> =
+            if (scrutineeType == null || scrutineeType.holdsTypeVar()) emptyMap()
+            else case.patterns.fold(emptyMap()) { acc, p -> acc + patternBindingTypes(p, scrutineeType) }
+
         val resolvedTypes = bindingNames.associateWith { name ->
-            val solverTy = solverBindings[name]
-            if (solverTy != null) substitution.apply(solverTy)
-            else structuralBindings[name] ?: run {
+            val solverTy = solverBindings[name]?.let { substitution.apply(it) }
+            if (solverTy != null) {
+                if (solverTy.holdsTypeVar()) determinedBindings[name] ?: solverTy else solverTy
+            } else structuralBindings[name] ?: run {
                 // A.2 — the compiler does not know this binding's type, and says
                 // so by minting a fresh variable. That is indistinguishable from
                 // a legitimately polymorphic binding, so nothing downstream can
