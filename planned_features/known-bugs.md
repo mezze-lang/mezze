@@ -1674,6 +1674,44 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   inlined directly. Primitives never mark, which is exactly the population that
   must not take the slow path.
 
+  **SECOND ATTEMPT — the discriminator, built and measured.** The design was: mark,
+  at compile time, every function that merely COMPUTES THE STRUCTURAL HASH of its
+  own argument (`FunctionIR.isDerivedStructuralHash`, a fixpoint over forwarding
+  calls), plus the capture slot a wrapper FORWARDS to, so the anonymous
+  `{ x } -> x.hash {}` a generic container receives could INHERIT the answer from
+  the dict value at the moment the closure is built. Carried to `MezzeFunction`
+  through a new `MakeLambda` operand, and read by `ElementInstances.of` to decline
+  the instance path. Correctness held throughout — a mod-10 newtype `Set` answered
+  `size = 1`, `contains = true`, distinct kept — but the discriminator never fired
+  for the population that matters, and the Int set kept reordering.
+
+  What the attempt DID establish, and what the next one should start from:
+
+  - The chain has FOUR links, not two: the container's wrapper, the dict, the
+    element's `impl X.hash`, and `let structural_hash`. Every link forwards.
+  - `{ x } -> x.hash {}` inside a generic function is not a `CallIndirectIR` but a
+    **`DictMethodCallIR`**, whose `dictSlot` is a frame slot the CALLER fills. At
+    runtime the closure has **zero captures**, so there is nothing to inherit from
+    when it is built — the dict arrives per call, not per closure. That kills the
+    inherit-at-construction design outright.
+  - Forwarding appears in THREE distinct IR shapes, because a call may use the
+    record ABI or the scalar one: `CallNativeIR` with a record `arg`, `CallNativeIR`
+    with positional `args`, and `CallDirectIR` with a single positional
+    `ReadLocalIR`. A matcher that knows only the record shape marks nothing.
+  - The fixpoint must be seeded ACROSS the module boundary: a wrapper compiled with
+    the user's program forwards to `impl Int.hash`, which lives in the precompiled
+    stdlib and is absent from the current compile's function list.
+  - Even with all of that, the stdlib compile marked at most `structural_hash`
+    itself. Each fix revealed the next shape; the property is decidable in
+    principle but the lowering does not preserve a single recognisable form.
+
+  And a self-inflicted complication worth recording: the pairing rule gave every
+  PRIMITIVE an explicit `impl Hash` (they all have an explicit `Eq`), so `Int`'s
+  hash is no longer the derived one — the very signal the discriminator needs is
+  gone for exactly the types whose performance matters. "Is this hash derived?" was
+  the wrong question; "does this hash agree with the runtime representation?" is the
+  right one, and it is a property of the IMPL, decidable once, not of the closure.
+
   **The blocker is therefore the same one A.2 and `DecodeTargetResolver` are on**,
   stated three different ways: the compiler RESOLVES an obligation and then throws
   the answer away, leaving the runtime to re-derive it or guess. Here it is "which
