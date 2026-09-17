@@ -203,6 +203,48 @@ object BuiltinTypes {
         return ctorName.hashCode() and 0x7FFFFFFF
     }
 
+    // Cons-list payload field names. `Cons { head, tail }` was spelled with raw
+    // literals at three separate sites, which is two more than there should ever be.
+    const val HEAD_FIELD = "head"
+    const val TAIL_FIELD = "tail"
+
+    /** `Cons`'s payload for element [elem]: `{ head: elem, tail: List elem }`. */
+    fun consPayload(elem: MezzeType): MezzeType.RecordType =
+        MezzeType.RecordType(mapOf(HEAD_FIELD to elem, TAIL_FIELD to MezzeType.ListType(elem)))
+
+    /**
+     * The builtin cons-list AS A VARIANT — the one description of `| Cons {…}, Nil |`.
+     *
+     * `List` has no `ParsedTypeDecl` (it is a compiler builtin with a dedicated
+     * [MezzeType.ListType]), so a checker that needs its CONSTRUCTORS has nothing to
+     * read them off. This is that, and it is deliberately a shape rather than a
+     * declaration: registering a decl would give `List 'a` a Declared identity,
+     * making it structurally derivable and colliding with the hand-written `Eq`/`Hash`
+     * in `std/collections/list.mz`, which are load-bearing while a List is native at
+     * runtime rather than an actual Cons/Nil chain.
+     */
+    fun listVariantShape(elem: MezzeType): MezzeType.VariantType =
+        MezzeType.VariantType(
+            constructors = mapOf(CONS to consPayload(elem), NIL to null),
+            rowVar = null,
+            typeArgs = listOf(elem),
+            identity = TypeIdentity.Builtin(LIST),
+        )
+
+    /**
+     * The element of the builtin LIST in EITHER representation — the dedicated
+     * [MezzeType.ListType] or the name-carried `TypeApplication("List", [elem])`.
+     *
+     * Sibling of [sequenceElementType], and here for the same reason: the name↔builtin
+     * mapping belongs in this one place, so callers ask a question about the TYPE
+     * instead of comparing a constructor string themselves.
+     */
+    fun listElementType(type: MezzeType): MezzeType? = when (type) {
+        is MezzeType.ListType -> type.elementType
+        is MezzeType.TypeApplication -> if (type.constructor == LIST) type.args.singleOrNull() else null
+        else -> null
+    }
+
     /** Delegates to PrimitiveTypes.isBoolVariant -- single canonical location. */
     fun isBoolVariant(type: MezzeType): Boolean = PrimitiveTypes.isBoolVariant(type)
 

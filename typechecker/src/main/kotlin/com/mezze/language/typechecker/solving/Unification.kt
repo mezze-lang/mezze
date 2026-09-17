@@ -1430,6 +1430,23 @@ private fun declarationFor(
 }
 
 internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.VariantType? {
+    // `List` has no `ParsedTypeDecl` — it is a compiler builtin with a dedicated
+    // `MezzeType.ListType` — so there was nothing to expand it against, and
+    // `let f: { l: List Int } -> Int` with `match l is Nil -> …` failed as "Cannot
+    // resolve type 'List' to check for constructor 'Nil'" while the same program in
+    // `Option`/`Result` worked. Its constructors are not in doubt: `Cons`/`Nil` are
+    // RESERVED to `List` (BuiltinTypes.reservedConstructorOwner), and matching them
+    // already works at runtime.
+    //
+    // Synthesised HERE rather than registered as a declaration on purpose. A decl
+    // would give `List 'a` a Declared identity, `canDeriveAbility("Eq", …)` would
+    // answer true, and the coherence rule would reject `std/collections/list.mz`'s
+    // hand-written `Eq`/`Hash` — which are load-bearing, because a List is NATIVE at
+    // runtime rather than an actual Cons/Nil chain. This gives the type checker the
+    // constructors without telling the derive machinery anything new. Deleting it is
+    // part of making a container's derived Eq element-aware (#34/T1.4).
+    BuiltinTypes.listElementType(typeApp)?.let { return BuiltinTypes.listVariantShape(it) }
+
     val typeDecl = declarationFor(typeApp, registry)
         ?: return null
 

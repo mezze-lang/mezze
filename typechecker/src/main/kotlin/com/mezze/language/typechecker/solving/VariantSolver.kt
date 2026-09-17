@@ -260,7 +260,9 @@ internal class VariantSolver(
             )
             is MezzeType.ListType -> solveConstructorOnList(variantType, constructorName, expectedPayloadType)
             else -> ConstraintSolver.ConstraintResult.Failure(
-                "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}"
+                "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}. " +
+                    "`Ctor { … }` matches a VARIANT constructor; a record destructures as `{ field, … }` " +
+                    "and a newtype opens as `Name.(inner)`."
             )
         }
     }
@@ -313,9 +315,7 @@ internal class VariantSolver(
         var resultSubst = Substitution.single(typeVar, listType)
 
         if (constructorName == BuiltinTypes.CONS && expectedPayloadType != null) {
-            val expectedConsPayload = MezzeType.RecordType(mapOf(
-                "head" to elemTypeVar, "tail" to listType
-            ))
+            val expectedConsPayload = BuiltinTypes.consPayload(elemTypeVar)
             val unifyResult = unify(expectedPayloadType, expectedConsPayload, registry)
             when (unifyResult) {
                 is UnificationResult.Success -> resultSubst = resultSubst.compose(unifyResult.substitution)
@@ -375,6 +375,13 @@ internal class VariantSolver(
         }
 
         if (isPatternContext) {
+            // An undeclared constructor on a scrutinee that is still an unsolved var
+            // gets an OPEN variant invented for it. That is row polymorphism, not a
+            // hole: `OpenVariantUnificationTest` and the inferred-variant rules
+            // depend on it, and the scrutinee's real type constrains it later.
+            // Constructor patterns on a KNOWN scrutinee are checked against that
+            // type — see the `else` arm of `solveHasConstructor` and the newtype-form
+            // check in `PatternConstraints.generateConstructor`.
             val newRowVar = RowVar.fresh()
             val newVariant = MezzeType.VariantType(
                 constructors = mapOf(constructorName to expectedPayloadType),
@@ -552,9 +559,7 @@ internal class VariantSolver(
     ): ConstraintSolver.ConstraintResult {
         if (constructorName == BuiltinTypes.CONS) {
             if (expectedPayloadType != null) {
-                val expectedConsPayload = MezzeType.RecordType(mapOf(
-                    "head" to listType.elementType, "tail" to listType
-                ))
+                val expectedConsPayload = BuiltinTypes.consPayload(listType.elementType)
                 val result = unify(expectedPayloadType, expectedConsPayload, registry)
                 return when (result) {
                     is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)

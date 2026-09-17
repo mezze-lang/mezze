@@ -310,6 +310,23 @@ class PatternConstraintGenerator {
         sourceLoc: Loc? = null
     ): PatternConstraintResult {
 
+        // `Ctor { … }` is the VARIANT-constructor form. A newtype has a constructor
+        // of the same name, so `N { x }` resolved and type-checked — and then died
+        // at runtime, because a newtype is ERASED to its payload and there is no `N`
+        // tag to match. `N.(inner)` is the form that survives erasure, and it parses
+        // to its own node. Rejected here, where the SHAPE of the pattern is still
+        // visible, rather than in a solver that sees only "some constructor named N".
+        if (context.typeDeclarations[pattern.constructor]?.definition is ParsedNewtypeDef) {
+            throw TypeCheckError(
+                "`${pattern.constructor}` is a newtype, not a variant constructor. " +
+                    "Match it with `${pattern.constructor}.(inner)`: a newtype is erased to its " +
+                    "payload at runtime, so there is no `${pattern.constructor}` tag for " +
+                    "`${pattern.constructor} { … }` to match.",
+                sourceLoc,
+                code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
+            )
+        }
+
         val payload = pattern.payload
 
         if (payload == null) {

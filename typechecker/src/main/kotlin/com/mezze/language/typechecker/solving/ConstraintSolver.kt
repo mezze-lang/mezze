@@ -387,6 +387,14 @@ class ConstraintSolver(
                                 errors.add(ConstraintError(
                                     message = result.message,
                                     constraint = appliedConstraint,
+                                    // A constructor that resolves to nothing is its
+                                    // own kind of failure, and callers have to be able
+                                    // to tell it from an equality mismatch WITHOUT
+                                    // matching on the message text — the top-level-expr
+                                    // filter in ConstraintGenerator keeps errors by
+                                    // typed code, and without one this failure was
+                                    // dropped there and the program ran.
+                                    code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
                                     context = appliedConstraint.context
                                 ))
                                 poison(constraint)

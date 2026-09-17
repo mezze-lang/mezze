@@ -141,7 +141,7 @@ class BufferModuleTest {
             let b = buffer::to_bytes { buf = buf2 }
             match bytes::to_str { b = b } is
                 Ok { val } -> val
-                Error { error } -> "failed"
+                Err { error } -> "failed"
         """)
         assertEquals("Hi", result)
     }
@@ -231,7 +231,7 @@ class BufferModuleTest {
             let b = buffer::to_bytes { buf = buf4 }
             match bytes::to_str { b = b } is
                 Ok { val } -> val
-                Error { error } -> "failed"
+                Err { error } -> "failed"
         """)
         assertEquals("Second", result)
     }
@@ -266,7 +266,7 @@ class BufferModuleTest {
             let result = buffer::to_bytes { buf = buf4 }
             match bytes::to_str { b = result } is
                 Ok { val } -> val
-                Error { error } -> "failed"
+                Err { error } -> "failed"
         """)
         assertEquals("ABC", result)
     }

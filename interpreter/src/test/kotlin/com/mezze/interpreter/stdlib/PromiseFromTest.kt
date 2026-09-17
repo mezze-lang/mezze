@@ -191,7 +191,7 @@ class PromiseFromTest {
                 {}
               }
               }
-              cancel { p = p, reason = LostRace {} }
+              cancel { p = p, reason = LostRace }
               deref { atom = observed }
         """.trimIndent()
         assertEquals(42L, eval(code))
@@ -260,7 +260,7 @@ class PromiseFromTest {
                     {}
                 }
               }
-              cancel { p = p, reason = LostRace {} }
+              cancel { p = p, reason = LostRace }
               deref { atom = observed }
         """.trimIndent()
         assertEquals(1L, eval(code))
@@ -272,7 +272,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel, is_cancelled }
             perform LoomAsync in do
               let p = promise_from { setup = { complete, fail, on_cancel } -> {} }
-              cancel { p = p, reason = LostRace {} }
+              cancel { p = p, reason = LostRace }
               is_cancelled { p = p }
         """.trimIndent()
         assertEquals(true, eval(code))
@@ -296,7 +296,7 @@ class PromiseFromTest {
                   {}
                 }
               }
-              cancel { p = p, reason = LostRace {} }
+              cancel { p = p, reason = LostRace }
               deref { atom = observed }
         """.trimIndent()
         // Second on_cancel wins → observed = 2

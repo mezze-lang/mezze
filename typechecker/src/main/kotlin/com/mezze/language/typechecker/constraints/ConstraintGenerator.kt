@@ -310,6 +310,27 @@ class ConstraintGenerator(
                         val solveResult = solver.solve(structuralConstraints)
                         if (solveResult is ConstraintSolver.SolveResult.Success) {
                             perBindingSubstitution = solveResult.substitution.compose(perBindingSubstitution)
+                        } else if (solveResult is ConstraintSolver.SolveResult.Failure) {
+                            // This solve used to keep its Success and drop its Failure
+                            // on the floor. So `match p is Nonsense { x }` as the
+                            // module result type-checked — the solver had already
+                            // produced "Cannot use constructor 'Nonsense' on
+                            // non-variant type" and nobody read it — and the program
+                            // then died at runtime with "no variant tag matched —
+                            // typechecker exhaustiveness guarantee violated". The
+                            // identical match `let`-bound was rejected properly: the
+                            // same top-level-vs-bound asymmetry the ability re-solve
+                            // just below was written to close.
+                            //
+                            // Only constructor resolution is surfaced, and by typed
+                            // code. A constructor no type in scope declares can never
+                            // become valid later, so deferring it to the global solver
+                            // defers it to nobody. Equality and field failures stay
+                            // deferred — the global solver owns their inference
+                            // ordering, which is the rule the filter below states.
+                            perBindingSolveErrors.addAll(
+                                solveResult.errors.filter { it.code == ErrorCode.V0704_UNKNOWN_CONSTRUCTOR }
+                            )
                         }
                     }
 
@@ -337,8 +358,21 @@ class ConstraintGenerator(
                             // single typed code discriminates them (no magic-string or
                             // constraint-shape matching). Equality / method-resolution
                             // failures are dropped here; the global solver owns those.
+                            // ...and constructor resolution, for the same reason and
+                            // by the same means. `match p is Nonsense { x }` fails
+                            // here with "Cannot use constructor … on non-variant
+                            // type", and dropping it let a top-level match on a name
+                            // no type declares type-check and then die at runtime
+                            // ("no variant tag matched — typechecker exhaustiveness
+                            // guarantee violated"). The identical match `let`-bound
+                            // was rejected — the same asymmetry this block already
+                            // exists to close for abilities.
+                            val keptCodes = setOf(
+                                ErrorCode.V0402_ABILITY_NOT_SATISFIED,
+                                ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
+                            )
                             perBindingSolveErrors.addAll(
-                                solveResult.errors.filter { it.code == ErrorCode.V0402_ABILITY_NOT_SATISFIED }
+                                solveResult.errors.filter { it.code in keptCodes }
                             )
                         }
                     }
