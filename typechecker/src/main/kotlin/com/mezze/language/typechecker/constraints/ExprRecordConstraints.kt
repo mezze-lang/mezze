@@ -321,7 +321,20 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
     }
 
     if (receiverName != null) {
-        if (BuiltInAbilities.isBuiltInAbility(receiverName)) {
+        // A NAME is not an ability. `BuiltInAbilities` is a name SET, so a module
+        // declaring its own `ability Default` was routed down the BUILT-IN path —
+        // skipping the "Direct ability access is not allowed" rejection that every
+        // other user ability gets, and then dispatching through the built-in's
+        // notion of the method, which blew up at runtime with "Expected record for
+        // field 'default', got: MezzeVariant". Take this path only when the name in
+        // scope really IS the built-in ability: nothing here declares it, or what
+        // does is that same declaration by content hash.
+        val declaredHere = context.abilityDeclarations[receiverName]
+        val receiverIsBuiltInAbility = BuiltInAbilities.isBuiltInAbility(receiverName) &&
+            (declaredHere == null ||
+                (declaredHere.contentHash ?: ParsedDeclHasher.hashAbilityDecl(declaredHere)) ==
+                    com.mezze.language.typechecker.WellKnownHashConstants.resolveAbilityHash(receiverName))
+        if (receiverIsBuiltInAbility) {
             val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
             val methodType = BuiltInAbilities.getAbilityMethodType(
                 receiverName,
