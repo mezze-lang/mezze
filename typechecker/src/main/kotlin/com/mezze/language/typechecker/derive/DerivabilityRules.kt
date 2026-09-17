@@ -90,6 +90,26 @@ internal fun canDeriveAbilityStructurally(
         WellKnownHashConstants.isEq(resolvedHash) ->
             unwrappedType is MezzeType.VarType ||
                 BuiltInAbilities.isBoolVariant(unwrappedType) ||
+                // A PRIMITIVE derives Eq, with that primitive's own semantics.
+                //
+                // Nothing here is for an author to decide: `Int` compares as a
+                // long, `Str` as a string, `Float` by the platform's IEEE rules (so
+                // `NaN` is not equal to itself). `==` lowers to a comparison node
+                // that specialises per type and already gets each of these right,
+                // so deriving costs nothing and spares every primitive an impl that
+                // could only restate what the language already means.
+                //
+                // A NEWTYPE is the one thing this cannot cover, and is excluded
+                // above: it is erased to its payload at runtime, so a derived
+                // comparison would silently be the WRAPPED type's. That is why a
+                // newtype — and only a newtype — must say what its equality is.
+                unwrappedType is MezzeType.BoolType ||
+                unwrappedType is MezzeType.IntType ||
+                unwrappedType is MezzeType.FloatType ||
+                unwrappedType is MezzeType.StringType ||
+                unwrappedType is MezzeType.CharType ||
+                unwrappedType is MezzeType.BytesType ||
+                unwrappedType is MezzeType.FracType ||
                 (unwrappedType is MezzeType.RecordType &&
                     (unwrappedType as MezzeType.RecordType).fields.values
                         .all { componentSatisfies(abilityName, it, abilityHash, seen) }) ||
