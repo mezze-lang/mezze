@@ -248,6 +248,27 @@ class ContextBuilder {
      * impl already in [ctx] so a newtype component's declared `Eq` counts.
      * Needs `Eq` nameable in this module (its decl in scope), as a source impl would.
      */
+    /**
+     * The type NAMES this module already writes an `<ability>` impl for.
+     *
+     * Only used to stay OUT of the way: where a module writes its own instance the
+     * compiler generates none, so the duplicate is reported once, by the validator,
+     * rather than being manufactured here and then rejected.
+     */
+    private fun explicitImplTargetNames(
+        explicitImpls: List<ParsedImplAbilityDecl>,
+        abilityName: String,
+    ): Set<String> = explicitImpls
+        .filter { it.abilityName == abilityName }
+        .mapNotNull { impl ->
+            when (val t = impl.targetTypes.lastOrNull()) {
+                is ParsedNamedType -> t.name
+                is ParsedTypeApp -> t.constructor
+                else -> null
+            }
+        }
+        .toSet()
+
     private fun deriveAbilityImpls(
         module: ParsedModule,
         typeDecls: Map<String, ParsedTypeDecl>,
@@ -264,16 +285,7 @@ class ContextBuilder {
 
         val declaredHere = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
         val homeHere = currentModulePath?.let { BuiltinTypeRegistry.getLocalTypesForModule(ModulePath.parse(it)) } ?: emptySet()
-        val explicitEqTargets = explicitImpls
-            .filter { it.abilityName == "Eq" }
-            .mapNotNull { impl ->
-                when (val t = impl.targetTypes.lastOrNull()) {
-                    is ParsedNamedType -> t.name
-                    is ParsedTypeApp -> t.constructor
-                    else -> null
-                }
-            }
-            .toSet()
+        val explicitEqTargets = explicitImplTargetNames(explicitImpls, "Eq")
         val registry = DeclarationRegistry.from(typeDecls + importedTypes, allAbilityDecls, effectDecls)
         val checker = com.mezze.language.typechecker.solving.AbilityChecker(ctx, registry)
 
@@ -282,9 +294,31 @@ class ContextBuilder {
         // `std::str`, exactly where a hand-written impl was allowed to live. The
         // instance has to exist for the same reason every other one does: a generic
         // position needs an `Eq Str` DICT to pass, and derivability alone is not one.
+        // `Eq` and `Hash` are generated together, because they are one decision: a
+        // hash container buckets by `hash` and compares by `eq`, and a derived
+        // equality paired with a hand-written hash is the pairing the coherence rule
+        // rejects for every other type.
+        // Each generated impl needs its ability NAMEABLE here, exactly as a source
+        // impl would — the `Eq` guard at the top of this function is the same rule.
+        // `Hash` is checked separately because a module can perfectly well import
+        // one and not the other, and generating an impl of an ability the module
+        // cannot name fails later with "Ability 'Hash' is not defined or not
+        // imported", pointing at an impl the author never wrote.
+        val hashDecl = allAbilityDecls["Hash"]
+        val hashNameable = hashDecl != null && WellKnownHashConstants.isHash(
+            hashDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(hashDecl)
+        )
+        val explicitHashTargets = explicitImplTargetNames(explicitImpls, "Hash")
         val primitiveImpls = com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqNames
-            .filter { it in homeHere && it !in explicitEqTargets }
-            .mapNotNull { com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqImpl(it) }
+            .filter { it in homeHere }
+            .flatMap { name ->
+                listOfNotNull(
+                    if (name in explicitEqTargets) null
+                    else com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqImpl(name),
+                    if (!hashNameable || name in explicitHashTargets) null
+                    else com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveHashImpl(name),
+                )
+            }
             .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
 
         return primitiveImpls + typeDecls.values.mapNotNull { decl ->

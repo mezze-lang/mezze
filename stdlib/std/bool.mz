@@ -7,9 +7,6 @@ use std::abilities::default::{ Default }
 ## `Eq` and `Hash` are written together or not at all: a hash container
 ## buckets by one and compares by the other, so a value whose hash
 ## disagrees with its equality is silently kept twice.
-impl Hash for Bool where {
-  hash: { it: Bool } -> Int = { it } -> structural_hash { it = it }
-}
 
 
 impl LogicalAnd for Bool where {

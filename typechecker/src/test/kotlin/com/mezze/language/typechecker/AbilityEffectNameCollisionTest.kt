@@ -287,16 +287,33 @@ class AbilityEffectNameCollisionTest {
                 hash: {it: 'a} -> Int
             }
 
-            impl Hash for Bool where {
-                hash: {it: Bool} -> Int = {it} -> if it then 1 else 0
+            # Implemented for a NEWTYPE, not for `Bool` directly. These declarations
+            # are content-identical to the well-known `Eq`/`Hash`, so they ARE those
+            # abilities — and the compiler derives both for every primitive, which
+            # makes a hand-written pair for `Bool` a second instance for one type. A
+            # newtype derives no `Eq`, so its own is the one legitimate instance.
+            # What this test is about — redeclaring an ability whose NAME collides
+            # with a built-in — is unchanged.
+            newtype Flag = Bool
+
+            impl Hash for Flag where {
+                hash: {it: Flag} -> Int = {it} ->
+                    match it is
+                        Flag.(b) -> if b then 1 else 0
             }
 
-            impl Eq for Bool where {
-                eq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then r else if r then False else True,
-                neq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then if r then False else True else r
+            impl Eq for Flag where {
+                eq: {it: Flag, r: Flag} -> Bool = {it, r} ->
+                    match it is
+                        Flag.(a) -> match r is
+                            Flag.(b) -> if a then b else if b then False else True,
+                neq: {it: Flag, r: Flag} -> Bool = {it, r} ->
+                    match it is
+                        Flag.(a) -> match r is
+                            Flag.(b) -> if a then if b then False else True else b
             }
 
-            let test = True.eq {r = False}
+            let test = Flag.(True).eq {r = Flag.(False)}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

@@ -23,9 +23,6 @@ impl NumDiv Frac for Frac having 'out = Frac where {
 ## `Eq` and `Hash` are written together or not at all: a hash container
 ## buckets by one and compares by the other, so a value whose hash
 ## disagrees with its equality is silently kept twice.
-impl Hash for Frac where {
-  hash: { it: Frac } -> Int = { it } -> structural_hash { it = it }
-}
 
 
 impl Ord for Frac where {

@@ -30,6 +30,7 @@ import com.mezze.language.parsedast.ParsedRecordDef
 import com.mezze.language.parsedast.ParsedRecordPattern
 import com.mezze.language.parsedast.ParsedRecordPatternEntry
 import com.mezze.language.parsedast.ParsedRecordType
+import com.mezze.language.parsedast.ParsedRecordTypeEntry
 import com.mezze.language.parsedast.ParsedTypeAliasDef
 import com.mezze.language.parsedast.ParsedTypeAnnotation
 import com.mezze.language.parsedast.ParsedTypeApp
@@ -126,6 +127,65 @@ object DerivedImplGenerator {
 
     /** Every primitive that derives `Eq`, for the caller that generates them. */
     val primitiveEqNames: Set<String> get() = PRIMITIVE_EQ.keys
+
+    private const val HASH_ABILITY = "Hash"
+    private const val STRUCTURAL_HASH_NATIVE = "__native_structural_hash"
+
+    /**
+     * `impl Hash for Int`, and its six siblings — the partner of [primitiveEqImpl].
+     *
+     * `Eq` and `Hash` are one decision: a hash container buckets by `hash` and then
+     * compares by `eq`, so a type whose equality is derived must have the hash that
+     * AGREES with it. Deriving one and leaving the other hand-written is the exact
+     * pairing the coherence rule rejects everywhere else, so the primitives cannot
+     * be the place it is tolerated.
+     *
+     * The body is the one the seven `.mz` impls all had — the structural hash,
+     * which is the derived hash by definition — so this moves the decision without
+     * changing the answer. It calls the NATIVE rather than the stdlib's
+     * `structural_hash` wrapper, because a generated impl must not depend on what
+     * its host module happens to import: `std::int` imported that wrapper only for
+     * the impl this replaces, so the very next tidy-up of an unused import would
+     * have broken generation. The op's written signature is what pins the types the
+     * wrapper used to.
+     */
+    fun primitiveHashImpl(name: String): ParsedImplAbilityDecl? {
+        if (name !in PRIMITIVE_EQ) return null
+        val receiver = ParsedNamedType(name, loc())
+        return ParsedImplAbilityDecl(
+            target = ParsedImplTarget.Named(ParsedQualifiedRef(HASH_ABILITY, null, loc())),
+            targetTypes = listOf(receiver),
+            forallVars = emptyList(),
+            operations = listOf(
+                ParsedImplOp(
+                    name = "hash",
+                    // Annotated for the same reason the stdlib annotated it: the body
+                    // is a call whose result type the op's own signature has to pin,
+                    // or the instance ships with an unbound return type.
+                    paramType = ParsedRecordType(
+                        listOf(ParsedRecordTypeEntry(LEFT, receiver, loc())),
+                        loc = loc(),
+                    ),
+                    returnType = ParsedNamedType(PrimitiveTypes.INT, loc()),
+                    implementation = ParsedLambda(
+                        params = ParsedLambdaParams.Untyped(names = listOf(LEFT)),
+                        body = ParsedFunctionCall(
+                            function = id(STRUCTURAL_HASH_NATIVE),
+                            arguments = ParsedRecordLit(
+                                listOf(ParsedRecordEntry.Field(LEFT, id(LEFT), loc())),
+                                loc(),
+                            ),
+                            loc = loc(),
+                        ),
+                        loc = loc(),
+                    ),
+                    loc = loc(),
+                ),
+            ),
+            loc = loc(),
+            derived = true,
+        )
+    }
 
     /**
      * `impl Eq for Int`, and its six siblings.

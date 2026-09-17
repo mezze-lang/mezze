@@ -38,19 +38,35 @@ class AbilityValidationTest {
               hash: {it: 'a} -> Int
             }
 
-            impl Hash for Str where {
-              hash: {it: Str} -> Int = {it} -> it.length {}
+            # Implemented for a NEWTYPE, not for `Str` directly: these declarations
+            # are content-identical to the well-known `Eq`/`Hash`, so they ARE those
+            # abilities, and the compiler derives both for every primitive — a
+            # hand-written pair for `Str` would be a second instance for one type.
+            # A newtype derives no `Eq`, so its own is the one instance. What this
+            # test is about — a multi-operation impl type-checking and dispatching —
+            # is unchanged.
+            newtype Key = Str
+
+            impl Hash for Key where {
+              hash: {it: Key} -> Int = {it} ->
+                match it is
+                  Key.(s) -> s.length {}
             }
 
-            impl Eq for Str where {
-              eq: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r},
-              neq: {it: Str, r: Str} -> Bool = {it, r} -> (stringEquals {a = it, b = r}).not {}
-
+            impl Eq for Key where {
+              eq: {it: Key, r: Key} -> Bool = {it, r} ->
+                match it is
+                  Key.(a) -> match r is
+                    Key.(b) -> stringEquals {a = a, b = b},
+              neq: {it: Key, r: Key} -> Bool = {it, r} ->
+                match it is
+                  Key.(a) -> match r is
+                    Key.(b) -> (stringEquals {a = a, b = b}).not {}
             }
 
             let areEqual = {x, y} -> x.eq {r = y}
 
-            areEqual {x = "hello", y = "world"}
+            areEqual {x = Key.("hello"), y = Key.("world")}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

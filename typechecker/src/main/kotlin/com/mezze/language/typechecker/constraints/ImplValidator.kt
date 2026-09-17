@@ -85,6 +85,57 @@ internal class ImplValidator(
      * `SeqType('a#26948)` and `SeqType('a#27001)`, which are different types. What
      * makes them the same TARGET is the shape, not which variable filled the hole.
      */
+    /**
+     * What to call an impl's receiver in a coherence error, or null when the
+     * coherence rule does not apply to it at all.
+     *
+     * It applies to exactly two kinds of receiver. A DECLARED nominal type — the
+     * compiler derives its `Eq`/`Inspect` structurally and owns that instance. And
+     * a PRIMITIVE, which has no declaration to carry an identity and so used to
+     * escape the rule entirely: `impl Eq for Int` was accepted and then never
+     * reached, because a primitive receiver takes the inline comparison node before
+     * ability resolution runs. Silently-unreachable code is worse than a duplicate,
+     * so a primitive is named by the only name it has and held to the same rule.
+     *
+     * For a primitive the ability matters, because SATISFYING an ability and having
+     * an instance DERIVED are not the same claim, and only the second makes a
+     * hand-written impl a duplicate. `Bool` satisfies `LogicalAnd` — `&&` is
+     * answered by an inline node — but nothing generates an instance, so
+     * `impl LogicalAnd for Bool` is the only one there is and has to be allowed.
+     * `Eq` and `Hash` are the two the compiler actually writes for a primitive.
+     *
+     * Everything else — a builtin shape like `['a]`, an anonymous record — is not a
+     * derived instance's territory and is left alone.
+     */
+    private fun coherenceReceiverName(receiver: MezzeType, abilityHash: Hash?): String? {
+        if (PrimitiveTypes.isPrimitiveType(receiver)) {
+            val generated = WellKnownHashConstants.isEq(abilityHash) ||
+                WellKnownHashConstants.isHash(abilityHash)
+            return if (generated) declaredTypeName(receiver) else null
+        }
+        return declaredTypeName(receiver)
+    }
+
+    /**
+     * What to CALL a type in a diagnostic: the name it was declared under.
+     *
+     * A declared receiver arrives in one of two shapes (the two-representations
+     * landmine): alias-expanded `type P = {..}` / `type V = | .. |` is a RecordType
+     * or VariantType carrying the declaration's identity, while `Option 'a` and a
+     * newtype are a TypeApplication — so the identity is read off whichever shape
+     * came, never off a constructor name. A primitive has no declaration at all and
+     * answers with the only name it has; without that it rendered as its Kotlin
+     * `toString`, and an error message read `MezzeType$IntType@73d6d0c`.
+     *
+     * Null for anything with no name of its own — an anonymous record, a bare shape.
+     */
+    private fun declaredTypeName(type: MezzeType): String? =
+        PrimitiveTypes.toName(type)
+            ?: (((type as? MezzeType.RecordType)?.identity
+                ?: (type as? MezzeType.VariantType)?.identity
+                ?: (type as? MezzeType.TypeApplication)?.identity)
+                as? TypeIdentity.Declared)?.displayName
+
     private fun canonicalTargetKey(type: MezzeType): MezzeType {
         val vars = com.mezze.language.ast.solving.collectFreeTypeVars(type)
         if (vars.isEmpty()) return type
@@ -132,12 +183,7 @@ internal class ImplValidator(
             if (isEq) eqTargets.putIfAbsent(key, decl) else hashTargets.add(key)
         }
         return eqTargets.filterKeys { it !in hashTargets }.map { (key, decl) ->
-            val shown = key.joinToString(" ") { t ->
-                ((t as? MezzeType.RecordType)?.identity as? TypeIdentity.Declared)?.displayName
-                    ?: ((t as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.displayName
-                    ?: ((t as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.displayName
-                    ?: t.toString()
-            }
+            val shown = key.joinToString(" ") { t -> declaredTypeName(t) ?: t.toString() }
             TypeCheckError(
                 "`$shown` writes its own `Eq` but not a `Hash`. They are one decision: a hash " +
                     "container buckets by `hash` and compares by `eq`, so a custom equality left " +
@@ -196,15 +242,11 @@ internal class ImplValidator(
             if (impl.derived) return@run
             val receiverAnn = impl.targetTypes.lastOrNull() ?: return@run
             val receiver = convertTypeAnnotation(receiverAnn)
-            val identity = (receiver as? com.mezze.language.ast.MezzeType.RecordType)?.identity
-                ?: (receiver as? com.mezze.language.ast.MezzeType.VariantType)?.identity
-                ?: (receiver as? com.mezze.language.ast.MezzeType.TypeApplication)?.identity
-                ?: return@run
-            if (identity !is com.mezze.language.ast.TypeIdentity.Declared) return@run
             if (receiver is com.mezze.language.ast.MezzeType.TypeApplication &&
                 registry.lookupType(receiver.constructor)?.definition is com.mezze.language.parsedast.ParsedNewtypeDef
             ) return@run
             val abilityHash = registry.resolveAbilityHash(abilityName)
+            val displayName = coherenceReceiverName(receiver, abilityHash) ?: return@run
             // `Hash` is derived for EVERY type, so "is it already derived?" is
             // always yes and would forbid every hand-written Hash — including the
             // ones the Eq/Hash pairing rule REQUIRES. The question that actually
@@ -221,10 +263,10 @@ internal class ImplValidator(
                 throw TypeCheckError(
                     if (coherenceAbility == abilityName)
                         "Duplicate ability impl: `$abilityName` is derived by the compiler for " +
-                        "`${identity.displayName}` (records and variants derive it structurally), so it is " +
+                        "`$displayName`, so it is " +
                         "already implemented — a hand-written impl is a second instance for the same type."
                     else
-                        "`Hash` cannot be hand-written for `${identity.displayName}`: its `Eq` is the " +
+                        "`Hash` cannot be hand-written for `$displayName`: its `Eq` is the " +
                         "compiler-derived structural one, and a custom hash paired with a structural " +
                         "equality breaks the invariant every hash container relies on — two values that " +
                         "compare equal would hash apart and both be kept. Write `Eq` and `Hash` together, " +
