@@ -1644,16 +1644,46 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
     whose `Eq` compares only the `x` field now hashes only `x`, where the
     structural hash would have included `y` and split equal values apart.
 
-  **Still OPEN — the container threading.** A type with a hand-written `Eq` (and
-  now a matching `Hash`) is accepted, and `Set`/`Map` still ignore both. They need
-  the element's `eq` and `hash` closures carried from construction the way
-  `ElementComparator` carries a sorted container's `cmp` (T1.3). The precedent for
-  the cost is established: `seq::unique` already calls an `eq` closure per
-  comparison, with no fast path. What is new for a hash container is that the
-  closures must reach `MezzeSet`/`MezzeMap`'s GENERIC storage — the
-  Long/Double/String storages are primitives-only, where structural and instance
-  equality coincide, so they need nothing. `HashContainerInstanceTest` carries the
-  three open cases.
+  **Still OPEN — the container threading. BUILT, MEASURED, AND REVERTED**, because
+  the discriminator it needs does not exist yet.
+
+  The whole chain was implemented and works: an `ElementInstance` (the element's
+  `eq` + `hash` as JDK functional interfaces, mirroring `ElementComparator`), an
+  `InstanceSetStorage` that buckets and compares by it, `*_by` natives, and
+  `set.mz` helpers passing the closures the way `sorted_set` passes `cmp`. With it,
+  a `Set` of a newtype whose `Eq` compares mod 10 correctly answered `size = 1`,
+  `contains P.(11) = true`, and kept genuinely distinct values apart.
+
+  It was reverted because the stdlib passes those closures for EVERY element type,
+  so every set became instance-backed — including `Set Int`. The golden rendering
+  test caught the consequence immediately: `Set{1, 2}` printed as `Set{2, 1}`,
+  because an Int set left its long-specialised storage for the instance one. That
+  is a user-visible change to every ordinary program, in exchange for a rare case.
+  (Full-suite wall clock was unchanged at 8:17 against a 8:00–8:20 baseline, so the
+  closure-per-hash cost did not show at suite scale — but the suite is not a
+  benchmark, and the reordering alone is disqualifying.)
+
+  A compile-time discriminator was then built — `FunctionIR.isDerivedStructuralHash`
+  plus a transitive fixpoint marking any function that merely computes the
+  structural hash of its own argument, threaded to `MezzeFunction` so
+  `ElementInstances.of` could decline. **It cannot work**, and the measurement says
+  why: only **2 of ~979** functions are statically provable. The stdlib container
+  functions are GENERIC, so `{ x } -> x.hash {}` inside them compiles to a
+  `CallIndirectIR` through the dict — the element's real hash is chosen at RUNTIME,
+  and the two marked cases were the handful where a derived record/variant hash
+  inlined directly. Primitives never mark, which is exactly the population that
+  must not take the slow path.
+
+  **The blocker is therefore the same one A.2 and `DecodeTargetResolver` are on**,
+  stated three different ways: the compiler RESOLVES an obligation and then throws
+  the answer away, leaving the runtime to re-derive it or guess. Here it is "which
+  `Hash` did `with Hash 'a` resolve to, and is it the structural one"; for A.2 it is
+  "which decode impl does this call site want". A mechanism that hands the
+  resolved EVIDENCE to the runtime — a per-call-site fact, the way
+  `monoCallSiteRewrites` already carries one — closes all three. That is the next
+  structural piece of work, and it is worth more than any of the three individually.
+
+  `HashContainerInstanceTest` keeps the three open cases.
 
   Found while doing this: `addAbilityConstraintsToFunctionType` rebuilt an
   obligation's class-argument tuple by prepending the receiver UNCONDITIONALLY, so
