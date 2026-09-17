@@ -2,7 +2,10 @@ package com.mezze.interpreter.nodes.builtin.collections;
 
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.ElementHashing;
+import com.mezze.datastructures.set.EvidenceSetStorage;
 import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.set.SetStorage;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -18,6 +21,54 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 public final class SetNatives {
 
     private SetNatives() {}
+
+    // ============ Operations carrying the element's own Eq/Hash ============
+    //
+    // A hash container buckets by the element's runtime representation, which is
+    // exactly right when the element's `Eq` is the compiler's derived structural
+    // one — and wrong when the element wrote its own. `newtype P = Int` comparing
+    // mod 10 has `P.(1) == P.(11)`, and a newtype is erased, so the structural
+    // tiers see the payloads `1` and `11`, bucket them apart, and keep both.
+    //
+    // These entry points take that element's `hash` and `eq` closures and install
+    // them ON THE SET, so every later insert, lookup and removal asks the element's
+    // instance. Installed at the first operation that HAS an element: an empty set
+    // has nothing to mis-bucket, so there is nothing to convert until then.
+    //
+    // The structural entry points above are untouched and stay the default — a set
+    // whose elements derive their `Eq` keeps the specialised Long/String tiers and
+    // their iteration order. Which form a call site uses is the COMPILER's decision,
+    // taken once from the element type.
+
+    /** [set] re-bucketed under [hashing], or itself when it already is. */
+    private static MezzeSet withHashing(MezzeSet set, ElementHashing hashing) {
+        if (hashing == null) return set;
+        SetStorage storage = set.storage();
+        if (storage instanceof EvidenceSetStorage e && e.hashing() == hashing) return set;
+        return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(set.toArray(), hashing));
+    }
+
+    @TruffleBoundary
+    public static MezzeSet insertWithEvidence(MezzeSet set, Object element, MezzeFunction hashFn, MezzeFunction eqFn) {
+        return withHashing(set, ClosureHashing.of(hashFn, eqFn)).add(element);
+    }
+
+    @TruffleBoundary
+    public static boolean containsWithEvidence(MezzeSet set, Object element, MezzeFunction hashFn, MezzeFunction eqFn) {
+        return withHashing(set, ClosureHashing.of(hashFn, eqFn)).contains(element);
+    }
+
+    @TruffleBoundary
+    public static MezzeSet removeWithEvidence(MezzeSet set, Object element, MezzeFunction hashFn, MezzeFunction eqFn) {
+        return withHashing(set, ClosureHashing.of(hashFn, eqFn)).remove(element);
+    }
+
+    @TruffleBoundary
+    public static MezzeSet fromArrayWithEvidence(Object[] arr, MezzeFunction hashFn, MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return MezzeSet.of(arr);
+        return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(arr, hashing));
+    }
 
     // ==================== Factory Operations ====================
 

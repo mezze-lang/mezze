@@ -98,6 +98,13 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Creates from an existing storage.
      */
+    /** The storage strategy backing this set. Callers use it to ask whether the set
+     *  already buckets by an element instance (see EvidenceSetStorage) before
+     *  rebuilding it under one. */
+    public SetStorage storage() {
+        return storage;
+    }
+
     public static <A> MezzeSet<A> fromStorage(SetStorage storage) {
         return new MezzeSet<>(storage);
     }

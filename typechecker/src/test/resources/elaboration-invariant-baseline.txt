@@ -20,7 +20,7 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 700 UNBOUND_TYPE_VAR, 150 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
+# Counts: 704 UNBOUND_TYPE_VAR, 150 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
@@ -446,6 +446,7 @@ UNBOUND_TYPE_VAR	let:contains_key_with_cmp
 UNBOUND_TYPE_VAR	let:contains_value
 UNBOUND_TYPE_VAR	let:contains_value_with_eq
 UNBOUND_TYPE_VAR	let:contains_with_cmp
+UNBOUND_TYPE_VAR	let:contains_with_evidence
 UNBOUND_TYPE_VAR	let:count
 UNBOUND_TYPE_VAR	let:count_element
 UNBOUND_TYPE_VAR	let:dedup
@@ -503,6 +504,7 @@ UNBOUND_TYPE_VAR	let:from_map_with_cmp
 UNBOUND_TYPE_VAR	let:from_nat
 UNBOUND_TYPE_VAR	let:from_seq
 UNBOUND_TYPE_VAR	let:from_seq_with_cmp
+UNBOUND_TYPE_VAR	let:from_seq_with_evidence
 UNBOUND_TYPE_VAR	let:from_set
 UNBOUND_TYPE_VAR	let:from_sorted_map
 UNBOUND_TYPE_VAR	let:from_sorted_set
@@ -530,6 +532,7 @@ UNBOUND_TYPE_VAR	let:insert
 UNBOUND_TYPE_VAR	let:insert_all
 UNBOUND_TYPE_VAR	let:insert_at
 UNBOUND_TYPE_VAR	let:insert_with_cmp
+UNBOUND_TYPE_VAR	let:insert_with_evidence
 UNBOUND_TYPE_VAR	let:intersect
 UNBOUND_TYPE_VAR	let:intersect_maps
 UNBOUND_TYPE_VAR	let:intersection
@@ -633,6 +636,7 @@ UNBOUND_TYPE_VAR	let:remove
 UNBOUND_TYPE_VAR	let:remove_all
 UNBOUND_TYPE_VAR	let:remove_at
 UNBOUND_TYPE_VAR	let:remove_with_cmp
+UNBOUND_TYPE_VAR	let:remove_with_evidence
 UNBOUND_TYPE_VAR	let:repeat
 UNBOUND_TYPE_VAR	let:repeat_go
 UNBOUND_TYPE_VAR	let:replace

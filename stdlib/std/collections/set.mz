@@ -77,6 +77,35 @@ pub let to_seq: { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
 ## Creates a set from a Seq.
 pub let from_seq: { xs: ['a] } with Eq 'a -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 
+## ── Operations that carry the element's own `Eq`/`Hash` ──────────────────
+##
+## A hash container buckets by the element's runtime representation, which is
+## exactly right when its `Eq` is the compiler's derived structural one — and
+## wrong when the element wrote its own. `newtype P = Int` comparing mod 10 has
+## `P.(1) == P.(11)`, and a newtype is erased, so the structural tiers see the
+## payloads `1` and `11`, bucket them apart, and keep both.
+##
+## These take the element's `hash` and `eq` and install them ON THE SET, so every
+## later lookup asks the element's instance. The plain operations above stay the
+## default; which form a call site uses is the compiler's decision, taken once
+## from the element type, so a set of `Int` keeps its specialised storage.
+
+pub let insert_with_evidence:
+  { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { a: 'a, b: 'a } -> Bool } -> Set 'a =
+  { s, x, hash, eq } -> __native_set_insert_with_evidence { s = s, x = x, hash = hash, eq = eq }
+
+pub let contains_with_evidence:
+  { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { a: 'a, b: 'a } -> Bool } -> Bool =
+  { s, x, hash, eq } -> __native_set_contains_with_evidence { s = s, x = x, hash = hash, eq = eq }
+
+pub let remove_with_evidence:
+  { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { a: 'a, b: 'a } -> Bool } -> Set 'a =
+  { s, x, hash, eq } -> __native_set_remove_with_evidence { s = s, x = x, hash = hash, eq = eq }
+
+pub let from_seq_with_evidence:
+  { xs: ['a], hash: { it: 'a } -> Int, eq: { a: 'a, b: 'a } -> Bool } -> Set 'a =
+  { xs, hash, eq } -> __native_set_from_seq_with_evidence { xs = xs, hash = hash, eq = eq }
+
 ## Converts to a List.
 pub let to_list: { s: Set 'a } -> List 'a = { s } -> __native_set_to_list { s = s }
 

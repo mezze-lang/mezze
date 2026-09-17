@@ -1258,6 +1258,23 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.insert(getSet(r, "s"), getField(r, "x")));
         HANDLERS.put("__native_set_remove", (r, c) ->
             SetNatives.remove(getSet(r, "s"), getField(r, "x")));
+        // Evidence-carrying forms: the element's own `hash`/`eq` install themselves
+        // on the set, so bucketing asks the element's instance instead of its
+        // runtime representation. The compiler emits these only for an element type
+        // that HAS a hand-written instance; everything else stays on the structural
+        // entry points above.
+        HANDLERS.put("__native_set_insert_with_evidence", (r, c) ->
+            SetNatives.insertWithEvidence(getSet(r, "s"), getField(r, "x"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_set_contains_with_evidence", (r, c) ->
+            SetNatives.containsWithEvidence(getSet(r, "s"), getField(r, "x"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_set_remove_with_evidence", (r, c) ->
+            SetNatives.removeWithEvidence(getSet(r, "s"), getField(r, "x"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_set_from_seq_with_evidence", (r, c) ->
+            SetNatives.fromArrayWithEvidence(getArray(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_set_insert_all", (r, c) ->
             SetNatives.insertAll(getSet(r, "s"), getArray(r, "xs")));
         HANDLERS.put("__native_set_remove_all", (r, c) ->

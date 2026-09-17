@@ -519,6 +519,8 @@ public final class MezzeRecord implements TruffleObject {
     private static final Shape SHAPE_ACC_X;
     private static final Shape SHAPE_A_B;
     private static final Shape SHAPE_S;
+    /** `{ it: … }` — the receiver record an ability op takes. */
+    public static final Shape SHAPE_IT;
     static {
         SHAPE_X = new Shape(
             new String[]{"x"},
@@ -540,6 +542,10 @@ public final class MezzeRecord implements TruffleObject {
         );
         SHAPE_S = new Shape(
             new String[]{"s"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
+        SHAPE_IT = new Shape(
+            new String[]{"it"},
             new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
         );
     }
@@ -570,6 +576,12 @@ public final class MezzeRecord implements TruffleObject {
      */
     public static MezzeRecord wrapS(Object value) {
         return new MezzeRecord(SHAPE_S, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{value}, true);
+    }
+
+    /** Create an `{it: value}` record — the argument shape of an ability op whose
+     *  receiver is its only parameter (`hash: { it: 'a } -> Int`). */
+    public static MezzeRecord wrapIt(Object value) {
+        return new MezzeRecord(SHAPE_IT, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{value}, true);
     }
 
     public static MezzeRecord wrapAB(Object a, Object b) {
