@@ -61,6 +61,38 @@ object TypeAnnotationConverter {
         return convertInternal(annotation, config, typeVarCache, sharedRowVar, mutableSetOf())
     }
 
+    /**
+     * Convert the annotations that make up ONE signature, sharing a single
+     * variable scope across them.
+     *
+     * [convertWith] defaults to a FRESH `typeVarCache` per call, which is right
+     * for two unrelated annotations and wrong for two halves of the same one. A
+     * parameter list is the second case: the `'a` in `{ x: 'a, y: 'a }` is ONE
+     * variable, and converting each field separately made it two — so the checker
+     * never required `x` and `y` to agree, and
+     *
+     *     let same = { x: 'a, y: 'a } -> x
+     *     same { x = 1, y = "two" }
+     *
+     * typechecked and ran. The same signature written as a full arrow
+     * (`let same: { x: 'a, y: 'a } -> 'a = …`) was correctly rejected, because
+     * that path converts the whole arrow in one scope.
+     *
+     * Three sites built parameter records the split way — constraint generation
+     * for a lambda, the binding-level generator, and the typing context — which
+     * is why this lives here rather than being written a fourth time.
+     */
+    fun <K> convertSignature(
+        entries: List<Pair<K, ParsedTypeAnnotation>>,
+        config: ConversionConfig,
+    ): List<Pair<K, MezzeType>> {
+        val typeVarCache = mutableMapOf<String, TypeVar>()
+        val sharedRowVar = SharedRowVar()
+        return entries.map { (key, annotation) ->
+            key to convertInternal(annotation, config, typeVarCache, sharedRowVar, mutableSetOf())
+        }
+    }
+
     private fun convertInternal(
         annotation: ParsedTypeAnnotation,
         config: ConversionConfig,

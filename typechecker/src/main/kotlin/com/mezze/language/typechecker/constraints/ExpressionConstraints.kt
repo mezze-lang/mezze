@@ -667,4 +667,11 @@ class ExpressionConstraintGenerator {
     internal fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         return TypeAnnotationConverter.convertWith(annotation, exprConversionConfig)
     }
+
+    /** The annotations of ONE signature, in a single variable scope.
+     *  See [TypeAnnotationConverter.convertSignature]. */
+    internal fun convertSignature(
+        entries: List<Pair<String, ParsedTypeAnnotation>>,
+    ): List<Pair<String, MezzeType>> =
+        TypeAnnotationConverter.convertSignature(entries, exprConversionConfig)
 }

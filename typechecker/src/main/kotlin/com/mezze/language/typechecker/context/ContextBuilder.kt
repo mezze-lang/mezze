@@ -629,7 +629,15 @@ class ContextBuilder {
         val hasAssocTypes = effectDecl.associatedTypes.isNotEmpty()
         if (!hasAssocTypes && implDecl.params.isEmpty()) return ctx
 
-        if (hasAssocTypes) typeVarCache.clear()
+        // Unconditionally — this declaration gets its own variable scope.
+        //
+        // Gating the clear on `hasAssocTypes` left the other live path (no
+        // associated types, but parameters below to convert) reusing whatever the
+        // PREVIOUS declaration left in the cache, so this performer's `'a` could
+        // silently BE that declaration's `'a`. That is the mirror of splitting one
+        // written variable in two: here two unrelated ones are fused. The early
+        // returns above already cover the case where there is nothing to convert.
+        typeVarCache.clear()
 
         val contentHash = implDecl.contentHash
             ?: error("Content hash not computed for impl: ${implDecl.performerName}. " +
@@ -750,13 +758,25 @@ class ContextBuilder {
 
     private fun inferParamTypeFromLambda(
         implementation: ParsedExpr,
-        convertField: (ParsedTypeAnnotation, String) -> MezzeType = { ann, _ -> convertParsedTypeAnnotation(ann) }
+        // The DEFAULT shares one variable scope across the whole parameter list —
+        // see TypeAnnotationConverter.convertSignature. Per-field conversion split
+        // the `'a` of `{ x: 'a, y: 'a }` into two variables. (A caller that passes
+        // its own converter owns its scoping; both current overrides resolve each
+        // field against the ability's declared op type, so they have no shared
+        // variable to lose.)
+        convertField: (ParsedTypeAnnotation, String) -> MezzeType = { ann, _ ->
+            convertParsedTypeAnnotationInternal(ann)
+        }
     ): MezzeType {
         val lambda = implementation as? ParsedLambda
             ?: return MezzeType.RecordType(fields = emptyMap(), rowVar = null)
         return when (val params = lambda.params) {
             is ParsedLambdaParams.Typed -> MezzeType.RecordType(
-                fields = params.fields.associate { it.name to convertField(it.type, it.name) },
+                fields = run {
+                    typeVarCache.clear()
+                    sharedRowVar.reset()
+                    params.fields.associate { it.name to convertField(it.type, it.name) }
+                },
                 rowVar = null
             )
             is ParsedLambdaParams.Untyped -> MezzeType.RecordType(

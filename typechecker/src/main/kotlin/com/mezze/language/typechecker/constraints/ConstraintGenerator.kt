@@ -920,9 +920,10 @@ class ConstraintGenerator(
                 }
             } else {
                 when (val params = lambda.params) {
-                    is ParsedLambdaParams.Typed -> params.fields.associate { entry ->
-                        entry.name to convertTypeAnnotation(entry.type)
-                    }
+                    // One scope for the whole parameter list — see
+                    // TypeAnnotationConverter.convertSignature.
+                    is ParsedLambdaParams.Typed ->
+                        convertSignatureAnnotations(params.fields.map { it.name to it.type }).toMap()
                     else -> paramNames.associateWith { name ->
                         if (name == Keywords.IT) targetType
                         else MezzeType.VarType(TypeVar.fresh())
@@ -1464,6 +1465,13 @@ class ConstraintGenerator(
             annotation, constraintConversionConfig, typeVarCache, sharedRowVar
         )
     }
+
+    /** The annotations of ONE signature, in a single variable scope.
+     *  See [TypeAnnotationConverter.convertSignature]. */
+    private fun convertSignatureAnnotations(
+        entries: List<Pair<String, ParsedTypeAnnotation>>,
+    ): List<Pair<String, MezzeType>> =
+        TypeAnnotationConverter.convertSignature(entries, constraintConversionConfig)
 
     companion object {
         fun create(

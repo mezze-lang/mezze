@@ -392,9 +392,11 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         is ParsedLambdaParams.Typed -> {
             isOpenPattern = false
             paramNames = params.fields.map { it.name }
-            paramFields = params.fields.associate { entry ->
-                entry.name to convertParsedTypeAnnotation(entry.type)
-            }
+            // ONE variable scope for the whole parameter list — see
+            // TypeAnnotationConverter.convertSignature. Converting each field
+            // separately split the `'a` of `{ x: 'a, y: 'a }` into two variables,
+            // so the two parameters were never required to agree.
+            paramFields = convertSignature(params.fields.map { it.name to it.type }).toMap()
         }
     }
 

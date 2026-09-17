@@ -1484,6 +1484,44 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   of `show`, so mono derives `args=null` for that call where a plain parameter
   derives `[Money]`. Three `@Disabled` cases in `DynamicPrintTypeFidelityTest`
   carry it. Closing it makes `PrintType` total and `Dynamic` deletable.
+- **BUG 15 (new, SOUNDNESS)** A type variable written twice in one parameter list
+  was two variables, so the parameters were never required to agree:
+
+  ```mezze
+  let same = { x: 'a, y: 'a } -> x
+  same { x = 1, y = "two" }        -- typechecked, and returned 1
+  ```
+
+  `TypeAnnotationConverter.convertWith` defaults to a FRESH variable cache per
+  call, and three sites converted a parameter list one field at a time —
+  constraint generation for a lambda (`ExprFunctionConstraints`), the
+  binding-level generator (`ConstraintGenerator`), and the typing context
+  (`ContextBuilder.inferParamTypeFromLambda`). Each `'a` became its own variable.
+
+  The same signature written as a full arrow
+  (`let same: { x: 'a, y: 'a } -> 'a = …`) was correctly REJECTED, because that
+  path converts the whole arrow in one scope. Two spellings of one signature
+  disagreed about whether a program is well typed, and the inline one was the
+  unsound direction. FIXED via `TypeAnnotationConverter.convertSignature`, which
+  all three now use; `SharedTypeVarAcrossParamsTest` pins it, including the
+  complement (`'a` and `'b` stay independent).
+
+  Two more instances of the same scoping error were corrected alongside:
+  `TypedAstBuilder` cleared per ABILITY/EFFECT OP where `ContextBuilder` scopes
+  per declaration — an op's type variables must be ability parameters, so every
+  `'a` in `ability Decode 'config 'a for 'in` is the same `'a` across its ops, and
+  the two representations of one ability disagreed about which variables its ops
+  share. And `ContextBuilder`'s performer clear was GATED on `hasAssocTypes`,
+  leaving the other live path reusing the previous declaration's cache — the
+  mirror error, fusing two unrelated variables instead of splitting one.
+
+  MEASURED AND LEFT ALONE: `TypeAliasBuilder` converts a variant's constructors
+  and a record's fields per member, which splits the declaration's own parameter
+  the same way — but alias type arguments are substituted BY NAME, so both halves
+  of the split receive the same substitution and every mismatch is still
+  rejected. Benign today; it becomes live the moment that substitution stops
+  being name-based.
+
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with

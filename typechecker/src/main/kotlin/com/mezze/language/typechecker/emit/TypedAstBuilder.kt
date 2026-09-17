@@ -433,20 +433,19 @@ class TypedAstBuilder(
         val loc = decl.loc
         val hash = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
 
+        // ONE clear for the whole ability, not one per op.
+        //
+        // An op's type variables are not its own: the checker rejects any that is
+        // not a parameter of the enclosing ability ("operation 'x' has undeclared
+        // type variable(s)"). So every `'a` written anywhere in `ability Decode
+        // 'config 'a for 'in` denotes the SAME `'a`, across ops and across each
+        // op's param/return alike, and a clear anywhere inside the declaration
+        // splits it. `ContextBuilder.addAbilityMethods` — which builds the typing
+        // context for the same declaration — already scopes it this way; clearing
+        // per op here made the two representations of one ability disagree about
+        // which variables its ops share.
+        typeVarCache.clear()
         val ops = decl.operations.mapIndexed { idx, op ->
-            // One clear PER OP — ops are independent, so each may reuse `'a`. NOT
-            // between an op's param and its return: those are two halves of ONE
-            // signature, and clearing between them splits every variable they
-            // share. `map: { it: 'a, f: { x: 'a } -> 'b } -> 'b` would give the
-            // returned `'b` a different variable from the callback's.
-            //
-            // PREVENTATIVE — no program observes this today, and it was checked:
-            // an op's own type variables must be ability parameters (T0-level
-            // rejection otherwise), ability parameters must be concrete at an
-            // `impl`, and the receiver variable resolves through the impl's
-            // target types rather than the op's declared arrow. The shape that
-            // WOULD observe it becomes writable when #195 lifts the first two.
-            typeVarCache.clear()
             val paramType = convertParsedTypeAnnotation(op.paramType)
             val returnType = convertParsedTypeAnnotation(op.returnType)
             TypedAbilityOp(op.name, idx, paramType, returnType, op.loc)
@@ -733,9 +732,10 @@ class TypedAstBuilder(
         val loc = decl.loc
         val hash = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
 
+        // One clear for the whole effect — see buildAbilityDecl, and
+        // `ContextBuilder.addEffectOperations`, which scopes it the same way.
+        typeVarCache.clear()
         val ops = decl.operations.mapIndexed { idx, op ->
-            // Per OP, not between an op's param and return — see buildAbilityDecl.
-            typeVarCache.clear()
             val paramType = convertParsedTypeAnnotation(op.paramType)
             val returnType = convertParsedTypeAnnotation(op.returnType)
             TypedEffectOp(op.name, idx, paramType, returnType, op.loc)
@@ -2093,11 +2093,14 @@ class TypedAstBuilder(
                 // the context does not.
                 val contextParamFields =
                     ((resolvedContext as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType)?.fields
+                // One scope for the whole PARAMETER LIST, not one per parameter: a
+                // lambda's params belong to a single signature, so two of them
+                // written `'a` are the same `'a`. Clearing per field made them
+                // different variables.
+                typeVarCache.clear()
                 params.fields.map { field ->
-                    val type = contextParamFields?.get(field.name) ?: run {
-                        typeVarCache.clear()
-                        substitution.apply(convertParsedTypeAnnotation(field.type))
-                    }
+                    val type = contextParamFields?.get(field.name)
+                        ?: substitution.apply(convertParsedTypeAnnotation(field.type))
                     TypedParam(field.name, type, field.loc)
                 }
             }
