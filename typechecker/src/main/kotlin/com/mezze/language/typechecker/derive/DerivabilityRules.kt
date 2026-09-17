@@ -71,23 +71,23 @@ internal fun canDeriveAbilityStructurally(
     // writing one obliges it to write a matching Hash. So the derived hash is only
     // ever paired with the derived (structural) equality it agrees with.
     if (isNewtype &&
-        !WellKnownHashConstants.isInspect(abilityHash) &&
-        !WellKnownHashConstants.isHash(abilityHash)
+        !WellKnownHashConstants.isInspect(resolvedHash) &&
+        !WellKnownHashConstants.isHash(resolvedHash)
     ) {
         return false
     }
 
     return when {
-        WellKnownHashConstants.isInspect(abilityHash) -> true
+        WellKnownHashConstants.isInspect(resolvedHash) -> true
 
         // Every value has a structural hash — `Objects.hashCode` is total, and it
         // is already what every hash container computes for its keys. So unlike
         // Ord (whose runtime comparison nodes THROW for composites) there is no
         // shape this cannot answer for, and deriving it universally type-checks
         // nothing that then fails at runtime.
-        WellKnownHashConstants.isHash(abilityHash) -> true
+        WellKnownHashConstants.isHash(resolvedHash) -> true
 
-        WellKnownHashConstants.isEq(abilityHash) ->
+        WellKnownHashConstants.isEq(resolvedHash) ->
             unwrappedType is MezzeType.VarType ||
                 BuiltInAbilities.isBoolVariant(unwrappedType) ||
                 (unwrappedType is MezzeType.RecordType &&
@@ -106,7 +106,7 @@ internal fun canDeriveAbilityStructurally(
                 (com.mezze.language.ast.BuiltinTypes.sequenceElementType(unwrappedType)
                     ?.let { componentSatisfies(abilityName, it, abilityHash, seen) } == true)
 
-        WellKnownHashConstants.isOrd(abilityHash) ->
+        WellKnownHashConstants.isOrd(resolvedHash) ->
             // Ord is NOT structurally derivable for composite types. Unlike Eq —
             // whose DirectEqualNode has an Objects.equals fallback reaching
             // MezzeVariant/MezzeRecord — the runtime Direct{LessThan,GreaterThan,

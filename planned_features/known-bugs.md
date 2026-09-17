@@ -1732,6 +1732,43 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   Now shares `abilityClassArgs` with `AbilityChecker`, which already had the exact
   rule: the ability's declared ARITY decides.
 
+- **BUG 17 (FIXED) + the primitive-Eq finding.** The owner's model is that `Eq` is
+  DERIVED for everything and only a NEWTYPE has to write one. The code does not
+  match: `DerivabilityRules` derives `Eq` for records, variants, sequences, `Bool`
+  and type variables only — every primitive and builtin container needs a written
+  impl, which is why the stdlib carries 34 of them (and why the Eq/Hash pairing
+  rule then demanded 34 `Hash` impls).
+
+  **FIXED on the way**: the derive rule resolves the ability's hash into
+  `resolvedHash` and then tests the RAW `abilityHash` in its arms —
+  `isEq(abilityHash)`, `isOrd(…)`, `isInspect(…)` — while the `LogicalAnd`/`Or` arm
+  tests `resolvedHash`. So wherever a caller had only a NAME, `isEq(null)` is false
+  and the answer is silently "not derivable". The same resolve-then-discard shape as
+  A.3. All arms now ask `resolvedHash`.
+
+  **MEASURED AND NOT SHIPPED — deriving `Eq` for primitives.** Implemented (`Int`,
+  `Float`, `Str`, `Char`, `Bytes`, `Frac`, `Bool`) and the semantics come out right,
+  because `==` lowers to a comparison node that specialises per type: `NaN == NaN`
+  stayed FALSE, `Set{1, 2}` kept its order, and a generic `with Eq 'a` still
+  resolved at `'a = Int`. The 7 stdlib impls were then deleted and the stdlib built
+  clean.
+
+  It is not shipped because it moves an unrelated INFERENCE result:
+  `HoverMatchAndAliasTest` — `let fast = Async.spawn {…}` — began hovering as
+  `PromiseState Str` instead of `Promise Str`. Isolated in two runs: restoring the
+  deleted impls does NOT fix it, and removing the primitive arms alone DOES. So the
+  cause is the derive rule answering yes for primitives, not the deletions. Deriving
+  more must be changing what the solver defers or absorbs, and something downstream
+  picks a different type for the binding. `Promise` is a newtype over
+  `__NativePromise` and `PromiseState` an unrelated variant, so this is a wrong
+  answer, not a labelling nuance.
+
+  Also surfaced, worth its own fix: **`==` desugars to the ability NAMED `Eq` in
+  scope**, not to the well-known one. A module declaring its own `ability Eq`
+  silently redirects every operator, and two typechecker fixtures only passed
+  because the stdlib's `impl Eq for Int` was then matched BY NAME. That is exactly
+  the name-for-identity substitution this effort exists to remove.
+
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with
