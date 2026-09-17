@@ -24,6 +24,10 @@ data class ImplOpSolution(
     val substitution: Substitution,
 )
 
+/** The one variable every impl-target variable is collapsed to when deciding
+ *  whether two impls name the same target. See [ImplValidator.canonicalTargetKey]. */
+private val CANONICAL_TARGET_VAR = MezzeType.VarType(TypeVar("'_target", 0, -1))
+
 internal class ImplValidator(
     private val expressionGenerator: ExpressionConstraintGenerator,
     private val registry: DeclarationRegistry,
@@ -70,6 +74,80 @@ internal class ImplValidator(
         val snapshot = implOpSolutions.toList()
         implOpSolutions.clear()
         return snapshot
+    }
+
+    /**
+     * An impl target with every type VARIABLE collapsed to one canonical variable,
+     * so two writings of the same target compare equal.
+     *
+     * Each `convertTypeAnnotation` mints fresh variables, and `TypeVar` carries an
+     * id in its equality — so `impl Eq for ['a]` and `impl Hash for ['a]` convert to
+     * `SeqType('a#26948)` and `SeqType('a#27001)`, which are different types. What
+     * makes them the same TARGET is the shape, not which variable filled the hole.
+     */
+    private fun canonicalTargetKey(type: MezzeType): MezzeType {
+        val vars = com.mezze.language.ast.solving.collectFreeTypeVars(type)
+        if (vars.isEmpty()) return type
+        return Substitution(vars.associateWith { CANONICAL_TARGET_VAR }).apply(type)
+    }
+
+    /**
+     * `Eq` and `Hash` are ONE decision: a module that writes one for a type must
+     * write the other.
+     *
+     * Every hash container buckets by `hash` and then compares by `eq`. If the two
+     * disagree, two values that ARE equal land in different buckets, the equality
+     * is never consulted, and the container silently keeps both. So the dangerous
+     * combination is not a missing ability — it is a CUSTOM one paired with a
+     * DERIVED one, in either direction:
+     *
+     *   - a hand-written `Eq` with the derived structural hash, and
+     *   - a hand-written `Hash` with the derived structural equality.
+     *
+     * The second is rejected by the coherence rule above (which asks about `Eq`
+     * when the impl is a `Hash`). This is the first: `Hash` derives for every type,
+     * so nothing else would ever notice its absence.
+     *
+     * Checked per MODULE and matched on the impl's target ANNOTATION text, which is
+     * what a reader sees as "the same type" — an impl for a type declared elsewhere
+     * still has to be written next to its partner, because coherence already
+     * confines both to the type's own module.
+     */
+    fun validateEqHashPairing(decls: List<ParsedDecl>): List<TypeCheckError> {
+        // Keyed on the converted TYPES, never on their rendering: `mezzeTypeToString`
+        // is lossy and two different types can print alike, which would silently pair
+        // an `Eq` with someone else's `Hash`. Type VARIABLES are canonicalised first —
+        // each conversion of `['a]` mints a fresh variable with its own id, so the raw
+        // types of `impl Eq for ['a]` and `impl Hash for ['a]` are never equal.
+        val eqTargets = LinkedHashMap<List<MezzeType>, ParsedImplAbilityDecl>()
+        val hashTargets = HashSet<List<MezzeType>>()
+        for (decl in decls) {
+            if (decl !is ParsedImplAbilityDecl || decl.isInherent || decl.derived) continue
+            val name = (decl.target as? ParsedImplTarget.Named)?.ability?.localName ?: continue
+            val abilityHash = registry.resolveAbilityHash(name)
+            val isEq = WellKnownHashConstants.isEq(abilityHash)
+            val isHash = WellKnownHashConstants.isHash(abilityHash)
+            if (!isEq && !isHash) continue
+            val key = decl.targetTypes.map { canonicalTargetKey(convertTypeAnnotation(it)) }
+            if (isEq) eqTargets.putIfAbsent(key, decl) else hashTargets.add(key)
+        }
+        return eqTargets.filterKeys { it !in hashTargets }.map { (key, decl) ->
+            val shown = key.joinToString(" ") { t ->
+                ((t as? MezzeType.RecordType)?.identity as? TypeIdentity.Declared)?.displayName
+                    ?: ((t as? MezzeType.VariantType)?.identity as? TypeIdentity.Declared)?.displayName
+                    ?: ((t as? MezzeType.TypeApplication)?.identity as? TypeIdentity.Declared)?.displayName
+                    ?: t.toString()
+            }
+            TypeCheckError(
+                "`$shown` writes its own `Eq` but not a `Hash`. They are one decision: a hash " +
+                    "container buckets by `hash` and compares by `eq`, so a custom equality left " +
+                    "with the derived structural hash means two values that ARE equal hash apart, " +
+                    "never meet, and are both kept. Add an `impl Hash for $shown` whose `hash` " +
+                    "agrees with this `Eq`.",
+                decl.loc,
+                code = ErrorCode.V0401_ABILITY_NOT_DEFINED,
+            )
+        }
     }
 
     fun validateAbilityImplementation(impl: ParsedImplAbilityDecl, context: TypingContext) {
@@ -127,13 +205,30 @@ internal class ImplValidator(
                 registry.lookupType(receiver.constructor)?.definition is com.mezze.language.parsedast.ParsedNewtypeDef
             ) return@run
             val abilityHash = registry.resolveAbilityHash(abilityName)
+            // `Hash` is derived for EVERY type, so "is it already derived?" is
+            // always yes and would forbid every hand-written Hash — including the
+            // ones the Eq/Hash pairing rule REQUIRES. The question that actually
+            // matters for Hash is whether the type's EQUALITY is the derived one:
+            // a custom hash paired with a structural equality breaks
+            // `a == b ⇒ hash a == hash b` just as surely as the reverse. So ask
+            // about Eq, and the two abilities stay written together or not at all.
+            val coherenceAbility =
+                if (WellKnownHashConstants.isHash(abilityHash)) "Eq" else abilityName
+            val coherenceHash = registry.resolveAbilityHash(coherenceAbility)
             val derives = com.mezze.language.typechecker.solving.AbilityChecker(context, registry)
-                .canDeriveAbility(abilityName, receiver, abilityHash)
+                .canDeriveAbility(coherenceAbility, receiver, coherenceHash)
             if (derives) {
                 throw TypeCheckError(
-                    "Duplicate ability impl: `$abilityName` is derived by the compiler for " +
-                    "`${identity.displayName}` (records and variants derive it structurally), so it is " +
-                    "already implemented — a hand-written impl is a second instance for the same type.",
+                    if (coherenceAbility == abilityName)
+                        "Duplicate ability impl: `$abilityName` is derived by the compiler for " +
+                        "`${identity.displayName}` (records and variants derive it structurally), so it is " +
+                        "already implemented — a hand-written impl is a second instance for the same type."
+                    else
+                        "`Hash` cannot be hand-written for `${identity.displayName}`: its `Eq` is the " +
+                        "compiler-derived structural one, and a custom hash paired with a structural " +
+                        "equality breaks the invariant every hash container relies on — two values that " +
+                        "compare equal would hash apart and both be kept. Write `Eq` and `Hash` together, " +
+                        "or neither.",
                     impl.loc,
                     code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
                 )

@@ -15,10 +15,13 @@ class UserContainerInstanceTest {
     private val head = """
         use std::collections::seq
         use std::collections::list
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         newtype P = { x: Int, y: Int }
         let px: { p: P } -> Int = { p } -> match p is
           P.({ x, y }) -> x
+        impl Hash for P where {
+          hash = { it } -> px { p = it }
+        }
         impl Eq for P where { eq = { it, r } -> px { p = it } == px { p = r }, neq = { it, r } -> if px { p = it } == px { p = r } then False else True, }
         impl Ord for P where { lt = { it, r } -> px { p = it } < px { p = r }, le = { it, r } -> px { p = it } <= px { p = r }, gt = { it, r } -> px { p = it } > px { p = r }, ge = { it, r } -> px { p = it } >= px { p = r }, }
         type Tree = | Node { l: Tree, v: P, r: Tree }, Leaf |

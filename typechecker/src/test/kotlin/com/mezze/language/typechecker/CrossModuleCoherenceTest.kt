@@ -50,8 +50,11 @@ class CrossModuleCoherenceTest {
         // User's `impl Eq for Int` here must be rejected as overlapping.
         val err = checkFailsWithPrelude(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
 
+            impl Hash for Int where {
+              hash = { it } -> 0
+            }
             impl Eq for Int where {
               eq  = { it, r } -> False,
               neq = { it, r } -> True,
@@ -72,7 +75,7 @@ class CrossModuleCoherenceTest {
     fun `user cannot re-impl Ord for Int when stdlib already impls it`() {
         val err = checkFailsWithPrelude(
             """
-            use std::abilities::compare::{ Ord }
+            use std::abilities::compare::{ Ord, Hash }
 
             impl Ord for Int where {
               lt = { it, r } -> False,
@@ -122,12 +125,15 @@ class CrossModuleCoherenceTest {
         // Eq itself and a hand-written impl would be a duplicate).
         val r = checkWithPrelude(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
 
             newtype UserId = Int
             let unwrap: { u: UserId } -> Int = { u } -> match u is
               UserId.(v) -> v
 
+            impl Hash for UserId where {
+              hash = { it } -> __native_structural_hash { it = it }
+            }
             impl Eq for UserId where {
               eq  = { it, r } -> unwrap { u = it } == unwrap { u = r },
               neq = { it, r } -> unwrap { u = it } != unwrap { u = r },
@@ -196,10 +202,13 @@ class CrossModuleCoherenceTest {
         // Newtype workaround for the orphan-rule case.
         val r = checkWithPrelude(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
 
             newtype UserId = Int
 
+            impl Hash for UserId where {
+              hash = { it } -> 0
+            }
             impl Eq for UserId where {
               eq  = { it, r } -> True,
               neq = { it, r } -> False,
@@ -264,8 +273,11 @@ class CrossModuleCoherenceTest {
         // and 'a is not a local type, this must be rejected.
         val err = checkFailsWithPrelude(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
 
+            impl Hash for 'a where {
+              hash = { it } -> 0
+            }
             impl Eq for 'a where {
               eq  = { it, r } -> True,
               neq = { it, r } -> False,

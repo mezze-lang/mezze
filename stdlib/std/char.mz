@@ -1,6 +1,14 @@
-use std::abilities::compare::{ Eq, Ord }
+use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::convert::{ Into, TryInto }
 use std::int
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Char where {
+  hash: { it: Char } -> Int = { it } -> structural_hash { it = it }
+}
 
 impl Eq for Char where {
   eq = { it, r } -> __native_char_eq { a = it, b = r },

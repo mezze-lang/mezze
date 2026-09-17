@@ -357,10 +357,13 @@ class NewtypeImplTest {
         @Test
         fun `newtype Eq with neq via not`() {
             checkPasses("""
-                use std::abilities::compare::{Eq}
+                use std::abilities::compare::{ Eq, Hash }
 
                 newtype UserId = Int
 
+                impl Hash for UserId where {
+                  hash = { it } -> match it is UserId.(a) -> a
+                }
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
                         UserId.(a) -> match r is

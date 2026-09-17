@@ -83,7 +83,7 @@ fun main(args: Array<String>) {
     // This drops ~90 dead named constants (all TYPE_*, most ABILITY_*/EFFECT_*). #289
     val keptAbilities = setOf(
         // is<Ability> anchors
-        "Eq", "Ord", "Inspect", "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
+        "Eq", "Ord", "Hash", "Inspect", "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
         // codec-set members (codecAbilitySet / encode|decode-flavored / decode-entry)
         "Encode", "EncodeRepr", "Decode", "DecodeRepr",
         "StreamEncode", "StreamDecode", "DecodeFormat",
@@ -141,6 +141,7 @@ fun main(args: Array<String>) {
     sb.appendLine("    fun isDecodeFlavoredCodec(hash: Hash?): Boolean = hash != null && hash in decodeFlavoredSet")
     sb.appendLine("    fun isEq(hash: Hash?): Boolean = hash != null && hash == ABILITY_EQ")
     sb.appendLine("    fun isOrd(hash: Hash?): Boolean = hash != null && hash == ABILITY_ORD")
+    sb.appendLine("    fun isHash(hash: Hash?): Boolean = hash != null && hash == ABILITY_HASH")
     sb.appendLine("    fun isNumAdd(hash: Hash?): Boolean = hash != null && hash == ABILITY_NUMADD")
     sb.appendLine("    fun isNumSub(hash: Hash?): Boolean = hash != null && hash == ABILITY_NUMSUB")
     sb.appendLine("    fun isNumMul(hash: Hash?): Boolean = hash != null && hash == ABILITY_NUMMUL")

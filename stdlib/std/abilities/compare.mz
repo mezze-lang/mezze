@@ -18,3 +18,29 @@ ability Ord for 'a where {
   ge: { it: 'a, r: 'a } -> Bool
 }
 
+
+## Hash code, for the containers that bucket values before comparing them.
+##
+## `Hash` and `Eq` are ONE decision, not two: every hash container relies on
+## `a == b` implying `hash a == hash b`. A value whose hash disagrees with its
+## equality lands in a different bucket from its equal, so the equality is never
+## consulted and the container silently holds both.
+##
+## Hash is DERIVED for every type — including newtypes — so a type is usable as a
+## `Map` key or `Set` element with no boilerplate, and the derived hash is the
+## structural one every container already computed. A type that writes its own
+## `Eq` must write a matching `Hash`; the compiler requires it, because that is
+## exactly the case where the derived hash would be wrong.
+## The structural hash of a value — what a DERIVED `Hash` means, and what every
+## hash container already computes for its keys.
+##
+## Declared as a typed `pub let` rather than called as a bare native at each impl
+## site: a native has no written signature, so a wrapper without one leaves its
+## return an unbound variable and every `impl X.hash` finishes elaboration with an
+## open type (the elaboration gate counts exactly that).
+pub let structural_hash: { it: 'a } -> Int = { it } -> __native_structural_hash { it = it }
+
+ability Hash for 'a where {
+  ## A hash code for this value. Equal values MUST return equal codes.
+  hash: { it: 'a } -> Int
+}

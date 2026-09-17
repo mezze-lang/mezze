@@ -27,10 +27,13 @@ class ElementInstanceMatrixTest {
             use std::collections::map
             use std::collections::sorted_set
             use std::collections::nonemptylist
-            use std::abilities::compare::{ Eq, Ord }
+            use std::abilities::compare::{ Eq, Ord, Hash }
             newtype P = { x: Int, y: Int }
             let px: { p: P } -> Int = { p } -> match p is
               P.({ x, y }) -> x
+            impl Hash for P where {
+              hash = { it } -> px { p = it }
+            }
             impl Eq for P where {
               eq = { it, r } -> px { p = it } == px { p = r },
               neq = { it, r } -> if px { p = it } == px { p = r } then False else True,

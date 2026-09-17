@@ -42,8 +42,11 @@ class ContainerRepresentationParityTest {
 
     private val modTenEq = """
         use std::collections::seq
-        use std::abilities::compare::{ Eq }
+        use std::abilities::compare::{ Eq, Hash }
         newtype P = Int
+        impl Hash for P where {
+          hash = { it } -> match it is P.(a) -> a % 10
+        }
         impl Eq for P where {
           eq = { it, r } -> match it is
             P.(a) -> match r is

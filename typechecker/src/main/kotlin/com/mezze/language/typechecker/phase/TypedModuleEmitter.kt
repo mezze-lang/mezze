@@ -223,6 +223,22 @@ private fun compileModule(
         allAbilityImpls.addAll(stdlibModule.abilityImpls)
     }
 
+    // The operation names of the `Hash` ability, identified by its CONTENT HASH
+    // rather than by the literal "hash" — the ability decides what its op is
+    // called, and a user ability that happens to declare a `hash` op is a
+    // different ability. Empty when `Hash` is not in scope, which simply means no
+    // call can be a Hash call.
+    val hashOpNames = buildSet {
+        val decls = wrapped.abilityDecls.asSequence() +
+            PrecompiledStdlib.stdlibTypedModules.values.asSequence().flatMap { it.abilityDecls } +
+            loadedModules.values.asSequence().mapNotNull { it.typedModule }.flatMap { it.abilityDecls } +
+            ModuleTypeChecker.getAllCachedModules().values.asSequence()
+                .mapNotNull { it.typedModule }.flatMap { it.abilityDecls }
+        for (decl in decls) {
+            if (WellKnownHashConstants.isHash(decl.hash)) decl.operations.forEach { add(it.name) }
+        }
+    }
+
     val declIndex = mutableMapOf<Hash, TypedLetDecl>()
     for (d in wrapped.decls) {
         if (d is TypedLetDecl) declIndex[d.hash] = d
@@ -312,6 +328,7 @@ private fun compileModule(
         preloweredDictMethods = stdlibDictMethods,
         substitution = substitution,
         decodeOpBySite = decodeOpBySite,
+        hashOpNames = hashOpNames,
     )
     compiler.setDeclIndex(declIndex)
 

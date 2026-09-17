@@ -457,9 +457,14 @@ class NewtypeImplRuntimeTest {
             // pattern destructures (`val`). Prior source constructed with
             // `value` and matched on `val`, which was a test-source bug.
             Object result = MezzeTestHelper.run("""
-                use std::abilities::compare::{Eq}
+                use std::abilities::compare::{Eq, Hash}
 
                 newtype UserId = Int
+
+                impl Hash for UserId where {
+                    hash = {it} -> match it is
+                        UserId.(a) -> a
+                }
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
@@ -478,9 +483,14 @@ class NewtypeImplRuntimeTest {
         @Test
         void newtypeNeqViaNot() {
             Object result = MezzeTestHelper.run("""
-                use std::abilities::compare::{Eq}
+                use std::abilities::compare::{Eq, Hash}
 
                 newtype UserId = Int
+
+                impl Hash for UserId where {
+                    hash = {it} -> match it is
+                        UserId.(a) -> a
+                }
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is
@@ -499,9 +509,14 @@ class NewtypeImplRuntimeTest {
         @Test
         void newtypeNeqViaNot_sameValues() {
             Object result = MezzeTestHelper.run("""
-                use std::abilities::compare::{Eq}
+                use std::abilities::compare::{Eq, Hash}
 
                 newtype UserId = Int
+
+                impl Hash for UserId where {
+                    hash = {it} -> match it is
+                        UserId.(a) -> a
+                }
 
                 impl Eq for UserId where {
                     eq = {it, r} -> match it is

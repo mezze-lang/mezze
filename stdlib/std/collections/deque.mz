@@ -1,4 +1,4 @@
-use std::abilities::compare::{ Eq, Ord }
+use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::abilities::iter::{ Iterable }
@@ -12,6 +12,14 @@ impl Default for Deque 'a where {
 }
 
 ## Structural equality for deques.
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Deque 'a where {
+  hash: { it: Deque 'a } -> Int = { it } -> structural_hash { it = it }
+}
+
 impl Eq for Deque 'a where {
   eq = { it, r } -> __native_deque_equals { d1 = it, d2 = r },
   neq = { it, r } -> if __native_deque_equals { d1 = it, d2 = r } then False else True,

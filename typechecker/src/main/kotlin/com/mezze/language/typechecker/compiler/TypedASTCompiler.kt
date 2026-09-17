@@ -44,6 +44,17 @@ class TypedASTCompiler(
      *  `from_json` call's USAGE-inferred target (DecodeTargetResolver). Wires the
      *  right decoder per call site where the target is a bare var in the type. */
     private val decodeOpBySite: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
+    /**
+     * The operation names of the `Hash` ability, identified by the ability's
+     * CONTENT HASH at the emitter — never by the literal "hash", so a user ability
+     * that happens to declare a `hash` op is not mistaken for this one.
+     *
+     * `Hash` is DERIVED for every type rather than implemented, exactly like
+     * `Inspect`: there is no impl for the compiler to dispatch to, so a call has
+     * to lower to the structural hash directly. Empty ⇒ `Hash` is not in scope and
+     * no call can be one.
+     */
+    private val hashOpNames: Set<String> = emptySet(),
     /** #424 Piece 5 — for each seed call site, arg-record field names to
      *  strip before compiling to a call. Fields correspond to closure
      *  params that were dead-code eliminated from the specialized decl. */
@@ -2049,6 +2060,29 @@ class TypedASTCompiler(
                 val receiverIR = compileReceiverExpr(fn.record)
                 return com.mezze.language.truffleir.InspectIR(
                     receiverIR, methodName == Keywords.TO_DBG, printType, src)
+            }
+
+            // The DERIVED `Hash`, lowered the same way and for the same reason:
+            // Hash is derived for every type rather than implemented, so no
+            // dictionary slot is ever populated for it and there is nothing to
+            // dispatch to. The derived hash IS the structural one — exactly what
+            // every hash container already computes for its keys — so this changes
+            // no behaviour and costs nothing; it only makes the operation
+            // NAMEABLE, which is what lets a container be handed the element type's
+            // own hash instead of assuming one.
+            //
+            // Gated on `opHash == null`, so a user `impl Hash for T` still wins:
+            // that is the whole point of the ability existing. `hashOpNames` comes
+            // from the ability's CONTENT HASH at the emitter, so an unrelated
+            // ability declaring its own `hash` op is untouched.
+            if (opHash == null && methodName in hashOpNames) {
+                val receiverIR = compileReceiverExpr(fn.record)
+                return CallNativeIR(
+                    name = "__native_structural_hash",
+                    arg = MakeRecordIR(listOf(FieldIR(Keywords.IT, receiverIR)), src),
+                    src = src,
+                    isPure = true,
+                )
             }
 
             if (opHash != null) {

@@ -36,7 +36,7 @@ class DeriveRuleAgreementTest {
     fun `a newtype without an Eq impl does not satisfy an Eq constraint`() {
         val result = check(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             use std::collections::seq
             pub newtype Money = Int
             let dedupe: { xs: [Money] } -> [Money] = { xs } -> xs.distinct {}
@@ -60,9 +60,12 @@ class DeriveRuleAgreementTest {
         // of the program being broken for some other reason.
         val result = check(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             use std::collections::seq
             pub newtype Money = Int
+            impl Hash for Money where {
+              hash = { it } -> match it is Money.(a) -> a
+            }
             impl Eq for Money where {
               eq = { it, r } -> match it is
                 Money.(a) -> match r is
@@ -83,7 +86,7 @@ class DeriveRuleAgreementTest {
         // The newtype rule must not have made derivation stricter in general.
         val result = check(
             """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             use std::collections::seq
             type P = { x: Int, y: Str }
             let dedupe: { xs: [P] } -> [P] = { xs } -> xs.distinct {}

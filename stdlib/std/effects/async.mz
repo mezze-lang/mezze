@@ -1,5 +1,5 @@
 use std::collections::seq
-use std::abilities::compare::{ Eq }
+use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::result
 use std::effects::exception::{ Exception, unwrap }
 use std::effects::time::{ Time }
@@ -19,6 +19,14 @@ pub let promise_eq: { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
 pub let promise_neq: { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Promise 'a where {
+  hash: { it: Promise 'a } -> Int = { it } -> structural_hash { it = it }
+}
+
 impl Eq for Promise 'a where {
   eq = { it, r } -> promise_eq { l = it, r = r },
   neq = { it, r } -> promise_neq { l = it, r = r },
@@ -29,6 +37,14 @@ pub let scope_eq: { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
 
 pub let scope_neq: { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Scope 'a where {
+  hash: { it: Scope 'a } -> Int = { it } -> structural_hash { it = it }
+}
 
 impl Eq for Scope 'a where {
   eq = { it, r } -> scope_eq { l = it, r = r },
@@ -835,6 +851,14 @@ pub let join_on_first: { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Asy
 # ============================================================================
 ## Cooperative cancellation token supporting hierarchical cancellation.
 pub newtype CancellationToken = __NativeCancellationToken
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for CancellationToken where {
+  hash: { it: CancellationToken } -> Int = { it } -> structural_hash { it = it }
+}
 
 impl Eq for CancellationToken where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

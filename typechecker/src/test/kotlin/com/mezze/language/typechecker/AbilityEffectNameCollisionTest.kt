@@ -283,6 +283,14 @@ class AbilityEffectNameCollisionTest {
                 neq: {it: 'a, r: 'a} -> Bool
             }
 
+            ability Hash for 'a where {
+                hash: {it: 'a} -> Int
+            }
+
+            impl Hash for Bool where {
+                hash: {it: Bool} -> Int = {it} -> if it then 1 else 0
+            }
+
             impl Eq for Bool where {
                 eq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then r else if r then False else True,
                 neq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then if r then False else True else r

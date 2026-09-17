@@ -1,4 +1,4 @@
-use std::abilities::compare::{ Eq }
+use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::abilities::iter::{ Iterable }
@@ -11,6 +11,14 @@ impl Default for Map 'k 'v where {
 }
 
 ## Structural equality for maps.
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Map 'k 'v where {
+  hash: { it: Map 'k 'v } -> Int = { it } -> structural_hash { it = it }
+}
+
 impl Eq for Map 'k 'v where {
   eq = { it, r } -> __native_map_equals { m1 = it, m2 = r },
   neq = { it, r } -> if __native_map_equals { m1 = it, m2 = r } then False else True,

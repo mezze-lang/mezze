@@ -223,8 +223,11 @@ class DuplicateDeclarationExtendedTest {
         // compiler OWNS that instance. A hand-written impl is a SECOND instance
         // for the same type — a duplicate under coherence, never an override.
         val code = """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             type P = { x: Int, y: Int }
+            impl Hash for P where {
+              hash = { it } -> __native_structural_hash { it = it }
+            }
             impl Eq for P where {
                 eq = { it, r } -> it.x == r.x,
                 neq = { it, r } -> if it.x == r.x then False else True,
@@ -243,10 +246,13 @@ class DuplicateDeclarationExtendedTest {
         // Newtypes derive NOTHING, so this is the type's one Eq — legal, and it is
         // exactly what container Eq (`[Q] == [Q]`) must dispatch to.
         val code = """
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             newtype Q = Int
             let unq: { n: Q } -> Int = { n } -> match n is
               Q.(v) -> v
+            impl Hash for Q where {
+              hash = { it } -> __native_structural_hash { it = it }
+            }
             impl Eq for Q where {
                 eq = { it, r } -> unq { n = it } == unq { n = r },
                 neq = { it, r } -> if unq { n = it } == unq { n = r } then False else True,

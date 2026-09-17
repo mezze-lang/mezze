@@ -61,15 +61,31 @@ internal fun canDeriveAbilityStructurally(
         }
     }
 
-    // A newtype derives NOTHING but Inspect. It is a distinct type from what it
-    // wraps, so wrapping an Int does not make it ordered or comparable — the
-    // author says what it means by writing the impl.
-    if (isNewtype && !WellKnownHashConstants.isInspect(abilityHash)) {
+    // A newtype derives NOTHING but Inspect and Hash. It is a distinct type from
+    // what it wraps, so wrapping an Int does not make it ordered or comparable —
+    // the author says what it means by writing the impl.
+    //
+    // Hash is the deliberate exception, so a newtype is usable as a `Map` key or
+    // `Set` element with no boilerplate. It is safe in a way Eq is not BECAUSE of
+    // the Eq rule above: a newtype that wants its own equality must write it, and
+    // writing one obliges it to write a matching Hash. So the derived hash is only
+    // ever paired with the derived (structural) equality it agrees with.
+    if (isNewtype &&
+        !WellKnownHashConstants.isInspect(abilityHash) &&
+        !WellKnownHashConstants.isHash(abilityHash)
+    ) {
         return false
     }
 
     return when {
         WellKnownHashConstants.isInspect(abilityHash) -> true
+
+        // Every value has a structural hash — `Objects.hashCode` is total, and it
+        // is already what every hash container computes for its keys. So unlike
+        // Ord (whose runtime comparison nodes THROW for composites) there is no
+        // shape this cannot answer for, and deriving it universally type-checks
+        // nothing that then fails at runtime.
+        WellKnownHashConstants.isHash(abilityHash) -> true
 
         WellKnownHashConstants.isEq(abilityHash) ->
             unwrappedType is MezzeType.VarType ||

@@ -20,12 +20,13 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 689 UNBOUND_TYPE_VAR, 193 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
+# Counts: 700 UNBOUND_TYPE_VAR, 150 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
 UNBOUND_TYPE_VAR	impl Bool.and
 UNBOUND_TYPE_VAR	impl Bool.eq
+UNBOUND_TYPE_VAR	impl Bool.hash
 UNBOUND_TYPE_VAR	impl Bool.iff
 UNBOUND_TYPE_VAR	impl Bool.neq
 UNBOUND_TYPE_VAR	impl Bool.not
@@ -36,12 +37,14 @@ UNBOUND_TYPE_VAR	impl Bytes.eq
 UNBOUND_TYPE_VAR	impl Bytes.fold
 UNBOUND_TYPE_VAR	impl Bytes.ge
 UNBOUND_TYPE_VAR	impl Bytes.gt
+UNBOUND_TYPE_VAR	impl Bytes.hash
 UNBOUND_TYPE_VAR	impl Bytes.le
 UNBOUND_TYPE_VAR	impl Bytes.lt
 UNBOUND_TYPE_VAR	impl Bytes.neq
 UNBOUND_TYPE_VAR	impl Char.eq
 UNBOUND_TYPE_VAR	impl Char.ge
 UNBOUND_TYPE_VAR	impl Char.gt
+UNBOUND_TYPE_VAR	impl Char.hash
 UNBOUND_TYPE_VAR	impl Char.is_digit
 UNBOUND_TYPE_VAR	impl Char.is_letter
 UNBOUND_TYPE_VAR	impl Char.is_lower
@@ -90,6 +93,7 @@ UNBOUND_TYPE_VAR	impl Float.eq
 UNBOUND_TYPE_VAR	impl Float.floor
 UNBOUND_TYPE_VAR	impl Float.ge
 UNBOUND_TYPE_VAR	impl Float.gt
+UNBOUND_TYPE_VAR	impl Float.hash
 UNBOUND_TYPE_VAR	impl Float.into
 UNBOUND_TYPE_VAR	impl Float.is_finite
 UNBOUND_TYPE_VAR	impl Float.is_infinite
@@ -118,6 +122,7 @@ UNBOUND_TYPE_VAR	impl Frac.div
 UNBOUND_TYPE_VAR	impl Frac.eq
 UNBOUND_TYPE_VAR	impl Frac.ge
 UNBOUND_TYPE_VAR	impl Frac.gt
+UNBOUND_TYPE_VAR	impl Frac.hash
 UNBOUND_TYPE_VAR	impl Frac.into
 UNBOUND_TYPE_VAR	impl Frac.is_negative
 UNBOUND_TYPE_VAR	impl Frac.is_positive
@@ -142,6 +147,7 @@ UNBOUND_TYPE_VAR	impl Int.eq
 UNBOUND_TYPE_VAR	impl Int.gcd
 UNBOUND_TYPE_VAR	impl Int.ge
 UNBOUND_TYPE_VAR	impl Int.gt
+UNBOUND_TYPE_VAR	impl Int.hash
 UNBOUND_TYPE_VAR	impl Int.into
 UNBOUND_TYPE_VAR	impl Int.is_even
 UNBOUND_TYPE_VAR	impl Int.is_odd
@@ -216,6 +222,7 @@ UNBOUND_TYPE_VAR	impl Map.eq
 UNBOUND_TYPE_VAR	impl Map.flat_map
 UNBOUND_TYPE_VAR	impl Map.fold
 UNBOUND_TYPE_VAR	impl Map.get_or
+UNBOUND_TYPE_VAR	impl Map.hash
 UNBOUND_TYPE_VAR	impl Map.is_empty
 UNBOUND_TYPE_VAR	impl Map.map_keys
 UNBOUND_TYPE_VAR	impl Map.map_values
@@ -235,6 +242,7 @@ UNBOUND_TYPE_VAR	impl Nat.div
 UNBOUND_TYPE_VAR	impl Nat.eq
 UNBOUND_TYPE_VAR	impl Nat.ge
 UNBOUND_TYPE_VAR	impl Nat.gt
+UNBOUND_TYPE_VAR	impl Nat.hash
 UNBOUND_TYPE_VAR	impl Nat.is_even
 UNBOUND_TYPE_VAR	impl Nat.is_odd
 UNBOUND_TYPE_VAR	impl Nat.is_zero
@@ -367,6 +375,7 @@ UNBOUND_TYPE_VAR	impl SortedMap.fold
 UNBOUND_TYPE_VAR	impl SortedMap.ge
 UNBOUND_TYPE_VAR	impl SortedMap.get
 UNBOUND_TYPE_VAR	impl SortedMap.gt
+UNBOUND_TYPE_VAR	impl SortedMap.hash
 UNBOUND_TYPE_VAR	impl SortedMap.insert
 UNBOUND_TYPE_VAR	impl SortedMap.le
 UNBOUND_TYPE_VAR	impl SortedMap.lt
@@ -395,6 +404,7 @@ UNBOUND_TYPE_VAR	impl SortedSet.remove
 UNBOUND_TYPE_VAR	impl Str.eq
 UNBOUND_TYPE_VAR	impl Str.ge
 UNBOUND_TYPE_VAR	impl Str.gt
+UNBOUND_TYPE_VAR	impl Str.hash
 UNBOUND_TYPE_VAR	impl Str.into
 UNBOUND_TYPE_VAR	impl Str.le
 UNBOUND_TYPE_VAR	impl Str.lt
@@ -653,6 +663,7 @@ UNBOUND_TYPE_VAR	let:split_with_eq
 UNBOUND_TYPE_VAR	let:starts_with
 UNBOUND_TYPE_VAR	let:starts_with_eq
 UNBOUND_TYPE_VAR	let:stddev
+UNBOUND_TYPE_VAR	let:structural_hash
 UNBOUND_TYPE_VAR	let:sub_map
 UNBOUND_TYPE_VAR	let:subsequences
 UNBOUND_TYPE_VAR	let:substring

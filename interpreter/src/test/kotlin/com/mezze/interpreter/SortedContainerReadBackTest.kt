@@ -67,7 +67,7 @@ class SortedContainerReadBackTest {
     }
 
     private val prelude = """
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         use std::collections::seq
         use std::collections::sorted_set
         type P = { k: Int, tag: Int }
@@ -211,10 +211,13 @@ class SortedContainerReadBackTest {
             1L,
             MezzeTestHelper.run(
                 """
-                use std::abilities::compare::{ Eq, Ord }
+                use std::abilities::compare::{ Eq, Ord, Hash }
                 use std::collections::seq
                 use std::collections::sorted_set
                 pub newtype N = Int
+                impl Hash for N where {
+                  hash = { it } -> match it is N.(a) -> a
+                }
                 impl Eq for N where {
                   eq = { it, r } -> match it is
                     N.(a) -> match r is
@@ -253,7 +256,7 @@ class SortedContainerReadBackTest {
             1L,
             MezzeTestHelper.run(
                 """
-                use std::abilities::compare::{ Eq, Ord }
+                use std::abilities::compare::{ Eq, Ord, Hash }
                 use std::collections::seq
                 use std::collections::sorted_set
                 type V = | Wrap { k: Int } |
@@ -310,10 +313,13 @@ class SortedContainerReadBackTest {
             3L,
             MezzeTestHelper.run(
                 """
-                use std::abilities::compare::{ Eq, Ord }
+                use std::abilities::compare::{ Eq, Ord, Hash }
                 use std::collections::seq
                 use std::collections::sorted_set
                 pub newtype N = Int
+                impl Hash for N where {
+                  hash = { it } -> match it is N.(a) -> a
+                }
                 impl Eq for N where {
                   eq = { it, r } -> match it is
                     N.(a) -> match r is

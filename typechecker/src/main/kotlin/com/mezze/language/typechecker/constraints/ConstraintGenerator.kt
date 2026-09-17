@@ -159,6 +159,7 @@ class ConstraintGenerator(
         // "declared-before-use" path). Cycles (mutual recursion) keep source
         // order — placeholder behaviour, no worse than before.
         val orderedDecls = dependencyOrderedDecls(module.decls)
+        collectedTypeCheckErrors.addAll(implValidator.validateEqHashPairing(orderedDecls))
         for (item in orderedDecls) {
             when (item) {
                 is ParsedLetDecl -> try {

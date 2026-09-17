@@ -1,4 +1,4 @@
-use std::abilities::compare::{ Eq, Ord }
+use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::sized::{ Sized }
 use std::abilities::convert::{ Into }
 use std::abilities::default::{ Default }
@@ -7,6 +7,14 @@ use std::collections::bytes
 
 impl Into Bytes for Str where {
   into = { it } -> bytes::from_str { s = it }
+}
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Str where {
+  hash: { it: Str } -> Int = { it } -> structural_hash { it = it }
 }
 
 impl Eq for Str where {

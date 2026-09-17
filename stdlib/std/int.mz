@@ -1,5 +1,5 @@
 use std::abilities::numeric::{ NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, NumOne }
-use std::abilities::compare::{ Eq, Ord }
+use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::convert::{ Into, TryInto }
 use std::abilities::default::{ Default }
 use std::float
@@ -62,6 +62,14 @@ impl NumMod Float for Int having 'out = Float where {
 
 impl NumMod Nat for Int having 'out = Int where {
   mod = { it, r } -> it % from_nat { n = r }
+}
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Int where {
+  hash: { it: Int } -> Int = { it } -> structural_hash { it = it }
 }
 
 impl Eq for Int where {

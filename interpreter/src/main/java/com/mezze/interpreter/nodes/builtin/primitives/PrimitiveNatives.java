@@ -607,4 +607,24 @@ public final class PrimitiveNatives {
     public static boolean natGte(long l, long r) {
         return l >= r;
     }
+
+    /**
+     * The STRUCTURAL hash of a value — what a derived {@code Hash} instance means.
+     *
+     * This is already what every hash container computes for its keys
+     * ({@code HashSetStorage} calls {@code elem.hashCode()}), so a type whose
+     * {@code Hash} is derived hashes exactly as it does today: adding the ability
+     * changes no behaviour and costs no performance for the common case. A type
+     * that writes its own {@code Hash} overrides this, which is the point — a
+     * hand-written {@code Eq} and a structural hash disagree, and a hash container
+     * that buckets by one and compares by the other silently holds both of two
+     * equal values.
+     *
+     * {@code MezzeRecord} and the variant/seq values define {@code hashCode} over
+     * their contents, so this is stable for compound values and not identity-based.
+     */
+    @TruffleBoundary
+    public static long structuralHash(Object value) {
+        return value == null ? 0L : (long) value.hashCode();
+    }
 }

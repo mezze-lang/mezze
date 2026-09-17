@@ -30,7 +30,7 @@ class DerivedEqRequiresFieldEqTest {
     private val noEqNewtype = """
         use std::collections::seq
         use std::collections::list
-        use std::abilities::compare::{ Eq }
+        use std::abilities::compare::{ Eq, Hash }
         newtype N = Int
     """.trimIndent()
 
@@ -69,6 +69,9 @@ class DerivedEqRequiresFieldEqTest {
             $noEqNewtype
             let unn: { n: N } -> Int = { n } -> match n is
               N.(v) -> v
+            impl Hash for N where {
+              hash = { it } -> __native_structural_hash { it = it }
+            }
             impl Eq for N where {
               eq = { it, r } -> unn { n = it } == unn { n = r },
               neq = { it, r } -> if unn { n = it } == unn { n = r } then False else True,

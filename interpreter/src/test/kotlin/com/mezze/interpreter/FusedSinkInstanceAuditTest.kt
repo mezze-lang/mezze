@@ -51,8 +51,11 @@ class FusedSinkInstanceAuditTest {
     /** Eq compares mod 10: `N.(1) == N.(11)`, but they are not equal structurally. */
     private val eqDeviant = """
         use std::collections::seq
-        use std::abilities::compare::{ Eq }
+        use std::abilities::compare::{ Eq, Hash }
         newtype N = Int
+        impl Hash for N where {
+          hash = { it } -> match it is N.(x) -> x % 10
+        }
         impl Eq for N where {
           eq = { it, r } -> match it is
             N.(x) -> match r is
@@ -67,11 +70,14 @@ class FusedSinkInstanceAuditTest {
     /** Ord orders DESCENDING, so the minimum is the largest wrapped value. */
     private val ordReversed = """
         use std::collections::seq
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         newtype R = Int
         # A Set element must HAVE an equality — a newtype derives none, and a
         # container that deduped it was comparing structurally on an equality its
         # author never wrote. This one agrees with the reversed Ord below.
+        impl Hash for R where {
+          hash = { it } -> match it is R.(x) -> x
+        }
         impl Eq for R where {
           eq = { it, r } -> match it is
             R.(x) -> match r is

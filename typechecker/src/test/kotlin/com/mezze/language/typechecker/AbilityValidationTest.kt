@@ -34,6 +34,14 @@ class AbilityValidationTest {
               neq: {it: 'a, r: 'a} -> Bool
             }
 
+            ability Hash for 'a where {
+              hash: {it: 'a} -> Int
+            }
+
+            impl Hash for Str where {
+              hash: {it: Str} -> Int = {it} -> it.length {}
+            }
+
             impl Eq for Str where {
               eq: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r},
               neq: {it: Str, r: Str} -> Bool = {it, r} -> (stringEquals {a = it, b = r}).not {}

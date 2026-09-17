@@ -1,4 +1,4 @@
-use std::abilities::compare::{ Eq }
+use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::effects::async::{ Async }
 
 ## Error returned by a `ValidatedAtom` mutation when the validator rejects
@@ -21,9 +21,25 @@ pub newtype Atom 'a = __NativeAtomicRef
 ## `Err { error = ValidatorRejected { val } }` when rejected (atom unchanged).
 pub newtype ValidatedAtom 'a = __NativeAtomicRef
 
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Atom 'a where {
+  hash: { it: Atom 'a } -> Int = { it } -> structural_hash { it = it }
+}
+
 impl Eq for Atom 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
+}
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for ValidatedAtom 'a where {
+  hash: { it: ValidatedAtom 'a } -> Int = { it } -> structural_hash { it = it }
 }
 
 impl Eq for ValidatedAtom 'a where {

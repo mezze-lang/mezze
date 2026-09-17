@@ -1622,15 +1622,38 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   was relying on the old behaviour (a newtype with `Ord` and no `Eq` in a `Set`)
   and now declares the `Eq` the rule requires.
 
-  **Half OPEN.** A type that HAS a hand-written `Eq` is accepted and the container
-  still ignores it. Closing it needs the element's `eq` — and a `hash` that AGREES
-  with it — to reach the container, the way `ElementComparator` already carries a
-  sorted container's `cmp` from construction (T1.3). `eq` alone is not enough:
-  values that compare equal must hash equal or they never meet in a bucket. Hence
-  the `Hash` ability, derived automatically for every type (keeping today's
-  structural hashing for the common case, so no boilerplate) plus the
-  compile-time requirement that a hand-written `Eq` come with a hand-written
-  `Hash`. `HashContainerInstanceTest` carries the three open cases.
+  **The `Hash` ability has LANDED**, which is the type-level half of what the
+  container threading needs:
+
+  - `ability Hash for 'a where { hash: { it: 'a } -> Int }`, DERIVED for every
+    type including newtypes. The derived hash is the structural one
+    (`Objects.hashCode`) — already exactly what every hash container computes for
+    its keys — so adding the ability changes no behaviour and costs no
+    performance. It is lowered like `Inspect`: derived rather than implemented, so
+    there is no dictionary slot and the call goes straight to the native, keyed on
+    the ability's CONTENT HASH at the emitter rather than on the name "hash".
+  - **`Eq` and `Hash` are written together, or neither.** A hand-written `Eq`
+    without a `Hash` is rejected (the pairing check), and a hand-written `Hash` on
+    a type whose `Eq` is derived is rejected too — the coherence rule, asked about
+    `Eq` rather than about `Hash`, since `Hash` derives universally and asking
+    about itself would forbid every hand-written one. Both directions break
+    `a == b ⇒ hash a == hash b`; this is what makes universal derivation safe.
+  - Cost, as the owner accepted: 34 stdlib `impl Eq`s gained a paired `impl Hash`,
+    and 15 interpreter + 5 typechecker fixtures did the same. Each fixture's hash
+    was written to AGREE with its equality, which is the point — e.g. a fixture
+    whose `Eq` compares only the `x` field now hashes only `x`, where the
+    structural hash would have included `y` and split equal values apart.
+
+  **Still OPEN — the container threading.** A type with a hand-written `Eq` (and
+  now a matching `Hash`) is accepted, and `Set`/`Map` still ignore both. They need
+  the element's `eq` and `hash` closures carried from construction the way
+  `ElementComparator` carries a sorted container's `cmp` (T1.3). The precedent for
+  the cost is established: `seq::unique` already calls an `eq` closure per
+  comparison, with no fast path. What is new for a hash container is that the
+  closures must reach `MezzeSet`/`MezzeMap`'s GENERIC storage — the
+  Long/Double/String storages are primitives-only, where structural and instance
+  equality coincide, so they need nothing. `HashContainerInstanceTest` carries the
+  three open cases.
 
   Found while doing this: `addAbilityConstraintsToFunctionType` rebuilt an
   obligation's class-argument tuple by prepending the receiver UNCONDITIONALLY, so

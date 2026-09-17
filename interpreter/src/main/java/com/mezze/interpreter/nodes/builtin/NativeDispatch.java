@@ -273,6 +273,8 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.intDivide(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_modulo", (r, c) ->
             PrimitiveNatives.intModulo(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_structural_hash", (r, c) ->
+            PrimitiveNatives.structuralHash(getField(r, "it")));
         HANDLERS.put("__native_int_to_str", (r, c) ->
             PrimitiveNatives.intToString(getLong(r, "n")));
         HANDLERS.put("__native_int_abs", (r, c) ->

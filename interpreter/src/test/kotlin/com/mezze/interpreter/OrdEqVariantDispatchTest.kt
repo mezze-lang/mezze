@@ -20,7 +20,7 @@ class OrdEqVariantDispatchTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val ordImpl = """
-        use std::abilities::compare::{ Ord }
+        use std::abilities::compare::{ Ord, Hash }
         type Priority = | Low, Mid, High |
         let rank = { p: Priority } -> match p is
           Low -> 0
@@ -61,8 +61,11 @@ class OrdEqVariantDispatchTest {
         // ALL pairs; a structural fallback would give False for 1 vs 2 — so a True
         // result proves the impl dispatched.
         assertEquals(true, eval("""
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             newtype Color = Int
+            impl Hash for Color where {
+              hash = { it } -> 0
+            }
             impl Eq for Color where {
               eq = { it, r } -> True,
               neq = { it, r } -> False,
@@ -143,8 +146,11 @@ class OrdEqVariantDispatchTest {
         // 1 != 2. A generic `with Eq 'a` helper calling `a == b` must use the
         // impl — so Color.(1) vs Color.(2) comes back True.
         assertEquals(true, eval("""
-            use std::abilities::compare::{ Eq }
+            use std::abilities::compare::{ Eq, Hash }
             newtype Color = Int
+            impl Hash for Color where {
+              hash = { it } -> 0
+            }
             impl Eq for Color where {
               eq = { it, r } -> True,
               neq = { it, r } -> False,

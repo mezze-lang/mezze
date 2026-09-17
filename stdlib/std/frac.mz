@@ -1,5 +1,5 @@
 use std::abilities::numeric::{ NumAdd, NumSub, NumMul, NumDiv, NumZero, NumOne }
-use std::abilities::compare::{ Eq, Ord }
+use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::convert::{ Into }
 use std::abilities::default::{ Default }
 
@@ -17,6 +17,14 @@ impl NumMul Frac for Frac having 'out = Frac where {
 
 impl NumDiv Frac for Frac having 'out = Frac where {
   div = { it, r } -> __native_frac_divide { l = it, r = r }
+}
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for Frac where {
+  hash: { it: Frac } -> Int = { it } -> structural_hash { it = it }
 }
 
 impl Eq for Frac where {

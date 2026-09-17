@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Assertions.*
 class SeqUserTypeCompareTest {
     private val head = """
         use std::collections::seq
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         type P = { x: Int, y: Int }
         impl Ord for P where { lt = { it, r } -> it.x < r.x, le = { it, r } -> it.x <= r.x, gt = { it, r } -> it.x > r.x, ge = { it, r } -> it.x >= r.x, }
     """.trimIndent()
@@ -47,7 +47,7 @@ class SeqUserTypeCompareTest {
     // (severity ranking) must drive seq comparison and sort the same way.
     private val variantHead = """
         use std::collections::seq
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         type Sev = | Low, Mid, High |
         let rank: { s: Sev } -> Int = { s } -> match s is
           Low -> 0
@@ -62,7 +62,7 @@ class SeqUserTypeCompareTest {
     private val listHead = """
         use std::collections::seq
         use std::collections::list
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         type P = { x: Int, y: Int }
     """.trimIndent()
     private fun runL(body: String) = MezzeTestHelper.run("$listHead\n$body")
@@ -75,11 +75,14 @@ class SeqUserTypeCompareTest {
     private val newtypeHead = """
         use std::collections::seq
         use std::collections::list
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         newtype P = { x: Int, y: Int }
         let px: { p: P } -> Int = { p } -> match p is
           P.({ x, y }) -> x
-        impl Eq for P where { eq = { it, r } -> px { p = it } == px { p = r }, neq = { it, r } -> if px { p = it } == px { p = r } then False else True, }
+        impl Hash for P where {
+      hash = { it } -> px { p = it }
+    }
+    impl Eq for P where { eq = { it, r } -> px { p = it } == px { p = r }, neq = { it, r } -> if px { p = it } == px { p = r } then False else True, }
         impl Ord for P where { lt = { it, r } -> px { p = it } < px { p = r }, le = { it, r } -> px { p = it } <= px { p = r }, gt = { it, r } -> px { p = it } > px { p = r }, ge = { it, r } -> px { p = it } >= px { p = r }, }
     """.trimIndent()
     private fun runN(body: String) = MezzeTestHelper.run("$newtypeHead\n$body")

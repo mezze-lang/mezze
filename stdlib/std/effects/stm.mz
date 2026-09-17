@@ -1,10 +1,18 @@
 use std::collections::list
 use std::int
-use std::abilities::compare::{ Eq }
+use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::effects::async::{ Async, park }
 
 ## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = __NativeTVar
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for TVar 'a where {
+  hash: { it: TVar 'a } -> Int = { it } -> structural_hash { it = it }
+}
 
 impl Eq for TVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
@@ -150,6 +158,14 @@ pub let write_all: { pairs: [{ var: TVar 'a, val: 'a }] } -> {} <STM> = { pairs 
 ## Useful for synchronization, one-shot events, and locks.
 pub newtype TMVar 'a = TVar (Option 'a)
 
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for TMVar 'a where {
+  hash: { it: TMVar 'a } -> Int = { it } -> structural_hash { it = it }
+}
+
 impl Eq for TMVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
@@ -258,6 +274,14 @@ pub let is_empty_tmvar: { var: TMVar 'a } -> Bool <STM> = { var } -> do
 
 ## Unbounded transactional FIFO queue.
 pub newtype TQueue 'a = TVar { read: List 'a, write: List 'a }
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for TQueue 'a where {
+  hash: { it: TQueue 'a } -> Int = { it } -> structural_hash { it = it }
+}
 
 impl Eq for TQueue 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
@@ -400,6 +424,14 @@ pub let size_tqueue: { q: TQueue 'a } -> Int <STM> = { q } -> do
 
 ## Bounded transactional FIFO queue that blocks on write when full.
 pub newtype TBQueue 'a = TVar { read: List 'a, write: List 'a, size: Int, capacity: Int }
+
+## Structural hash, paired with the `Eq` below.
+## `Eq` and `Hash` are written together or not at all: a hash container
+## buckets by one and compares by the other, so a value whose hash
+## disagrees with its equality is silently kept twice.
+impl Hash for TBQueue 'a where {
+  hash: { it: TBQueue 'a } -> Int = { it } -> structural_hash { it = it }
+}
 
 impl Eq for TBQueue 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },

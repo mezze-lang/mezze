@@ -39,9 +39,12 @@ class InherentImplBodyTypedTest {
     }
 
     private val pWithModEq = """
-        use std::abilities::compare::{ Eq }
+        use std::abilities::compare::{ Eq, Hash }
         use std::collections::seq
         pub newtype P = Int
+        impl Hash for P where {
+          hash = { it } -> match it is P.(a) -> a % 10
+        }
         impl Eq for P where {
           eq = { it, r } -> match it is
             P.(a) -> match r is

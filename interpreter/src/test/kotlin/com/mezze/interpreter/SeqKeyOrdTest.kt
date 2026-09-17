@@ -18,11 +18,14 @@ import org.junit.jupiter.api.Assertions.*
 class SeqKeyOrdTest {
     private val head = """
         use std::collections::seq
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         newtype K = { x: Int, y: Int }
         let kx: { k: K } -> Int = { k } -> match k is
           K.({ x, y }) -> x
-        impl Eq for K where { eq = { it, r } -> kx { k = it } == kx { k = r }, neq = { it, r } -> if kx { k = it } == kx { k = r } then False else True, }
+        impl Hash for K where {
+  hash = { it } -> kx { k = it }
+}
+impl Eq for K where { eq = { it, r } -> kx { k = it } == kx { k = r }, neq = { it, r } -> if kx { k = it } == kx { k = r } then False else True, }
         impl Ord for K where { lt = { it, r } -> kx { k = it } < kx { k = r }, le = { it, r } -> kx { k = it } <= kx { k = r }, gt = { it, r } -> kx { k = it } > kx { k = r }, ge = { it, r } -> kx { k = it } >= kx { k = r }, }
         type E = { k: K, tag: Int }
     """.trimIndent()

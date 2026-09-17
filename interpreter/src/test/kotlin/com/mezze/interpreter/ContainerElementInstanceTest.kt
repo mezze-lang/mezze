@@ -16,12 +16,15 @@ class ContainerElementInstanceTest {
     private val head = """
         use std::collections::seq
         use std::collections::list
-        use std::abilities::compare::{ Eq, Ord }
+        use std::abilities::compare::{ Eq, Ord, Hash }
         newtype P = { x: Int, y: Int }
         let px: { p: P } -> Int = { p } -> match p is
           P.({ x, y }) -> x
         let py: { p: P } -> Int = { p } -> match p is
           P.({ x, y }) -> y
+        impl Hash for P where {
+          hash = { it } -> px { p = it }
+        }
         impl Eq for P where {
           eq = { it, r } -> px { p = it } == px { p = r },
           neq = { it, r } -> if px { p = it } == px { p = r } then False else True,
