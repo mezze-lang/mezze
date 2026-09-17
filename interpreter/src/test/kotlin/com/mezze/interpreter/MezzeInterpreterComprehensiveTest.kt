@@ -165,7 +165,7 @@ class MezzeInterpreterComprehensiveTest {
     @Test
     fun testComplexPatternMatching() {
         val source = """
-            type Result = | Success {value: Int}, Error {message: Str} |
+            type Outcome = | Success {value: Int}, Error {message: Str} |
             let processResult = {result} -> match result is
               Success {value} -> value + 10
               Error {message} -> 0

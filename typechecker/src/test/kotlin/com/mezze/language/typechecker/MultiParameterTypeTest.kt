@@ -45,12 +45,12 @@ class MultiParameterTypeTest {
     @Test
     fun `test Result type with two parameters`() {
         val source = """
-            type Result 'ok 'err = | Ok 'ok, Err 'err |
+            type Outcome 'ok 'err = | Good 'ok, Bad 'err |
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
-        assertEquals("Result", typeDecl.name)
+        assertEquals("Outcome", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'ok", typeDecl.typeParams[0])
         assertEquals("'err", typeDecl.typeParams[1])

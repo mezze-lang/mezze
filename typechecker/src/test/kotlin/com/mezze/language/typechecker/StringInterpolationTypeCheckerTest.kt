@@ -189,13 +189,13 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test match with data extraction in interpolation context`() {
         assertTypeChecks("""
-            type Result = | Success { message: Str }, Failure { error: Str } |
+            type Outcome = | Success { message: Str }, Failure { error: Str } |
 
-            let getMessage = {r: Result} -> match r is
+            let getMessage = {r: Outcome} -> match r is
                 Success { message } -> message
                 Failure { error } -> error
 
-            let format = {r: Result} -> "Result: $(getMessage {r = r})"
+            let format = {r: Outcome} -> "Outcome: $(getMessage {r = r})"
             format {r = Success {message = "OK"}}
         """.trimIndent())
     }
@@ -593,7 +593,7 @@ class StringInterpolationTypeCheckerTest {
                 show = {it} -> __native_int_to_str {n = it}
             }
 
-            type Result = | Ok { value: Int }, Err { message: Str } |
+            type Outcome = | Good { value: Int }, Bad { message: Str } |
 
             effect Log where {
                 print : {msg: Str} -> {} <Log>
@@ -603,16 +603,16 @@ class StringInterpolationTypeCheckerTest {
                 print : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let processResult: {r: Result} -> Str = {r} -> match r is
-                Ok { value } -> "Success: $(value.show {})"
-                Err { message } -> "Error: $(message)"
+            let processResult: {r: Outcome} -> Str = {r} -> match r is
+                Good { value } -> "Success: $(value.show {})"
+                Bad { message } -> "Error: $(message)"
 
-            let logAndProcess: {r: Result} -> Str <Log> = {r} -> do
+            let logAndProcess: {r: Outcome} -> Str <Log> = {r} -> do
                 let msg = processResult {r = r}
                 Log.print {msg = "Processing: $(msg)"}
                 msg
 
-            perform Console in logAndProcess {r = Ok {value = 42}}
+            perform Console in logAndProcess {r = Good {value = 42}}
         """.trimIndent())
     }
 

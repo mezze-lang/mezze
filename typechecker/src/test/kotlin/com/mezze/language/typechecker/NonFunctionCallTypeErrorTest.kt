@@ -290,10 +290,9 @@ class NonFunctionCallTypeErrorTest {
     @Test
     fun `calling match expression that returns unit should fail`() {
         val source = """
-            type Option 'a = | Some { value: 'a }, None |
-            let opt = Some { value = 1 }
+            let opt = Some { val = 1 }
             let x = (match opt is
-                Some { value } -> {}
+                Some { val } -> {}
                 None -> {}) {}
         """.trimIndent()
 

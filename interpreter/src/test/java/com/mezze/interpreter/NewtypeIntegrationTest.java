@@ -225,11 +225,11 @@ class NewtypeIntegrationTest {
     @Test
     void newtypeAsFunctionReturnValue() {
         Object result = MezzeTestHelper.run("""
-            newtype Result = Str
+            newtype Outcome = Str
 
-            let createResult = {msg} -> Result.(msg)
+            let createResult = {msg} -> Outcome.(msg)
             let unwrapResult = {r} -> match r is
-                Result.(value) -> value
+                Outcome.(value) -> value
 
             let res = createResult {msg = "Success"}
             unwrapResult {r = res}

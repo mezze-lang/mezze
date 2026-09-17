@@ -75,6 +75,37 @@ object BuiltinTypes {
      *  False/Cons/Nil). Single authority — prefer this over raw `name == "True"`. */
     fun isReservedConstructor(name: String): Boolean = name in coreVariantConstructors
 
+    /**
+     * Type names the COMPILER owns — the primitives, plus the core and collection
+     * types it has a dedicated [MezzeType] representation for.
+     *
+     * No `.mz` file declares any of these; they are synthetic, which is what makes
+     * them different in kind from a stdlib type like `Json` or `HttpError`. Those
+     * are ordinary declarations, and shadowing one is ordinary module scoping, so
+     * they are deliberately NOT here.
+     *
+     * A declaration under a reserved name cannot mean what it says. For `Int` the
+     * compiler keeps its own meaning and the declaration was silently discarded —
+     * the author got no diagnostic, just a later mismatch against a type they
+     * thought they had defined. For `Option` the declaration WAS honoured while the
+     * compiler went on applying `Option`'s rules (the `Some`/`None` constructors,
+     * the container and codec machinery keyed on the type), so the two coexisted
+     * and disagreed. Rejecting the declaration is the only reading that stays true.
+     *
+     * [LIST] is the one hold-out, and for a reason that is itself a defect: the
+     * builtin `List` cannot be USED by name. `let f: { l: List Int } -> Int` with a
+     * `match l is Nil -> …` fails with "Cannot resolve type 'List' to check for
+     * constructor 'Nil'", while the identical program in `Option` or `Result` works.
+     * Several fixtures declare `type List 'a = | Cons …, Nil |` precisely to work
+     * around that, so reserving the name would take away a workaround before the
+     * thing it works around is fixed. Add LIST here once it resolves like its
+     * siblings.
+     */
+    val reservedTypeNames: Set<String> = PrimitiveTypes.allNames + (coreTypeNames - LIST)
+
+    /** True iff [name] is a type name the compiler owns. Single authority. */
+    fun isReservedTypeName(name: String): Boolean = name in reservedTypeNames
+
     // Standard record field names for built-in types
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err

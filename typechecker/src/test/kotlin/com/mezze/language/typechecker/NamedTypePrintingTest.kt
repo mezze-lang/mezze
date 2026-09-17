@@ -222,7 +222,6 @@ class NamedTypePrintingTest {
     @Test
     fun `test unit constructors print correctly with named types`() {
         val source = """
-            type Option 'a = | None, Some { val: 'a } |
 
             let none_value = None
             let some_value = Some { val = 42 }

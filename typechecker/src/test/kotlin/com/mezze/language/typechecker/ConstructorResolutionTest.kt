@@ -167,7 +167,6 @@ class ConstructorResolutionTest {
         // Verify that variant constructors type-check correctly
         // (resolution is validated through constraint solving, not v1 AST resolution field)
         val result = typeCheckAndGetResult("""
-            type Option 'a = | None, Some { val: 'a } |
 
             let test = Some { val = 42 }
         """.trimIndent())
@@ -179,7 +178,6 @@ class ConstructorResolutionTest {
     @Test
     fun `test unit variant constructor is resolved as VariantConstructor`() {
         val result = typeCheckAndGetResult("""
-            type Option 'a = | None, Some { val: 'a } |
 
             let test = None
         """.trimIndent())
@@ -211,7 +209,6 @@ class ConstructorResolutionTest {
     @Test
     fun `test ability method call and variant in same expression are resolved correctly`() {
         val result = typeCheckAndGetResult("""
-            type Option 'a = | None, Some { val: 'a } |
 
             let x = Some { val = 42 }
             let test = 42.to_dbg {}
@@ -231,7 +228,6 @@ class ConstructorResolutionTest {
     @Test
     fun `test effect and variant in same expression are resolved correctly`() {
         val result = typeCheckAndGetResult("""
-            type Result 'a 'e = | Ok { val: 'a }, Err { error: 'e } |
 
             effect Logger where {
                 log: {msg: Str} -> {}

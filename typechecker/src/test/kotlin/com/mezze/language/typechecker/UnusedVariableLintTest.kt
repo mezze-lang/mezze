@@ -113,7 +113,6 @@ class UnusedVariableLintTest {
     @Test
     fun `match binding nested in a do-block still warns (propagation fix)`() {
         val code = """
-            type Option = | Some { val: Int }, None |
 
             let test = {opt: Option} -> do
                 let r =

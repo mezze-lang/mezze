@@ -54,7 +54,6 @@ class MatchEffectUnificationTest {
                 info = {msg} -> {}
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = { opt: Option Int } -> do
                 match opt is
@@ -119,7 +118,6 @@ class MatchEffectUnificationTest {
     @Test
     fun `test match with all pure branches stays pure`() {
         val code = """
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = { opt: Option Int } -> do
                 match opt is
@@ -188,7 +186,6 @@ class MatchEffectUnificationTest {
                 info = {msg} -> {}
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = { outer: Option Int, inner: Option Int } -> do
                 match outer is
@@ -221,7 +218,6 @@ class MatchEffectUnificationTest {
                 info = {msg} -> {}
             }
 
-            type Bool = | True, False |
 
             let choose: { b: Bool } -> Int <Log> = { b } ->
                 match b is
@@ -251,7 +247,6 @@ class MatchEffectUnificationTest {
                 info = {msg} -> {}
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = { opt: Option Int } -> do
                 match opt is
@@ -275,7 +270,6 @@ class MatchEffectUnificationTest {
     fun `test match expression type error for incompatible value types`() {
         // Even with effect unification, value types must still match
         val code = """
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = { opt: Option Int } -> do
                 match opt is
@@ -309,7 +303,6 @@ class MatchEffectUnificationTest {
                 info = {msg} -> {}
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             # Function takes a callback with polymorphic effects
             let apply_to_opt: { opt: Option Int, f: { x: Int } -> Int <...> } -> Int <...> =
@@ -348,7 +341,6 @@ class MatchEffectUnificationTest {
                 get = {} -> 0
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = {} -> do
                 let val = State.get {}
@@ -463,7 +455,6 @@ class MatchEffectUnificationTest {
                 info = {msg} -> {}
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             let outer = {} -> do
                 let inner = match Some { val = 42 } is
@@ -502,7 +493,6 @@ class MatchEffectUnificationTest {
                 get = {} -> 0
             }
 
-            type Option 'a = | Some { val: 'a }, None |
 
             let test = { a: Option Int, b: Option Int, c: Option Int } -> do
                 match a is

@@ -98,7 +98,6 @@ class DuplicateDeclarationTest {
     @Test
     fun `test single overlapping constructor should fail`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: Str } |
 
             type Status = | Ok, Pending, Failed |
 
@@ -128,7 +127,6 @@ class DuplicateDeclarationTest {
     @Test
     fun `test variant with payload constructor collision should fail`() {
         val code = """
-            type Option = | Some { val: Int }, None |
 
             type Maybe = | Some { val: Str }, Nothing |
 

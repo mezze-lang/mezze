@@ -695,7 +695,6 @@ class TypecheckerSoundnessTest {
     @Test
     fun `substitution applied twice equals applied once`() {
         val source = """
-            type Result 'ok 'err = | Ok { val: 'ok }, Err { error: 'err } |
 
             let wrap : {x: Int} -> Result Int Str = {x} -> Ok { val = x }
             let unwrap = {r: Result Int Str} -> match r is

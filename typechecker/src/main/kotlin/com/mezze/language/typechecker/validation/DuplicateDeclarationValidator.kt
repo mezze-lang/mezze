@@ -9,6 +9,7 @@ import com.mezze.language.ast.ScopedEffectConstants
 
 object DuplicateDeclarationValidator {
         fun validateModule(module: ParsedModule) {
+        validateReservedTypeNames(module)
         validateDuplicateTypes(module)
         validateDuplicateConstructors(module)
         validateNewtypeConstructors(module)
@@ -84,6 +85,37 @@ object DuplicateDeclarationValidator {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * A type declaration may not take a name the COMPILER owns.
+     *
+     * The builtin types are synthetic — no `.mz` file declares `Option` or `Int` —
+     * so a declaration under one of those names was never a redeclaration the
+     * compiler could notice, and the two meanings simply coexisted:
+     *
+     *   - `type Int = | Yes, No |` was silently DISCARDED. `Int` went on meaning the
+     *     primitive, and the author's only clue was a later mismatch against a type
+     *     they believed they had defined.
+     *   - `type Option = | Yes, No |` was HONOURED, while the compiler kept applying
+     *     `Option`'s own rules. `Option Int` then unified with the local type, and a
+     *     well-typed program died at runtime with "no variant tag matched —
+     *     typechecker exhaustiveness guarantee violated".
+     *
+     * Ordinary stdlib types are untouched: `Json`, `HttpError` and friends are plain
+     * declarations in `.mz` files, and shadowing one is ordinary module scoping.
+     */
+    private fun validateReservedTypeNames(module: ParsedModule) {
+        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
+            if (!BuiltinTypes.isReservedTypeName(typeDecl.name)) continue
+            throw TypeCheckError(
+                "Cannot declare a type named '${typeDecl.name}': it is a built-in type. " +
+                    "The compiler keeps its own meaning for '${typeDecl.name}' whatever this " +
+                    "declaration says, so the two would disagree. Choose another name.",
+                typeDecl.loc,
+                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+            )
         }
     }
 

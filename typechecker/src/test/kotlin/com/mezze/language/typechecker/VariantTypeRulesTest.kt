@@ -577,9 +577,9 @@ class VariantTypeRulesTest {
     @Test
     fun `J1 - constructor with payload in closed variant`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: Str } |
+            type Outcome = | Good { value: Int }, Bad { message: Str } |
 
-            let x: Result = Ok { value = 42 }
+            let x: Outcome = Good { value = 42 }
         """.trimIndent()
         assertTypeCheckPasses(code)
     }
@@ -587,10 +587,10 @@ class VariantTypeRulesTest {
     @Test
     fun `J2 - constructor with payload inferred correctly`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: Str } |
+            type Outcome = | Good { value: Int }, Bad { message: Str } |
 
-            let x = Ok { value = 42 }
-            let y = Err { message = "failed" }
+            let x = Good { value = 42 }
+            let y = Bad { message = "failed" }
         """.trimIndent()
         assertTypeCheckPasses(code)
     }
@@ -598,11 +598,11 @@ class VariantTypeRulesTest {
     @Test
     fun `J3 - pattern match extracts payload`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: Str } |
+            type Outcome = | Good { value: Int }, Bad { message: Str } |
 
             let f = { r } -> match r is
-                Ok { value } -> value
-                Err { message } -> 0
+                Good { value } -> value
+                Bad { message } -> 0
         """.trimIndent()
         assertTypeCheckPasses(code)
     }
@@ -610,11 +610,11 @@ class VariantTypeRulesTest {
     @Test
     fun `J4 - mixed payload and unit constructors`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
             let f = { o } -> match o is
-                Some { value } -> value
-                None -> 0
+                Just { value } -> value
+                Nothing -> 0
         """.trimIndent()
         assertTypeCheckPasses(code)
     }
@@ -646,9 +646,9 @@ class VariantTypeRulesTest {
     @Test
     fun `K1 - missing required payload fails`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
-            let x: Option = Some
+            let x: Maybe = Just
         """.trimIndent()
         assertTypeCheckFails(code, "payload")
     }
@@ -656,9 +656,9 @@ class VariantTypeRulesTest {
     @Test
     fun `K2 - extra payload on unit constructor fails`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
-            let x: Option = None { value = 42 }
+            let x: Maybe = Nothing { value = 42 }
         """.trimIndent()
         assertTypeCheckFails(code, "payload")
     }
@@ -666,9 +666,9 @@ class VariantTypeRulesTest {
     @Test
     fun `K3 - wrong payload field name fails`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
-            let x: Option = Some { wrong = 42 }
+            let x: Maybe = Just { wrong = 42 }
         """.trimIndent()
         assertTypeCheckFails(code)
     }
@@ -676,9 +676,9 @@ class VariantTypeRulesTest {
     @Test
     fun `K4 - wrong payload type fails`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
-            let x: Option = Some { value = "hello" }
+            let x: Maybe = Just { value = "hello" }
         """.trimIndent()
         assertTypeCheckFails(code)
     }
@@ -686,11 +686,11 @@ class VariantTypeRulesTest {
     @Test
     fun `K5 - pattern without destructuring on payload constructor fails`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
             let f = { o } -> match o is
-                Some -> 1
-                None -> 0
+                Just -> 1
+                Nothing -> 0
         """.trimIndent()
         assertTypeCheckFails(code, "payload")
     }
@@ -698,11 +698,11 @@ class VariantTypeRulesTest {
     @Test
     fun `K6 - pattern with destructuring on unit constructor fails`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
             let f = { o } -> match o is
-                Some { value } -> value
-                None { x } -> 0
+                Just { value } -> value
+                Nothing { x } -> 0
         """.trimIndent()
         assertTypeCheckFails(code, "payload")
     }
@@ -779,12 +779,12 @@ class VariantTypeRulesTest {
     @Test
     fun `L5 - guard with payload extraction`() {
         val code = """
-            type Option = | Some { value: Int }, None |
+            type Maybe = | Just { value: Int }, Nothing |
 
             let f = { o } -> match o is
-                Some { value } if value > 0 -> value
-                Some { value } -> 0
-                None -> 0
+                Just { value } if value > 0 -> value
+                Just { value } -> 0
+                Nothing -> 0
         """.trimIndent()
         assertTypeCheckPasses(code)
     }
@@ -850,10 +850,10 @@ class VariantTypeRulesTest {
     @Test
     fun `polymorphic variant type works`() {
         val code = """
-            type Option 'a = | Some { value: 'a }, None |
+            type Maybe 'a = | Just { value: 'a }, Nothing |
 
-            let x: Option Int = Some { value = 42 }
-            let y: Option Str = Some { value = "hello" }
+            let x: Maybe Int = Just { value = 42 }
+            let y: Maybe Str = Just { value = "hello" }
         """.trimIndent()
         assertTypeCheckPasses(code)
     }

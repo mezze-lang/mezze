@@ -6,24 +6,31 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * A type NAME is not a type identity, and declaring `Option` yourself does not make
- * your type the stdlib's.
+ * A type NAME is not a type identity — and for the names the compiler owns, there
+ * is nothing to resolve in the first place.
  *
- * `Option Int` arrives as a name-carried `TypeApplication`, and unifying one
- * against a `VariantType` expands it through a declaration. That expansion looked
- * the declaration up by NAME whenever the hash-keyed lookup missed — so in a module
- * declaring `type Option = | Yes, No |`, the stdlib's `Option Int` expanded to
- * `| Yes, No |`, unified with the local type, and produced a WELL-TYPED program
- * that died at runtime:
+ * Two rules, and the second is what makes the first small.
  *
- *     Non-exhaustive match: no variant tag matched
- *       — typechecker exhaustiveness guarantee violated
+ * ## Built-in names are not declarable
  *
- * That is the well-typed⇒runs-to-a-value invariant broken by a name collision. The
- * tests below are the two shapes that reached it plus the controls that prove the
- * rejection is about IDENTITY, not about the name `Option` being special: a local
- * `Result` already rejected correctly, and a local `Option` used consistently must
- * keep working.
+ * `Option`, `Result`, `Seq`, `Int`, … are synthetic: no `.mz` file declares them,
+ * so a user declaration under one of those names was never a redeclaration the
+ * compiler could notice, and the two meanings coexisted. It went wrong in both
+ * directions. `type Int = | Yes, No |` was silently DISCARDED — `Int` kept meaning
+ * the primitive and the author's only clue was a later mismatch against a type
+ * they believed they had defined. `type Option = | Yes, No |` was HONOURED while
+ * the compiler kept applying `Option`'s own rules, so `Option Int` unified with the
+ * local type and a well-typed program died at runtime with "no variant tag matched
+ * — typechecker exhaustiveness guarantee violated".
+ *
+ * ## An ordinary stdlib name still shadows, and now resolves by identity
+ *
+ * `Json`, `HttpError`, `CancelReason` are plain declarations in `.mz` files, so
+ * shadowing one is ordinary module scoping and stays legal. That is where the
+ * identity fix still has work to do: a name-carried `TypeApplication` from another
+ * module is expanded through a declaration, and that declaration is found by HASH —
+ * a hash that misses means NOT HERE, rather than "try the name and take whatever
+ * shares it".
  */
 class ShadowingTypeNameIdentityTest {
 
@@ -32,97 +39,83 @@ class ShadowingTypeNameIdentityTest {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
     }
 
-    private val localOption = "type Option = | Yes, No |\n"
-
     private fun errorFrom(src: String): String? =
         runCatching { MezzeTestHelper.run(src) }.exceptionOrNull()?.message
 
-    @Test
-    fun `a stdlib Option cannot be passed where a shadowing local Option is expected`() {
-        val e = errorFrom(
-            """
-            use std::int
-            $localOption
-            let f: { o: Option } -> Int = { o } ->
-              match o is
-                Yes -> 1
-                No -> 0
-            f { o = int::from_str { s = "5" } }
-            """.trimIndent(),
-        )
+    private fun assertReserved(name: String, decl: String) {
+        val e = errorFrom("$decl\nlet a: Int = 1\na")
         assertTrue(
-            e?.contains("expects Option but got Option Int") == true,
-            "expected a type error, not a runtime exhaustiveness violation; got: $e",
+            e?.contains("Cannot declare a type named '$name': it is a built-in type") == true,
+            "expected '$name' to be reserved; got: $e",
         )
     }
 
     @Test
-    fun `a stdlib Option cannot be bound to a shadowing local Option annotation`() {
-        val e = errorFrom(
-            """
-            use std::int
-            $localOption
-            let b: Option = int::from_str { s = "5" }
-            match b is
-              Yes -> 1
-              No -> 0
-            """.trimIndent(),
-        )
-        assertTrue(
-            e?.contains("declared as Option but expression has type Option Int") == true,
-            "expected a type error, not a runtime exhaustiveness violation; got: $e",
-        )
+    fun `a core built-in type name cannot be declared`() {
+        // `List` is deliberately absent: the builtin cannot be USED by name
+        // (`match l is Nil` against a `List Int` annotation fails to resolve), so
+        // fixtures declare their own as a workaround and reserving the name would
+        // remove the workaround before the defect. See BuiltinTypes.reservedTypeNames.
+        for (n in listOf("Option", "Result", "Seq", "Map", "Set", "Deque", "Iter")) {
+            assertReserved(n, "type $n = | Yes, No |")
+        }
     }
 
     @Test
-    fun `the shadowing type still works when used consistently`() {
-        // The fix rejects a MISMATCH; it must not make the local type unusable.
+    fun `a primitive type name cannot be declared`() {
+        // These used to be silently discarded, which is the worse failure: the
+        // author gets no diagnostic at the declaration, only a confusing mismatch
+        // wherever they try to use the type they thought they had.
+        for (n in listOf("Int", "Str", "Bool", "Float", "Char", "Bytes", "Frac")) {
+            assertReserved(n, "type $n = | Yes, No |")
+        }
+    }
+
+    @Test
+    fun `the rule covers newtype and alias declarations too`() {
+        assertReserved("Option", "newtype Option = Int")
+        assertReserved("Option", "type Option = Int")
+    }
+
+    @Test
+    fun `an ordinary stdlib type name is still shadowable`() {
+        // The boundary. `Json` is declared in a `.mz` file like any other type, so
+        // a module may declare its own and mean it.
         assertEquals(
             1L,
             MezzeTestHelper.run(
                 """
-                $localOption
-                let f: { o: Option } -> Int = { o } ->
-                  match o is
+                type Json = | Yes, No |
+                let f: { j: Json } -> Int = { j } ->
+                  match j is
                     Yes -> 1
                     No -> 0
-                f { o = Yes }
+                f { j = Yes }
                 """.trimIndent(),
             ),
         )
     }
 
     @Test
-    fun `the shadowing type does not accept the stdlib's constructors`() {
-        // This half always worked: an inline `Some { val = 1 }` is a VariantType, so
-        // it never went through the TypeApplication expansion that was at fault.
-        // Kept as the pair to the case above — the two representations of the same
-        // value have to give the same answer.
-        val e = errorFrom("$localOption\nlet a: Option = Some { val = 1 }\na")
-        assertTrue(
-            e?.contains("declared as Option but expression has type") == true,
-            "expected a type error; got: $e",
-        )
-    }
-
-    @Test
-    fun `a local type under an unrelated stdlib name was already correct`() {
-        // The control that showed the bug was specific to the expansion path rather
-        // than to shadowing in general.
+    fun `a shadowed stdlib type does not unify with the stdlib's own`() {
+        // The identity fix, on the names where shadowing is still allowed. The
+        // stdlib's `Json` arrives name-carried from another module; expanding it
+        // through the LOCAL declaration of that name is what produced a well-typed
+        // program that got stuck. It is a type error now.
         val e = errorFrom(
             """
-            use std::int
-            type Result = | Up, Down |
-            let f: { o: Result } -> Int = { o } ->
-              match o is
-                Up -> 1
-                Down -> 0
-            f { o = int::from_str { s = "5" } }
+            use std::codec::json
+            type Json = | Yes, No |
+            let f: { j: Json } -> Int = { j } ->
+              match j is
+                Yes -> 1
+                No -> 0
+            f { j = json::from_str { s = "1" } }
             """.trimIndent(),
         )
         assertTrue(
-            e?.contains("expects Result but got Option Int") == true,
-            "expected a type error; got: $e",
+            e?.contains("does not have constructor 'Yes'") == true,
+            "expected a type error, not a runtime exhaustiveness violation; got: $e",
         )
     }
 }

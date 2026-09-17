@@ -109,12 +109,12 @@ class PatternValidationTest {
     @Test
     fun `test mixed variants with correct patterns should pass`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: Str }, Loading |
+            type Outcome = | Good { value: Int }, Bad { message: Str }, Loading |
 
             let handle = {result} ->
                 match result is
-                    Ok { value } -> value
-                    Err { message } -> 0
+                    Good { value } -> value
+                    Bad { message } -> 0
                     Loading -> 0
         """.trimIndent()
 
@@ -126,12 +126,12 @@ class PatternValidationTest {
     @Test
     fun `test variant with payload ignoring value should pass`() {
         val code = """
-            type Option = | Some { val: Int }, None |
+            type Maybe = | Just { val: Int }, Nothing |
 
-            let is_some: {opt: Option} -> Bool = {opt} ->
+            let is_some: {opt: Maybe} -> Bool = {opt} ->
                 match opt is
-                    Some { val } -> True
-                    None -> False
+                    Just { val } -> True
+                    Nothing -> False
         """.trimIndent()
 
         // Should pass - Some has payload and pattern destructures it
@@ -183,12 +183,12 @@ class PatternValidationTest {
     @Test
     fun `multiple payload variants without destructuring should fail`() {
         val code = """
-            type Result = | Ok { val: Int }, Err { msg: Str } |
+            type Outcome = | Good { val: Int }, Bad { msg: Str } |
 
             let check = {result} ->
                 match result is
-                    Ok -> 1
-                    Err -> 0
+                    Good -> 1
+                    Bad -> 0
         """.trimIndent()
 
         // Should throw - both Ok and Err have payloads
@@ -201,19 +201,19 @@ class PatternValidationTest {
     fun `polymorphic payload variant without destructuring should fail`() {
         // Test with type parameter 'a
         val code = """
-            type Option 'a = | Some { val: 'a }, None |
+            type Maybe 'a = | Just { val: 'a }, Nothing |
 
             let is_some = {opt} ->
                 match opt is
-                    Some -> True
-                    None -> False
+                    Just -> True
+                    Nothing -> False
         """.trimIndent()
 
         // Should throw - Some has payload
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        assertTrue(exception.message?.contains("Some") == true,
+        assertTrue(exception.message?.contains("Just") == true,
             "Message should contain 'Some'. Actual: ${exception.message}")
     }
 
@@ -354,12 +354,12 @@ class PatternValidationTest {
     @Test
     fun `unused pattern binding should produce warning`() {
         val code = """
-            type Option = | Some { val: Int }, None |
+            type Maybe = | Just { val: Int }, Nothing |
 
-            let test = {opt: Option} ->
+            let test = {opt: Maybe} ->
                 match opt is
-                    Some { val } -> 42
-                    None -> 0
+                    Just { val } -> 42
+                    Nothing -> 0
         """.trimIndent()
 
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
@@ -372,12 +372,12 @@ class PatternValidationTest {
     @Test
     fun `used pattern binding should not produce warning`() {
         val code = """
-            type Option = | Some { val: Int }, None |
+            type Maybe = | Just { val: Int }, Nothing |
 
-            let test = {opt: Option} ->
+            let test = {opt: Maybe} ->
                 match opt is
-                    Some { val } -> val
-                    None -> 0
+                    Just { val } -> val
+                    Nothing -> 0
         """.trimIndent()
 
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
@@ -390,12 +390,12 @@ class PatternValidationTest {
     @Test
     fun `underscore prefix suppresses unused variable warning`() {
         val code = """
-            type Option = | Some { val: Int }, None |
+            type Maybe = | Just { val: Int }, Nothing |
 
-            let test = {opt: Option} ->
+            let test = {opt: Maybe} ->
                 match opt is
-                    Some { val = _unused } -> 42
-                    None -> 0
+                    Just { val = _unused } -> 42
+                    Nothing -> 0
         """.trimIndent()
 
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)

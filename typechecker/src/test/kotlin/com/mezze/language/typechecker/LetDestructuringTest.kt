@@ -294,13 +294,13 @@ class LetDestructuringTest {
     @Test
     fun `test destructuring with match expression`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: Str } |
+            type Outcome = | Good { value: Int }, Bad { message: Str } |
 
-            let handleResult = {r: Result} -> match r is
-                Ok { value } -> value
-                Err { message } -> 0
+            let handleResult = {r: Outcome} -> match r is
+                Good { value } -> value
+                Bad { message } -> 0
 
-            let ok = Ok { value = 42 }
+            let ok = Good { value = 42 }
             let test = handleResult { r = ok }
         """.trimIndent()
 

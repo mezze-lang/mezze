@@ -306,9 +306,9 @@ class MatchExhaustivenessTest {
     @Test
     fun `test exhaustiveness with mixed pattern types`() {
         val code = """
-            type Result = | Success { value: Int }, Error { message: Str }, Loading |
+            type Outcome = | Success { value: Int }, Error { message: Str }, Loading |
             
-            let test: {result: Result} -> Str = {result} -> match result is
+            let test: {result: Outcome} -> Str = {result} -> match result is
               Success { value } if value > 0 -> "positive result"
               Success { value } -> "zero or negative result"
               Error { message } -> "error: $(message)"

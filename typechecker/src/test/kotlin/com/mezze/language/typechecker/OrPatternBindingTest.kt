@@ -32,11 +32,11 @@ class OrPatternBindingTest {
     @Test
     fun `test or-pattern with same bindings should pass`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { value: Int } |
+            type Outcome = | Good { value: Int }, Bad { value: Int } |
 
             let get_value = {r} ->
                 match r is
-                    Ok { value = v } | Err { value = v } -> v
+                    Good { value = v } | Bad { value = v } -> v
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -111,11 +111,11 @@ class OrPatternBindingTest {
     @Test
     fun `test or-pattern with extra binding in second alternative should fail`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { code: Int, msg: Str } |
+            type Outcome = | Good { value: Int }, Bad { code: Int, msg: Str } |
 
             let bad = {r} ->
                 match r is
-                    Ok { value = x } | Err { code = x, msg = m } -> x
+                    Good { value = x } | Bad { code = x, msg = m } -> x
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
@@ -147,11 +147,11 @@ class OrPatternBindingTest {
     @Test
     fun `test or-pattern first has binding second has none should fail`() {
         val code = """
-            type Option = | Some { val: Int }, None |
+            type Maybe = | Just { val: Int }, Nothing |
 
             let bad = {opt} ->
                 match opt is
-                    Some { val = v } | None -> v
+                    Just { val = v } | Nothing -> v
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
@@ -165,11 +165,11 @@ class OrPatternBindingTest {
     @Test
     fun `test or-pattern first has none second has binding should fail`() {
         val code = """
-            type Option = | Some { val: Int }, None |
+            type Maybe = | Just { val: Int }, Nothing |
 
             let bad = {opt} ->
                 match opt is
-                    None | Some { val = v } -> 0
+                    Nothing | Just { val = v } -> 0
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {

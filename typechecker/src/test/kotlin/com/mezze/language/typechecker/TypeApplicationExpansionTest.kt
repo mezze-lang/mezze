@@ -59,7 +59,6 @@ class TypeApplicationExpansionTest {
     @Test
     fun `TypeApplication expansion - simple Option type`() {
         val code = """
-            type Option 'a = | None, Some { val: 'a } |
 
             let unwrap_or = {opt, default} ->
                 match opt is
@@ -94,7 +93,6 @@ class TypeApplicationExpansionTest {
     @Test
     fun `TypeApplication expansion - Result type with two parameters`() {
         val code = """
-            type Result 'ok 'err = | Ok { val: 'ok }, Err { error: 'err } |
 
             let is_ok = {result} ->
                 match result is
@@ -171,7 +169,6 @@ class TypeApplicationExpansionTest {
     fun `Pattern matching - nested parametric types`() {
         val code = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
-            type Option 'a = | None, Some { val: 'a } |
 
             let find_value = {tree, target} -> match tree is
               Leaf -> None
@@ -219,7 +216,6 @@ class TypeApplicationExpansionTest {
     fun `Higher-order - tree filter with predicate`() {
         val code = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
-            type Option 'a = | None, Some { val: 'a } |
 
             let tree_filter = {tree, pred} -> match tree is
               Leaf -> None
@@ -291,7 +287,6 @@ class TypeApplicationExpansionTest {
     fun `Complex constraints - multiple type parameters in use`() {
         val code = """
             type Pair 'a 'b = | Pair { first: 'a, second: 'b } |
-            type Result 'ok 'err = | Ok { val: 'ok }, Err { error: 'err } |
 
             let swap_if_ok = {result} -> match result is
               Ok { val = Pair { first, second } } -> Ok { val = Pair { first = second, second = first } }
@@ -334,7 +329,6 @@ class TypeApplicationExpansionTest {
     fun `Edge case - deeply nested parametric types`() {
         val code = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
-            type Option 'a = | None, Some { val: 'a } |
 
             let get_value = {tree} -> match tree is
               Leaf -> None
@@ -355,7 +349,6 @@ class TypeApplicationExpansionTest {
     @Test
     fun `Edge case - parametric type with unit constructor`() {
         val code = """
-            type Option 'a = | None, Some { val: 'a } |
 
             let is_none = {opt} -> match opt is
               None -> True
@@ -437,7 +430,6 @@ class TypeApplicationExpansionTest {
         // instantiated with a concrete payload: `Some { val = 5 }` needs
         // `NumAdd Str Int`, which has no impl. Call it so the mismatch surfaces.
         val code = """
-            type Option 'a = | None, Some { val: 'a } |
 
             let bad = {opt} -> match opt is
               Some { val } -> val + "hello"

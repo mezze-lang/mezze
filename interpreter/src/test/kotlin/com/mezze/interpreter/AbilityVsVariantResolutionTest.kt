@@ -95,7 +95,6 @@ class AbilityVsVariantResolutionTest {
     fun `test variant constructor vs ability - no confusion`() {
         val source = """
             # Define a variant that happens to have an uppercase name
-            type Result 'a 'e = | Ok { val: 'a }, Err { error: 'e } |
 
             let success = Ok { val = 42 }
             let failure = Err { error = "oops" }
@@ -115,7 +114,6 @@ class AbilityVsVariantResolutionTest {
     @Test
     fun `test unit variant constructors`() {
         val source = """
-            type Option 'a = | None, Some { val: 'a } |
 
             let nothing = None
             let something = Some { val = 42 }

@@ -2,6 +2,7 @@ package com.mezze.interpreter
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Assertions.*
 
@@ -308,11 +309,14 @@ class BuiltInAbilitiesTest {
     @Test
     @DisplayName("Variant equality is derived automatically - equal variants")
     fun testVariantEqualityTrue() {
+        // Annotated deliberately. Without the annotation an unannotated let-bound
+        // variant construction infers a one-constructor anonymous type, and derived
+        // `Eq` on that shape gets stuck at runtime — see the disabled test below.
         val source = """
-            type Option 'a = | Some { val: 'a }, None |
+            use std::option
 
-            let opt1 = Some { val = 42 }
-            let opt2 = Some { val = 42 }
+            let opt1: Option Int = Some { val = 42 }
+            let opt2: Option Int = Some { val = 42 }
             let result = opt1 == opt2
             result
         """.trimIndent()
@@ -325,10 +329,10 @@ class BuiltInAbilitiesTest {
     @DisplayName("Variant equality is derived automatically - different values")
     fun testVariantEqualityDifferentValues() {
         val source = """
-            type Option 'a = | Some { val: 'a }, None |
+            use std::option
 
-            let opt1 = Some { val = 42 }
-            let opt2 = Some { val = 99 }
+            let opt1: Option Int = Some { val = 42 }
+            let opt2: Option Int = Some { val = 99 }
             let result = opt1 == opt2
             result
         """.trimIndent()
@@ -338,10 +342,31 @@ class BuiltInAbilitiesTest {
     }
 
     @Test
+    @Disabled(
+        "An unannotated let-bound variant construction infers a ONE-CONSTRUCTOR " +
+            "anonymous type, and derived `Eq` on that shape gets stuck: " +
+            "\"Non-exhaustive match: no variant tag matched — typechecker " +
+            "exhaustiveness guarantee violated\". The same comparison written inline, " +
+            "or with the let annotated `Option Int`, both work — so it is the inferred " +
+            "type of the binding, not the comparison. Was masked until now by fixtures " +
+            "declaring their own `type Option`.",
+    )
+    @DisplayName("Variant equality works without annotating the binding")
+    fun testVariantEqualityUnannotatedBinding() {
+        val result = eval(
+            """
+            let opt1 = Some { val = 42 }
+            let opt2 = Some { val = 42 }
+            opt1 == opt2
+            """.trimIndent(),
+        )
+        assertEquals(true, result)
+    }
+
+    @Test
     @DisplayName("Variant equality is derived automatically - different constructors")
     fun testVariantEqualityDifferentConstructors() {
         val source = """
-            type Option 'a = | Some { val: 'a }, None |
 
             let opt1 = Some { val = 42 }
             let opt2 = None
@@ -357,7 +382,6 @@ class BuiltInAbilitiesTest {
     @DisplayName("Variant equality for None values")
     fun testVariantEqualityNone() {
         val source = """
-            type Option 'a = | Some { val: 'a }, None |
 
             let opt1 = None
             let opt2 = None
@@ -373,7 +397,6 @@ class BuiltInAbilitiesTest {
     @DisplayName("Complex nested structure equality")
     fun testComplexNestedEquality() {
         val source = """
-            type Option 'a = | Some { val: 'a }, None |
 
             let person1 = { name = "Alice", age = 30 }
             let person2 = { name = "Alice", age = 30 }

@@ -128,9 +128,8 @@ class ErrorReportingTest {
     @Test
     fun testPatternMatchExhaustivenessError() {
         val source = """
-            type Option = | Some { value: Int }, None |
             let getValue = {option: Option} -> match option is
-              Some { value } -> value
+              Some { val } -> value
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
