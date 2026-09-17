@@ -3049,7 +3049,22 @@ class TypedASTCompiler(
         // captureless stub whose `a == b` fell back to STRUCTURAL equality, silently
         // ignoring the element's Eq impl. Take the LAST arg structurally (mirrors
         // Map/SortedMap → valueType); never key on the constructor NAME.
-        is TypeApplication -> type.args.lastOrNull()
+        // The last CONCRETE argument, not simply the last: `Ok { val = 1 }` infers
+        // `Result Int 'a` with the error type still unconstrained, and every caller
+        // here discards a `VarType` anyway — so answering with the trailing `'a`
+        // answers nothing, while `Int` is the payload actually being compared.
+        is TypeApplication -> type.args.lastOrNull { it !is VarType }
+        // ...and a name-carried VARIANT is the THIRD representation, which the two
+        // above still missed. `let a: Option Int = …` converts the annotation to a
+        // TypeApplication and works; `let a = Some { val = 42 }` INFERS the same
+        // type as a VariantType carrying `typeArgs = [Int]`, and that yielded no
+        // element at all. The `Eq 'a` dict for the payload then resolved against
+        // `[Option Int]` — which is Option's OWN `eq` — so comparing two `Some`s ran
+        // Option's variant match on the payload `42` and died with "no variant tag
+        // matched — typechecker exhaustiveness guarantee violated". A well-typed
+        // program, stuck, because one of three spellings of one type was never
+        // asked the question.
+        is VariantType -> type.typeArgs.lastOrNull { it !is VarType }
         else -> null
     }
 

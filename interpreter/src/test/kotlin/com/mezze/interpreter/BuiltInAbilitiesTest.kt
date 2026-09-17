@@ -342,15 +342,6 @@ class BuiltInAbilitiesTest {
     }
 
     @Test
-    @Disabled(
-        "An unannotated let-bound variant construction infers a ONE-CONSTRUCTOR " +
-            "anonymous type, and derived `Eq` on that shape gets stuck: " +
-            "\"Non-exhaustive match: no variant tag matched — typechecker " +
-            "exhaustiveness guarantee violated\". The same comparison written inline, " +
-            "or with the let annotated `Option Int`, both work — so it is the inferred " +
-            "type of the binding, not the comparison. Was masked until now by fixtures " +
-            "declaring their own `type Option`.",
-    )
     @DisplayName("Variant equality works without annotating the binding")
     fun testVariantEqualityUnannotatedBinding() {
         val result = eval(
