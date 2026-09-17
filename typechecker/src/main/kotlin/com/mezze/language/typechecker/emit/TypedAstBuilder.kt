@@ -534,6 +534,39 @@ class TypedAstBuilder(
         else -> type
     }
 
+    /**
+     * The constructor's own payload type, written into the solved variant shape
+     * where that shape left a variable.
+     *
+     * An UNDECLARED variant has no declaration to read a payload type from, so the
+     * solver invents one and relies on unification to fill it. That does not always
+     * reach the emitted type: `show { a = Grams { n = Money.(4) } }` emitted
+     * `VariantType([Grams])` whose `Grams` payload was still `{ n: 'y }` — while
+     * the payload EXPRESSION sitting right there was already typed
+     * `{ n: Money }`. The construction is what gives the constructor its payload,
+     * so the payload's own type is not a guess about the shape; it IS the shape.
+     *
+     * Downstream that gap is not a missing type but a wrong ANSWER: monomorphization
+     * needs a concrete type argument to specialize on, derives `args=null` from a
+     * payload that holds a variable, and the un-specialized body prints an erased
+     * newtype as its payload (`4`, not `Money.(4)`).
+     *
+     * Only fills a HOLE: a payload the solved shape already resolved is left alone,
+     * and a payload expression that is itself not concrete supplies nothing.
+     */
+    private fun payloadTypedVariant(
+        solvedType: MezzeType,
+        constructor: String,
+        payload: TypedExpr?,
+    ): MezzeType {
+        if (solvedType !is MezzeType.VariantType) return solvedType
+        val payloadType = payload?.type ?: return solvedType
+        if (payloadType.holdsTypeVar()) return solvedType
+        val current = solvedType.constructors[constructor]
+        if (current != null && !current.holdsTypeVar()) return solvedType
+        return solvedType.copy(constructors = solvedType.constructors + (constructor to payloadType))
+    }
+
     private fun attachAbilityConstraints(
         expr: TypedExpr,
         constraints: List<MezzeType.FunctionAbilityConstraint>
@@ -881,7 +914,10 @@ class TypedAstBuilder(
                         fromCtx !is MezzeType.VarType -> fromCtx
                         else -> perLoc ?: fromCtx
                     }
-                    TypedVariantConstruct(expr.constructor, payload, solvedType, loc)
+                    TypedVariantConstruct(
+                        expr.constructor, payload,
+                        payloadTypedVariant(solvedType, expr.constructor, payload), loc,
+                    )
                 }
             }
             is ParsedIdentifier -> {

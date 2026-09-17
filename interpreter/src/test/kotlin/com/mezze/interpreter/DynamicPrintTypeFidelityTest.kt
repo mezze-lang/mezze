@@ -1,7 +1,6 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
@@ -37,7 +36,7 @@ import kotlin.test.assertEquals
  * | `let show = { x: 'a } -> …` (inline annotation)  | WRONG   | **fixed** |
  * | `let show = { x } -> …`     (no annotation)      | correct | correct   |
  * | match-arm binder, DECLARED payload, in a lambda   | WRONG   | **fixed** |
- * | match-arm binder, UNDECLARED payload              | WRONG   | WRONG     |
+ * | match-arm binder, UNDECLARED payload              | WRONG   | **fixed** |
  *
  * Two independent causes, each of which made a correct program print the wrong
  * thing:
@@ -54,7 +53,14 @@ import kotlin.test.assertEquals
  *    scrutinee's own declared shape, which — the scrutinee being concrete —
  *    DETERMINES the binder's type. An absent answer was outranking a real one.
  *
- * The last row remains, and is what still holds `Dynamic` in place
+ *  - The UNDECLARED variant's payload. With no declaration to read a payload
+ *    type from, the solver invents one and relies on unification to fill it —
+ *    which did not reach the emitted type, leaving `VariantType([Grams])` whose
+ *    payload was `{ n: 'y }` while the payload EXPRESSION beside it was already
+ *    typed `{ n: Money }`. Monomorphization then derived `args=null` and never
+ *    specialized. The construction is what gives the constructor its payload, so
+ *    the payload's own type IS the shape; it is now written in where the solved
+ *    shape left a hole
  */
 class DynamicPrintTypeFidelityTest {
 
@@ -161,21 +167,10 @@ class DynamicPrintTypeFidelityTest {
         )
     }
 
-    // ── What still reaches Dynamic ────────────────────────────────────────
+    // ── Through an UNDECLARED variant's payload ───────────────────────────
 
     @Test
-    @Disabled(
-        "D.1 — the payload of an UNDECLARED variant. `show { a = Grams { n = " +
-            "Money.(4) } }` gives `n` no declared type, so the scrutinee's own " +
-            "type holds a variable and determines nothing. The type is known only " +
-            "at the CALL, and mono cannot use it: measured, the argument's type " +
-            "reaches MonoDriver as `VariantType([Grams])` with payload `{ n: 'y }` " +
-            "— the constructed value's own payload type is a variable — so " +
-            "deriving the type argument yields `args=null` and no specialization " +
-            "happens. Closing it means the constructor application recording its " +
-            "payload's type, which is upstream of PrintType entirely.",
-    )
-    fun `a newtype through an UNDECLARED-variant payload keeps its wrapper`() {
+        fun `a newtype through an UNDECLARED-variant payload keeps its wrapper`() {
         assertEquals(
             "Money.(4)",
             MezzeTestHelper.run(

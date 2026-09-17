@@ -1536,15 +1536,27 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   and `CallIndirect` dies on `[MezzeRecord, Object[]]`. Codec decode bodies need
   those binders to stay variables.
 
-  STILL OPEN: the payload binder of an UNDECLARED variant. `show { a = Grams { n
-  = Money.(4) } }` gives `n` no declared type, so the scrutinee's own type holds a
-  variable and determines nothing; the type is known only at the CALL, and mono
-  cannot use it — measured, the argument reaches `MonoDriver` as
-  `VariantType([Grams])` with payload `{ n: 'y }`, i.e. the CONSTRUCTED VALUE's own
-  payload type is a variable, so deriving the type argument yields `args=null`.
-  Closing it means the constructor application recording its payload's type, which
-  is upstream of `PrintType` entirely. One `@Disabled` case in
-  `DynamicPrintTypeFidelityTest` carries it.
+  THIRD CAUSE, ALSO FIXED — the payload of an UNDECLARED variant. With no
+  declaration to read a payload type from, the solver invents one and relies on
+  unification to fill it, which did not reach the emitted type:
+  `show { a = Grams { n = Money.(4) } }` emitted `VariantType([Grams])` whose
+  `Grams` payload was still `{ n: 'y }` — while the payload EXPRESSION beside it
+  was already typed `{ n: Money }`. Monomorphization then derived `args=null` and
+  never specialized, so the un-specialized body printed the erased newtype.
+
+  Measured discriminator: let-binding the construction first
+  (`let v = Grams { n = Money.(4) }` then `show { a = v }`) was always correct —
+  only an INLINE construction in an argument lost it. The construction is what
+  gives the constructor its payload, so the payload's own type IS the shape; it is
+  now written into the solved variant where that shape left a hole, and only there.
+
+  `DynamicPrintTypeFidelityTest` now has NO disabled cases.
+
+  `PrintType.Dynamic` itself is still NOT deletable: re-measured after all three
+  fixes, the `VarType` arm still fires 39 times across the interpreter gate.
+  Deleting it needs every remaining firing shown to be a position that carries no
+  runtime value (a phantom / an unreachable arm), which is what `PrintType`'s doc
+  asserts and what has not been established.
 - **BUG 15 (new, SOUNDNESS)** A type variable written twice in one parameter list
   was two variables, so the parameters were never required to agree:
 
