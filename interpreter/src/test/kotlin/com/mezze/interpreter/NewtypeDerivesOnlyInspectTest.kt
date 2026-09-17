@@ -23,10 +23,13 @@ import kotlin.test.assertTrue
  *
  *     if (isNewtype && !isInspect(abilityHash)) return false
  *
- * The enabled cases below confirm it holds where the ability is reached through
- * an OPERATOR. The disabled ones are BUG 13: the collection natives reach the
- * same abilities WITHOUT going through that predicate, so they compare
- * structurally on a type that has no `Eq` at all.
+ * The cases below confirm it holds where the ability is reached through an
+ * OPERATOR, and — since BUG 13 was closed — where it is reached through a
+ * CONTAINER. `Set` and `Map` now declare `with Eq` on every operation that
+ * buckets or looks up an element, so an element type with no equality is
+ * rejected instead of being deduped by a structural comparison its author never
+ * wrote. The one case still disabled is the codec flavour, which fails at
+ * runtime rather than at compile time.
  */
 class NewtypeDerivesOnlyInspectTest {
 
@@ -62,16 +65,10 @@ class NewtypeDerivesOnlyInspectTest {
         )
     }
 
-    // ── BUG 13: the collections do not honour the rule ────────────────────
+    // ── Reached through a CONTAINER (BUG 13, closed) ──────────────────────
 
     @Test
-    @Disabled(
-        "BUG 13 — a Set DEDUPES two newtype values with no Eq impl, comparing " +
-            "structurally. `==` on the same type is correctly rejected, so the " +
-            "collection natives reach Eq without going through " +
-            "DerivabilityRules. Needs Set/Map to require `Hash + Eq` (T1.4).",
-    )
-    fun `a Set rejects a newtype element that has no Eq`() {
+        fun `a Set rejects a newtype element that has no Eq`() {
         // Today this answers 1: the two values were compared structurally and
         // deduped, using an Eq the author never wrote.
         val e = runCatching {
@@ -87,8 +84,7 @@ class NewtypeDerivesOnlyInspectTest {
     }
 
     @Test
-    @Disabled("BUG 13 — as above: `contains` answers true using an Eq that does not exist.")
-    fun `a Set rejects contains on a newtype element that has no Eq`() {
+        fun `a Set rejects contains on a newtype element that has no Eq`() {
         val e = runCatching {
             MezzeTestHelper.run(
                 """
@@ -102,8 +98,7 @@ class NewtypeDerivesOnlyInspectTest {
     }
 
     @Test
-    @Disabled("BUG 13 — as above, for a Map KEY.")
-    fun `a Map rejects a newtype key that has no Eq`() {
+        fun `a Map rejects a newtype key that has no Eq`() {
         val e = runCatching {
             MezzeTestHelper.run(
                 """

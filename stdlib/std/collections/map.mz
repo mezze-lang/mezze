@@ -20,18 +20,18 @@ impl Eq for Map 'k 'v where {
 pub let empty: {} -> Map 'k 'v = {} -> __native_map_empty {}
 
 ## Inserts a key-value pair, returning a new map.
-pub let insert: { m: Map 'k 'v, k: 'k, v: 'v } -> Map 'k 'v = { m, k, v } ->
+pub let insert: { m: Map 'k 'v, k: 'k, v: 'v } with Eq 'k -> Map 'k 'v = { m, k, v } ->
   __native_map_insert { m = m, k = k, v = v }
 
 ## Returns the value for the given key, or None.
-pub let get: { m: Map 'k 'v, k: 'k } -> Option 'v = { m, k } -> __native_map_get { m = m, k = k }
+pub let get: { m: Map 'k 'v, k: 'k } with Eq 'k -> Option 'v = { m, k } -> __native_map_get { m = m, k = k }
 
 ## Removes a key, returning a new map.
-pub let remove: { m: Map 'k 'v, k: 'k } -> Map 'k 'v = { m, k } ->
+pub let remove: { m: Map 'k 'v, k: 'k } with Eq 'k -> Map 'k 'v = { m, k } ->
   __native_map_remove { m = m, k = k }
 
 ## Returns True if the key exists in the map.
-pub let contains_key: { m: Map 'k 'v, k: 'k } -> Bool = { m, k } ->
+pub let contains_key: { m: Map 'k 'v, k: 'k } with Eq 'k -> Bool = { m, k } ->
   __native_map_contains_key { m = m, k = k }
 
 ## Returns the number of entries.
@@ -63,11 +63,11 @@ pub let fold
   = { m, init, f } -> __native_map_fold { m = m, init = init, f = f }
 
 ## Builds a map from a list of keys using f to compute values.
-pub let from_keys: { ks: List 'k, f: { val: 'k } -> 'v <...> } -> Map 'k 'v <...> = { ks, f } ->
+pub let from_keys: { ks: List 'k, f: { val: 'k } -> 'v <...> } with Eq 'k -> Map 'k 'v <...> = { ks, f } ->
   __native_map_from_keys { ks = ks, f = f }
 
 ## Merges two maps; values from m2 override m1 on key conflict.
-pub let merge: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
+pub let merge: { m1: Map 'k 'v, m2: Map 'k 'v } with Eq 'k -> Map 'k 'v = { m1, m2 } ->
   __native_map_merge { m1 = m1, m2 = m2 }
 
 ## Merges two maps, using f to resolve conflicting keys.
@@ -79,6 +79,7 @@ pub let merge_with
 ## Updates the value for key k using f; removes if f returns None.
 pub let update
   : { m: Map 'k 'v, k: 'k, f: { x: Option 'v } -> Option 'v <...> }
+  with Eq 'k
   -> Map 'k 'v <...>
   = { m, k, f } -> do
     let current = get { m = m, k = k }
@@ -89,11 +90,11 @@ pub let update
 
 
 ## Removes all keys in the given list.
-pub let remove_all: { m: Map 'k 'v, ks: List 'k } -> Map 'k 'v = { m, ks } ->
+pub let remove_all: { m: Map 'k 'v, ks: List 'k } with Eq 'k -> Map 'k 'v = { m, ks } ->
   __native_map_remove_all { m = m, ks = ks }
 
 ## Returns True if the two maps are equal.
-pub let equals: { m1: Map 'k 'v, m2: Map 'k 'v } -> Bool = { m1, m2 } ->
+pub let equals: { m1: Map 'k 'v, m2: Map 'k 'v } with Eq 'k -> Bool = { m1, m2 } ->
   __native_map_equals { m1 = m1, m2 = m2 }
 
 ## Returns True if any entry matches the predicate.
@@ -128,13 +129,13 @@ pub let contains_value: { m: Map 'k 'v, v: 'v } with Eq 'v -> Bool = { m, v } ->
   contains_value_with_eq { m = m, v = v, eq = { a, b } -> a == b }
 
 ## Returns the value for key k, or def if not found.
-pub let get_or: { m: Map 'k 'v, k: 'k, def: 'v } -> 'v = { m, k, def } -> match get { m = m, k = k } is
+pub let get_or: { m: Map 'k 'v, k: 'k, def: 'v } with Eq 'k -> 'v = { m, k, def } -> match get { m = m, k = k } is
   Some { val } -> val
   None -> def
 
 
 ## Creates a single-entry map.
-pub let singleton: { k: 'k, v: 'v } -> Map 'k 'v = { k, v } ->
+pub let singleton: { k: 'k, v: 'v } with Eq 'k -> Map 'k 'v = { k, v } ->
   __native_map_singleton { k = k, v = v }
 
 ## Returns all entries as a seq of {k, v} records.
@@ -188,11 +189,11 @@ pub let max_value: { m: Map 'k 'v } with Ord 'v -> Option 'v = { m } ->
 pub let invert: { m: Map 'k 'v } -> Map 'v 'k = { m } -> __native_map_invert { m = m }
 
 ## Keeps only the specified keys.
-pub let select_keys: { m: Map 'k 'v, ks: ['k] } -> Map 'k 'v = { m, ks } ->
+pub let select_keys: { m: Map 'k 'v, ks: ['k] } with Eq 'k -> Map 'k 'v = { m, ks } ->
   __native_map_select_keys { m = m, ks = ks }
 
 ## Removes the specified keys.
-pub let reject_keys: { m: Map 'k 'v, ks: ['k] } -> Map 'k 'v = { m, ks } ->
+pub let reject_keys: { m: Map 'k 'v, ks: ['k] } with Eq 'k -> Map 'k 'v = { m, ks } ->
   __native_map_reject_keys { m = m, ks = ks }
 
 ## Reduces entries to a single entry, or None if empty.
@@ -228,11 +229,11 @@ pub let zip_maps
   = { m1, m2 } -> __native_map_zip_maps { m1 = m1, m2 = m2 }
 
 ## Returns keys in m1 but not in m2.
-pub let diff_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
+pub let diff_maps: { m1: Map 'k 'v, m2: Map 'k 'v } with Eq 'k -> Map 'k 'v = { m1, m2 } ->
   __native_map_diff_maps { m1 = m1, m2 = m2 }
 
 ## Returns keys present in both maps (values from m1).
-pub let intersect_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
+pub let intersect_maps: { m1: Map 'k 'v, m2: Map 'k 'v } with Eq 'k -> Map 'k 'v = { m1, m2 } ->
   __native_map_intersect_maps { m1 = m1, m2 = m2 }
 
 ## Returns keys in either map but not both.
@@ -246,7 +247,7 @@ pub let to_list: { m: Map 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
   __native_map_to_list { m = m }
 
 ## Creates a map from a List of {k, v} records.
-pub let from_list: { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = { xs } ->
+pub let from_list: { xs: List { k: 'k, v: 'v } } with Eq 'k -> Map 'k 'v = { xs } ->
   __native_map_from_list { xs = xs }
 
 ## Maps each entry to a Map and merges all results.

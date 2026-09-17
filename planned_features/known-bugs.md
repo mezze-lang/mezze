@@ -1583,6 +1583,52 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   rejected. Benign today; it becomes live the moment that substitution stops
   being name-based.
 
+- **BUG 13 CLOSED / BUG 16 (new, measured)** `Set` and `Map` do not answer the
+  same question `==` answers.
+
+  Measured with a newtype `P` whose hand-written `Eq` compares MOD 10, so
+  `P.(1) == P.(11)` is true by its instance and false structurally:
+
+  | expression                                    | answered | correct |
+  |-----------------------------------------------|----------|---------|
+  | `P.(1) == P.(11)`                             | true     | true    |
+  | `[P.(1)].contains { x = P.(11) }`             | true     | true    |
+  | `set::from_seq { xs = [P.(1), P.(11)] }.size` | **2**    | 1       |
+  | `set.contains { x = P.(11) }`                 | **false**| true    |
+  | `map` insert both keys, `.size`               | **2**    | 1       |
+
+  The same value, two different answers depending on which container is asked.
+  `==` and `seq` honour the instance (T1.2's work); the hash containers compare
+  the runtime representation.
+
+  **Half FIXED.** `Set` and `Map` now declare `with Eq` on every operation that
+  buckets or looks up an element or key — 27 signatures across the two modules,
+  plus the four that inherit it (`singleton`, `update`, `get_or`, set's
+  `singleton`). An element type with NO equality is now REJECTED rather than
+  deduped by a structural comparison its author never wrote. That was BUG 13, and
+  its three cases in `NewtypeDerivesOnlyInspectTest` are enabled. One test fixture
+  was relying on the old behaviour (a newtype with `Ord` and no `Eq` in a `Set`)
+  and now declares the `Eq` the rule requires.
+
+  **Half OPEN.** A type that HAS a hand-written `Eq` is accepted and the container
+  still ignores it. Closing it needs the element's `eq` — and a `hash` that AGREES
+  with it — to reach the container, the way `ElementComparator` already carries a
+  sorted container's `cmp` from construction (T1.3). `eq` alone is not enough:
+  values that compare equal must hash equal or they never meet in a bucket. Hence
+  the `Hash` ability, derived automatically for every type (keeping today's
+  structural hashing for the common case, so no boilerplate) plus the
+  compile-time requirement that a hand-written `Eq` come with a hand-written
+  `Hash`. `HashContainerInstanceTest` carries the three open cases.
+
+  Found while doing this: `addAbilityConstraintsToFunctionType` rebuilt an
+  obligation's class-argument tuple by prepending the receiver UNCONDITIONALLY, so
+  a single-parameter `Eq 'a` came out as `Eq 'a 'a` — which no `impl Eq for T`
+  matches and which fails the annotation check ("annotation says … but inferred …
+  with Eq 'a 'a"). The code below it deduplicated constraints on their DISTINCT
+  argument identities, which hid the malformed tuple instead of not building it.
+  Now shares `abilityClassArgs` with `AbilityChecker`, which already had the exact
+  rule: the ability's declared ARITY decides.
+
 - **A.4** Delete the heuristics from 0.3, one per gated test.
 - **B.1** One canonical type form: builtin containers as `TypeApplication`
   (dedicated nodes deleted = backlog #315); declared types nominal with

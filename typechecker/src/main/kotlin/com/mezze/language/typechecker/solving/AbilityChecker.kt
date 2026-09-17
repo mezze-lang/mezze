@@ -169,12 +169,11 @@ class AbilityChecker internal constructor(
         // Gate on the ability's declared arity: prepend only when `typeArgs` is
         // short of it. When `typeArgs` already fills the arity, the receiver is
         // present — use it as-is.
-        val abilityArity = registry.lookupAbility(abilityName)?.typeParams?.size
-        val trackingArgs = if (abilityArity != null && typeArgs.size >= abilityArity) {
-            typeArgs
-        } else {
-            listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs
-        }
+        val trackingArgs = com.mezze.language.typechecker.constraints.abilityClassArgs(
+            primary = MezzeType.VarType(constraint.typeVar),
+            typeArgs = typeArgs,
+            arity = registry.lookupAbility(abilityName)?.typeParams?.size,
+        )
         val fromAnnotation = constraint.context?.startsWith("Type annotation on ") == true
         val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.loc, fromAnnotation)
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }

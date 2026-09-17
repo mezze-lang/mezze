@@ -67,3 +67,26 @@ internal fun abilityObligationAtCallSite(
         loc = loc,
     )
 }
+
+/**
+ * The FULL positional class-argument tuple of an ability obligation, rebuilt from
+ * the (`typeVar`, `typeArgs`) split that [Constraint.AbilityRequired] stores it in.
+ *
+ * That split does not record WHERE the primary sat, so the tuple has to be
+ * reconstructed — and the reconstruction must not guess. Prepending
+ * unconditionally duplicates the primary whenever `typeArgs` already holds it: a
+ * single-parameter `Eq 'a` came out as `Eq 'a 'a`, which no `impl Eq for T`
+ * matches, and which fails the annotation check against the written `with Eq 'a`
+ * ("annotation says … but inferred … with Eq 'a 'a"). Downstream that was patched
+ * over by deduplicating constraints on their DISTINCT argument identities, which
+ * hid the malformed tuple rather than not building it.
+ *
+ * The ability's declared ARITY decides, and decides exactly: a tuple that already
+ * fills the arity is complete, and one short of it is missing its primary.
+ */
+internal fun abilityClassArgs(
+    primary: MezzeType,
+    typeArgs: List<MezzeType>,
+    arity: Int?,
+): List<MezzeType> =
+    if (arity != null && typeArgs.size >= arity) typeArgs else listOf(primary) + typeArgs

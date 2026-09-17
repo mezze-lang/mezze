@@ -1245,13 +1245,14 @@ class ConstraintGenerator(
                     // receiver followed by the substituted class-args — prepending the
                     // matched (class-arg) var would drop the concrete receiver (`Int`) and
                     // print `NumAdd 'a 'a`. So use the solved receiver as the lead.
-                    val leadArgs: List<MezzeType> =
-                        if (solvedTypeVar is MezzeType.VarType) {
-                            listOf(MezzeType.VarType(matchingTypeVar)) +
-                                constraint.typeArgs.map { substitution.apply(it) }
-                        } else {
-                            listOf(solvedTypeVar) + constraint.typeArgs.map { substitution.apply(it) }
-                        }
+                    val arity = registry.lookupAbility(constraint.abilityName)?.typeParams?.size
+                    val substitutedArgs = constraint.typeArgs.map { substitution.apply(it) }
+                    val leadArgs: List<MezzeType> = abilityClassArgs(
+                        primary = if (solvedTypeVar is MezzeType.VarType)
+                            MezzeType.VarType(matchingTypeVar) else solvedTypeVar,
+                        typeArgs = substitutedArgs,
+                        arity = arity,
+                    )
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
                         typeArgs = leadArgs,

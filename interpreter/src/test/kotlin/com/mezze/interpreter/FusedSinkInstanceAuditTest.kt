@@ -67,8 +67,19 @@ class FusedSinkInstanceAuditTest {
     /** Ord orders DESCENDING, so the minimum is the largest wrapped value. */
     private val ordReversed = """
         use std::collections::seq
-        use std::abilities::compare::{ Ord }
+        use std::abilities::compare::{ Eq, Ord }
         newtype R = Int
+        # A Set element must HAVE an equality — a newtype derives none, and a
+        # container that deduped it was comparing structurally on an equality its
+        # author never wrote. This one agrees with the reversed Ord below.
+        impl Eq for R where {
+          eq = { it, r } -> match it is
+            R.(x) -> match r is
+              R.(y) -> x == y,
+          neq = { it, r } -> match it is
+            R.(x) -> match r is
+              R.(y) -> x != y
+        }
         impl Ord for R where {
           lt = { it, r } -> match it is
             R.(x) -> match r is
