@@ -17,10 +17,6 @@ impl Hash for Bytes where {
   hash: { it: Bytes } -> Int = { it } -> structural_hash { it = it }
 }
 
-impl Eq for Bytes where {
-  eq = { it, r } -> __native_bytes_equals { b1 = it, b2 = r },
-  neq = { it, r } -> if __native_bytes_equals { b1 = it, b2 = r } then False else True,
-}
 
 ## Lexicographic ordering for byte sequences.
 impl Ord for Bytes where {

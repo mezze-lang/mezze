@@ -2,12 +2,16 @@ package com.mezze.language.typechecker.derive
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.OperatorMapping
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typechecker.codec.mezzeTypeToParsedAnnotation
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedBinaryOp
 import com.mezze.language.parsedast.ParsedConstructorPattern
 import com.mezze.language.parsedast.ParsedExpr
 import com.mezze.language.parsedast.ParsedFnAbilityConstraint
+import com.mezze.language.parsedast.ParsedFunctionCall
+import com.mezze.language.parsedast.ParsedRecordEntry
+import com.mezze.language.parsedast.ParsedRecordLit
 import com.mezze.language.parsedast.ParsedIdentifier
 import com.mezze.language.parsedast.ParsedIf
 import com.mezze.language.parsedast.ParsedImplAbilityDecl
@@ -94,6 +98,81 @@ object DerivedImplGenerator {
      *  the instance the comparing module synthesizes when the shape holds a newtype. */
     fun eqImplForShape(shape: MezzeType.RecordType): ParsedImplAbilityDecl =
         eqImplDecl(mezzeTypeToParsedAnnotation(shape, loc()), emptyList()) { recordEq(shape.fields.keys.sorted()) }
+
+    /**
+     * The native comparison behind each primitive's `Eq`.
+     *
+     * A primitive has no fields to compare, so its derived instance bottoms out in
+     * the same native the hand-written stdlib impls called — these entries ARE
+     * those bodies, moved from seven `.mz` files into the one place that decides
+     * what `Eq` means. The argument names differ per native because the natives
+     * were written independently; they are part of each native's signature, not a
+     * choice this makes.
+     *
+     * `Nat` is deliberately absent: it is a newtype, so it derives nothing and
+     * writes its own `Eq`, which is exactly the rule.
+     */
+    private data class PrimitiveEq(val native: String, val neqNative: String?, val lhs: String, val rhs: String)
+
+    private val PRIMITIVE_EQ: Map<String, PrimitiveEq> = mapOf(
+        PrimitiveTypes.INT to PrimitiveEq("__native_int_eq", "__native_int_neq", "l", "r"),
+        PrimitiveTypes.FLOAT to PrimitiveEq("__native_float_eq", "__native_float_neq", "l", "r"),
+        PrimitiveTypes.STR to PrimitiveEq("__native_string_eq", "__native_string_neq", "l", "r"),
+        PrimitiveTypes.BOOL to PrimitiveEq("__native_bool_eq", "__native_bool_neq", "l", "r"),
+        PrimitiveTypes.CHAR to PrimitiveEq("__native_char_eq", null, "a", "b"),
+        PrimitiveTypes.FRAC to PrimitiveEq("__native_frac_equals", null, "l", "r"),
+        PrimitiveTypes.BYTES to PrimitiveEq("__native_bytes_equals", null, "b1", "b2"),
+    )
+
+    /** Every primitive that derives `Eq`, for the caller that generates them. */
+    val primitiveEqNames: Set<String> get() = PRIMITIVE_EQ.keys
+
+    /**
+     * `impl Eq for Int`, and its six siblings.
+     *
+     * Deriving for a primitive is what makes `Eq` uniform: a generic position
+     * (`Pair 'a 'b`'s derived `eq` takes an `Eq 'b` dict) needs an INSTANCE to pass,
+     * and "the compiler knows how to compare a `Str`" is not one. Without this the
+     * derivability predicate and the evidence disagreed — `Str` answered "derives
+     * Eq" while nothing generated the instance, so the dict slot for the component
+     * was filled from elsewhere and `Pair P Str` compared its `Str` with `P`'s `eq`.
+     */
+    fun primitiveEqImpl(name: String): ParsedImplAbilityDecl? {
+        val prim = PRIMITIVE_EQ[name] ?: return null
+        val call = { native: String ->
+            ParsedFunctionCall(
+                function = id(native),
+                arguments = ParsedRecordLit(
+                    listOf(
+                        ParsedRecordEntry.Field(prim.lhs, id(LEFT), loc()),
+                        ParsedRecordEntry.Field(prim.rhs, id(RIGHT), loc()),
+                    ),
+                    loc(),
+                ),
+                loc = loc(),
+            )
+        }
+        return ParsedImplAbilityDecl(
+            target = ParsedImplTarget.Named(ParsedQualifiedRef(EQ_ABILITY, null, loc())),
+            targetTypes = listOf(ParsedNamedType(name, loc())),
+            forallVars = emptyList(),
+            operations = listOf(
+                ParsedImplOp(name = "eq", implementation = lambda(call(prim.native)), loc = loc()),
+                ParsedImplOp(
+                    name = "neq",
+                    // Where a native `neq` exists it is the one the stdlib called;
+                    // where it does not, negating `eq` is the same answer.
+                    implementation = lambda(
+                        prim.neqNative?.let { call(it) }
+                            ?: ParsedIf(call(prim.native), bool(false), bool(true), loc())
+                    ),
+                    loc = loc(),
+                ),
+            ),
+            loc = loc(),
+            derived = true,
+        )
+    }
 
     private fun eqImplDecl(target: ParsedTypeAnnotation, forallVars: List<String>, eqBody: () -> ParsedExpr): ParsedImplAbilityDecl {
         // `with Eq 'a` for every type param, written EXPLICITLY on each op: a

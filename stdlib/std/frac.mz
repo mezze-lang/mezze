@@ -27,10 +27,6 @@ impl Hash for Frac where {
   hash: { it: Frac } -> Int = { it } -> structural_hash { it = it }
 }
 
-impl Eq for Frac where {
-  eq = { it, r } -> __native_frac_equals { l = it, r = r },
-  neq = { it, r } -> if __native_frac_equals { l = it, r = r } then False else True,
-}
 
 impl Ord for Frac where {
   lt = { it, r } -> __native_frac_less_than { l = it, r = r },

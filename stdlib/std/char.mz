@@ -10,10 +10,6 @@ impl Hash for Char where {
   hash: { it: Char } -> Int = { it } -> structural_hash { it = it }
 }
 
-impl Eq for Char where {
-  eq = { it, r } -> __native_char_eq { a = it, b = r },
-  neq = { it, r } -> if __native_char_eq { a = it, b = r } then False else True,
-}
 
 impl Ord for Char where {
   lt = { it, r } -> __native_char_compare_int { a = it, b = r } == (0 - 1),

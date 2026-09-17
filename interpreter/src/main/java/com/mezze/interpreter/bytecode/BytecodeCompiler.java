@@ -3812,14 +3812,31 @@ public final class BytecodeCompiler {
             m.put("mul@stdlib-std-int.mz", InlineOp.MUL);
             m.put("div@stdlib-std-int.mz", InlineOp.DIV);
             m.put("mod@stdlib-std-int.mz", InlineOp.MOD);
-            m.put("eq@stdlib-std-int.mz",  InlineOp.EQ);
-            m.put("neq@stdlib-std-int.mz", InlineOp.NEQ);
+            // `eq`/`neq` are deliberately absent: `Eq` is compiler-derived for every
+            // type but a newtype, so `impl Eq for Int` is no longer written in
+            // `std/int.mz` and there is no file left to name. They are recognized by
+            // BODY instead (see NATIVE_TO_OP), which is the identity this table was
+            // approximating all along — a function IS the op it calls, whoever wrote
+            // it and wherever it lives.
             m.put("lt@stdlib-std-int.mz",  InlineOp.LT);
             m.put("le@stdlib-std-int.mz",  InlineOp.LE);
             m.put("gt@stdlib-std-int.mz",  InlineOp.GT);
             m.put("ge@stdlib-std-int.mz",  InlineOp.GE);
             KEY_TO_OP = java.util.Map.copyOf(m);
         }
+
+        /**
+         * Natives that ARE an {@link InlineOp}. A one-line wrapper around one of
+         * these is that op, so a call to the wrapper folds to the op itself.
+         *
+         * Scoped to equality because that is what the derived instances are made of;
+         * the arithmetic wrappers still come from KEY_TO_OP above, where a file name
+         * is still available to key on.
+         */
+        private static final java.util.Map<String, InlineOp> NATIVE_TO_OP = java.util.Map.of(
+            "__native_int_eq", InlineOp.EQ,
+            "__native_int_neq", InlineOp.NEQ
+        );
 
         private static volatile java.util.Map<Hash, InlineOp> hashToOp;
 
@@ -3839,9 +3856,15 @@ public final class BytecodeCompiler {
                 var fn = e.getValue();
                 var key = fn.getName() + "@" + basename(fn.getSourceFile());
                 var op = KEY_TO_OP.get(key);
+                if (op == null) op = bodyOp(fn.getBody());
                 if (op != null) m.put(e.getKey(), op);
             }
             return m;
+        }
+
+        /** The op a function's whole body is, when its body is exactly one native call. */
+        private static InlineOp bodyOp(NodeIR body) {
+            return body instanceof CallNativeIR cn ? NATIVE_TO_OP.get(cn.getName()) : null;
         }
 
         static String basename(String path) {

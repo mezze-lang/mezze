@@ -11,10 +11,6 @@ impl Hash for Bool where {
   hash: { it: Bool } -> Int = { it } -> structural_hash { it = it }
 }
 
-impl Eq for Bool where {
-  eq = { it, r } -> __native_bool_eq { l = it, r = r },
-  neq = { it, r } -> __native_bool_neq { l = it, r = r },
-}
 
 impl LogicalAnd for Bool where {
   and = { it, r } -> __native_bool_and { l = it, r = r }

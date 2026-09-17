@@ -277,7 +277,17 @@ class ContextBuilder {
         val registry = DeclarationRegistry.from(typeDecls + importedTypes, allAbilityDecls, effectDecls)
         val checker = com.mezze.language.typechecker.solving.AbilityChecker(ctx, registry)
 
-        return typeDecls.values.mapNotNull { decl ->
+        // A PRIMITIVE has no `ParsedTypeDecl` to walk, so it is generated from its
+        // home module rather than from the decl list — `Int` in `std::int`, `Str` in
+        // `std::str`, exactly where a hand-written impl was allowed to live. The
+        // instance has to exist for the same reason every other one does: a generic
+        // position needs an `Eq Str` DICT to pass, and derivability alone is not one.
+        val primitiveImpls = com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqNames
+            .filter { it in homeHere && it !in explicitEqTargets }
+            .mapNotNull { com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqImpl(it) }
+            .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
+
+        return primitiveImpls + typeDecls.values.mapNotNull { decl ->
             if (decl.name !in declaredHere && decl.name !in homeHere) return@mapNotNull null
             if (PrimitiveTypes.fromName(decl.name) != null) return@mapNotNull null
             if (decl.name in explicitEqTargets) return@mapNotNull null
