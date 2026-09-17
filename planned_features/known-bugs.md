@@ -1437,10 +1437,40 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   changed nothing: all 4 still failed. The target var is unbound in that solve
   too, so the loss is upstream of the substitution merge, not in it.
 
-  That is now A.2's concrete remaining question — not "125 fresh-var sites" but
-  one: **where does a lambda body's solved record shape get dropped between its
-  solve and the module substitution?** Answer it and the 4 cases above go green
-  with the pin already deleted.
+  **RE-MEASURED after the match-binder fix (f075e4024).** The same 4 still fail
+  with the pin disabled, and the picture is now much sharper:
+
+  - The call type at those sites is `Result 'a DecodeError` with a DISTINCT
+    unbound var per site (`'a#3827`, `'a#3828`). So the sites are distinguishable
+    in principle — the vars are simply never resolved, not conflated.
+  - Every SINGLE-shape variant passes with the pin disabled, in every position
+    tried (top level, in a lambda, in a do-block, annotated, via `.map`). One
+    decoder exists, so any resolution is the right one.
+  - Two-shape variants reconstructed in all four of those positions ALSO pass. I
+    could not reproduce the failure standalone; something in the four tests'
+    exact shape matters that the reconstructions do not capture.
+  - The pin carries a SECOND dependency, stated in `JsonDecodeExhaustiveTest`'s
+    own doc: it also keeps two structurally-similar decode callbacks from being
+    deduped onto one decoder, because the call's decoder ref participates in its
+    hash. Deleting the pin removes both mechanisms at once.
+
+  And the structural FILL half of A.2 is now closed as NOT-DOABLE-THIS-WAY rather
+  than open. Five widenings have been tried — unconditional, "prefer ground
+  types", "prefer the declared shape", strictly-additive merge, and
+  concrete-scrutinee-only — and every one fails the same four tests identically.
+  The mechanism is no longer a guess: a dict slot is keyed on the receiver BEING
+  a variable (per-var slots, C.2), so a binder that stops being one loses its
+  slot, the call degrades to a name-based field read, and `CallIndirect` dies on
+  `[MezzeRecord, Object[]]`. **Codec decode bodies require those binders to stay
+  variables**, so widening the fill cannot work until decode dispatch stops
+  depending on var-ness. That — not the fill — is the real blocker, and it is the
+  same blocker as deleting `DecodeTargetResolver`.
+
+  A.2's remaining question is therefore: **what would let a decode dict be
+  selected by EVIDENCE rather than by its receiver still being a variable?** The
+  A.3 machinery (`obligationDispatchTypes` / `resolveOpFromObligation`) is the
+  shape of the answer; it needs the target type at the call, which is the one
+  thing still missing.
 - **D.1 / BUG 14 (new)** `PrintType.Dynamic` is not a harmless escape hatch, and
   an inline type annotation used to make a program's answer WRONG.
 
