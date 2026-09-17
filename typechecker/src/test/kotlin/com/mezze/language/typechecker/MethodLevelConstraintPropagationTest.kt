@@ -22,11 +22,11 @@ import kotlin.test.assertNotNull
  *
  * Example:
  *   ability Ord for 'a where {
- *       compare: {r: 'a} with Eq 'a -> Int
+ *       compare: {r: 'a} with Same 'a -> Int
  *   }
  *
- *   # This function MUST declare Eq 'a because it calls .compare
- *   let myCompare: {...} with Ord 'a, Eq 'a -> Int = ...
+ *   # This function MUST declare Same 'a because it calls .compare
+ *   let myCompare: {...} with Ord 'a, Same 'a -> Int = ...
  */
 class MethodLevelConstraintPropagationTest {
 
@@ -54,15 +54,15 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `function calling method with constraint must declare that constraint`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {r: 'a} -> Bool
+            ability Same for 'a where {
+                same: {r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
 
             # WRONG: Only declares Ord, but .compare requires Eq
@@ -71,25 +71,25 @@ class MethodLevelConstraintPropagationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "Eq")
+        assertContains(error.message!!, "Same")
     }
 
     @Test
     fun `function declaring all required constraints passes`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {r: 'a} -> Bool
+            ability Same for 'a where {
+                same: {r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
 
             # CORRECT: Declares both Ord and Eq
-            let myCompare: {x: 'a, y: 'a} with Ord 'a, Eq 'a -> Int = {x, y} ->
+            let myCompare: {x: 'a, y: 'a} with Ord 'a, Same 'a -> Int = {x, y} ->
                 x.compare {r = y}
         """.trimIndent()
 
@@ -99,15 +99,15 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `concrete type call satisfies constraint without declaration`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {r: 'a} -> Bool
+            ability Same for 'a where {
+                same: {r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
 
             # CORRECT: Concrete Int satisfies both constraints
@@ -124,24 +124,24 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `multi-level constraint propagation works`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {r: 'a} -> Bool
+            ability Same for 'a where {
+                same: {r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
             ability Sortable for 'a where {
-                sort: {items: ['a]} with Ord 'a, Eq 'a -> ['a]
+                sort: {items: ['a]} with Ord 'a, Same 'a -> ['a]
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
             impl Sortable for Int where { sort = {items} -> items }
 
             # Calling .sort requires Ord and Eq
-            let mySorter: {elem: 'b, xs: ['b]} with Sortable 'b, Ord 'b, Eq 'b -> ['b] = {elem, xs} ->
+            let mySorter: {elem: 'b, xs: ['b]} with Sortable 'b, Ord 'b, Same 'b -> ['b] = {elem, xs} ->
                 elem.sort {items = xs}
         """.trimIndent()
 
@@ -151,19 +151,19 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `missing transitive constraint fails`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {r: 'a} -> Bool
+            ability Same for 'a where {
+                same: {r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
             ability Sortable for 'a where {
-                sort: {items: ['a]} with Ord 'a, Eq 'a -> ['a]
+                sort: {items: ['a]} with Ord 'a, Same 'a -> ['a]
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
             impl Sortable for Int where { sort = {items} -> items }
 
@@ -173,7 +173,7 @@ class MethodLevelConstraintPropagationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "Eq")
+        assertContains(error.message!!, "Same")
     }
 
     // ========================================================================
@@ -184,18 +184,18 @@ class MethodLevelConstraintPropagationTest {
     fun `multiple independent constraints on method`() {
         val code = """
             ability Show for 'a where { show: {it: 'a} -> Str }
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Debug for 'a where {
-                debug: {} with Show 'a, Eq 'a -> Str
+                debug: {} with Show 'a, Same 'a -> Str
             }
 
             impl Show for Int where { show = {} -> "Int" }
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Debug for Int where { debug = {} -> "debug" }
 
             # Must declare both Show and Eq — use 'a to match ability's type param convention
-            let myDebug: {x: 'a} with Debug 'a, Show 'a, Eq 'a -> Str = {x} ->
+            let myDebug: {x: 'a} with Debug 'a, Show 'a, Same 'a -> Str = {x} ->
                 x.debug {}
         """.trimIndent()
 
@@ -206,14 +206,14 @@ class MethodLevelConstraintPropagationTest {
     fun `partial constraints fails`() {
         val code = """
             ability Show for 'a where { show: {it: 'a} -> Str }
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Debug for 'a where {
-                debug: {} with Show 'a, Eq 'a -> Str
+                debug: {} with Show 'a, Same 'a -> Str
             }
 
             impl Show for Int where { show = {} -> "Int" }
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Debug for Int where { debug = {} -> "debug" }
 
             # WRONG: Only declares Show, missing Eq — use 'a to match ability's type param convention
@@ -222,7 +222,7 @@ class MethodLevelConstraintPropagationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "Eq")
+        assertContains(error.message!!, "Same")
     }
 
     // ========================================================================
@@ -283,21 +283,21 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `nested method calls propagate all constraints`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
-            ability Ord for 'a where { compare: {r: 'a} with Eq 'a -> Int }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
+            ability Ord for 'a where { compare: {r: 'a} with Same 'a -> Int }
             ability Show for 'a where { show: {it: 'a} -> Str }
 
             ability Combined for 'a where {
-                process: {} with Eq 'a, Ord 'a, Show 'a -> Str
+                process: {} with Same 'a, Ord 'a, Show 'a -> Str
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
             impl Show for Int where { show = {} -> "Int" }
             impl Combined for Int where { process = {} -> "processed" }
 
             # Must declare all three constraints — use 'a to match ability's type param convention
-            let fullProcess: {x: 'a} with Combined 'a, Eq 'a, Ord 'a, Show 'a -> Str = {x} ->
+            let fullProcess: {x: 'a} with Combined 'a, Same 'a, Ord 'a, Show 'a -> Str = {x} ->
                 x.process {}
         """.trimIndent()
 
@@ -311,17 +311,17 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `impl method body can use constrained methods with concrete type`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
 
             # Impl body can use .eq because Int implements Eq
             impl Ord for Int where {
-                compare = {it, r} -> if it.eq {r = r} then 0 else 1
+                compare = {it, r} -> if it.same {r = r} then 0 else 1
             }
         """.trimIndent()
 
@@ -335,13 +335,13 @@ class MethodLevelConstraintPropagationTest {
     @Test
     fun `error message mentions missing constraint name`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            impl Same for Int where { same = {it, r} -> it == r }
             impl Ord for Int where { compare = {r} -> 0 }
 
             let bad: {x: 'a, y: 'a} with Ord 'a -> Int = {x, y} ->
@@ -350,7 +350,7 @@ class MethodLevelConstraintPropagationTest {
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
         // Error should clearly indicate which constraint is missing
-        assertContains(error.message!!, "Eq")
+        assertContains(error.message!!, "Same")
     }
 
     // ========================================================================
@@ -407,7 +407,7 @@ class MethodLevelConstraintPropagationTest {
 
     @Test
     fun `generic impl for seq type matches concrete seq`() {
-        // impl Eq for ['a] with method-level constraint
+        // impl Same for ['a] with method-level constraint
         // When checking Eq [Int], should match if Eq Int is satisfied
         val code = """
             ability MyEq for 'a where {

@@ -16,8 +16,8 @@ import kotlin.test.assertTrue
  * Exhaustive tests for METHOD-LEVEL ability constraints.
  *
  * Key Design Decision:
- * - Ability-level constraints are DISALLOWED: `ability Ord for 'a with Eq 'a where {...}`
- * - Method-level constraints are REQUIRED: `ability Ord for 'a where { compare: {...} with Eq 'a -> ... }`
+ * - Ability-level constraints are DISALLOWED: `ability Ord for 'a with Same 'a where {...}`
+ * - Method-level constraints are REQUIRED: `ability Ord for 'a where { compare: {...} with Same 'a -> ... }`
  *
  * This provides a uniform constraint model where all constraints are on functions.
  */
@@ -72,10 +72,10 @@ class MethodLevelAbilityConstraintTest {
     fun `multiple method-level constraints on single method parsed correctly`() {
         val code = """
             ability Show for 'a where { show: {it: 'a} -> Str }
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Formatter for 'a where {
-                format: {val: 'b} with Show 'b, Eq 'b -> Str
+                format: {val: 'b} with Show 'b, Same 'b -> Str
             }
         """.trimIndent()
 
@@ -86,18 +86,18 @@ class MethodLevelAbilityConstraintTest {
 
         assertEquals(2, formatter.operations[0].abilityConstraints.size)
         assertEquals("Show", formatter.operations[0].abilityConstraints[0].abilityName)
-        assertEquals("Eq", formatter.operations[0].abilityConstraints[1].abilityName)
+        assertEquals("Same", formatter.operations[0].abilityConstraints[1].abilityName)
     }
 
     @Test
     fun `different methods with different constraints`() {
         val code = """
             ability Show for 'a where { show: {it: 'a} -> Str }
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Collection for 'c where {
                 length: {} -> Int,
-                contains: {item: 'a} with Eq 'a -> Bool,
+                contains: {item: 'a} with Same 'a -> Bool,
                 display: {item: 'a} with Show 'a -> Str
             }
         """.trimIndent()
@@ -111,7 +111,7 @@ class MethodLevelAbilityConstraintTest {
         assertEquals(0, collection.operations[0].abilityConstraints.size)
         // contains has Eq
         assertEquals(1, collection.operations[1].abilityConstraints.size)
-        assertEquals("Eq", collection.operations[1].abilityConstraints[0].abilityName)
+        assertEquals("Same", collection.operations[1].abilityConstraints[0].abilityName)
         // display has Show
         assertEquals(1, collection.operations[2].abilityConstraints.size)
         assertEquals("Show", collection.operations[2].abilityConstraints[0].abilityName)
@@ -223,15 +223,15 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `constraint on ability type parameter works`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
-            impl Eq for Int where { eq = {it, r} -> it == r }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
+            impl Same for Int where { same = {it, r} -> it == r }
 
             ability Comparable for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with Same 'a -> Int
             }
 
             impl Comparable for Int where {
-                compare = {it, r} -> if it.eq {r = r} then 0 else 1
+                compare = {it, r} -> if it.same {r = r} then 0 else 1
             }
 
             let test = {} -> 1.compare {r = 2}
@@ -278,9 +278,9 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `ability-level constraint is rejected`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
-            ability Ord for 'a with Eq 'a where {
+            ability Ord for 'a with Same 'a where {
                 compare: {r: 'a} -> Int
             }
         """.trimIndent()
@@ -293,9 +293,9 @@ class MethodLevelAbilityConstraintTest {
     fun `multiple ability-level constraints are rejected`() {
         val code = """
             ability Show for 'a where { show: {it: 'a} -> Str }
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
-            ability Serializable for 'a with Show 'a, Eq 'a where {
+            ability Serializable for 'a with Show 'a, Same 'a where {
                 serialize: {} -> Str
             }
         """.trimIndent()
@@ -307,9 +307,9 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `error message suggests method-level alternative`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
-            ability Ord for 'a with Eq 'a where {
+            ability Ord for 'a with Same 'a where {
                 compare: {r: 'a} -> Int
             }
         """.trimIndent()
@@ -327,12 +327,12 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `associated type with method-level constraint`() {
         val code = """
-            ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }
+            ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Container for 'c having 'item where {
                 empty: {} -> 'c,
                 add: {elem: 'item} -> 'c,
-                contains: {elem: 'item} with Eq 'item -> Bool
+                contains: {elem: 'item} with Same 'item -> Bool
             }
         """.trimIndent()
 

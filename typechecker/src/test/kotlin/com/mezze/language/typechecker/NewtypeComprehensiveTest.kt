@@ -178,18 +178,18 @@ class NewtypeComprehensiveTest {
             val source = """
                 newtype UserId = Int
 
-                ability Eq for 'a where {
-                    eq: {it: 'a, r: 'a} -> Bool
+                ability Same for 'a where {
+                    same: {it: 'a, r: 'a} -> Bool
                 }
 
-                impl Eq for UserId where {
-                    eq = {it, r} ->
+                impl Same for UserId where {
+                    same = {it, r} ->
                         match it is
                             UserId.(a) -> match r is
                                 UserId.(b) -> a == b
                 }
 
-                let same = {a: UserId, b: UserId} -> a.eq {r = b}
+                let same = {a: UserId, b: UserId} -> a.same {r = b}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)

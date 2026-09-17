@@ -85,9 +85,9 @@ class AbilityEffectComprehensiveTest {
         @Test
         fun `ability declaration with multiple operations`() {
             val source = """
-                ability Eq for 'a where {
-                    eq: { it: 'a, right: 'a } -> Bool,
-                    neq: { it: 'a, right: 'a } -> Bool
+                ability Same for 'a where {
+                    same: { it: 'a, right: 'a } -> Bool,
+                    not_same: { it: 'a, right: 'a } -> Bool
                 }
 
                 let x = 1
@@ -1469,13 +1469,13 @@ class AbilityEffectComprehensiveTest {
         @Test
         fun `impl missing required operation should fail`() {
             val source = """
-                ability Eq for 'a where {
-                    eq: { it: 'a, right: 'a } -> Bool,
-                    neq: { it: 'a, right: 'a } -> Bool
+                ability Same for 'a where {
+                    same: { it: 'a, right: 'a } -> Bool,
+                    not_same: { it: 'a, right: 'a } -> Bool
                 }
 
-                impl Eq for Int where {
-                    eq = { it, right } -> True
+                impl Same for Int where {
+                    same = { it, right } -> True
                     # Missing neq operation
                 }
             """.trimIndent()

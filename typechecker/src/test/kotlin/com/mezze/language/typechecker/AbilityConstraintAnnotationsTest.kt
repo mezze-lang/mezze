@@ -194,16 +194,16 @@ class AbilityConstraintAnnotationsTest {
     @Test
     fun `test simple ability without associated types works without having`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {it: 'a, r: 'a} -> Bool,
+            ability Same for 'a where {
+                same: {it: 'a, r: 'a} -> Bool,
             }
 
-            impl Eq for Int where {
-                eq = {it, r} -> True,
+            impl Same for Int where {
+                same = {it, r} -> True,
             }
 
-            let areEqual: {a: 'a, b: 'a} with Eq 'a -> Bool = {a, b} ->
-                a.eq {r = b}
+            let areEqual: {a: 'a, b: 'a} with Same 'a -> Bool = {a, b} ->
+                a.same {r = b}
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -222,25 +222,25 @@ class AbilityConstraintAnnotationsTest {
     @Test
     fun `test chained ability constraints without having clauses`() {
         val code = """
-            ability Eq for 'a where {
-                eq: {it: 'a, r: 'a} -> Bool,
+            ability Same for 'a where {
+                same: {it: 'a, r: 'a} -> Bool,
             }
 
             ability Show for 'a where {
                 show: {it: 'a} -> Str,
             }
 
-            impl Eq for Int where {
-                eq = {it, r} -> True,
+            impl Same for Int where {
+                same = {it, r} -> True,
             }
 
             impl Show for Int where {
                 show = {it} -> "int",
             }
 
-            let checkAndShow: {a: 'a, b: 'a} with Eq 'a, Show 'a -> Str = {a, b} ->
+            let checkAndShow: {a: 'a, b: 'a} with Same 'a, Show 'a -> Str = {a, b} ->
                 do
-                    let isEqual = a.eq {r = b}
+                    let isEqual = a.same {r = b}
                     a.show {}
         """.trimIndent()
 

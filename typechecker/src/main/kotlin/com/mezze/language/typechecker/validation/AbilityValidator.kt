@@ -31,11 +31,10 @@ object AbilityValidator {
     // the inherent-method check, not here. See [[project_native_hof_scalar_abi_fusion]]
     // and [[feedback_no_name_string_dispatch_ever]].
 
-    /** True iff `abilityName` resolves (by canonical content hash) to a built-in
-     *  operator ability whose methods the compiler inlines on primitives. */
-    private fun isBuiltinOperatorAbility(abilityName: String): Boolean {
-        val hash = WellKnownHashConstants.resolveAbilityHash(abilityName)
-        return WellKnownHashConstants.isNumAdd(hash) ||
+    /** True iff [hash] IS a built-in operator ability — the ones whose methods the
+     *  compiler inlines on primitives. Identity, never a name. */
+    private fun isBuiltinOperatorHash(hash: com.mezze.language.typedast.Hash?): Boolean =
+        WellKnownHashConstants.isNumAdd(hash) ||
             WellKnownHashConstants.isNumSub(hash) ||
             WellKnownHashConstants.isNumMul(hash) ||
             WellKnownHashConstants.isNumDiv(hash) ||
@@ -44,7 +43,21 @@ object AbilityValidator {
             WellKnownHashConstants.isOrd(hash) ||
             (hash != null && hash == WellKnownHashConstants.ABILITY_LOGICALAND) ||
             (hash != null && hash == WellKnownHashConstants.ABILITY_LOGICALOR)
-    }
+
+    /**
+     * True iff `abilityName` NAMES a built-in operator ability.
+     *
+     * A question about a NAME, and the right question in exactly one place: deriving
+     * the reserved method names below from the built-in declarations, where names
+     * are the input and the declarations are the built-in ones by construction.
+     *
+     * It is the WRONG question for deciding whether an impl is exempt from the
+     * shadowing rule, because a module may declare its own `ability Eq` and this
+     * answers for the stdlib's. Use [isBuiltinOperatorHash] with the impl's own
+     * declaration there.
+     */
+    private fun isBuiltinOperatorAbility(abilityName: String): Boolean =
+        isBuiltinOperatorHash(WellKnownHashConstants.resolveAbilityHash(abilityName))
 
     /** Method names owned by the built-in operator abilities, derived from those
      *  abilities' own parsed declarations (e.g. NumAdd→{add}, Eq→{eq,neq},
@@ -98,7 +111,7 @@ object AbilityValidator {
         //       covered by validateNoFieldMethodConflict / V0419).
         // Exempt the built-in operator abilities THEMSELVES — impl'ing NumAdd/Eq/Ord
         // for your type is the intended way to get `+`/`==`/`<`.
-        validateNoBuiltinShadowing(impl, sourceLocation, context)
+        validateNoBuiltinShadowing(impl, sourceLocation, context, registry)
 
         val abilityName = impl.abilityName!!
         val abilityQualifier = impl.abilityRef?.qualifier
@@ -687,19 +700,43 @@ object AbilityValidator {
         impl: ParsedImplAbilityDecl,
         sourceLocation: Loc,
         context: TypingContext?,
+        registry: DeclarationRegistry,
     ) {
         val abilityName = impl.abilityName ?: return
         val implMethodNames = impl.operations.map { it.name }
 
-        // (a) built-in operator collision — skip when the impl IS a builtin operator ability.
-        if (!isBuiltinOperatorAbility(abilityName)) {
+        // (a) built-in operator collision — skip when the impl IS a builtin operator
+        // ability. Asked of the ability THIS impl names in THIS module, by content
+        // hash: looking the name up in the well-known table instead answered for the
+        // stdlib's `Eq` whenever a module declared an `Eq` of its own, so a locally
+        // declared `ability Eq for 'a where { eq: {it:'a, r:'a} -> Str }` was waved
+        // through — and then captured every `==` in the module, which returned a
+        // `Str`. The exemption exists for the built-in operator abilities; a
+        // same-named ability that is not one of them is exactly what the rule is
+        // here to catch.
+        if (!isBuiltinOperatorHash(registry.resolveAbilityHash(abilityName))) {
             val opClash = implMethodNames.firstOrNull { it in builtinOperatorMethodNames }
             if (opClash != null) {
+                // Two different mistakes reach here, and they need different advice.
+                // An ability under an unrelated name has simply picked a reserved
+                // method name. An ability under a BUILT-IN OPERATOR'S name has
+                // redeclared that ability with a different signature — renaming the
+                // method is not the fix, matching the built-in (or picking another
+                // ability name) is.
+                val shadowsBuiltinName = isBuiltinOperatorAbility(abilityName)
                 throw TypeCheckError(
-                    "Ability '$abilityName' declares method '$opClash', which is a built-in " +
-                        "operator method. A `$opClash` call is compiled to the built-in operator, so " +
-                        "this impl's '$opClash' would never run (it is silently shadowed). Rename the " +
-                        "method to a name that is not a built-in operator.",
+                    if (shadowsBuiltinName)
+                        "Ability '$abilityName' is declared here with a different signature than the " +
+                            "built-in '$abilityName', so it is a DIFFERENT ability that happens to share " +
+                            "the name — but `$opClash` is the built-in's operator method, and a `$opClash` " +
+                            "call still compiles to the built-in operator. This impl's '$opClash' would " +
+                            "never run. Either declare '$abilityName' to match the built-in, or give this " +
+                            "ability a name of its own."
+                    else
+                        "Ability '$abilityName' declares method '$opClash', which is a built-in " +
+                            "operator method. A `$opClash` call is compiled to the built-in operator, so " +
+                            "this impl's '$opClash' would never run (it is silently shadowed). Rename the " +
+                            "method to a name that is not a built-in operator.",
                     sourceLocation,
                     code = ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR,
                 )

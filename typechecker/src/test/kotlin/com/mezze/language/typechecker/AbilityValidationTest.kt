@@ -29,20 +29,20 @@ class AbilityValidationTest {
             # Define a helper function to compare strings
             let stringEquals = {a: Str, b: Str} -> a == b
 
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool,
-              neq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool,
+              not_same: {it: 'a, r: 'a} -> Bool
             }
 
             ability Hash for 'a where {
               hash: {it: 'a} -> Int
             }
 
-            # Implemented for a NEWTYPE, not for `Str` directly: these declarations
-            # are content-identical to the well-known `Eq`/`Hash`, so they ARE those
-            # abilities, and the compiler derives both for every primitive — a
-            # hand-written pair for `Str` would be a second instance for one type.
-            # A newtype derives no `Eq`, so its own is the one instance. What this
+            # Implemented for a NEWTYPE, not for `Str` directly. `Hash` here is
+            # content-identical to the well-known one, so it IS that ability — and
+            # the compiler derives `Eq` and `Hash` for every primitive, which makes
+            # a hand-written `Hash` for `Str` a second instance for one type. A
+            # newtype derives neither, so its own are the ones that count. What this
             # test is about — a multi-operation impl type-checking and dispatching —
             # is unchanged.
             newtype Key = Str
@@ -53,18 +53,18 @@ class AbilityValidationTest {
                   Key.(s) -> s.length {}
             }
 
-            impl Eq for Key where {
-              eq: {it: Key, r: Key} -> Bool = {it, r} ->
+            impl Same for Key where {
+              same: {it: Key, r: Key} -> Bool = {it, r} ->
                 match it is
                   Key.(a) -> match r is
                     Key.(b) -> stringEquals {a = a, b = b},
-              neq: {it: Key, r: Key} -> Bool = {it, r} ->
+              not_same: {it: Key, r: Key} -> Bool = {it, r} ->
                 match it is
                   Key.(a) -> match r is
                     Key.(b) -> (stringEquals {a = a, b = b}).not {}
             }
 
-            let areEqual = {x, y} -> x.eq {r = y}
+            let areEqual = {x, y} -> x.same {r = y}
 
             areEqual {x = Key.("hello"), y = Key.("world")}
         """.trimIndent()
@@ -156,28 +156,32 @@ class AbilityValidationTest {
             # Define a helper function to compare strings
             let stringEquals = {a: Str, b: Str} -> a == b
 
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool
             }
 
-            # Method-level constraints instead of ability-level
-            ability Ord for 'a where {
-              compare: {it: 'a, r: 'a} with Eq 'a -> Int,
-              lt: {it: 'a, r: 'a} with Eq 'a -> Bool,
-              gt: {it: 'a, r: 'a} with Eq 'a -> Bool
+            # Method-level constraints instead of ability-level.
+            # Named `Ranked`, with methods that are not the built-in operator ones:
+            # this is a toy ability for testing constraint placement, and an `lt`
+            # declared here would be shadowed by the `<` operator's inline path and
+            # never run. The test is about WHERE the constraints sit, not the name.
+            ability Ranked for 'a where {
+              compare: {it: 'a, r: 'a} with Same 'a -> Int,
+              before: {it: 'a, r: 'a} with Same 'a -> Bool,
+              after: {it: 'a, r: 'a} with Same 'a -> Bool
             }
 
-            impl Eq for Str where {
-              eq: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r}
+            impl Same for Str where {
+              same: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r}
             }
 
-            impl Ord for Str where {
+            impl Ranked for Str where {
               compare: {it: Str, r: Str} -> Int = {it, r} -> if stringEquals {a = it, b = r} then 0 else if it < r then -1 else 1,
-              lt: {it: Str, r: Str} -> Bool = {it, r} -> (it.compare {r = r}) < 0,
-              gt: {it: Str, r: Str} -> Bool = {it, r} -> (it.compare {r = r}) > 0
+              before: {it: Str, r: Str} -> Bool = {it, r} -> (it.compare {r = r}) < 0,
+              after: {it: Str, r: Str} -> Bool = {it, r} -> (it.compare {r = r}) > 0
             }
 
-            let isLess = {x, y} -> x.lt {r = y}
+            let isLess = {x, y} -> x.before {r = y}
 
             isLess {x = "apple", y = "banana"}
         """.trimIndent()
@@ -221,16 +225,16 @@ class AbilityValidationTest {
     @Test
     fun `test missing operation should fail`() {
         val source = """
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool,
-              neq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool,
+              not_same: {it: 'a, r: 'a} -> Bool
             }
 
-            impl Eq for Str where {
-              eq: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r}
+            impl Same for Str where {
+              same: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r}
             }
 
-            let areEqual = {x, y} -> x.eq {r = y}
+            let areEqual = {x, y} -> x.same {r = y}
 
             areEqual {x = "hello", y = "world"}
         """.trimIndent()
@@ -245,16 +249,16 @@ class AbilityValidationTest {
     @Test
     fun `test extra operation should fail`() {
         val source = """
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool
             }
 
-            impl Eq for Str where {
-              eq: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r},
+            impl Same for Str where {
+              same: {it: Str, r: Str} -> Bool = {it, r} -> stringEquals {a = it, b = r},
               compare: {it: Str, r: Str} -> Int = {it, r} -> stringCompare {a = it, b = r}
             }
 
-            let areEqual = {x, y} -> x.eq {r = y}
+            let areEqual = {x, y} -> x.same {r = y}
 
             areEqual {x = "hello", y = "world"}
         """.trimIndent()
@@ -298,15 +302,15 @@ class AbilityValidationTest {
     @Test
     fun `test wrong specialization type should fail`() {
         val source = """
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool
             }
 
-            impl Eq for Str where {
-              eq: {r: Int} -> Bool = {r} -> False
+            impl Same for Str where {
+              same: {r: Int} -> Bool = {r} -> False
             }
 
-            let areEqual = {x, y} -> x.eq {r = y}
+            let areEqual = {x, y} -> x.same {r = y}
 
             areEqual {x = "hello", y = 5}
         """.trimIndent()
@@ -500,20 +504,20 @@ class AbilityValidationTest {
               show: {it: 'a} -> Str
             }
 
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool
             }
 
             impl Show for Int where {
               show = {it} -> int::to_str {n = it}
             }
 
-            impl Eq for Int where {
-              eq: {it: Int, r: Int} -> Bool = {it, r} -> it == r
+            impl Same for Int where {
+              same: {it: Int, r: Int} -> Bool = {it, r} -> it == r
             }
 
-            let compare: {x: 'a, y: 'a} with Show 'a, Eq 'a -> Str = {x, y} ->
-              if x.eq {r = y} then
+            let compare: {x: 'a, y: 'a} with Show 'a, Same 'a -> Str = {x, y} ->
+              if x.same {r = y} then
                 "Equal: $(x.show {})"
               else
                 "Not equal"
@@ -534,8 +538,8 @@ class AbilityValidationTest {
               show: {it: 'a} -> Str
             }
 
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool
             }
 
             impl Show for Str where {
@@ -545,7 +549,7 @@ class AbilityValidationTest {
             # Missing Eq implementation for undeclared type MissingT
 
             let compare: {x: Str, y: Str} with Show Str, Eq MissingT -> Str = {x, y} ->
-              if x.eq {r = y} then
+              if x.same {r = y} then
                 "Equal: $(x.show {})"
               else
                 "Not equal"
@@ -768,7 +772,7 @@ class AbilityValidationTest {
 
     @Test
     fun `test multiple different ability constraints on same function`() {
-        // Test function with multiple constraints: "with Show 'a, Eq 'a"
+        // Test function with multiple constraints: "with Show 'a, Same 'a"
         val source = """
             use std::int
 
@@ -776,21 +780,21 @@ class AbilityValidationTest {
               show: {it: 'a} -> Str
             }
 
-            ability Eq for 'a where {
-              eq: {it: 'a, r: 'a} -> Bool
+            ability Same for 'a where {
+              same: {it: 'a, r: 'a} -> Bool
             }
 
             impl Show for Int where {
               show = {it} -> int::to_str {n = it}
             }
 
-            impl Eq for Int where {
-              eq: {it: Int, r: Int} -> Bool = {it, r} -> it == r
+            impl Same for Int where {
+              same: {it: Int, r: Int} -> Bool = {it, r} -> it == r
             }
 
             # Multiple constraints on same type parameter
-            let showIfEqual: {a: 'x, b: 'x} with Show 'x, Eq 'x -> Str = {a, b} ->
-              if a.eq {r = b} then
+            let showIfEqual: {a: 'x, b: 'x} with Show 'x, Same 'x -> Str = {a, b} ->
+              if a.same {r = b} then
                 a.show {}
               else
                 "not equal"
