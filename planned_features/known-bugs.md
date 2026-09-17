@@ -1763,6 +1763,30 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   `__NativePromise` and `PromiseState` an unrelated variant, so this is a wrong
   answer, not a labelling nuance.
 
+  **BISECTED (second session).** The trigger is `StringType` alone — deriving `Eq`
+  for `Str` and nothing else reproduces it; `Int`, `Bool` and `Float` are each
+  innocent. Two mechanisms were then ruled OUT by measurement:
+
+  - it is not the deleted impls (restoring all 7 does not fix it), and
+  - it is not `AbilityChecker.tryBidirectionalInference` (instrumented: the only
+    guesses that fire on this program are `FromJson` and `NumAdd`, and neither
+    produces a `PromiseState`).
+
+  So deriving `Eq` for `Str` changes an inference result through some third path,
+  still unidentified. `Async.spawn` is declared `-> Promise 'a`, `Promise` is a
+  newtype over `__NativePromise`, and `PromiseState` is an unrelated variant that
+  only `Promise.inspect` returns — which this program never calls. Whatever picks
+  `PromiseState` is therefore not reading the declaration.
+
+  **Found while looking, and worth its own fix:** `tryBidirectionalInference` binds
+  a type variable whenever **exactly one impl matches** a partially-known argument
+  tuple, and writes the result straight into the solve via `deferredInference`.
+  That makes inference depend on how many impls happen to exist — a count, not a
+  proof — so adding or removing any impl anywhere can silently move an unrelated
+  binding. It is the same family as the heuristics A.4 catalogued, and it is a
+  plausible source of future "why did that type change?" reports even though it is
+  not the cause here.
+
   Also surfaced, worth its own fix: **`==` desugars to the ability NAMED `Eq` in
   scope**, not to the well-known one. A module declaring its own `ability Eq`
   silently redirects every operator, and two typechecker fixtures only passed
