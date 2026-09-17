@@ -130,6 +130,14 @@ internal class VariantSolver(
         // candidate/import order. See project_tc_audit_2026-08 (#12).
         var deferredFailure: VariantInferenceResult.Failure? = null
 
+        // ...and #263's other half: when SEVERAL candidates fully cover the set,
+        // returning the first is the same order-dependence one step later.
+        // `{ Timeout }` is covered by both `HttpError` and `CancelReason`, and
+        // `candidateVariants` is a hash set, so which one a construction inferred
+        // came down to iteration order. Collect every full cover and let the
+        // PAYLOADS choose between them below.
+        val fullCover = mutableListOf<Pair<ParsedTypeDecl, ParsedVariantDef>>()
+
         for ((typeDecl, definition) in candidateVariants) {
             val typeName = typeDecl.name
             val declaredConstructors = definition.constructors.map { it.name }.toSet()
@@ -140,6 +148,53 @@ internal class VariantSolver(
                 continue
             }
 
+            if (!definition.isOpen) {
+                val invalidConstructors = constructors - declaredConstructors
+                if (invalidConstructors.isNotEmpty()) {
+                    // Partial cover — defer the failure and try the next candidate.
+                    if (deferredFailure == null) {
+                        val suggestions = invalidConstructors.map { invalid ->
+                            val suggestion = StringDistance.suggestDidYouMean(
+                                invalid,
+                                declaredConstructors.toList()
+                            )
+                            if (suggestion != null) "'$invalid' ($suggestion)" else "'$invalid'"
+                        }
+                        val errorMsg = "Constructor(s) ${suggestions.joinToString()} not found in closed variant '$typeName'. " +
+                                      "Available constructors: ${declaredConstructors.joinToString()}"
+                        deferredFailure = VariantInferenceResult.Failure(errorMsg)
+                    }
+                    continue
+                }
+            }
+
+            fullCover.add(typeDecl to definition)
+        }
+
+        // No candidate fully covered the constructor set: surface the deferred
+        // partial-cover failure if we saw one, else fall through (null = unresolved).
+        if (fullCover.isEmpty()) return deferredFailure
+
+        val chosen = if (fullCover.size == 1) {
+            fullCover.first()
+        } else {
+            // The constructor NAMES no longer discriminate, so the payload field
+            // names have to. Exactly one fit is an answer; anything else is not,
+            // and inferring nothing is the honest outcome — the `HasConstructor`
+            // constraint survives, and an annotation or the surrounding
+            // unification decides it where the evidence actually is.
+            val fitting = fullCover.filter { (_, definition) ->
+                constructors.all { name ->
+                    val ctor = definition.constructors.firstOrNull { it.name == name }
+                    ctor == null || payloadFits(ctor.dataType, constructorPayloads[name])
+                }
+            }
+            fitting.singleOrNull() ?: return null
+        }
+
+        run {
+            val (typeDecl, definition) = chosen
+            val typeName = typeDecl.name
             val typeParams = typeDecl.typeParams
             val freshArgs = typeParams.map { MezzeType.VarType(TypeVar.fresh()) }
             val typeParamSubst = typeParams.zip(freshArgs).toMap()
@@ -161,45 +216,13 @@ internal class VariantSolver(
                 }
             }
 
-            if (definition.isOpen) {
-                val variantType = if (freshArgs.isNotEmpty()) {
-                    WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
-                } else {
-                    WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
-                }
-                return VariantInferenceResult.Success(variantType, payloadConstraints)
+            val variantType = if (freshArgs.isNotEmpty()) {
+                WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
             } else {
-                val invalidConstructors = constructors - declaredConstructors
-
-                if (invalidConstructors.isNotEmpty()) {
-                    // Partial cover — defer the failure and try the next candidate.
-                    if (deferredFailure == null) {
-                        val suggestions = invalidConstructors.map { invalid ->
-                            val suggestion = StringDistance.suggestDidYouMean(
-                                invalid,
-                                declaredConstructors.toList()
-                            )
-                            if (suggestion != null) "'$invalid' ($suggestion)" else "'$invalid'"
-                        }
-                        val errorMsg = "Constructor(s) ${suggestions.joinToString()} not found in closed variant '$typeName'. " +
-                                      "Available constructors: ${declaredConstructors.joinToString()}"
-                        deferredFailure = VariantInferenceResult.Failure(errorMsg)
-                    }
-                    continue
-                }
-
-                val variantType = if (freshArgs.isNotEmpty()) {
-                    WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
-                } else {
-                    WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
-                }
-                return VariantInferenceResult.Success(variantType, payloadConstraints)
+                WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
             }
+            return VariantInferenceResult.Success(variantType, payloadConstraints)
         }
-
-        // No candidate fully covered the constructor set: surface the deferred
-        // partial-cover failure if we saw one, else fall through (null = unresolved).
-        return deferredFailure
     }
 
     fun solveHasConstructor(
@@ -316,17 +339,24 @@ internal class VariantSolver(
         }
 
         if (isPatternContext) {
-            val declaringType = findTypeDeclarationForConstructor(constructorName)
-            if (declaringType != null) {
-                return resolveConstructorAgainstDecl(declaringType, constructorName, expectedPayloadType, variantType.variable)
+            when (val found = lookupConstructorDecl(constructorName, expectedPayloadType)) {
+                is CtorLookup.Resolved ->
+                    return resolveConstructorAgainstDecl(found.typeDecl, constructorName, expectedPayloadType, variantType.variable)
+                is CtorLookup.NoneFit ->
+                    return resolveConstructorAgainstDecl(found.nearest, constructorName, expectedPayloadType, variantType.variable)
+                is CtorLookup.Ambiguous -> return ambiguousConstructor(constructorName, found)
+                CtorLookup.Undeclared -> {}
             }
         }
 
         if (constructorName == BuiltinTypes.CONS || constructorName == BuiltinTypes.NIL) {
             if (!isPatternContext) {
-                val declaringTypeExpr = findTypeDeclarationForConstructor(constructorName)
+                // A DECLARED `Cons`/`Nil` wins over the builtin list when one is in
+                // scope; when the name is ambiguous or undeclared the builtin is the
+                // answer, not a deferral, so this branch never asks to wait.
+                val declaringTypeExpr = lookupConstructorDecl(constructorName, expectedPayloadType) as? CtorLookup.Resolved
                 if (declaringTypeExpr != null) {
-                    return resolveConstructorAgainstDecl(declaringTypeExpr, constructorName, expectedPayloadType, variantType.variable)
+                    return resolveConstructorAgainstDecl(declaringTypeExpr.typeDecl, constructorName, expectedPayloadType, variantType.variable)
                 }
             }
             val context = if (isPatternContext) "pattern" else "constructor"
@@ -334,9 +364,13 @@ internal class VariantSolver(
         }
 
         if (!isPatternContext) {
-            val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
-            if (typeForConstructor != null) {
-                return solveConstructorFromDecl(typeForConstructor, constructorName, expectedPayloadType, variantType.variable)
+            when (val found = lookupConstructorDecl(constructorName, expectedPayloadType)) {
+                is CtorLookup.Resolved ->
+                    return solveConstructorFromDecl(found.typeDecl, constructorName, expectedPayloadType, variantType.variable)
+                is CtorLookup.NoneFit ->
+                    return solveConstructorFromDecl(found.nearest, constructorName, expectedPayloadType, variantType.variable)
+                is CtorLookup.Ambiguous -> return ambiguousConstructor(constructorName, found)
+                CtorLookup.Undeclared -> {}
             }
         }
 
@@ -621,8 +655,124 @@ internal class VariantSolver(
         }
     }
 
-    private fun findTypeDeclarationForConstructor(constructorName: String): ParsedTypeDecl? {
-        return constructorIndex[constructorName]?.firstOrNull()?.first
+    /**
+     * Which declaration a constructor NAME refers to.
+     *
+     * The name alone does not decide it. `std::effects::http` declares
+     * `HttpError.Timeout { url, ms }` and `std::effects::async` declares
+     * `CancelReason.Timeout { deadline_ms }`, so every module that makes a
+     * retrying HTTP call has two declarations under one name. The PAYLOAD decides
+     * — the same way [findVariantWithConstructors] already decides the
+     * multi-constructor case from the constructor set (#263). Taking the first
+     * entry of the index instead made the answer a function of map order, and
+     * `Timeout { url = "x", ms = 100 }` was solved against `CancelReason`.
+     */
+    private sealed class CtorLookup {
+        /** Exactly one declaration in scope declares this name with a fitting payload. */
+        data class Resolved(val typeDecl: ParsedTypeDecl) : CtorLookup()
+
+        /** Nothing in scope declares it; the caller builds a structural variant. */
+        object Undeclared : CtorLookup()
+
+        /**
+         * Something declares it, nothing FITS. Resolution has already failed; the
+         * declaration carried here only decides which one the error names, so the
+         * existing per-declaration diagnostics stay exact ("missing required
+         * fields: ms" rather than a generic "no such constructor").
+         */
+        data class NoneFit(val nearest: ParsedTypeDecl) : CtorLookup()
+
+        /**
+         * Several fit. [decidable] is false while the payload still holds unsolved
+         * type vars — more information is coming, so the caller waits for it; true
+         * when a CONCRETE payload still does not single one out, which is a real
+         * ambiguity only the program can resolve.
+         */
+        data class Ambiguous(val typeNames: List<String>, val decidable: Boolean) : CtorLookup()
+    }
+
+    private fun lookupConstructorDecl(
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+    ): CtorLookup {
+        val candidates = constructorIndex[constructorName].orEmpty()
+        if (candidates.isEmpty()) return CtorLookup.Undeclared
+        if (candidates.size == 1) return CtorLookup.Resolved(candidates.first().first)
+
+        val fitting = candidates.filter { (_, definition) ->
+            payloadFits(
+                definition.constructors.first { it.name == constructorName }.dataType,
+                expectedPayloadType,
+            )
+        }
+        fitting.singleOrNull()?.let { return CtorLookup.Resolved(it.first) }
+
+        if (fitting.isEmpty()) {
+            // Name the candidate closest to what was written, tie-broken by type
+            // name so the message never depends on index order.
+            val nearest = candidates.minWithOrNull(
+                compareBy({ payloadDistance(it.second, constructorName, expectedPayloadType) }, { it.first.name })
+            )!!.first
+            return CtorLookup.NoneFit(nearest)
+        }
+
+        return CtorLookup.Ambiguous(
+            typeNames = fitting.map { it.first.name }.sorted(),
+            decidable = expectedPayloadType?.holdsTypeVar() != true,
+        )
+    }
+
+    /**
+     * Could a construction or pattern carrying [expected] be THIS declared payload?
+     *
+     * Field NAMES are what discriminate here, and only one direction of the subset
+     * holds in general: a pattern names a subset of the fields it matches, while an
+     * open declaration requires a superset. Anything a record's field names cannot
+     * discriminate (a bare constructor, a non-record payload, a payload not yet
+     * solved to a record) is left as a fit, so the decision falls to
+     * [CtorLookup.Ambiguous] rather than being made here on no evidence.
+     */
+    private fun payloadFits(declared: ParsedTypeAnnotation?, expected: MezzeType?): Boolean = when {
+        declared == null -> expected == null
+        expected == null -> false
+        declared !is ParsedRecordType -> true
+        expected !is MezzeType.RecordType -> true
+        declared.isOpen -> declared.entries.all { it.name in expected.fields }
+        else -> expected.fields.keys.all { name -> declared.entries.any { it.name == name } }
+    }
+
+    /** Field-name distance. Used only to choose which declaration an ERROR names. */
+    private fun payloadDistance(
+        definition: ParsedVariantDef,
+        constructorName: String,
+        expected: MezzeType?,
+    ): Int {
+        val declared = definition.constructors.first { it.name == constructorName }.dataType
+        val declaredFields = (declared as? ParsedRecordType)?.entries?.map { it.name }?.toSet() ?: emptySet()
+        val expectedFields = (expected as? MezzeType.RecordType)?.fields?.keys ?: emptySet()
+        return (declaredFields - expectedFields).size + (expectedFields - declaredFields).size
+    }
+
+    /**
+     * Two declarations fit and nothing here can choose between them. Which of the
+     * two answers this is depends on whether waiting could still help.
+     */
+    private fun ambiguousConstructor(
+        constructorName: String,
+        found: CtorLookup.Ambiguous,
+    ): ConstraintSolver.ConstraintResult {
+        val names = found.typeNames.joinToString(" and ")
+        return if (found.decidable) {
+            ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' is declared by $names, and this payload fits both. " +
+                    "Annotate the value with the type you mean.",
+                terminal = true,
+            )
+        } else {
+            ConstraintSolver.ConstraintResult.Deferred(
+                "constructor '$constructorName' is declared by $names; waiting for the payload to be pinned"
+            )
+        }
     }
 
     private fun resolveConstructorAgainstDecl(

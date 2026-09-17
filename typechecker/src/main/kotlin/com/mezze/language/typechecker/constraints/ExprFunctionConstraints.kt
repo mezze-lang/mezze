@@ -139,6 +139,29 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
     )
 }
 
+/**
+ * One variant constructor in scope that a construction's NAME could mean.
+ *
+ * Constructor names are not unique across a module's imports, so a construction
+ * has a candidate SET, not a candidate. Only the solver's `Constraint.HasConstructor`
+ * picks the member of that set the construction actually means; everything the
+ * eager arity check does is phrase a better error for the case where NO member
+ * fits. That makes the set a disjunction, and holding the candidates in one place
+ * is what keeps it read as one.
+ */
+private data class VariantCtorCandidate(
+    val typeName: String,
+    val expectedFields: Set<String>,
+    val isOpen: Boolean,
+) {
+    /** An open constructor takes any superset, so it accepts whatever it is given. */
+    fun accepts(literalFields: Set<String>): Boolean = isOpen || expectedFields == literalFields
+
+    /** Field-set distance. Used only to choose WHICH candidate an error names. */
+    fun distanceFrom(literalFields: Set<String>): Int =
+        (expectedFields - literalFields).size + (literalFields - expectedFields).size
+}
+
 internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: ParsedVariantConstruct, context: ConstraintContext): ConstraintResult {
 
     val constructorBinding = context.typingContext.lookup(BindingKey.unqualified(expr.constructor))
@@ -223,6 +246,8 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
         // not, so `Meters { val = "boom" }` (Str into an Int newtype) type-checked.
         val newtypeFieldConstraints = mutableListOf<Constraint>()
 
+        val ctorCandidates = mutableListOf<VariantCtorCandidate>()
+
         if (valueExpr is ParsedRecordLit && context.typeDeclarations.isNotEmpty()) {
             for ((typeName, typeDecl) in context.typeDeclarations) {
                 val newtypeDef = typeDecl.definition as? ParsedNewtypeDef
@@ -266,43 +291,65 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                         }
                     }
                 }
-                if (typeDecl.definition is ParsedVariantDef) {
-                    val variantDef = typeDecl.definition as ParsedVariantDef
-                    val constructor = variantDef.constructors.find { it.name == expr.constructor }
+                val ctorRecord = (typeDecl.definition as? ParsedVariantDef)
+                    ?.constructors?.find { it.name == expr.constructor }
+                    ?.dataType as? ParsedRecordType
+                if (ctorRecord != null) {
+                    ctorCandidates.add(
+                        VariantCtorCandidate(
+                            typeName = typeName,
+                            expectedFields = ctorRecord.entries.map { it.name }.toSet(),
+                            isOpen = ctorRecord.isOpen,
+                        )
+                    )
+                }
+            }
 
-                    if (constructor != null && constructor.dataType is ParsedRecordType) {
-                        val expectedRecordType = constructor.dataType as ParsedRecordType
-                        val isOpen = expectedRecordType.isOpen
+            // EXISTS one candidate that accepts these fields — not FOR ALL of them.
+            //
+            // A constructor NAME does not identify a constructor. `std::effects::http`
+            // declares `Timeout { url, ms }` and `std::effects::async` declares
+            // `Timeout { deadline_ms }`, and a module that imports from both has two
+            // candidates under one name; which one a construction MEANS is decided by
+            // the solver's `HasConstructor` below, from the fields. Checking each
+            // candidate as it came out of `typeDeclarations` and throwing on the first
+            // disagreement read the set as a conjunction, so a well-typed
+            // `Timeout { url = "x", ms = 100 }` was rejected against the OTHER
+            // `Timeout` — and which of the two you were judged against depended on map
+            // order. Ask the question the solver asks instead: is there a candidate
+            // these fields fit?
+            val literalFields = valueExpr.entries
+                .filterIsInstance<ParsedRecordEntry.Field>().map { it.name }.toSet()
+            if (ctorCandidates.isNotEmpty() && ctorCandidates.none { it.accepts(literalFields) }) {
+                // None fits, so this really is an arity error. Report it against the
+                // NEAREST candidate — the one the author most likely meant — and
+                // tie-break by type name so the message never depends on map order.
+                val reported = ctorCandidates
+                    .minWithOrNull(compareBy({ it.distanceFrom(literalFields) }, { it.typeName }))!!
+                val expectedFields = reported.expectedFields
 
-                        val literalFields = valueExpr.entries.filterIsInstance<ParsedRecordEntry.Field>().map { it.name }.toSet()
-                        val expectedFields = expectedRecordType.entries.map { it.name }.toSet()
+                val extraFields = literalFields - expectedFields
+                if (extraFields.isNotEmpty()) {
+                    throw TypeCheckError(
+                        message = "Variant constructor ${expr.constructor} expects exact fields ${expectedFields.sorted().joinToString(", ")} " +
+                                "but got extra field(s): ${extraFields.sorted().joinToString(", ")}",
+                        loc = expr.loc,
+                        errorType = ErrorType.TYPE_MISMATCH,
+                        code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
+                        hints = listOf("remove: ${extraFields.sorted().joinToString(", ")}"),
+                    )
+                }
 
-                        if (!isOpen) {
-                            val extraFields = literalFields - expectedFields
-                            if (extraFields.isNotEmpty()) {
-                                throw TypeCheckError(
-                                    message = "Variant constructor ${expr.constructor} expects exact fields ${expectedFields.sorted().joinToString(", ")} " +
-                                            "but got extra field(s): ${extraFields.sorted().joinToString(", ")}",
-                                    loc = expr.loc,
-                                    errorType = ErrorType.TYPE_MISMATCH,
-                                    code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
-                                    hints = listOf("remove: ${extraFields.sorted().joinToString(", ")}"),
-                                )
-                            }
-
-                            val missingFields = expectedFields - literalFields
-                            if (missingFields.isNotEmpty()) {
-                                throw TypeCheckError(
-                                    message = "Variant constructor ${expr.constructor} expects fields ${expectedFields.sorted().joinToString(", ")} " +
-                                            "but missing field(s): ${missingFields.sorted().joinToString(", ")}",
-                                    loc = expr.loc,
-                                    errorType = ErrorType.MISSING_FIELD,
-                                    code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
-                                    hints = listOf("add: ${missingFields.sorted().joinToString(", ")}"),
-                                )
-                            }
-                        }
-                    }
+                val missingFields = expectedFields - literalFields
+                if (missingFields.isNotEmpty()) {
+                    throw TypeCheckError(
+                        message = "Variant constructor ${expr.constructor} expects fields ${expectedFields.sorted().joinToString(", ")} " +
+                                "but missing field(s): ${missingFields.sorted().joinToString(", ")}",
+                        loc = expr.loc,
+                        errorType = ErrorType.MISSING_FIELD,
+                        code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
+                        hints = listOf("add: ${missingFields.sorted().joinToString(", ")}"),
+                    )
                 }
             }
         }
