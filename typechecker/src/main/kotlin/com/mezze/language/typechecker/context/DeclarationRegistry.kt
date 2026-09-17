@@ -28,9 +28,21 @@ class DeclarationRegistry(
      * the first time). This is the one legitimate place a name maps to a decl;
      * it is NOT a dispatch fallback. Every lookup* below delegates here so the
      * rule lives in exactly one spot and cannot drift per decl-kind.
+     *
+     * The implementation used to read `(hash?.let { byHash[it] }) ?: byName[name]`,
+     * which is the rule above for a hash that HITS and its opposite for one that
+     * misses: a caller who knew exactly which declaration it wanted, and whose
+     * declaration this registry did not have, was handed a different one that
+     * happened to share the name. A module declaring `type Option = | Yes, No |`
+     * expanded the stdlib's `Option Int` with ITS constructors, the two unified,
+     * the program type-checked, and the match died at runtime with "no variant tag
+     * matched — typechecker exhaustiveness guarantee violated".
+     *
+     * A hash that misses means NOT HERE. That is an answer, and callers that can
+     * look further afield must do so by hash too.
      */
     private fun <D> resolve(name: String, hash: Hash?, byHash: Map<Hash, D>, byName: Map<String, D>): D? =
-        (hash?.let { byHash[it] }) ?: byName[name]
+        if (hash != null) byHash[hash] else byName[name]
 
     fun lookupType(name: String, hash: Hash? = null): ParsedTypeDecl? =
         resolve(name, hash, typesByHash, typesByName)

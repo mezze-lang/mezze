@@ -11,13 +11,14 @@ import com.mezze.language.typedast.Hash
  * IDENTITY IS CENTRALIZED HERE. Every TypeApplication a declared type flows into
  * needs a content hash so it carries a real nominal identity (Declared, never
  * Named). Rather than make ~40 call sites each thread a hash, [of] resolves it in
- * one place, in precedence order:
+ * one place, in precedence order — nearest scope first, because a NAME is not an
+ * identity and only the nearest declaration says which type it is:
  *   1. an explicit `typeHash` argument (the caller already has it) — wins;
- *   2. the STDLIB well-known table ([WellKnownHashConstants]) — for `Result`,
- *      `Option`, `Json`, … whose hashes are fixed at build time;
- *   3. an installed per-module REGISTRY resolver ([withHashResolver]) — for
- *      USER/LOCAL declared types (`Tree`, `Color`, `UserId`, …), whose hash is a
- *      pure function of the decl and always computable from the registry.
+ *   2. an installed per-module REGISTRY resolver ([withHashResolver]) — whatever
+ *      THIS module declares or imports (`Tree`, `Color`, `UserId`, and the stdlib's
+ *      own types when imported), whose hash is a pure function of the decl;
+ *   3. the STDLIB well-known table ([WellKnownHashConstants]) — `Result`, `Option`,
+ *      `Json`, … for the paths where no registry is installed.
  *
  * `null` only survives for a name that resolves to no declaration at all — a
  * builtin (`List`/`Bool`) or `__Native*` handle (identified by reserved name, no
@@ -45,9 +46,24 @@ internal object WellKnownTypeApp {
         }
     }
 
-    /** Resolve a declared type's content hash: stdlib table, then the installed registry resolver. */
+    /**
+     * Resolve a declared type's content hash: the module's own REGISTRY first, the
+     * stdlib table second.
+     *
+     * The order is the whole point. The stdlib table is a NAME→hash map, so asking
+     * it first meant a module declaring `type Option = | Yes, No |` got the stdlib
+     * `Option`'s hash stamped as its identity — two unrelated types sharing one
+     * identity, after which `Option Int` unified with the local `Option`, the
+     * program type-checked, and it died at runtime with "Non-exhaustive match: no
+     * variant tag matched — typechecker exhaustiveness guarantee violated".
+     *
+     * The registry answers for whatever THIS module can see, and that includes the
+     * stdlib's own types when imported — so a genuine `Option` resolves to the same
+     * hash either way, and only a shadowing declaration changes answer. The table is
+     * what remains for the paths where no registry is installed.
+     */
     fun resolveHash(constructor: String): Hash? =
-        WellKnownHashConstants.resolveTypeHash(constructor) ?: hashResolver.get()?.invoke(constructor)
+        hashResolver.get()?.invoke(constructor) ?: WellKnownHashConstants.resolveTypeHash(constructor)
 
     fun of(
         constructor: String,

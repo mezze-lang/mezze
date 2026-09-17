@@ -1372,8 +1372,7 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, r
     // `expandTypeApplication` returns NotFound and the RecordType-vs-TypeApp arm
     // reports "SharedConfig is not compatible with SharedConfig". Mirrors the
     // ModuleResolver fallback already used by expandTypeApplicationToVariant.
-    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash)
-        ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
+    val typeDecl = declarationFor(typeApp, registry)
         ?: return null
 
     val recordDef = typeDecl.definition as? ParsedRecordDef ?: return null
@@ -1400,9 +1399,38 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, r
     )
 }
 
+/**
+ * The declaration a [MezzeType.TypeApplication] names, resolved by its IDENTITY.
+ *
+ * This file's registry answers first. `ModuleResolver`'s module cache is the wider
+ * net for a type the registry never loaded — a nested application reached through
+ * an alias-inline of an imported type, e.g. `JsonC` inlining to a record with a
+ * `TypeApplication(SharedConfig)` field where `SharedConfig` was never imported
+ * directly.
+ *
+ * That wider lookup is BY NAME, and for an application carrying a Declared identity
+ * it has to agree with it. Letting it answer regardless substitutes a different
+ * type that merely shares the name: a module declaring `type Option = | Yes, No |`
+ * expanded the stdlib's `Option Int` with ITS constructors, the two unified, the
+ * program type-checked, and the match died at runtime with "no variant tag matched
+ * — typechecker exhaustiveness guarantee violated".
+ *
+ * Null means no declaration THIS application could be; each caller turns that into
+ * its own not-found result, which unification reports as incompatible types.
+ */
+private fun declarationFor(
+    typeApp: MezzeType.TypeApplication,
+    registry: DeclarationRegistry,
+): ParsedTypeDecl? {
+    val declaredHash = (typeApp.identity as? TypeIdentity.Declared)?.hash
+    return registry.lookupType(typeApp.constructor, declaredHash)
+        ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)?.takeIf { d ->
+            declaredHash == null || (d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d)) == declaredHash
+        }
+}
+
 internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.VariantType? {
-    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash)
-        ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
+    val typeDecl = declarationFor(typeApp, registry)
         ?: return null
 
     val variantDef = when (val def = typeDecl.definition) {
@@ -1493,8 +1521,7 @@ internal fun expandTypeApplication(
     // of an imported type (e.g. `JsonC` inlining to a record with a
     // `TypeApplication(SharedConfig)` field, where `SharedConfig` isn't directly
     // imported). Mirrors the fallback already used by expandTypeApplicationToVariant.
-    val typeDecl = registry.lookupType(typeApp.constructor, (typeApp.identity as? TypeIdentity.Declared)?.hash)
-        ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
+    val typeDecl = declarationFor(typeApp, registry)
         ?: return TypeExpansionResult.NotFound
 
     return when (val definition = typeDecl.definition) {
