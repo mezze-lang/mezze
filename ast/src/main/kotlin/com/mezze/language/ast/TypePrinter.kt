@@ -499,6 +499,15 @@ private fun prettyPrintTypeWithAliasesRecursive(
 }
 }
 
+/** The name this type was DECLARED with, or null for an anonymous shape. */
+private fun MezzeType.declaredIdentityName(): String? = when (this) {
+    is MezzeType.RecordType -> identity.displayNameOrNull()
+    is MezzeType.VariantType -> identity.displayNameOrNull()
+    is MezzeType.TypeApplication -> identity.displayNameOrNull() ?: constructor
+    is MezzeType.NewtypeType -> name
+    else -> null
+}
+
 data class TypeAliasInfo(
     val name: String,
     val typeParams: List<String>,
@@ -532,6 +541,21 @@ private fun findTypeAliasForType(type: MezzeType, typeAliases: Map<String, TypeA
         }
         else -> {}
     }
+
+    // A type that already HAS a name of its own is never renamed to another one.
+    //
+    // The scan below returns the first alias whose definition merely UNIFIES with
+    // the type, and it walks a map — so the winner is decided by iteration order.
+    // That is fine for an anonymous shape, which has no name to lose. It is wrong
+    // for a declared type: `Promise Str` (a newtype, so absent from `typeAliases`
+    // and missed by the fast path above) printed as `PromiseState Str` — an
+    // unrelated variant that happens to unify — and which of the two you got
+    // depended on map order, so an edit anywhere else could flip it.
+    //
+    // Returning null here means "print it as itself", which is what a type with a
+    // Declared identity always wants.
+    if (type.declaredIdentityName() != null) return null
+
     for ((_, aliasInfo) in typeAliases) {
         if (aliasInfo.typeParams.isEmpty()) {
             // Simple type alias without parameters - use unification logic
