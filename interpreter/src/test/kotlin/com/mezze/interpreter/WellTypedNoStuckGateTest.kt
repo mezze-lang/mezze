@@ -280,17 +280,37 @@ class WellTypedNoStuckGateTest {
 
     /**
      * KNOWN-FAILING repro of the live emit bug the gate surfaced. Disabled so the
-     * suite is green; enable it when working the fix. Bisection that pinned it:
+     * suite is green; enable it when working the fix.
+     *
+     * Trigger, by bisection:
      *   D1 plain fn, no closure, variant find, return rt.k   → 7   (ok)
      *   D2 closure, variant find, return rt.k                → 7   (ok)
      *   D3 closure, variant find, return the closure param   → CRASH
      *   D4 = D3 with an Int compare                          → 7   (ok — variant is required)
      *   D5 closure, seq::any variant, return the param       → CRASH (not match-specific)
-     * ⇒ trigger = returned-closure-result-is-own-param + variant `==` in a HOF predicate.
-     * Symptom: NativeTypeMismatchException "Expected Long for field 'l', got MezzeVariant=Get"
-     * — the variant leaks into the closure-param slot.
+     * ⇒ returned-closure-result-is-own-param + variant `==` in a HOF predicate.
+     * Symptom: NativeTypeMismatchException "Expected Long for field 'l', got
+     * MezzeVariant=Get" — an INT-eq native receiving the variant.
+     *
+     * Narrowed further, and this is the useful part — a match arm that is a BARE
+     * PARAMETER REFERENCE is what does it. Returning `key + 0` instead of `key`
+     * passes. So the arm's SHAPE is the trigger, not the value's type.
+     *
+     * RULED OUT by measurement (do not re-try these):
+     *   - nullary-variant representation — a variant carrying a PAYLOAD fails
+     *     identically, so it is not about tag-vs-box;
+     *   - name collision — renaming the closure param changes nothing;
+     *   - dropped captures — a probe on the `mapNotNull` that silently drops an
+     *     unresolvable capture (which WOULD shift every later index) reports none;
+     *   - scalar fusion (`MEZZE_DISABLE_SCALAR=1`) and inlining
+     *     (`MEZZE_DISABLE_INLINE=1`);
+     *   - `TrivialWrapperInliner`, both the user-side pass
+     *     (`MEZZE_INLINE_WRAPPERS=0`) AND the stdlib's own precompile-time
+     *     inlining, checked by rebuilding the stdlib with the flag set — the
+     *     user-side flag alone does NOT undo the stdlib's, which is why the first
+     *     check of this was not conclusive.
      */
-    @org.junit.jupiter.api.Disabled("live emit bug: returned-closure param slot gets variant value; see class doc")
+    @org.junit.jupiter.api.Disabled("live emit bug: match arm that is a bare param; see the doc above")
     @Test
     fun `KNOWN-FAILING returned-closure param with variant compare in HOF predicate`() {
         val r = MezzeTestHelper.run(

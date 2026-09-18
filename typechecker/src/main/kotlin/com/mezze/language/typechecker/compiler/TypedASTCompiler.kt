@@ -4101,13 +4101,16 @@ class TypedASTCompiler(
                 if (parentCaptureIdx != null) {
                     // Parent's capture at index N is at frame slot N (captures are at slots 0..captureCount-1)
                     CaptureIR(parentCaptureIdx, SlotKind.OBJECT)
-                } else null
+                } else {
+                    null
+                }
             }
         }
         // Append the synthetic dict captures, in the same order they were added
         // to lambdaCaptureInfo above. Each points at a parent's dict-param (or
         // already-captured dict) slot.
         val allCaptures = captures + dictsToCapture.map { CaptureIR(it.second, SlotKind.OBJECT) }
+
 
         // Restore parent's capture info so sibling lambdas in the same function body
         // see the correct capture context. Without this, compiling lambda A inside a
