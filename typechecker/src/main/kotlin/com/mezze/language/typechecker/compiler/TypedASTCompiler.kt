@@ -4103,7 +4103,14 @@ class TypedASTCompiler(
         // 1. Parent's locals (localsByName)
         // 2. Parent's params (parentParamNames, offset by parentCaptureCount)
         // 3. Parent's captures (parentCaptureNames — variables captured from grandparent)
-        val captures = expr.captures.mapNotNull { c ->
+        // POSITIONAL: the lambda reads capture i at frame slot i, so this list must
+        // stay aligned with `expr.captures`. `mapNotNull` used to sit here, and a
+        // single unresolvable name silently shifted every LATER capture down one —
+        // every one of them then reading its neighbour's value. Measured as not
+        // firing today, which is exactly why it must fail loudly rather than keep
+        // waiting: a capture the typechecker recorded and the emitter cannot place
+        // is a defect in one of them, never something to skip.
+        val captures = expr.captures.map { c ->
             val slot = localsByName[c.name]
             if (slot != null) {
                 CaptureIR(slot, SlotKind.OBJECT)
@@ -4118,7 +4125,12 @@ class TypedASTCompiler(
                     // Parent's capture at index N is at frame slot N (captures are at slots 0..captureCount-1)
                     CaptureIR(parentCaptureIdx, SlotKind.OBJECT)
                 } else {
-                    null
+                    throw IllegalStateException(
+                        "lambda captures '${c.name}', which is neither a local, a parameter nor a " +
+                            "capture of the enclosing function. Enclosing locals=${localsByName.keys}, " +
+                            "params=$parentParamNames, captures=${parentCaptureNames.keys}. " +
+                            "Dropping it would shift every later capture's slot.",
+                    )
                 }
             }
         }
