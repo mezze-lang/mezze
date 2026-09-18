@@ -1852,6 +1852,41 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   operation set. Operations now come from the ability DECLARATIONS.
   `hashOpNames` was this same fix applied to exactly one ability and is now
   derived from the general index rather than being its own parameter.
+- **BUG 21 (FIXED) — `==` on four containers ignored the element's own `Eq`.**
+  `Deque`, `Map` compared by VALUE, `SortedSet`, and `SortedMap` compared by VALUE
+  each called a native that compared the runtime REPRESENTATION, so for a
+  `newtype P` whose `Eq` compares mod 10 — where `P.(1) == P.(11)` is true — all
+  four answered FALSE. No crash: a wrong answer, silently. ORDERING was never the
+  broken half, which is what hid it: `<` on a deque threads the element's
+  comparator and a sorted container consults the comparator it carries from
+  construction, so the same two values compared correctly under `<` and wrongly
+  under `==`. (The older note claiming sorted containers ordered records by
+  `identityHashCode` is stale — measured, they do not.) Each native gained the
+  element's `eq` the way `ListNatives.equals` already had it, each impl threads it
+  behind a `*_equals_with_eq` helper, and the map pair compares KEYS by the map's
+  own instance-aware lookup and VALUES by the value's `Eq`. `ContainerOperatorEqTest`
+  pins both directions so they cannot diverge again.
+- **Ability identity in constraint matching (FIXED).** Three sites matched an
+  associated-type resolution to an ability constraint by NAME — one dedupe, two
+  filters. `AssociatedTypeResolution` now carries the ability's content hash,
+  populated at its three generator construction sites, and all three comparisons go
+  through one `sameAbility` rule. Measured live rather than assumed: the path fires
+  21 times across the typechecker suite and every one has a hash on BOTH sides, so
+  the name never decides.
+- **OPEN (design, not a fix): forwarding a no-receiver operation.**
+  `let make: {} with Zero 'a -> 'a = {} -> Zero.zero {}` is refused. A dictionary
+  is reached through the RECEIVER's type — the dict scan keys on a var-typed
+  receiver, and dict params are frame names with no binding form of their own — so
+  an operation with no receiver cannot express the need. Doing it properly means
+  per-call-site target resolution for ANY ability whose only target is its return,
+  which is the generalisation of what `DecodeTargetResolver` already does for
+  `from_json` alone. The call says exactly that rather than guessing an impl, and
+  `StaticAbilityOpTest` pins the refusal AND its wording so the test flips when the
+  design lands. Same root as
+  `AbilityChecker.validateAbilityConstraints` silently skipping any constraint
+  whose type variable is still unsolved — correct for a generic body where the
+  caller discharges it, wrong where nothing can — which closes with A.2.
+
 - **BUG 20 (FIXED) — every static ability operation was uncallable.** `ability
   Default for 'a where { default: {} -> 'a }` ships in the stdlib and had no
   working call form: `Default.default {}` crashed at runtime ("Expected record for
