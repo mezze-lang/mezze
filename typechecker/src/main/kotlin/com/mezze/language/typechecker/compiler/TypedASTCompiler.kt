@@ -45,16 +45,17 @@ class TypedASTCompiler(
      *  right decoder per call site where the target is a bare var in the type. */
     private val decodeOpBySite: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
     /**
-     * The operation names of the `Hash` ability, identified by the ability's
-     * CONTENT HASH at the emitter — never by the literal "hash", so a user ability
-     * that happens to declare a `hash` op is not mistaken for this one.
+     * Every visible ability's operation names, keyed by the ability's CONTENT HASH.
      *
-     * `Hash` is DERIVED for every type rather than implemented, exactly like
-     * `Inspect`: there is no impl for the compiler to dispatch to, so a call has
-     * to lower to the structural hash directly. Empty ⇒ `Hash` is not in scope and
-     * no call can be one.
+     * Sourced from the ability DECLARATIONS, which is where an ability's operations
+     * are actually written down. The impl index cannot answer this: it only knows
+     * the abilities someone has implemented, so an ability whose impls are not in
+     * this compile step — the common case at stdlib-precompile time — looks like it
+     * has no operations at all.
+     *
+     * Empty ⇒ no ability is in scope, so no call can be an ability call.
      */
-    private val hashOpNames: Set<String> = emptySet(),
+    private val abilityOpNames: Map<Hash, Set<String>> = emptyMap(),
     /** #424 Piece 5 — for each seed call site, arg-record field names to
      *  strip before compiling to a call. Fields correspond to closure
      *  params that were dead-code eliminated from the specialized decl. */
@@ -96,6 +97,18 @@ class TypedASTCompiler(
          *  what lets the compiler USE that decision instead of re-deriving one. */
         val abilityHash: Hash?
     )
+    /**
+     * The operation names of the `Hash` ability specifically. `Hash` is DERIVED for
+     * every type rather than implemented, exactly like `Inspect`: there is no impl
+     * to dispatch to, so a call has to lower to the structural hash directly. Read
+     * off [abilityOpNames] by CONTENT HASH — never by the literal "hash", so a user
+     * ability that happens to declare a `hash` op is not mistaken for this one.
+     */
+    private val hashOpNames: Set<String> =
+        abilityOpNames.entries
+            .firstOrNull { com.mezze.language.typechecker.WellKnownHashConstants.isHash(it.key) }
+            ?.value ?: emptySet()
+
     private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOp>>()
 
     /** Extracted lambda functions */
@@ -428,6 +441,7 @@ class TypedASTCompiler(
             // ordering differs from the type it wraps.
             for ((opHash, body) in implOpBodies) propagate(opHash, body)
         }
+
     }
 
     /**

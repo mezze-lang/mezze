@@ -226,9 +226,13 @@ object PrecompiledStdlib {
                 val prePerformers = mutableListOf<Array<String>>()
                 val preDictMethods = mutableMapOf<Hash, Set<String>>()
                 val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
+                val allAbilityOpNames = abilityOpNamesOf(allModulesForPrelower.values)
                 for ((modHash, typedMod) in allModulesForPrelower) {
                     try {
-                        val compiler = TypedASTCompiler(abilityImpls = allAbilityImpls)
+                        val compiler = TypedASTCompiler(
+                            abilityImpls = allAbilityImpls,
+                            abilityOpNames = allAbilityOpNames,
+                        )
                         val result = compiler.compile(typedMod, isStdlibCompilation = true)
                         for (pr in result.performerRecords) {
                             val arr = mutableListOf(pr.performerHash, pr.effectHash)
@@ -303,13 +307,27 @@ object PrecompiledStdlib {
      * prescan for each module, collecting the hash → methods map. Does NOT
      * compile function bodies — only the prescan step runs.
      */
+    /** Every ability declared across [modules], keyed by content hash, mapped to
+     *  its operation names. The declarations are the authority on what an ability's
+     *  operations are — impls only cover the abilities someone implemented. */
+    private fun abilityOpNamesOf(modules: Collection<TypedAstModule>): Map<Hash, Set<String>> =
+        buildMap {
+            for (m in modules) {
+                for (decl in m.abilityDecls) put(decl.hash, decl.operations.mapTo(HashSet()) { it.name })
+            }
+        }
+
     private fun prescanDictMethodsFromModules(modules: Map<Hash, TypedAstModule>): Map<Hash, Set<String>> {
         if (modules.isEmpty()) return emptyMap()
         val allAbilityImpls = modules.values.flatMap { it.abilityImpls }
+        val allAbilityOpNames = abilityOpNamesOf(modules.values)
         val result = mutableMapOf<Hash, Set<String>>()
         for ((_, typedMod) in modules) {
             try {
-                val compiler = TypedASTCompiler(abilityImpls = allAbilityImpls)
+                val compiler = TypedASTCompiler(
+                    abilityImpls = allAbilityImpls,
+                    abilityOpNames = allAbilityOpNames,
+                )
                 compiler.prescanOnly(typedMod)
                 for ((h, methods) in compiler.getDictMethodsForHash()) {
                     result[h] = methods

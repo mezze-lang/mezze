@@ -223,20 +223,17 @@ private fun compileModule(
         allAbilityImpls.addAll(stdlibModule.abilityImpls)
     }
 
-    // The operation names of the `Hash` ability, identified by its CONTENT HASH
-    // rather than by the literal "hash" — the ability decides what its op is
-    // called, and a user ability that happens to declare a `hash` op is a
-    // different ability. Empty when `Hash` is not in scope, which simply means no
-    // call can be a Hash call.
-    val hashOpNames = buildSet {
+    // Every visible ability's operation names, keyed by the ability's CONTENT HASH
+    // — the ability decides what its ops are called, and two abilities sharing an
+    // op name are still different abilities. Declarations, not impls: an ability
+    // nobody has implemented in this step still has its operations.
+    val abilityOpNames = buildMap {
         val decls = wrapped.abilityDecls.asSequence() +
             PrecompiledStdlib.stdlibTypedModules.values.asSequence().flatMap { it.abilityDecls } +
             loadedModules.values.asSequence().mapNotNull { it.typedModule }.flatMap { it.abilityDecls } +
             ModuleTypeChecker.getAllCachedModules().values.asSequence()
                 .mapNotNull { it.typedModule }.flatMap { it.abilityDecls }
-        for (decl in decls) {
-            if (WellKnownHashConstants.isHash(decl.hash)) decl.operations.forEach { add(it.name) }
-        }
+        for (decl in decls) put(decl.hash, decl.operations.mapTo(HashSet()) { it.name })
     }
 
     val declIndex = mutableMapOf<Hash, TypedLetDecl>()
@@ -328,7 +325,7 @@ private fun compileModule(
         preloweredDictMethods = stdlibDictMethods,
         substitution = substitution,
         decodeOpBySite = decodeOpBySite,
-        hashOpNames = hashOpNames,
+        abilityOpNames = abilityOpNames,
     )
     compiler.setDeclIndex(declIndex)
 
