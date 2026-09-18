@@ -1832,6 +1832,33 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
 - **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
   re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
   site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.
+- **C.4/C.5 MEASURED — the prescan is not deletable as stated, and here is the
+  number.** Two answers exist to "which functions need a dictionary param": the
+  body SCAN, and the DECLARED constraints on a function's own type.
+  `getDeclaredDictMethodsForHash` now computes the second beside the first, and
+  `DictJustificationGateTest` holds the scan to it — a dict the scan demands must
+  be one a declared constraint justifies, with 4 named exceptions (below).
+  Deleting the scan in favour of the declared answer is a PESSIMISATION, not a
+  simplification: ~120 stdlib functions declare a live constraint the scan never
+  flags, and a constraint names an ABILITY rather than which of its OPERATIONS a
+  body uses, so every `Ord`-constrained function would take four dict params
+  where it uses one. The scan's guess was only ever in deriving the NEED; the
+  narrowing it does is correct work, and the gate is what keeps the guess from
+  growing back.
+- **Fixed on the way (was silently wrong):** the only ability-op index was built
+  from the IMPLS in scope, so an ability nobody implemented in the current step
+  had no operations at all — the normal situation at stdlib-precompile time,
+  where 10 functions with a live `Encode` constraint resolved to an empty
+  operation set. Operations now come from the ability DECLARATIONS.
+  `hashOpNames` was this same fix applied to exactly one ability and is now
+  derived from the general index rather than being its own parameter.
+- **BUG 16 — a native call's return type comes back as a bare variable.**
+  `__native_nat_to_int { n = it } % 2` types its result as `'a`, so concrete Int
+  arithmetic reads as polymorphic. Measured consequence: `enumerate`,
+  `zip_with_index`, `Nat::is_even` and `Nat::is_odd` are each emitted with an
+  arithmetic dict param that no declared constraint calls for — the four
+  exceptions allowlisted in `DictJustificationGateTest`. Fixing this empties that
+  list, and the gate fails if a fifth appears or if a listed one stops firing.
 - **D.3** INVESTIGATED; no change made, and that is the finding. Inherent impl
   operations are excluded from parameter seeding (`!isInherent` in
   `TypedAstBuilder.buildAbilityImpl`) because they have no ability declaration to
