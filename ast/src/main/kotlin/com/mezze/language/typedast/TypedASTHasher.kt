@@ -165,6 +165,17 @@ object TypedASTHasher {
                         b.append(byteArrayOf(HashTags.EXTERNAL_REF, 0x01))
                         b.append(binding.name)
                     }
+                    is BindingRef.AbilityOp -> {
+                        // The ABILITY's content hash plus the operation and the type
+                        // variable it dispatches on. The variable's NAME is part of the
+                        // identity here because it selects which dictionary slot the
+                        // call reads — two operations of one ability on two different
+                        // variables are two different references.
+                        b.append(byteArrayOf(HashTags.EXTERNAL_REF, 0x02))
+                        b.append(binding.abilityHash.hex)
+                        b.append(binding.opName)
+                        b.append(binding.typeVarName)
+                    }
                     is BindingRef.Local -> {
                         b.append(byteArrayOf(HashTags.LOCAL_REF))
                         b.appendInt(binding.depth)

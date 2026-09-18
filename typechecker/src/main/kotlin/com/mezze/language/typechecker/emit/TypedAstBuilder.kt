@@ -1350,6 +1350,30 @@ class TypedAstBuilder(
                 info.abilityDeclHash == abilityHash && producedName in info.targetTypes
             }
         } else null
+        // The produced type is still a VARIABLE: the impl is not this call's to pick.
+        // The enclosing function declared a constraint for that variable, so the
+        // dictionary it carries holds the operation — reference it and let the caller
+        // supply the evidence, exactly as a receiver-taking operation does.
+        if (implEntry == null && abilityHash != null && produced is MezzeType.VarType) {
+            val fn = TypedVar(
+                name = methodInfo.methodName,
+                binding = BindingRef.AbilityOp(
+                    abilityHash = abilityHash,
+                    opName = methodInfo.methodName,
+                    typeVarName = produced.variable.name,
+                ),
+                type = solvedFnType ?: substitution.apply(contextType),
+                loc = memberAccess.memberLoc,
+            )
+            return TypedCall(
+                function = fn,
+                arg = argExpr,
+                instantiation = null,
+                isTailCall = isTailCallLocation(loc),
+                type = produced,
+                loc = loc,
+            )
+        }
         if (implEntry == null) {
             throw com.mezze.language.typechecker.TypeCheckError(
                 message = "'$abilityName.${methodInfo.methodName}' takes no receiver, so the type it " +

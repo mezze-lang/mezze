@@ -695,6 +695,33 @@ class TypedASTCompiler(
         val abilityPrefix = mp.dictParamName(method) + mp.ABILITY_SEP
         return (params + captures.keys).firstOrNull { it.startsWith(abilityPrefix) }
     }
+    /** Frame index of the dictionary parameter [name] — a param sits after the
+     *  captures, a capture at its own index. Null when this function carries no
+     *  such slot. */
+    private fun dictSlotIndex(name: String): Int? {
+        val paramIdx = currentParamNames.indexOf(name)
+        if (paramIdx >= 0) return currentCaptureCount + paramIdx
+        return currentCaptureNames[name]
+    }
+
+    /** The dictionary slot an [BindingRef.AbilityOp] reference resolves to, or a
+     *  loud failure: the reference exists only because the enclosing function
+     *  declared the constraint that supplies it, so a miss is a compiler defect,
+     *  never something to paper over. */
+    private fun abilityOpDictSlot(binding: BindingRef.AbilityOp): Int {
+        val name = enclosingDictSlot(binding.opName, binding.typeVarName, binding.abilityHash.hex)
+        val index = name?.let { dictSlotIndex(it) }
+        return index ?: throw com.mezze.language.typechecker.TypeCheckError(
+            message = "'${binding.opName}' takes no receiver, so the type it produces is what " +
+                "chooses the implementation — and nothing here determines that type. Say what " +
+                "the call produces (`let x: <Type> = … ${binding.opName} {…}`), or declare the " +
+                "constraint on the enclosing function so the caller supplies it " +
+                "(`{ … } with <Ability> '${binding.typeVarName.removePrefix("'")} -> …`).",
+            errorType = com.mezze.language.typechecker.ErrorType.CONSTRAINT_VIOLATION,
+            code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
+        )
+    }
+
     private fun enclosingDictSlot(method: String, typeVar: String?, abilityHash: String? = null): String? =
         enclosingDictSlotIn(currentParamNames, currentCaptureNames, method, typeVar, abilityHash)
 
@@ -934,6 +961,18 @@ class TypedASTCompiler(
         when (expr) {
             is TypedCall -> {
                 val fn = expr.function
+                // An operation with NO RECEIVER says which dictionary it wants —
+                // there is no variable-typed receiver for the walk below to notice,
+                // so the requirement would otherwise be invisible and the slot would
+                // never be allocated.
+                val staticOp = (fn as? TypedVar)?.binding as? BindingRef.AbilityOp
+                if (staticOp != null) {
+                    out.add(
+                        com.mezze.language.ast.MagicParams.dictKey(
+                            staticOp.opName, staticOp.typeVarName, staticOp.abilityHash.hex,
+                        ),
+                    )
+                }
                 if (fn is TypedFieldAccess) {
                     val methodName = fn.field
                     // Refresh against the final substitution so an inlineable op
@@ -1804,6 +1843,12 @@ class TypedASTCompiler(
 
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
+            is BindingRef.AbilityOp -> {
+                // Referenced without being called — hand back the function the
+                // dictionary slot holds. Named directly because an operation with no
+                // receiver has no value whose type could point at the slot.
+                ReadLocalIR(abilityOpDictSlot(binding), SlotKind.OBJECT, src)
+            }
             is BindingRef.Local -> {
                 // Names contributed by the effect-handler runtime inside op
                 // handler bodies (`scope`, `resume`, `abort`). See
@@ -2450,6 +2495,13 @@ class TypedASTCompiler(
         if (fn is TypedVar) {
             val binding = fn.binding
             return when (binding) {
+                is BindingRef.AbilityOp -> {
+                    // The same node the receiver-taking path emits, and the same slot
+                    // it computes — the only difference is that the argument record is
+                    // passed through unchanged, there being no receiver to fold in.
+                    census.methodDictCallee++
+                    DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src)
+                }
                 is BindingRef.ByHash -> {
                     val calleeHash = binding.hash
 
@@ -2499,6 +2551,9 @@ class TypedASTCompiler(
                             // otherwise resolution falls to the arg types where the xs
                             // container falsely matches the blanket `impl Ord for ['a]`.
                             .let { bindConstraintArgsViaArg(rawFnType, expr.arg, it) }
+                            // …and from the RETURN, for a constraint variable the
+                            // parameters never mention (`{} with Zero 'a -> 'a`).
+                            .let { bindConstraintArgsViaReturn(rawFnType, expr.type, it) }
                         // STRUCTURAL constraint binding for an ability-op callee — the
                         // instance-head step (`instance Eq a => Eq [a]`: bind `a` from the
                         // HEAD, then resolve the constraint on that binding). `fn.type` on a
@@ -2767,6 +2822,38 @@ class TypedASTCompiler(
      * (where the xs container falsely matches the blanket `impl Ord for ['a]`).
      * Leaves already-concrete args and unbindable vars untouched.
      */
+    /**
+     * The mirror of [bindConstraintArgsViaArg]: bind a callee's constraint variables
+     * from its declared RETURN, unified against the type this call actually produces.
+     *
+     * A constraint variable does not have to appear in the parameters.
+     * `make: {} with Zero 'a -> 'a` mentions `'a` only in what it returns, so the
+     * argument-side harvest has nothing to look at and `'a` stays generic — the
+     * caller then injects no dictionary and the callee falls through to the built-in
+     * fallback. The call's own solved type is the evidence, and it is already here.
+     *
+     * Runs after the argument harvest and only fills variables it left unbound, so
+     * no call site that already resolves changes what it resolves to.
+     */
+    private fun bindConstraintArgsViaReturn(
+        rawFnType: FunctionType?,
+        callType: MezzeType,
+        rawArgs: List<MezzeType>,
+    ): List<MezzeType> {
+        if (rawFnType == null || rawArgs.none { it is VarType }) return rawArgs
+        val produced = substitution.apply(callType)
+        if (produced is VarType || containsVarType(produced)) return rawArgs
+        val bindings = mutableMapOf<String, MezzeType>()
+        harvestVarBindings(substitution.apply(rawFnType.returnType), produced, bindings)
+        if (bindings.isEmpty()) return rawArgs
+        return rawArgs.map { t ->
+            if (t is VarType) {
+                val bound = bindings[t.variable.name]
+                if (bound != null && bound !is VarType) substitution.apply(bound) else t
+            } else t
+        }
+    }
+
     private fun bindConstraintArgsViaArg(
         rawFnType: FunctionType?,
         argExpr: TypedExpr,

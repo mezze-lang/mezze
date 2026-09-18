@@ -1370,6 +1370,16 @@ class MezzeTextDocumentService(
                     if (expr is com.mezze.language.typedast.TypedVar) {
                         // Variable reference — find where it was defined.
                         when (val binding = expr.binding) {
+                            // An ability OPERATION with no receiver. Which impl runs
+                            // is decided by the dictionary the caller supplies, so
+                            // there is no single implementation to jump to — go to the
+                            // ability's DECLARATION, which is the thing the reference
+                            // actually names. Matched by content hash.
+                            is com.mezze.language.typedast.BindingRef.AbilityOp -> {
+                                val decl = typedModule.abilityDecls
+                                    .firstOrNull { it.hash == binding.abilityHash }
+                                if (decl != null) return listOf(locToLocation(state.uri, decl.loc))
+                            }
                             // Local let bindings / lambda params / match pattern
                             // bindings in the current file. Resolve the binder
                             // STRUCTURALLY from the cursor var's de Bruijn

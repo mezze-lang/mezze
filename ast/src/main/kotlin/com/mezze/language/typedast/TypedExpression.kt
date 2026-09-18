@@ -34,6 +34,23 @@ sealed interface BindingRef {
     @Serializable data class ByHash(val hash: Hash) : BindingRef
     @Serializable data class Capture(val index: Int) : BindingRef
     @Serializable data class Native(val name: String) : BindingRef
+
+    /**
+     * An ability OPERATION whose implementation is not known here, to be taken from
+     * the dictionary the enclosing function carries for [typeVarName].
+     *
+     * Every other ability call reaches its dictionary through the RECEIVER's type —
+     * the emitter sees `x.op {…}` with `x` still a variable and looks up the slot
+     * for that variable. An operation with no receiver (`default: {} -> 'a`) has no
+     * such value, so it needs to say directly which (ability, operation, variable)
+     * it wants. The slot name is the same one the receiver path computes, so both
+     * arrive at the same dictionary.
+     */
+    @Serializable data class AbilityOp(
+        val abilityHash: Hash,
+        val opName: String,
+        val typeVarName: String,
+    ) : BindingRef
 }
 
 

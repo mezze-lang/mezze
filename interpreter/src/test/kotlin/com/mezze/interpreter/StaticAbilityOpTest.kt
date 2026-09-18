@@ -122,32 +122,48 @@ class StaticAbilityOpTest {
         }.exceptionOrNull()
         val message = e?.message ?: ""
         assertTrue(
-            message.contains("nothing at this call determines that type"),
+            message.contains("nothing here determines that type"),
             "should say the produced type is undetermined; got: $message",
         )
         assertTrue(
-            message.contains("let x: <Type> ="),
-            "should show how to say it; got: $message",
+            message.contains("with <Ability>"),
+            "should also offer declaring the constraint; got: $message",
         )
     }
 
     @Test
-    fun `forwarding one through a declared constraint is refused, and says so`() {
-        // The other half of the boundary, and the one worth stating precisely
-        // because the program looks like it should work: the wrapper DOES declare
-        // `with Zero 'a`, so for a receiver-TAKING operation this would compile and
-        // forward the dictionary. A no-receiver operation cannot: a dictionary is
-        // reached through the receiver's type, and there is no receiver. Resolving
-        // it would mean per-call-site target resolution for any ability whose only
-        // target is its return — a design change, not a fix — so the call says what
-        // it cannot do rather than guessing an impl.
-        val e = runCatching {
-            MezzeTestHelper.run("$zero\nlet make: {} with Zero 'a -> 'a = {} -> Zero.zero {}\nlet n: Int = make {}\nn")
-        }.exceptionOrNull()
-        val message = e?.message ?: ""
-        assertTrue(
-            message.contains("never forwarded"),
-            "should say a no-receiver operation is resolved at the call; got: $message",
+    fun `it forwards through a declared constraint`() {
+        // A wrapper that declares `with Zero 'a` and returns what the operation
+        // produces. A receiver-taking operation has always been able to do this —
+        // the dictionary is reached through the receiver's TYPE. With no receiver
+        // there is no such value, so the reference names the (ability, operation,
+        // variable) it wants directly and reads the same dictionary slot.
+        assertEquals(
+            0L,
+            MezzeTestHelper.run("$zero\nlet make: {} with Zero 'a -> 'a = {} -> Zero.zero {}\nlet n: Int = make {}\nn"),
+        )
+    }
+
+    @Test
+    fun `the same wrapper resolves at each type it is used at`() {
+        val src = "$zero\nimpl Zero for Str where {\n  zero = {} -> \"z\"\n}\n" +
+            "let make: {} with Zero 'a -> 'a = {} -> Zero.zero {}\n" +
+            "let s: Str = make {}\ns"
+        assertEquals("z", MezzeTestHelper.run(src))
+    }
+
+    @Test
+    fun `the stdlib Default forwards through a wrapper too`() {
+        assertEquals(
+            false,
+            MezzeTestHelper.run(
+                """
+                use std::abilities::default::{ Default }
+                let mk: {} with Default 'a -> 'a = {} -> Default.default {}
+                let b: Bool = mk {}
+                b
+                """.trimIndent(),
+            ),
         )
     }
 
