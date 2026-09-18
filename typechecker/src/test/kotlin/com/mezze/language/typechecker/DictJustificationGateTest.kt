@@ -40,10 +40,21 @@ class DictJustificationGateTest {
      * dict nothing in the types calls for.
      *
      * What remains: `list::enumerate` (and `zip_with_index`, which is its alias)
-     * compute `acc.i + 1` inside a `fold_left` callback. `fold_left` declares
-     * `init: 'acc` and `f: { acc: 'acc, x: 'a } -> 'acc`, so the accumulator's
-     * record type IS tied to the callback parameter by the signature — it just does
-     * not arrive, leaving `acc.i` a field read off a variable.
+     * compute `acc.i + 1` inside a `fold_left` callback. Traced end to end:
+     * `acc`'s type is still the declared `'acc` after the substitution is applied —
+     * the solver never bound it — so emit's member-access path finds no record to
+     * read `i` off and stamps the read `VarType("unknown")`. The dict scan then sees
+     * `+` on a variable and asks for `__dict_add`.
+     *
+     * Not a same-module instantiation gap and not the `<...>` effect row: a
+     * same-module polymorphic function used at two types, a callback whose
+     * parameter shape comes from the call, and the identical fold written over
+     * `seq` (whose signature carries the same `<...>`) all infer correctly. What is
+     * different here is that the accumulator is RECURSIVE — `{ acc: List 'z, i: Int }`
+     * where `'z` is fixed only by the `cons` inside the callback whose type `'acc`
+     * is supposed to give. That is the `UNBOUND_TYPE_VAR` row the elaboration
+     * baseline already carries for these two, and closing it is A.2's job (take
+     * that baseline to zero), not a separate fix.
      *
      * `Nat::is_even` / `Nat::is_odd` were here too and are now fixed. They computed
      * `__native_nat_to_int {…} % 2`: a native reference is typed as a bare variable

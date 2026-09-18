@@ -1898,10 +1898,19 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
     it: its `SlotKind` is the ABI, not the type (`__native_nat_min` returns LONG
     and is a `Nat`), so reading types off it would be a fresh guess.
   - `list::enumerate` (and `zip_with_index`, its alias) compute `acc.i + 1` in a
-    `fold_left` callback. `fold_left` declares `init: 'acc` and
-    `f: { acc: 'acc, x: 'a } -> 'acc`, so the accumulator's record type IS tied to
-    the callback parameter in the signature — it just does not arrive, leaving
-    `acc.i` a field read off a variable.
+    `fold_left` callback. Traced end to end: `acc`'s type is still the declared
+    `'acc` after the substitution is applied — the solver never bound it — so
+    emit's member-access path finds no record to read `i` off and stamps the read
+    `VarType("unknown")` (the `?:` there is a resolution fallback, and it is what
+    turns an unsolved variable into a type the scan then misreads). Ruled out by
+    measurement: same-module instantiation works (a polymorphic function used at
+    two types in one module infers fine), callback parameter shapes arrive from
+    the call, and the identical fold over `seq` — same `<...>` effect row —
+    infers. What is different is that the accumulator is RECURSIVE:
+    `{ acc: List 'z, i: Int }` where `'z` is fixed only by the `cons` inside the
+    callback that `'acc` is supposed to type. This is the `UNBOUND_TYPE_VAR` row
+    the elaboration baseline already carries for these two, so it closes with A.2
+    (take that baseline to zero) rather than as a fix of its own.
 - **D.3** INVESTIGATED; no change made, and that is the finding. Inherent impl
   operations are excluded from parameter seeding (`!isInherent` in
   `TypedAstBuilder.buildAbilityImpl`) because they have no ability declaration to
