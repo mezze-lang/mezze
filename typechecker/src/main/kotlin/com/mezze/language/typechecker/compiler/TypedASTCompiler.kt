@@ -1338,8 +1338,24 @@ class TypedASTCompiler(
         // where dedup happens — never let downstream rediscover it.
         val seenHashes = HashSet<Hash>(functions.size)
         val deduped = ArrayList<FunctionIR>(functions.size)
+        val keptByHash = HashMap<Hash, FunctionIR>(functions.size)
         for (fn in functions) {
-            if (seenHashes.add(fn.hash)) deduped.add(fn)
+            if (seenHashes.add(fn.hash)) {
+                deduped.add(fn)
+                keptByHash[fn.hash] = fn
+            } else if (recordDedupeCollisions) {
+                // The comment above says duplicate rows are "semantically the same
+                // function". Measured, that is not always true: the lambda hash is
+                // type- and environment-blind (see `saltedLambdaHash`), so two
+                // lambdas with DIFFERENT compiled bodies can share one, and
+                // first-occurrence-wins then discards a body some call site needed.
+                // Off by default — comparing whole IR bodies is not free — and
+                // switched on by `DedupeCollisionGateTest`, which holds the count.
+                val kept = keptByHash[fn.hash]
+                if (kept != null && kept.body != fn.body) {
+                    dedupeCollisions.add(fn.hash.hex)
+                }
+            }
         }
 
         // β-reduce `Mut.mutate { act = λ }` in every compiled function.
@@ -4987,6 +5003,23 @@ class TypedASTCompiler(
     companion object {
         @JvmStatic
         fun computeOpHash(implHash: Hash, opName: String): Hash = Hash.computeOpHash(implHash, opName)
+
+        /** Switched on by `DedupeCollisionGateTest`; off in production because it
+         *  compares whole IR bodies. PER THREAD: the suite runs test classes in
+         *  parallel, so a global switch would record every other test's compiles
+         *  into whichever gate happened to be running. */
+        private val recordCollisions = ThreadLocal.withInitial { false }
+
+        /** Hashes whose per-hash dedupe discarded a body DIFFERENT from the one it
+         *  kept — i.e. where content addressing did not hold. Per thread, for the
+         *  same reason. */
+        private val collisions = ThreadLocal.withInitial { LinkedHashSet<String>() }
+
+        var recordDedupeCollisions: Boolean
+            get() = recordCollisions.get()
+            set(v) = recordCollisions.set(v)
+
+        val dedupeCollisions: MutableSet<String> get() = collisions.get()
     }
 
     private fun locToSourceInfo(loc: Loc): SourceInfo {
