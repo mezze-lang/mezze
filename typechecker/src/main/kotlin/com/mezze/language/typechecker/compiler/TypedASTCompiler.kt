@@ -109,6 +109,7 @@ class TypedASTCompiler(
             .firstOrNull { com.mezze.language.typechecker.WellKnownHashConstants.isHash(it.key) }
             ?.value ?: emptySet()
 
+    private val declaredDictMethodsForHash = mutableMapOf<Hash, Set<String>>()
     private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOp>>()
 
     /** Extracted lambda functions */
@@ -314,6 +315,24 @@ class TypedASTCompiler(
     fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
 
     /**
+     * The same question answered from the DECLARED constraints instead of from the
+     * bodies: a function constrained `with Ord 'a`, where `'a` is still a variable,
+     * needs a dict for each of `Ord`'s operations.
+     *
+     * This is where the answer actually lives for a well-typed program, and it is
+     * the standing measurement of how far [dictMethodsForHash] is from being
+     * derivable rather than scanned (C.4/C.5). `DictJustificationGateTest` holds
+     * the scan to it: nothing may demand a dict that no declared constraint
+     * justifies.
+     *
+     * It does not replace the scan outright. A dict param carries ONE operation, and
+     * a constraint names an ability, not which of its operations a body uses — so
+     * substituting this for the scan would hand every `Ord`-constrained function
+     * four dict params where it uses one.
+     */
+    fun getDeclaredDictMethodsForHash(): Map<Hash, Set<String>> = declaredDictMethodsForHash.toMap()
+
+    /**
      * Which functions need a `__dict_*` parameter, transitively.
      *
      * This is load-bearing — bypassing it breaks `SeqUserTypeCompareTest`
@@ -333,6 +352,7 @@ class TypedASTCompiler(
     private fun prescanForDictMethods(modules: List<TypedModule>) {
         dictMethodsForHash.clear()
         declaredOpTypeByHash.clear()
+        declaredDictMethodsForHash.clear()
         // Seed with pre-lowered stdlib dict methods so call sites in the user
         // module correctly inject dicts for stdlib functions whose modules are
         // NOT in `additionalModules` during user compilation.
@@ -352,6 +372,9 @@ class TypedASTCompiler(
                         val methods = scanExprForVarTypeMethodCalls(value.body, constrained)
                         if (methods.isNotEmpty()) {
                             dictMethodsForHash[decl.hash] = methods
+                        }
+                        declaredDictMethods(value.type).let {
+                            if (it.isNotEmpty()) declaredDictMethodsForHash[decl.hash] = it
                         }
                     }
                 }
@@ -383,6 +406,9 @@ class TypedASTCompiler(
                 val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained)
                 if (methods.isNotEmpty()) {
                     dictMethodsForHash[opHash] = methods
+                }
+                declaredDictMethods(opBody.type).let {
+                    if (it.isNotEmpty()) declaredDictMethodsForHash[opHash] = it
                 }
             }
         }
@@ -773,6 +799,24 @@ class TypedASTCompiler(
      * root's capture count. Applying substitution filters out these
      * resolved constraints correctly.
      */
+    /**
+     * The dict operations [type]'s own declared constraints call for: every
+     * operation of every ability it is constrained by, for a constraint whose type
+     * argument is still a VARIABLE.
+     *
+     * A constraint on a type that resolved to something concrete needs no dict — the
+     * impl is picked at compile time — and inference leaves those behind on the
+     * arrow (see [arrowHasAbilityConstraint]), so the variable test is what separates
+     * a live constraint from a spent one.
+     */
+    private fun declaredDictMethods(type: MezzeType): Set<String> {
+        val fn = type as? MezzeType.FunctionType ?: return emptySet()
+        if (fn.abilityConstraints.isEmpty()) return emptySet()
+        return fn.abilityConstraints
+            .filter { c -> c.typeArgs.any { containsVarTypeDeep(substitution.apply(it)) } }
+            .flatMapTo(HashSet()) { c -> c.abilityHash?.let { abilityOpNames[it] } ?: emptySet() }
+    }
+
     private fun arrowHasAbilityConstraint(type: MezzeType): Boolean {
         if (type !is MezzeType.FunctionType) return false
         if (type.abilityConstraints.isEmpty()) return false
