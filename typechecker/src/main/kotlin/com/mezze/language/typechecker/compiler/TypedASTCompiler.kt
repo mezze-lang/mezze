@@ -2545,6 +2545,19 @@ class TypedASTCompiler(
                 }
                 is BindingRef.Native -> {
                     census.native++
+                    // A hash container buckets by the element's RUNTIME
+                    // REPRESENTATION, which IS the derived structural equality — so
+                    // it is already right for every element whose `Eq` the compiler
+                    // wrote, and wrong only for one the AUTHOR wrote. Where the
+                    // author wrote it, hand the container that element's own
+                    // `hash`/`eq` and it buckets by those instead.
+                    //
+                    // Decided HERE and once, from the impl the monomorphizer already
+                    // chose for this specialization — not threaded per call, not
+                    // captured at construction. Declining leaves the structural
+                    // native exactly as it was, so a `Set Int` keeps its specialised
+                    // storage and iteration order.
+                    evidenceNativeCall(binding.name, argIR, src)?.let { return it }
                     // Scalar-ABI emission: if the native is declared in the
                     // NativeOp DSL, transpose the user record into positional
                     // args in the registry's declared order. The interpreter
@@ -3485,6 +3498,53 @@ class TypedASTCompiler(
      * carrying several constraints cannot have one ability's evidence answer for
      * another's identically-named op.
      */
+    /**
+     * Structural container native → the form taking the element's own `hash`/`eq`.
+     *
+     * A native is identified by its name — that is what a native IS here, the same
+     * way `__native_int_eq` names an operation — so this is a table of operations,
+     * not a dispatch on a type's spelling.
+     */
+    private val evidenceNativeForm: Map<String, String> = mapOf(
+        "__native_set_from_seq" to "__native_set_from_seq_with_evidence",
+        "__native_set_insert" to "__native_set_insert_with_evidence",
+        "__native_set_contains" to "__native_set_contains_with_evidence",
+        "__native_set_remove" to "__native_set_remove_with_evidence",
+    )
+
+    /**
+     * The evidence-carrying call for [nativeName], or null to leave it structural.
+     *
+     * Null whenever the element's instance is the compiler's own: the container's
+     * structural bucketing already IS that instance, so threading closures would buy
+     * nothing and cost the specialised storage tiers.
+     */
+    private fun evidenceNativeCall(nativeName: String, argIR: NodeIR, src: SourceInfo): NodeIR? {
+        val evidenceName = evidenceNativeForm[nativeName] ?: return null
+        if (argIR !is MakeRecordIR) return null
+        // Both halves or neither: a container that hashed by the element's instance
+        // and compared structurally would put equal values in one bucket and then
+        // fail to match them.
+        val hashOp = specEvidenceOpHash(com.mezze.language.ast.BuiltinTypes.HASH_METHOD) ?: return null
+        val eqOp = specEvidenceOpHash(com.mezze.language.ast.BuiltinTypes.EQ_METHOD) ?: return null
+        if (specAbilityImpls.none { implIsHandWritten(it.implHash) }) return null
+        return CallNativeIR(
+            name = evidenceName,
+            arg = MakeRecordIR(
+                argIR.fields + listOf(
+                    FieldIR(com.mezze.language.ast.BuiltinTypes.HASH_METHOD, ReadGlobalFnByHashIR(hashOp, src)),
+                    FieldIR(com.mezze.language.ast.BuiltinTypes.EQ_METHOD, ReadGlobalFnByHashIR(eqOp, src)),
+                ),
+                src,
+            ),
+            src = src,
+        )
+    }
+
+    /** True when the author wrote this impl rather than the compiler deriving it. */
+    private fun implIsHandWritten(implHash: Hash): Boolean =
+        abilityImpls.any { it.hash == implHash && !it.derived }
+
     private fun specEvidenceOpHash(methodName: String): Hash? {
         val candidates = abilityOpIndex[methodName] ?: return null
         // The ONLY source: the impls the monomorphizer recorded as discharging

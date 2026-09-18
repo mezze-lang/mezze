@@ -519,8 +519,10 @@ public final class MezzeRecord implements TruffleObject {
     private static final Shape SHAPE_ACC_X;
     private static final Shape SHAPE_A_B;
     private static final Shape SHAPE_S;
-    /** `{ it: … }` — the receiver record an ability op takes. */
+    /** `{ it: … }` — the receiver record a one-parameter ability op takes. */
     public static final Shape SHAPE_IT;
+    /** `{ it: …, r: … }` — a two-parameter ability op's record (`Eq`'s `eq`/`neq`). */
+    public static final Shape SHAPE_IT_R;
     static {
         SHAPE_X = new Shape(
             new String[]{"x"},
@@ -547,6 +549,13 @@ public final class MezzeRecord implements TruffleObject {
         SHAPE_IT = new Shape(
             new String[]{"it"},
             new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
+        SHAPE_IT_R = new Shape(
+            new String[]{"it", "r"},
+            new FieldLocation[]{
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 0),
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 1)
+            }
         );
     }
 
@@ -582,6 +591,13 @@ public final class MezzeRecord implements TruffleObject {
      *  receiver is its only parameter (`hash: { it: 'a } -> Int`). */
     public static MezzeRecord wrapIt(Object value) {
         return new MezzeRecord(SHAPE_IT, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{value}, true);
+    }
+
+    /** Create an `{it: a, r: b}` record — the argument shape of a two-parameter
+     *  ability op such as `Eq`'s `eq`. Distinct from {@link #wrapAB}, which is a
+     *  comparator closure's `{a, b}`. */
+    public static MezzeRecord wrapItR(Object a, Object b) {
+        return new MezzeRecord(SHAPE_IT_R, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b}, true);
     }
 
     public static MezzeRecord wrapAB(Object a, Object b) {

@@ -56,7 +56,8 @@ internal object AbilityImplFactory {
             sourceModule = sourceModule,
             contentHash = implKey,
             typeVars = typeVars,
-            operationConstraints = operationConstraints
+            operationConstraints = operationConstraints,
+            derived = implDecl.derived
         )
     }
 

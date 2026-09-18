@@ -53,7 +53,16 @@ data class TypingContext(
         val sourceModule: String? = null,
         val contentHash: Hash,
         val typeVars: Set<String> = emptySet(),
-        val operationConstraints: List<ParsedFnAbilityConstraint> = emptyList()
+        val operationConstraints: List<ParsedFnAbilityConstraint> = emptyList(),
+        /**
+         * True when the COMPILER wrote this instance, false when the author did.
+         *
+         * Carried because downstream has to answer "whose instance is this" and
+         * cannot re-derive it: a hash container's structural bucketing already IS
+         * the derived equality, so the element's own `hash`/`eq` need threading to
+         * it only when the author wrote them.
+         */
+        val derived: Boolean = false
     )
 
     data class PerformerTypeInfo(

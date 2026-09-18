@@ -169,7 +169,11 @@ data class TypedAbilityImpl(
     val forallVars: List<TypeParam>,
     val associatedTypeBindings: Map<String, MezzeType>,
     val operations: Map<String, TypedExpr>,
-    val loc: Loc
+    val loc: Loc,
+    /** True when the COMPILER wrote this instance, false when the author did.
+     *  Survives into the typed AST because the container-evidence decision needs
+     *  it and cannot re-derive it. */
+    val derived: Boolean = false
 )
 
 

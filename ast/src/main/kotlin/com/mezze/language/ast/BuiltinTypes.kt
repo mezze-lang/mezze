@@ -110,6 +110,12 @@ object BuiltinTypes {
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err
 
+    /** Ability operation names the compiler itself must NAME. An operation's name
+     *  is its identity within its ability, so these are constants rather than
+     *  literals spelled at use sites. */
+    const val HASH_METHOD = "hash"
+    const val EQ_METHOD = "eq"
+
     /** The Bool ability method for logical negation: `b.not {}`. Single source so
      *  callers recognize the negation method here, not via raw `member == "not"`. */
     const val NOT_METHOD = "not"

@@ -51,7 +51,7 @@ class EvidenceSetStorageTest {
               P.(b) -> a % 10 != b % 10
         }
         let h: { it: P } -> Int = { it } -> it.hash {}
-        let e: { a: P, b: P } -> Bool = { a, b } -> a == b
+        let e: { it: P, r: P } -> Bool = { it, r } -> it == r
     """.trimIndent()
 
     private fun run(body: String) = MezzeTestHelper.run("$head\n$body")

@@ -101,17 +101,11 @@ class HashContainerInstanceTest {
     // ── The instance is NOT honoured here ─────────────────────────────────
 
     @Test
-    @Disabled(
-        "T1.4 — answers 2. The Set buckets by the runtime representation, so " +
-            "P.(1) and P.(11) never meet and the mod-10 Eq is never consulted. " +
-            "Needs the element's eq AND an agreeing hash to reach the container.",
-    )
     fun `a Set collapses elements equal by the element's Eq`() {
         assertEquals(1L, run("use std::collections::set\nset::from_seq { xs = [P.(1), P.(11)] }.size {}"))
     }
 
     @Test
-    @Disabled("T1.4 — answers false, for the same reason: the lookup hashes before it compares.")
     fun `a Set finds an element equal by the element's Eq`() {
         assertEquals(true, run("use std::collections::set\nset::from_seq { xs = [P.(1)] }.contains { x = P.(11) }"))
     }

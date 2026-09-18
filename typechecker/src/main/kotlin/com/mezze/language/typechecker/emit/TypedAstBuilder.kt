@@ -752,7 +752,8 @@ class TypedAstBuilder(
             forallVars = forallVars,
             associatedTypeBindings = assocTypeBindings,
             operations = ops,
-            loc = loc
+            loc = loc,
+            derived = decl.derived
         ))
     }
 
