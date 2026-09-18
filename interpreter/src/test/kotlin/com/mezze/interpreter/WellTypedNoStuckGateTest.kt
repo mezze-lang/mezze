@@ -35,6 +35,28 @@ class WellTypedNoStuckGateTest {
         val returnsClosure: Boolean,
         val hof: String,          // "find" | "any" | "filterSize" | "fold"
         val predicate: String,    // "variant" | "int" | "twoClause"
+        /**
+         * Whether the generated program writes the types of its INNER lambdas — the
+         * HOF predicate, the fold callback, an inherent op's receiver.
+         *
+         * This axis is the rule "a type annotation is never REQUIRED to typecheck,
+         * and never CHANGES what a program means" made mechanical, applied where the
+         * rule actually bites: a lambda handed to `seq::find` over a `[Rt]` has its
+         * parameter type FULLY DETERMINED by the call it appears in, so writing
+         * `{ x: Rt }` can only restate what the signature already says. Every cell
+         * exists twice, and both halves must typecheck and answer 7.
+         *
+         * It does NOT drop the wrapper's own `rts: [Rt]`. That one is not a
+         * restatement: a Mezze record is EXACT unless it is written open, so an
+         * unannotated `{ rts } -> … x.m …` infers the narrowest element that fits
+         * the body — `[{ m: M }]` — and a `[{ m: M, k: Int }]` argument is then
+         * correctly rejected for having a field the parameter does not declare. That
+         * is the language's record semantics and not an inference gap: the SAME
+         * program with the closed annotation `{ rts: [{ m: M }] }` is rejected
+         * identically, so nothing about the annotation changed the meaning. Dropping
+         * it would test record exactness, which `OpenRecordValidationTest` owns.
+         */
+        val annotated: Boolean,
     )
 
     /** Preamble types shared by every cell. Rt has BOTH a variant field (m) and an
@@ -57,16 +79,25 @@ class WellTypedNoStuckGateTest {
         else -> error("unknown predicate $kind")
     }
 
-    /** The predicate lambda `{ x: Rt } -> <bool>` for find/any/filter. */
-    private fun predicateExpr(kind: String): String = "{ x: Rt } -> ${condition(kind, "x")}"
+    /** The predicate lambda for find/any/filter — `{ x: Rt } -> …` as written, or
+     *  `{ x } -> …` when the cell drops its annotations. */
+    private fun predicateExpr(kind: String, annotated: Boolean): String =
+        if (annotated) "{ x: Rt } -> ${condition(kind, "x")}"
+        else "{ x } -> ${condition(kind, "x")}"
 
     /** The HOF over list `xs`, producing an Int (the matched key, or 0), as one or
      *  more LOGICAL LINES with NO leading indentation — the caller re-indents the
      *  whole block to its insertion column. Returning a list lets `find` use the real
      *  `match`-on-Option shape (which reproduces the frame-slot launder) without the
      *  single-line-splice hazard. `hit` is the expression yielded on a match. */
-    private fun hofBody(hof: String, pred: String, xs: String, hit: String): List<String> {
-        val p = predicateExpr(pred)
+    private fun hofBody(
+        hof: String,
+        pred: String,
+        xs: String,
+        hit: String,
+        annotated: Boolean,
+    ): List<String> {
+        val p = predicateExpr(pred, annotated)
         return when (hof) {
             // The proven crash shape: match on seq::find's Option, variant compare in
             // the predicate. This is exactly the nesting that laundered x.m → VarType.
@@ -77,11 +108,15 @@ class WellTypedNoStuckGateTest {
             )
             "any" -> listOf("if seq::any { xs = $xs, p = $p } then $hit else 0")
             "filterSize" -> listOf("seq::size { xs = seq::filter { xs = $xs, p = $p } } * $hit")
-            // `x: Rt` pins the element type: the int predicate only reads `x.k`, which
-            // would otherwise narrow the element (and the source list) to `{ k: Int }`.
+            // As written, `x: Rt` pins the element type; the int predicate reads only
+            // `x.k`, so without it inference is free to narrow the element (and the
+            // source list) to `{ k: Int }`. Narrowing is not by itself wrong — the
+            // annotated and inferred halves must still agree on the ANSWER, which is
+            // exactly what the inferred half is here to check.
             "fold" -> listOf(
                 "seq::fold { xs = $xs, init = 0,",
-                "  f = { acc, x: Rt } -> if ${condition(pred, "x")} then x.k else acc }",
+                "  f = { acc, x${if (annotated) ": Rt" else ""} } -> " +
+                    "if ${condition(pred, "x")} then x.k else acc }",
             )
             else -> error("unknown hof $hof")
         }
@@ -106,21 +141,21 @@ class WellTypedNoStuckGateTest {
         val hit = if (c.returnsClosure) "key" else "7"
         when {
             c.wrapper == "plainFn" && c.returnsClosure -> {
-                sb.append("let mk = { rts } -> { key } ->\n")
-                sb.append(indent(hofBody(c.hof, c.predicate, "rts", hit), 2)).append("\n")
+                sb.append("let mk = { rts: [Rt] } -> { key } ->\n")
+                sb.append(indent(hofBody(c.hof, c.predicate, "rts", hit, c.annotated), 2)).append("\n")
                 sb.append("let main = {} -> (mk { rts = $list1 }) { key = 7 }\n")
             }
             c.wrapper == "plainFn" && !c.returnsClosure -> {
-                sb.append("let run = { rts } ->\n")
-                sb.append(indent(hofBody(c.hof, c.predicate, "rts", hit), 2)).append("\n")
+                sb.append("let run = { rts: [Rt] } ->\n")
+                sb.append(indent(hofBody(c.hof, c.predicate, "rts", hit, c.annotated), 2)).append("\n")
                 sb.append("let main = {} -> run { rts = $list1 }\n")
             }
             c.wrapper == "inherent" && c.returnsClosure -> {
                 sb.append("type Box = { rts: [Rt] }\n")
                 sb.append("let box = { rts } -> { rts = rts }\n")
                 sb.append("impl Box where {\n")
-                sb.append("  runner = { it: 'it } -> { key } ->\n")
-                sb.append(indent(hofBody(c.hof, c.predicate, "it.rts", hit), 4)).append("\n")
+                sb.append("  runner = { it${if (c.annotated) ": 'it" else ""} } -> { key } ->\n")
+                sb.append(indent(hofBody(c.hof, c.predicate, "it.rts", hit, c.annotated), 4)).append("\n")
                 sb.append("}\n")
                 sb.append("let main = {} -> ((box { rts = $list1 }).runner {}) { key = 7 }\n")
             }
@@ -128,8 +163,8 @@ class WellTypedNoStuckGateTest {
                 sb.append("type Box = { rts: [Rt] }\n")
                 sb.append("let box = { rts } -> { rts = rts }\n")
                 sb.append("impl Box where {\n")
-                sb.append("  run = { it: 'it } ->\n")
-                sb.append(indent(hofBody(c.hof, c.predicate, "it.rts", hit), 4)).append("\n")
+                sb.append("  run = { it${if (c.annotated) ": 'it" else ""} } ->\n")
+                sb.append(indent(hofBody(c.hof, c.predicate, "it.rts", hit, c.annotated), 4)).append("\n")
                 sb.append("}\n")
                 sb.append("let main = {} -> (box { rts = $list1 }).run {}\n")
             }
@@ -138,7 +173,7 @@ class WellTypedNoStuckGateTest {
                 // do-result; `main {}` dedents to close the block.
                 sb.append("let main = {} -> do\n")
                 sb.append("  let ys = $list1\n")
-                sb.append(indent(hofBody(c.hof, c.predicate, "ys", hit), 2)).append("\n")
+                sb.append(indent(hofBody(c.hof, c.predicate, "ys", hit, c.annotated), 2)).append("\n")
             }
             else -> error("bad cell $c")
         }
@@ -154,7 +189,8 @@ class WellTypedNoStuckGateTest {
             for (returnsClosure in closureOpts)
                 for (hof in listOf("find", "any", "filterSize", "fold"))
                     for (pred in listOf("variant", "int", "twoClause"))
-                        out.add(Cell(wrapper, returnsClosure, hof, pred))
+                        for (annotated in listOf(true, false))
+                            out.add(Cell(wrapper, returnsClosure, hof, pred, annotated))
         }
         return out
     }
