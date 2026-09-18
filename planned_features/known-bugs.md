@@ -1852,6 +1852,29 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   operation set. Operations now come from the ability DECLARATIONS.
   `hashOpNames` was this same fix applied to exactly one ability and is now
   derived from the general index rather than being its own parameter.
+- **"The compiler did not determine a type" is no longer a type variable.**
+  `VarType(freshWithName("unknown"))` sat inline at six places, and what it
+  produced was indistinguishable from an ordinary type variable the moment it left
+  the function — so every pass downstream read it as POLYMORPHISM and guessed from
+  it. There is one way to mint one now (`TypeVar.unknown(reason)`), and
+  `TypeVar.isPlaceholder` / `MezzeType.holdsUnknownPlaceholder()` let a consumer
+  that would guess tell the two apart. Derived from the name, not stored: a type
+  variable is rebuilt from its name in several passes and a stored flag is dropped
+  by each. Not in any content hash. Two guessing sites — mono's `selectOpEntry`
+  and `tryResolveAbilityOp` — now refuse a PLACEHOLDER while still deferring to a
+  real variable; refusing for all variables was tried and fails ten tests, because
+  a user `Ord`/`Eq` on a container element reaches its impl precisely that way.
+  `UnknownPlaceholderGateTest` bounds the set of reasons.
+- **MEASURED, and the single biggest lever left: 793 of 795 unknown types are
+  `__native_*` references.** Compiling one small module mints 795 placeholders;
+  793 are native references, whose Mezze type is simply never declared anywhere.
+  Most are pinned afterwards by the `pub let` wrapper they sit in — which is why
+  this mostly works — and the ones that are NOT are BUG 19 (`__native_nat_to_int
+  {…} % 2`, where the result feeds an operator instead of the wrapper's declared
+  return). So "drive A.2's misses to zero" is, in the main, "give natives declared
+  Mezze types". Note `NativeSignatures` cannot supply them: its `SlotKind` is the
+  runtime ABI, not the type (`__native_nat_min` returns LONG and is a `Nat`).
+
 - **The returned-closure variant leak: ROOT CAUSE LOCATED, and it is A.2's.** The
   crash is `__native_int_eq` receiving a `MezzeVariant` on a program that type-checks
   clean. Chain, measured end to end: the emitter stamps the predicate's receiver
