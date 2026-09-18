@@ -93,6 +93,12 @@ internal fun emitTypedModuleAndLower(
                     else -> continue
                 }
                 builder.buildCodecImpl(parsedImpl, extraImpls)
+            } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                // A diagnostic is never "this codec simply does not apply" — it is a
+                // message written for the person compiling, at a location they can
+                // act on. Swallowing one replaces it with silence and a failure much
+                // further downstream. See the same split on the two handlers below.
+                throw e
             } catch (e: Exception) {
                 // A codec impl that fails to generate does not fail here — the
                 // program keeps going and dies later at the use site with
@@ -159,6 +165,11 @@ internal fun emitTypedModuleAndLower(
         val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution, mergedDecodeOpBySite)
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
+    } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+        // As above: a diagnostic propagates. Lowering that fails for any other
+        // reason still leaves the typed module standing, which is what the swallow
+        // below is for.
+        throw e
     } catch (e: Exception) {
         if (System.getenv("MEZZE_COMPILER_DBG") != null) {
             System.err.println("[COMPILER-DBG] ${e.javaClass.simpleName}: ${e.message}")

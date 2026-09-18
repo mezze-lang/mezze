@@ -202,6 +202,7 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                             primaryTypeVar = freshConstraint.typeVar,
                             associatedTypeVars = assocVars,
                             classArgTypeVars = classArgVars,
+                            abilityHash = context.abilityDeclarations[freshConstraint.abilityName]?.contentHash,
                             context = "Call-site associated type resolution for ${freshConstraint.abilityName}",
                             loc = expr.loc
                         )

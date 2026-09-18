@@ -98,6 +98,12 @@ sealed interface Constraint {
         // impl's `'out`. Matching the whole tuple resolves it. Empty for
         // single-param abilities (primaryTypeVar alone suffices).
         val classArgTypeVars: List<TypeVar> = emptyList(),
+        /** Content hash of the ability this resolution belongs to. A NAME is not an
+         *  identity — two abilities in scope may declare the same one — so matching
+         *  a body's resolution to an annotation's constraint goes through
+         *  [sameAbility], which prefers this. Null where the hash was not yet known
+         *  at the construction site. */
+        val abilityHash: Hash? = null,
         override val context: String? = null,
         override val loc: Loc? = null
     ) : Constraint {
@@ -611,3 +617,20 @@ data class ConstraintContext(
         return copy(currentScopeBindings = paramNames)
     }
 }
+
+/**
+ * Whether two references denote the SAME ability.
+ *
+ * A NAME is not an identity: two abilities in scope may declare the same name, and
+ * matching on it lets one ability's constraint satisfy another's — the shape that
+ * made `Weigh.rank` and `Price.rank` share a dictionary slot. Content hashes are
+ * compared whenever both sides carry one.
+ *
+ * The name is consulted only when a hash is missing, which is not a preference but
+ * a staging fact: a constraint can be raised before the ability's declaration hash
+ * is in reach (a built-in during bootstrap, an annotation converted before the
+ * registry is populated). Where BOTH sides carry hashes the name never decides, so
+ * the discrimination this exists for applies exactly when it can.
+ */
+internal fun sameAbility(hash1: Hash?, name1: String, hash2: Hash?, name2: String): Boolean =
+    if (hash1 != null && hash2 != null) hash1 == hash2 else name1 == name2

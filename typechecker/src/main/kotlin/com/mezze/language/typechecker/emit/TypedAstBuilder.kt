@@ -1355,8 +1355,10 @@ class TypedAstBuilder(
                 message = "'$abilityName.${methodInfo.methodName}' takes no receiver, so the type it " +
                     "produces is what chooses the implementation" +
                     if (producedName == null) {
-                        " — and nothing here determines that type. Say what the call produces: " +
-                        "`let x: <Type> = $abilityName.${methodInfo.methodName} {…}`."
+                        " — and nothing at this call determines that type. Say what the call " +
+                        "produces: `let x: <Type> = $abilityName.${methodInfo.methodName} {…}`. " +
+                        "An enclosing `with $abilityName 'a` does not carry it: an operation " +
+                        "with no receiver is resolved at the call, never forwarded."
                     } else {
                         ", and here it produces $producedName. No `impl $abilityName for " +
                         "$producedName` is in scope — write one, or import it."

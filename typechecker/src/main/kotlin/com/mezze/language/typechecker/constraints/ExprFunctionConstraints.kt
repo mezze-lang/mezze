@@ -579,7 +579,9 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         }
         expectedFunctionType?.abilityConstraints?.isNotEmpty() == true -> expectedFunctionType.abilityConstraints
         else -> bodyResult.abilityConstraints
-            .distinctBy { it.abilityName to it.typeVar.id }
+            // Key on the ability's IDENTITY, not its name: two abilities in scope
+            // may declare the same name, and deduping on it drops one of them.
+            .distinctBy { (it.abilityHash ?: it.abilityName) to it.typeVar.id }
             .map { ab ->
                 // Carry the associated-type link (e.g. `having 'out = 'c`) onto the
                 // stored constraint so the call site can re-emit an
@@ -590,7 +592,10 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
                 // AssociatedTypeResolution to this constraint by ability + primary
                 // type var (the receiver `'l`).
                 val bindings = bodyResult.associatedTypeConstraints
-                    .filter { it.abilityName == ab.abilityName && it.primaryTypeVar.id == ab.typeVar.id }
+                    .filter {
+                        sameAbility(it.abilityHash, it.abilityName, ab.abilityHash, ab.abilityName) &&
+                            it.primaryTypeVar.id == ab.typeVar.id
+                    }
                     .flatMap { res -> res.associatedTypeVars.entries }
                     .associate { (name, assocVar) -> name to (MezzeType.VarType(assocVar) as MezzeType) }
                 // In a FunctionAbilityConstraint the receiver IS typeArgs[0] —
@@ -626,7 +631,10 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
     for (annotationConstraint in expectedAbilityConstraints) {
         if (annotationConstraint.associatedTypeBindings.isNotEmpty()) {
             val matchingBodyConstraints = bodyResult.associatedTypeConstraints.filter {
-                it.abilityName == annotationConstraint.abilityName
+                sameAbility(
+                    it.abilityHash, it.abilityName,
+                    annotationConstraint.abilityHash, annotationConstraint.abilityName,
+                )
             }
 
             for (bodyConstraint in matchingBodyConstraints) {
@@ -1322,6 +1330,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                     primaryTypeVar = primary,
                     associatedTypeVars = assocVars,
                     classArgTypeVars = classArgVars,
+                    abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                     context = "Call-site associated type resolution for ${constraint.abilityName}",
                     loc = expr.loc
                 )

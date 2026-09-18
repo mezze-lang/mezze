@@ -561,6 +561,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                         primaryTypeVar = abilityTypeVars.first(),
                         associatedTypeVars = associatedTypeVarsMap,
                         classArgTypeVars = abilityTypeVars,
+                        abilityHash = context.abilityDeclarations[abilityName]?.contentHash,
                         context = "Associated type resolution for $abilityName.$methodName",
                         loc = expr.loc
                     ))

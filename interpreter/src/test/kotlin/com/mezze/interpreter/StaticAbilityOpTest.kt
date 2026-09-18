@@ -122,12 +122,32 @@ class StaticAbilityOpTest {
         }.exceptionOrNull()
         val message = e?.message ?: ""
         assertTrue(
-            message.contains("nothing here determines that type"),
+            message.contains("nothing at this call determines that type"),
             "should say the produced type is undetermined; got: $message",
         )
         assertTrue(
             message.contains("let x: <Type> ="),
             "should show how to say it; got: $message",
+        )
+    }
+
+    @Test
+    fun `forwarding one through a declared constraint is refused, and says so`() {
+        // The other half of the boundary, and the one worth stating precisely
+        // because the program looks like it should work: the wrapper DOES declare
+        // `with Zero 'a`, so for a receiver-TAKING operation this would compile and
+        // forward the dictionary. A no-receiver operation cannot: a dictionary is
+        // reached through the receiver's type, and there is no receiver. Resolving
+        // it would mean per-call-site target resolution for any ability whose only
+        // target is its return — a design change, not a fix — so the call says what
+        // it cannot do rather than guessing an impl.
+        val e = runCatching {
+            MezzeTestHelper.run("$zero\nlet make: {} with Zero 'a -> 'a = {} -> Zero.zero {}\nlet n: Int = make {}\nn")
+        }.exceptionOrNull()
+        val message = e?.message ?: ""
+        assertTrue(
+            message.contains("never forwarded"),
+            "should say a no-receiver operation is resolved at the call; got: $message",
         )
     }
 
