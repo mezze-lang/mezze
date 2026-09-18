@@ -1064,6 +1064,29 @@ class Monomorphizer(
      *  on no match or genuine ambiguity — the caller falls through to the
      *  unmodified TypedFieldAccess call, which the compiler resolves separately. */
     private fun selectOpEntry(entries: List<OpEntry>, receiverType: MezzeType): OpEntry? {
+        // MEASURED, and do not "fix" this without new information: a LONE candidate
+        // is taken WITHOUT checking it against the receiver, and that is
+        // load-bearing.
+        //
+        // The entries are gathered by operation NAME from the specialization's
+        // ability impls, so "one entry" means "this spec carries one impl that
+        // happens to declare an op with this name" — never "this impl is for this
+        // receiver". Two tightenings were tried and both fail ten tests in
+        // `OrdImplTest` / `ContainerElementInstanceTest`: requiring the lone
+        // candidate to match the receiver, and — the honest reading, since
+        // `typeMatchesTarget` answers true for a VARIABLE against any target —
+        // refusing to rewrite at all when the receiver's type is unresolved. A user
+        // `Ord`/`Eq` on a container element reaches its impl precisely BECAUSE the
+        // laundered receiver is rewritten on the strength of the spec alone.
+        //
+        // So the guess is holding up code with no other route to its impl, which is
+        // C.3's "fresh-var fallback is the real hole" seen from the other side. It is
+        // also a wrong answer waiting: with a receiver laundered to the emitter's
+        // `unknown` placeholder, a variant `==` inside a specialized closure whose
+        // spec carries only `Eq Int` is rewritten to Int's operation, and
+        // `__native_int_eq` is handed a MezzeVariant. Closing that needs the
+        // receiver's type to SURVIVE to here — A.2's job — not a stricter rule laid
+        // on top of its absence.
         if (entries.size == 1) return entries.first()
         val matches = entries.filter { e ->
             val recvTarget = e.impl.targetTypes.lastOrNull() ?: return@filter false
