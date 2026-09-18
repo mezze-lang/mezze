@@ -456,6 +456,7 @@ UNBOUND_TYPE_VAR	let:dedup_by_with_eq
 UNBOUND_TYPE_VAR	let:dedup_with_eq
 UNBOUND_TYPE_VAR	let:denominator
 UNBOUND_TYPE_VAR	let:deque_compare_with_cmp
+UNBOUND_TYPE_VAR	let:deque_equals_with_eq
 UNBOUND_TYPE_VAR	let:dequeue
 UNBOUND_TYPE_VAR	let:diff_maps
 UNBOUND_TYPE_VAR	let:difference
@@ -579,6 +580,7 @@ UNBOUND_TYPE_VAR	let:lower_bound
 UNBOUND_TYPE_VAR	let:lower_bound_with_cmp
 UNBOUND_TYPE_VAR	let:make
 UNBOUND_TYPE_VAR	let:map
+UNBOUND_TYPE_VAR	let:map_equals_with_eq
 UNBOUND_TYPE_VAR	let:map_keys
 UNBOUND_TYPE_VAR	let:map_values
 UNBOUND_TYPE_VAR	let:max
@@ -662,6 +664,8 @@ UNBOUND_TYPE_VAR	let:sort
 UNBOUND_TYPE_VAR	let:sort_by
 UNBOUND_TYPE_VAR	let:sort_by_key
 UNBOUND_TYPE_VAR	let:sort_by_key_with_cmp
+UNBOUND_TYPE_VAR	let:sorted_map_equals_with_eq
+UNBOUND_TYPE_VAR	let:sorted_set_equals_with_eq
 UNBOUND_TYPE_VAR	let:span
 UNBOUND_TYPE_VAR	let:split
 UNBOUND_TYPE_VAR	let:split_at

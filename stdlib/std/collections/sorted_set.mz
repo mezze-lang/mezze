@@ -19,9 +19,18 @@ impl Hash for SortedSet 'a where {
   hash: { it: SortedSet 'a } -> Int = { it } -> structural_hash { it = it }
 }
 
+## Element-wise equality in sorted order, threading the ELEMENT's Eq. Asked of `Eq`
+## and not of the ordering the set carries: they are separate abilities and a type
+## may implement them independently.
+let sorted_set_equals_with_eq
+  : { s1: SortedSet 'a, s2: SortedSet 'a, eq: { a: 'a, b: 'a } -> Bool } -> Bool = { s1, s2, eq } ->
+  __native_sorted_set_equals { s1 = s1, s2 = s2, eq = eq }
+
 impl Eq for SortedSet 'a where {
-  eq = { it, r } -> __native_sorted_set_equals { s1 = it, s2 = r },
-  neq = { it, r } -> if __native_sorted_set_equals { s1 = it, s2 = r } then False else True,
+  eq: { it: SortedSet 'a, r: SortedSet 'a } with Eq 'a -> Bool = { it, r } ->
+    sorted_set_equals_with_eq { s1 = it, s2 = r, eq = { a, b } -> a == b },
+  neq: { it: SortedSet 'a, r: SortedSet 'a } with Eq 'a -> Bool = { it, r } ->
+    if sorted_set_equals_with_eq { s1 = it, s2 = r, eq = { a, b } -> a == b } then False else True,
 }
 
 ## Lexicographic ordering for sorted sets.
@@ -117,8 +126,8 @@ pub let from_set: { s: Set 'a } with Ord 'a -> SortedSet 'a = { s } ->
 pub let to_set: { s: SortedSet 'a } -> Set 'a = { s } -> __native_sorted_set_to_set { s = s }
 
 ## Returns True if the two sorted sets are equal.
-pub let equals: { s1: SortedSet 'a, s2: SortedSet 'a } -> Bool = { s1, s2 } ->
-  __native_sorted_set_equals { s1 = s1, s2 = s2 }
+pub let equals: { s1: SortedSet 'a, s2: SortedSet 'a } with Eq 'a -> Bool = { s1, s2 } ->
+  sorted_set_equals_with_eq { s1 = s1, s2 = s2, eq = { a, b } -> a == b }
 
 ## Splits into elements matching and not matching the predicate.
 pub let partition

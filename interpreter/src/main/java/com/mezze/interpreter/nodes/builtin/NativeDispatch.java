@@ -1398,7 +1398,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_difference", (r, c) ->
             SortedSetNatives.difference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
         HANDLERS.put("__native_sorted_set_equals", (r, c) ->
-            SortedSetNatives.equals(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.equals(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunction(r, "eq"), c));
         HANDLERS.put("__native_sorted_set_compare", (r, c) ->
             SortedSetNatives.compare(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
         HANDLERS.put("__native_sorted_set_to_list", (r, c) ->
@@ -1524,7 +1525,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_map_merge", (r, c) ->
             MapNatives.merge(getMap(r, "m1"), getMap(r, "m2")));
         HANDLERS.put("__native_map_equals", (r, c) ->
-            MapNatives.equals(getMap(r, "m1"), getMap(r, "m2")));
+            MapNatives.equals(getMap(r, "m1"), getMap(r, "m2"), getFunction(r, "eq"), c));
 
         // HOF operations
         HANDLERS.put("__native_map_filter", (r, c) ->
@@ -1640,7 +1641,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_entries", (r, c) ->
             SortedMapNatives.entries(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_equals", (r, c) ->
-            SortedMapNatives.equals(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
+            SortedMapNatives.equals(getSortedMap(r, "m1"), getSortedMap(r, "m2"),
+                getFunction(r, "eq"), c));
         HANDLERS.put("__native_sorted_map_compare", (r, c) ->
             SortedMapNatives.compareMaps(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
         HANDLERS.put("__native_sorted_map_min_entry", (r, c) ->
@@ -1758,7 +1760,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_concat", (r, c) ->
             DequeNatives.concat(getDeque(r, "d1"), getDeque(r, "d2")));
         HANDLERS.put("__native_deque_equals", (r, c) ->
-            DequeNatives.equals(getDeque(r, "d1"), getDeque(r, "d2")));
+            DequeNatives.equals(getDeque(r, "d1"), getDeque(r, "d2"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_deque_compare", (r, c) ->
             DequeNatives.compare(getDeque(r, "d1"), getDeque(r, "d2"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_deque_to_list", (r, c) ->

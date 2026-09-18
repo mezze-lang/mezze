@@ -112,9 +112,31 @@ public final class SortedSetNatives {
         return set1.difference(set2);
     }
 
+    /**
+     * Element-wise equality in sorted order, each pair compared by the ELEMENT'S
+     * OWN `eq`.
+     *
+     * `set1.equals(set2)` compared the runtime representation, which is right only
+     * when the element's equality is the derived structural one. A newtype whose
+     * `Eq` compares mod 10 has `P.(1) == P.(11)`, and a newtype erases to its
+     * payload, so the structural compare saw `1` and `11` and answered false —
+     * silently, while `<` on the same two sets answered correctly because `compare`
+     * below consults the comparator the set carries. Equality is asked of `Eq`
+     * rather than of that comparator on purpose: they are separate abilities and a
+     * type may implement them independently.
+     */
     @TruffleBoundary
-    public static boolean equals(MezzeSortedSet set1, MezzeSortedSet set2) {
-        return set1.equals(set2);
+    public static boolean equals(MezzeSortedSet set1, MezzeSortedSet set2, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (set1.size() != set2.size()) return false;
+        var ctx = ScalarCall.prepare2(eqFn, "a", "b");
+        for (int i = 0; i < set1.size(); i++) {
+            Object result = ctx.call2(callNode, set1.get(i), set2.get(i));
+            if (!(result instanceof Boolean bool) || !bool) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

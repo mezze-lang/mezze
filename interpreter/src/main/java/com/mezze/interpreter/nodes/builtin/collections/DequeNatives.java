@@ -162,9 +162,28 @@ public final class DequeNatives {
 
     // ==================== Equality & Comparison ====================
 
+    /**
+     * Element-wise equality, each pair compared by the ELEMENT'S OWN `eq`.
+     *
+     * `deque1.equals(deque2)` compared the runtime representation, which is right
+     * only when the element's equality is the derived structural one. A newtype
+     * whose `Eq` compares mod 10 has `P.(1) == P.(11)`, and a newtype erases to its
+     * payload, so the structural compare saw `1` and `11` and answered false where
+     * the element type says true — silently, with no crash. `compare` below has
+     * always threaded the element's comparator; this is its missing counterpart.
+     */
     @TruffleBoundary
-    public static boolean equals(MezzeDeque deque1, MezzeDeque deque2) {
-        return deque1.equals(deque2);
+    public static boolean equals(MezzeDeque deque1, MezzeDeque deque2, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (deque1.size() != deque2.size()) return false;
+        var ctx = ScalarCall.prepare2(eqFn, "a", "b");
+        for (int i = 0; i < deque1.size(); i++) {
+            Object result = ctx.call2(callNode, deque1.get(i), deque2.get(i));
+            if (!(result instanceof Boolean bool) || !bool) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

@@ -94,9 +94,31 @@ public final class SortedMapNatives {
 
     // ==================== Additional Operations ====================
 
+    /**
+     * Equality over both halves of an entry: the KEYS by the map's own ordered
+     * lookup, and the VALUES by the VALUE'S OWN `eq`, threaded in.
+     *
+     * `a.equals(b)` compared the runtime representation of the values, which is
+     * right only when their equality is the derived structural one — so a value
+     * type with a hand-written `Eq` was ignored and two equal maps answered false,
+     * silently, while `<` on the same two answered correctly. A key present in one
+     * and absent from the other ends it: `getObject` returns null only for an
+     * absent key, a Mezze value never being null.
+     */
     @TruffleBoundary
-    public static boolean equals(MezzeSortedMap a, MezzeSortedMap b) {
-        return a.equals(b);
+    public static boolean equals(MezzeSortedMap a, MezzeSortedMap b, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (a.size() != b.size()) return false;
+        var ctx = ScalarCall.prepare2(eqFn, "a", "b");
+        for (MezzeSortedMap.Entry entry : (Iterable<MezzeSortedMap.Entry>) (Object) a) {
+            Object other = b.getObject(entry.key());
+            if (other == null) return false;
+            Object result = ctx.call2(callNode, entry.value(), other);
+            if (!(result instanceof Boolean bool) || !bool) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

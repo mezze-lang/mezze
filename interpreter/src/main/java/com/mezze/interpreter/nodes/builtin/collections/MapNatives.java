@@ -233,9 +233,35 @@ public final class MapNatives {
 
     // ==================== Equality ====================
 
+    /**
+     * Equality over both halves of an entry: the KEYS by the map's own lookup —
+     * which already buckets by the key type's instance — and the VALUES by the
+     * VALUE'S OWN `eq`, threaded in.
+     *
+     * `map1.equals(map2)` compared the runtime representation of the values, which
+     * is right only when their equality is the derived structural one. A newtype
+     * whose `Eq` compares mod 10 has `P.(1) == P.(11)`, and a newtype erases to its
+     * payload, so two maps holding those values answered false where the value type
+     * says true — silently, with no crash.
+     *
+     * A key present in one map and absent from the other ends it: `get` returns
+     * null only for an absent key, because a stored null is not reachable through
+     * this type (a Mezze value is never null).
+     */
     @TruffleBoundary
-    public static boolean equals(MezzeMap map1, MezzeMap map2) {
-        return map1.equals(map2);
+    public static boolean equals(MezzeMap map1, MezzeMap map2, MezzeFunction eqFn,
+                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (map1.size() != map2.size()) return false;
+        var ctx = ScalarCall.prepare2(eqFn, "a", "b");
+        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map1) {
+            Object other = map2.get(entry.key());
+            if (other == null) return false;
+            Object result = ctx.call2(callNode, entry.value(), other);
+            if (!(result instanceof Boolean bool) || !bool) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ==================== Predicate Operations ====================

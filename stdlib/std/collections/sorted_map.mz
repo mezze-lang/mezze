@@ -19,9 +19,17 @@ impl Hash for SortedMap 'k 'v where {
   hash: { it: SortedMap 'k 'v } -> Int = { it } -> structural_hash { it = it }
 }
 
+## Entry-wise equality: KEYS by the map's own ordered lookup, VALUES by the VALUE's
+## Eq, threaded in.
+let sorted_map_equals_with_eq
+  : { m1: SortedMap 'k 'v, m2: SortedMap 'k 'v, eq: { a: 'v, b: 'v } -> Bool } -> Bool = { m1, m2, eq } ->
+  __native_sorted_map_equals { m1 = m1, m2 = m2, eq = eq }
+
 impl Eq for SortedMap 'k 'v where {
-  eq = { it, r } -> __native_sorted_map_equals { m1 = it, m2 = r },
-  neq = { it, r } -> if __native_sorted_map_equals { m1 = it, m2 = r } then False else True,
+  eq: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Eq 'k, Eq 'v -> Bool = { it, r } ->
+    sorted_map_equals_with_eq { m1 = it, m2 = r, eq = { a, b } -> a == b },
+  neq: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Eq 'k, Eq 'v -> Bool = { it, r } ->
+    if sorted_map_equals_with_eq { m1 = it, m2 = r, eq = { a, b } -> a == b } then False else True,
 }
 
 ## Lexicographic ordering for sorted maps.
@@ -126,8 +134,8 @@ pub let to_map: { m: SortedMap 'k 'v } -> Map 'k 'v = { m } ->
   __native_sorted_map_to_map { m = m }
 
 ## Returns True if the two sorted maps are equal.
-pub let equals: { m1: SortedMap 'k 'v, m2: SortedMap 'k 'v } -> Bool = { m1, m2 } ->
-  __native_sorted_map_equals { m1 = m1, m2 = m2 }
+pub let equals: { m1: SortedMap 'k 'v, m2: SortedMap 'k 'v } with Eq 'k, Eq 'v -> Bool = { m1, m2 } ->
+  sorted_map_equals_with_eq { m1 = m1, m2 = m2, eq = { a, b } -> a == b }
 
 ## Splits into entries matching and not matching the predicate.
 pub let partition
