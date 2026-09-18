@@ -3510,6 +3510,10 @@ class TypedASTCompiler(
         "__native_set_insert" to "__native_set_insert_with_evidence",
         "__native_set_contains" to "__native_set_contains_with_evidence",
         "__native_set_remove" to "__native_set_remove_with_evidence",
+        "__native_map_insert" to "__native_map_insert_with_evidence",
+        "__native_map_get" to "__native_map_get_with_evidence",
+        "__native_map_contains_key" to "__native_map_contains_key_with_evidence",
+        "__native_map_remove" to "__native_map_remove_with_evidence",
     )
 
     /**

@@ -89,6 +89,13 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     /**
      * Creates from an existing storage.
      */
+    /** The storage strategy backing this map. Callers use it to ask whether the map
+     *  already buckets by a key instance (see EvidenceMapStorage) before rebuilding
+     *  it under one. */
+    public MapStorage storage() {
+        return storage;
+    }
+
     public static <K, V> MezzeMap<K, V> fromStorage(MapStorage storage) {
         return new MezzeMap<>(storage);
     }

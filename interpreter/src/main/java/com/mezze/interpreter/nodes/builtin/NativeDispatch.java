@@ -1489,6 +1489,22 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.size(getMap(r, "m")));
         HANDLERS.put("__native_map_is_empty", (r, c) ->
             MapNatives.isEmpty(getMap(r, "m")));
+        // Evidence-carrying forms: the KEY's own `hash`/`eq` install themselves on
+        // the map, so bucketing asks the key's instance instead of its runtime
+        // representation. The compiler emits these only for a key type that HAS a
+        // hand-written instance.
+        HANDLERS.put("__native_map_insert_with_evidence", (r, c) ->
+            MapNatives.insertWithEvidence(getMap(r, "m"), getField(r, "k"), getField(r, "v"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_map_get_with_evidence", (r, c) ->
+            MapNatives.getWithEvidence(getMap(r, "m"), getField(r, "k"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_map_contains_key_with_evidence", (r, c) ->
+            MapNatives.containsKeyWithEvidence(getMap(r, "m"), getField(r, "k"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_map_remove_with_evidence", (r, c) ->
+            MapNatives.removeWithEvidence(getMap(r, "m"), getField(r, "k"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_map_contains_key", (r, c) ->
             MapNatives.containsKey(getMap(r, "m"), getField(r, "k")));
         HANDLERS.put("__native_map_get", (r, c) ->

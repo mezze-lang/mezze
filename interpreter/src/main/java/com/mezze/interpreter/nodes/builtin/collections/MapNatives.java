@@ -1,6 +1,9 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
+import com.mezze.datastructures.map.EvidenceMapStorage;
+import com.mezze.datastructures.map.MapStorage;
 import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
@@ -51,6 +54,52 @@ public final class MapNatives {
 
     public static boolean isEmpty(MezzeMap map) {
         return map.isEmpty();
+    }
+
+    // ============ Operations carrying the KEY's own Eq/Hash ============
+    //
+    // A map buckets by the key's runtime representation, which IS the derived
+    // structural equality — right for every key whose `Eq` the compiler wrote, and
+    // wrong for one the author wrote. `newtype P = Int` comparing mod 10 has
+    // `P.(1) == P.(11)`, and a newtype is erased, so the structural tiers keep two
+    // entries where the key type says there is one.
+    //
+    // Installed at the first operation that HAS a key: an empty map has nothing to
+    // mis-bucket. The structural entry points stay the default, so a `Map Str V`
+    // keeps its specialised storage. Which form a call site uses is the compiler's
+    // decision, taken once from the key type.
+
+    /** [map] re-bucketed under [hashing], or itself when it already is. */
+    private static MezzeMap withHashing(MezzeMap map, ElementHashing hashing) {
+        if (hashing == null) return map;
+        MapStorage storage = map.storage();
+        if (storage instanceof EvidenceMapStorage e && e.hashing() == hashing) return map;
+        return MezzeMap.fromStorage(
+            EvidenceMapStorage.fromEntries(map.storage().keys(), map.storage().values(), hashing));
+    }
+
+    @TruffleBoundary
+    public static MezzeMap insertWithEvidence(MezzeMap map, Object key, Object value,
+                                             MezzeFunction hashFn, MezzeFunction eqFn) {
+        return withHashing(map, ClosureHashing.of(hashFn, eqFn)).put(key, value);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant getWithEvidence(MezzeMap map, Object key,
+                                              MezzeFunction hashFn, MezzeFunction eqFn) {
+        return get(withHashing(map, ClosureHashing.of(hashFn, eqFn)), key);
+    }
+
+    @TruffleBoundary
+    public static boolean containsKeyWithEvidence(MezzeMap map, Object key,
+                                                  MezzeFunction hashFn, MezzeFunction eqFn) {
+        return withHashing(map, ClosureHashing.of(hashFn, eqFn)).containsKey(key);
+    }
+
+    @TruffleBoundary
+    public static MezzeMap removeWithEvidence(MezzeMap map, Object key,
+                                              MezzeFunction hashFn, MezzeFunction eqFn) {
+        return withHashing(map, ClosureHashing.of(hashFn, eqFn)).remove(key);
     }
 
     @TruffleBoundary

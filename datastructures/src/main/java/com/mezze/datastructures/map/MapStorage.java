@@ -11,7 +11,11 @@ public sealed interface MapStorage permits
         LongHashMapStorage,
         DoubleHashMapStorage,
         StringHashMapStorage,
-        HashMapStorage {
+        HashMapStorage,
+        // Buckets by the KEY'S own hashing rather than its runtime representation.
+        // Chosen for a key type that wrote its own `Eq`/`Hash`; never promoted away
+        // from — see EvidenceMapStorage.
+        EvidenceMapStorage {
 
     /**
      * Returns the number of entries.

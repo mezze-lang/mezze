@@ -20,7 +20,7 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 704 UNBOUND_TYPE_VAR, 150 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
+# Counts: 706 UNBOUND_TYPE_VAR, 150 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
@@ -443,6 +443,7 @@ UNBOUND_TYPE_VAR	let:cons
 UNBOUND_TYPE_VAR	let:contains
 UNBOUND_TYPE_VAR	let:contains_key
 UNBOUND_TYPE_VAR	let:contains_key_with_cmp
+UNBOUND_TYPE_VAR	let:contains_key_with_evidence
 UNBOUND_TYPE_VAR	let:contains_value
 UNBOUND_TYPE_VAR	let:contains_value_with_eq
 UNBOUND_TYPE_VAR	let:contains_with_cmp
@@ -513,6 +514,7 @@ UNBOUND_TYPE_VAR	let:gcd
 UNBOUND_TYPE_VAR	let:get
 UNBOUND_TYPE_VAR	let:get_or
 UNBOUND_TYPE_VAR	let:get_with_cmp
+UNBOUND_TYPE_VAR	let:get_with_evidence
 UNBOUND_TYPE_VAR	let:glob_match
 UNBOUND_TYPE_VAR	let:greater_than
 UNBOUND_TYPE_VAR	let:group_by
