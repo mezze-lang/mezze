@@ -1852,6 +1852,34 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   operation set. Operations now come from the ability DECLARATIONS.
   `hashOpNames` was this same fix applied to exactly one ability and is now
   derived from the general index rather than being its own parameter.
+- **BUG 23 (FIXED) — a capture that could not be placed was silently dropped.**
+  Capture slots resolve BY NAME against the enclosing function's locals, then its
+  parameters, then its own captures, and the list was built with `mapNotNull`. The
+  list is POSITIONAL — the lambda reads capture `i` at frame slot `i` — so a drop
+  shifted every later capture down one and each read its neighbour's value.
+  Measured as not firing today, which is why it is loud NOW rather than after it
+  bites.
+- **A.2 RE-SCOPED by measurement: 150 of its 861 rows are a design choice, not a
+  defect.** The baseline is 710 `UNBOUND_TYPE_VAR` + 150 `UNTYPED_PARAM` + 1
+  `VARTYPE_RECEIVER`. The `UNTYPED_PARAM` rows are all INHERENT impl ops, and the
+  invariant reads each `TypedParam.type` — which the emitter deliberately leaves a
+  fresh variable: "typed locals, untyped signature", because that laundered
+  surface is what mono specializes on. Inherent ops are now seeded from their own
+  solved arrow (the exclusion's premise — "no signature to read" — was false in
+  the same way BUG 11's was; it fires 574×), which types their BODIES, but the
+  rows stay. Closing them means changing what mono specializes on. So "drive
+  misses to zero" is roughly a 710-row job, not an 861-row one.
+- **Content addressing does not hold where the compiler relies on it.** Every
+  compiled function is collapsed by hash, first occurrence wins, on the stated
+  premise that "structurally identical bodies share a hash". `saltedLambdaHash` is
+  by its own comment type- and environment-blind, so compiling
+  `let f = { x } -> x` — the smallest program there is — the dedupe discards a
+  DIFFERENT body for 7 distinct hashes (8 in the full suite), every one in the
+  stdlib. `DedupeCollisionGateTest` bounds it. Not fixed: folding the enclosing
+  function's hash into the salt separates them but ties a nested lambda's identity
+  to where it sits, so adding a `newtype` changes the IR of programs identical
+  after erasure — `NewtypeErasureIRTest` rightly rejects that.
+
 - **BUG 22 (FIXED) — a handler installed over a `perform` that already takes the
   same effect.** `perform A, A in e` was always a hard error; `perform A in
   perform A in e` was accepted in SILENCE, and so was `perform A in perform B in
