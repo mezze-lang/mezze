@@ -8,6 +8,28 @@ import kotlinx.serialization.json.JsonClassDiscriminator
 
 @Serializable
 data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
+    /**
+     * True when this variable stands for "the compiler did not determine a type
+     * here" — NOT for "this position is polymorphic".
+     *
+     * The two were the same value until now: a pass that could not find a type
+     * minted a fresh variable, and every pass downstream read it as ordinary
+     * polymorphism. That is how a VARIANT comparison came to be rewritten to
+     * `Eq Int`'s operation — mono treats a type variable as "the specialization's
+     * evidence decides", and the specialization happened to carry `Eq Int`.
+     *
+     * DERIVED from the name rather than stored, because a type variable is rebuilt
+     * from its name in several passes (instantiation, freshening, substitution) and
+     * a stored flag is silently dropped by every one of them. [UNKNOWN_NAME] cannot
+     * collide with a program's own variable: those always carry the leading `'`,
+     * which is load-bearing elsewhere (see [freshWithName]).
+     *
+     * A consumer that would GUESS from a variable — pick an impl, an operation, a
+     * representation — must ask this first and refuse. A consumer that legitimately
+     * defers to one (unification, generalization) should not ask.
+     */
+    val isPlaceholder: Boolean get() = name == UNKNOWN_NAME
+
     companion object {
         private var globalCounter = 0
         private var currentLevel = 0
@@ -57,6 +79,33 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
             val id = globalCounter++
             return TypeVar(name, level, id)
         }
+
+        /**
+         * The type a pass reaches for when it could NOT determine one.
+         *
+         * Every such site used to write `?: VarType(freshWithName("unknown"))`
+         * inline, which made "I don't know" indistinguishable from "this is
+         * polymorphic" the moment it left the function. There is one way to mint
+         * one now, it is marked, and [isPlaceholder] is how a consumer that would
+         * otherwise guess can tell.
+         *
+         * [reason] is for diagnostics and for the gate that counts these; it does
+         * not affect identity.
+         */
+        /** The reserved name marking a placeholder. A program's own variables all
+         *  begin with `'`, so this cannot be one of them. */
+        const val UNKNOWN_NAME = "unknown"
+
+        fun unknown(reason: String, level: Int = currentLevel): TypeVar {
+            val id = globalCounter++
+            unknownMinted.add(reason)
+            return TypeVar(UNKNOWN_NAME, level, id)
+        }
+
+        /** Reasons an unknown placeholder was minted, for the ratchet that bounds
+         *  them. Per thread: test classes run in parallel. */
+        private val minted = ThreadLocal.withInitial { LinkedHashSet<String>() }
+        val unknownMinted: MutableSet<String> get() = minted.get()
 
         fun resetCounter() {
             globalCounter = 0

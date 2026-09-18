@@ -320,7 +320,7 @@ class TypedAstBuilder(
             val loc = decl.loc
             val rawType = constraintResults[destrName]?.let { substitution.apply(it.type) }
                 ?: constraintResults["__destructured__"]?.let { substitution.apply(it.type) }
-                ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
+                ?: MezzeType.VarType(TypeVar.unknown("destructuring let with no solved type"))
             val type = closeGeneratedRowVars(rawType)
             val value = buildExpr(decl.value, file, type)
 
@@ -337,7 +337,7 @@ class TypedAstBuilder(
         val loc = decl.loc
 
         val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
-            ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
+            ?: MezzeType.VarType(TypeVar.unknown("let binding with no solved type"))
         // Closes RECORD/VARIANT row vars only; effect rows pass through untouched
         // (effect-row membership is owned by gen-time harvest + unifyEffectRows).
         val closedType = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
@@ -847,7 +847,7 @@ class TypedAstBuilder(
     ) {
         val loc = decl.loc
         val hash = ParsedDeclHasher.hashExpr(decl.expression)
-        val type = MezzeType.VarType(TypeVar.freshWithName("unknown"))
+        val type = MezzeType.VarType(TypeVar.unknown("top-level expression"))
         val value = buildExpr(decl.expression, file, type)
         decls.add(TypedLetDecl(
             hash = hash,
@@ -860,7 +860,15 @@ class TypedAstBuilder(
         ))
     }
 
-    fun buildExpr(expr: ParsedExpr, file: String, contextType: MezzeType = MezzeType.VarType(TypeVar.freshWithName("unknown"))): TypedExpr {
+    fun buildExpr(
+        expr: ParsedExpr,
+        file: String,
+        // No expectation from above. A PLACEHOLDER, not a fresh variable: every
+        // consumer that would guess from a type variable can tell the difference
+        // (TypeVar.isPlaceholder), which is the whole point — "nobody told me" and
+        // "this is polymorphic" used to be the same value.
+        contextType: MezzeType = MezzeType.VarType(TypeVar.unknown("no context type at buildExpr")),
+    ): TypedExpr {
         val loc = expr.loc
         return when (expr) {
             is ParsedIntLit -> TypedIntLit(expr.value, MezzeType.IntType, loc)
@@ -2375,7 +2383,7 @@ class TypedAstBuilder(
             importContext?.importedBindings?.get(name)?.type?.let {
                 return substitution.apply(it)
             }
-            return MezzeType.VarType(TypeVar.freshWithName("unknown"))
+            return MezzeType.VarType(TypeVar.unknown("qualified identifier not in imports"))
         }
 
         identifierContext[name]?.let { return substitution.apply(it) }
@@ -2388,7 +2396,7 @@ class TypedAstBuilder(
             return substitution.apply(it)
         }
 
-        return MezzeType.VarType(TypeVar.freshWithName("unknown"))
+        return MezzeType.VarType(TypeVar.unknown("identifier resolved nowhere (mostly `__native_*`, whose Mezze type is undeclared)"))
     }
 
     private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {

@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.compiler
 import com.mezze.language.ast.EffectBindingKind
 import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.holdsUnknownPlaceholder
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.typechecker.solving.IdentityVerdict
@@ -4853,6 +4854,19 @@ class TypedASTCompiler(
          *  it is what C.3 generalizes. */
         abilityHash: Hash? = null,
     ): Hash? {
+        // A receiver the compiler never determined resolves NOTHING here.
+        // `typeMatchesTarget` answers true for a type variable against any target,
+        // so with a placeholder every candidate "matches" and `firstOrNull()` below
+        // is a coin flip — that is how a VARIANT `==` came to be answered by `Eq
+        // Int`'s operation. The caller's next step, `tryResolveAbilityOpByArgs`,
+        // exists for exactly this case and reads the ARGUMENT types instead, which
+        // are real.
+        //
+        // Only a PLACEHOLDER is refused (TypeVar.isPlaceholder). A genuine type
+        // variable still resolves as before: that is polymorphism the caller's
+        // evidence discharges, and refusing it breaks a user `Ord`/`Eq` on a
+        // container element.
+        if (receiverType.holdsUnknownPlaceholder()) return null
         val effectiveType = receiverType
         val allCandidates = abilityOpIndex[methodName] ?: return null
         val candidates =

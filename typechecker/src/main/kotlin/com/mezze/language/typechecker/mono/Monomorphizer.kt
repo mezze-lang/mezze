@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.mono
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.holdsUnknownPlaceholder
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.collectTypeVarsInOrder
 import com.mezze.language.ast.hashing.HashTags
@@ -1064,29 +1065,29 @@ class Monomorphizer(
      *  on no match or genuine ambiguity — the caller falls through to the
      *  unmodified TypedFieldAccess call, which the compiler resolves separately. */
     private fun selectOpEntry(entries: List<OpEntry>, receiverType: MezzeType): OpEntry? {
-        // MEASURED, and do not "fix" this without new information: a LONE candidate
-        // is taken WITHOUT checking it against the receiver, and that is
-        // load-bearing.
+        // A receiver the compiler never determined selects NOTHING.
         //
         // The entries are gathered by operation NAME from the specialization's
-        // ability impls, so "one entry" means "this spec carries one impl that
-        // happens to declare an op with this name" — never "this impl is for this
-        // receiver". Two tightenings were tried and both fail ten tests in
-        // `OrdImplTest` / `ContainerElementInstanceTest`: requiring the lone
-        // candidate to match the receiver, and — the honest reading, since
-        // `typeMatchesTarget` answers true for a VARIABLE against any target —
-        // refusing to rewrite at all when the receiver's type is unresolved. A user
-        // `Ord`/`Eq` on a container element reaches its impl precisely BECAUSE the
-        // laundered receiver is rewritten on the strength of the spec alone.
+        // ability impls, so a lone entry means "this spec carries one impl that
+        // happens to declare an op with this name", never "this impl is for this
+        // receiver". Taking it on faith rewrote `x.m == Get` — a VARIANT comparison
+        // — to `Eq Int`'s operation, because the enclosing closure's spec carried
+        // `Eq Int` and that was the only `eq` in the list. `__native_int_eq` then
+        // received a MezzeVariant, on a program that type-checks clean.
         //
-        // So the guess is holding up code with no other route to its impl, which is
-        // C.3's "fresh-var fallback is the real hole" seen from the other side. It is
-        // also a wrong answer waiting: with a receiver laundered to the emitter's
-        // `unknown` placeholder, a variant `==` inside a specialized closure whose
-        // spec carries only `Eq Int` is rewritten to Int's operation, and
-        // `__native_int_eq` is handed a MezzeVariant. Closing that needs the
-        // receiver's type to SURVIVE to here — A.2's job — not a stricter rule laid
-        // on top of its absence.
+        // The distinction that makes this safe is [TypeVar.isPlaceholder]. A real
+        // type VARIABLE as the receiver is mono's signal that the specialization's
+        // evidence decides, and taking the lone entry there is load-bearing — a
+        // user `Ord`/`Eq` on a container element reaches its impl that way, and
+        // refusing for all variables fails ten tests in `OrdImplTest` /
+        // `ContainerElementInstanceTest`. A PLACEHOLDER is not that signal: it is
+        // the emitter recording that it could not type the receiver, and there is
+        // no evidence behind it to defer to.
+        //
+        // Returning null is the contract below: the caller falls through to the
+        // unmodified call and the compiler resolves it separately, with the
+        // field-access receiver and its slot-type recovery still in hand.
+        if (receiverType.holdsUnknownPlaceholder()) return null
         if (entries.size == 1) return entries.first()
         val matches = entries.filter { e ->
             val recvTarget = e.impl.targetTypes.lastOrNull() ?: return@filter false

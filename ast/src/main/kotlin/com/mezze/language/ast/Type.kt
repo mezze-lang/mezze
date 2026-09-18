@@ -551,5 +551,17 @@ sealed interface MezzeType {
  * row's associated types, both of which a hand-rolled recursion has forgotten
  * before.
  */
+/**
+ * True iff this type IS, or contains, a variable the compiler minted because it
+ * could not determine a type — see [TypeVar.isPlaceholder].
+ *
+ * Distinct from [holdsTypeVar] on purpose. A pass that defers to a variable
+ * (unification, generalization) wants that one. A pass that would GUESS from a
+ * variable — pick an impl, pick an operation, pick a representation — wants this
+ * one, and must not guess when it answers true.
+ */
+fun MezzeType.holdsUnknownPlaceholder(): Boolean =
+    (this is MezzeType.VarType && variable.isPlaceholder) || anyChild { it.holdsUnknownPlaceholder() }
+
 fun MezzeType.holdsTypeVar(): Boolean =
     this is MezzeType.VarType || anyChild { it.holdsTypeVar() }
