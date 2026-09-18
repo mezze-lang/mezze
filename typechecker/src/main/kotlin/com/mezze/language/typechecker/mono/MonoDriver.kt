@@ -775,7 +775,63 @@ object MonoDriver {
         // recovered from the receiver through the instance head. (Formerly only
         // the six builtin containers.)
         val targetVarNames = impl.targetTypes.flatMap { collectVarTypeNames(it) }.toHashSet()
-        val missing = impl.forallVars.filter { it.name !in baseNames && it.name in targetVarNames }
+        // A forallVar the op's surface merely RENAMED is not missing.
+        //
+        // `name !in baseNames` is a NAME comparison, and the typechecker stamps op
+        // bodies with its own fresh names — `impl Map 'k 'v`'s `insert` comes back
+        // typed over `'k433`/`'l433`. Both of the impl's vars then looked absent and
+        // were appended, so the op carried FOUR type params for two things:
+        //
+        //     type   = ({it: Map['k433,'l433], k: 'k433, …} -> Map['k433,'l433])
+        //     params = ['k433, 'l433, 'k, 'v]
+        //
+        // The map's key is one written variable and became two independent params,
+        // which then received two different answers — `'k433 → P` and `'k → Int`,
+        // the VALUE type filling the key slot. Downstream the call specialized at
+        // the wrong key type, so a `Map P Int` reached its native as `Map Int Int`
+        // and the key's own `Eq`/`Hash` were never asked.
+        //
+        // Ask the structural question instead: unify the impl target against the
+        // op's OWN receiver type. A var that binds to one already in `base` is that
+        // same variable under the typechecker's name, and appending it would split
+        // it in two. Only a var that binds to nothing is genuinely dropped from the
+        // laundered surface — which is the case this recovery exists for.
+        // The impl target and the op's own receiver describe the SAME type — the
+        // target as written (`Map 'k 'v`), the receiver as the typechecker stamped
+        // it (`Map 'z434 'a435`). Their variables correspond by position, so zipping
+        // the two encounter orders says which of the impl's vars the op merely
+        // RENAMED. (Unifying the two binds nothing: the unifier in scope does not
+        // relate two distinct free vars.)
+        //
+        // Both sides must carry STRUCTURE for that to mean anything. A bare type
+        // variable matches any other bare type variable, so reading a rename off one
+        // would call every impl var a rename of whatever the op happened to name its
+        // receiver — and an op receiver that is still an unsolved var has not been
+        // resolved to the target at all. The zip is then VERIFIED: substituting the
+        // candidates into the target has to reproduce the receiver exactly, or the
+        // two were never the same type and no var was renamed.
+        val opReceiver = ((opType as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType)
+            ?.fields?.get(com.mezze.language.ast.Keywords.IT)
+        val renamedTo = HashMap<String, String>()
+        if (opReceiver != null && opReceiver !is MezzeType.VarType) {
+            val receiverVars = collectVarTypes(opReceiver)
+            for (target in impl.targetTypes) {
+                if (target is MezzeType.VarType) continue
+                val targetVars = collectVarTypes(target)
+                if (targetVars.size != receiverVars.size) continue
+                val subst = targetVars.zip(receiverVars)
+                    .associate { (t, r) -> t.variable.name to (r as MezzeType) }
+                val renamedTarget =
+                    com.mezze.language.typechecker.solving.substituteTypeParamsByName(target, subst)
+                if (renamedTarget != opReceiver) continue
+                targetVars.zip(receiverVars).forEach { (t, r) ->
+                    renamedTo[t.variable.name] = r.variable.name
+                }
+            }
+        }
+        val missing = impl.forallVars.filter {
+            it.name !in baseNames && it.name in targetVarNames && renamedTo[it.name] !in baseNames
+        }
         if (missing.isEmpty()) return base to emptyList()
         // Recover each missing forallVar's concrete type by unifying the impl target
         // against the receiver (e.g. `['a]` vs `[P]` → `'a = P`).
@@ -791,11 +847,14 @@ object MonoDriver {
         return (base + missing) to extraArgs
     }
 
-    private fun collectVarTypeNames(type: MezzeType): List<String> {
-        val seen = LinkedHashSet<String>()
+    /** The var nodes of [type] in encounter order, each name once. Kept as nodes
+     *  so two types' variables can be PAIRED, not merely counted. [collectVarTypeNames]
+     *  reads the same walk for names — one traversal, two views. */
+    private fun collectVarTypes(type: MezzeType): List<MezzeType.VarType> {
+        val seen = LinkedHashMap<String, MezzeType.VarType>()
         fun go(t: MezzeType) {
             when (t) {
-                is MezzeType.VarType -> seen.add(t.variable.name)
+                is MezzeType.VarType -> seen.putIfAbsent(t.variable.name, t)
                 is MezzeType.FunctionType -> { go(t.paramType); go(t.returnType) }
                 is MezzeType.RecordType -> t.fields.values.forEach(::go)
                 is MezzeType.VariantType -> t.constructors.values.forEach { it?.let(::go) }
@@ -809,8 +868,11 @@ object MonoDriver {
             }
         }
         go(type)
-        return seen.toList()
+        return seen.values.toList()
     }
+
+    private fun collectVarTypeNames(type: MezzeType): List<String> =
+        collectVarTypes(type).map { it.variable.name }
 
     /** True if `typeParamName` appears anywhere in `type`. Used to
      *  distinguish "phantom" type params (declared but unreferenced)

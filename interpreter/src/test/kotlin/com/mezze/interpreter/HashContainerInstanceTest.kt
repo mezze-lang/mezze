@@ -111,16 +111,6 @@ class HashContainerInstanceTest {
     }
 
     @Test
-    @Disabled(
-        "Method-style only. `map::insert { m = …, k = P.(1) … }` written as a DIRECT " +
-            "call now collapses the two keys correctly, and so does the explicit " +
-            "`insert_with_evidence` form — the Map evidence tier works. The chain below " +
-            "goes through `impl Map 'k 'v`'s inherent `insert`, which delegates to the " +
-            "module function, and that path carries no spec evidence, so the rewrite " +
-            "declines and the structural native runs. Declaring the constraints on the " +
-            "inherent op does not change it. See MapEvidenceStorageTest for the forms " +
-            "that do work.",
-    )
     fun `a Map treats keys equal by the key's Eq as one key`() {
         assertEquals(
             1L,
