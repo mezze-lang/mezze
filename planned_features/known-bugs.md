@@ -1852,6 +1852,24 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   operation set. Operations now come from the ability DECLARATIONS.
   `hashOpNames` was this same fix applied to exactly one ability and is now
   derived from the general index rather than being its own parameter.
+- **The returned-closure variant leak: ROOT CAUSE LOCATED, and it is A.2's.** The
+  crash is `__native_int_eq` receiving a `MezzeVariant` on a program that type-checks
+  clean. Chain, measured end to end: the emitter stamps the predicate's receiver
+  `x.m` with `VarType("unknown")`, its "I did not know" placeholder; mono's
+  `selectOpEntry` gathers op candidates BY NAME from the specialization's ability
+  impls and returns a LONE candidate WITHOUT checking it against the receiver; the
+  enclosing closure's spec carries only `Eq Int`, so a VARIANT `==` is rewritten to
+  Int's operation. Probe: `[sel] n=1 recv=VarType(name=unknown) targets=[IntType]`,
+  firing once in the failing program and not at all in the passing one.
+  BOTH obvious fixes were tried and BOTH fail the same ten tests
+  (`OrdImplTest`, `ContainerElementInstanceTest`): requiring the lone candidate to
+  match, and refusing to rewrite when the receiver holds a type variable. A user
+  `Ord`/`Eq` on a container element reaches its impl precisely BECAUSE the laundered
+  receiver is rewritten on the spec alone — the guess is load-bearing, which is
+  C.3's "fresh-var fallback is the real hole" from the other side. Closing it needs
+  the receiver's type to SURVIVE to mono, which is A.2, not a stricter rule over its
+  absence.
+
 - **BUG 23 (FIXED) — a capture that could not be placed was silently dropped.**
   Capture slots resolve BY NAME against the enclosing function's locals, then its
   parameters, then its own captures, and the list was built with `mapNotNull`. The
