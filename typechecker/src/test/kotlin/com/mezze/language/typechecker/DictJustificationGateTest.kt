@@ -32,13 +32,29 @@ class DictJustificationGateTest {
     /**
      * The known-unjustified demands, by declaration name.
      *
-     * All four compute on the result of a native call — `__native_nat_to_int {…} %
-     * 2` — and a native's return type comes back as a bare variable, so concrete
-     * Int arithmetic reads as polymorphic and the scan asks for an arithmetic dict
-     * that nothing in the types calls for. Fixing the native-return hole empties
-     * this set; until then it is the exact list, and a fifth entry fails the gate.
+     * Every one of them is a declaration that reaches the end of elaboration with
+     * an OPEN TYPE VARIABLE — all four are already in the elaboration baseline, and
+     * the third test below holds them there rather than letting this list acquire
+     * its own story. The dict demand is the downstream consequence: arithmetic on a
+     * receiver whose type never closed reads as polymorphic, so the scan asks for a
+     * dict nothing in the types calls for.
+     *
+     * The open variable has a different origin in each half, which is why closing
+     * them is two pieces of work and not one:
+     *
+     *  - `Nat::is_even` / `Nat::is_odd` compute `__native_nat_to_int {…} % 2`. A
+     *    native reference is typed as a bare fresh variable and pinned by whatever
+     *    uses it — normally the declared return type of the `pub let` wrapper it
+     *    sits in. Called straight from an impl body there is no wrapper, so nothing
+     *    pins it.
+     *  - `list::enumerate` (and `zip_with_index`, which is its alias) compute
+     *    `acc.i + 1` inside a `fold_left` callback. The accumulator's record type is
+     *    given by `init`, and it does not reach the callback parameter, so `acc.i`
+     *    is a field read off a variable.
+     *
+     * A fifth entry fails the gate, and so does a listed one that stops firing.
      */
-    private val unjustifiedByNativeReturnType = setOf(
+    private val unjustifiedByOpenTypeVar = setOf(
         "enumerate",
         "zip_with_index",
         "is_even",
@@ -97,7 +113,7 @@ class DictJustificationGateTest {
         val (scanned, declared) = scanStdlib()
         val unjustified = scanned.entries
             .filter { (key, methods) -> (methods - (declared[key] ?: emptySet())).isNotEmpty() }
-            .filter { (key, _) -> nameOfKey(key) !in unjustifiedByNativeReturnType }
+            .filter { (key, _) -> nameOfKey(key) !in unjustifiedByOpenTypeVar }
             .sortedBy { it.key }
         if (unjustified.isNotEmpty()) {
             fail(
@@ -118,15 +134,38 @@ class DictJustificationGateTest {
     @Test
     fun `the known-unjustified list has no stale entries`() {
         val (scanned, declared) = scanStdlib()
-        val stale = unjustifiedByNativeReturnType.filter { name ->
+        val stale = unjustifiedByOpenTypeVar.filter { name ->
             scanned.none { (key, methods) ->
                 nameOfKey(key) == name && (methods - (declared[key] ?: emptySet())).isNotEmpty()
             }
         }
         if (stale.isNotEmpty()) {
             fail(
-                "${stale.size} entr(ies) in unjustifiedByNativeReturnType no longer demand an " +
+                "${stale.size} entr(ies) in unjustifiedByOpenTypeVar no longer demand an " +
                     "unjustified dict — delete them, so the list keeps meaning what it says: $stale",
+            )
+        }
+    }
+
+    @Test
+    fun `every known-unjustified entry is an open type variable the elaboration gate already tracks`() {
+        val baseline = (javaClass.getResourceAsStream("/elaboration-invariant-baseline.txt")
+            ?: fail("missing /elaboration-invariant-baseline.txt"))
+            .bufferedReader().readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+        // A baseline row is `KIND<tab>owner`, where owner is `let:name` or
+        // `impl <target>.<op>` — match the declaration name off the end either way.
+        val tracked = baseline.mapNotNullTo(HashSet()) { row ->
+            row.substringAfter('\t', "").ifEmpty { null }
+                ?.substringAfterLast(':')?.substringAfterLast('.')
+        }
+        val unanchored = unjustifiedByOpenTypeVar - tracked
+        if (unanchored.isNotEmpty()) {
+            fail(
+                "${unanchored.size} entr(ies) are allowed an unjustified dict without the elaboration " +
+                    "gate tracking an open type variable for them. The two lists have to agree — an " +
+                    "entry here is a CONSEQUENCE of one there, not a finding of its own: $unanchored",
             )
         }
     }

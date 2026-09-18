@@ -1302,7 +1302,23 @@ class TypedAstBuilder(
         )
     }
 
-    private fun buildMethodCall(
+
+    /**
+     * `Ability.op {…}` for an operation that declares NO RECEIVER.
+     *
+     * `default: {} -> 'a` gives the call nothing to dispatch on but the type it
+     * produces, so the impl is chosen from the SOLVED RETURN. The ordinary method
+     * path cannot do this: it builds a receiver from `memberAccess.receiver`, and
+     * an ability name is not a value — `Default` is uppercase, so it built as a
+     * variant constructor and the program reached the runtime doing a field read
+     * on a variant ("Expected record for field 'default', got: MezzeVariant").
+     *
+     * Resolution is by ABILITY CONTENT HASH plus the produced type's name, the
+     * same pairing the ambiguous-operation path above uses. No impl for that type
+     * is an error here rather than a fallback: there is no other way to pick one,
+     * and guessing produces exactly the silent wrong answer this replaces.
+     */
+    private fun buildStaticAbilityOpCall(
         expr: ParsedFunctionCall,
         methodInfo: ConstraintResult.MethodCallInfo,
         file: String,
@@ -1310,7 +1326,81 @@ class TypedAstBuilder(
     ): TypedCall {
         val loc = expr.loc
         val memberAccess = expr.function as ParsedMemberAccess
+        val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
+        val methodParamType = (solvedFnType as? MezzeType.FunctionType)?.paramType
+        val argExpr = if (methodParamType != null) buildExpr(expr.arguments, file, methodParamType)
+                      else buildExpr(expr.arguments, file)
+
+        val solvedCallSite = callReturnTypes[loc]?.let { substitution.apply(it) }
+        val produced = when {
+            solvedCallSite != null && solvedCallSite !is MezzeType.VarType -> solvedCallSite
+            solvedFnType is MezzeType.FunctionType -> substitution.apply(solvedFnType.returnType)
+            else -> substitution.apply(contextType)
+        }
+
+        val abilityName = methodInfo.abilityName
+        val abilityHash = abilityName?.let { name ->
+            registry.lookupAbility(name)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                ?: importContext?.importedAbilities?.get(name)
+                    ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        }
+        val producedName = com.mezze.language.typechecker.util.receiverTypeName(produced)
+        val implEntry = if (abilityHash != null && producedName != null) {
+            abilityImpls.entries.firstOrNull { (_, info) ->
+                info.abilityDeclHash == abilityHash && producedName in info.targetTypes
+            }
+        } else null
+        if (implEntry == null) {
+            throw com.mezze.language.typechecker.TypeCheckError(
+                message = "'$abilityName.${methodInfo.methodName}' takes no receiver, so the type it " +
+                    "produces is what chooses the implementation" +
+                    if (producedName == null) {
+                        " — and nothing here determines that type. Say what the call produces: " +
+                        "`let x: <Type> = $abilityName.${methodInfo.methodName} {…}`."
+                    } else {
+                        ", and here it produces $producedName. No `impl $abilityName for " +
+                        "$producedName` is in scope — write one, or import it."
+                    },
+                loc = loc,
+                errorType = com.mezze.language.typechecker.ErrorType.MISSING_FIELD,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
+            )
+        }
+        val opHash = Hash.computeOpHash(implEntry.value.contentHash, methodInfo.methodName)
+        val fn = TypedVar(
+            name = methodInfo.methodName,
+            binding = BindingRef.ByHash(opHash),
+            type = solvedFnType ?: substitution.apply(contextType),
+            loc = memberAccess.memberLoc,
+        )
+        return TypedCall(
+            function = fn,
+            arg = argExpr,
+            instantiation = null,
+            isTailCall = isTailCallLocation(loc),
+            type = produced,
+            loc = loc,
+        )
+    }
+
+    private fun buildMethodCall(
+        expr: ParsedFunctionCall,
+        methodInfo: ConstraintResult.MethodCallInfo,
+        file: String,
+        contextType: MezzeType,
+    ): TypedCall {
+        // An operation that declares no receiver is dispatched by the type it
+        // PRODUCES, and there is nothing here to build a receiver from — building
+        // one from `memberAccess.receiver` is what turned the ability NAME into a
+        // variant and sent it to the runtime.
+        if (methodInfo.receiverFieldName == null) {
+            return buildStaticAbilityOpCall(expr, methodInfo, file, contextType)
+        }
+
+        val loc = expr.loc
+        val memberAccess = expr.function as ParsedMemberAccess
         val receiverExpr = buildExpr(memberAccess.receiver, file)
+        val receiverFieldName = methodInfo.receiverFieldName
 
         val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
 
@@ -1346,8 +1436,6 @@ class TypedAstBuilder(
             }
             fromResolver ?: legacy
         }
-
-        val receiverFieldName = methodInfo.receiverFieldName
 
         // #226: the STATIC ability-call form `Ability.method { it = v, ... }` carries
         // the receiver in the args' `it` field; `memberAccess.receiver` is the

@@ -1852,13 +1852,53 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   operation set. Operations now come from the ability DECLARATIONS.
   `hashOpNames` was this same fix applied to exactly one ability and is now
   derived from the general index rather than being its own parameter.
-- **BUG 16 — a native call's return type comes back as a bare variable.**
-  `__native_nat_to_int { n = it } % 2` types its result as `'a`, so concrete Int
-  arithmetic reads as polymorphic. Measured consequence: `enumerate`,
-  `zip_with_index`, `Nat::is_even` and `Nat::is_odd` are each emitted with an
-  arithmetic dict param that no declared constraint calls for — the four
-  exceptions allowlisted in `DictJustificationGateTest`. Fixing this empties that
-  list, and the gate fails if a fifth appears or if a listed one stops firing.
+- **BUG 20 (FIXED) — every static ability operation was uncallable.** `ability
+  Default for 'a where { default: {} -> 'a }` ships in the stdlib and had no
+  working call form: `Default.default {}` crashed at runtime ("Expected record for
+  field 'default', got: MezzeVariant"), the bare `default {}` was rejected with a
+  message recommending the form that crashed, and a user ability's static
+  operation was rejected outright with advice that cannot be followed ("Use
+  'value.zero { args }'" — a static operation has no value to put in `it`).
+  Cause: `Ability.op { it = v, … }` is DESUGARED to `v.op { … }`, so with no `it`
+  there was nothing to desugar through; the call fell to the ordinary path, which
+  builds a receiver by EVALUATING `memberAccess.receiver`. An ability name is not
+  a value, and an uppercase one builds as a VARIANT CONSTRUCTOR — an open variant
+  that unifies with whatever the ability's type variable wanted, so nothing
+  objected until the runtime read a field off it. The receiver-taking forms only
+  ever worked by going through that desugaring. An operation declaring no receiver
+  now resolves through the type the call PRODUCES, and no impl for that type is a
+  loud error naming both. See `StaticAbilityOpTest`.
+- **Still open, found doing that:** a static call whose produced type NOTHING pins
+  (`Zero.zero {}` with no annotation) fails with NO DIAGNOSTIC AT ALL — the
+  typechecker returns an empty result and the runtime reports "TruffleIR not
+  produced by typechecker. typedModule is null".
+  `AbilityChecker.validateAbilityConstraints` skips any constraint whose type
+  variable is still unsolved — correct for a generic body, where the caller
+  discharges it; wrong here, where nothing can. The emit-side error that WOULD
+  name the problem is unreachable because the module is never built. Two blanket
+  `catch (e: Exception)` swallows in `TypedModuleEmitter` print only under a debug
+  env var; neither fires here, so they are not the cause, but they are the same
+  shape and worth deleting.
+- **BUG 19 — four declarations demand an arithmetic dict their types never ask
+  for.** `enumerate`, `zip_with_index`, `Nat::is_even`, `Nat::is_odd` — the four
+  exceptions allowlisted in `DictJustificationGateTest`. Each one ends elaboration
+  with an OPEN TYPE VARIABLE and is already in the elaboration baseline as
+  `UNBOUND_TYPE_VAR`; the dict demand is the downstream consequence, since
+  arithmetic on a receiver whose type never closed reads as polymorphic. A test
+  holds the two lists together so neither drifts. Two distinct origins, so closing
+  them is two pieces of work:
+  - `Nat::is_even`/`is_odd` compute `__native_nat_to_int {…} % 2`. A native
+    reference is typed as a bare fresh variable and pinned by whatever uses it —
+    normally the declared return type of the `pub let` wrapper it sits in. Called
+    straight from an impl body there is no wrapper and nothing pins it. Note the
+    runtime `NativeSignatures` registry cannot supply the answer: its `SlotKind`
+    is the ABI, not the Mezze type (`__native_nat_min` returns LONG and is a
+    `Nat`), so reading types off it would be a fresh guess.
+  - `list::enumerate` (and `zip_with_index`, its alias) compute `acc.i + 1` in a
+    `fold_left` callback. `fold_left` declares `init: 'acc` and
+    `f: { acc: 'acc, x: 'a } -> 'acc`, so the accumulator's record type IS tied to
+    the callback parameter in the signature — it just does not arrive, leaving
+    `acc.i` a field read off a variable.
 - **D.3** INVESTIGATED; no change made, and that is the finding. Inherent impl
   operations are excluded from parameter seeding (`!isInherent` in
   `TypedAstBuilder.buildAbilityImpl`) because they have no ability declaration to

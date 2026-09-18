@@ -887,6 +887,15 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                         loc = it.loc
                     )
                 }
+                if (itReceiver == null) {
+                    // No `it` to desugar through. Either the operation declares no
+                    // receiver — in which case the type the call PRODUCES is what
+                    // chooses the impl — or the call is malformed and the ladder
+                    // below reports it.
+                    tryGenerateStaticAbilityOpCall(
+                        expr, memberAccess, memberAccess.member, receiverName, context,
+                    )?.let { return it }
+                }
                 if (itReceiver != null) {
                     val remainingFields = argRecord.entries.filter { e ->
                         e !is ParsedRecordEntry.Field || e.name != Keywords.IT

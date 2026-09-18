@@ -423,7 +423,10 @@ data class ConstraintResult(
         val abilityName: String?,        // null for inherent methods
         val methodName: String,
         val methodHash: Hash?,
-        val receiverFieldName: String,
+        /** The argument field the receiver arrives in — `it` for every operation
+         *  that declares one. NULL means the operation declares no receiver, and
+         *  the impl is chosen by the type the call PRODUCES. */
+        val receiverFieldName: String?,
         val isInherentMethod: Boolean = false,
         val implContentHash: Hash? = null,
         val implStartLine: Int = 0,

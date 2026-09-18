@@ -20,6 +20,104 @@ internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodTyp
     )
 }
 
+/**
+ * `Ability.op {…}` where the operation declares NO RECEIVER.
+ *
+ * `default: {} -> 'a` names nothing to dispatch on but the type it produces, so
+ * `let b: Bool = Default.default {}` has to resolve through the RETURN. The
+ * general method path cannot: it generates `memberAccess.receiver` as an
+ * expression, and an ability name is not a value. `Default` is uppercase, so it
+ * generated as a variant constructor — an open variant, which unifies with
+ * whatever the ability's type variable wanted — and the program reached the
+ * runtime doing a field read on a variant: "Expected record for field 'default',
+ * got: MezzeVariant". Every static operation in the language was uncallable.
+ *
+ * The receiver-TAKING forms survive that only by accident: `Eq.eq { it = 1, r =
+ * 1 }` carries the real receiver in the argument's `it` field, emit reads it back
+ * from there, and the open variant standing in for `Eq` unifies with anything, so
+ * nothing downstream notices. That is why this path is confined to operations
+ * whose DECLARED parameters have no `it` — where there is no argument field to
+ * recover a receiver from, and the accident cannot happen.
+ *
+ * Returns null for anything else, so the ladder below is untouched.
+ */
+internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
+    expr: ParsedFunctionCall,
+    memberAccess: ParsedMemberAccess,
+    methodName: String,
+    abilityName: String,
+    context: ConstraintContext,
+): ConstraintResult? {
+
+    // The ability's own type parameter, as a fresh variable this call site owns.
+    // Everything the call learns about the produced type flows through it.
+    val abilityVar = MezzeType.VarType(TypeVar.fresh())
+    val decl = context.abilityDeclarations[abilityName]
+        ?: BuiltInAbilities.getRawAbilityDeclarations()[abilityName]
+        ?: return null
+    val declaredOpType = context.typingContext.findAbilitiesByMethodName(methodName)
+        .firstOrNull { it.first == abilityName }?.second
+        ?: BuiltInAbilities.getAbilityMethodType(abilityName, methodName, abilityVar)
+        ?: return null
+    val receiverParam = decl.receiverTypeParam ?: decl.typeParams.firstOrNull() ?: return null
+    val opType = com.mezze.language.typechecker.solving.substituteTypeParamsByName(
+        declaredOpType,
+        mapOf(receiverParam to abilityVar),
+    ) as? MezzeType.FunctionType ?: return null
+
+    // Receiver-taking operations are NOT this path — see the doc comment.
+    val params = opType.paramType as? MezzeType.RecordType ?: return null
+    if (params.fields.containsKey(Keywords.IT)) return null
+
+    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    val constraints = mutableListOf<Constraint>()
+    constraints.addAll(argumentResult.constraints)
+    constraints.add(
+        Constraint.Equality(
+            left = argumentResult.type,
+            right = opType.paramType,
+            context = "Static ability call arguments: $abilityName.$methodName",
+            loc = expr.loc,
+        ),
+    )
+
+    val abilityHash = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
+    val abilityConstraint = Constraint.AbilityRequired(
+        typeVar = abilityVar.variable,
+        abilityName = abilityName,
+        abilityHash = abilityHash,
+        typeArgs = emptyList(),
+        context = "Static ability call: $abilityName.$methodName",
+        loc = expr.loc,
+    )
+
+    // `receiverFieldName = null` is the whole signal to emit: this operation has
+    // no receiver, so pick the impl from the type the call produces.
+    val methodCallInfo = ConstraintResult.MethodCallInfo(
+        abilityName = abilityName,
+        methodName = methodName,
+        methodHash = null,
+        receiverFieldName = null,
+        isInherentMethod = false,
+        methodFunctionType = opType,
+        typeArgs = listOf(abilityVar),
+    )
+
+    return ConstraintResult(
+        type = opType.returnType,
+        constraints = constraints,
+        effects = argumentResult.effects,
+        effectInstances = argumentResult.effectInstances,
+        abilityConstraints = listOf(abilityConstraint),
+        associatedTypeConstraints = emptyList(),
+        undefinedVariables = argumentResult.undefinedVariables,
+        usedVariables = argumentResult.usedVariables,
+        methodCallResolutions = argumentResult.methodCallResolutions +
+            mapOf((expr.loc to methodName) to methodCallInfo),
+        callReturnTypes = argumentResult.callReturnTypes + (expr.loc to opType.returnType),
+    )
+}
+
 internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     expr: ParsedFunctionCall,
     memberAccess: ParsedMemberAccess,

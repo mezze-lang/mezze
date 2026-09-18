@@ -114,6 +114,14 @@ internal fun emitTypedModuleAndLower(
         } else {
             typed
         }
+    } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+        // A TypeCheckError is a DIAGNOSTIC — a message written for the person
+        // compiling, at a location they can act on. Swallowing one can only ever
+        // replace it with silence: the module comes back null, and the runtime
+        // reports "TruffleIR not produced by typechecker" with nothing to act on.
+        // Everything else keeps the behaviour below, which is about a build step
+        // that may legitimately not apply.
+        throw e
     } catch (e: Exception) {
         if (System.getenv("MEZZE_DEBUG") != null) {
             System.err.println("[BUILDER] ${e.javaClass.simpleName}: ${e.message}")
