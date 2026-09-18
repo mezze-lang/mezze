@@ -1887,13 +1887,16 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   arithmetic on a receiver whose type never closed reads as polymorphic. A test
   holds the two lists together so neither drifts. Two distinct origins, so closing
   them is two pieces of work:
-  - `Nat::is_even`/`is_odd` compute `__native_nat_to_int {…} % 2`. A native
-    reference is typed as a bare fresh variable and pinned by whatever uses it —
-    normally the declared return type of the `pub let` wrapper it sits in. Called
-    straight from an impl body there is no wrapper and nothing pins it. Note the
-    runtime `NativeSignatures` registry cannot supply the answer: its `SlotKind`
-    is the ABI, not the Mezze type (`__native_nat_min` returns LONG and is a
-    `Nat`), so reading types off it would be a fresh guess.
+  - `Nat::is_even`/`is_odd` (FIXED) computed `__native_nat_to_int {…} % 2`. A
+    native reference is typed as a bare variable and pinned by whatever uses it —
+    for every other operation in that impl, the operation's own declared return.
+    These fed the result into `%` instead, so nothing said the arithmetic was on
+    Int. They now go through `to_int`, the module's own typed name for that
+    native; both ratchets moved (the dict allowlist and two `VARTYPE_RECEIVER`
+    baseline rows). The general hole is unchanged — a raw native call's Mezze type
+    is undeclared — and note the runtime `NativeSignatures` registry cannot supply
+    it: its `SlotKind` is the ABI, not the type (`__native_nat_min` returns LONG
+    and is a `Nat`), so reading types off it would be a fresh guess.
   - `list::enumerate` (and `zip_with_index`, its alias) compute `acc.i + 1` in a
     `fold_left` callback. `fold_left` declares `init: 'acc` and
     `f: { acc: 'acc, x: 'a } -> 'acc`, so the accumulator's record type IS tied to

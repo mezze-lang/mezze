@@ -880,6 +880,4 @@ UNTYPED_PARAM	let:to_sorted_set
 UNTYPED_PARAM	let:unique
 UNTYPED_PARAM	let:unzip
 UNTYPED_PARAM	let:upper_bound
-VARTYPE_RECEIVER	impl Nat.is_even
-VARTYPE_RECEIVER	impl Nat.is_odd
 VARTYPE_RECEIVER	let:enumerate

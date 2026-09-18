@@ -39,26 +39,26 @@ class DictJustificationGateTest {
      * receiver whose type never closed reads as polymorphic, so the scan asks for a
      * dict nothing in the types calls for.
      *
-     * The open variable has a different origin in each half, which is why closing
-     * them is two pieces of work and not one:
+     * What remains: `list::enumerate` (and `zip_with_index`, which is its alias)
+     * compute `acc.i + 1` inside a `fold_left` callback. `fold_left` declares
+     * `init: 'acc` and `f: { acc: 'acc, x: 'a } -> 'acc`, so the accumulator's
+     * record type IS tied to the callback parameter by the signature — it just does
+     * not arrive, leaving `acc.i` a field read off a variable.
      *
-     *  - `Nat::is_even` / `Nat::is_odd` compute `__native_nat_to_int {…} % 2`. A
-     *    native reference is typed as a bare fresh variable and pinned by whatever
-     *    uses it — normally the declared return type of the `pub let` wrapper it
-     *    sits in. Called straight from an impl body there is no wrapper, so nothing
-     *    pins it.
-     *  - `list::enumerate` (and `zip_with_index`, which is its alias) compute
-     *    `acc.i + 1` inside a `fold_left` callback. The accumulator's record type is
-     *    given by `init`, and it does not reach the callback parameter, so `acc.i`
-     *    is a field read off a variable.
+     * `Nat::is_even` / `Nat::is_odd` were here too and are now fixed. They computed
+     * `__native_nat_to_int {…} % 2`: a native reference is typed as a bare variable
+     * and pinned by whatever uses it, which for every other operation in that impl
+     * is the operation's own declared return — but these fed the result into `%`, so
+     * nothing said the arithmetic was on Int. They go through `to_int`, the module's
+     * own typed name for that native, and the demand disappears. The general hole
+     * (a raw native call's type is undeclared) is unchanged; what closed is every
+     * place in the stdlib that walked into it.
      *
-     * A fifth entry fails the gate, and so does a listed one that stops firing.
+     * A third entry fails the gate, and so does a listed one that stops firing.
      */
     private val unjustifiedByOpenTypeVar = setOf(
         "enumerate",
         "zip_with_index",
-        "is_even",
-        "is_odd",
     )
 
     /** A decl's gate key: its name, plus enough of its hash that two same-named

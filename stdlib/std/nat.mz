@@ -165,7 +165,13 @@ impl Nat where {
   clamp = { it, min, max } -> __native_nat_clamp { n = it, min = min, max = max },
   min = { it, r } -> __native_nat_min { l = it, r = r },
   max = { it, r } -> __native_nat_max { l = it, r = r },
-  is_even = { it } -> __native_nat_to_int { n = it } % 2 == 0,
-  is_odd = { it } -> __native_nat_to_int { n = it } % 2 != 0,
+  ## Through `to_int`, not the raw native: a native reference is typed as a bare
+  ## variable and pinned by whatever uses it, which for every other operation here
+  ## is the operation's own declared return. These two feed the result into `%`
+  ## instead, so with the raw native nothing says the arithmetic is on Int — and
+  ## the emitter asked for an arithmetic dictionary no declared constraint calls
+  ## for. `to_int` is this module's own typed name for the same native.
+  is_even = { it } -> to_int { n = it } % 2 == 0,
+  is_odd = { it } -> to_int { n = it } % 2 != 0,
   subtract_to_int = { it, r } -> __native_nat_subtract_to_int { l = it, r = r },
 }
