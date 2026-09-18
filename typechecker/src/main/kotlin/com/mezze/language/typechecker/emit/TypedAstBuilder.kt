@@ -692,14 +692,26 @@ class TypedAstBuilder(
             // untyped receiver, an untyped receiver lowers `<` to a dynamic field
             // read, and for a newtype — erased to its payload at runtime — that
             // silently used the WRAPPED type's ordering instead of the author's.
-            val seedThisOp = seedOpParams && !isInherent && op.implementation is ParsedLambda &&
-                declaredOpType != null &&
+            // An INHERENT op has no ability declaration to read a signature from,
+            // which is why it was excluded — but it does not need one: `ctxType`
+            // above is already the op's own solved arrow (`{ it: <target> } ->
+            // <return>`), built from the impl's target and the solve. Seeding from it
+            // types `it` in the body exactly as the ability path types `it` and `r`,
+            // and leaving it unseeded is the same defect BUG 11 was: an untyped
+            // receiver lowers a comparison to a dynamic field read.
+            val inherentOpType = if (isInherent) ctxType as? MezzeType.FunctionType else null
+            val seedFrom: MezzeType? = when {
+                isInherent -> inherentOpType?.paramType
+                else -> declaredOpType?.paramType
+            }
+            val seedThisOp = seedOpParams && op.implementation is ParsedLambda &&
+                seedFrom != null &&
                 // Codec-flavored abilities (Encode/Decode/Format…) dispatch through
                 // `config` and were shaped for untyped bodies — leave them as they are.
                 !WellKnownHashConstants.isCodecAbility(abilityHash) &&
                 !opCarriesCodecConstraint
             if (seedThisOp) {
-                pendingOpParamTypes = (declaredOpType.paramType as? MezzeType.RecordType)?.fields
+                pendingOpParamTypes = (seedFrom as? MezzeType.RecordType)?.fields
             }
             val prevTypingImplOpBody = typingImplOpBody
             typingImplOpBody = seedThisOp
