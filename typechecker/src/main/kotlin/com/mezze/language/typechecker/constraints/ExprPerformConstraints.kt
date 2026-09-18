@@ -54,6 +54,50 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         }
     }
 
+    // A handler the body's OWN `perform` already takes, with nothing in between.
+    // `perform A in perform A in e` installs A twice back to back: the inner one
+    // takes every operation `e` performs, so the outer can never fire. Written as
+    // one list — `perform A, A in e` — that is already a hard error, so this is the
+    // same mistake spelled the other way.
+    //
+    // NOT the same as SHADOWING, which is a feature: `Reader`'s `local` IS a nested
+    // `WithReader`, and `perform SystemTime in perform LoomAsync in …` is ordinary
+    // composition. Both keep the outer handler live for whatever sits between the
+    // two, so this asks only the structural question — is the body *exactly* the
+    // inner `perform`? — and never consults an inferred effect row, which for a
+    // nested body is not reliable enough to carry a hard error.
+    //
+    // The inner handler's own impl is the exception: if it performs the effect,
+    // the outer is what handles THAT, and it is live.
+    (expr.body as? ParsedPerform)?.let { inner ->
+        for ((handlerName, effectName) in handlerEffects) {
+            val innerTakesIt = inner.handlers.any {
+                context.performerToEffect[it.performer.localName] == effectName
+            }
+            val innerImplPerformsIt = inner.handlers.any {
+                effectName in (context.performerAddedEffects[it.performer.localName] ?: emptySet())
+            }
+            if (innerTakesIt && !innerImplPerformsIt) {
+                val innerName = inner.handlers.first {
+                    context.performerToEffect[it.performer.localName] == effectName
+                }.performer.localName
+                throw TypeCheckError(
+                    message = "Handler '$handlerName' handles '$effectName', but the `perform` it " +
+                        "wraps installs '$innerName' for the same effect with nothing in between — " +
+                        "the inner one takes every operation, so '$handlerName' can never fire.",
+                    loc = expr.loc,
+                    errorType = ErrorType.CONSTRAINT_VIOLATION,
+                    code = ErrorCode.V0507_HANDLER_DUPLICATE,
+                    hints = listOf(
+                        "keep whichever of '$handlerName' / '$innerName' you meant, and delete the other.",
+                        "to let both matter, put the code they each handle between them: " +
+                            "`perform $handlerName in do … perform $innerName in …`.",
+                    ),
+                )
+            }
+        }
+    }
+
     val isNestedPerform = expr.body is ParsedPerform
     val extractedEffects = extractEffectsFromType(exprResult.type)
     val allEffects = exprResult.effects + extractedEffects.effects
