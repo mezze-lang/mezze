@@ -1852,6 +1852,22 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   operation set. Operations now come from the ability DECLARATIONS.
   `hashOpNames` was this same fix applied to exactly one ability and is now
   derived from the general index rather than being its own parameter.
+- **BUG 22 (FIXED) — a handler installed over a `perform` that already takes the
+  same effect.** `perform A, A in e` was always a hard error; `perform A in
+  perform A in e` was accepted in SILENCE, and so was `perform A in perform B in
+  e` with A and B on the same effect. The inner handler takes every operation the
+  body performs, so the outer can never fire — the same mistake the one-list form
+  rejects, spelled the other way. Now refused, naming both handlers.
+  The line is STRUCTURAL because shadowing is a feature: `Reader`'s `local` IS a
+  nested `WithReader`, and `perform SystemTime in perform LoomAsync in …` is
+  ordinary composition. What separates them is whether anything sits BETWEEN the
+  two installs, so the check asks only "is the body EXACTLY the inner `perform`?"
+  and never reads an inferred effect row. Recorded because it cost a cycle: the
+  obvious change — dropping the `!isNestedPerform` guard on the two existing
+  row-based checks, which LOOKS redundant since `shouldValidate` already carries
+  the nested case — fires on legitimate nesting and breaks twelve tests. A nested
+  body's row is not solid enough to carry an error. See `BackToBackHandlerTest`.
+
 - **BUG 21 (FIXED) — `==` on four containers ignored the element's own `Eq`.**
   `Deque`, `Map` compared by VALUE, `SortedSet`, and `SortedMap` compared by VALUE
   each called a native that compared the runtime REPRESENTATION, so for a
