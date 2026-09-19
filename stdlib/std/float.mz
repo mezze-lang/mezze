@@ -8,7 +8,7 @@ impl NumAdd Float for Float having 'out = Float where {
 }
 
 impl NumAdd Int for Float having 'out = Float where {
-  add = { it, r } -> it + r.to_float {}
+  add = { it, r } -> it + from_int { n = r }
 }
 
 impl NumAdd Nat for Float having 'out = Float where {
@@ -20,7 +20,7 @@ impl NumSub Float for Float having 'out = Float where {
 }
 
 impl NumSub Int for Float having 'out = Float where {
-  sub = { it, r } -> it - r.to_float {}
+  sub = { it, r } -> it - from_int { n = r }
 }
 
 impl NumSub Nat for Float having 'out = Float where {
@@ -32,7 +32,7 @@ impl NumMul Float for Float having 'out = Float where {
 }
 
 impl NumMul Int for Float having 'out = Float where {
-  mul = { it, r } -> it * r.to_float {}
+  mul = { it, r } -> it * from_int { n = r }
 }
 
 impl NumMul Nat for Float having 'out = Float where {
@@ -44,7 +44,7 @@ impl NumDiv Float for Float having 'out = Float where {
 }
 
 impl NumDiv Int for Float having 'out = Float where {
-  div = { it, r } -> it / r.to_float {}
+  div = { it, r } -> it / from_int { n = r }
 }
 
 impl NumDiv Nat for Float having 'out = Float where {
@@ -56,7 +56,7 @@ impl NumMod Float for Float having 'out = Float where {
 }
 
 impl NumMod Int for Float having 'out = Float where {
-  mod = { it, r } -> it % r.to_float {}
+  mod = { it, r } -> it % from_int { n = r }
 }
 
 impl NumMod Nat for Float having 'out = Float where {

@@ -24,20 +24,11 @@
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
-UNBOUND_TYPE_VAR	impl Int.add
-UNBOUND_TYPE_VAR	impl Int.div
-UNBOUND_TYPE_VAR	impl Int.mod
-UNBOUND_TYPE_VAR	impl Int.mul
-UNBOUND_TYPE_VAR	impl Int.sub
 UNBOUND_TYPE_VAR	impl Seq.is_sorted
 UNBOUND_TYPE_VAR	impl Seq.is_sorted_descending
 UNBOUND_TYPE_VAR	let:enumerate
 UNBOUND_TYPE_VAR	let:flatten
-UNBOUND_TYPE_VAR	let:init
 UNBOUND_TYPE_VAR	let:intersperse
-UNBOUND_TYPE_VAR	let:repeat
-UNBOUND_TYPE_VAR	let:singleton
 UNBOUND_TYPE_VAR	let:sort_by
-UNBOUND_TYPE_VAR	let:zip
 UNTYPED_PARAM	let:intersperse
 UNTYPED_PARAM	let:sort_by

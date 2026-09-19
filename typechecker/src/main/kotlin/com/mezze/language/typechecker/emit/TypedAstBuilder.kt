@@ -1427,23 +1427,47 @@ class TypedAstBuilder(
                     if (!argExpr.type.holdsUnknownPlaceholder()) {
                         harvestVarBindings(declared.paramType, argExpr.type, bindings)
                     }
-                    // The return corroborates, but only for variables the
-                    // PARAMETERS also mention. A variable that appears solely in the
-                    // return is the dispatch key of a no-receiver ability op —
-                    // `zero {}`, `default {}`, chosen by the type they produce — and
-                    // rewriting it to whatever this site happens to call the same
-                    // type leaves the dispatcher looking up a variable that is no
-                    // longer there: "nothing here determines that type".
+                    // The return too — it is the only thing `empty {}`, `None` and
+                    // every other nullary constructor HAS, and without it their
+                    // element type stays open in the caller.
+                    //
+                    // Except for a variable a DICTIONARY is keyed on. `zero {}` and
+                    // `default {}` are chosen by the type they produce, and so is
+                    // every wrapper that forwards one (`{ … } with Default 'a -> 'a`)
+                    // — the evidence arrives in a slot named for that variable.
+                    // Renaming it leaves the lookup pointing at a variable that is no
+                    // longer there: "nothing here determines that type". Both forms
+                    // say so structurally — the ability op through its binding, the
+                    // wrapper through the constraint on its own arrow — so neither
+                    // needs to be recognised by name.
+                    val dictKeyed = HashSet<String>()
+                    if ((fn as? TypedVar)?.binding is BindingRef.AbilityOp) {
+                        val inReturn = HashSet<TypeVar>()
+                        com.mezze.language.ast.collectTypeVariables(declared.returnType, inReturn)
+                        inReturn.forEach { dictKeyed.add(it.name) }
+                    }
+                    for (constraint in declared.abilityConstraints) {
+                        for (arg in constraint.typeArgs) {
+                            val inArg = HashSet<TypeVar>()
+                            com.mezze.language.ast.collectTypeVariables(arg, inArg)
+                            inArg.forEach { dictKeyed.add(it.name) }
+                        }
+                    }
+                    val inParams = HashSet<TypeVar>()
+                    com.mezze.language.ast.collectTypeVariables(declared.paramType, inParams)
+                    val paramVarNames = inParams.mapTo(HashSet()) { it.name }
                     if (!callType.holdsUnknownPlaceholder()) {
-                        val inParams = HashSet<TypeVar>()
-                        com.mezze.language.ast.collectTypeVariables(declared.paramType, inParams)
-                        val paramVarNames = inParams.mapTo(HashSet()) { it.name }
                         val fromReturn = mutableMapOf<String, MezzeType>()
                         harvestVarBindings(declared.returnType, callType, fromReturn)
                         for ((name, to) in fromReturn) {
-                            if (name in paramVarNames) bindings.putIfAbsent(name, to)
+                            if (name !in dictKeyed || name in paramVarNames) {
+                                bindings.putIfAbsent(name, to)
+                            }
                         }
                     }
+                    // A dict-keyed variable stays put even when an ARGUMENT would
+                    // have pinned it, for the same reason.
+                    bindings.keys.retainAll { it !in dictKeyed || it in paramVarNames }
                     // A variable standing for itself is not an instantiation, and a
                     // binding to something still undetermined would REPLACE a real
                     // variable with a guess — strictly worse than leaving it open.
