@@ -24,40 +24,16 @@
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
-UNBOUND_TYPE_VAR	impl Bool.and
-UNBOUND_TYPE_VAR	impl Bool.eq
-UNBOUND_TYPE_VAR	impl Bool.hash
 UNBOUND_TYPE_VAR	impl Bool.iff
-UNBOUND_TYPE_VAR	impl Bool.neq
-UNBOUND_TYPE_VAR	impl Bool.not
-UNBOUND_TYPE_VAR	impl Bool.or
-UNBOUND_TYPE_VAR	impl Bool.to_str
-UNBOUND_TYPE_VAR	impl Bool.xor
-UNBOUND_TYPE_VAR	impl Bytes.eq
 UNBOUND_TYPE_VAR	impl Bytes.fold
 UNBOUND_TYPE_VAR	impl Bytes.ge
 UNBOUND_TYPE_VAR	impl Bytes.gt
-UNBOUND_TYPE_VAR	impl Bytes.hash
 UNBOUND_TYPE_VAR	impl Bytes.le
 UNBOUND_TYPE_VAR	impl Bytes.lt
-UNBOUND_TYPE_VAR	impl Bytes.neq
-UNBOUND_TYPE_VAR	impl Char.eq
 UNBOUND_TYPE_VAR	impl Char.ge
 UNBOUND_TYPE_VAR	impl Char.gt
-UNBOUND_TYPE_VAR	impl Char.hash
-UNBOUND_TYPE_VAR	impl Char.is_digit
-UNBOUND_TYPE_VAR	impl Char.is_letter
-UNBOUND_TYPE_VAR	impl Char.is_lower
-UNBOUND_TYPE_VAR	impl Char.is_upper
-UNBOUND_TYPE_VAR	impl Char.is_whitespace
 UNBOUND_TYPE_VAR	impl Char.le
 UNBOUND_TYPE_VAR	impl Char.lt
-UNBOUND_TYPE_VAR	impl Char.neq
-UNBOUND_TYPE_VAR	impl Char.to_int
-UNBOUND_TYPE_VAR	impl Char.to_lower
-UNBOUND_TYPE_VAR	impl Char.to_str
-UNBOUND_TYPE_VAR	impl Char.to_upper
-UNBOUND_TYPE_VAR	impl Char.try_into
 UNBOUND_TYPE_VAR	impl Deque.contains
 UNBOUND_TYPE_VAR	impl Deque.dedup
 UNBOUND_TYPE_VAR	impl Deque.dedup_by
@@ -84,90 +60,22 @@ UNBOUND_TYPE_VAR	impl Deque.scan
 UNBOUND_TYPE_VAR	impl Deque.sort
 UNBOUND_TYPE_VAR	impl Deque.to_map
 UNBOUND_TYPE_VAR	impl Deque.to_sorted_map
-UNBOUND_TYPE_VAR	impl Float.abs
 UNBOUND_TYPE_VAR	impl Float.add
-UNBOUND_TYPE_VAR	impl Float.ceil
-UNBOUND_TYPE_VAR	impl Float.clamp
 UNBOUND_TYPE_VAR	impl Float.div
-UNBOUND_TYPE_VAR	impl Float.eq
-UNBOUND_TYPE_VAR	impl Float.floor
-UNBOUND_TYPE_VAR	impl Float.ge
-UNBOUND_TYPE_VAR	impl Float.gt
-UNBOUND_TYPE_VAR	impl Float.hash
-UNBOUND_TYPE_VAR	impl Float.into
-UNBOUND_TYPE_VAR	impl Float.is_finite
-UNBOUND_TYPE_VAR	impl Float.is_infinite
-UNBOUND_TYPE_VAR	impl Float.is_nan
 UNBOUND_TYPE_VAR	impl Float.is_zero
-UNBOUND_TYPE_VAR	impl Float.le
-UNBOUND_TYPE_VAR	impl Float.lt
-UNBOUND_TYPE_VAR	impl Float.max
-UNBOUND_TYPE_VAR	impl Float.min
 UNBOUND_TYPE_VAR	impl Float.mod
 UNBOUND_TYPE_VAR	impl Float.mul
-UNBOUND_TYPE_VAR	impl Float.neg
-UNBOUND_TYPE_VAR	impl Float.neq
-UNBOUND_TYPE_VAR	impl Float.round
-UNBOUND_TYPE_VAR	impl Float.sign
-UNBOUND_TYPE_VAR	impl Float.sqrt
 UNBOUND_TYPE_VAR	impl Float.sub
-UNBOUND_TYPE_VAR	impl Float.to_int
-UNBOUND_TYPE_VAR	impl Float.to_str
-UNBOUND_TYPE_VAR	impl Float.try_into
-UNBOUND_TYPE_VAR	impl Frac.abs
-UNBOUND_TYPE_VAR	impl Frac.add
-UNBOUND_TYPE_VAR	impl Frac.default
-UNBOUND_TYPE_VAR	impl Frac.denominator
-UNBOUND_TYPE_VAR	impl Frac.div
-UNBOUND_TYPE_VAR	impl Frac.eq
-UNBOUND_TYPE_VAR	impl Frac.ge
-UNBOUND_TYPE_VAR	impl Frac.gt
-UNBOUND_TYPE_VAR	impl Frac.hash
-UNBOUND_TYPE_VAR	impl Frac.into
 UNBOUND_TYPE_VAR	impl Frac.is_negative
 UNBOUND_TYPE_VAR	impl Frac.is_positive
 UNBOUND_TYPE_VAR	impl Frac.is_zero
-UNBOUND_TYPE_VAR	impl Frac.le
-UNBOUND_TYPE_VAR	impl Frac.lt
-UNBOUND_TYPE_VAR	impl Frac.mul
-UNBOUND_TYPE_VAR	impl Frac.neg
-UNBOUND_TYPE_VAR	impl Frac.neq
-UNBOUND_TYPE_VAR	impl Frac.numerator
-UNBOUND_TYPE_VAR	impl Frac.one
 UNBOUND_TYPE_VAR	impl Frac.reciprocal
-UNBOUND_TYPE_VAR	impl Frac.sub
-UNBOUND_TYPE_VAR	impl Frac.to_float
-UNBOUND_TYPE_VAR	impl Frac.to_str
-UNBOUND_TYPE_VAR	impl Frac.zero
-UNBOUND_TYPE_VAR	impl Int.abs
 UNBOUND_TYPE_VAR	impl Int.add
-UNBOUND_TYPE_VAR	impl Int.clamp
 UNBOUND_TYPE_VAR	impl Int.div
-UNBOUND_TYPE_VAR	impl Int.eq
-UNBOUND_TYPE_VAR	impl Int.gcd
-UNBOUND_TYPE_VAR	impl Int.ge
-UNBOUND_TYPE_VAR	impl Int.gt
-UNBOUND_TYPE_VAR	impl Int.hash
-UNBOUND_TYPE_VAR	impl Int.into
-UNBOUND_TYPE_VAR	impl Int.is_even
-UNBOUND_TYPE_VAR	impl Int.is_odd
 UNBOUND_TYPE_VAR	impl Int.is_zero
-UNBOUND_TYPE_VAR	impl Int.lcm
-UNBOUND_TYPE_VAR	impl Int.le
-UNBOUND_TYPE_VAR	impl Int.lt
-UNBOUND_TYPE_VAR	impl Int.max
-UNBOUND_TYPE_VAR	impl Int.min
 UNBOUND_TYPE_VAR	impl Int.mod
 UNBOUND_TYPE_VAR	impl Int.mul
-UNBOUND_TYPE_VAR	impl Int.neg
-UNBOUND_TYPE_VAR	impl Int.neq
-UNBOUND_TYPE_VAR	impl Int.pow
-UNBOUND_TYPE_VAR	impl Int.sign
 UNBOUND_TYPE_VAR	impl Int.sub
-UNBOUND_TYPE_VAR	impl Int.to_float
-UNBOUND_TYPE_VAR	impl Int.to_nat
-UNBOUND_TYPE_VAR	impl Int.to_str
-UNBOUND_TYPE_VAR	impl Int.try_into
 UNBOUND_TYPE_VAR	impl List.append
 UNBOUND_TYPE_VAR	impl List.binary_search
 UNBOUND_TYPE_VAR	impl List.binary_search_insert_point
@@ -237,27 +145,14 @@ UNBOUND_TYPE_VAR	impl Map.update
 UNBOUND_TYPE_VAR	impl MutBytes.is_empty
 UNBOUND_TYPE_VAR	impl MutSeq.is_empty
 UNBOUND_TYPE_VAR	impl Nat.add
-UNBOUND_TYPE_VAR	impl Nat.clamp
 UNBOUND_TYPE_VAR	impl Nat.div
-UNBOUND_TYPE_VAR	impl Nat.eq
-UNBOUND_TYPE_VAR	impl Nat.ge
-UNBOUND_TYPE_VAR	impl Nat.gt
 UNBOUND_TYPE_VAR	impl Nat.hash
 UNBOUND_TYPE_VAR	impl Nat.is_even
 UNBOUND_TYPE_VAR	impl Nat.is_odd
 UNBOUND_TYPE_VAR	impl Nat.is_zero
-UNBOUND_TYPE_VAR	impl Nat.le
-UNBOUND_TYPE_VAR	impl Nat.lt
-UNBOUND_TYPE_VAR	impl Nat.max
-UNBOUND_TYPE_VAR	impl Nat.min
 UNBOUND_TYPE_VAR	impl Nat.mod
 UNBOUND_TYPE_VAR	impl Nat.mul
-UNBOUND_TYPE_VAR	impl Nat.neq
 UNBOUND_TYPE_VAR	impl Nat.sub
-UNBOUND_TYPE_VAR	impl Nat.subtract_to_int
-UNBOUND_TYPE_VAR	impl Nat.to_int
-UNBOUND_TYPE_VAR	impl Nat.to_str
-UNBOUND_TYPE_VAR	impl Nat.try_into
 UNBOUND_TYPE_VAR	impl NonEmptyList.contains
 UNBOUND_TYPE_VAR	impl NonEmptyList.eq
 UNBOUND_TYPE_VAR	impl NonEmptyList.flat_map
@@ -357,7 +252,6 @@ UNBOUND_TYPE_VAR	impl Seq.zip
 UNBOUND_TYPE_VAR	impl Seq.zip_with
 UNBOUND_TYPE_VAR	impl Set.collect_list
 UNBOUND_TYPE_VAR	impl Set.collect_seq
-UNBOUND_TYPE_VAR	impl Set.eq
 UNBOUND_TYPE_VAR	impl Set.filter_map
 UNBOUND_TYPE_VAR	impl Set.flat_map
 UNBOUND_TYPE_VAR	impl Set.fold
@@ -368,7 +262,6 @@ UNBOUND_TYPE_VAR	impl Set.max
 UNBOUND_TYPE_VAR	impl Set.max_by
 UNBOUND_TYPE_VAR	impl Set.min
 UNBOUND_TYPE_VAR	impl Set.min_by
-UNBOUND_TYPE_VAR	impl Set.neq
 UNBOUND_TYPE_VAR	impl SortedMap.contains_key
 UNBOUND_TYPE_VAR	impl SortedMap.eq
 UNBOUND_TYPE_VAR	impl SortedMap.fold
@@ -401,338 +294,88 @@ UNBOUND_TYPE_VAR	impl SortedSet.max_by
 UNBOUND_TYPE_VAR	impl SortedSet.min_by
 UNBOUND_TYPE_VAR	impl SortedSet.neq
 UNBOUND_TYPE_VAR	impl SortedSet.remove
-UNBOUND_TYPE_VAR	impl Str.eq
-UNBOUND_TYPE_VAR	impl Str.ge
-UNBOUND_TYPE_VAR	impl Str.gt
-UNBOUND_TYPE_VAR	impl Str.hash
-UNBOUND_TYPE_VAR	impl Str.into
-UNBOUND_TYPE_VAR	impl Str.le
-UNBOUND_TYPE_VAR	impl Str.lt
-UNBOUND_TYPE_VAR	impl Str.neq
 UNBOUND_TYPE_VAR	impl c3d08106.list
-UNBOUND_TYPE_VAR	let:abs
 UNBOUND_TYPE_VAR	let:add
-UNBOUND_TYPE_VAR	let:add_with_cmp
-UNBOUND_TYPE_VAR	let:all
-UNBOUND_TYPE_VAR	let:and
-UNBOUND_TYPE_VAR	let:any
 UNBOUND_TYPE_VAR	let:append
-UNBOUND_TYPE_VAR	let:append_list
-UNBOUND_TYPE_VAR	let:average
 UNBOUND_TYPE_VAR	let:binary_search
-UNBOUND_TYPE_VAR	let:binary_search_by
 UNBOUND_TYPE_VAR	let:binary_search_insert_point
-UNBOUND_TYPE_VAR	let:binary_search_insert_point_cmp
-UNBOUND_TYPE_VAR	let:binary_search_insert_point_with_cmp
-UNBOUND_TYPE_VAR	let:binary_search_with_cmp
-UNBOUND_TYPE_VAR	let:cartesian_product
-UNBOUND_TYPE_VAR	let:ceiling_key
-UNBOUND_TYPE_VAR	let:char_at
-UNBOUND_TYPE_VAR	let:chars
-UNBOUND_TYPE_VAR	let:chunk
-UNBOUND_TYPE_VAR	let:chunks_exact
-UNBOUND_TYPE_VAR	let:clamp
-UNBOUND_TYPE_VAR	let:collect_list
-UNBOUND_TYPE_VAR	let:collect_seq
-UNBOUND_TYPE_VAR	let:combinations
 UNBOUND_TYPE_VAR	let:compare
-UNBOUND_TYPE_VAR	let:compare_with_cmp
-UNBOUND_TYPE_VAR	let:concat
-UNBOUND_TYPE_VAR	let:concat_all
-UNBOUND_TYPE_VAR	let:cons
 UNBOUND_TYPE_VAR	let:contains
 UNBOUND_TYPE_VAR	let:contains_key
-UNBOUND_TYPE_VAR	let:contains_key_with_cmp
-UNBOUND_TYPE_VAR	let:contains_key_with_evidence
 UNBOUND_TYPE_VAR	let:contains_value
-UNBOUND_TYPE_VAR	let:contains_value_with_eq
-UNBOUND_TYPE_VAR	let:contains_with_cmp
-UNBOUND_TYPE_VAR	let:contains_with_evidence
-UNBOUND_TYPE_VAR	let:count
 UNBOUND_TYPE_VAR	let:count_element
 UNBOUND_TYPE_VAR	let:dedup
 UNBOUND_TYPE_VAR	let:dedup_by
-UNBOUND_TYPE_VAR	let:dedup_by_with_eq
-UNBOUND_TYPE_VAR	let:dedup_with_eq
-UNBOUND_TYPE_VAR	let:denominator
-UNBOUND_TYPE_VAR	let:deque_compare_with_cmp
-UNBOUND_TYPE_VAR	let:deque_equals_with_eq
 UNBOUND_TYPE_VAR	let:dequeue
-UNBOUND_TYPE_VAR	let:diff_maps
-UNBOUND_TYPE_VAR	let:difference
-UNBOUND_TYPE_VAR	let:digit_to_int
 UNBOUND_TYPE_VAR	let:distinct
-UNBOUND_TYPE_VAR	let:divide
-UNBOUND_TYPE_VAR	let:drop
-UNBOUND_TYPE_VAR	let:drop_while
-UNBOUND_TYPE_VAR	let:empty
 UNBOUND_TYPE_VAR	let:ends_with
-UNBOUND_TYPE_VAR	let:ends_with_eq
 UNBOUND_TYPE_VAR	let:enqueue
-UNBOUND_TYPE_VAR	let:entries
 UNBOUND_TYPE_VAR	let:enumerate
-UNBOUND_TYPE_VAR	let:eq
 UNBOUND_TYPE_VAR	let:equal_range
-UNBOUND_TYPE_VAR	let:equal_range_with_cmp
 UNBOUND_TYPE_VAR	let:equals
-UNBOUND_TYPE_VAR	let:fill
-UNBOUND_TYPE_VAR	let:fill_with
-UNBOUND_TYPE_VAR	let:filter
-UNBOUND_TYPE_VAR	let:filter_keys
-UNBOUND_TYPE_VAR	let:filter_map
-UNBOUND_TYPE_VAR	let:filter_values
-UNBOUND_TYPE_VAR	let:find
-UNBOUND_TYPE_VAR	let:find_index
-UNBOUND_TYPE_VAR	let:first
 UNBOUND_TYPE_VAR	let:flat_map
 UNBOUND_TYPE_VAR	let:flatten
-UNBOUND_TYPE_VAR	let:floor_key
-UNBOUND_TYPE_VAR	let:fold
 UNBOUND_TYPE_VAR	let:fold_go
-UNBOUND_TYPE_VAR	let:fold_left
-UNBOUND_TYPE_VAR	let:fold_right
-UNBOUND_TYPE_VAR	let:for_each
-UNBOUND_TYPE_VAR	let:from_base64
-UNBOUND_TYPE_VAR	let:from_deque
-UNBOUND_TYPE_VAR	let:from_float
-UNBOUND_TYPE_VAR	let:from_head_tail
-UNBOUND_TYPE_VAR	let:from_hex
-UNBOUND_TYPE_VAR	let:from_int
-UNBOUND_TYPE_VAR	let:from_keys
 UNBOUND_TYPE_VAR	let:from_list
-UNBOUND_TYPE_VAR	let:from_list_with_cmp
 UNBOUND_TYPE_VAR	let:from_map
-UNBOUND_TYPE_VAR	let:from_map_with_cmp
-UNBOUND_TYPE_VAR	let:from_nat
 UNBOUND_TYPE_VAR	let:from_seq
-UNBOUND_TYPE_VAR	let:from_seq_with_cmp
-UNBOUND_TYPE_VAR	let:from_seq_with_evidence
-UNBOUND_TYPE_VAR	let:from_set
-UNBOUND_TYPE_VAR	let:from_sorted_map
-UNBOUND_TYPE_VAR	let:from_sorted_set
-UNBOUND_TYPE_VAR	let:from_str
 UNBOUND_TYPE_VAR	let:gcd
 UNBOUND_TYPE_VAR	let:get
 UNBOUND_TYPE_VAR	let:get_or
-UNBOUND_TYPE_VAR	let:get_with_cmp
-UNBOUND_TYPE_VAR	let:get_with_evidence
-UNBOUND_TYPE_VAR	let:glob_match
-UNBOUND_TYPE_VAR	let:greater_than
-UNBOUND_TYPE_VAR	let:group_by
-UNBOUND_TYPE_VAR	let:group_by_value
 UNBOUND_TYPE_VAR	let:group_consecutive
 UNBOUND_TYPE_VAR	let:group_consecutive_by
-UNBOUND_TYPE_VAR	let:group_consecutive_by_with_eq
-UNBOUND_TYPE_VAR	let:group_consecutive_with_eq
-UNBOUND_TYPE_VAR	let:head
-UNBOUND_TYPE_VAR	let:head_map
-UNBOUND_TYPE_VAR	let:head_set
 UNBOUND_TYPE_VAR	let:iff
 UNBOUND_TYPE_VAR	let:implies
 UNBOUND_TYPE_VAR	let:index_of
 UNBOUND_TYPE_VAR	let:init
 UNBOUND_TYPE_VAR	let:insert
-UNBOUND_TYPE_VAR	let:insert_all
-UNBOUND_TYPE_VAR	let:insert_at
-UNBOUND_TYPE_VAR	let:insert_with_cmp
-UNBOUND_TYPE_VAR	let:insert_with_evidence
-UNBOUND_TYPE_VAR	let:intersect
-UNBOUND_TYPE_VAR	let:intersect_maps
-UNBOUND_TYPE_VAR	let:intersection
 UNBOUND_TYPE_VAR	let:intersperse
-UNBOUND_TYPE_VAR	let:invert
-UNBOUND_TYPE_VAR	let:is_alpha_numeric
-UNBOUND_TYPE_VAR	let:is_digit
-UNBOUND_TYPE_VAR	let:is_disjoint
 UNBOUND_TYPE_VAR	let:is_empty
 UNBOUND_TYPE_VAR	let:is_even
-UNBOUND_TYPE_VAR	let:is_finite
-UNBOUND_TYPE_VAR	let:is_infinite
-UNBOUND_TYPE_VAR	let:is_letter
-UNBOUND_TYPE_VAR	let:is_lower
-UNBOUND_TYPE_VAR	let:is_nan
 UNBOUND_TYPE_VAR	let:is_odd
 UNBOUND_TYPE_VAR	let:is_sorted
 UNBOUND_TYPE_VAR	let:is_sorted_by
 UNBOUND_TYPE_VAR	let:is_sorted_by_go
-UNBOUND_TYPE_VAR	let:is_sorted_by_with_cmp
-UNBOUND_TYPE_VAR	let:is_sorted_cmp
 UNBOUND_TYPE_VAR	let:is_sorted_descending
-UNBOUND_TYPE_VAR	let:is_sorted_descending_cmp
-UNBOUND_TYPE_VAR	let:is_subset
-UNBOUND_TYPE_VAR	let:is_superset
-UNBOUND_TYPE_VAR	let:is_upper
-UNBOUND_TYPE_VAR	let:is_whitespace
 UNBOUND_TYPE_VAR	let:is_zero
-UNBOUND_TYPE_VAR	let:join
-UNBOUND_TYPE_VAR	let:keys
-UNBOUND_TYPE_VAR	let:keys_seq
-UNBOUND_TYPE_VAR	let:last
 UNBOUND_TYPE_VAR	let:last_index_of
-UNBOUND_TYPE_VAR	let:last_index_of_with_eq
 UNBOUND_TYPE_VAR	let:lcm
-UNBOUND_TYPE_VAR	let:less_than
-UNBOUND_TYPE_VAR	let:lexicographic_compare
-UNBOUND_TYPE_VAR	let:lines
-UNBOUND_TYPE_VAR	let:list_compare_with_cmp
-UNBOUND_TYPE_VAR	let:list_equals_with_eq
 UNBOUND_TYPE_VAR	let:lower_bound
-UNBOUND_TYPE_VAR	let:lower_bound_with_cmp
-UNBOUND_TYPE_VAR	let:make
-UNBOUND_TYPE_VAR	let:map
-UNBOUND_TYPE_VAR	let:map_equals_with_eq
-UNBOUND_TYPE_VAR	let:map_keys
-UNBOUND_TYPE_VAR	let:map_values
 UNBOUND_TYPE_VAR	let:max
 UNBOUND_TYPE_VAR	let:max_by
-UNBOUND_TYPE_VAR	let:max_by_with_cmp
-UNBOUND_TYPE_VAR	let:max_entry
-UNBOUND_TYPE_VAR	let:max_float
 UNBOUND_TYPE_VAR	let:max_key
-UNBOUND_TYPE_VAR	let:max_key_with_cmp
 UNBOUND_TYPE_VAR	let:max_value
-UNBOUND_TYPE_VAR	let:max_value_with_cmp
-UNBOUND_TYPE_VAR	let:median
-UNBOUND_TYPE_VAR	let:merge
-UNBOUND_TYPE_VAR	let:merge_with
 UNBOUND_TYPE_VAR	let:min
 UNBOUND_TYPE_VAR	let:min_by
-UNBOUND_TYPE_VAR	let:min_by_with_cmp
-UNBOUND_TYPE_VAR	let:min_entry
-UNBOUND_TYPE_VAR	let:min_float
 UNBOUND_TYPE_VAR	let:min_key
-UNBOUND_TYPE_VAR	let:min_key_with_cmp
 UNBOUND_TYPE_VAR	let:min_value
-UNBOUND_TYPE_VAR	let:min_value_with_cmp
-UNBOUND_TYPE_VAR	let:modulo
-UNBOUND_TYPE_VAR	let:multiply
-UNBOUND_TYPE_VAR	let:negate
-UNBOUND_TYPE_VAR	let:nel_compare_with_cmp
-UNBOUND_TYPE_VAR	let:nel_equals_with_eq
-UNBOUND_TYPE_VAR	let:none
-UNBOUND_TYPE_VAR	let:not
-UNBOUND_TYPE_VAR	let:nth
-UNBOUND_TYPE_VAR	let:numerator
 UNBOUND_TYPE_VAR	let:of
-UNBOUND_TYPE_VAR	let:or
-UNBOUND_TYPE_VAR	let:pad_left
-UNBOUND_TYPE_VAR	let:pad_right
-UNBOUND_TYPE_VAR	let:partition
-UNBOUND_TYPE_VAR	let:peek_back
-UNBOUND_TYPE_VAR	let:peek_front
-UNBOUND_TYPE_VAR	let:permutations
 UNBOUND_TYPE_VAR	let:pop
-UNBOUND_TYPE_VAR	let:pop_back
-UNBOUND_TYPE_VAR	let:pop_front
 UNBOUND_TYPE_VAR	let:pow
 UNBOUND_TYPE_VAR	let:prepend
-UNBOUND_TYPE_VAR	let:prepend_list
-UNBOUND_TYPE_VAR	let:product
-UNBOUND_TYPE_VAR	let:product_float
 UNBOUND_TYPE_VAR	let:push
-UNBOUND_TYPE_VAR	let:push_back
-UNBOUND_TYPE_VAR	let:push_front
-UNBOUND_TYPE_VAR	let:range
-UNBOUND_TYPE_VAR	let:range_step
-UNBOUND_TYPE_VAR	let:reduce
-UNBOUND_TYPE_VAR	let:reject_keys
 UNBOUND_TYPE_VAR	let:remove
-UNBOUND_TYPE_VAR	let:remove_all
-UNBOUND_TYPE_VAR	let:remove_at
-UNBOUND_TYPE_VAR	let:remove_with_cmp
-UNBOUND_TYPE_VAR	let:remove_with_evidence
 UNBOUND_TYPE_VAR	let:repeat
 UNBOUND_TYPE_VAR	let:repeat_go
 UNBOUND_TYPE_VAR	let:replace
 UNBOUND_TYPE_VAR	let:replace_all
-UNBOUND_TYPE_VAR	let:replace_all_with_eq
-UNBOUND_TYPE_VAR	let:replace_with_eq
-UNBOUND_TYPE_VAR	let:reverse
-UNBOUND_TYPE_VAR	let:rotate_left
-UNBOUND_TYPE_VAR	let:rotate_right
-UNBOUND_TYPE_VAR	let:scan
-UNBOUND_TYPE_VAR	let:select_keys
-UNBOUND_TYPE_VAR	let:seq_equals_with_eq
-UNBOUND_TYPE_VAR	let:set
 UNBOUND_TYPE_VAR	let:sign
 UNBOUND_TYPE_VAR	let:singleton
-UNBOUND_TYPE_VAR	let:singleton_with_cmp
-UNBOUND_TYPE_VAR	let:size
-UNBOUND_TYPE_VAR	let:slice
-UNBOUND_TYPE_VAR	let:sliding
 UNBOUND_TYPE_VAR	let:sort
 UNBOUND_TYPE_VAR	let:sort_by
 UNBOUND_TYPE_VAR	let:sort_by_key
-UNBOUND_TYPE_VAR	let:sort_by_key_with_cmp
-UNBOUND_TYPE_VAR	let:sorted_map_equals_with_eq
-UNBOUND_TYPE_VAR	let:sorted_set_equals_with_eq
 UNBOUND_TYPE_VAR	let:span
 UNBOUND_TYPE_VAR	let:split
 UNBOUND_TYPE_VAR	let:split_at
-UNBOUND_TYPE_VAR	let:split_with_eq
 UNBOUND_TYPE_VAR	let:starts_with
-UNBOUND_TYPE_VAR	let:starts_with_eq
-UNBOUND_TYPE_VAR	let:stddev
-UNBOUND_TYPE_VAR	let:structural_hash
-UNBOUND_TYPE_VAR	let:sub_map
-UNBOUND_TYPE_VAR	let:subsequences
-UNBOUND_TYPE_VAR	let:substring
-UNBOUND_TYPE_VAR	let:subtract
-UNBOUND_TYPE_VAR	let:subtract_to_int
-UNBOUND_TYPE_VAR	let:sum
-UNBOUND_TYPE_VAR	let:sum_float
-UNBOUND_TYPE_VAR	let:swap
-UNBOUND_TYPE_VAR	let:symmetric_diff_maps
-UNBOUND_TYPE_VAR	let:symmetric_difference
-UNBOUND_TYPE_VAR	let:tail
-UNBOUND_TYPE_VAR	let:tail_map
-UNBOUND_TYPE_VAR	let:tail_set
-UNBOUND_TYPE_VAR	let:take
-UNBOUND_TYPE_VAR	let:take_while
-UNBOUND_TYPE_VAR	let:to_base64
-UNBOUND_TYPE_VAR	let:to_camel_case
-UNBOUND_TYPE_VAR	let:to_deque
-UNBOUND_TYPE_VAR	let:to_float
-UNBOUND_TYPE_VAR	let:to_hex
-UNBOUND_TYPE_VAR	let:to_int
-UNBOUND_TYPE_VAR	let:to_kebab_case
-UNBOUND_TYPE_VAR	let:to_list
-UNBOUND_TYPE_VAR	let:to_lower
-UNBOUND_TYPE_VAR	let:to_map
-UNBOUND_TYPE_VAR	let:to_nat
-UNBOUND_TYPE_VAR	let:to_screaming_snake_case
-UNBOUND_TYPE_VAR	let:to_seq
-UNBOUND_TYPE_VAR	let:to_set
-UNBOUND_TYPE_VAR	let:to_snake_case
 UNBOUND_TYPE_VAR	let:to_sorted_map
-UNBOUND_TYPE_VAR	let:to_sorted_map_with_cmp
 UNBOUND_TYPE_VAR	let:to_sorted_set
-UNBOUND_TYPE_VAR	let:to_sorted_set_with_cmp
-UNBOUND_TYPE_VAR	let:to_str
-UNBOUND_TYPE_VAR	let:to_upper
-UNBOUND_TYPE_VAR	let:trim
-UNBOUND_TYPE_VAR	let:trim_end
-UNBOUND_TYPE_VAR	let:trim_start
-UNBOUND_TYPE_VAR	let:uncons
-UNBOUND_TYPE_VAR	let:union
 UNBOUND_TYPE_VAR	let:unique
-UNBOUND_TYPE_VAR	let:unique_with_eq
 UNBOUND_TYPE_VAR	let:unzip
 UNBOUND_TYPE_VAR	let:update
 UNBOUND_TYPE_VAR	let:upper_bound
-UNBOUND_TYPE_VAR	let:upper_bound_with_cmp
-UNBOUND_TYPE_VAR	let:values
-UNBOUND_TYPE_VAR	let:values_seq
-UNBOUND_TYPE_VAR	let:variance
-UNBOUND_TYPE_VAR	let:windows
-UNBOUND_TYPE_VAR	let:words
-UNBOUND_TYPE_VAR	let:xor
 UNBOUND_TYPE_VAR	let:zip
-UNBOUND_TYPE_VAR	let:zip3
-UNBOUND_TYPE_VAR	let:zip4
 UNBOUND_TYPE_VAR	let:zip_go
-UNBOUND_TYPE_VAR	let:zip_maps
-UNBOUND_TYPE_VAR	let:zip_with
 UNBOUND_TYPE_VAR	let:zip_with_index
 UNTYPED_PARAM	impl Bool.iff
 UNTYPED_PARAM	impl Bool.implies

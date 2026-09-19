@@ -950,7 +950,10 @@ class TypedAstBuilder(
                 // so `x` reads as the exact record its uses pin, not `{ …, … }`.
                 // mustBeOpenRowVars still protects a genuinely-open row (a user
                 // `…`, a polymorphic param), same policy as the let-decl close.
-                val type = closeGeneratedRowVars(resolveIdentifierType(name, qualifier), mustBeOpenRowVars)
+                val type = closeGeneratedRowVars(
+                    resolveIdentifierType(name, qualifier, contextType),
+                    mustBeOpenRowVars,
+                )
 
                 val binding = resolveBinding(name, qualifier)
 
@@ -1312,8 +1315,25 @@ class TypedAstBuilder(
 
         val isTailCall = isTailCallLocation(expr.loc)
 
+        // A callee whose type is still undetermined gets it from the CALL, which
+        // knows: the argument record was just built, and the return is the call's
+        // own solved type. Nothing is invented — both halves are read off this node.
+        //
+        // This is what types `__native_*` references. A native is in no binding
+        // table, so it resolved nowhere and emitted as an undetermined type; the
+        // stdlib is mostly native wrappers, so that single gap accounted for the
+        // large majority of undetermined types in the emitted tree.
+        val typedFn = if (
+            fn is TypedVar &&
+            fn.type.holdsUnknownPlaceholder() &&
+            !callType.holdsUnknownPlaceholder() &&
+            !argExpr.type.holdsUnknownPlaceholder()
+        ) {
+            fn.copy(type = MezzeType.FunctionType(paramType = argExpr.type, returnType = callType))
+        } else fn
+
         return TypedCall(
-            function = fn,
+            function = typedFn,
             arg = argExpr,
             instantiation = null,
             isTailCall = isTailCall,
@@ -2373,7 +2393,26 @@ class TypedAstBuilder(
         )
     }
 
-    private fun resolveIdentifierType(name: String, qualifier: ParsedModulePath?): MezzeType {
+    /**
+     * The type of a referenced name.
+     *
+     * [expected] is what the POSITION requires — the caller's `contextType`. When a
+     * name resolves nowhere the old code invented a placeholder; the expected type
+     * is a real answer and is preferred. This is what types `__native_*`
+     * references: a native is in no binding table, so every one of them used to
+     * emit as an undetermined type, and at a call site the position's type is
+     * `{args} -> <solved return>`, built from the call's own solved parts.
+     */
+    private fun resolveIdentifierType(
+        name: String,
+        qualifier: ParsedModulePath?,
+        expected: MezzeType? = null,
+    ): MezzeType {
+        fun giveUp(reason: String): MezzeType {
+            val e = expected
+            if (e != null && !e.holdsUnknownPlaceholder()) return substitution.apply(e)
+            return MezzeType.VarType(TypeVar.unknown(reason))
+        }
         // shape is still visible. See #233.
         if (qualifier != null) {
             val qualifiedKey = "${qualifier.shortName}::$name"
@@ -2383,7 +2422,7 @@ class TypedAstBuilder(
             importContext?.importedBindings?.get(name)?.type?.let {
                 return substitution.apply(it)
             }
-            return MezzeType.VarType(TypeVar.unknown("qualified identifier not in imports"))
+            return giveUp("qualified identifier not in imports")
         }
 
         identifierContext[name]?.let { return substitution.apply(it) }
@@ -2396,7 +2435,7 @@ class TypedAstBuilder(
             return substitution.apply(it)
         }
 
-        return MezzeType.VarType(TypeVar.unknown("identifier resolved nowhere (mostly `__native_*`, whose Mezze type is undeclared)"))
+        return giveUp("identifier resolved nowhere and the position expects nothing")
     }
 
     private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {
