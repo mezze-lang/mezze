@@ -243,8 +243,16 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                 // bare var). Give them their REAL signature so the foreign type flows
                 // through the chain and it all infers with ZERO annotations in the
                 // provider `impl <Lang>Foreign`. See [polyglotNativeSignature].
+                // The native's own declared type, read off the `pub let` that wraps
+                // it (see `nativeDeclaredTypes`). A fresh variable is what this used
+                // to hand back for every native, which is nothing for the solve to
+                // work from — and where the native's result does not flow straight
+                // out of a typed wrapper, nothing is what the caller kept.
+                val declaredNative = nativeDeclaredTypes[expr.localName]
                 val polyglotType = polyglotNativeSignature(expr.localName, context)
-                val nativeType = polyglotType ?: MezzeType.VarType(TypeVar.fresh())
+                val nativeType = declaredNative
+                    ?: polyglotType
+                    ?: MezzeType.VarType(TypeVar.fresh())
                 return ConstraintResult(
                     type = nativeType,
                     constraints = emptyList(),

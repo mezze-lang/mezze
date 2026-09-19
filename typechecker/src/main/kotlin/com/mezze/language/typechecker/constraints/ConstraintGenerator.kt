@@ -158,6 +158,18 @@ class ConstraintGenerator(
         // so the call instantiates the true function type (the working
         // "declared-before-use" path). Cycles (mutual recursion) keep source
         // order — placeholder behaviour, no worse than before.
+        // Read each `__native_*` intrinsic's Mezze type off the `pub let` that wraps
+        // it, BEFORE anything is generated, so a reference to one is typed rather
+        // than met with a fresh variable. See `nativeDeclaredTypes`.
+        //
+        // Only a wrapper whose body is EXACTLY a call to the native, passing its own
+        // parameters straight through, is read — that is the shape the stdlib uses
+        // for every one, and it is the only shape where the wrapper's declared type
+        // IS the native's. Two wrappers that disagree drop the entry rather than
+        // pick one: an ambiguous answer is worse than none, which is what the
+        // caller had before.
+        collectNativeDeclaredTypes(module.decls, annotationTypes, expressionGenerator.nativeDeclaredTypes)
+
         val orderedDecls = dependencyOrderedDecls(module.decls)
         collectedTypeCheckErrors.addAll(implValidator.validateEqHashPairing(orderedDecls))
         for (item in orderedDecls) {
@@ -1580,3 +1592,57 @@ data class PatternConstraintResult(
     val warnings: List<String> = emptyList(),
     val bindingLocations: Map<String, Loc> = emptyMap()
 )
+
+/**
+ * Fill [out] with `nativeName -> { fields } -> return`, read off each `pub let`
+ * that wraps exactly one native call.
+ *
+ * The wrapper states the native's type: `pub let clamp: { n: Int, min: Int, max:
+ * Int } -> Int = { n, min, max } -> __native_int_clamp { n = n, min = min, max =
+ * max }` maps each of the native's OWN field names to the declared type of the
+ * parameter handed to it. Anything less direct than that — a computed argument, a
+ * field the wrapper does not have a parameter for — is skipped, because then the
+ * wrapper's type is not the native's.
+ */
+private fun collectNativeDeclaredTypes(
+    decls: List<ParsedDecl>,
+    annotationTypes: Map<ParsedLetDecl, MezzeType>,
+    out: MutableMap<String, MezzeType>,
+) {
+    val conflicting = HashSet<String>()
+    for (decl in decls) {
+        if (decl !is ParsedLetDecl) continue
+        val declType = annotationTypes[decl] as? MezzeType.FunctionType ?: continue
+        val wrapperParams = (declType.paramType as? MezzeType.RecordType)?.fields ?: continue
+        val lambda = decl.value as? ParsedLambda ?: continue
+        val call = lambda.body as? ParsedFunctionCall ?: continue
+        val callee = call.function as? ParsedIdentifier ?: continue
+        val nativeName = callee.localName
+        if (!nativeName.startsWith(MagicParams.NATIVE_PREFIX)) continue
+        val args = call.arguments as? ParsedRecordLit ?: continue
+
+        val fields = LinkedHashMap<String, MezzeType>()
+        var direct = true
+        for (entry in args.entries) {
+            val field = entry as? ParsedRecordEntry.Field
+            if (field == null) { direct = false; break }
+            val passed = field.value as? ParsedIdentifier
+            if (passed == null) { direct = false; break }
+            val paramType = wrapperParams[passed.localName]
+            if (paramType == null) { direct = false; break }
+            fields[field.name] = paramType
+        }
+        if (!direct || fields.isEmpty()) continue
+
+        val nativeType = MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(fields),
+            returnType = declType.returnType,
+        )
+        val existing = out[nativeName]
+        when {
+            nativeName in conflicting -> Unit
+            existing == null -> out[nativeName] = nativeType
+            existing != nativeType -> { out.remove(nativeName); conflicting.add(nativeName) }
+        }
+    }
+}

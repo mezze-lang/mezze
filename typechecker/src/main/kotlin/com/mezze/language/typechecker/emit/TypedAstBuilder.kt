@@ -1346,7 +1346,15 @@ class TypedAstBuilder(
                 if (!declared.holdsTypeVar()) continue
                 val fieldValue = entry.value ?: continue
                 val actual = substitution.apply(buildExpr(fieldValue, file).type)
-                if (actual.holdsTypeVar()) continue
+                // A variable bound by the ENCLOSING declaration is a real type, not
+                // a gap: inside `min_by : { xs: ['a], f: { x: 'a } -> 'b } …` the
+                // argument `f` has type `{ x: 'n227 } -> 'v229`, and those two
+                // variables are precisely what the callee's `'a` and `'b` are being
+                // instantiated to here. Refusing every actual that holds a variable
+                // refused all of them inside generic code — which is all of the
+                // collections — so the callee's own `'b` stayed in the caller's body
+                // and belonged to no signature there.
+                if (actual.holdsUnknownPlaceholder()) continue
                 harvestVarBindings(declared, actual, bindings)
             }
             if (bindings.isEmpty()) fnParamType
@@ -1372,14 +1380,81 @@ class TypedAstBuilder(
         // table, so it resolved nowhere and emitted as an undetermined type; the
         // stdlib is mostly native wrappers, so that single gap accounted for the
         // large majority of undetermined types in the emitted tree.
-        val typedFn = if (
-            fn is TypedVar &&
-            fn.type.holdsUnknownPlaceholder() &&
-            !callType.holdsUnknownPlaceholder() &&
-            !argExpr.type.holdsUnknownPlaceholder()
-        ) {
-            fn.copy(type = MezzeType.FunctionType(paramType = argExpr.type, returnType = callType))
-        } else fn
+        // The callee is not always a plain reference. `a < b` and every other
+        // operator dispatch emits the ability op as a FIELD ACCESS off its
+        // receiver, and that is the form 441 of the 451 remaining undetermined
+        // types took — the rule below used to skip them for being the wrong node
+        // class, which has nothing to do with whether the call knows the type.
+        val calleeType: MezzeType? = when (fn) {
+            is TypedVar -> fn.type
+            is TypedFieldAccess -> fn.type
+            else -> null
+        }
+        fun retypedCallee(to: MezzeType): TypedExpr = when (fn) {
+            is TypedVar -> fn.copy(type = to)
+            is TypedFieldAccess -> fn.copy(type = to)
+            else -> fn
+        }
+
+        val typedFn = when {
+            calleeType == null -> fn
+
+            calleeType.holdsUnknownPlaceholder() &&
+                !callType.holdsUnknownPlaceholder() &&
+                !argExpr.type.holdsUnknownPlaceholder() ->
+                retypedCallee(MezzeType.FunctionType(paramType = argExpr.type, returnType = callType))
+
+            // A POLYMORPHIC callee is instantiated at its use site.
+            //
+            // A reference to `min_by_with_cmp : { xs: ['a], … } -> Option 'a` was
+            // emitted carrying the callee's OWN variables — the very `'a` object
+            // from its declaration, shared by every call site in the program. The
+            // declaration `min_by` is generalized over the variables its own solve
+            // produced, so its scheme said `'n227` while its body said `'a`: one
+            // written type variable, two TypeVars, and nothing downstream that
+            // matches BY NAME (mono's substitution, the per-(ability, type var)
+            // dict slots) can line the two up.
+            //
+            // This call knows the instantiation: match the declared shape against
+            // the argument that was just built and against the call's own solved
+            // result. Only the VARIABLES move — the declared shape, its open/closed
+            // records and its aliases, is what gets substituted into, so nothing is
+            // widened or narrowed here.
+            else -> {
+                val declared = calleeType as? MezzeType.FunctionType
+                if (declared == null || !declared.holdsTypeVar()) fn else {
+                    val bindings = mutableMapOf<String, MezzeType>()
+                    if (!argExpr.type.holdsUnknownPlaceholder()) {
+                        harvestVarBindings(declared.paramType, argExpr.type, bindings)
+                    }
+                    // The return corroborates, but only for variables the
+                    // PARAMETERS also mention. A variable that appears solely in the
+                    // return is the dispatch key of a no-receiver ability op —
+                    // `zero {}`, `default {}`, chosen by the type they produce — and
+                    // rewriting it to whatever this site happens to call the same
+                    // type leaves the dispatcher looking up a variable that is no
+                    // longer there: "nothing here determines that type".
+                    if (!callType.holdsUnknownPlaceholder()) {
+                        val inParams = HashSet<TypeVar>()
+                        com.mezze.language.ast.collectTypeVariables(declared.paramType, inParams)
+                        val paramVarNames = inParams.mapTo(HashSet()) { it.name }
+                        val fromReturn = mutableMapOf<String, MezzeType>()
+                        harvestVarBindings(declared.returnType, callType, fromReturn)
+                        for ((name, to) in fromReturn) {
+                            if (name in paramVarNames) bindings.putIfAbsent(name, to)
+                        }
+                    }
+                    // A variable standing for itself is not an instantiation, and a
+                    // binding to something still undetermined would REPLACE a real
+                    // variable with a guess — strictly worse than leaving it open.
+                    val instantiation = bindings.filterNot { (name, to) ->
+                        to.holdsUnknownPlaceholder() || (to as? MezzeType.VarType)?.variable?.name == name
+                    }
+                    if (instantiation.isEmpty()) fn
+                    else retypedCallee(substituteTypeParamsByName(declared, instantiation))
+                }
+            }
+        }
 
         return TypedCall(
             function = typedFn,
@@ -1727,19 +1802,34 @@ class TypedAstBuilder(
         // the wrong receiver even though dispatch (resolvedImplHash) and the arg
         // record are correct. Rebuild the fn type from the real param record
         // (wrappedArg.type carries `{ it: <solvedReceiver>, … }`) and return type.
-        val correctedFn = if (fn is TypedVar && fn.name == methodInfo.methodName) {
-            // Preserve the method's effect row + ability constraints from the
-            // original (solved) fn type — rebuilding only param/return here would
-            // otherwise DROP them (default null), so a hover on `.send` lost its
-            // `<Http>` even though the method body performs Http.
-            val prior = substitution.apply(fn.type) as? MezzeType.FunctionType
-            fn.copy(type = MezzeType.FunctionType(
-                paramType = substitution.apply(wrappedArg.type),
-                returnType = callReturnType,
-                effects = prior?.effects,
-                abilityConstraints = prior?.abilityConstraints ?: emptyList(),
-            ))
-        } else fn
+        // Preserve the method's effect row + ability constraints from the
+        // original (solved) fn type — rebuilding only param/return here would
+        // otherwise DROP them (default null), so a hover on `.send` lost its
+        // `<Http>` even though the method body performs Http.
+        fun correctTo(prior: MezzeType): MezzeType = MezzeType.FunctionType(
+            paramType = substitution.apply(wrappedArg.type),
+            returnType = callReturnType,
+            effects = (prior as? MezzeType.FunctionType)?.effects,
+            abilityConstraints = (prior as? MezzeType.FunctionType)?.abilityConstraints ?: emptyList(),
+        )
+
+        val correctedFn = when {
+            fn is TypedVar && fn.name == methodInfo.methodName ->
+                fn.copy(type = correctTo(substitution.apply(fn.type)))
+
+            // An OPERATOR dispatches through the same machinery, but emits the op
+            // as a field access off its receiver rather than as a named var — and
+            // that form was skipped here purely for being the wrong node class.
+            // It was the single largest remaining source of "the compiler finished
+            // without a type": 441 of 451, every `a < b` and `x == 0` in the
+            // stdlib. The receiver's type and the call's result are both known at
+            // this point; `wrappedArg` is the very record the op is applied to.
+            fn is TypedFieldAccess && fn.field == methodInfo.methodName &&
+                fn.type.holdsUnknownPlaceholder() ->
+                fn.copy(type = correctTo(substitution.apply(fn.type)))
+
+            else -> fn
+        }
 
         val isTailCall = isTailCallLocation(expr.loc)
 

@@ -24,362 +24,22 @@
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
-UNBOUND_TYPE_VAR	impl Bool.iff
-UNBOUND_TYPE_VAR	impl Bytes.fold
-UNBOUND_TYPE_VAR	impl Bytes.ge
-UNBOUND_TYPE_VAR	impl Bytes.gt
-UNBOUND_TYPE_VAR	impl Bytes.le
-UNBOUND_TYPE_VAR	impl Bytes.lt
-UNBOUND_TYPE_VAR	impl Char.ge
-UNBOUND_TYPE_VAR	impl Char.gt
-UNBOUND_TYPE_VAR	impl Char.le
-UNBOUND_TYPE_VAR	impl Char.lt
-UNBOUND_TYPE_VAR	impl Deque.contains
-UNBOUND_TYPE_VAR	impl Deque.dedup
-UNBOUND_TYPE_VAR	impl Deque.dedup_by
-UNBOUND_TYPE_VAR	impl Deque.dequeue
-UNBOUND_TYPE_VAR	impl Deque.enqueue
-UNBOUND_TYPE_VAR	impl Deque.eq
-UNBOUND_TYPE_VAR	impl Deque.flat_map
-UNBOUND_TYPE_VAR	impl Deque.fold
-UNBOUND_TYPE_VAR	impl Deque.for_each
-UNBOUND_TYPE_VAR	impl Deque.ge
-UNBOUND_TYPE_VAR	impl Deque.gt
-UNBOUND_TYPE_VAR	impl Deque.index_of
-UNBOUND_TYPE_VAR	impl Deque.le
-UNBOUND_TYPE_VAR	impl Deque.lt
-UNBOUND_TYPE_VAR	impl Deque.map
-UNBOUND_TYPE_VAR	impl Deque.max
-UNBOUND_TYPE_VAR	impl Deque.max_by
-UNBOUND_TYPE_VAR	impl Deque.min
-UNBOUND_TYPE_VAR	impl Deque.min_by
-UNBOUND_TYPE_VAR	impl Deque.neq
-UNBOUND_TYPE_VAR	impl Deque.pop
-UNBOUND_TYPE_VAR	impl Deque.push
-UNBOUND_TYPE_VAR	impl Deque.scan
-UNBOUND_TYPE_VAR	impl Deque.sort
-UNBOUND_TYPE_VAR	impl Deque.to_map
-UNBOUND_TYPE_VAR	impl Deque.to_sorted_map
-UNBOUND_TYPE_VAR	impl Float.add
-UNBOUND_TYPE_VAR	impl Float.div
-UNBOUND_TYPE_VAR	impl Float.is_zero
-UNBOUND_TYPE_VAR	impl Float.mod
-UNBOUND_TYPE_VAR	impl Float.mul
-UNBOUND_TYPE_VAR	impl Float.sub
-UNBOUND_TYPE_VAR	impl Frac.is_negative
-UNBOUND_TYPE_VAR	impl Frac.is_positive
-UNBOUND_TYPE_VAR	impl Frac.is_zero
-UNBOUND_TYPE_VAR	impl Frac.reciprocal
 UNBOUND_TYPE_VAR	impl Int.add
 UNBOUND_TYPE_VAR	impl Int.div
-UNBOUND_TYPE_VAR	impl Int.is_zero
 UNBOUND_TYPE_VAR	impl Int.mod
 UNBOUND_TYPE_VAR	impl Int.mul
 UNBOUND_TYPE_VAR	impl Int.sub
-UNBOUND_TYPE_VAR	impl List.append
-UNBOUND_TYPE_VAR	impl List.binary_search
-UNBOUND_TYPE_VAR	impl List.binary_search_insert_point
-UNBOUND_TYPE_VAR	impl List.compare
-UNBOUND_TYPE_VAR	impl List.contains
-UNBOUND_TYPE_VAR	impl List.dedup
-UNBOUND_TYPE_VAR	impl List.dedup_by
-UNBOUND_TYPE_VAR	impl List.enumerate
-UNBOUND_TYPE_VAR	impl List.eq
-UNBOUND_TYPE_VAR	impl List.equal_range
-UNBOUND_TYPE_VAR	impl List.equals
-UNBOUND_TYPE_VAR	impl List.flat_map
-UNBOUND_TYPE_VAR	impl List.flatten
-UNBOUND_TYPE_VAR	impl List.fold_left
-UNBOUND_TYPE_VAR	impl List.fold_right
-UNBOUND_TYPE_VAR	impl List.for_each
-UNBOUND_TYPE_VAR	impl List.ge
-UNBOUND_TYPE_VAR	impl List.group_by
-UNBOUND_TYPE_VAR	impl List.group_consecutive
-UNBOUND_TYPE_VAR	impl List.group_consecutive_by
-UNBOUND_TYPE_VAR	impl List.gt
-UNBOUND_TYPE_VAR	impl List.index_of
-UNBOUND_TYPE_VAR	impl List.init
-UNBOUND_TYPE_VAR	impl List.intersperse
-UNBOUND_TYPE_VAR	impl List.is_sorted
-UNBOUND_TYPE_VAR	impl List.is_sorted_by
-UNBOUND_TYPE_VAR	impl List.is_sorted_descending
-UNBOUND_TYPE_VAR	impl List.last_index_of
-UNBOUND_TYPE_VAR	impl List.le
-UNBOUND_TYPE_VAR	impl List.lower_bound
-UNBOUND_TYPE_VAR	impl List.lt
-UNBOUND_TYPE_VAR	impl List.map
-UNBOUND_TYPE_VAR	impl List.max
-UNBOUND_TYPE_VAR	impl List.max_by
-UNBOUND_TYPE_VAR	impl List.min
-UNBOUND_TYPE_VAR	impl List.min_by
-UNBOUND_TYPE_VAR	impl List.neq
-UNBOUND_TYPE_VAR	impl List.scan
-UNBOUND_TYPE_VAR	impl List.sort
-UNBOUND_TYPE_VAR	impl List.sort_by_key
-UNBOUND_TYPE_VAR	impl List.span
-UNBOUND_TYPE_VAR	impl List.split_at
-UNBOUND_TYPE_VAR	impl List.to_map
-UNBOUND_TYPE_VAR	impl List.to_sorted_map
-UNBOUND_TYPE_VAR	impl List.to_sorted_set
-UNBOUND_TYPE_VAR	impl List.unzip
-UNBOUND_TYPE_VAR	impl List.upper_bound
-UNBOUND_TYPE_VAR	impl List.zip
-UNBOUND_TYPE_VAR	impl List.zip_with_index
-UNBOUND_TYPE_VAR	impl Map.contains_value
-UNBOUND_TYPE_VAR	impl Map.eq
-UNBOUND_TYPE_VAR	impl Map.flat_map
-UNBOUND_TYPE_VAR	impl Map.fold
-UNBOUND_TYPE_VAR	impl Map.get_or
-UNBOUND_TYPE_VAR	impl Map.hash
-UNBOUND_TYPE_VAR	impl Map.is_empty
-UNBOUND_TYPE_VAR	impl Map.map_keys
-UNBOUND_TYPE_VAR	impl Map.map_values
-UNBOUND_TYPE_VAR	impl Map.max_key
-UNBOUND_TYPE_VAR	impl Map.max_value
-UNBOUND_TYPE_VAR	impl Map.min_key
-UNBOUND_TYPE_VAR	impl Map.min_value
-UNBOUND_TYPE_VAR	impl Map.neq
-UNBOUND_TYPE_VAR	impl Map.to_iter
-UNBOUND_TYPE_VAR	impl Map.to_sorted_map
-UNBOUND_TYPE_VAR	impl Map.update
-UNBOUND_TYPE_VAR	impl MutBytes.is_empty
-UNBOUND_TYPE_VAR	impl MutSeq.is_empty
-UNBOUND_TYPE_VAR	impl Nat.add
-UNBOUND_TYPE_VAR	impl Nat.div
-UNBOUND_TYPE_VAR	impl Nat.hash
-UNBOUND_TYPE_VAR	impl Nat.is_even
-UNBOUND_TYPE_VAR	impl Nat.is_odd
-UNBOUND_TYPE_VAR	impl Nat.is_zero
-UNBOUND_TYPE_VAR	impl Nat.mod
-UNBOUND_TYPE_VAR	impl Nat.mul
-UNBOUND_TYPE_VAR	impl Nat.sub
-UNBOUND_TYPE_VAR	impl NonEmptyList.contains
-UNBOUND_TYPE_VAR	impl NonEmptyList.eq
-UNBOUND_TYPE_VAR	impl NonEmptyList.flat_map
-UNBOUND_TYPE_VAR	impl NonEmptyList.fold_left
-UNBOUND_TYPE_VAR	impl NonEmptyList.fold_right
-UNBOUND_TYPE_VAR	impl NonEmptyList.ge
-UNBOUND_TYPE_VAR	impl NonEmptyList.gt
-UNBOUND_TYPE_VAR	impl NonEmptyList.le
-UNBOUND_TYPE_VAR	impl NonEmptyList.lt
-UNBOUND_TYPE_VAR	impl NonEmptyList.map
-UNBOUND_TYPE_VAR	impl NonEmptyList.neq
-UNBOUND_TYPE_VAR	impl NonEmptyList.sort
-UNBOUND_TYPE_VAR	impl NonEmptyList.zip
-UNBOUND_TYPE_VAR	impl Option.eq
-UNBOUND_TYPE_VAR	impl Option.filter
-UNBOUND_TYPE_VAR	impl Option.flat_map
-UNBOUND_TYPE_VAR	impl Option.flatten
-UNBOUND_TYPE_VAR	impl Option.fold
-UNBOUND_TYPE_VAR	impl Option.ge
-UNBOUND_TYPE_VAR	impl Option.get_or
-UNBOUND_TYPE_VAR	impl Option.gt
-UNBOUND_TYPE_VAR	impl Option.if_none
-UNBOUND_TYPE_VAR	impl Option.is_none
-UNBOUND_TYPE_VAR	impl Option.is_some
-UNBOUND_TYPE_VAR	impl Option.le
-UNBOUND_TYPE_VAR	impl Option.lt
-UNBOUND_TYPE_VAR	impl Option.map
-UNBOUND_TYPE_VAR	impl Option.neq
-UNBOUND_TYPE_VAR	impl Option.or_else
-UNBOUND_TYPE_VAR	impl Option.to_result
-UNBOUND_TYPE_VAR	impl Option.zip
-UNBOUND_TYPE_VAR	impl Option.zip_with
-UNBOUND_TYPE_VAR	impl Result.eq
-UNBOUND_TYPE_VAR	impl Result.flat_map
-UNBOUND_TYPE_VAR	impl Result.flatten
-UNBOUND_TYPE_VAR	impl Result.fold
-UNBOUND_TYPE_VAR	impl Result.get_or
-UNBOUND_TYPE_VAR	impl Result.if_err
-UNBOUND_TYPE_VAR	impl Result.if_ok
-UNBOUND_TYPE_VAR	impl Result.is_err
-UNBOUND_TYPE_VAR	impl Result.is_ok
-UNBOUND_TYPE_VAR	impl Result.map
-UNBOUND_TYPE_VAR	impl Result.map_err
-UNBOUND_TYPE_VAR	impl Result.neq
-UNBOUND_TYPE_VAR	impl Result.or_else
-UNBOUND_TYPE_VAR	impl Result.to_list
-UNBOUND_TYPE_VAR	impl Result.to_option
-UNBOUND_TYPE_VAR	impl Result.zip
-UNBOUND_TYPE_VAR	impl Seq.binary_search
-UNBOUND_TYPE_VAR	impl Seq.binary_search_insert_point
-UNBOUND_TYPE_VAR	impl Seq.cartesian_product
-UNBOUND_TYPE_VAR	impl Seq.compare
-UNBOUND_TYPE_VAR	impl Seq.contains
-UNBOUND_TYPE_VAR	impl Seq.count_element
-UNBOUND_TYPE_VAR	impl Seq.dedup
-UNBOUND_TYPE_VAR	impl Seq.dedup_by
-UNBOUND_TYPE_VAR	impl Seq.distinct
-UNBOUND_TYPE_VAR	impl Seq.ends_with
-UNBOUND_TYPE_VAR	impl Seq.eq
-UNBOUND_TYPE_VAR	impl Seq.equal_range
-UNBOUND_TYPE_VAR	impl Seq.equals
-UNBOUND_TYPE_VAR	impl Seq.flat_map
-UNBOUND_TYPE_VAR	impl Seq.fold
-UNBOUND_TYPE_VAR	impl Seq.for_each
-UNBOUND_TYPE_VAR	impl Seq.ge
-UNBOUND_TYPE_VAR	impl Seq.group_by
-UNBOUND_TYPE_VAR	impl Seq.group_consecutive
-UNBOUND_TYPE_VAR	impl Seq.group_consecutive_by
-UNBOUND_TYPE_VAR	impl Seq.gt
-UNBOUND_TYPE_VAR	impl Seq.index_of
 UNBOUND_TYPE_VAR	impl Seq.is_sorted
-UNBOUND_TYPE_VAR	impl Seq.is_sorted_by
 UNBOUND_TYPE_VAR	impl Seq.is_sorted_descending
-UNBOUND_TYPE_VAR	impl Seq.last_index_of
-UNBOUND_TYPE_VAR	impl Seq.le
-UNBOUND_TYPE_VAR	impl Seq.lower_bound
-UNBOUND_TYPE_VAR	impl Seq.lt
-UNBOUND_TYPE_VAR	impl Seq.map
-UNBOUND_TYPE_VAR	impl Seq.max
-UNBOUND_TYPE_VAR	impl Seq.max_by
-UNBOUND_TYPE_VAR	impl Seq.min
-UNBOUND_TYPE_VAR	impl Seq.min_by
-UNBOUND_TYPE_VAR	impl Seq.neq
-UNBOUND_TYPE_VAR	impl Seq.replace
-UNBOUND_TYPE_VAR	impl Seq.replace_all
-UNBOUND_TYPE_VAR	impl Seq.scan
-UNBOUND_TYPE_VAR	impl Seq.sort
-UNBOUND_TYPE_VAR	impl Seq.sort_by_key
-UNBOUND_TYPE_VAR	impl Seq.split
-UNBOUND_TYPE_VAR	impl Seq.starts_with
-UNBOUND_TYPE_VAR	impl Seq.to_map
-UNBOUND_TYPE_VAR	impl Seq.to_sorted_map
-UNBOUND_TYPE_VAR	impl Seq.unique
-UNBOUND_TYPE_VAR	impl Seq.unzip
-UNBOUND_TYPE_VAR	impl Seq.upper_bound
-UNBOUND_TYPE_VAR	impl Seq.zip
-UNBOUND_TYPE_VAR	impl Seq.zip_with
-UNBOUND_TYPE_VAR	impl Set.collect_list
-UNBOUND_TYPE_VAR	impl Set.collect_seq
-UNBOUND_TYPE_VAR	impl Set.filter_map
-UNBOUND_TYPE_VAR	impl Set.flat_map
-UNBOUND_TYPE_VAR	impl Set.fold
-UNBOUND_TYPE_VAR	impl Set.group_by
-UNBOUND_TYPE_VAR	impl Set.is_empty
-UNBOUND_TYPE_VAR	impl Set.map
-UNBOUND_TYPE_VAR	impl Set.max
-UNBOUND_TYPE_VAR	impl Set.max_by
-UNBOUND_TYPE_VAR	impl Set.min
-UNBOUND_TYPE_VAR	impl Set.min_by
-UNBOUND_TYPE_VAR	impl SortedMap.contains_key
-UNBOUND_TYPE_VAR	impl SortedMap.eq
-UNBOUND_TYPE_VAR	impl SortedMap.fold
-UNBOUND_TYPE_VAR	impl SortedMap.ge
-UNBOUND_TYPE_VAR	impl SortedMap.get
-UNBOUND_TYPE_VAR	impl SortedMap.gt
-UNBOUND_TYPE_VAR	impl SortedMap.hash
-UNBOUND_TYPE_VAR	impl SortedMap.insert
-UNBOUND_TYPE_VAR	impl SortedMap.le
-UNBOUND_TYPE_VAR	impl SortedMap.lt
-UNBOUND_TYPE_VAR	impl SortedMap.map_keys
-UNBOUND_TYPE_VAR	impl SortedMap.map_values
-UNBOUND_TYPE_VAR	impl SortedMap.neq
-UNBOUND_TYPE_VAR	impl SortedMap.remove
-UNBOUND_TYPE_VAR	impl SortedMap.to_iter
-UNBOUND_TYPE_VAR	impl SortedSet.add
-UNBOUND_TYPE_VAR	impl SortedSet.collect_list
-UNBOUND_TYPE_VAR	impl SortedSet.collect_seq
-UNBOUND_TYPE_VAR	impl SortedSet.contains
-UNBOUND_TYPE_VAR	impl SortedSet.eq
-UNBOUND_TYPE_VAR	impl SortedSet.filter_map
-UNBOUND_TYPE_VAR	impl SortedSet.fold
-UNBOUND_TYPE_VAR	impl SortedSet.for_each
-UNBOUND_TYPE_VAR	impl SortedSet.ge
-UNBOUND_TYPE_VAR	impl SortedSet.gt
-UNBOUND_TYPE_VAR	impl SortedSet.le
-UNBOUND_TYPE_VAR	impl SortedSet.lt
-UNBOUND_TYPE_VAR	impl SortedSet.map
-UNBOUND_TYPE_VAR	impl SortedSet.max_by
-UNBOUND_TYPE_VAR	impl SortedSet.min_by
-UNBOUND_TYPE_VAR	impl SortedSet.neq
-UNBOUND_TYPE_VAR	impl SortedSet.remove
-UNBOUND_TYPE_VAR	impl c3d08106.list
-UNBOUND_TYPE_VAR	let:add
-UNBOUND_TYPE_VAR	let:append
-UNBOUND_TYPE_VAR	let:binary_search
-UNBOUND_TYPE_VAR	let:binary_search_insert_point
-UNBOUND_TYPE_VAR	let:compare
-UNBOUND_TYPE_VAR	let:contains
-UNBOUND_TYPE_VAR	let:contains_key
-UNBOUND_TYPE_VAR	let:contains_value
-UNBOUND_TYPE_VAR	let:count_element
-UNBOUND_TYPE_VAR	let:dedup
-UNBOUND_TYPE_VAR	let:dedup_by
-UNBOUND_TYPE_VAR	let:dequeue
-UNBOUND_TYPE_VAR	let:distinct
-UNBOUND_TYPE_VAR	let:ends_with
-UNBOUND_TYPE_VAR	let:enqueue
 UNBOUND_TYPE_VAR	let:enumerate
-UNBOUND_TYPE_VAR	let:equal_range
-UNBOUND_TYPE_VAR	let:equals
-UNBOUND_TYPE_VAR	let:flat_map
 UNBOUND_TYPE_VAR	let:flatten
-UNBOUND_TYPE_VAR	let:fold_go
-UNBOUND_TYPE_VAR	let:from_list
-UNBOUND_TYPE_VAR	let:from_map
-UNBOUND_TYPE_VAR	let:from_seq
-UNBOUND_TYPE_VAR	let:gcd
-UNBOUND_TYPE_VAR	let:get
-UNBOUND_TYPE_VAR	let:get_or
-UNBOUND_TYPE_VAR	let:group_consecutive
-UNBOUND_TYPE_VAR	let:group_consecutive_by
-UNBOUND_TYPE_VAR	let:iff
-UNBOUND_TYPE_VAR	let:implies
-UNBOUND_TYPE_VAR	let:index_of
 UNBOUND_TYPE_VAR	let:init
-UNBOUND_TYPE_VAR	let:insert
 UNBOUND_TYPE_VAR	let:intersperse
-UNBOUND_TYPE_VAR	let:is_empty
-UNBOUND_TYPE_VAR	let:is_even
-UNBOUND_TYPE_VAR	let:is_odd
-UNBOUND_TYPE_VAR	let:is_sorted
-UNBOUND_TYPE_VAR	let:is_sorted_by
-UNBOUND_TYPE_VAR	let:is_sorted_by_go
-UNBOUND_TYPE_VAR	let:is_sorted_descending
-UNBOUND_TYPE_VAR	let:is_zero
-UNBOUND_TYPE_VAR	let:last_index_of
-UNBOUND_TYPE_VAR	let:lcm
-UNBOUND_TYPE_VAR	let:lower_bound
-UNBOUND_TYPE_VAR	let:max
-UNBOUND_TYPE_VAR	let:max_by
-UNBOUND_TYPE_VAR	let:max_key
-UNBOUND_TYPE_VAR	let:max_value
-UNBOUND_TYPE_VAR	let:min
-UNBOUND_TYPE_VAR	let:min_by
-UNBOUND_TYPE_VAR	let:min_key
-UNBOUND_TYPE_VAR	let:min_value
-UNBOUND_TYPE_VAR	let:of
-UNBOUND_TYPE_VAR	let:pop
-UNBOUND_TYPE_VAR	let:pow
-UNBOUND_TYPE_VAR	let:prepend
-UNBOUND_TYPE_VAR	let:push
-UNBOUND_TYPE_VAR	let:remove
 UNBOUND_TYPE_VAR	let:repeat
-UNBOUND_TYPE_VAR	let:repeat_go
-UNBOUND_TYPE_VAR	let:replace
-UNBOUND_TYPE_VAR	let:replace_all
-UNBOUND_TYPE_VAR	let:sign
 UNBOUND_TYPE_VAR	let:singleton
-UNBOUND_TYPE_VAR	let:sort
 UNBOUND_TYPE_VAR	let:sort_by
-UNBOUND_TYPE_VAR	let:sort_by_key
-UNBOUND_TYPE_VAR	let:span
-UNBOUND_TYPE_VAR	let:split
-UNBOUND_TYPE_VAR	let:split_at
-UNBOUND_TYPE_VAR	let:starts_with
-UNBOUND_TYPE_VAR	let:to_sorted_map
-UNBOUND_TYPE_VAR	let:to_sorted_set
-UNBOUND_TYPE_VAR	let:unique
-UNBOUND_TYPE_VAR	let:unzip
-UNBOUND_TYPE_VAR	let:update
-UNBOUND_TYPE_VAR	let:upper_bound
 UNBOUND_TYPE_VAR	let:zip
-UNBOUND_TYPE_VAR	let:zip_go
-UNBOUND_TYPE_VAR	let:zip_with_index
-UNTYPED_PARAM	impl Bool.iff
 UNTYPED_PARAM	impl Bool.implies
-UNTYPED_PARAM	impl Bool.xor
 UNTYPED_PARAM	impl Bytes.fold
 UNTYPED_PARAM	impl Deque.contains
 UNTYPED_PARAM	impl Deque.enqueue
@@ -390,14 +50,8 @@ UNTYPED_PARAM	impl Deque.push
 UNTYPED_PARAM	impl Deque.push_back
 UNTYPED_PARAM	impl Deque.push_front
 UNTYPED_PARAM	impl Deque.scan
-UNTYPED_PARAM	impl Float.clamp
-UNTYPED_PARAM	impl Float.max
-UNTYPED_PARAM	impl Float.min
-UNTYPED_PARAM	impl Int.clamp
 UNTYPED_PARAM	impl Int.gcd
 UNTYPED_PARAM	impl Int.lcm
-UNTYPED_PARAM	impl Int.max
-UNTYPED_PARAM	impl Int.min
 UNTYPED_PARAM	impl Int.pow
 UNTYPED_PARAM	impl List.binary_search
 UNTYPED_PARAM	impl List.binary_search_by
@@ -421,10 +75,6 @@ UNTYPED_PARAM	impl Map.get_or
 UNTYPED_PARAM	impl Map.insert
 UNTYPED_PARAM	impl Map.remove
 UNTYPED_PARAM	impl Map.update
-UNTYPED_PARAM	impl Nat.clamp
-UNTYPED_PARAM	impl Nat.max
-UNTYPED_PARAM	impl Nat.min
-UNTYPED_PARAM	impl Nat.subtract_to_int
 UNTYPED_PARAM	impl NonEmptyList.contains
 UNTYPED_PARAM	impl NonEmptyList.fold_left
 UNTYPED_PARAM	impl NonEmptyList.fold_right
@@ -475,56 +125,5 @@ UNTYPED_PARAM	impl SortedSet.head_set
 UNTYPED_PARAM	impl SortedSet.range
 UNTYPED_PARAM	impl SortedSet.remove
 UNTYPED_PARAM	impl SortedSet.tail_set
-UNTYPED_PARAM	let:add
-UNTYPED_PARAM	let:append
-UNTYPED_PARAM	let:binary_search
-UNTYPED_PARAM	let:binary_search_insert_point
-UNTYPED_PARAM	let:compare
-UNTYPED_PARAM	let:contains
-UNTYPED_PARAM	let:contains_key
-UNTYPED_PARAM	let:contains_value
-UNTYPED_PARAM	let:count_element
-UNTYPED_PARAM	let:dedup
-UNTYPED_PARAM	let:dedup_by
-UNTYPED_PARAM	let:distinct
-UNTYPED_PARAM	let:ends_with
-UNTYPED_PARAM	let:enumerate
-UNTYPED_PARAM	let:equal_range
-UNTYPED_PARAM	let:equals
-UNTYPED_PARAM	let:from_list
-UNTYPED_PARAM	let:from_map
-UNTYPED_PARAM	let:from_seq
-UNTYPED_PARAM	let:get
-UNTYPED_PARAM	let:group_consecutive
-UNTYPED_PARAM	let:group_consecutive_by
-UNTYPED_PARAM	let:index_of
-UNTYPED_PARAM	let:insert
 UNTYPED_PARAM	let:intersperse
-UNTYPED_PARAM	let:is_sorted
-UNTYPED_PARAM	let:is_sorted_by
-UNTYPED_PARAM	let:is_sorted_descending
-UNTYPED_PARAM	let:last_index_of
-UNTYPED_PARAM	let:lower_bound
-UNTYPED_PARAM	let:max
-UNTYPED_PARAM	let:max_by
-UNTYPED_PARAM	let:max_key
-UNTYPED_PARAM	let:max_value
-UNTYPED_PARAM	let:min
-UNTYPED_PARAM	let:min_by
-UNTYPED_PARAM	let:min_key
-UNTYPED_PARAM	let:min_value
-UNTYPED_PARAM	let:remove
-UNTYPED_PARAM	let:replace
-UNTYPED_PARAM	let:replace_all
-UNTYPED_PARAM	let:singleton
-UNTYPED_PARAM	let:sort
 UNTYPED_PARAM	let:sort_by
-UNTYPED_PARAM	let:sort_by_key
-UNTYPED_PARAM	let:split
-UNTYPED_PARAM	let:starts_with
-UNTYPED_PARAM	let:to_sorted_map
-UNTYPED_PARAM	let:to_sorted_set
-UNTYPED_PARAM	let:unique
-UNTYPED_PARAM	let:unzip
-UNTYPED_PARAM	let:upper_bound
-VARTYPE_RECEIVER	let:enumerate

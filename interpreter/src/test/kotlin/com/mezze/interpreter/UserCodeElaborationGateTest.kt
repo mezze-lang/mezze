@@ -103,9 +103,10 @@ class UserCodeElaborationGateTest {
         let total: { b: Box } -> Int = { b } -> b.size_of {}
         total { b = { n = 7 } }
         """.trimIndent(),
-        // The call `b.size_of {}` resolves, but a node in `total` keeps an open
-        // variable: the ability's own type parameter never gets tied to Box here.
-        listOf("UNBOUND_TYPE_VAR let:total"),
+        // CLEAN. The ability's type parameter is tied to Box by the call, because
+        // the call site now types its callee from the call rather than leaving it
+        // carrying the declaration's own variables.
+        emptyList(),
     )
 
     @Test
@@ -117,9 +118,10 @@ class UserCodeElaborationGateTest {
         let count = { xs: [T] } -> xs.size {}
         count { xs = [A { n = 1 }, B { s = "x" }] }
         """.trimIndent(),
-        // `xs.size {}` types as the literal `unknown`, even though `xs: [T]` is
-        // written out one line above.
-        listOf("UNBOUND_TYPE_VAR let:count"),
+        // CLEAN. `xs.size {}` used to type as the literal `unknown` even though
+        // `xs: [T]` is written out one line above; the operation's field-access
+        // form is now typed from the call like any other callee.
+        emptyList(),
     )
 
     @Test
@@ -132,9 +134,9 @@ class UserCodeElaborationGateTest {
           Wrap { items } -> items.size {}
         n { w = Wrap { items = [1, 2, 3] } }
         """.trimIndent(),
-        // The residue of the CallIndirect crash: it runs now, but `items.size {}`
-        // still carries `unknown`. A.2 is what makes this a compile error.
-        listOf("UNBOUND_TYPE_VAR let:n"),
+        // CLEAN. The residue of the CallIndirect crash is gone too: `items.size {}`
+        // carries the type the call determines, not `unknown`.
+        emptyList(),
     )
 
     @Test
@@ -145,9 +147,10 @@ class UserCodeElaborationGateTest {
         let evens = { xs: [Int] } -> xs.filter { p = { x } -> x % 2 == 0 }.size {}
         evens { xs = [1, 2, 3, 4] }
         """.trimIndent(),
-        // Seven open nodes for one line of code — the inline lambda and the two
-        // chained calls each leave types the solver never wrote down.
-        listOf("UNBOUND_TYPE_VAR let:evens x7"),
+        // CLEAN. This was seven open nodes for one line of code — the inline
+        // lambda and both chained calls each left a type the solver never wrote
+        // down. The chain is the hardest of these cells and it closes entirely.
+        emptyList(),
     )
 
     @Test
@@ -160,12 +163,10 @@ class UserCodeElaborationGateTest {
         let strs = pair_up { a = "x", b = "y" }
         ints.size {} + strs.size {}
         """.trimIndent(),
-        // `pair_up` is fully annotated, yet its parameters reach the typed AST as
-        // bare fresh variables — the same shape the stdlib's impl bodies have —
-        // and both call sites keep an open variable.
-        listOf(
-            "UNBOUND_TYPE_VAR let:ints",
-            "UNBOUND_TYPE_VAR let:strs",
-        ),
+        // CLEAN. `pair_up` is fully annotated, and its parameters used to reach the
+        // typed AST as bare fresh variables anyway — one written `'a` arriving as
+        // two TypeVars, the shape that let both call sites keep an open variable.
+        // Each site now instantiates the callee at the types it is applied to.
+        emptyList(),
     )
 }

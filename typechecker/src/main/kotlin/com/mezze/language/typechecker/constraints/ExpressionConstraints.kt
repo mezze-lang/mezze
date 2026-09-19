@@ -26,6 +26,25 @@ class ExpressionConstraintGenerator {
     internal val maxCacheSize = 1000
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
 
+    /**
+     * Each `__native_*` intrinsic's Mezze type, read off the `pub let` that wraps
+     * it. Populated per module by `ConstraintGenerator`.
+     *
+     * A native is in no binding table and has no signature of its own, so a
+     * reference to one used to get a bare fresh variable — nothing for the solve to
+     * work from. Where a native's result flows straight out of its wrapper that
+     * costs nothing, because the wrapper's declared return pins it. Where it does
+     * NOT — an inherent impl operation calling a native directly, whose parameters
+     * beyond the receiver have no other source — those parameters stay variables
+     * all the way into the emitted tree.
+     *
+     * The type is already written down: `pub let clamp: { n: Int, min: Int, max:
+     * Int } -> Int = { n, min, max } -> __native_int_clamp { n = n, min = min, max
+     * = max }` says exactly what `__native_int_clamp` takes and returns. This reads
+     * it rather than asking anyone to declare it twice.
+     */
+    val nativeDeclaredTypes = mutableMapOf<String, MezzeType>()
+
     // S2.1 (#356): candidate-bucketing recording sink for Stage 2's single
     // post-solve dispatch. Constraint generation appends one MethodResolveBucket
     // per method/ability/builtin call site here (see tryGenerateMethodCall) — it

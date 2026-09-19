@@ -65,12 +65,18 @@ class DictJustificationGateTest {
      * (a raw native call's type is undeclared) is unchanged; what closed is every
      * place in the stdlib that walked into it.
      *
-     * A third entry fails the gate, and so does a listed one that stops firing.
+     * `enumerate` / `zip_with_index` were the last two, and they are now fixed by
+     * the same work that took the elaboration baseline from 861 rows to 99: a call
+     * site types its callee from THIS call rather than leaving the callee carrying
+     * its declaration's own variables, so the recursive accumulator's `'z` is
+     * pinned by the `cons` that fixes it and no dictionary is demanded for a
+     * variable nobody can supply.
+     *
+     * The list is empty, and the gate now says the strong thing: every dictionary
+     * parameter in the stdlib is justified by a constraint the declaration makes.
+     * An entry fails the gate, and so does a listed one that stops firing.
      */
-    private val unjustifiedByOpenTypeVar = setOf(
-        "enumerate",
-        "zip_with_index",
-    )
+    private val unjustifiedByOpenTypeVar = emptySet<String>()
 
     /** A decl's gate key: its name, plus enough of its hash that two same-named
      *  operations on different impls stay distinct. */
