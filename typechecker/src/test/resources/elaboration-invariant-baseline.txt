@@ -13,9 +13,20 @@
 #   fold_left with a RECURSIVE accumulator — `enumerate`, `intersperse`,
 #   `flatten`. `init = { acc = empty {}, i = 0 }` says nothing about what the
 #   list holds; the only thing that does is the `cons` inside the callback,
-#   whose type `init` is supposed to give. Nothing at the call site can be read
-#   to close this — it needs the solve to reach a fixed point over the
-#   accumulator, which is a solver change, not an emit one.
+#   whose type `init` is supposed to give.
+#
+#   Measured on `enumerate`, the accumulator's element comes out as
+#   `{ value: 'c318, index: 'h318 }`. `'c318` is the declaration's `'a` and is
+#   fine. `'h318` is the `index` field, and it should be `Int` by TWO
+#   independent routes: it is assigned `acc.i`, and `acc.i` resolved to `Int` in
+#   the same record; and the declaration's own return type is written
+#   `List { value: 'a, index: Int }`, which `reverse { xs = both.acc }` unifies
+#   against. Neither closed it. Two reads of `acc.i` in one callback appear to
+#   produce independent variables, and only the one flowing into `i` is pinned.
+#
+#   This produces no wrong answer — the annotation is what callers see and the
+#   runtime record holds an Int — but it is a real inference gap and it is a
+#   SOLVER question, not something a call site can be read for.
 #
 #   impl Seq.is_sorted / is_sorted_descending — an inherent op forwarding to a
 #   free function constrained `with Ord 'a`. The variable a DICTIONARY is keyed
