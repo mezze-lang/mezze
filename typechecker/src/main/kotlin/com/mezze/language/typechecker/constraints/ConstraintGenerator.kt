@@ -360,8 +360,29 @@ class ConstraintGenerator(
                     // report ONLY the ability failures — equality / method-resolution
                     // mismatches must stay deferred to the global solver, which owns
                     // their inference ordering, so we must not surface those here.
+                    //
+                    // FIELD resolution is surfaced here too, and for a blunter
+                    // reason: the comment above says the global solver owns those,
+                    // and it does not — `collectGlobalConstraints` strips HasField
+                    // before the global solve, so "deferred" meant "dropped by
+                    // both". Measured, `(1).zzz {}` as the module result type-checked
+                    // and died at runtime with "Expected record for field 'zzz', got:
+                    // Long", while `let v = (1).zzz {}` was correctly rejected with
+                    // "Cannot access field 'zzz' on non-record type: Int". That is
+                    // the third instance of this exact top-level-vs-bound asymmetry
+                    // in this one block.
+                    //
+                    // Discriminated by the CONSTRAINT, not by a message or a name:
+                    // these failures carry no distinguishing ErrorCode, but the
+                    // error records the constraint that produced it, and a HasField
+                    // failure is a HasField failure whatever it says.
                     val abilityObligations = result.abilityConstraints + result.associatedTypeConstraints
-                    if (abilityObligations.isNotEmpty()) {
+                    run {
+                        // Unconditional now. It used to run only when there were
+                        // ability obligations, and `(1).zzz {}` has none — so the one
+                        // solve that sees the full constraint set, with receiver types
+                        // pinned by the equalities, never ran for exactly the programs
+                        // that needed it.
                         val solveResult = solver.solve(result.constraints + abilityObligations)
                         if (solveResult is ConstraintSolver.SolveResult.Failure) {
                             // Keep only genuine ability failures — both the directly
@@ -382,6 +403,15 @@ class ConstraintGenerator(
                             val keptCodes = setOf(
                                 ErrorCode.V0402_ABILITY_NOT_SATISFIED,
                                 ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
+                                // The field is ABSENT — the receiver is a scalar, an
+                                // opaque newtype, or a record without it. That can
+                                // never become valid later, so deferring it defers it
+                                // to nobody. A field TYPE mismatch is a different
+                                // failure, carries no code, and stays deferred: the
+                                // global solver widens a structural error union across
+                                // a nested `Result` flatten, and surfacing that here
+                                // rejects a program that is fine.
+                                ErrorCode.T0205_FIELD_NOT_FOUND,
                             )
                             perBindingSolveErrors.addAll(
                                 solveResult.errors.filter { it.code in keptCodes }

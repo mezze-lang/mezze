@@ -112,12 +112,6 @@ class NewtypeDerivesOnlyInspectTest {
     }
 
     @Test
-    @Disabled(
-        "BUG 13, codec flavour — encoding a newtype with no Encode impl fails at " +
-            "RUNTIME (\"Expected record for field 'encode', got: Long\") rather " +
-            "than being rejected at compile time. Same rule, different surface: " +
-            "the erased payload reaches the codec walk.",
-    )
     fun `encoding a newtype without an Encode impl is a compile error not a crash`() {
         val e = runCatching {
             MezzeTestHelper.run(

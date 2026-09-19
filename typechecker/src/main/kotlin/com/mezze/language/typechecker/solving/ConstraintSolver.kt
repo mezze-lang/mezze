@@ -326,6 +326,7 @@ class ConstraintSolver(
                         errors.add(ConstraintError(
                             message = result.message,
                             constraint = appliedConstraint,
+                            code = result.code,
                             context = appliedConstraint.context
                         ))
                         // Poison so later HasField/worklist constraints on the
@@ -555,6 +556,7 @@ class ConstraintSolver(
                                 errors.add(ConstraintError(
                                     message = result.message,
                                     constraint = appliedConstraint,
+                                    code = result.code,
                                     context = appliedConstraint.context
                                 ))
                                 poison(constraint)
@@ -819,7 +821,18 @@ class ConstraintSolver(
 
         data class Failure(
             val message: String,
-            val terminal: Boolean = false
+            val terminal: Boolean = false,
+            /**
+             * Lets a caller tell one KIND of failure from another without reading
+             * the message. The top-level-expression filter in ConstraintGenerator
+             * keeps errors by typed code, and a `HasField` failure comes in two
+             * kinds that must be treated oppositely: the field is ABSENT (the
+             * receiver is a scalar, an opaque newtype, or a record without it),
+             * which can never become valid later and must be reported; or the
+             * field's TYPE has not been reconciled yet, which the global solver
+             * owns and which must stay deferred. Only the first carries a code.
+             */
+            val code: ErrorCode = ErrorCode.UNCATEGORIZED,
         ) : ConstraintResult()
 
         data class Deferred(val reason: String) : ConstraintResult()
@@ -1067,7 +1080,8 @@ class ConstraintSolver(
                     return ConstraintResult.Failure(
                         "Field access '.$fieldName' on an opaque newtype '${recordType.constructor}': " +
                         "a newtype hides its underlying value. Unwrap it first with " +
-                        "`match x is ${recordType.constructor}.(v) -> ...`, then access the field on `v`."
+                        "`match x is ${recordType.constructor}.(v) -> ...`, then access the field on `v`.",
+                        code = ErrorCode.T0205_FIELD_NOT_FOUND,
                     )
                 }
                 is TypeExpansionResult.NotFound -> {
@@ -1105,7 +1119,8 @@ class ConstraintSolver(
                 }
             }
             return ConstraintResult.Failure(
-                "Cannot access field '$fieldName' on variant type: ${prettyPrintType(recordType)}"
+                "Cannot access field '$fieldName' on variant type: ${prettyPrintType(recordType)}",
+                code = ErrorCode.T0205_FIELD_NOT_FOUND,
             )
         }
 
@@ -1172,7 +1187,8 @@ class ConstraintSolver(
                         "fields"
                     )
                     return ConstraintResult.Failure(
-                        "Record type does not have field '$fieldName'. $suggestion"
+                        "Record type does not have field '$fieldName'. $suggestion",
+                        code = ErrorCode.T0205_FIELD_NOT_FOUND,
                     )
                 }
             }
@@ -1187,7 +1203,8 @@ class ConstraintSolver(
         }
 
         return ConstraintResult.Failure(
-            "Cannot access field '$fieldName' on non-record type: ${prettyPrintType(recordType)}"
+            "Cannot access field '$fieldName' on non-record type: ${prettyPrintType(recordType)}",
+            code = ErrorCode.T0205_FIELD_NOT_FOUND,
         )
     }
 

@@ -911,7 +911,7 @@ monomorphization change cannot quietly reintroduce the lossy path.
 
 ---
 
-## BUG 13 — OPEN: collections reach Eq on a newtype that has none
+## BUG 13 — FIXED: collections enforce the newtype rule; the codec half was a top-level-expression hole
 
 Found 2026-09-16 by testing the owner's stated rule rather than assuming the
 compiler enforced it.
@@ -969,11 +969,44 @@ from silently-wrong to loudly-rejected, which is the safe direction, but it is a
 stdlib-wide signature change and every call site that relies on the current
 permissiveness will surface at once.
 
+### Outcome (2026-09-19)
+
+The COLLECTION half was already closed by T1.4's element-evidence work: `Set`,
+`Map` and `contains` all reject a newtype element with no `Eq`, measured, and
+those cases have been enabled and passing.
+
+The CODEC half turned out not to be about codecs at all. Measured:
+
+    UserId.(1).encode { config = json::json_default }      crashed at runtime
+    let v = UserId.(1).encode { … }                        correctly REJECTED
+
+The difference is the POSITION, not the ability. A module's trailing expression
+is solved separately from its bindings, and the filter deciding what that solve
+reports kept only two error kinds. Field resolution was excluded with the
+reasoning that the global solver owns it — and `collectGlobalConstraints` strips
+`HasField` before the global solve, so "deferred" meant "dropped by both". Any
+unknown method reached the runtime this way:
+
+    (1).zzz {}                 accepted, then "Expected record for field 'zzz', got: Long"
+    UserId.(1).nonexistent {}  same
+    let v = (1).zzz {}         correctly rejected all along
+
+This is the THIRD time this one block has been widened for the same reason
+(constructors, then ability obligations, now fields), which is why the fix comes
+with `TopLevelExprRejectionTest` asserting the general invariant — the same
+program is rejected in both positions — rather than three more one-off cases.
+
+Two halves of `HasField` had to be separated to do it, and they are separated by
+a typed code rather than by message text: the field is ABSENT (scalar receiver,
+opaque newtype, record without it), which can never become valid later and is
+reported; or its TYPE is not yet reconciled, which the global solver genuinely
+does own — surfacing that one rejected a legitimate nested-`Result` flatten,
+which the typechecker gate caught.
+
 ### Acceptance
 
-`NewtypeDerivesOnlyInspectTest` — 3 enabled cases pinning the rule where it holds
-(Inspect works, `==` and `<` rejected), 4 `@Disabled` on the collection and codec
-gaps.
+`NewtypeDerivesOnlyInspectTest` — all 7 cases enabled and passing, no `@Disabled`
+left. `TopLevelExprRejectionTest` — 4 cases pinning top-level/bound symmetry.
 
 ---
 
