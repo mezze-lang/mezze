@@ -4,7 +4,6 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
@@ -18,12 +17,12 @@ import java.nio.file.Paths
  * this, hover/inlay/check would render plain bindings as `'a`. Tests in
  * this file mirror that production setup.
  *
- * The `@Disabled` tests document the cross-module inherent-impl
- * inference bug tracked by issue #213. They will be enabled once the
- * inferred return type from a stdlib impl operation is plumbed through
- * the import boundary (today the importer rebuilds the methodType from
- * ParsedImplAbilityDecl with fresh TypeVars, dropping the body's
- * solved return type).
+ * This file once carried `@Disabled` cases for the cross-module
+ * inherent-impl inference bug (#213) — the importer rebuilt a method's
+ * type from ParsedImplAbilityDecl with fresh TypeVars and dropped the
+ * body's solved return type. That is fixed and every case here is
+ * enabled; the note is kept because the header claimed otherwise long
+ * after the fact and sent someone looking for tests that were not there.
  */
 class PreludeAlwaysOnTest {
 

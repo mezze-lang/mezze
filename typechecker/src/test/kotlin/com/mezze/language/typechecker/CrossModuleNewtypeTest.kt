@@ -34,16 +34,18 @@ import java.nio.file.Path
  *     ability (`Describe`) itself for dot-method resolution (case2).
  *   - PASS: a cross-module do-block binding `let x = A.make {..}` keeps the
  *     `Length` wrapper (case5, ties #395/#396).
- *   - REAL BUG (@Disabled case4b): a newtype-over-record is intended OPAQUE, but
- *     `.field` access punches straight through the wrapper. `solveHasField`
- *     unwraps the newtype transparently with no opacity/visibility guard.
- *   - REAL BUG (@Disabled case6): same-named newtypes in different modules are
- *     intended DISTINCT, but they COLLIDE — newtypes are never stamped with a
- *     `Declared` identity, so unification falls to bare-name matching.
+ *   - WAS A BUG, FIXED (#401) and enabled (case4b): a newtype-over-record is
+ *     OPAQUE. `.field` used to punch straight through the wrapper because
+ *     `solveHasField` unwrapped the newtype with no opacity guard; it now
+ *     rejects `.field` on any newtype, with no shape or module special-casing.
+ *   - WAS A BUG, FIXED (#400) and enabled (case6): same-named newtypes in
+ *     different modules are DISTINCT. They used to collide — a newtype was never
+ *     stamped with a `Declared` identity, so unification fell to bare-name
+ *     matching — and now carry a module-salted one that unification keys on.
  *
- * Both @Disabled cases carry the intended assertion UNWEAKENED — they document a
- * genuine cross-module encapsulation/identity hole for follow-up, they do not
- * paper over it.
+ * Both carried their intended assertion UNWEAKENED while they were failing, and
+ * both now pass with that same assertion. Nothing here is papered over: every
+ * case in this file is enabled.
  */
 class CrossModuleNewtypeTest {
 
@@ -227,7 +229,8 @@ class CrossModuleNewtypeTest {
     // Companion to case 4: B cannot reach into the record shape hidden behind
     // the Money wrapper (the newtype is opaque across the boundary).
     //
-    // @Disabled — REAL BUG. This assertion is the intended rule (a newtype-over-
+    // WAS a real bug, FIXED by #401 and enabled — see the resolution at the end of
+    // this comment. The assertion is the intended rule (a newtype-over-
     // record is OPAQUE; a consumer must use the defining module's accessors or
     // `match m is Money.(r) -> r.field`, never `.field` on the wrapper — the same
     // barrier as the private constructor in case3, and the record analog of the
@@ -299,7 +302,8 @@ class CrossModuleNewtypeTest {
     // B.Id both `newtype Id = Str`. A REAL cross-module version of the fake Q5.
     // A function typed for A's Id must reject a B-produced Id (and vice versa).
     // =====================================================================
-    // @Disabled — REAL BUG. Two modules each declaring `newtype Id = Str` are
+    // WAS a real bug, FIXED by #400 and enabled — see the resolution at the end of
+    // this comment. Two modules each declaring `newtype Id = Str` are
     // intended to be DISTINCT nominal types; passing a mod_b Id where a mod_a Id
     // is expected must be rejected. The unit-level NominalHashIdentityTest already
     // asserts this at the `unify()` primitive (same-named newtypes with different
