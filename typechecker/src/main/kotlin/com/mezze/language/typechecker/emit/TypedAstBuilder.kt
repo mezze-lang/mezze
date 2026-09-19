@@ -500,8 +500,6 @@ class TypedAstBuilder(
             is MezzeType.RecordType -> if (inferred is MezzeType.RecordType) {
                 for ((k, t) in declared.fields) inferred.fields[k]?.let { linkDeclaredVars(t, it, out) }
             }
-            is MezzeType.SeqType -> if (inferred is MezzeType.SeqType)
-                linkDeclaredVars(declared.elementType, inferred.elementType, out)
             is MezzeType.TypeApplication -> if (inferred is MezzeType.TypeApplication &&
                 declared.args.size == inferred.args.size
             ) {
@@ -521,7 +519,6 @@ class TypedAstBuilder(
     /** Rewrite a converted obligation's variables through [linkDeclaredVars]'s map. */
     private fun relinkType(type: MezzeType, link: Map<String, MezzeType>): MezzeType = when (type) {
         is MezzeType.VarType -> link[type.variable.name] ?: type
-        is MezzeType.SeqType -> MezzeType.SeqType(relinkType(type.elementType, link))
         is MezzeType.TypeApplication -> type.copy(args = type.args.map { relinkType(it, link) })
         is MezzeType.RecordType -> type.copy(fields = type.fields.mapValues { (_, t) -> relinkType(t, link) })
         else -> type
@@ -1190,7 +1187,12 @@ class TypedAstBuilder(
             is ParsedDo -> buildDoBlock(expr, file, contextType)
             is ParsedSeqLit -> {
                 val elementContextType = when (val ct = substitution.apply(contextType)) {
-                    is MezzeType.SeqType -> ct.elementType
+                    // The expected type says what the elements are. This used to read
+                    // `is MezzeType.SeqType -> ct.elementType`; `[T]` is a
+                    // TypeApplication since B.1, so it reads arg 0 of a `Seq`.
+                    is MezzeType.TypeApplication ->
+                        if (ct.constructor == BuiltinTypes.SEQ && ct.args.size == 1) ct.args[0]
+                        else MezzeType.VarType(TypeVar.freshWithName("elem"))
                     else -> MezzeType.VarType(TypeVar.freshWithName("elem"))
                 }
                 val elements = expr.elements.map { elem ->
@@ -1198,11 +1200,11 @@ class TypedAstBuilder(
                         is ParsedSeqElement.Regular ->
                             TypedSeqElement.Regular(buildExpr(elem.expr, file, elementContextType))
                         is ParsedSeqElement.Spread ->
-                            TypedSeqElement.Spread(buildExpr(elem.expr, file, MezzeType.SeqType(elementContextType)))
+                            TypedSeqElement.Spread(buildExpr(elem.expr, file, BuiltinTypes.seqApp(elementContextType)))
                     }
                 }
                 val elemType = (elements.firstOrNull() as? TypedSeqElement.Regular)?.expr?.type ?: elementContextType
-                TypedSeq(elements, MezzeType.SeqType(elemType), loc)
+                TypedSeq(elements, BuiltinTypes.seqApp(elemType), loc)
             }
             is ParsedBinaryOp -> {
                 val op = expr.op.resolved
@@ -2231,7 +2233,6 @@ class TypedAstBuilder(
                 // carries a comment about. B.1 removes the choice; until then, read
                 // both.
                 val elementType = when {
-                    shape is MezzeType.SeqType -> shape.elementType
                     shape is MezzeType.TypeApplication &&
                         shape.constructor in com.mezze.language.ast.BuiltinTypes.sequenceConstructors ->
                         shape.args.firstOrNull()
@@ -2745,7 +2746,7 @@ class TypedAstBuilder(
                 )
             }
             is ParsedSeqType -> {
-                MezzeType.SeqType(elementType = convertParsedTypeAnnotation(annotation.elementType))
+                BuiltinTypes.seqApp(convertParsedTypeAnnotation(annotation.elementType))
             }
             is ParsedQualifiedType -> {
                 WellKnownTypeApp.of(

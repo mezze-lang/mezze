@@ -412,7 +412,7 @@ class AbilityResolver(
     private fun resolveTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
             is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
-            is ParsedSeqType -> MezzeType.SeqType(resolveTypeAnnotation(annotation.elementType))
+            is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(resolveTypeAnnotation(annotation.elementType))
             // L-07: any OTHER shape (ParsedTypeApp, qualified, function, record, …)
             // previously became `WellKnownTypeApp.of(annotation.toString(), [])` — a
             // bogus nullary type-app whose constructor is the RENDERED STRING, which

@@ -132,7 +132,6 @@ object EntryPointCheck {
             val effects = if (type.effects != null) " <*>" else ""
             "$params -> $returns$effects"
         }
-        is MezzeType.SeqType -> "[${render(type.elementType)}]"
         is MezzeType.VarType -> "'${type.variable.name}"
         else -> type.toString()
     }

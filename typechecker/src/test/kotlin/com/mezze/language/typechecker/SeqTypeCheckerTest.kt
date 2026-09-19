@@ -24,10 +24,10 @@ class SeqTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val inferredType = typedProgram.getVariableType("empty") as MezzeType.SeqType
+        val inferredType = typedProgram.getVariableType("empty") as MezzeType.TypeApplication
 
         // Empty Seq should have a type variable for element type
-        assertTrue(inferredType.elementType is MezzeType.VarType)
+        assertTrue(inferredType.args[0] is MezzeType.VarType)
     }
 
     @Test
@@ -36,10 +36,10 @@ class SeqTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val inferredType = typedProgram.getVariableType("numbers") as MezzeType.SeqType
+        val inferredType = typedProgram.getVariableType("numbers") as MezzeType.TypeApplication
 
         // Should infer [Int]
-        assertTrue(inferredType.elementType is MezzeType.IntType)
+        assertTrue(inferredType.args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -48,10 +48,10 @@ class SeqTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val inferredType = typedProgram.getVariableType("names") as MezzeType.SeqType
+        val inferredType = typedProgram.getVariableType("names") as MezzeType.TypeApplication
 
         // Should infer [Str]
-        assertTrue(inferredType.elementType is MezzeType.StringType)
+        assertTrue(inferredType.args[0] is MezzeType.StringType)
     }
 
     @Test
@@ -60,10 +60,10 @@ class SeqTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val inferredType = typedProgram.getVariableType("flags") as MezzeType.SeqType
+        val inferredType = typedProgram.getVariableType("flags") as MezzeType.TypeApplication
 
         // Should infer [Bool] - either BoolType or VariantType with True/False
-        val elemType = inferredType.elementType
+        val elemType = inferredType.args[0]
         assertTrue(
             elemType is MezzeType.BoolType ||
             (elemType is MezzeType.VariantType && elemType.constructors.keys == setOf("True", "False"))
@@ -76,11 +76,11 @@ class SeqTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val inferredType = typedProgram.getVariableType("matrix") as MezzeType.SeqType
+        val inferredType = typedProgram.getVariableType("matrix") as MezzeType.TypeApplication
 
         // Should infer [[Int]]
-        val innerType = inferredType.elementType as MezzeType.SeqType
-        assertTrue(innerType.elementType is MezzeType.IntType)
+        val innerType = inferredType.args[0] as MezzeType.TypeApplication
+        assertTrue(innerType.args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -94,9 +94,9 @@ class SeqTypeCheckerTest {
         val inferredType = typedProgram.getVariableType("numbers")
 
         // Should be an Seq type
-        assertTrue(inferredType is MezzeType.SeqType)
-        if (inferredType is MezzeType.SeqType) {
-            assertTrue(inferredType.elementType is MezzeType.IntType)
+        assertTrue(inferredType is MezzeType.TypeApplication && inferredType.constructor == "Seq")
+        if (inferredType is MezzeType.TypeApplication && inferredType.constructor == "Seq") {
+            assertTrue(inferredType.args[0] is MezzeType.IntType)
         }
     }
 
@@ -110,11 +110,12 @@ class SeqTypeCheckerTest {
         val inferredType = typedProgram.getVariableType("matrix")
 
         // Should be a nested Seq type
-        assertTrue(inferredType is MezzeType.SeqType)
-        if (inferredType is MezzeType.SeqType) {
-            assertTrue(inferredType.elementType is MezzeType.SeqType)
-            val innerType = inferredType.elementType as MezzeType.SeqType
-            assertTrue(innerType.elementType is MezzeType.IntType)
+        assertTrue(inferredType is MezzeType.TypeApplication && inferredType.constructor == "Seq")
+        if (inferredType is MezzeType.TypeApplication && inferredType.constructor == "Seq") {
+            val inner = inferredType.args[0]
+            assertTrue(inner is MezzeType.TypeApplication && inner.constructor == "Seq")
+            val innerType = inferredType.args[0] as MezzeType.TypeApplication
+            assertTrue(innerType.args[0] is MezzeType.IntType)
         }
     }
 
@@ -135,10 +136,10 @@ class SeqTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val inferredType = typedProgram.getVariableType("computed") as MezzeType.SeqType
+        val inferredType = typedProgram.getVariableType("computed") as MezzeType.TypeApplication
 
         // Should infer [Int] from arithmetic expressions
-        assertTrue(inferredType.elementType is MezzeType.IntType)
+        assertTrue(inferredType.args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -155,19 +156,19 @@ class SeqTypeCheckerTest {
         // numbers should be [Int]
         val numbersType = typedProgram.getVariableType("numbers")
         assertNotNull(numbersType)
-        assertTrue(numbersType is MezzeType.SeqType)
-        assertTrue((numbersType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(numbersType is MezzeType.TypeApplication && numbersType.constructor == "Seq")
+        assertTrue((numbersType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
 
         // strings should be [Str]
         val stringsType = typedProgram.getVariableType("strings")
         assertNotNull(stringsType)
-        assertTrue(stringsType is MezzeType.SeqType)
-        assertTrue((stringsType as MezzeType.SeqType).elementType is MezzeType.StringType)
+        assertTrue(stringsType is MezzeType.TypeApplication && stringsType.constructor == "Seq")
+        assertTrue((stringsType as MezzeType.TypeApplication).args[0] is MezzeType.StringType)
 
         // empty should be ['a] (polymorphic array)
         val emptyType = typedProgram.getVariableType("empty")
         assertNotNull(emptyType)
-        assertTrue(emptyType is MezzeType.SeqType)
+        assertTrue(emptyType is MezzeType.TypeApplication && emptyType.constructor == "Seq")
     }
 
     @Test
@@ -182,10 +183,10 @@ class SeqTypeCheckerTest {
 
         // Check that types are inferred correctly
         val numbersType = typedProgram.getVariableType("numbers")!!
-        assertTrue(numbersType is MezzeType.SeqType)
+        assertTrue(numbersType is MezzeType.TypeApplication && numbersType.constructor == "Seq")
 
         val namesType = typedProgram.getVariableType("names")!!
-        assertTrue(namesType is MezzeType.SeqType)
+        assertTrue(namesType is MezzeType.TypeApplication && namesType.constructor == "Seq")
 
         // Check pretty printing works
         val numbersTypeStr = prettyPrintType(numbersType)

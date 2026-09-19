@@ -150,7 +150,6 @@ internal fun typeMatchesTarget(
         // STRUCTURAL target (MezzeType.SeqType/MezzeType.MapType/…), so a same-kind receiver must match element-
         // agnostically (the target's element is a VarType). Without this, `impl Sized for ['a]`
         // never dispatches to a seq receiver and `seq.size {}` degrades to a field read (#279).
-        concrete is MezzeType.SeqType && target is MezzeType.SeqType -> true
         concrete is MezzeType.RecordType && target is MezzeType.TypeApplication &&
             concrete.identity.displayNameOrNull() == target.constructor -> true
         // MezzeType.RecordType-to-MezzeType.RecordType. Compare structurally, guarded by an
@@ -305,7 +304,6 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
                     else -> false
                 }
             }
-        is MezzeType.SeqType -> unifySeq(pattern.elementType, v, bindings)
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
             // Move-5: newtype is a nominal wall — two DISTINCT declared newtypes
             // (same name, different hash: the newtype-two-faces hazard) must not
@@ -326,8 +324,8 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
                 pattern.args.size == v.args.size &&
                 pattern.args.zip(v.args).all { (p2, v2) -> unify(p2, v2, bindings) }
             // Container-alias: pattern is `TypeApplication("Seq", X)` and
-            // value is a concrete `SeqType(Y)`. The two shapes represent
-            // the same nominal type; unify their element types.
+            // value is a concrete `[Y]`. Both are the same form since B.1;
+            // unify their element types.
             //
             // Without this branch, mono seeding fails for the extremely
             // common case where a stdlib decl's scheme uses the aliased
@@ -336,8 +334,6 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             // returns `SeqType`, but `impl Seq 'a` methods declare their
             // receiver as `TypeApplication("Seq", 'a)`).
             pattern.args.size == 1 -> when {
-                pattern.constructor == BuiltinTypes.SEQ && v is MezzeType.SeqType ->
-                    unify(pattern.args[0], v.elementType, bindings)
                 else -> false
             }
             pattern.args.size == 2 -> when {
@@ -354,14 +350,13 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
     }
 }
 
-/** Container/TypeApplication cross-shape unifiers. Mezze uses two
- *  representations for the same nominal container types: the concrete
- *  container shape (`SeqType`, `ListType`, …) and the aliased shape
- *  (`TypeApplication("Seq", …)`, `TypeApplication("List", …)`, …).
- *  Both directions must unify: `SeqType(Int)` vs `TypeApplication("Seq", 'a)`
- *  must bind `'a → Int` for stdlib mono seeding to work. */
+/** Container unifiers. Mezze USED to carry two representations for the same
+ *  nominal container — a dedicated node and a `TypeApplication` of the same
+ *  name — and these existed to reconcile them. B.1 deleted the dedicated nodes,
+ *  so there is one shape: `TypeApplication("Seq", …)`, `("List", …)`, and so on.
+ *  `[Int]` vs `TypeApplication("Seq", 'a)` must still bind `'a → Int` for stdlib
+ *  mono seeding — those are now the same form, not two being matched up. */
 private fun unifySeq(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
-    v is MezzeType.SeqType -> unify(patternElem, v.elementType, bindings)
     v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.SEQ && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false

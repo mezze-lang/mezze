@@ -60,7 +60,7 @@ class MatchValidator(
         if (isNonEnumerablePrimitive(expanded)) return expanded
         // #203: a seq/list — require empty + open-cons pair (or a catch-all);
         // a fixed-length pattern like `[a, b]` covers only length 2.
-        if (expanded is MezzeType.SeqType || isListApp(expanded)) return expanded
+        if (isSeqApp(expanded) || isListApp(expanded)) return expanded
         // #218: a record matched with record patterns — check its finite fields.
         if (expanded is MezzeType.RecordType) return expanded
         return null
@@ -69,6 +69,11 @@ class MatchValidator(
     /** Primitive scalar types whose values can't be enumerated, so a match on
      *  them is only exhaustive with a catch-all (`_`/variable). Bool is NOT here
      *  — it's finite and handled by the variant path. */
+    /** `[elem]` — a TypeApplication since B.1 deleted the dedicated node. */
+    private fun isSeqApp(type: MezzeType): Boolean =
+        type is MezzeType.TypeApplication &&
+            type.constructor == com.mezze.language.ast.BuiltinTypes.SEQ
+
     /** `List elem` — a TypeApplication since B.1 deleted the dedicated node. */
     private fun isListApp(type: MezzeType): Boolean =
         type is MezzeType.TypeApplication &&
@@ -155,7 +160,7 @@ class MatchValidator(
             // `[..._]`), OR an empty-arm (`[]`) together with an open-cons arm
             // (`[x, ...rest]`/`[x, ..._]`) that covers all lengths >= 1. A
             // fixed-length pattern (`[a]`, `[a, b]`) covers only that one length.
-            if (expandedType is MezzeType.SeqType || isListApp(expandedType)) {
+            if (isSeqApp(expandedType) || isListApp(expandedType)) {
                 return seqExhaustivenessErrors(matchExpr)
             }
             // #218: a record scrutinee is exhaustive iff a catch-all covers it, or its

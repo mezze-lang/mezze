@@ -35,7 +35,6 @@ object ContentHashComputer {
                 val constructorNames = type.constructors.keys.sorted().joinToString("_")
                 if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
             }
-            is MezzeType.SeqType -> "Array_${mezzeTypeToString(type.elementType)}"
             else -> type.toString()
         }
 

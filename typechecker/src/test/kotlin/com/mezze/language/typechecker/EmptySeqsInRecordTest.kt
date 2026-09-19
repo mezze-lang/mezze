@@ -41,8 +41,8 @@ class EmptySeqsInRecordTest {
             is com.mezze.language.ast.MezzeType.VarType -> {
                 "VarType(${testType.variable})"
             }
-            is com.mezze.language.ast.MezzeType.SeqType -> {
-                "SeqType(${testType.elementType})"
+            is com.mezze.language.ast.MezzeType.TypeApplication -> {
+                "TypeApplication(${testType.constructor}, ${testType.args})"
             }
             else -> {
                 "${testType?.let { it::class.simpleName } ?: "null"}: $testType"

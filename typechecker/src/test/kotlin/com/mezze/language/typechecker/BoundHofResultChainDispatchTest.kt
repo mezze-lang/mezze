@@ -52,10 +52,10 @@ class BoundHofResultChainDispatchTest {
         )
         val ret = returnType(r.getVariableType("main"))
         assertTrue(
-            ret is MezzeType.SeqType,
+            ret is MezzeType.TypeApplication && ret.constructor == "Seq",
             "expected main to return a Seq (not Bytes), got $ret"
         )
-        val elem = (ret as MezzeType.SeqType).elementType
+        val elem = (ret as MezzeType.TypeApplication).args[0]
         assertTrue(elem is MezzeType.IntType, "expected [Int], got element $elem")
     }
 
@@ -71,10 +71,10 @@ class BoundHofResultChainDispatchTest {
             """.trimIndent()
         )
         val ret = returnType(r.getVariableType("main"))
-        assertTrue(ret is MezzeType.SeqType, "expected Seq return, got $ret")
+        assertTrue(ret is MezzeType.TypeApplication && ret.constructor == "Seq", "expected Seq return, got $ret")
         assertTrue(
-            (ret as MezzeType.SeqType).elementType is MezzeType.IntType,
-            "expected [Int], got ${(ret).elementType}"
+            (ret as MezzeType.TypeApplication).args[0] is MezzeType.IntType,
+            "expected [Int], got ${(ret as MezzeType.TypeApplication).args[0]}"
         )
     }
 
@@ -89,7 +89,7 @@ class BoundHofResultChainDispatchTest {
             """.trimIndent()
         )
         val ret = returnType(r.getVariableType("main"))
-        assertTrue(ret is MezzeType.SeqType, "inline chain should still infer Seq, got $ret")
+        assertTrue(ret is MezzeType.TypeApplication && ret.constructor == "Seq", "inline chain should still infer Seq, got $ret")
     }
 
     @Test
@@ -103,6 +103,6 @@ class BoundHofResultChainDispatchTest {
             """.trimIndent()
         )
         val ret = returnType(r.getVariableType("main"))
-        assertTrue(ret is MezzeType.SeqType, "literal-bound chain should infer Seq, got $ret")
+        assertTrue(ret is MezzeType.TypeApplication && ret.constructor == "Seq", "literal-bound chain should infer Seq, got $ret")
     }
 }

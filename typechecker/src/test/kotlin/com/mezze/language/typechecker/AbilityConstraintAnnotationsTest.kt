@@ -273,8 +273,8 @@ class AbilityConstraintAnnotationsTest {
         assertNotNull(program)
 
         val resultType = program.getVariableType("result")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertEquals(MezzeType.IntType, (resultType as MezzeType.SeqType).elementType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertEquals(MezzeType.IntType, (resultType as MezzeType.TypeApplication).args[0])
     }
 
     @Test

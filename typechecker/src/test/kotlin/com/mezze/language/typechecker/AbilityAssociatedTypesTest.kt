@@ -698,8 +698,8 @@ class AbilityAssociatedTypesTest {
         // Find the 'result' binding - should be [Int]
         val resultType = result.getVariableType("result")
         assertNotNull(resultType)
-        assertTrue(resultType is MezzeType.SeqType, "Expected SeqType but got $resultType")
-        assertEquals(MezzeType.IntType, (resultType as MezzeType.SeqType).elementType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq", "Expected SeqType but got $resultType")
+        assertEquals(MezzeType.IntType, (resultType as MezzeType.TypeApplication).args[0])
     }
 
     @Test
@@ -726,8 +726,9 @@ class AbilityAssociatedTypesTest {
         assertTrue(resultType is MezzeType.TypeApplication, "Expected TypeApplication but got $resultType")
         val typeApp = resultType as MezzeType.TypeApplication
         assertEquals("Option", typeApp.constructor)
-        assertTrue(typeApp.args[0] is MezzeType.SeqType)
-        assertEquals(MezzeType.IntType, (typeApp.args[0] as MezzeType.SeqType).elementType)
+        val innerSeq = typeApp.args[0]
+        assertTrue(innerSeq is MezzeType.TypeApplication && innerSeq.constructor == "Seq")
+        assertEquals(MezzeType.IntType, (innerSeq as MezzeType.TypeApplication).args[0])
     }
 
     @Test

@@ -226,10 +226,17 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     // an anonymous inline variant expands structurally. Sharing it here is what
     // stops the plain and alias printers from drifting on variant rendering.
     is MezzeType.VariantType -> printVariantType(type, emptyMap(), showExpansion = false, typeVarMapping)
-    is MezzeType.SeqType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is MezzeType.TypeApplication -> {
-        val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
-        if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
+        // `Seq T` is WRITTEN `[T]`, and that is what a reader expects to see.
+        // The dedicated SeqType node used to carry the bracket rendering; B.1
+        // deleted it, so the rendering belongs here, keyed on the constructor.
+        // This is presentation, not a second representation.
+        if (type.constructor == BuiltinTypes.SEQ && type.args.size == 1) {
+            "[${prettyPrintTypeWithMapping(type.args[0], typeVarMapping)}]"
+        } else {
+            val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
+            if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
+        }
     }
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
@@ -436,10 +443,13 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is MezzeType.VariantType -> {
         printVariantType(type, typeAliases, showExpansion, typeVarMapping)
     }
-    is MezzeType.SeqType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
     is MezzeType.TypeApplication -> {
-        val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
-        if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
+        if (type.constructor == BuiltinTypes.SEQ && type.args.size == 1) {
+            "[${prettyPrintWithAliasCheck(type.args[0], typeAliases, showExpansion, typeVarMapping)}]"
+        } else {
+            val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+            if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
+        }
     }
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
@@ -697,8 +707,6 @@ private fun unifyTypesForAlias(
                     else -> false
                 }
             }
-        concrete is MezzeType.SeqType && pattern is MezzeType.SeqType ->
-            unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
         concrete is MezzeType.TypeApplication && pattern is MezzeType.TypeApplication ->
             concrete.constructor == pattern.constructor &&
             concrete.args.size == pattern.args.size &&
@@ -849,7 +857,6 @@ private fun collectFreeTypeVars(type: MezzeType, result: MutableSet<MezzeType>) 
         is MezzeType.VariantType -> type.constructors.values.filterNotNull().forEach { collectFreeTypeVars(it, result) }
         is MezzeType.FunctionType -> { collectFreeTypeVars(type.paramType, result); collectFreeTypeVars(type.returnType, result) }
         is MezzeType.TypeApplication -> type.args.forEach { collectFreeTypeVars(it, result) }
-        is MezzeType.SeqType -> collectFreeTypeVars(type.elementType, result)
         else -> {}
     }
 }

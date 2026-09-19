@@ -82,7 +82,7 @@ internal class ImplValidator(
      *
      * Each `convertTypeAnnotation` mints fresh variables, and `TypeVar` carries an
      * id in its equality — so `impl Eq for ['a]` and `impl Hash for ['a]` convert to
-     * `SeqType('a#26948)` and `SeqType('a#27001)`, which are different types. What
+     * `[ 'a#26948 ]` and `[ 'a#27001 ]`, which are different types. What
      * makes them the same TARGET is the shape, not which variable filled the hole.
      */
     /**

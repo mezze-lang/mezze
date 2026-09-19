@@ -433,7 +433,7 @@ internal class AnnotationValidator(
         is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
         is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { publicAnnToMezze(it) })
         is ParsedQualifiedType -> WellKnownTypeApp.of(annotation.typeName, annotation.args.map { publicAnnToMezze(it) })
-        is ParsedSeqType -> MezzeType.SeqType(publicAnnToMezze(annotation.elementType))
+        is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(publicAnnToMezze(annotation.elementType))
         is ParsedRecordType -> MezzeType.RecordType(
             fields = annotation.entries.associate { it.name to publicAnnToMezze(it.type) },
             rowVar = if (annotation.isOpen) RowVar.fresh() else null,

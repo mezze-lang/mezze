@@ -72,7 +72,6 @@ private fun argIdentityToken(arg: MezzeType): String? =
         ?: when (arg) {
             is MezzeType.VarType -> null
             is MezzeType.RecordType -> null
-            is MezzeType.SeqType -> argIdentityToken(arg.elementType)?.let { "Seq<$it>" }
             is MezzeType.TypeApplication -> appliedHashOf(arg)?.hex
             else -> receiverTypeName(arg)
         }
@@ -126,7 +125,6 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
     is MezzeType.NewtypeType -> type.name
     is MezzeType.CharType -> "Char"
     is MezzeType.BytesType -> "Bytes"
-    is MezzeType.SeqType -> "Seq"
     is MezzeType.TypeApplication -> type.constructor
     is MezzeType.RecordType -> type.identity.displayNameOrNull()
     is MezzeType.VariantType -> type.identity.displayNameOrNull()
@@ -186,7 +184,6 @@ private fun mangledTypeAppName(type: MezzeType.TypeApplication): String {
 
 private fun mangledArgName(arg: MezzeType): String? = when (arg) {
     is MezzeType.TypeApplication -> mangledTypeAppName(arg)
-    is MezzeType.SeqType -> mangledArgName(arg.elementType)?.let { "Seq_$it" }
     is MezzeType.VarType -> null
     else -> receiverTypeName(arg)
 }

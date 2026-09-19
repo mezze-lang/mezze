@@ -166,14 +166,12 @@ object BuiltinTypes {
      * which types derive.
      */
     fun sequenceElementType(type: MezzeType): MezzeType? = when (type) {
-        is MezzeType.SeqType -> type.elementType
         is MezzeType.TypeApplication ->
             if (type.constructor in sequenceConstructors) type.args.firstOrNull() else null
         else -> null
     }
 
     fun builtinConstructorName(type: MezzeType): String? = when (type) {
-        is MezzeType.SeqType -> SEQ
         is MezzeType.BytesType -> BYTES
         else -> null
     }
@@ -220,6 +218,20 @@ object BuiltinTypes {
      * hash and the hashes differ, so this meets a converter-built `List` on the
      * name and unifies, which is exactly what a builtin needs.
      */
+    /**
+     * `Seq elem` — the `[elem]` syntax — in the one form a container has (B.1).
+     *
+     * Same Builtin identity as [listApp], for the same reason. This is also what
+     * makes `[Int]` and a written `Seq Int` the SAME type rather than two that
+     * unification has to reconcile, which is the whole point of the exercise.
+     */
+    fun seqApp(elem: MezzeType): MezzeType.TypeApplication =
+        MezzeType.TypeApplication(
+            constructor = SEQ,
+            args = listOf(elem),
+            identity = TypeIdentity.derive(SEQ, null, allowBuiltin = true),
+        )
+
     fun listApp(elem: MezzeType): MezzeType.TypeApplication =
         MezzeType.TypeApplication(
             constructor = LIST,

@@ -91,7 +91,7 @@ internal fun ExpressionConstraintGenerator.generateStringLiteral(expr: ParsedStr
 internal fun ExpressionConstraintGenerator.generateSeqLiteral(expr: ParsedSeqLit, context: ConstraintContext): ConstraintResult {
     if (expr.elements.isEmpty()) {
         val elementType = MezzeType.VarType(TypeVar.fresh())
-        return ConstraintResult.simple(MezzeType.SeqType(elementType))
+        return ConstraintResult.simple(com.mezze.language.ast.BuiltinTypes.seqApp(elementType))
     }
 
     val elementType = MezzeType.VarType(TypeVar.fresh())
@@ -120,7 +120,7 @@ internal fun ExpressionConstraintGenerator.generateSeqLiteral(expr: ParsedSeqLit
                 collector.constraints.add(
                     Constraint.Equality(
                         left = result.type,
-                        right = MezzeType.SeqType(elementType),
+                        right = com.mezze.language.ast.BuiltinTypes.seqApp(elementType),
                         context = "Spread element must be a seq",
                         loc = element.expr.loc,
                         errorContext = ErrorContext.SeqElement(elementIndex)
@@ -131,7 +131,7 @@ internal fun ExpressionConstraintGenerator.generateSeqLiteral(expr: ParsedSeqLit
         }
     }
 
-    return collector.toResult(MezzeType.SeqType(elementType))
+    return collector.toResult(com.mezze.language.ast.BuiltinTypes.seqApp(elementType))
 }
 
 internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdentifier, context: ConstraintContext): ConstraintResult {

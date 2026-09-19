@@ -107,8 +107,6 @@ object TypeAnnotationMatcher {
                             typeMatchesAnnotation(a, b, typeDeclarations, typeVars, typeVarBindings)
                         }
                     }
-                    type is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ ->
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)
                     else -> false
                 }
             }
@@ -128,8 +126,9 @@ object TypeAnnotationMatcher {
                     else typeMatchesAnnotation(concretePayload, ctor.dataType!!, typeDeclarations, typeVars, typeVarBindings)
                 }
             }
-            is ParsedSeqType -> type is MezzeType.SeqType &&
-                typeMatchesAnnotation(type.elementType, annotation.elementType, typeDeclarations, typeVars, typeVarBindings)
+            is ParsedSeqType -> type is MezzeType.TypeApplication &&
+                type.constructor == BuiltinTypes.SEQ && type.args.size == 1 &&
+                typeMatchesAnnotation(type.args[0], annotation.elementType, typeDeclarations, typeVars, typeVarBindings)
             is ParsedFunctionType -> false
             is ParsedQualifiedType -> false
         }

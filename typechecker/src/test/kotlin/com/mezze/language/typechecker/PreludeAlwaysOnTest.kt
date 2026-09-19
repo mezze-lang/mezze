@@ -68,8 +68,8 @@ class PreludeAlwaysOnTest {
     fun `Seq literal binding produces concrete element type`() {
         val r = checkWithPrelude("let xs = [1, 2, 3]")
         val actual = assertConcrete(r, "xs")
-        assertTrue(actual is MezzeType.SeqType, "expected SeqType, got $actual")
-        assertEquals(MezzeType.IntType, (actual as MezzeType.SeqType).elementType)
+        assertTrue(actual is MezzeType.TypeApplication && actual.constructor == "Seq", "expected SeqType, got $actual")
+        assertEquals(MezzeType.IntType, (actual as MezzeType.TypeApplication).args[0])
     }
 
     @Test

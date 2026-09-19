@@ -499,7 +499,7 @@ class TypedASTCompiler(
                                     val refreshed = substitution.apply(entry.value.type)
                                     val recovered = resolveVariantReceiverType(entry.value, refreshed) ?: refreshed
                                     // Extract concrete element types from seq/list literals
-                                    // so VarType-wrapped containers (e.g. SeqType(VarType))
+                                    // so VarType-wrapped containers (e.g. `['a]`)
                                     // can still resolve the element-level impl.
                                     val elementType = extractConcreteElementTypeFromExpr(entry.value)
                                     if (elementType != null) concreteTypes.add(elementType)
@@ -509,7 +509,7 @@ class TypedASTCompiler(
                             }
                         }
                         // Filter out types that still contain VarType before resolution.
-                        // A SeqType(VarType) could match a container-level impl like
+                        // A `['a]` could match a container-level impl like
                         // `impl Ord for ['a]` when the dict is actually for the element
                         // type — which is unknown. Only fully-concrete types (or types
                         // where expression-based extraction recovered the element type)
@@ -872,7 +872,6 @@ class TypedASTCompiler(
         is MezzeType.VarType -> true
         is MezzeType.RecordType -> type.fields.values.any { containsVarTypeDeep(it) }
         is MezzeType.FunctionType -> containsVarTypeDeep(type.paramType) || containsVarTypeDeep(type.returnType)
-        is MezzeType.SeqType -> containsVarTypeDeep(type.elementType)
         is MezzeType.TypeApplication -> type.args.any { containsVarTypeDeep(it) }
         is MezzeType.VariantType -> type.constructors.values.any { payload ->
             payload != null && containsVarTypeDeep(payload)
@@ -2962,13 +2961,9 @@ class TypedASTCompiler(
             is RecordType -> if (value is RecordType) {
                 for ((k, t) in pattern.fields) value.fields[k]?.let { harvestVarBindings(t, it, out) }
             }
-            is SeqType -> if (value is SeqType) harvestVarBindings(pattern.elementType, value.elementType, out)
-                else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
             is TypeApplication -> when {
                 value is TypeApplication && pattern.constructor == value.constructor && pattern.args.size == value.args.size ->
                     pattern.args.zip(value.args).forEach { (p, v) -> harvestVarBindings(p, v, out) }
-                pattern.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && pattern.args.size == 1 && value is SeqType ->
-                    harvestVarBindings(pattern.args[0], value.elementType, out)
                 // A declared generic record / variant arrives EXPANDED (`Box P` as
                 // `RecordType{v: P}`, the two-representations landmine) while the impl
                 // target is the nominal `Box 'a`. Open the declaration's generic shape
@@ -3172,14 +3167,13 @@ class TypedASTCompiler(
 
     /**
      * Check if a type contains any VarType in its structure.
-     * A type like SeqType(VarType) is "partially generic" — the container is
+     * A type like `['a]` is "partially generic" — the container is
      * known but the element is unknown. Resolving ability impls against such
      * types can match blanket container-level impls (e.g. `impl Ord for ['a]`)
      * when the intended resolution is for the element type.
      */
     private fun containsVarType(type: MezzeType): Boolean = when (type) {
         is VarType -> true
-        is SeqType -> containsVarType(type.elementType)
         is TypeApplication -> type.args.any { containsVarType(it) }
         else -> false
     }
@@ -3190,7 +3184,6 @@ class TypedASTCompiler(
      */
     /** The element (or map value) type of a container type, else null. */
     private fun containerElementType(type: MezzeType): MezzeType? = when (type) {
-        is SeqType -> type.elementType
         // A container has TWO representations: the ParametricBuiltin cases above and
         // `TypeApplication("List"|"Map"|…, args)` (see Unification ~299, which already
         // bridges the SEQ pair). Only the former were handled, so `List P == List P`
@@ -5161,7 +5154,7 @@ class TypedASTCompiler(
             // Nested seq literal whose OWN element type is laundered (e.g.
             // `[[Low]]` — the inner `[Low]`'s element is an orphan VarType, #13):
             // recurse into the inner literal and rebuild the concrete container
-            // type, so `[[Low]]` recovers `SeqType(Sev)` and each nesting level's
+            // type, so `[[Low]]` recovers `[Sev]` and each nesting level's
             // dict resolves against the right element impl.
             // B.1, matchers-first: ask whether the element type IS a sequence in
             // either representation, not whether it is the dedicated node. A
@@ -5172,7 +5165,7 @@ class TypedASTCompiler(
                 com.mezze.language.ast.BuiltinTypes.sequenceElementType(elemType)
             if (element is com.mezze.language.typedast.TypedSeq &&
                 (elemSeqElement == null || elemSeqElement is VarType)) {
-                extractConcreteElementTypeFromExpr(element)?.let { return SeqType(it) }
+                extractConcreteElementTypeFromExpr(element)?.let { return com.mezze.language.ast.BuiltinTypes.seqApp(it) }
             }
             if (elemType !is VarType) return elemType
         }

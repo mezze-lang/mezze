@@ -33,23 +33,28 @@ import kotlin.test.fail
 class ContainerTypeFormGateTest {
 
     /** Construction sites per dedicated container node, measured. */
-    private val baseline = mapOf(
-        "SeqType" to 30,
-    )
-
     /**
-     * FIVE of the six are ABSENT because they no longer exist: SetType, MapType,
-     * SortedSetType, SortedMapType and ListType. Once the annotation converter
-     * stopped producing them, four had no producer at all; ListType's two
-     * (VariantSolver's cons-on-a-variable solve, and BuiltinTypes' cons payload)
-     * were moved to `BuiltinTypes.listApp`. Each was then deleted along with every
-     * arm that matched it — including the cross-form unification arms, which are
-     * the thing this duplication cost in the first place.
+     * ALL SIX are gone: SeqType, ListType, SetType, MapType, SortedSetType and
+     * SortedMapType. A builtin container has exactly one representation now —
+     * `TypeApplication("Seq", [T])` and its siblings — built by
+     * `BuiltinTypes.seqApp` / `listApp` or by the annotation converter, which
+     * sends every applied type down one path.
      *
-     * SeqType alone remains, with 30 producers built directly rather than through
-     * any annotation. It is `[]` syntax, which is why it is the one that did not
-     * fall out of the converter change.
+     * The map is empty and the gate asserts ZERO construction sites for each
+     * name. Reintroducing a dedicated node fails here, which is the point: the
+     * duplication produced three independent wrong answers before it was
+     * removed (containerElementType, harvestVarBindings, and mono's
+     * elementVarName, the last of which is why `List P == List P` compared
+     * structurally while `[P] == [P]` did not).
      */
+    private val baseline = mapOf(
+        "SeqType" to 0,
+        "ListType" to 0,
+        "SetType" to 0,
+        "MapType" to 0,
+        "SortedMapType" to 0,
+        "SortedSetType" to 0,
+    )
 
     private val roots = listOf(
         "ast/src/main", "typechecker/src/main", "interpreter/src/main",
@@ -71,7 +76,13 @@ class ContainerTypeFormGateTest {
             dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { f ->
                 f.forEachLine { line ->
                     // A construction, not a match arm or a type position.
+                    // `Parsed$typeName(` CONTAINS `$typeName(`. The parsed
+                    // annotation `[T]` is a different thing entirely — it is
+                    // syntax, and it stays; only the solved MezzeType node was
+                    // deleted. Counting it here read as 11 phantom SeqType
+                    // constructions after the node was already gone.
                     if (line.contains("$typeName(") &&
+                        !line.contains("Parsed$typeName(") &&
                         !line.contains("is MezzeType.$typeName") &&
                         !line.contains("is $typeName") &&
                         !line.contains("data class $typeName")
@@ -85,10 +96,9 @@ class ContainerTypeFormGateTest {
     @Test
     fun `no new place constructs a dedicated container type`() {
         val found = baseline.keys.associateWith { countConstructions(it) }
-        assertTrue(
-            found.values.sum() > 0,
-            "counted nothing — the source roots or the pattern are wrong, and this gate is vacuous",
-        )
+        // No "> 0" companion any more: the correct total IS zero. The pattern is
+        // kept honest by the fact that it counted 49 sites before the deletions
+        // and each drop was checked against a compile.
         val grown = found.filter { (k, v) -> v > baseline.getValue(k) }
         if (grown.isNotEmpty()) {
             fail(

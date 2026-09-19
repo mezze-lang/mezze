@@ -73,8 +73,6 @@
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
-UNBOUND_TYPE_VAR	impl Seq.is_sorted
-UNBOUND_TYPE_VAR	impl Seq.is_sorted_descending
 UNBOUND_TYPE_VAR	let:enumerate
 UNBOUND_TYPE_VAR	let:flatten
 UNBOUND_TYPE_VAR	let:intersperse

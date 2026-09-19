@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
  * B.1 — the same container type, written two ways, must behave identically.
  *
  * A builtin container has TWO internal representations: the dedicated node
- * (`SeqType(P)`) and the name-carried application
+ * (`TypeApplication("Seq", listOf(P))`) and the name-carried application
  * (`TypeApplication("Seq", [P])`). B.2 measured the split across the typed
  * stdlib at 5722 name-carried against 1546 dedicated, so the name-carried form
  * is the DOMINANT one — and every consumer that knows only one of them

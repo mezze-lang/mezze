@@ -269,7 +269,7 @@ object TypeAnnotationConverter {
                 }
             }
 
-            is ParsedSeqType -> MezzeType.SeqType(recurse(annotation.elementType))
+            is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(recurse(annotation.elementType))
 
             is ParsedEffectRow -> MezzeType.EffectRow(annotation.effects.toSet())
 
@@ -346,7 +346,7 @@ object TypeAnnotationConverter {
                     e.name to convert(e.type, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
                 })
             }
-            is ParsedSeqType -> MezzeType.SeqType(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash))
+            is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash))
             is ParsedVariantType -> {
                 if (faithful) {
                     MezzeType.VariantType(

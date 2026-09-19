@@ -36,8 +36,8 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [Int]
         val resultType = result.getVariableType("copy")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertTrue((resultType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -54,8 +54,8 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [Int]
         val resultType = result.getVariableType("extended")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertTrue((resultType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -73,8 +73,8 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [Int]
         val resultType = result.getVariableType("combined")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertTrue((resultType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -91,8 +91,8 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [Str]
         val resultType = result.getVariableType("extended")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.StringType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertTrue((resultType as MezzeType.TypeApplication).args[0] is MezzeType.StringType)
     }
 
     // ========== Type Error Tests ==========
@@ -156,8 +156,8 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [Int]
         val resultType = result.getVariableType("result")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertTrue((resultType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
     }
 
     @Test
@@ -174,8 +174,8 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [Int]
         val resultType = result.getVariableType("nums")
-        assertTrue(resultType is MezzeType.SeqType)
-        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        assertTrue((resultType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
     }
 
     // ========== Nested Seq Tests ==========
@@ -194,9 +194,9 @@ class SeqSpreadTypeCheckTest {
 
         // Result should be [[Int]]
         val resultType = result.getVariableType("extended")
-        assertTrue(resultType is MezzeType.SeqType)
-        val innerType = (resultType as MezzeType.SeqType).elementType
-        assertTrue(innerType is MezzeType.SeqType)
-        assertTrue((innerType as MezzeType.SeqType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.TypeApplication && resultType.constructor == "Seq")
+        val innerType = (resultType as MezzeType.TypeApplication).args[0]
+        assertTrue(innerType is MezzeType.TypeApplication && innerType.constructor == "Seq")
+        assertTrue((innerType as MezzeType.TypeApplication).args[0] is MezzeType.IntType)
     }
 }

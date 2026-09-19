@@ -279,7 +279,7 @@ object CompletionEngine {
             is MezzeType.StringType, is MezzeType.CharType,
             is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.NewtypeType,
-            is MezzeType.SeqType, is MezzeType.EffectRow -> {}
+            is MezzeType.EffectRow -> {}
         }
         return out
     }
@@ -882,7 +882,6 @@ object CompletionEngine {
                 if (type.args.isEmpty()) type.constructor
                 else "${type.constructor} ${type.args.joinToString(" ") { elem(it) }}"
             is MezzeType.NewtypeType -> concreteTypeHint(type.wrappedType, depth)
-            is MezzeType.SeqType -> "Seq ${elem(type.elementType)}"
             is MezzeType.VariantType -> type.identity.displayNameOrNull()
             is MezzeType.VarType,
             is MezzeType.FunctionType,
@@ -1401,7 +1400,6 @@ object CompletionEngine {
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"
             is MezzeType.BytesType -> "Bytes"
-            is MezzeType.SeqType -> "Seq"
             is MezzeType.TypeApplication -> type.constructor
             is MezzeType.VariantType -> type.constructors.keys.firstOrNull()
             else -> null
@@ -1618,7 +1616,7 @@ object CompletionEngine {
         val first = receiverText.first()
         return when {
             first == '[' && receiverText.endsWith("]") -> {
-                MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar.fresh()))
+                com.mezze.language.ast.BuiltinTypes.seqApp(MezzeType.VarType(com.mezze.language.ast.TypeVar.fresh()))
             }
             first == '"' && receiverText.endsWith("\"") -> MezzeType.StringType
             first == '\'' && receiverText.endsWith("'") -> MezzeType.CharType

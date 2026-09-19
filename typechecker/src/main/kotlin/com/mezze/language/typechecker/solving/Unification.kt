@@ -291,13 +291,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.TypeApplication && type2 is MezzeType.TypeApplication ->
             unifyTypeApplications(type1, type2, registry)
 
-        type1 is MezzeType.SeqType && type2 is MezzeType.SeqType ->
-            unify(type1.elementType, type2.elementType, registry)
-
-        type1 is MezzeType.SeqType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SEQ) && type2.args.size == 1 ->
-            unify(type1.elementType, type2.args[0], registry)
-        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SEQ) && type1.args.size == 1 && type2 is MezzeType.SeqType ->
-            unify(type1.args[0], type2.elementType, registry)
 
 
         type1 is MezzeType.EffectRow && type2 is MezzeType.EffectRow ->

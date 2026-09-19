@@ -211,9 +211,6 @@ internal fun ExpressionConstraintGenerator.buildTypeVarMappingHelper(original: M
                 buildTypeVarMappingHelper(orig, inst, mapping)
             }
         }
-        original is MezzeType.SeqType && instantiated is MezzeType.SeqType -> {
-            buildTypeVarMappingHelper(original.elementType, instantiated.elementType, mapping)
-        }
     }
 }
 internal fun ExpressionConstraintGenerator.tryGeneratePerformerMethodCall(

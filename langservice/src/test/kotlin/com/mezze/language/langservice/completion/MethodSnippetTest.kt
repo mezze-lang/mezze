@@ -68,7 +68,7 @@ class MethodSnippetTest {
             returnType = acc
         )
         val record = MezzeType.RecordType(
-            fields = mapOf("it" to MezzeType.SeqType(x), "acc" to acc, "f" to callback),
+            fields = mapOf("it" to MezzeType.TypeApplication("Seq", listOf(x)), "acc" to acc, "f" to callback),
             rowVar = null
         )
 

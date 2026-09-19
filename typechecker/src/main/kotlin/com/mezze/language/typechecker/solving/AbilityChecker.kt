@@ -397,7 +397,7 @@ class AbilityChecker internal constructor(
                 )
             }
             is ParsedSeqType ->
-                MezzeType.SeqType(substituteAnnotationWithImplBindings(annotation.elementType, implTypeVarBindings))
+                com.mezze.language.ast.BuiltinTypes.seqApp(substituteAnnotationWithImplBindings(annotation.elementType, implTypeVarBindings))
             is ParsedRecordType ->
                 MezzeType.RecordType(fields = annotation.entries.associate {
                     it.name to substituteAnnotationWithImplBindings(it.type, implTypeVarBindings)
@@ -533,7 +533,7 @@ class AbilityChecker internal constructor(
         return when (annotation) {
             is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
             is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
-            is ParsedSeqType -> MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
+            is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(typeAnnotationToMezzeType(annotation.elementType))
             is ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
             is ParsedFunctionType -> MezzeType.FunctionType(paramType = typeAnnotationToMezzeType(annotation.paramType), returnType = typeAnnotationToMezzeType(annotation.returnType))
             is ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
@@ -846,8 +846,6 @@ class AbilityChecker internal constructor(
                 null
             }
 
-            is MezzeType.SeqType -> require("${prefix}List") ?:
-                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
 
 
             is MezzeType.TypeApplication -> when (dataType.constructor) {
@@ -1352,7 +1350,7 @@ class AbilityChecker internal constructor(
                 if (annotation.args.isEmpty() && annotation.constructor.isTypeVarName())
                     MezzeType.VarType(TypeVar.freshWithName(annotation.constructor))
                 else { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else WellKnownTypeApp.of(annotation.constructor, args) }
-            is ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
+            is ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { com.mezze.language.ast.BuiltinTypes.seqApp(it) }
             is ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
             is ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })
             is ParsedFunctionType -> { val p = convertAnnotationToType(annotation.paramType) ?: return null; val r = convertAnnotationToType(annotation.returnType) ?: return null; MezzeType.FunctionType(p, r) }

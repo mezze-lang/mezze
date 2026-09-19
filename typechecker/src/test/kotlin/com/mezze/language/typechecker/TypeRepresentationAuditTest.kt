@@ -8,21 +8,21 @@ import kotlin.test.assertTrue
 /**
  * Disease 2, measured — the size and shape of task B.1.
  *
- * A container has TWO representations: the dedicated node (`SeqType(T)`) and the
- * name-carried application (`TypeApplication("Seq", [T])`). B.1 deletes the
- * dedicated nodes so only one survives. That is a 247-site change across the
- * typechecker and ast, so it is worth knowing what actually FLOWS before moving
- * any of it.
+ * A container HAD two representations: a dedicated node (`SeqType(T)`) and a
+ * name-carried application (`TypeApplication("Seq", [T])`). B.1 deleted the
+ * dedicated nodes so only one survives, and this test — which existed to measure
+ * how much of each flowed before moving any of it — now asserts the endpoint:
+ * ZERO dedicated nodes reach the typed stdlib, because none of them exist.
  *
  * A.1's bisection produced the first concrete casualty: an isolated impl-op solve
  * returned `TypeApplication("Nat")` where the declared shape gave the nominal
  * `Nat`, and taking the solver's version sent dispatch down a path keyed on the
  * representation it did not have. This counts how much of that there is.
  *
- * The interesting number is not the totals — it is how many DECLARATIONS carry
- * both forms, because those are where a consumer written for one meets the
- * other. Kept as a ratchet: the count may not grow while B.1 is outstanding, and
- * B.1 finishing drives it to zero from the other side.
+ * The interesting number was how many DECLARATIONS carried both forms, since
+ * those are where a consumer written for one meets the other. It is zero, and
+ * the walk still runs so that a reintroduced dedicated node would be caught
+ * here rather than in a dispatch bug.
  */
 class TypeRepresentationAuditTest {
 
@@ -38,8 +38,9 @@ class TypeRepresentationAuditTest {
     private fun countIn(type: MezzeType, counts: Counts, seen: MutableSet<MezzeType> = HashSet()) {
         if (!seen.add(type)) return
         when (type) {
-            is MezzeType.SeqType,
-            -> counts.dedicatedNodes++
+            // No arm can increment `dedicatedNodes` any more — every dedicated
+            // container node is deleted. The field and the assertion below are
+            // kept so that reintroducing one, and matching it here, fails loudly.
             is MezzeType.TypeApplication ->
                 if (type.constructor in containerConstructors) counts.applications++
             else -> Unit
@@ -48,7 +49,6 @@ class TypeRepresentationAuditTest {
             is MezzeType.FunctionType -> {
                 countIn(type.paramType, counts, seen); countIn(type.returnType, counts, seen)
             }
-            is MezzeType.SeqType -> countIn(type.elementType, counts, seen)
             is MezzeType.TypeApplication -> type.args.forEach { countIn(it, counts, seen) }
             is MezzeType.RecordType -> type.fields.values.forEach { countIn(it, counts, seen) }
             is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { p -> countIn(p, counts, seen) } }
@@ -153,8 +153,15 @@ class TypeRepresentationAuditTest {
         mixedDecls.take(20).forEach { println("    $it") }
 
         assertTrue(
-            totalDedicated + totalApplications > 0,
+            totalApplications > 0,
             "counted no container types at all — the walk is not reaching solved types",
+        )
+        assertTrue(
+            totalDedicated == 0 && mixedDecls.isEmpty(),
+            "a dedicated container node reached the typed stdlib. B.1 deleted all six, " +
+                "so one being back means a representation was reintroduced — and a " +
+                "consumer written for the other form will silently do nothing on it. " +
+                "Found $totalDedicated in ${mixedDecls.size} declaration(s): $mixedDecls",
         )
     }
 }

@@ -371,13 +371,6 @@ sealed interface MezzeType {
         )
     }
 
-    // Seq types (for [] syntax)
-    @Serializable
-    data class SeqType(val elementType: MezzeType) : ParametricBuiltin {
-        override val typeArgs: List<MezzeType> get() = listOf(elementType)
-        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = SeqType(args[0])
-    }
-
     // Function types
     @Serializable
     data class FunctionType(

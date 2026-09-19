@@ -483,7 +483,7 @@ class PatternConstraintGenerator {
         constraints.add(
             Constraint.Equality(
                 left = scrutineeType,
-                right = MezzeType.SeqType(elementType),
+                right = BuiltinTypes.seqApp(elementType),
                 context = "Seq pattern requires seq type",
                 loc = sourceLoc
             )
@@ -497,7 +497,7 @@ class PatternConstraintGenerator {
 
         val restPatternName = pattern.restPattern
         if (restPatternName != null) {
-            bindings[restPatternName] = MezzeType.SeqType(elementType)
+            bindings[restPatternName] = BuiltinTypes.seqApp(elementType)
         }
 
         return PatternConstraintResult(

@@ -511,7 +511,10 @@ object TypedAstScopeWalker {
                 }
             }
             is TypedSeqPattern -> {
-                val elem = (scrutinee as? MezzeType.SeqType)?.elementType
+                // `[elem]` is a TypeApplication since B.1; take arg 0.
+                val elem = (scrutinee as? MezzeType.TypeApplication)
+                    ?.takeIf { it.constructor == com.mezze.language.ast.BuiltinTypes.SEQ }
+                    ?.args?.firstOrNull()
                 if (elem != null) for (e in pattern.elements) derivePatternTypes(elem, e, out)
                 pattern.rest?.let { out[it] = scrutinee }
             }

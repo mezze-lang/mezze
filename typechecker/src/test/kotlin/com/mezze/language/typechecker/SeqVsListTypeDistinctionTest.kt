@@ -42,7 +42,7 @@ class SeqVsListTypeDistinctionTest {
         val inferredType = typedProgram.getVariableType("arr")
 
         // Should be Seq type, not List type
-        assertTrue(inferredType is MezzeType.SeqType,
+        assertTrue(inferredType is MezzeType.TypeApplication && inferredType.constructor == "Seq",
                   "Seq literal should have SeqType, got: ${prettyPrintType(inferredType!!)}")
     }
 
@@ -62,7 +62,7 @@ class SeqVsListTypeDistinctionTest {
         // Should be a TypeApplication of List, not Array
         assertTrue(inferredType is MezzeType.TypeApplication || inferredType is MezzeType.VariantType,
                   "List constructor should create TypeApplication or VariantType, got: ${prettyPrintType(inferredType!!)}")
-        assertFalse(inferredType is MezzeType.SeqType,
+        assertFalse(inferredType is MezzeType.TypeApplication && inferredType.constructor == "Seq",
                    "List constructor should NOT create SeqType")
     }
 
@@ -394,14 +394,14 @@ class SeqVsListTypeDistinctionTest {
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredArrType = typedProgram.getVariableType("arr_of_lists")
-        assertTrue(inferredArrType is MezzeType.SeqType,
+        assertTrue(inferredArrType is MezzeType.TypeApplication && inferredArrType.constructor == "Seq",
                   "Should be SeqType")
 
-        val arrayType = inferredArrType as MezzeType.SeqType
+        val elem = (inferredArrType as MezzeType.TypeApplication).args[0]
         // Element type should be List type
-        assertTrue(arrayType.elementType is MezzeType.TypeApplication ||
-                  arrayType.elementType is MezzeType.VariantType ||
-                  arrayType.elementType is MezzeType.VarType,
+        assertTrue(elem is MezzeType.TypeApplication ||
+                  elem is MezzeType.VariantType ||
+                  elem is MezzeType.VarType,
                   "Seq elements should be List type")
     }
 

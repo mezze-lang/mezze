@@ -520,7 +520,6 @@ class TypeValidator(
         type1 is MezzeType.TypeApplication && type2 is MezzeType.TypeApplication ->
             type1.constructor == type2.constructor && type1.args.size == type2.args.size &&
             type1.args.zip(type2.args).all { (a, b) -> alphaEquivalent(a, b, mapping) }
-        type1 is MezzeType.SeqType && type2 is MezzeType.SeqType -> alphaEquivalent(type1.elementType, type2.elementType, mapping)
         else -> false
     }
 

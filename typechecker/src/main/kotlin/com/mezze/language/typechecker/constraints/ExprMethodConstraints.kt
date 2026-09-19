@@ -935,7 +935,7 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
         is ParsedStringLit -> return MezzeType.StringType
         is ParsedCharLit -> return MezzeType.CharType
         is ParsedSeqLit ->
-            return MezzeType.SeqType(MezzeType.VarType(TypeVar.fresh()))
+            return com.mezze.language.ast.BuiltinTypes.seqApp(MezzeType.VarType(TypeVar.fresh()))
         // `(expr).method` — a parenthesized receiver is type-transparent, so
         // look through it. Without this `(5).to_str {}` and `(f {}).to_str {}`
         // reported the receiver as "unresolved" and fell through to a HasField
