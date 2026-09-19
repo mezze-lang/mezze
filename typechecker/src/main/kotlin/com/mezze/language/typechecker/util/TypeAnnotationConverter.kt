@@ -393,15 +393,16 @@ object TypeAnnotationConverter {
     }
 
     private fun resolveWellKnownTypeApp(constructor: String, args: List<MezzeType>, typeHash: Hash? = null): MezzeType {
-        return when {
-            constructor == BuiltinTypes.SEQ && args.size == 1 -> MezzeType.SeqType(args[0])
-            constructor == BuiltinTypes.LIST && args.size == 1 -> MezzeType.ListType(args[0])
-            constructor == BuiltinTypes.SET && args.size == 1 -> MezzeType.SetType(args[0])
-            constructor == BuiltinTypes.SORTED_SET && args.size == 1 -> MezzeType.SortedSetType(args[0])
-            constructor == BuiltinTypes.MAP && args.size == 2 -> MezzeType.MapType(args[0], args[1])
-            constructor == BuiltinTypes.SORTED_MAP && args.size == 2 -> MezzeType.SortedMapType(args[0], args[1])
-            else -> WellKnownTypeApp.of(constructor, args, typeHash)
-        }
+        // B.1 — every builtin container converts to the SAME form as every other
+        // applied type. It used to convert to a dedicated MezzeType node instead,
+        // which is how each of these came to exist twice: once as its own node and
+        // once as a TypeApplication carrying the same name. Consumers are
+        // two-sided, but a PRODUCER picks one, and a pass handed the other
+        // silently does nothing — measured three times independently
+        // (containerElementType, harvestVarBindings, mono's elementVarName, the
+        // last of which is why `List P == List P` compared structurally while
+        // `[P] == [P]` did not).
+        return WellKnownTypeApp.of(constructor, args, typeHash)
     }
 
     class SharedRowVar {

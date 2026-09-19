@@ -17,9 +17,14 @@ import kotlin.test.fail
  * `elementVarName`, which is why `List P == List P` compared structurally while
  * `[P] == [P]` did not.
  *
- * The endpoint is one form and the deletion of the dedicated nodes — 413
- * references, a refactor rather than a fix. Until then this bounds the producers,
- * so the eventual deletion has a fixed target instead of a moving one.
+ * The endpoint is one form and the deletion of the dedicated nodes — 415
+ * references, a refactor rather than a fix. The annotation converter was the
+ * chokepoint: it turned every written `Seq 'a` / `Map 'k 'v` / … into a
+ * dedicated node while every other applied type became a TypeApplication, and
+ * it now produces one form for all of them. That took the producers from 49 to
+ * 41 with both gates green, and left SortedSetType and SortedMapType with no
+ * producer at all. Until the rest follow, this bounds them, so the eventual
+ * deletion has a fixed target instead of a moving one.
  *
  * Counted by reading the source rather than by reflection: a construction is a
  * textual `SeqType(` that is not a `when` arm. That is crude, and it only has to
@@ -29,12 +34,16 @@ class ContainerTypeFormGateTest {
 
     /** Construction sites per dedicated container node, measured. */
     private val baseline = mapOf(
-        "SeqType" to 31,
-        "ListType" to 4,
-        "SetType" to 5,
-        "MapType" to 5,
-        "SortedMapType" to 2,
-        "SortedSetType" to 2,
+        "SeqType" to 30,
+        "ListType" to 3,
+        "SetType" to 3,
+        "MapType" to 3,
+        // 1 each, and that 1 is the `rebuild` in the type's own declaration —
+        // which only fires on an instance that already exists. Nothing produces
+        // one any more, so every `is MezzeType.SortedSetType` / `SortedMapType`
+        // arm in the compiler is now unreachable and the nodes are deletable.
+        "SortedMapType" to 1,
+        "SortedSetType" to 1,
     )
 
     private val roots = listOf(
