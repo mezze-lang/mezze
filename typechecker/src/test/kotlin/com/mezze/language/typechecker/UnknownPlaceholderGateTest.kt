@@ -29,17 +29,50 @@ import kotlin.test.fail
  */
 class UnknownPlaceholderGateTest {
 
-    /** Every reason the compiler currently mints an unknown placeholder for. */
+    /**
+     * Every reason the compiler can mint an unknown placeholder for.
+     *
+     * The list used to be six BLANKET reasons, and the largest of them — "no
+     * context type at buildExpr" — was a DEFAULT PARAMETER, so it fired on every
+     * context-free build in the compiler and one entry covered every position
+     * that gave up. Absence of a context is now `null`, which is what it is, and
+     * each genuine last resort says which position it is.
+     *
+     * Three of the old six are gone entirely, replaced by a loud failure rather
+     * than a placeholder, because reaching them means emit ran on something that
+     * should not have type-checked: a `let` or destructuring `let` with no solved
+     * type, and a qualified name in no import table. A fourth — the module's
+     * trailing expression — reads the type the generator already recorded under
+     * `_toplevel` instead of inventing one.
+     *
+     * Measured over the stdlib plus five programs covering literals, chained
+     * HOFs, newtypes, matches and maps, exactly TWO of these fire:
+     *
+     *   field read with no solved type and no declared shape
+     *   identifier resolved nowhere and the position expects nothing
+     *
+     * The rest are reachable in principle and unreached in practice. They stay
+     * listed because the gate's job is to catch a NEW place where the compiler
+     * gives up, and an unlisted reason firing is exactly that.
+     */
     private val allowed = setOf(
-        "no context type at buildExpr",
-        "top-level expression",
+        "ability op reference with no solved signature",
         "let binding with no solved type",
-        "destructuring let with no solved type",
-        // The big one, and the most actionable: a `__native_*` reference has no
-        // declared Mezze type, so every one of them lands here. This is BUG 19's
-        // native-return hole, counted.
-        "identifier resolved nowhere (mostly `__native_*`, whose Mezze type is undeclared)",
         "qualified identifier not in imports",
+        "top-level expression with no recorded solve",
+        "call with no solved return, no callee arrow and no context",
+        "field read with no solved type and no declared shape",
+        "identifier resolved nowhere and the position expects nothing",
+        "inherent method reference with no solved signature",
+        "match with no cases and no context",
+        "method call with no solved return, no method arrow and no context",
+        "method reference with no solved signature",
+        "perform op with no solved result and no context",
+        "perform op with no solved return, no resolved return and no context",
+        "pipe placeholder with no piped-in type",
+        "static ability op field access with no solved signature",
+        "static ability op with no solved, declared or context type",
+        "variant construct with no solved or context type",
     )
 
     private lateinit var parser: MezzeParser

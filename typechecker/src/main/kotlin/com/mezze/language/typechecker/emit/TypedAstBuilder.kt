@@ -319,9 +319,24 @@ class TypedAstBuilder(
             val pattern = decl.pattern as ParsedRecordPattern
             val destrName = "${com.mezze.language.ast.MagicParams.DESTRUCTURE_DECL_PREFIX}${decls.size}"
             val loc = decl.loc
-            val rawType = constraintResults[destrName]?.let { substitution.apply(it.type) }
-                ?: constraintResults["__destructured__"]?.let { substitution.apply(it.type) }
-                ?: MezzeType.VarType(TypeVar.unknown("destructuring let with no solved type"))
+            // Keyed the way the GENERATOR keys it. `ConstraintGenerator.getBindingName`
+            // files a destructuring `let` under its FIRST BOUND NAME — `theValue`
+            // for `let { only = theValue } = data`. Emit looked up
+            // `__destructured_<n>` and then `__destructured__`, and nothing has ever
+            // recorded under either, so both missed every time and the type came
+            // from a placeholder. Every field pulled out of the pattern was then
+            // typed from that placeholder.
+            //
+            // `__destructured_<n>` was doubly wrong: it counts `decls.size`, so the
+            // key moved when a prelude was prepended. Position is not identity.
+            val solveKey = pattern.extractBindings().firstOrNull()
+            val rawType = solveKey?.let { k -> constraintResults[k]?.let { substitution.apply(it.type) } }
+                ?: error(
+                    "no solved type for the destructuring binding at ${decl.loc} " +
+                        "(looked under `$solveKey`, the first name it binds — the same " +
+                        "key ConstraintGenerator.getBindingName files it under). Emit " +
+                        "runs only on a module that type-checked, so it has one."
+                )
             val type = closeGeneratedRowVars(rawType)
             val value = buildExpr(decl.value, file, type)
 
@@ -338,7 +353,13 @@ class TypedAstBuilder(
         val loc = decl.loc
 
         val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
-            ?: MezzeType.VarType(TypeVar.unknown("let binding with no solved type"))
+            // MEASURED REACHABLE. Converting this to a hard error broke 58 tests
+            // across the newtype, STM and atom families, so "emit runs only on a
+            // module that type-checked, therefore every binding has a solved type"
+            // is FALSE — some binding reaches emit without one. Which, and why, is
+            // not yet known; until it is, this stays a named placeholder rather
+            // than a crash.
+            ?: noContextType("let binding with no solved type")
         // Closes RECORD/VARIANT row vars only; effect rows pass through untouched
         // (effect-row membership is owned by gen-time harvest + unifyEffectRows).
         val closedType = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
@@ -837,7 +858,17 @@ class TypedAstBuilder(
     ) {
         val loc = decl.loc
         val hash = ParsedDeclHasher.hashExpr(decl.expression)
-        val type = MezzeType.VarType(TypeVar.unknown("top-level expression"))
+        // The generator records this expression's solved type under `_toplevel`
+        // (ConstraintGenerator's ParsedTopLevelExpr arm). Minting a placeholder as
+        // the context and building against THAT threw the answer away and handed
+        // the body an undetermined type to work from.
+        // Reads the type the generator recorded (ConstraintGenerator's
+        // ParsedTopLevelExpr arm files it under `_toplevel`) instead of minting a
+        // placeholder and building the body against THAT. Falls back rather than
+        // failing: the recording is per-module, and emit also runs on paths that
+        // did not go through that arm.
+        val type = constraintResults["_toplevel"]?.let { substitution.apply(it.type) }
+            ?: noContextType("top-level expression with no recorded solve")
         val value = buildExpr(decl.expression, file, type)
         decls.add(TypedLetDecl(
             hash = hash,
@@ -857,7 +888,11 @@ class TypedAstBuilder(
         // consumer that would guess from a type variable can tell the difference
         // (TypeVar.isPlaceholder), which is the whole point — "nobody told me" and
         // "this is polymorphic" used to be the same value.
-        contextType: MezzeType = MezzeType.VarType(TypeVar.unknown("no context type at buildExpr")),
+        // NULL means "this position imposes no type", which is what it is. It used
+        // to be a placeholder TypeVar — a value that IS a type, indistinguishable
+        // from an ordinary variable the moment it left this function, and read
+        // downstream as polymorphism. Absence is not polymorphism.
+        contextType: MezzeType? = null,
     ): TypedExpr {
         val loc = expr.loc
         return when (expr) {
@@ -919,7 +954,7 @@ class TypedAstBuilder(
                     // `Status`, not `'a`. Prefer whichever is concrete; per-loc
                     // wins when both are.
                     val perLoc = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
-                    val fromCtx = substitution.apply(contextType)
+                    val fromCtx = contextType?.let { substitution.apply(it) }
                     val solvedType = when {
                         perLoc != null && perLoc !is MezzeType.VarType -> perLoc
                         fromCtx !is MezzeType.VarType -> fromCtx
@@ -927,7 +962,7 @@ class TypedAstBuilder(
                     }
                     TypedVariantConstruct(
                         expr.constructor, payload,
-                        payloadTypedVariant(solvedType, expr.constructor, payload), loc,
+                        payloadTypedVariant(solvedType ?: noContextType("variant construct with no solved or context type"), expr.constructor, payload), loc,
                     )
                 }
             }
@@ -970,7 +1005,7 @@ class TypedAstBuilder(
 
                 pushScope(params.map { it.name }.toMutableList(), isLambdaBoundary = true)
 
-                val appliedCtx = substitution.apply(contextType)
+                val appliedCtx = contextType?.let { substitution.apply(it) }
                 val returnType = when (appliedCtx) {
                     is MezzeType.FunctionType -> substitution.apply(appliedCtx.returnType)
                     else -> MezzeType.VarType(TypeVar.freshWithName("ret"))
@@ -1001,7 +1036,7 @@ class TypedAstBuilder(
                 // come out effectless and the import-side harvest would
                 // see no effects. Same reasoning applies to top-level lets
                 // with annotated effect arrows.
-                val ctxFnType = substitution.apply(contextType) as? MezzeType.FunctionType
+                val ctxFnType = contextType?.let { substitution.apply(it) } as? MezzeType.FunctionType
                 // The pushed param type is the CALLEE's declaration, which for a
                 // generic higher-order function is a variable: `seq::find`'s
                 // `p: { x: 'a } -> Bool`. Taking it wholesale discarded the
@@ -1063,10 +1098,12 @@ class TypedAstBuilder(
                 // taken off the receiver's declared shape — in either representation
                 // (alias-expanded RecordType or nominal TypeApplication), which is what
                 // an ability-impl body needs: its reads never went through the solver.
-                val solvedFieldType = substitution.apply(contextType)
+                val solvedFieldType = contextType?.let { substitution.apply(it) }
                 val fieldType = when {
-                    solvedFieldType !is MezzeType.VarType -> solvedFieldType
-                    else -> (declaredShape(receiverType) as? MezzeType.RecordType)?.fields?.get(memberName) ?: solvedFieldType
+                    solvedFieldType != null && solvedFieldType !is MezzeType.VarType -> solvedFieldType
+                    else -> (declaredShape(receiverType) as? MezzeType.RecordType)?.fields?.get(memberName)
+                        ?: solvedFieldType
+                        ?: noContextType("field read with no solved type and no declared shape")
                 }.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
 
                 TypedFieldAccess(
@@ -1092,7 +1129,7 @@ class TypedAstBuilder(
                 // fields when present, else fall back to the solved record's fields,
                 // so a field value like `Queued` is emitted with its solved type
                 // (`Status`) rather than a bare `'a`. (Hover/inlay read these.)
-                val ctxFields = (substitution.apply(contextType) as? MezzeType.RecordType)?.fields
+                val ctxFields = (contextType?.let { substitution.apply(it) } as? MezzeType.RecordType)?.fields
                 val solvedFields = (callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     as? MezzeType.RecordType)?.fields
                 val expectedFields = when {
@@ -1172,7 +1209,9 @@ class TypedAstBuilder(
                     val cases = expr.cases.map { c ->
                         buildMatchCase(c, file, contextType, scrutineeShapeType)
                     }
-                    val resultType = cases.firstOrNull()?.body?.type ?: substitution.apply(contextType)
+                    val resultType = cases.firstOrNull()?.body?.type
+                        ?: contextType?.let { substitution.apply(it) }
+                        ?: noContextType("match with no cases and no context")
                     // S5.0 (#376): stamp the UNERASED source-level scrutinee type
                     // (constraint-time solved, keyed by the scrutinee's Loc) onto the
                     // node. The erased `scrutinee.type` above is unchanged and still
@@ -1186,7 +1225,7 @@ class TypedAstBuilder(
             }
             is ParsedDo -> buildDoBlock(expr, file, contextType)
             is ParsedSeqLit -> {
-                val elementContextType = when (val ct = substitution.apply(contextType)) {
+                val elementContextType = when (val ct = contextType?.let { substitution.apply(it) }) {
                     // The expected type says what the elements are. This used to read
                     // `is MezzeType.SeqType -> ct.elementType`; `[T]` is a
                     // TypeApplication since B.1, so it reads arg 0 of a `Seq`.
@@ -1227,7 +1266,9 @@ class TypedAstBuilder(
             }
 
             is ParsedPipePlaceholder -> {
-                TypedVar("@", BindingRef.Local(0, 0), substitution.apply(contextType), loc)
+                TypedVar("@", BindingRef.Local(0, 0),
+                    contextType?.let { substitution.apply(it) }
+                        ?: noContextType("pipe placeholder with no piped-in type"), loc)
             }
             is ParsedParens -> buildExpr(expr.expr, file, contextType)
             is ParsedPerform -> {
@@ -1254,12 +1295,14 @@ class TypedAstBuilder(
 
                 val argExpr = buildExpr(expr.arguments, file)
 
-                TypedPerformOp(effectHash, opName, argExpr, substitution.apply(contextType), loc)
+                TypedPerformOp(effectHash, opName, argExpr,
+                    contextType?.let { substitution.apply(it) }
+                        ?: noContextType("perform op with no solved result and no context"), loc)
             }
         }
     }
 
-    private fun buildFunctionCall(expr: ParsedFunctionCall, file: String, contextType: MezzeType): TypedExpr {
+    private fun buildFunctionCall(expr: ParsedFunctionCall, file: String, contextType: MezzeType?): TypedExpr {
         val loc = expr.loc
 
         if (expr.function is ParsedMemberAccess) {
@@ -1292,12 +1335,12 @@ class TypedAstBuilder(
                     val resolvedReturnType = effectDecl?.operations
                         ?.firstOrNull { it.name == opName }
                         ?.let { convertParsedTypeAnnotation(it.returnType) }
-                    val applied = substitution.apply(contextType)
+                    val applied = contextType?.let { substitution.apply(it) }
                     val finalType = when {
                         solvedCallReturn != null && solvedCallReturn !is MezzeType.VarType -> solvedCallReturn
                         applied is MezzeType.VarType && resolvedReturnType != null -> resolvedReturnType
                         else -> applied
-                    }
+                    } ?: noContextType("perform op with no solved return, no resolved return and no context")
                     return TypedPerformOp(effectHash, opName, argExpr, finalType, loc)
                 }
             }
@@ -1362,8 +1405,9 @@ class TypedAstBuilder(
         val callType = solvedReturn
             ?: when (val ft = substitution.apply(fn.type)) {
                 is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                else -> substitution.apply(contextType)
+                else -> contextType?.let { substitution.apply(it) }
             }
+            ?: noContextType("call with no solved return, no callee arrow and no context")
 
         val isTailCall = isTailCallLocation(expr.loc)
 
@@ -1505,7 +1549,7 @@ class TypedAstBuilder(
         expr: ParsedFunctionCall,
         methodInfo: ConstraintResult.MethodCallInfo,
         file: String,
-        contextType: MezzeType,
+        contextType: MezzeType?,
     ): TypedCall {
         val loc = expr.loc
         val memberAccess = expr.function as ParsedMemberAccess
@@ -1518,8 +1562,8 @@ class TypedAstBuilder(
         val produced = when {
             solvedCallSite != null && solvedCallSite !is MezzeType.VarType -> solvedCallSite
             solvedFnType is MezzeType.FunctionType -> substitution.apply(solvedFnType.returnType)
-            else -> substitution.apply(contextType)
-        }
+            else -> contextType?.let { substitution.apply(it) }
+        } ?: noContextType("static ability op with no solved, declared or context type")
 
         val abilityName = methodInfo.abilityName
         val abilityHash = abilityName?.let { name ->
@@ -1545,7 +1589,8 @@ class TypedAstBuilder(
                     opName = methodInfo.methodName,
                     typeVarName = produced.variable.name,
                 ),
-                type = solvedFnType ?: substitution.apply(contextType),
+                type = solvedFnType ?: contextType?.let { substitution.apply(it) }
+                    ?: noContextType("ability op reference with no solved signature"),
                 loc = memberAccess.memberLoc,
             )
             return TypedCall(
@@ -1579,7 +1624,8 @@ class TypedAstBuilder(
         val fn = TypedVar(
             name = methodInfo.methodName,
             binding = BindingRef.ByHash(opHash),
-            type = solvedFnType ?: substitution.apply(contextType),
+            type = solvedFnType ?: contextType?.let { substitution.apply(it) }
+                ?: noContextType("method reference with no solved signature"),
             loc = memberAccess.memberLoc,
         )
         return TypedCall(
@@ -1596,7 +1642,7 @@ class TypedAstBuilder(
         expr: ParsedFunctionCall,
         methodInfo: ConstraintResult.MethodCallInfo,
         file: String,
-        contextType: MezzeType,
+        contextType: MezzeType?,
     ): TypedCall {
         // An operation that declares no receiver is dispatched by the type it
         // PRODUCES, and there is nothing here to build a receiver from — building
@@ -1718,7 +1764,8 @@ class TypedAstBuilder(
             TypedVar(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(ambiguousAbilityOpHash),
-                type = solvedFnType ?: substitution.apply(contextType),
+                type = solvedFnType ?: contextType?.let { substitution.apply(it) }
+                    ?: noContextType("ability op reference with no solved signature"),
                 loc = memberAccess.memberLoc,
             )
         } else if (methodInfo.methodHash != null) {
@@ -1726,7 +1773,8 @@ class TypedAstBuilder(
             TypedVar(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(hash),
-                type = solvedFnType ?: substitution.apply(contextType),
+                type = solvedFnType ?: contextType?.let { substitution.apply(it) }
+                    ?: noContextType("method reference with no solved signature"),
                 // Narrow member-name loc, not the whole `receiver.method` span,
                 // so hover/goto-def on a chained call resolve to THIS method
                 // rather than the outermost one. Safe for tree descent: the
@@ -1740,7 +1788,8 @@ class TypedAstBuilder(
             TypedVar(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(opHash),
-                type = solvedFnType ?: substitution.apply(contextType),
+                type = solvedFnType ?: contextType?.let { substitution.apply(it) }
+                    ?: noContextType("inherent method reference with no solved signature"),
                 loc = memberAccess.memberLoc
             )
         } else if (staticReceiverValue != null) {
@@ -1754,7 +1803,9 @@ class TypedAstBuilder(
             // abilities sharing one slot.
             TypedFieldAccess(
                 staticReceiverValue, methodInfo.methodName, -1,
-                solvedFnType ?: substitution.apply(contextType), memberAccess.memberLoc,
+                solvedFnType ?: contextType?.let { substitution.apply(it) }
+                    ?: noContextType("static ability op field access with no solved signature"),
+                memberAccess.memberLoc,
                 abilityHash = ambiguousAbilityHash,
             )
         } else {
@@ -1809,9 +1860,9 @@ class TypedAstBuilder(
             solvedCallSite != null && solvedCallSite !is MezzeType.VarType -> solvedCallSite
             else -> when (val ft = substitution.apply(fn.type)) {
                 is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                else -> solvedCallSite ?: substitution.apply(contextType)
+                else -> solvedCallSite ?: contextType?.let { substitution.apply(it) }
             }
-        }
+        } ?: noContextType("method call with no solved return, no method arrow and no context")
 
         // Correct the method-var's displayed type to the ACTUAL call site. For a
         // deferred inherent method (receiver pinned only after solving, e.g.
@@ -1879,7 +1930,7 @@ class TypedAstBuilder(
         )
     }
 
-    private fun buildDoBlock(expr: ParsedDo, file: String, contextType: MezzeType): TypedBlock {
+    private fun buildDoBlock(expr: ParsedDo, file: String, contextType: MezzeType?): TypedBlock {
         val pushedBlockScope = lambdaParamScopes.isEmpty()
         if (pushedBlockScope) {
             pushScope(mutableListOf(), isLambdaBoundary = false)
@@ -2016,7 +2067,7 @@ class TypedAstBuilder(
     private fun buildMatchCase(
         case: ParsedMatchCase,
         file: String,
-        contextType: MezzeType,
+        contextType: MezzeType?,
         scrutineeType: MezzeType? = null,
     ): TypedCase {
         val patterns = case.patterns.map { buildPattern(it, file) }
@@ -2468,10 +2519,10 @@ class TypedAstBuilder(
 
     private fun buildLambdaParams(
         params: ParsedLambdaParams,
-        contextType: MezzeType,
+        contextType: MezzeType?,
         loc: Loc
     ): List<TypedParam> {
-        val resolvedContext = substitution.apply(contextType)
+        val resolvedContext = contextType?.let { substitution.apply(it) }
         return when (params) {
             is ParsedLambdaParams.Typed -> {
                 // Read the param's type off the SOLVED context first, exactly as the
@@ -2601,6 +2652,17 @@ class TypedAstBuilder(
      * emit as an undetermined type, and at a call site the position's type is
      * `{args} -> <solved return>`, built from the call's own solved parts.
      */
+    /**
+     * The position imposed no type and nothing else determined one.
+     *
+     * This is the honest last resort, and it is deliberately NOT the default for
+     * `buildExpr`'s `contextType` — absence of a context is `null`, which is what
+     * it is. Minting one placeholder for every context-free build made a single
+     * reason cover every position, so the gate could not tell which one gave up.
+     */
+    private fun noContextType(reason: String): MezzeType =
+        MezzeType.VarType(TypeVar.unknown(reason))
+
     private fun resolveIdentifierType(
         name: String,
         qualifier: ParsedModulePath?,
@@ -2620,6 +2682,9 @@ class TypedAstBuilder(
             importContext?.importedBindings?.get(name)?.type?.let {
                 return substitution.apply(it)
             }
+            // Also measured reachable — the same 58 failures. An unresolved
+            // qualified name was expected to be a typecheck error raised before
+            // emit; it is not, at least on the prelude-bearing path.
             return giveUp("qualified identifier not in imports")
         }
 
