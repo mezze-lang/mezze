@@ -1012,12 +1012,33 @@ class TypedAstBuilder(
                 // see no effects. Same reasoning applies to top-level lets
                 // with annotated effect arrows.
                 val ctxFnType = substitution.apply(contextType) as? MezzeType.FunctionType
-                val paramRecordType = ctxFnType?.paramType
-                    ?: MezzeType.RecordType(params.associate { p ->
-                        // Seeded ability-op params keep the laundered surface (see
-                        // pendingOpParamTypes): typed locals, untyped signature.
-                        p.name to (if (seededParamTypes != null) MezzeType.VarType(TypeVar.freshWithName(p.name)) else p.type)
-                    })
+                // The pushed param type is the CALLEE's declaration, which for a
+                // generic higher-order function is a variable: `seq::find`'s
+                // `p: { x: 'a } -> Bool`. Taking it wholesale discarded the
+                // parameter's OWN type — so `{ x: Rt } -> x.m == Get` passed to
+                // `find` emitted `x` as `'a`, `x.m` could not be typed, and every
+                // consumer downstream was left guessing on a receiver the program
+                // had spelled out. Per parameter: keep what the parameter itself
+                // knows, and take the pushed type only where it knows nothing.
+                val pushedParams = (ctxFnType?.paramType as? MezzeType.RecordType)?.fields
+                val paramRecordType = if (pushedParams != null) {
+                    MezzeType.RecordType(
+                        params.associate { p ->
+                            val pushed = pushedParams[p.name]
+                            val own = p.type
+                            val keepOwn = own !is MezzeType.VarType &&
+                                (pushed == null || pushed is MezzeType.VarType)
+                            p.name to (if (keepOwn) own else (pushed ?: own))
+                        } + pushedParams.filterKeys { k -> params.none { it.name == k } },
+                    )
+                } else {
+                    ctxFnType?.paramType
+                        ?: MezzeType.RecordType(params.associate { p ->
+                            // Seeded ability-op params keep the laundered surface (see
+                            // pendingOpParamTypes): typed locals, untyped signature.
+                            p.name to (if (seededParamTypes != null) MezzeType.VarType(TypeVar.freshWithName(p.name)) else p.type)
+                        })
+                }
                 // Propagate `with <Ability>` constraints from the enclosing arrow so
                 // the compiler's prescan can see them on the TypedLambda's type when
                 // deciding which method calls need dict-passing (Bug B / #86).
@@ -1303,7 +1324,35 @@ class TypedAstBuilder(
         // param, and an ability-method call on it emits an uncached CallIndirect
         // that crashes at runtime (mono's methodReceiverNotConcrete bail).
         val fnParamType = (substitution.apply(fn.type) as? MezzeType.FunctionType)?.paramType
-        val argExpr = if (fnParamType != null) buildExpr(expr.arguments, file, fnParamType)
+        // The callee's declared parameter record can still hold ITS OWN generic
+        // variables at this site — `seq::find`'s `p: { x: 'a } -> Bool` keeps `'a`
+        // when the solve did not pin it here. Pushing that down stamps a callback's
+        // parameter as a variable, and everything downstream is then guessing on a
+        // receiver the program had spelled out.
+        //
+        // The sibling arguments say what those variables are: `find { xs = rts, … }`
+        // with `rts : [Rt]` binds `'a = Rt`. Harvest from them and substitute before
+        // pushing. Non-lambda fields are built first because they are what carries
+        // the information; the result is discarded, only their TYPES are used.
+        val refinedParamType = run {
+            val pattern = fnParamType as? MezzeType.RecordType ?: return@run fnParamType
+            if (!pattern.holdsTypeVar()) return@run fnParamType
+            val args = expr.arguments as? ParsedRecordLit ?: return@run fnParamType
+            val bindings = mutableMapOf<String, MezzeType>()
+            for (entry in args.entries) {
+                if (entry !is ParsedRecordEntry.Field) continue
+                if (entry.value is ParsedLambda) continue
+                val declared = pattern.fields[entry.name] ?: continue
+                if (!declared.holdsTypeVar()) continue
+                val fieldValue = entry.value ?: continue
+                val actual = substitution.apply(buildExpr(fieldValue, file).type)
+                if (actual.holdsTypeVar()) continue
+                harvestVarBindings(declared, actual, bindings)
+            }
+            if (bindings.isEmpty()) fnParamType
+            else substituteTypeParamsByName(pattern, bindings)
+        }
+        val argExpr = if (refinedParamType != null) buildExpr(expr.arguments, file, refinedParamType)
             else buildExpr(expr.arguments, file)
 
         val solvedReturn = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
@@ -2279,6 +2328,34 @@ class TypedAstBuilder(
                 }
             }
             return
+        }
+    }
+
+    /** Bind [pattern]'s type variables by walking it against [value] in parallel.
+     *  Same shape as the compiler's harvest of the same name; only the positions
+     *  a variable occupies are recorded, never a name match. */
+    private fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<String, MezzeType>) {
+        if (pattern is MezzeType.VarType) {
+            out.putIfAbsent(pattern.variable.name, value)
+            return
+        }
+        when {
+            pattern is MezzeType.RecordType && value is MezzeType.RecordType ->
+                for ((k, pt) in pattern.fields) value.fields[k]?.let { harvestVarBindings(pt, it, out) }
+            pattern is MezzeType.FunctionType && value is MezzeType.FunctionType -> {
+                harvestVarBindings(pattern.paramType, value.paramType, out)
+                harvestVarBindings(pattern.returnType, value.returnType, out)
+            }
+            pattern is MezzeType.TypeApplication && value is MezzeType.TypeApplication ->
+                if (pattern.constructor == value.constructor && pattern.args.size == value.args.size)
+                    pattern.args.zip(value.args).forEach { (p, v) -> harvestVarBindings(p, v, out) }
+            pattern is MezzeType.ParametricBuiltin && value is MezzeType.ParametricBuiltin ->
+                if (pattern.typeArgs.size == value.typeArgs.size)
+                    pattern.typeArgs.zip(value.typeArgs).forEach { (p, v) -> harvestVarBindings(p, v, out) }
+            pattern is MezzeType.VariantType && value is MezzeType.VariantType ->
+                for ((k, pt) in pattern.constructors)
+                    if (pt != null) value.constructors[k]?.let { harvestVarBindings(pt, it, out) }
+            else -> Unit
         }
     }
 
