@@ -34,9 +34,11 @@ object ElaborationInvariants {
         /** A node's type carries a variable bound by no enclosing binder. */
         UNBOUND_TYPE_VAR,
 
-        /** A parameter typed as a bare variable with no binder — the shape an
-         *  impl body gets when its params were never given the ability
-         *  signature's types. */
+        /** A parameter typed as a bare variable with no binder, whose variable
+         *  appears nowhere else in the operation either — so nothing ties it to
+         *  anything and the parameter has genuinely no type. A variable shared
+         *  with the receiver, a sibling parameter or the return is that
+         *  operation's own type variable and not this. */
         UNTYPED_PARAM,
 
         /** A field read off a receiver whose type is still a variable. This is
@@ -137,9 +139,28 @@ object ElaborationInvariants {
                 // variables belonging to no signature at all.
                 val paramVar = param.type as? MezzeType.VarType ?: continue
                 if (bound.contains(paramVar.variable.name)) continue
+                // ...and only when it is TIED to nothing. An inherent operation's
+                // non-receiver parameters are seeded as fresh variables and pinned
+                // by the solve, so they carry the solver's names while the impl's
+                // target carries the ones the source wrote — the same variable
+                // under two names, which `bound` cannot see past. Measured over the
+                // stdlib, 91 of 94 such parameters share their variable with the
+                // receiver, a sibling parameter, or the return: they are that
+                // operation's type variable, not a gap. The remaining 3 shared it
+                // with nothing, and every one was a real hole — `Int.pow`, `gcd`
+                // and `lcm` calling a native no wrapper declares a type for.
+                //
+                // Renaming the solver's variables to the written ones instead was
+                // tried and reverted: the substitution is KEYED by the solver's
+                // names, so renaming away from them discards the solution.
+                val tiedElsewhere = expr.params.any { other ->
+                    other !== param && mentionsVar(other.type, paramVar.variable.name)
+                } || mentionsVar(expr.type, paramVar.variable.name, skipParamRecord = true)
+                if (tiedElsewhere) continue
                 out.add(Finding(
                     Kind.UNTYPED_PARAM, where,
-                    "param '${param.name}' has no type beyond a fresh variable",
+                    "param '${param.name}' has no type beyond a fresh variable, " +
+                        "and that variable appears nowhere else in the operation",
                     param.loc,
                 ))
             }
@@ -267,6 +288,21 @@ object ElaborationInvariants {
      * throughout its body. Names over-approximate boundness, which is the safe
      * direction for a ratchet — it can hide a finding, never invent one.
      */
+    /**
+     * Does [name] occur in [type]?
+     *
+     * [skipParamRecord] looks at a function type's RETURN only. A lambda's own
+     * type contains its parameter record, so asking "does this parameter's
+     * variable appear in the lambda's type" would answer yes for every parameter
+     * and make the question vacuous.
+     */
+    private fun mentionsVar(type: MezzeType, name: String, skipParamRecord: Boolean = false): Boolean {
+        val target = if (skipParamRecord) (type as? MezzeType.FunctionType)?.returnType ?: return false else type
+        val vars = HashSet<String>()
+        collectVars(target, vars)
+        return name in vars
+    }
+
     private fun collectVars(type: MezzeType, into: MutableSet<String>) {
         val vars = HashSet<com.mezze.language.ast.TypeVar>()
         com.mezze.language.ast.collectTypeVariables(type, vars)

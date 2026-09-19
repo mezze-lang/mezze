@@ -160,14 +160,14 @@ pub let is_even: { n: Int } -> Bool = { n } -> (n % 2) == 0
 ## True if n is odd.
 pub let is_odd: { n: Int } -> Bool = { n } -> (n % 2) != 0
 
-## Raise base to the power exp.
-pub let pow: { base: Int, exp: Int } -> Int = { base, exp } -> if exp == 0 then 1 else if exp == 1 then base else if is_even { n = exp } then pow { base = base, exp = exp / 2 } * pow { base = base, exp = exp / 2 } else base * pow { base = base, exp = exp - 1 }
+## Raise base to the power exp. A negative exponent gives 0.
+pub let pow: { base: Int, exp: Int } -> Int = { base, exp } -> __native_int_pow { base = base, exp = exp }
 
 ## Greatest common divisor.
-pub let gcd: { l: Int, r: Int } -> Int = { l, r } -> if r == 0 then abs { n = l } else gcd { l = r, r = l % r }
+pub let gcd: { l: Int, r: Int } -> Int = { l, r } -> __native_int_gcd { l = l, r = r }
 
-## Least common multiple.
-pub let lcm: { l: Int, r: Int } -> Int = { l, r } -> abs { n = (l * r) / gcd { l = l, r = r } }
+## Least common multiple. Zero if either side is zero.
+pub let lcm: { l: Int, r: Int } -> Int = { l, r } -> __native_int_lcm { l = l, r = r }
 
 ## Clamp n to the range [min, max].
 pub let clamp: { n: Int, min: Int, max: Int } -> Int = { n, min, max } ->
