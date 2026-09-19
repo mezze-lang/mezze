@@ -102,7 +102,7 @@ data class Substitution(
         is MezzeType.BytesType,
         is MezzeType.CharType -> true
         is MezzeType.VarType, is MezzeType.FunctionType, is MezzeType.RecordType,
-        is MezzeType.VariantType, is MezzeType.TypeApplication, is MezzeType.ListType,
+        is MezzeType.VariantType, is MezzeType.TypeApplication,
  is MezzeType.SeqType,
         is MezzeType.NewtypeType, is MezzeType.EffectRow -> false
     }

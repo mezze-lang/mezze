@@ -27,7 +27,7 @@ class SubstitutionPropertyTest {
         if (depth <= 0) return randomLeafType(seed)
         return when (seed % 6) {
             0 -> randomLeafType(seed / 6)
-            1 -> MezzeType.ListType(randomType(depth - 1, seed / 6))
+            1 -> MezzeType.TypeApplication("List", listOf(randomType(depth - 1, seed / 6)))
             2 -> MezzeType.RecordType(
                 fields = linkedMapOf("x" to randomType(depth - 1, seed / 6)),
                 rowVar = null
@@ -81,9 +81,9 @@ class SubstitutionPropertyTest {
         val tv = freshVar()
         val sub = Substitution.single(tv, MezzeType.IntType)
 
-        val listOfVar = MezzeType.ListType(MezzeType.VarType(tv))
+        val listOfVar = MezzeType.TypeApplication("List", listOf(MezzeType.VarType(tv)))
         val result = sub.apply(listOfVar)
-        assertEquals(MezzeType.ListType(MezzeType.IntType), result)
+        assertEquals(MezzeType.TypeApplication("List", listOf(MezzeType.IntType)), result)
     }
 
     @RepeatedTest(10)

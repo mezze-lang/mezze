@@ -109,8 +109,6 @@ object TypeAnnotationMatcher {
                     }
                     type is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ ->
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)
-                    type is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST ->
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)
                     else -> false
                 }
             }

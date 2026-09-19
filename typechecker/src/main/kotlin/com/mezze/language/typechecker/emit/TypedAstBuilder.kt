@@ -502,8 +502,6 @@ class TypedAstBuilder(
             }
             is MezzeType.SeqType -> if (inferred is MezzeType.SeqType)
                 linkDeclaredVars(declared.elementType, inferred.elementType, out)
-            is MezzeType.ListType -> if (inferred is MezzeType.ListType)
-                linkDeclaredVars(declared.elementType, inferred.elementType, out)
             is MezzeType.TypeApplication -> if (inferred is MezzeType.TypeApplication &&
                 declared.args.size == inferred.args.size
             ) {
@@ -524,7 +522,6 @@ class TypedAstBuilder(
     private fun relinkType(type: MezzeType, link: Map<String, MezzeType>): MezzeType = when (type) {
         is MezzeType.VarType -> link[type.variable.name] ?: type
         is MezzeType.SeqType -> MezzeType.SeqType(relinkType(type.elementType, link))
-        is MezzeType.ListType -> MezzeType.ListType(relinkType(type.elementType, link))
         is MezzeType.TypeApplication -> type.copy(args = type.args.map { relinkType(it, link) })
         is MezzeType.RecordType -> type.copy(fields = type.fields.mapValues { (_, t) -> relinkType(t, link) })
         else -> type
@@ -2235,7 +2232,6 @@ class TypedAstBuilder(
                 // both.
                 val elementType = when {
                     shape is MezzeType.SeqType -> shape.elementType
-                    shape is MezzeType.ListType -> shape.elementType
                     shape is MezzeType.TypeApplication &&
                         shape.constructor in com.mezze.language.ast.BuiltinTypes.sequenceConstructors ->
                         shape.args.firstOrNull()

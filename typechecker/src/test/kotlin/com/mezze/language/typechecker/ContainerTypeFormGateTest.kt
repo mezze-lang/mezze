@@ -35,19 +35,20 @@ class ContainerTypeFormGateTest {
     /** Construction sites per dedicated container node, measured. */
     private val baseline = mapOf(
         "SeqType" to 30,
-        "ListType" to 3,
     )
 
     /**
-     * SetType, MapType, SortedSetType and SortedMapType are ABSENT because they
-     * no longer exist. Once the annotation converter stopped producing them,
-     * nothing else did, and each was deleted along with every arm that matched
-     * it — including the cross-form unification arms, which are the thing this
-     * duplication cost in the first place.
+     * FIVE of the six are ABSENT because they no longer exist: SetType, MapType,
+     * SortedSetType, SortedMapType and ListType. Once the annotation converter
+     * stopped producing them, four had no producer at all; ListType's two
+     * (VariantSolver's cons-on-a-variable solve, and BuiltinTypes' cons payload)
+     * were moved to `BuiltinTypes.listApp`. Each was then deleted along with every
+     * arm that matched it — including the cross-form unification arms, which are
+     * the thing this duplication cost in the first place.
      *
-     * ListType has 2 real producers left (VariantSolver, BuiltinTypes' cons
-     * shape) and SeqType 30, built directly rather than through any annotation.
-     * Those are what remains.
+     * SeqType alone remains, with 30 producers built directly rather than through
+     * any annotation. It is `[]` syntax, which is why it is the one that did not
+     * fall out of the converter change.
      */
 
     private val roots = listOf(

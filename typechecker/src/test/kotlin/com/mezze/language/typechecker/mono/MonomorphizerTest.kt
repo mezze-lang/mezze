@@ -268,7 +268,7 @@ class MonomorphizerTest {
                     function = TypedVar("rec", BindingRef.ByHash(gh), MezzeType.FunctionType(varT, varT), loc),
                     arg = TypedVar("x", BindingRef.Param(0), varT, loc),
                     instantiation = TypeInstantiation(
-                        typeArgs = listOf(MezzeType.ListType(varT)),
+                        typeArgs = listOf(MezzeType.TypeApplication("List", listOf(varT))),
                         abilityImpls = emptyList()
                     ),
                     isTailCall = false,

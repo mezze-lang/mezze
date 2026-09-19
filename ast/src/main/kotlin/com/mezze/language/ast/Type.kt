@@ -341,12 +341,6 @@ sealed interface MezzeType {
         fun rebuild(args: List<MezzeType>): ParametricBuiltin
     }
 
-    @Serializable
-    data class ListType(val elementType: MezzeType) : ParametricBuiltin {
-        override val typeArgs: List<MezzeType> get() = listOf(elementType)
-        override fun rebuild(args: List<MezzeType>): ParametricBuiltin = ListType(args[0])
-    }
-
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor
     @Serializable

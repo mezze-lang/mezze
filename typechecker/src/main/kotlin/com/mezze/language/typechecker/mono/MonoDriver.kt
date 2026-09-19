@@ -733,7 +733,6 @@ object MonoDriver {
             is MezzeType.FunctionType -> "(${detailed(t.paramType)} -> ${detailed(t.returnType)})"
             is MezzeType.RecordType -> t.fields.entries.joinToString(prefix = "{", postfix = "}") { "${it.key}: ${detailed(it.value)}" }
             is MezzeType.VariantType -> t.constructors.entries.joinToString(prefix = "V<${t.identity.displayNameOrNull() ?: "?"}: ", postfix = ">") { "${it.key}(${detailed(it.value ?: MezzeType.RecordType(emptyMap()))})" }
-            is MezzeType.ListType -> "List[${detailed(t.elementType)}]"
             is MezzeType.SeqType -> "Seq[${detailed(t.elementType)}]"
             is MezzeType.NewtypeType -> "New(${t.name})[${detailed(t.wrappedType)}]"
             is MezzeType.TypeApplication -> "App(${t.constructor})[${t.args.joinToString { detailed(it) }}]"

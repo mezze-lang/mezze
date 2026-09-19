@@ -258,7 +258,6 @@ internal class VariantSolver(
                 variantType, constructorName, expectedPayloadType,
                 currentSubst, originalConstraint
             )
-            is MezzeType.ListType -> solveConstructorOnList(variantType, constructorName, expectedPayloadType)
             else -> ConstraintSolver.ConstraintResult.Failure(
                 "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}. " +
                     "`Ctor { … }` matches a VARIANT constructor; a record destructures as `{ field, … }` " +
@@ -311,7 +310,7 @@ internal class VariantSolver(
         context: String
     ): ConstraintSolver.ConstraintResult {
         val elemTypeVar = MezzeType.VarType(TypeVar.fresh())
-        val listType = MezzeType.ListType(elemTypeVar)
+        val listType = BuiltinTypes.listApp(elemTypeVar)
         var resultSubst = Substitution.single(typeVar, listType)
 
         if (constructorName == BuiltinTypes.CONS && expectedPayloadType != null) {
@@ -549,41 +548,6 @@ internal class VariantSolver(
             )
         } else {
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-        }
-    }
-
-    private fun solveConstructorOnList(
-        listType: MezzeType.ListType,
-        constructorName: String,
-        expectedPayloadType: MezzeType?
-    ): ConstraintSolver.ConstraintResult {
-        if (constructorName == BuiltinTypes.CONS) {
-            if (expectedPayloadType != null) {
-                val expectedConsPayload = BuiltinTypes.consPayload(listType.elementType)
-                val result = unify(expectedPayloadType, expectedConsPayload, registry)
-                return when (result) {
-                    is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
-                    is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor 'Cons' payload type mismatch: ${result.message}"
-                    )
-                }
-            } else {
-                return ConstraintSolver.ConstraintResult.Failure(
-                    "Constructor 'Cons' has a payload that must be destructured. " +
-                    "Use 'Cons { head, tail }' to match the payload."
-                )
-            }
-        } else if (constructorName == BuiltinTypes.NIL) {
-            if (expectedPayloadType != null) {
-                return ConstraintSolver.ConstraintResult.Failure(
-                    "Constructor 'Nil' does not have a payload"
-                )
-            }
-            return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-        } else {
-            return ConstraintSolver.ConstraintResult.Failure(
-                "List type only has constructors 'Cons' and 'Nil', not '$constructorName'"
-            )
         }
     }
 

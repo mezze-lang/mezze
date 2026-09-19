@@ -77,8 +77,8 @@ class UnificationPropertyTest {
         val tv = freshVar()
 
         val result = unify(
-            MezzeType.ListType(MezzeType.VarType(tv)),
-            MezzeType.ListType(MezzeType.IntType)
+            MezzeType.TypeApplication("List", listOf(MezzeType.VarType(tv))),
+            MezzeType.TypeApplication("List", listOf(MezzeType.IntType))
         )
         assertIs<UnificationResult.Success>(result)
         assertEquals(MezzeType.IntType, result.substitution.apply(MezzeType.VarType(tv)))
@@ -105,7 +105,7 @@ class UnificationPropertyTest {
     @Test
     fun `unifying incompatible structures fails`() {
         val result = unify(
-            MezzeType.ListType(MezzeType.IntType),
+            MezzeType.TypeApplication("List", listOf(MezzeType.IntType)),
             MezzeType.TypeApplication("Set", listOf(MezzeType.IntType))
         )
         assertIs<UnificationResult.Failure>(result)
@@ -115,7 +115,8 @@ class UnificationPropertyTest {
     fun `post-unification substitution equates both sides`() {
         val cases = listOf(
             MezzeType.VarType(freshVar()) to MezzeType.IntType,
-            MezzeType.ListType(MezzeType.VarType(freshVar())) to MezzeType.ListType(MezzeType.StringType),
+            MezzeType.TypeApplication("List", listOf(MezzeType.VarType(freshVar()))) to
+                MezzeType.TypeApplication("List", listOf(MezzeType.StringType)),
             MezzeType.VarType(freshVar()) to MezzeType.VarType(freshVar()),
         )
 

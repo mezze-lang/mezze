@@ -167,7 +167,6 @@ object BuiltinTypes {
      */
     fun sequenceElementType(type: MezzeType): MezzeType? = when (type) {
         is MezzeType.SeqType -> type.elementType
-        is MezzeType.ListType -> type.elementType
         is MezzeType.TypeApplication ->
             if (type.constructor in sequenceConstructors) type.args.firstOrNull() else null
         else -> null
@@ -175,7 +174,6 @@ object BuiltinTypes {
 
     fun builtinConstructorName(type: MezzeType): String? = when (type) {
         is MezzeType.SeqType -> SEQ
-        is MezzeType.ListType -> LIST
         is MezzeType.BytesType -> BYTES
         else -> null
     }
@@ -212,7 +210,22 @@ object BuiltinTypes {
 
     /** `Cons`'s payload for element [elem]: `{ head: elem, tail: List elem }`. */
     fun consPayload(elem: MezzeType): MezzeType.RecordType =
-        MezzeType.RecordType(mapOf(HEAD_FIELD to elem, TAIL_FIELD to MezzeType.ListType(elem)))
+        MezzeType.RecordType(mapOf(HEAD_FIELD to elem, TAIL_FIELD to listApp(elem)))
+
+    /**
+     * `List elem` in the one form a container has (B.1).
+     *
+     * Builtin identity, not Declared: `List` has no `ParsedTypeDecl` to hash. That
+     * is not a second identity — unification vetoes only when BOTH sides carry a
+     * hash and the hashes differ, so this meets a converter-built `List` on the
+     * name and unifies, which is exactly what a builtin needs.
+     */
+    fun listApp(elem: MezzeType): MezzeType.TypeApplication =
+        MezzeType.TypeApplication(
+            constructor = LIST,
+            args = listOf(elem),
+            identity = TypeIdentity.derive(LIST, null, allowBuiltin = true),
+        )
 
     /**
      * The builtin cons-list AS A VARIANT — the one description of `| Cons {…}, Nil |`.
@@ -242,7 +255,6 @@ object BuiltinTypes {
      * instead of comparing a constructor string themselves.
      */
     fun listElementType(type: MezzeType): MezzeType? = when (type) {
-        is MezzeType.ListType -> type.elementType
         is MezzeType.TypeApplication -> if (type.constructor == LIST) type.args.singleOrNull() else null
         else -> null
     }

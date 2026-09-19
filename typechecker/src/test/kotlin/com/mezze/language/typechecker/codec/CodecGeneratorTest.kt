@@ -135,14 +135,14 @@ class CodecGeneratorTest {
 
     @Test
     fun `list of primitives should be serializable`() {
-        val listType = MezzeType.ListType(MezzeType.IntType)
+        val listType = MezzeType.TypeApplication("List", listOf(MezzeType.IntType))
         assertTrue(generator.isSerializable(listType))
     }
 
     @Test
     fun `list of records should be serializable`() {
         val recordType = MezzeType.RecordType(mapOf("x" to MezzeType.IntType))
-        val listType = MezzeType.ListType(recordType)
+        val listType = MezzeType.TypeApplication("List", listOf(recordType))
         assertTrue(generator.isSerializable(listType))
     }
 
@@ -152,7 +152,7 @@ class CodecGeneratorTest {
             paramType = MezzeType.RecordType(emptyMap()),
             returnType = MezzeType.IntType
         )
-        val listType = MezzeType.ListType(funcType)
+        val listType = MezzeType.TypeApplication("List", listOf(funcType))
         assertFalse(generator.isSerializable(listType))
     }
 
@@ -258,7 +258,7 @@ class CodecGeneratorTest {
 
     @Test
     fun `generateEncodeImpl for List creates valid impl`() {
-        val listType = MezzeType.ListType(MezzeType.IntType)
+        val listType = MezzeType.TypeApplication("List", listOf(MezzeType.IntType))
         val impl = generator.generateEncodeImpl(jsonC, listType)
 
         assertEquals("Encode", impl.abilityName)
@@ -433,7 +433,7 @@ class CodecGeneratorTest {
     @Test
     fun `list of Option types should be serializable`() {
         val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
-        val listType = MezzeType.ListType(optionType)
+        val listType = MezzeType.TypeApplication("List", listOf(optionType))
         assertTrue(generator.isSerializable(listType))
     }
 

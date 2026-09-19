@@ -846,8 +846,6 @@ class AbilityChecker internal constructor(
                 null
             }
 
-            is MezzeType.ListType -> require("${prefix}List") ?:
-                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
             is MezzeType.SeqType -> require("${prefix}List") ?:
                 walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
 

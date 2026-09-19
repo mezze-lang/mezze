@@ -364,7 +364,12 @@ object ErrorMessageBuilder {
         }
 
         if (stringContext.contains("Seq pattern")) {
-            if (type1 is MezzeType.ListType || type2 is MezzeType.ListType) {
+            // `List` reaches here as a TypeApplication now (B.1), so the check
+            // is on the constructor rather than on a dedicated node.
+            if (listOf(type1, type2).any {
+                    it is MezzeType.TypeApplication && it.constructor == BuiltinTypes.LIST
+                }
+            ) {
                 return "Cannot use seq pattern syntax [a, b, ...] with List type. " +
                     "Use constructor patterns 'Cons { head, tail }' and 'Nil' instead."
             }

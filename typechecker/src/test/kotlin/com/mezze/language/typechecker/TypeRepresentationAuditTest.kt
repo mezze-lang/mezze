@@ -38,7 +38,7 @@ class TypeRepresentationAuditTest {
     private fun countIn(type: MezzeType, counts: Counts, seen: MutableSet<MezzeType> = HashSet()) {
         if (!seen.add(type)) return
         when (type) {
-            is MezzeType.SeqType, is MezzeType.ListType,
+            is MezzeType.SeqType,
             -> counts.dedicatedNodes++
             is MezzeType.TypeApplication ->
                 if (type.constructor in containerConstructors) counts.applications++
@@ -49,7 +49,6 @@ class TypeRepresentationAuditTest {
                 countIn(type.paramType, counts, seen); countIn(type.returnType, counts, seen)
             }
             is MezzeType.SeqType -> countIn(type.elementType, counts, seen)
-            is MezzeType.ListType -> countIn(type.elementType, counts, seen)
             is MezzeType.TypeApplication -> type.args.forEach { countIn(it, counts, seen) }
             is MezzeType.RecordType -> type.fields.values.forEach { countIn(it, counts, seen) }
             is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { p -> countIn(p, counts, seen) } }

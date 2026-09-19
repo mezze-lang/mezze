@@ -52,7 +52,6 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.FracType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x08))
         is MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
         is MezzeType.SeqType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE)); appendTypeInScope(b, type.elementType) }
-        is MezzeType.ListType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x01)); appendTypeInScope(b, type.elementType) }
         // 0x02 through 0x05 belonged to SetType, MapType, SortedMapType and
         // SortedSetType, which no
         // longer exist — both reach here as TypeApplication now. The tags are

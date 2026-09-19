@@ -36,7 +36,6 @@ object ContentHashComputer {
                 if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
             }
             is MezzeType.SeqType -> "Array_${mezzeTypeToString(type.elementType)}"
-            is MezzeType.ListType -> "List_${mezzeTypeToString(type.elementType)}"
             else -> type.toString()
         }
 

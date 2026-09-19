@@ -59,9 +59,9 @@ class TypeSubstitutionTest {
 
     @Test
     fun `applyType walks list and map types`() {
-        val listT = MezzeType.ListType(varA)
+        val listT = MezzeType.TypeApplication("List", listOf(varA))
         val mapT = MezzeType.TypeApplication("Map", listOf(varA, varB))
-        assertEquals(MezzeType.ListType(intT), TypeSubstitution.applyType(listT, mapOf(a to intT)))
+        assertEquals(MezzeType.TypeApplication("List", listOf(intT)), TypeSubstitution.applyType(listT, mapOf(a to intT)))
         assertEquals(
             MezzeType.TypeApplication("Map", listOf(intT, strT)),
             TypeSubstitution.applyType(mapT, mapOf(a to intT, b to strT))
@@ -79,7 +79,7 @@ class TypeSubstitutionTest {
     fun `applyType empty substitution is identity`() {
         val complex = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("x" to varA)),
-            MezzeType.ListType(varB)
+            MezzeType.TypeApplication("List", listOf(varB))
         )
         assertEquals(complex, TypeSubstitution.applyType(complex, emptyMap()))
     }
@@ -93,7 +93,7 @@ class TypeSubstitutionTest {
     @Test
     fun `applyType is idempotent under empty sub after one application`() {
         // substitute then re-substitute with empty = identity
-        val complex = MezzeType.FunctionType(varA, MezzeType.ListType(varB))
+        val complex = MezzeType.FunctionType(varA, MezzeType.TypeApplication("List", listOf(varB)))
         val once = TypeSubstitution.applyType(complex, mapOf(a to intT, b to strT))
         val twice = TypeSubstitution.applyType(once, emptyMap())
         assertEquals(once, twice)

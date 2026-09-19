@@ -231,7 +231,6 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
         if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
     }
-    is MezzeType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
             "(${prettyPrintTypeWithMapping(type.paramType, typeVarMapping)})"
@@ -442,7 +441,6 @@ private fun prettyPrintTypeWithAliasesRecursive(
         val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
         if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
     }
-    is MezzeType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
             "(${prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping)})"
@@ -701,8 +699,6 @@ private fun unifyTypesForAlias(
             }
         concrete is MezzeType.SeqType && pattern is MezzeType.SeqType ->
             unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
-        concrete is MezzeType.ListType && pattern is MezzeType.ListType ->
-            unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
         concrete is MezzeType.TypeApplication && pattern is MezzeType.TypeApplication ->
             concrete.constructor == pattern.constructor &&
             concrete.args.size == pattern.args.size &&
@@ -854,7 +850,6 @@ private fun collectFreeTypeVars(type: MezzeType, result: MutableSet<MezzeType>) 
         is MezzeType.FunctionType -> { collectFreeTypeVars(type.paramType, result); collectFreeTypeVars(type.returnType, result) }
         is MezzeType.TypeApplication -> type.args.forEach { collectFreeTypeVars(it, result) }
         is MezzeType.SeqType -> collectFreeTypeVars(type.elementType, result)
-        is MezzeType.ListType -> collectFreeTypeVars(type.elementType, result)
         else -> {}
     }
 }

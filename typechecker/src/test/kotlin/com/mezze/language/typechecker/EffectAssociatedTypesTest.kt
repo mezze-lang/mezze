@@ -424,7 +424,7 @@ class EffectAssociatedTypesTest {
         println("[TEST LIST] Actual type: $returnType")
         println("[TEST LIST] Type class: ${returnType?.javaClass?.simpleName}")
         // List T can be VariantType, TypeApplication, or ListType (when using built-in Cons/Nil)
-        assertTrue(returnType is MezzeType.VariantType || returnType is MezzeType.TypeApplication || returnType is MezzeType.ListType)
+        assertTrue(returnType is MezzeType.VariantType || returnType is MezzeType.TypeApplication || (returnType is MezzeType.TypeApplication && returnType.constructor == "List"))
     }
 
     @Test

@@ -39,7 +39,7 @@ class InvariantCheckerTest {
     @Test
     fun `occurs-check violation detected`() {
         val tv = TypeVar("a", 0, 1)
-        val sub = Substitution(mapOf(tv to MezzeType.ListType(MezzeType.VarType(tv))))
+        val sub = Substitution(mapOf(tv to MezzeType.TypeApplication("List", listOf(MezzeType.VarType(tv)))))
         assertFailsWith<InvariantChecker.InvariantViolation> {
             InvariantChecker.checkSubstitution(sub, "test")
         }

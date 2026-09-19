@@ -56,7 +56,7 @@ class UnifierDifferentialGateTest {
         "[Int]" to SeqType(IntType),
         "[Str]" to SeqType(StringType),
         "['a]" to SeqType(v("a")),
-        "List Int" to ListType(IntType),
+        "List Int" to TypeApplication("List", listOf(IntType)),
         "Map Str Int" to TypeApplication("Map", listOf(StringType, IntType)),
         "App(P,[Int])" to TypeApplication("P", listOf(IntType), TypeIdentity.Declared(h('1'), "P")),
         "App(P,['a])" to TypeApplication("P", listOf(v("a")), TypeIdentity.Declared(h('1'), "P")),
@@ -82,6 +82,21 @@ class UnifierDifferentialGateTest {
         "App(P,['a]) vs App(P,['a])",
         "var V{X,Y} vs var V{X}", "var V{X} vs var V{X,Y}",
         "fn 'a->'a vs fn Int->Str", "fn 'a->'a vs fn 'a->'a",
+
+        // Added when B.1 deleted MezzeType.ListType and `List Int` became an
+        // ordinary TypeApplication. RE-JUSTIFIED rather than absorbed:
+        //
+        // `List` genuinely IS a variant — `| Cons { head, tail }, Nil |`, which
+        // BuiltinTypes spells out — so the SOLVER can now relate `List Int` to an
+        // open variant variable, which it could not do through an opaque
+        // dedicated node. Mono still refuses, for the reason it refuses
+        // everything else on this list: it needs concrete bindings to seed a
+        // specialization, and a variant row is not one.
+        //
+        // The direction is what makes this safe, and it is asserted separately
+        // above: solver-accepts / mono-refuses. Four new pairs, all that way.
+        "List Int vs var V{X,Y}", "var V{X,Y} vs List Int",
+        "List Int vs var V{X}", "var V{X} vs List Int",
     )
 
     @Test

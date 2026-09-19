@@ -104,7 +104,7 @@ class MonoSpecializationsTest {
         val types: List<MezzeType> = listOf(
             MezzeType.IntType,
             MezzeType.StringType,
-            MezzeType.ListType(MezzeType.IntType)
+            MezzeType.TypeApplication("List", listOf(MezzeType.IntType))
         )
         val bytes = StoreSerialization.serializeTypeList(types)
         val back = StoreSerialization.deserializeTypeList(bytes)

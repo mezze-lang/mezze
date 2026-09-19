@@ -873,7 +873,6 @@ class TypedASTCompiler(
         is MezzeType.RecordType -> type.fields.values.any { containsVarTypeDeep(it) }
         is MezzeType.FunctionType -> containsVarTypeDeep(type.paramType) || containsVarTypeDeep(type.returnType)
         is MezzeType.SeqType -> containsVarTypeDeep(type.elementType)
-        is MezzeType.ListType -> containsVarTypeDeep(type.elementType)
         is MezzeType.TypeApplication -> type.args.any { containsVarTypeDeep(it) }
         is MezzeType.VariantType -> type.constructors.values.any { payload ->
             payload != null && containsVarTypeDeep(payload)
@@ -2965,14 +2964,10 @@ class TypedASTCompiler(
             }
             is SeqType -> if (value is SeqType) harvestVarBindings(pattern.elementType, value.elementType, out)
                 else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
-            is ListType -> if (value is ListType) harvestVarBindings(pattern.elementType, value.elementType, out)
-                else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.LIST && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
             is TypeApplication -> when {
                 value is TypeApplication && pattern.constructor == value.constructor && pattern.args.size == value.args.size ->
                     pattern.args.zip(value.args).forEach { (p, v) -> harvestVarBindings(p, v, out) }
                 pattern.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && pattern.args.size == 1 && value is SeqType ->
-                    harvestVarBindings(pattern.args[0], value.elementType, out)
-                pattern.constructor == com.mezze.language.ast.BuiltinTypes.LIST && pattern.args.size == 1 && value is ListType ->
                     harvestVarBindings(pattern.args[0], value.elementType, out)
                 // A declared generic record / variant arrives EXPANDED (`Box P` as
                 // `RecordType{v: P}`, the two-representations landmine) while the impl
@@ -3185,7 +3180,6 @@ class TypedASTCompiler(
     private fun containsVarType(type: MezzeType): Boolean = when (type) {
         is VarType -> true
         is SeqType -> containsVarType(type.elementType)
-        is ListType -> containsVarType(type.elementType)
         is TypeApplication -> type.args.any { containsVarType(it) }
         else -> false
     }
@@ -3197,7 +3191,6 @@ class TypedASTCompiler(
     /** The element (or map value) type of a container type, else null. */
     private fun containerElementType(type: MezzeType): MezzeType? = when (type) {
         is SeqType -> type.elementType
-        is ListType -> type.elementType
         // A container has TWO representations: the ParametricBuiltin cases above and
         // `TypeApplication("List"|"Map"|…, args)` (see Unification ~299, which already
         // bridges the SEQ pair). Only the former were handled, so `List P == List P`

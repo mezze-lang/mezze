@@ -56,7 +56,6 @@ class CodecGenerator(
         is MezzeType.VariantType -> type.constructors.values.all { payload ->
             payload == null || isSerializable(payload)
         }
-        is MezzeType.ListType -> isSerializable(type.elementType)
         is MezzeType.SeqType -> isSerializable(type.elementType)
         is MezzeType.TypeApplication -> type.args.all { isSerializable(it) }
         is MezzeType.NewtypeType -> false
@@ -131,7 +130,6 @@ class CodecGenerator(
             // they must be converted to a seq before __native_seq_map (which
             // rejects a non-Seq with "Expected MezzeSeq, got MezzeLongCons/…").
             is MezzeType.SeqType     -> buildEncodeList(type.elementType, valueExpr, toSeq = null)
-            is MezzeType.ListType    -> buildEncodeList(type.elementType, valueExpr, toSeq = "__native_list_to_seq")
 
 
             is MezzeType.TypeApplication -> when (type.constructor) {
@@ -427,7 +425,6 @@ class CodecGenerator(
             is MezzeType.RecordType -> buildDecodeRecord(type, inputExpr)
             is MezzeType.VariantType -> buildDecodeVariant(type, inputExpr)
 
-            is MezzeType.ListType     -> buildDecodeList(type.elementType, inputExpr)
             is MezzeType.SeqType      -> buildDecodeList(type.elementType, inputExpr)
 
 
@@ -934,7 +931,6 @@ internal fun mezzeTypeToParsedAnnotation(type: MezzeType, loc: Loc): ParsedTypeA
                 loc = loc,
             )
         }
-        is MezzeType.ListType    -> ParsedTypeApp("List", listOf(mezzeTypeToParsedAnnotation(type.elementType, loc)), loc)
         is MezzeType.SeqType     -> ParsedSeqType(mezzeTypeToParsedAnnotation(type.elementType, loc), loc)
         is MezzeType.TypeApplication -> ParsedTypeApp(
             type.constructor,

@@ -341,7 +341,6 @@ object DecodeTargetResolver {
                 else impl.fields.all { (k, v) -> shapeMatches(v, target.fields.getValue(k)) }
             }
             impl is MezzeType.SeqType && target is MezzeType.SeqType -> shapeMatches(impl.elementType, target.elementType)
-            impl is MezzeType.ListType && target is MezzeType.ListType -> shapeMatches(impl.elementType, target.elementType)
             impl is MezzeType.TypeApplication && target is MezzeType.TypeApplication ->
                 impl.constructor == target.constructor && impl.args.size == target.args.size &&
                     impl.args.indices.all { shapeMatches(impl.args[it], target.args[it]) }
@@ -353,7 +352,6 @@ object DecodeTargetResolver {
         is MezzeType.RecordType ->
             "{" + t.fields.toSortedMap().entries.joinToString(",") { "${it.key}:${structural(it.value)}" } + "}"
         is MezzeType.SeqType -> "[" + structural(t.elementType) + "]"
-        is MezzeType.ListType -> "[" + structural(t.elementType) + "]"
         is MezzeType.TypeApplication -> t.constructor + "(" + t.args.joinToString(",") { structural(it) } + ")"
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"

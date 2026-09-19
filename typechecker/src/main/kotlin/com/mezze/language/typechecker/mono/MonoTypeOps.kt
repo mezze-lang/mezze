@@ -151,7 +151,6 @@ internal fun typeMatchesTarget(
         // agnostically (the target's element is a VarType). Without this, `impl Sized for ['a]`
         // never dispatches to a seq receiver and `seq.size {}` degrades to a field read (#279).
         concrete is MezzeType.SeqType && target is MezzeType.SeqType -> true
-        concrete is MezzeType.ListType && target is MezzeType.ListType -> true
         concrete is MezzeType.RecordType && target is MezzeType.TypeApplication &&
             concrete.identity.displayNameOrNull() == target.constructor -> true
         // MezzeType.RecordType-to-MezzeType.RecordType. Compare structurally, guarded by an
@@ -306,7 +305,6 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
                     else -> false
                 }
             }
-        is MezzeType.ListType -> unifyList(pattern.elementType, v, bindings)
         is MezzeType.SeqType -> unifySeq(pattern.elementType, v, bindings)
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
             // Move-5: newtype is a nominal wall — two DISTINCT declared newtypes
@@ -340,8 +338,6 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             pattern.args.size == 1 -> when {
                 pattern.constructor == BuiltinTypes.SEQ && v is MezzeType.SeqType ->
                     unify(pattern.args[0], v.elementType, bindings)
-                pattern.constructor == BuiltinTypes.LIST && v is MezzeType.ListType ->
-                    unify(pattern.args[0], v.elementType, bindings)
                 else -> false
             }
             pattern.args.size == 2 -> when {
@@ -372,7 +368,6 @@ private fun unifySeq(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<
 }
 
 private fun unifyList(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
-    v is MezzeType.ListType -> unify(patternElem, v.elementType, bindings)
     v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.LIST && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false
