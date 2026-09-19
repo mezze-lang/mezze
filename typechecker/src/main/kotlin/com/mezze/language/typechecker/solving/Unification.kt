@@ -315,22 +315,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SET) && type1.args.size == 1 && type2 is MezzeType.SetType ->
             unify(type1.args[0], type2.elementType, registry)
 
-        type1 is MezzeType.SortedMapType && type2 is MezzeType.SortedMapType ->
-            unifySortedMaps(type1, type2, registry)
-
-        type1 is MezzeType.SortedMapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_MAP) && type2.args.size == 2 ->
-            unifyKeyValue(type1.keyType, type1.valueType, type2.args[0], type2.args[1], registry)
-        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_MAP) && type1.args.size == 2 && type2 is MezzeType.SortedMapType ->
-            unifyKeyValue(type1.args[0], type1.args[1], type2.keyType, type2.valueType, registry)
-
-        type1 is MezzeType.SortedSetType && type2 is MezzeType.SortedSetType ->
-            unify(type1.elementType, type2.elementType, registry)
-
-        type1 is MezzeType.SortedSetType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_SET) && type2.args.size == 1 ->
-            unify(type1.elementType, type2.args[0], registry)
-        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_SET) && type1.args.size == 1 && type2 is MezzeType.SortedSetType ->
-            unify(type1.args[0], type2.elementType, registry)
-
         type1 is MezzeType.MapType && type2 is MezzeType.MapType ->
             unifyMaps(type1, type2, registry)
 
@@ -1095,8 +1079,6 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
 private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, registry: DeclarationRegistry): UnificationResult =
     unifyKeyValue(map1.keyType, map1.valueType, map2.keyType, map2.valueType, registry)
 
-private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, registry: DeclarationRegistry): UnificationResult =
-    unifyKeyValue(map1.keyType, map1.valueType, map2.keyType, map2.valueType, registry)
 
 private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow, registry: DeclarationRegistry): UnificationResult {
     val allEffects1 = eff1.allEffectNames

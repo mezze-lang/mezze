@@ -38,12 +38,10 @@ class ContainerTypeFormGateTest {
         "ListType" to 3,
         "SetType" to 3,
         "MapType" to 3,
-        // 1 each, and that 1 is the `rebuild` in the type's own declaration —
-        // which only fires on an instance that already exists. Nothing produces
-        // one any more, so every `is MezzeType.SortedSetType` / `SortedMapType`
-        // arm in the compiler is now unreachable and the nodes are deletable.
-        "SortedMapType" to 1,
-        "SortedSetType" to 1,
+        // SortedMapType and SortedSetType are ABSENT because they no longer
+        // exist: nothing produced them once the annotation converter stopped, so
+        // both were deleted along with every arm that matched them. Two down,
+        // four to go — and the two that went were the proof the rest can.
     )
 
     private val roots = listOf(

@@ -178,8 +178,6 @@ object BuiltinTypes {
         is MezzeType.ListType -> LIST
         is MezzeType.SetType -> SET
         is MezzeType.MapType -> MAP
-        is MezzeType.SortedSetType -> SORTED_SET
-        is MezzeType.SortedMapType -> SORTED_MAP
         is MezzeType.BytesType -> BYTES
         else -> null
     }

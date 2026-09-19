@@ -852,15 +852,8 @@ class AbilityChecker internal constructor(
                 walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "[]")
             is MezzeType.SetType -> require("${prefix}List") ?:
                 walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "{}")
-            is MezzeType.SortedSetType -> require("${prefix}List") ?:
-                walkTier2Capabilities(dataType.elementType, configType, isEncode, path + "{}")
 
             is MezzeType.MapType -> require("${prefix}Map") ?: run {
-                val k = walkTier2Capabilities(dataType.keyType, configType, isEncode, path + "key")
-                if (k != null) return k
-                walkTier2Capabilities(dataType.valueType, configType, isEncode, path + "value")
-            }
-            is MezzeType.SortedMapType -> require("${prefix}Map") ?: run {
                 val k = walkTier2Capabilities(dataType.keyType, configType, isEncode, path + "key")
                 if (k != null) return k
                 walkTier2Capabilities(dataType.valueType, configType, isEncode, path + "value")

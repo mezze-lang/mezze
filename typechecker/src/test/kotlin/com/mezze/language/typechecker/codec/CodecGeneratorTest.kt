@@ -171,17 +171,23 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(setType))
     }
 
+    // SortedSet / SortedMap reach here as TypeApplication — their dedicated
+    // MezzeType nodes were deleted once nothing produced them (B.1). These assert
+    // the same thing they always did, against the representation that now exists.
     @Test
     fun `sorted set should be serializable`() {
-        val sortedSetType = MezzeType.SortedSetType(MezzeType.IntType)
+        val sortedSetType = MezzeType.TypeApplication(
+            constructor = "SortedSet",
+            args = listOf(MezzeType.IntType),
+        )
         assertTrue(generator.isSerializable(sortedSetType))
     }
 
     @Test
     fun `sorted map should be serializable`() {
-        val sortedMapType = MezzeType.SortedMapType(
-            keyType = MezzeType.StringType,
-            valueType = MezzeType.IntType
+        val sortedMapType = MezzeType.TypeApplication(
+            constructor = "SortedMap",
+            args = listOf(MezzeType.StringType, MezzeType.IntType),
         )
         assertTrue(generator.isSerializable(sortedMapType))
     }

@@ -103,9 +103,7 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
         is MezzeType.ListType -> PrintType.MzList(buildShape(type.elementType))
         is MezzeType.SeqType -> PrintType.MzSeq(buildShape(type.elementType))
         is MezzeType.SetType -> PrintType.MzSet(buildShape(type.elementType))
-        is MezzeType.SortedSetType -> PrintType.MzSortedSet(buildShape(type.elementType))
         is MezzeType.MapType -> PrintType.MzMap(buildShape(type.keyType), buildShape(type.valueType))
-        is MezzeType.SortedMapType -> PrintType.MzSortedMap(buildShape(type.keyType), buildShape(type.valueType))
 
         is MezzeType.TypeApplication -> buildApplication(type)
 

@@ -280,7 +280,6 @@ object CompletionEngine {
             is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.NewtypeType, is MezzeType.ListType,
             is MezzeType.SeqType, is MezzeType.MapType, is MezzeType.SetType,
-            is MezzeType.SortedMapType, is MezzeType.SortedSetType,
             is MezzeType.EffectRow -> {}
         }
         return out
@@ -887,9 +886,7 @@ object CompletionEngine {
             is MezzeType.ListType -> "List ${elem(type.elementType)}"
             is MezzeType.SeqType -> "Seq ${elem(type.elementType)}"
             is MezzeType.SetType -> "Set ${elem(type.elementType)}"
-            is MezzeType.SortedSetType -> "SortedSet ${elem(type.elementType)}"
             is MezzeType.MapType -> "Map ${elem(type.keyType)} ${elem(type.valueType)}"
-            is MezzeType.SortedMapType -> "SortedMap ${elem(type.keyType)} ${elem(type.valueType)}"
             is MezzeType.VariantType -> type.identity.displayNameOrNull()
             is MezzeType.VarType,
             is MezzeType.FunctionType,
@@ -1411,9 +1408,7 @@ object CompletionEngine {
             is MezzeType.ListType -> "List"
             is MezzeType.SeqType -> "Seq"
             is MezzeType.SetType -> "Set"
-            is MezzeType.SortedSetType -> "SortedSet"
             is MezzeType.MapType -> "Map"
-            is MezzeType.SortedMapType -> "SortedMap"
             is MezzeType.TypeApplication -> type.constructor
             is MezzeType.VariantType -> type.constructors.keys.firstOrNull()
             else -> null

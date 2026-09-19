@@ -875,9 +875,7 @@ class TypedASTCompiler(
         is MezzeType.SeqType -> containsVarTypeDeep(type.elementType)
         is MezzeType.ListType -> containsVarTypeDeep(type.elementType)
         is MezzeType.SetType -> containsVarTypeDeep(type.elementType)
-        is MezzeType.SortedSetType -> containsVarTypeDeep(type.elementType)
         is MezzeType.MapType -> containsVarTypeDeep(type.keyType) || containsVarTypeDeep(type.valueType)
-        is MezzeType.SortedMapType -> containsVarTypeDeep(type.keyType) || containsVarTypeDeep(type.valueType)
         is MezzeType.TypeApplication -> type.args.any { containsVarTypeDeep(it) }
         is MezzeType.VariantType -> type.constructors.values.any { payload ->
             payload != null && containsVarTypeDeep(payload)
@@ -2973,10 +2971,8 @@ class TypedASTCompiler(
                 else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.LIST && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
             is SetType -> if (value is SetType) harvestVarBindings(pattern.elementType, value.elementType, out)
                 else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SET && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
-            is SortedSetType -> if (value is SortedSetType) harvestVarBindings(pattern.elementType, value.elementType, out)
                 else if (value is TypeApplication && value.constructor == com.mezze.language.ast.BuiltinTypes.SORTED_SET && value.args.size == 1) harvestVarBindings(pattern.elementType, value.args[0], out)
             is MapType -> if (value is MapType) { harvestVarBindings(pattern.keyType, value.keyType, out); harvestVarBindings(pattern.valueType, value.valueType, out) }
-            is SortedMapType -> if (value is SortedMapType) { harvestVarBindings(pattern.keyType, value.keyType, out); harvestVarBindings(pattern.valueType, value.valueType, out) }
             is TypeApplication -> when {
                 value is TypeApplication && pattern.constructor == value.constructor && pattern.args.size == value.args.size ->
                     pattern.args.zip(value.args).forEach { (p, v) -> harvestVarBindings(p, v, out) }
@@ -3197,9 +3193,7 @@ class TypedASTCompiler(
         is SeqType -> containsVarType(type.elementType)
         is ListType -> containsVarType(type.elementType)
         is SetType -> containsVarType(type.elementType)
-        is SortedSetType -> containsVarType(type.elementType)
         is MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
-        is SortedMapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
         is TypeApplication -> type.args.any { containsVarType(it) }
         else -> false
     }
@@ -3213,9 +3207,7 @@ class TypedASTCompiler(
         is SeqType -> type.elementType
         is ListType -> type.elementType
         is SetType -> type.elementType
-        is SortedSetType -> type.elementType
         is MapType -> type.valueType
-        is SortedMapType -> type.valueType
         // A container has TWO representations: the ParametricBuiltin cases above and
         // `TypeApplication("List"|"Map"|…, args)` (see Unification ~299, which already
         // bridges the SEQ pair). Only the former were handled, so `List P == List P`

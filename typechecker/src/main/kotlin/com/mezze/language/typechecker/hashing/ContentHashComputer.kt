@@ -39,8 +39,6 @@ object ContentHashComputer {
             is MezzeType.ListType -> "List_${mezzeTypeToString(type.elementType)}"
             is MezzeType.SetType -> "Set_${mezzeTypeToString(type.elementType)}"
             is MezzeType.MapType -> "Map_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"
-            is MezzeType.SortedMapType -> "SortedMap_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"
-            is MezzeType.SortedSetType -> "SortedSet_${mezzeTypeToString(type.elementType)}"
             else -> type.toString()
         }
 

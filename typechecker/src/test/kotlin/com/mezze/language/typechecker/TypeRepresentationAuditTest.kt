@@ -39,7 +39,7 @@ class TypeRepresentationAuditTest {
         if (!seen.add(type)) return
         when (type) {
             is MezzeType.SeqType, is MezzeType.ListType, is MezzeType.SetType,
-            is MezzeType.MapType, is MezzeType.SortedSetType, is MezzeType.SortedMapType,
+            is MezzeType.MapType,
             -> counts.dedicatedNodes++
             is MezzeType.TypeApplication ->
                 if (type.constructor in containerConstructors) counts.applications++
@@ -52,11 +52,7 @@ class TypeRepresentationAuditTest {
             is MezzeType.SeqType -> countIn(type.elementType, counts, seen)
             is MezzeType.ListType -> countIn(type.elementType, counts, seen)
             is MezzeType.SetType -> countIn(type.elementType, counts, seen)
-            is MezzeType.SortedSetType -> countIn(type.elementType, counts, seen)
             is MezzeType.MapType -> {
-                countIn(type.keyType, counts, seen); countIn(type.valueType, counts, seen)
-            }
-            is MezzeType.SortedMapType -> {
                 countIn(type.keyType, counts, seen); countIn(type.valueType, counts, seen)
             }
             is MezzeType.TypeApplication -> type.args.forEach { countIn(it, counts, seen) }
