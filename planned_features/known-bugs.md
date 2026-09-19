@@ -1875,7 +1875,23 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   Mezze types". Note `NativeSignatures` cannot supply them: its `SlotKind` is the
   runtime ABI, not the type (`__native_nat_min` returns LONG and is a `Nat`).
 
-- **The returned-closure variant leak: ROOT CAUSE LOCATED, and it is A.2's.** The
+- **The returned-closure variant leak: FIXED.** All 144 cells of the
+  well-typed⇒no-stuck gate pass; the five-cell exclusion, its tripwire and the
+  `@Disabled` repro are deleted, and the tripwire fired on its own to announce it.
+  Two halves. `seq::find`'s generic `{ x: 'a }` was pushed into the predicate and
+  DISCARDED what `{ x: Rt }` said, so the receiver of `x.m == Get` was a type the
+  emitter never determined — callee generics are now bound from the sibling
+  arguments first (`xs = rts` with `rts : [Rt]` says `'a = Rt`). And mono's
+  `selectOpEntry` returned a LONE candidate without checking it against the
+  receiver; entries are gathered by operation NAME, so one entry means "this spec
+  carries one impl that happens to declare an op with this name", and the spec
+  carried `Eq Int`. The check is conditional on the receiver being KNOWN, which is
+  why it works now and failed before: applied unconditionally it fails ten tests,
+  because an unresolved receiver is mono's signal that the specialization's
+  evidence decides, and a user `Ord`/`Eq` on a container element reaches its impl
+  exactly that way.
+
+  ORIGINAL DIAGNOSIS, kept because the reasoning is the fix's: The
   crash is `__native_int_eq` receiving a `MezzeVariant` on a program that type-checks
   clean. Chain, measured end to end: the emitter stamps the predicate's receiver
   `x.m` with `VarType("unknown")`, its "I did not know" placeholder; mono's
