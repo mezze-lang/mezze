@@ -23,6 +23,19 @@
 #   `List { value: 'a, index: Int }`, which `reverse { xs = both.acc }` unifies
 #   against. Neither closed it.
 #
+#   TRIED AND REVERTED (2026-09-19), so nobody spends the day twice: recording
+#   the SOLVED CALLEE TYPE per call site (`callCalleeTypes`, threaded exactly
+#   like `callReturnTypes` and `lambdaParamTypes`) and having emit type the
+#   callee — and therefore the argument record, and therefore any inline
+#   callback's parameters — from the instantiation rather than re-resolving the
+#   identifier to its declaration. It closed the two `impl Seq.is_sorted*` rows
+#   and NOTHING else, and it broke six tests (StaticAbilityOp's three wrapper
+#   cases, OrdImpl's two seq wrappers, DualAbilityParam). Guarding it to leave
+#   evidence-keyed callees alone put those two rows straight back. So the only
+#   rows it reached were exactly the ones where rewriting the callee's variables
+#   is unsafe — a dictionary is keyed on them — and the fold family it was aimed
+#   at did not move at all. The plumbing was deleted rather than left inert.
+#
 #   Reduced to twelve lines in UserCodeElaborationGateTest — see
 #   `a fold whose accumulator element is fixed only inside the callback`. Two
 #   explanations were checked and are WRONG, so nobody need re-check them: it is
