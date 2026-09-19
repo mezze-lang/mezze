@@ -176,8 +176,6 @@ object BuiltinTypes {
     fun builtinConstructorName(type: MezzeType): String? = when (type) {
         is MezzeType.SeqType -> SEQ
         is MezzeType.ListType -> LIST
-        is MezzeType.SetType -> SET
-        is MezzeType.MapType -> MAP
         is MezzeType.BytesType -> BYTES
         else -> null
     }

@@ -522,9 +522,6 @@ class TypeValidator(
             type1.args.zip(type2.args).all { (a, b) -> alphaEquivalent(a, b, mapping) }
         type1 is MezzeType.SeqType && type2 is MezzeType.SeqType -> alphaEquivalent(type1.elementType, type2.elementType, mapping)
         type1 is MezzeType.ListType && type2 is MezzeType.ListType -> alphaEquivalent(type1.elementType, type2.elementType, mapping)
-        type1 is MezzeType.SetType && type2 is MezzeType.SetType -> alphaEquivalent(type1.elementType, type2.elementType, mapping)
-        type1 is MezzeType.MapType && type2 is MezzeType.MapType ->
-            alphaEquivalent(type1.keyType, type2.keyType, mapping) && alphaEquivalent(type1.valueType, type2.valueType, mapping)
         else -> false
     }
 

@@ -152,8 +152,6 @@ internal fun typeMatchesTarget(
         // never dispatches to a seq receiver and `seq.size {}` degrades to a field read (#279).
         concrete is MezzeType.SeqType && target is MezzeType.SeqType -> true
         concrete is MezzeType.ListType && target is MezzeType.ListType -> true
-        concrete is MezzeType.SetType && target is MezzeType.SetType -> true
-        concrete is MezzeType.MapType && target is MezzeType.MapType -> true
         concrete is MezzeType.RecordType && target is MezzeType.TypeApplication &&
             concrete.identity.displayNameOrNull() == target.constructor -> true
         // MezzeType.RecordType-to-MezzeType.RecordType. Compare structurally, guarded by an
@@ -310,8 +308,6 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             }
         is MezzeType.ListType -> unifyList(pattern.elementType, v, bindings)
         is MezzeType.SeqType -> unifySeq(pattern.elementType, v, bindings)
-        is MezzeType.SetType -> unifySet(pattern.elementType, v, bindings)
-        is MezzeType.MapType -> unifyMap(pattern.keyType, pattern.valueType, v, bindings)
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
             // Move-5: newtype is a nominal wall — two DISTINCT declared newtypes
             // (same name, different hash: the newtype-two-faces hazard) must not
@@ -346,14 +342,9 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
                     unify(pattern.args[0], v.elementType, bindings)
                 pattern.constructor == BuiltinTypes.LIST && v is MezzeType.ListType ->
                     unify(pattern.args[0], v.elementType, bindings)
-                pattern.constructor == BuiltinTypes.SET && v is MezzeType.SetType ->
-                    unify(pattern.args[0], v.elementType, bindings)
                 else -> false
             }
             pattern.args.size == 2 -> when {
-                pattern.constructor == BuiltinTypes.MAP && v is MezzeType.MapType ->
-                    unify(pattern.args[0], v.keyType, bindings) &&
-                    unify(pattern.args[1], v.valueType, bindings)
                 else -> false
             }
             else -> false
@@ -388,7 +379,6 @@ private fun unifyList(patternElem: MezzeType, v: MezzeType, bindings: MutableMap
 }
 
 private fun unifySet(patternElem: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
-    v is MezzeType.SetType -> unify(patternElem, v.elementType, bindings)
     v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.SET && v.args.size == 1 ->
         unify(patternElem, v.args[0], bindings)
     else -> false
@@ -401,7 +391,6 @@ private fun unifySortedSet(patternElem: MezzeType, v: MezzeType, bindings: Mutab
 }
 
 private fun unifyMap(patternKey: MezzeType, patternVal: MezzeType, v: MezzeType, bindings: MutableMap<String, MezzeType>): Boolean = when {
-    v is MezzeType.MapType -> unify(patternKey, v.keyType, bindings) && unify(patternVal, v.valueType, bindings)
     v is MezzeType.TypeApplication && v.constructor == BuiltinTypes.MAP && v.args.size == 2 ->
         unify(patternKey, v.args[0], bindings) && unify(patternVal, v.args[1], bindings)
     else -> false

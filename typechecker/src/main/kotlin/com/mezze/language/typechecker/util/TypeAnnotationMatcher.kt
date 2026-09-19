@@ -111,12 +111,6 @@ object TypeAnnotationMatcher {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)
                     type is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST ->
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)
-                    type is MezzeType.SetType && annotation.constructor == BuiltinTypes.SET ->
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)
-                    type is MezzeType.MapType && annotation.constructor == BuiltinTypes.MAP ->
-                        annotation.args.size == 2 &&
-                        typeMatchesAnnotation(type.keyType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings) &&
-                        typeMatchesAnnotation(type.valueType, annotation.args[1], typeDeclarations, typeVars, typeVarBindings)
                     else -> false
                 }
             }

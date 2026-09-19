@@ -158,16 +158,15 @@ class CodecGeneratorTest {
 
     @Test
     fun `map with serializable key value should be serializable`() {
-        val mapType = MezzeType.MapType(
-            keyType = MezzeType.StringType,
-            valueType = MezzeType.IntType
+        val mapType = MezzeType.TypeApplication(
+            "Map", listOf(MezzeType.StringType, MezzeType.IntType),
         )
         assertTrue(generator.isSerializable(mapType))
     }
 
     @Test
     fun `set of primitives should be serializable`() {
-        val setType = MezzeType.SetType(MezzeType.IntType)
+        val setType = MezzeType.TypeApplication("Set", listOf(MezzeType.IntType))
         assertTrue(generator.isSerializable(setType))
     }
 
@@ -441,9 +440,8 @@ class CodecGeneratorTest {
     @Test
     fun `map with record values should be serializable`() {
         val recordType = MezzeType.RecordType(mapOf("x" to MezzeType.IntType))
-        val mapType = MezzeType.MapType(
-            keyType = MezzeType.StringType,
-            valueType = recordType
+        val mapType = MezzeType.TypeApplication(
+            "Map", listOf(MezzeType.StringType, recordType),
         )
         assertTrue(generator.isSerializable(mapType))
     }

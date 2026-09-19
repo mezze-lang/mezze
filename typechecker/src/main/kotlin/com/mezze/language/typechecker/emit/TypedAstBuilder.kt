@@ -504,10 +504,6 @@ class TypedAstBuilder(
                 linkDeclaredVars(declared.elementType, inferred.elementType, out)
             is MezzeType.ListType -> if (inferred is MezzeType.ListType)
                 linkDeclaredVars(declared.elementType, inferred.elementType, out)
-            is MezzeType.MapType -> if (inferred is MezzeType.MapType) {
-                linkDeclaredVars(declared.keyType, inferred.keyType, out)
-                linkDeclaredVars(declared.valueType, inferred.valueType, out)
-            }
             is MezzeType.TypeApplication -> if (inferred is MezzeType.TypeApplication &&
                 declared.args.size == inferred.args.size
             ) {
@@ -529,7 +525,6 @@ class TypedAstBuilder(
         is MezzeType.VarType -> link[type.variable.name] ?: type
         is MezzeType.SeqType -> MezzeType.SeqType(relinkType(type.elementType, link))
         is MezzeType.ListType -> MezzeType.ListType(relinkType(type.elementType, link))
-        is MezzeType.MapType -> MezzeType.MapType(relinkType(type.keyType, link), relinkType(type.valueType, link))
         is MezzeType.TypeApplication -> type.copy(args = type.args.map { relinkType(it, link) })
         is MezzeType.RecordType -> type.copy(fields = type.fields.mapValues { (_, t) -> relinkType(t, link) })
         else -> type

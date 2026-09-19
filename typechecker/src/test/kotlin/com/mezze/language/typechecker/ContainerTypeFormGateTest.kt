@@ -36,13 +36,19 @@ class ContainerTypeFormGateTest {
     private val baseline = mapOf(
         "SeqType" to 30,
         "ListType" to 3,
-        "SetType" to 3,
-        "MapType" to 3,
-        // SortedMapType and SortedSetType are ABSENT because they no longer
-        // exist: nothing produced them once the annotation converter stopped, so
-        // both were deleted along with every arm that matched them. Two down,
-        // four to go — and the two that went were the proof the rest can.
     )
+
+    /**
+     * SetType, MapType, SortedSetType and SortedMapType are ABSENT because they
+     * no longer exist. Once the annotation converter stopped producing them,
+     * nothing else did, and each was deleted along with every arm that matched
+     * it — including the cross-form unification arms, which are the thing this
+     * duplication cost in the first place.
+     *
+     * ListType has 2 real producers left (VariantSolver, BuiltinTypes' cons
+     * shape) and SeqType 30, built directly rather than through any annotation.
+     * Those are what remains.
+     */
 
     private val roots = listOf(
         "ast/src/main", "typechecker/src/main", "interpreter/src/main",

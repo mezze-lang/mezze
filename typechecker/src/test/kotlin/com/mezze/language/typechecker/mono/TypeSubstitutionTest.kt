@@ -60,10 +60,10 @@ class TypeSubstitutionTest {
     @Test
     fun `applyType walks list and map types`() {
         val listT = MezzeType.ListType(varA)
-        val mapT = MezzeType.MapType(varA, varB)
+        val mapT = MezzeType.TypeApplication("Map", listOf(varA, varB))
         assertEquals(MezzeType.ListType(intT), TypeSubstitution.applyType(listT, mapOf(a to intT)))
         assertEquals(
-            MezzeType.MapType(intT, strT),
+            MezzeType.TypeApplication("Map", listOf(intT, strT)),
             TypeSubstitution.applyType(mapT, mapOf(a to intT, b to strT))
         )
     }

@@ -109,15 +109,6 @@ object BuiltinAbilities {
                 hasAutomaticImplementation("List", abilityName) &&
                 typeHasAutomaticImplementation(type.elementType, abilityName)
             }
-            is MezzeType.MapType -> {
-                hasAutomaticImplementation("Map", abilityName) &&
-                typeHasAutomaticImplementation(type.keyType, abilityName) &&
-                typeHasAutomaticImplementation(type.valueType, abilityName)
-            }
-            is MezzeType.SetType -> {
-                hasAutomaticImplementation("Set", abilityName) &&
-                typeHasAutomaticImplementation(type.elementType, abilityName)
-            }
 
             // Record types automatically derive Eq and Inspect if all fields have these abilities
             is MezzeType.RecordType -> {

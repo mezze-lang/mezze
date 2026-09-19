@@ -32,10 +32,13 @@ class SubstitutionPropertyTest {
                 fields = linkedMapOf("x" to randomType(depth - 1, seed / 6)),
                 rowVar = null
             )
-            3 -> MezzeType.SetType(randomType(depth - 1, seed / 6))
-            4 -> MezzeType.MapType(
-                keyType = randomType(depth - 1, seed / 6),
-                valueType = randomType(depth - 1, (seed / 6) + 1)
+            3 -> MezzeType.TypeApplication("Set", listOf(randomType(depth - 1, seed / 6)))
+            4 -> MezzeType.TypeApplication(
+                "Map",
+                listOf(
+                    randomType(depth - 1, seed / 6),
+                    randomType(depth - 1, (seed / 6) + 1),
+                ),
             )
             else -> MezzeType.VarType(freshVar())
         }

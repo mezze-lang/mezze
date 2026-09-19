@@ -58,8 +58,6 @@ class CodecGenerator(
         }
         is MezzeType.ListType -> isSerializable(type.elementType)
         is MezzeType.SeqType -> isSerializable(type.elementType)
-        is MezzeType.SetType -> isSerializable(type.elementType)
-        is MezzeType.MapType -> isSerializable(type.keyType) && isSerializable(type.valueType)
         is MezzeType.TypeApplication -> type.args.all { isSerializable(it) }
         is MezzeType.NewtypeType -> false
         is MezzeType.VarType -> true
@@ -134,9 +132,7 @@ class CodecGenerator(
             // rejects a non-Seq with "Expected MezzeSeq, got MezzeLongCons/…").
             is MezzeType.SeqType     -> buildEncodeList(type.elementType, valueExpr, toSeq = null)
             is MezzeType.ListType    -> buildEncodeList(type.elementType, valueExpr, toSeq = "__native_list_to_seq")
-            is MezzeType.SetType     -> buildEncodeList(type.elementType, valueExpr, toSeq = "__native_set_to_seq")
 
-            is MezzeType.MapType       -> buildEncodeMap(type.keyType, type.valueType, valueExpr)
 
             is MezzeType.TypeApplication -> when (type.constructor) {
                 BuiltinTypes.OPTION ->
@@ -433,9 +429,7 @@ class CodecGenerator(
 
             is MezzeType.ListType     -> buildDecodeList(type.elementType, inputExpr)
             is MezzeType.SeqType      -> buildDecodeList(type.elementType, inputExpr)
-            is MezzeType.SetType      -> buildDecodeList(type.elementType, inputExpr)
 
-            is MezzeType.MapType       -> buildDecodeMap(type.keyType, type.valueType, inputExpr)
 
             is MezzeType.TypeApplication -> when (type.constructor) {
                 BuiltinTypes.OPTION ->
@@ -942,12 +936,6 @@ internal fun mezzeTypeToParsedAnnotation(type: MezzeType, loc: Loc): ParsedTypeA
         }
         is MezzeType.ListType    -> ParsedTypeApp("List", listOf(mezzeTypeToParsedAnnotation(type.elementType, loc)), loc)
         is MezzeType.SeqType     -> ParsedSeqType(mezzeTypeToParsedAnnotation(type.elementType, loc), loc)
-        is MezzeType.SetType     -> ParsedTypeApp("Set", listOf(mezzeTypeToParsedAnnotation(type.elementType, loc)), loc)
-        is MezzeType.MapType     -> ParsedTypeApp(
-            "Map",
-            listOf(mezzeTypeToParsedAnnotation(type.keyType, loc), mezzeTypeToParsedAnnotation(type.valueType, loc)),
-            loc,
-        )
         is MezzeType.TypeApplication -> ParsedTypeApp(
             type.constructor,
             type.args.map { mezzeTypeToParsedAnnotation(it, loc) },

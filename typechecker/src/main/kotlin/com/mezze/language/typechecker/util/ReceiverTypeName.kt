@@ -74,12 +74,6 @@ private fun argIdentityToken(arg: MezzeType): String? =
             is MezzeType.RecordType -> null
             is MezzeType.SeqType -> argIdentityToken(arg.elementType)?.let { "Seq<$it>" }
             is MezzeType.ListType -> argIdentityToken(arg.elementType)?.let { "List<$it>" }
-            is MezzeType.SetType -> argIdentityToken(arg.elementType)?.let { "Set<$it>" }
-            is MezzeType.MapType -> {
-                val k = argIdentityToken(arg.keyType)
-                val v = argIdentityToken(arg.valueType)
-                if (k != null && v != null) "Map<$k,$v>" else null
-            }
             is MezzeType.TypeApplication -> appliedHashOf(arg)?.hex
             else -> receiverTypeName(arg)
         }
@@ -135,8 +129,6 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
     is MezzeType.BytesType -> "Bytes"
     is MezzeType.SeqType -> "Seq"
     is MezzeType.ListType -> "List"
-    is MezzeType.SetType -> "Set"
-    is MezzeType.MapType -> "Map"
     is MezzeType.TypeApplication -> type.constructor
     is MezzeType.RecordType -> type.identity.displayNameOrNull()
     is MezzeType.VariantType -> type.identity.displayNameOrNull()
@@ -198,11 +190,6 @@ private fun mangledArgName(arg: MezzeType): String? = when (arg) {
     is MezzeType.TypeApplication -> mangledTypeAppName(arg)
     is MezzeType.SeqType -> mangledArgName(arg.elementType)?.let { "Seq_$it" }
     is MezzeType.ListType -> mangledArgName(arg.elementType)?.let { "List_$it" }
-    is MezzeType.SetType -> mangledArgName(arg.elementType)?.let { "Set_$it" }
-    is MezzeType.MapType -> {
-        val k = mangledArgName(arg.keyType); val v = mangledArgName(arg.valueType)
-        if (k != null && v != null) "Map_${k}_$v" else null
-    }
     is MezzeType.VarType -> null
     else -> receiverTypeName(arg)
 }

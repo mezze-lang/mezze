@@ -57,7 +57,7 @@ class UnifierDifferentialGateTest {
         "[Str]" to SeqType(StringType),
         "['a]" to SeqType(v("a")),
         "List Int" to ListType(IntType),
-        "Map Str Int" to MapType(StringType, IntType),
+        "Map Str Int" to TypeApplication("Map", listOf(StringType, IntType)),
         "App(P,[Int])" to TypeApplication("P", listOf(IntType), TypeIdentity.Declared(h('1'), "P")),
         "App(P,['a])" to TypeApplication("P", listOf(v("a")), TypeIdentity.Declared(h('1'), "P")),
         "App(Q,[Int])" to TypeApplication("Q", listOf(IntType), TypeIdentity.Declared(h('2'), "Q")),

@@ -106,7 +106,7 @@ class UnificationPropertyTest {
     fun `unifying incompatible structures fails`() {
         val result = unify(
             MezzeType.ListType(MezzeType.IntType),
-            MezzeType.SetType(MezzeType.IntType)
+            MezzeType.TypeApplication("Set", listOf(MezzeType.IntType))
         )
         assertIs<UnificationResult.Failure>(result)
     }
@@ -137,8 +137,8 @@ class UnificationPropertyTest {
         val vv = freshVar("v")
 
         val result = unify(
-            MezzeType.MapType(MezzeType.VarType(kv), MezzeType.VarType(vv)),
-            MezzeType.MapType(MezzeType.StringType, MezzeType.IntType)
+            MezzeType.TypeApplication("Map", listOf(MezzeType.VarType(kv), MezzeType.VarType(vv))),
+            MezzeType.TypeApplication("Map", listOf(MezzeType.StringType, MezzeType.IntType))
         )
         assertIs<UnificationResult.Success>(result)
         assertEquals(MezzeType.StringType, result.substitution.apply(MezzeType.VarType(kv)))

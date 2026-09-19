@@ -53,12 +53,8 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
         is MezzeType.SeqType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE)); appendTypeInScope(b, type.elementType) }
         is MezzeType.ListType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x01)); appendTypeInScope(b, type.elementType) }
-        is MezzeType.SetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x02)); appendTypeInScope(b, type.elementType) }
-        is MezzeType.MapType -> {
-            b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x03))
-            appendTypeInScope(b, type.keyType); appendTypeInScope(b, type.valueType)
-        }
-        // 0x04 and 0x05 belonged to SortedMapType / SortedSetType, which no
+        // 0x02 through 0x05 belonged to SetType, MapType, SortedMapType and
+        // SortedSetType, which no
         // longer exist — both reach here as TypeApplication now. The tags are
         // NOT reused: a hash is a stable identity, and handing an old tag to a
         // new shape would silently equate two different types across a rebuild.

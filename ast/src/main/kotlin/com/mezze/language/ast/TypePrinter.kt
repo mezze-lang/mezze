@@ -232,8 +232,6 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
     }
     is MezzeType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
-    is MezzeType.MapType -> "Map ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
-    is MezzeType.SetType -> "Set ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
             "(${prettyPrintTypeWithMapping(type.paramType, typeVarMapping)})"
@@ -445,8 +443,6 @@ private fun prettyPrintTypeWithAliasesRecursive(
         if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
     }
     is MezzeType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
-    is MezzeType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)}"
-    is MezzeType.SetType -> "Set ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
     is MezzeType.FunctionType -> {
         val paramTypeStr = if (type.paramType is MezzeType.FunctionType) {
             "(${prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping)})"
@@ -707,9 +703,6 @@ private fun unifyTypesForAlias(
             unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
         concrete is MezzeType.ListType && pattern is MezzeType.ListType ->
             unifyTypesForAlias(concrete.elementType, pattern.elementType, substitutions, patternNames)
-        concrete is MezzeType.MapType && pattern is MezzeType.MapType ->
-            unifyTypesForAlias(concrete.keyType, pattern.keyType, substitutions, patternNames) &&
-            unifyTypesForAlias(concrete.valueType, pattern.valueType, substitutions, patternNames)
         concrete is MezzeType.TypeApplication && pattern is MezzeType.TypeApplication ->
             concrete.constructor == pattern.constructor &&
             concrete.args.size == pattern.args.size &&
