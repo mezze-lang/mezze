@@ -701,7 +701,6 @@ class ParallelEffectTest {
     }
 
     @Test
-    @Disabled("#391 — BDSL cannot compile entry-body (large IR); unblocks TruffleCompiler.kt deletion")
     fun `test large list parallel processing`() {
         // Test with a larger list to exercise parallelism
         val code = """
@@ -729,7 +728,6 @@ class ParallelEffectTest {
     }
 
     @Test
-    @Disabled("#391 — BDSL cannot compile entry-body (large IR); unblocks TruffleCompiler.kt deletion")
     fun `test large list with chunking for efficiency`() {
         val code = """
             use std::effects::parallel::{ Parallel, LoomParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
@@ -898,7 +896,6 @@ class ParallelEffectTest {
     }
 
     @Test
-    @Disabled("#391 — BDSL cannot compile entry-body (large IR); unblocks TruffleCompiler.kt deletion")
     fun `test LoomParallel large list work-stealing`() {
         val code = """
             use std::effects::parallel::{ LoomParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }

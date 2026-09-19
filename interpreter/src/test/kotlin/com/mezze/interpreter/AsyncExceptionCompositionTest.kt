@@ -73,17 +73,6 @@ class AsyncExceptionCompositionTest {
         assertEquals(42L, payload.getField("val"))
     }
 
-    @Disabled("""
-        Partial fix landed in task #51 — for_each, both, and spawned-task
-        Exception propagation all now work correctly. This test still
-        fails because the `let r = map { ... }` binding wraps `r` into an
-        outer `Ok { val = r }` record before the outer perform driver
-        catches the abort — so eval sees `Ok { val = MezzeSuspend }`
-        instead of the abort's Err. The abort machinery races with record
-        construction. Tracked in docs/PARALLEL_KNOWN_ISSUES.md; likely
-        needs the outer perform driver to catch TaskUnhandledOpException
-        (not just AbortPerformException) in its unwind path.
-    """)
     @Test
     fun `raise inside Parallel map callback is caught by outer ExceptionToResult`() {
         // The parallel map runs on a virtual-thread pool. The callback at

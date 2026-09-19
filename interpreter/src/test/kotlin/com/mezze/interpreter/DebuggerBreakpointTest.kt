@@ -30,7 +30,20 @@ class DebuggerBreakpointTest {
 
     @Test
     @Timeout(60)
-    @Disabled("#391 — Truffle BDSL prepareForInstrumentation AssertionError; unblocks TruffleCompiler.kt deletion")
+    @Disabled(
+        "#391, instrumentation half — attaching the debugger makes Truffle RE-RUN the " +
+            "bytecode parser to add instrumentation, and the second run trips an " +
+            "AssertionError in MezzeBytecodeRootNodeGen\$Builder.endRoot. Stack: " +
+            "prepareForInstrumentation -> updateImpl -> performUpdate -> " +
+            "BytecodeCompiler.lambda\$compile\$0 -> endRoot. So the parser lambda is not " +
+            "REPARSEABLE: a Bytecode DSL parser must emit the same program when invoked " +
+            "again, and this one does not. Ruled out: localMap is built INSIDE the lambda " +
+            "(line ~1365), so it is not the usual stale-BytecodeLocal reuse. Look next at " +
+            "the compiler instance state the lambda mutates (inSelfTailLoop, " +
+            "selfTailParamLocals, selfTailContinueFlag, selfTailHash) and at " +
+            "compiledCallTargets, which supports() populates before the first parse. " +
+            "The entry-body half of #391 is FIXED — see the over-63 seq-literal cap.",
+    )
     fun `a line breakpoint suspends execution at that line`() {
         // Top-level `let`s EXECUTE on eval (they bind + run each value), unlike a
         // `main` fn body which is only defined, not called. So line 3's `let x =

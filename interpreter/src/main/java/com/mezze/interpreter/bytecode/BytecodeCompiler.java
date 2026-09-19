@@ -889,10 +889,21 @@ public final class BytecodeCompiler {
             return true;
         }
         if (node instanceof MakeSeqIR ms) {
-            // MakeSeqWithSpread packs isSpread as a 63-bit long; larger
-            // literals fall back to AST until a boolean[]-operand variant
-            // is added.
-            if (ms.getElements().size() > 63) { markReject(node, "over-63"); return false; }
+            // The 63 belongs to MakeSeqWithSpread, which packs its isSpread
+            // flags into a long. A literal with NO spread is emitted through
+            // plain MakeSeq, a variadic with no such limit — so applying the
+            // cap to every literal rejected `[1, 2, … 100]`, which has nothing
+            // to pack. It cost four tests: the comment this replaces said
+            // larger literals "fall back to AST", and that fallback was deleted
+            // with the AST tree, turning a quiet degrade into a hard failure.
+            boolean hasSpread = false;
+            for (SeqElementIR el : ms.getElements()) {
+                if (el instanceof SeqElementIR.Spread) { hasSpread = true; break; }
+            }
+            if (hasSpread && ms.getElements().size() > 63) {
+                markReject(node, "spread-over-63");
+                return false;
+            }
             for (SeqElementIR el : ms.getElements()) {
                 if (el instanceof SeqElementIR.Spread sp) {
                     if (!supportsNode(sp.getNode(), argCount)) return false;

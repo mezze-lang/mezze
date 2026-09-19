@@ -563,15 +563,23 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             com.mezze.language.truffleir.FunctionIR entryIR) {
         if (!BDSL_ENABLED) return null;
         com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
-        if (!bdsl.supports(entryIR)) return null;
+        if (!bdsl.supports(entryIR)) {
+            // Name the rejected node, exactly as the named-function path does.
+            // Returning null here instead sent the caller into a generic "an IR
+            // shape BDSL supports() doesn't accept or emit() throws on" with no
+            // way to tell WHICH, and no way to tell the two apart — which is the
+            // state #391's four disabled tests were left in.
+            String rejected = bdsl.lastRejectionReason();
+            throw bdslCompileError(
+                    entryIR,
+                    "unsupported" + (rejected == null ? "" : " (node=" + rejected + ")"),
+                    null);
+        }
         try {
             com.oracle.truffle.api.nodes.RootNode root = bdsl.compileEntryFn(entryIR);
             return root.getCallTarget();
         } catch (Throwable t) {
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println("[BDSL entry] compile failed for " + entryIR.getName() + ": " + t);
-            }
-            return null;
+            throw bdslCompileError(entryIR, "entry-emit-crash", t);
         }
     }
 

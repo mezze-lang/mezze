@@ -611,7 +611,6 @@ class LazyEffectsTest {
     }
 
     @Test
-    @Disabled("#392 — residual under MEZZE_EAGER=1; passes in isolation, fails after prior test in same class. NOT an Engine-cache leak (empirically refuted: clearing slotTable + userStubCache + stdlibCallTargetCache + importedCallTargetCache in disposeContext does NOT fix). Real root cause likely: (a) a stale value baked as @ConstantOperand in MezzeBytecodeRootNode bytecode (per-Engine, unclearable from disposeContext) OR (b) test-order-dependent poisoning of MezzeVariant.TagRegistry / HandlerChainEntry ThreadLocal / HandlerChainRegistry state. Next diagnostic pass: instrument thread-local + TagRegistry state at test teardown, not Engine caches.")
     fun `test Inspect to_dbg on success path of lazy effect`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
