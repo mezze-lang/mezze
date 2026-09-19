@@ -115,6 +115,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         methodCallResolutions = argumentResult.methodCallResolutions +
             mapOf((expr.loc to methodName) to methodCallInfo),
         callReturnTypes = argumentResult.callReturnTypes + (expr.loc to opType.returnType),
+        lambdaParamTypes = argumentResult.lambdaParamTypes,
     )
 }
 
@@ -724,7 +725,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
         usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
-        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
+        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
+        lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
     )
 }
 
@@ -1342,7 +1344,8 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
         usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
-        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
+        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
+        lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
     )
 }
 
@@ -1480,6 +1483,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodName) to methodCallInfo),
         callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
+        lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
     )
 }
 

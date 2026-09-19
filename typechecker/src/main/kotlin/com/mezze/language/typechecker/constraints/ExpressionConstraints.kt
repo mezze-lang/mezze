@@ -168,6 +168,9 @@ class ExpressionConstraintGenerator {
         // up (like doBindingSolvedTypes/callReturnTypes) so every nested perform's
         // entry reaches the top-level decl's ConstraintResult for emit to read.
         val performFullyDischarged = mutableMapOf<Loc, Boolean>()
+        // Per-lambda solved param types, merged up like callReturnTypes so a
+        // lambda nested anywhere reaches the top-level decl's ConstraintResult.
+        val lambdaParamTypes = mutableMapOf<Loc, Map<String, MezzeType>>()
 
         fun merge(result: ConstraintResult) {
             constraints.addAll(result.constraints)
@@ -190,6 +193,7 @@ class ExpressionConstraintGenerator {
             unusedHandlers.addAll(result.unusedHandlers)
             doBindingSolvedTypes.putAll(result.doBindingSolvedTypes)
             performFullyDischarged.putAll(result.performFullyDischarged)
+            lambdaParamTypes.putAll(result.lambdaParamTypes)
         }
 
         fun toResult(type: MezzeType): ConstraintResult = ConstraintResult(
@@ -206,6 +210,7 @@ class ExpressionConstraintGenerator {
             referencedBindings = referencedBindings,
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
+            lambdaParamTypes = lambdaParamTypes,
             matchScrutineeTypes = matchScrutineeTypes,
             pendingClosureArgEffects = pendingClosureArgEffects,
             duplicateBindings = duplicateBindings,

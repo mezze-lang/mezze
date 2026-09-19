@@ -556,7 +556,8 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
         usedVariables = receiverResult.usedVariables,
         referencedBindings = receiverResult.referencedBindings,
         methodCallResolutions = receiverResult.methodCallResolutions,
-        callReturnTypes = receiverResult.callReturnTypes
+        callReturnTypes = receiverResult.callReturnTypes,
+        lambdaParamTypes = receiverResult.lambdaParamTypes,
     )
 }
 

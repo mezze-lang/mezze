@@ -685,6 +685,7 @@ class TypeChecker(
                     matchCaseBindings = aggregated.matchCaseBindings,
                     matchScrutineeTypes = aggregated.matchScrutineeTypes,
                     doBindingSolvedTypes = aggregated.doBindingSolvedTypes,
+                    lambdaParamTypes = aggregated.lambdaParamTypes,
                     performFullyDischarged = aggregated.performFullyDischarged,
                 )
                 val emitResult = emitTypedModuleAndLower(
@@ -750,6 +751,7 @@ class TypeChecker(
         val expectedTypeAt: Map<Loc, MezzeType>,
         val doBindingSolvedTypes: Map<Loc, MezzeType>,
         val performFullyDischarged: Map<Loc, Boolean>,
+        val lambdaParamTypes: Map<Loc, Map<String, MezzeType>>,
     )
 
     private fun aggregateConstraintResults(
@@ -783,6 +785,12 @@ class TypeChecker(
         // no substitution needed).
         val performFullyDischarged = constraintResults.values
             .fold(emptyMap<Loc, Boolean>()) { acc, r -> acc + r.performFullyDischarged }
+        // Per-lambda solved param types. Substitution-applied here for the same
+        // reason doBindingSolvedTypes is: the local incremental solve may have left
+        // a variable open that the module solve pinned.
+        val lambdaParamTypes = constraintResults.values
+            .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r -> acc + r.lambdaParamTypes }
+            .mapValues { (_, fields) -> fields.mapValues { (_, t) -> substitution.apply(t) } }
         return AggregatedConstraintResults(
             tailCallLocations = tailCallLocations,
             methodCallResolutions = methodCallResolutions,
@@ -792,6 +800,7 @@ class TypeChecker(
             expectedTypeAt = expectedTypeAt,
             doBindingSolvedTypes = doBindingSolvedTypes,
             performFullyDischarged = performFullyDischarged,
+            lambdaParamTypes = lambdaParamTypes,
         )
     }
 

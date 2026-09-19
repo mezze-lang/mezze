@@ -8,6 +8,23 @@
 # Do NOT regenerate this file to make a build green. Every line is a place the
 # compiler is guessing, and adding one is a decision to allow another guess.
 #
+# WHAT IS LEFT (6 rows, from 861). Two causes, both named:
+#
+#   fold_left with a RECURSIVE accumulator — `enumerate`, `intersperse`,
+#   `flatten`. `init = { acc = empty {}, i = 0 }` says nothing about what the
+#   list holds; the only thing that does is the `cons` inside the callback,
+#   whose type `init` is supposed to give. Nothing at the call site can be read
+#   to close this — it needs the solve to reach a fixed point over the
+#   accumulator, which is a solver change, not an emit one.
+#
+#   impl Seq.is_sorted / is_sorted_descending — an inherent op forwarding to a
+#   free function constrained `with Ord 'a`. The variable a DICTIONARY is keyed
+#   on is deliberately left alone at call sites (renaming it makes the lookup
+#   miss and the call fail outright), so the impl's own name for it and the
+#   solver's stay distinct here.
+#
+# Neither is a guess that changes an answer; both are places a type stays open.
+#
 # What the kinds mean:
 #   UNBOUND_TYPE_VAR  a node's type carries a variable bound by no enclosing
 #                     signature — the solver never pinned it
@@ -29,6 +46,4 @@ UNBOUND_TYPE_VAR	impl Seq.is_sorted_descending
 UNBOUND_TYPE_VAR	let:enumerate
 UNBOUND_TYPE_VAR	let:flatten
 UNBOUND_TYPE_VAR	let:intersperse
-UNBOUND_TYPE_VAR	let:sort_by
 UNTYPED_PARAM	let:intersperse
-UNTYPED_PARAM	let:sort_by

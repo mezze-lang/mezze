@@ -415,6 +415,13 @@ data class ConstraintResult(
     // TypedPerform.fullyDischarges is sourced from the residual-effect set, not any
     // value-carried effect row (removed in the effect-model migration).
     val performFullyDischarged: Map<Loc, Boolean> = emptyMap(),
+    // Per-lambda solved PARAMETER types, keyed by the lambda's Loc. A lambda that
+    // is an argument to a callee whose type nothing declares — the comparator in
+    // `__native_seq_sort_by { xs = xs, cmp = { a, b } -> … }` — gets no expected
+    // type pushed in, so emit minted a fresh variable per parameter and the
+    // solver's own answer, which the BODY does determine, had nowhere to be read
+    // back from. Merged up like callReturnTypes.
+    val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> = emptyMap(),
 ) {
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
      *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType

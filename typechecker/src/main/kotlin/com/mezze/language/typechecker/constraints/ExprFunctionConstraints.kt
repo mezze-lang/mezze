@@ -109,6 +109,7 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
                 // back to the wrapper. Without this, a do-block/record/list binding
                 // that reads the emitted node's `.type` sees the erased underlying.
                 callReturnTypes = valueResult.callReturnTypes + (expr.loc to fnType.returnType),
+                lambdaParamTypes = valueResult.lambdaParamTypes,
             )
         }
     }
@@ -136,6 +137,7 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
         // #395: see the fnType branch above — record the NewtypeType so emit can
         // preserve the wrapper on the erased value node's static type.
         callReturnTypes = valueResult.callReturnTypes + (expr.loc to newtypeType),
+        lambdaParamTypes = valueResult.lambdaParamTypes,
     )
 }
 
@@ -409,7 +411,8 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
             // #182: stash the loc → inferred-type entry so TypedAstBuilder
             // can recover the post-solve variant type. See no-payload
             // branch above for the full rationale.
-            callReturnTypes = payloadResult.callReturnTypes + (expr.loc to resultType)
+            callReturnTypes = payloadResult.callReturnTypes + (expr.loc to resultType),
+            lambdaParamTypes = payloadResult.lambdaParamTypes,
         )
     }
 }
@@ -723,6 +726,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         matchCaseBindings = bodyResult.matchCaseBindings,
         matchScrutineeTypes = bodyResult.matchScrutineeTypes,
         pendingClosureArgEffects = bodyResult.pendingClosureArgEffects,
+        lambdaParamTypes = bodyResult.lambdaParamTypes + (expr.loc to paramFields),
     )
 }
 

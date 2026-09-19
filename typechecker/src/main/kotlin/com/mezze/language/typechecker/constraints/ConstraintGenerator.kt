@@ -1048,6 +1048,7 @@ class ConstraintGenerator(
                 undefinedVariables = emptyList(),
                 usedVariables = bodyResult.usedVariables,
                 callReturnTypes = bodyResult.callReturnTypes,
+                lambdaParamTypes = bodyResult.lambdaParamTypes,
                 methodCallResolutions = bodyResult.methodCallResolutions
             )
         }

@@ -384,6 +384,7 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         referencedBindings = exprResult.referencedBindings,
         methodCallResolutions = exprResult.methodCallResolutions,
         callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
+        lambdaParamTypes = exprResult.lambdaParamTypes,
         matchCaseBindings = exprResult.matchCaseBindings,
         matchScrutineeTypes = exprResult.matchScrutineeTypes,
         // Carry the body's nested-perform entries and add this perform's. Mirrors

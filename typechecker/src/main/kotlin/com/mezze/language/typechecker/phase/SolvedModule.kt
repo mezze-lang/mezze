@@ -60,4 +60,9 @@ data class SolvedModule(
      *  its body's row → emit sets TypedPerform.fullyDischarges from this instead of
      *  inspecting the value-carried effect row. */
     val performFullyDischarged: Map<Loc, Boolean> = emptyMap(),
+    /** Per-lambda solved parameter types, keyed by the lambda's Loc. Emit reads a
+     *  parameter's type from here when no expected type reached the lambda, so an
+     *  inline callback passed to an undeclared callee is typed by what its own body
+     *  determined rather than by a fresh variable. */
+    val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> = emptyMap(),
 )

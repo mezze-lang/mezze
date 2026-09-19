@@ -92,6 +92,7 @@ class TypedAstBuilder(
     // var #354, effect row #378, newtype wrapper #395) can recur. Effect-row
     // ownership stays with the separate #378 rider below.
     private val doBindingSolvedTypes: Map<Loc, MezzeType> get() = solved.doBindingSolvedTypes
+    private val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> get() = solved.lambdaParamTypes
     private val performFullyDischarged: Map<Loc, Boolean> get() = solved.performFullyDischarged
 
 
@@ -2525,12 +2526,26 @@ class TypedAstBuilder(
                 // own loc in that case so behaviour is no worse than
                 // before.
                 val perNameLocs = params.nameLocs
+                // What the SOLVE determined for this lambda's parameters. An
+                // inline callback passed to a callee whose type nothing declares —
+                // `__native_seq_sort_by { …, cmp = { a, b } -> … }` — gets no
+                // expected type pushed in, and minting a variable per parameter
+                // here threw away an answer the solver already had: the body says
+                // what `a` and `b` are. Keyed by the lambda's own Loc, so it cannot
+                // pick up a same-named parameter of a different lambda.
+                val solvedParams = lambdaParamTypes[loc]
                 params.names.mapIndexed { idx, name ->
-                    val type = when (contextParamType) {
-                        is MezzeType.RecordType -> contextParamType.fields[name]
-                            ?: MezzeType.VarType(TypeVar.freshWithName(name))
-                        else -> MezzeType.VarType(TypeVar.freshWithName(name))
-                    }
+                    val fromContext = (contextParamType as? MezzeType.RecordType)?.fields?.get(name)
+                    val fromSolve = solvedParams?.get(name)
+                        ?.let { substitution.apply(it) }
+                        // A solved VARIABLE is still the answer — for the
+                        // comparator above it is the declaration's own element
+                        // variable, which is bound where a fresh one is not. Only
+                        // an unknown placeholder is worth refusing.
+                        ?.takeIf { !it.holdsUnknownPlaceholder() }
+                    val type = fromContext
+                        ?: fromSolve
+                        ?: MezzeType.VarType(TypeVar.freshWithName(name))
                     val paramLoc = perNameLocs.getOrNull(idx) ?: loc
                     TypedParam(name, type, paramLoc)
                 }
