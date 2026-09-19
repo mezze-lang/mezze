@@ -8,54 +8,35 @@
 # Do NOT regenerate this file to make a build green. Every line is a place the
 # compiler is guessing, and adding one is a decision to allow another guess.
 #
-# WHAT IS LEFT (6 rows, from 861). Two causes, both named:
+# WHAT IS LEFT: 3 rows, from 861.
 #
-#   fold_left with a RECURSIVE accumulator — `enumerate`, `intersperse`,
-#   `flatten`. `init = { acc = empty {}, i = 0 }` says nothing about what the
-#   list holds; the only thing that does is the `cons` inside the callback,
-#   whose type `init` is supposed to give.
+# `intersperse` and `flatten`, both in the fold-with-a-record-accumulator family
+# whose main case — `enumerate` — is now CLOSED.
 #
-#   Measured on `enumerate`, the accumulator's element comes out as
-#   `{ value: 'c318, index: 'h318 }`. `'c318` is the declaration's `'a` and is
-#   fine. `'h318` is the `index` field, and it should be `Int` by TWO
-#   independent routes: it is assigned `acc.i`, and `acc.i` resolved to `Int` in
-#   the same record; and the declaration's own return type is written
-#   `List { value: 'a, index: Int }`, which `reverse { xs = both.acc }` unifies
-#   against. Neither closed it.
+# THAT CLOSURE IS THE THING TO READ IF YOU PICK THESE UP. `acc.i` is a field read
+# whose receiver is still a type VARIABLE when the constraint is generated, so it
+# DEFERS in the per-binding solve; `acc` is pinned later, by `init`. And
+# `collectGlobalConstraints` STRIPPED every HasField before the global solve, so
+# nothing ever revisited the read and its variable stayed open forever. The
+# global pass now re-solves them in COMPLETION mode — finish a read whose
+# receiver became a concrete record, invent nothing, reject nothing. Plain
+# re-running grows open rows (a `from_json` target then failed its obligation);
+# strict re-running rejects a field a spread legitimately provides.
 #
-#   TRIED AND REVERTED (2026-09-19), so nobody spends the day twice: recording
-#   the SOLVED CALLEE TYPE per call site (`callCalleeTypes`, threaded exactly
-#   like `callReturnTypes` and `lambdaParamTypes`) and having emit type the
-#   callee — and therefore the argument record, and therefore any inline
-#   callback's parameters — from the instantiation rather than re-resolving the
-#   identifier to its declaration. It closed the two `impl Seq.is_sorted*` rows
-#   and NOTHING else, and it broke six tests (StaticAbilityOp's three wrapper
-#   cases, OrdImpl's two seq wrappers, DualAbilityParam). Guarding it to leave
-#   evidence-keyed callees alone put those two rows straight back. So the only
-#   rows it reached were exactly the ones where rewriting the callee's variables
-#   is unsafe — a dictionary is keyed on them — and the fold family it was aimed
-#   at did not move at all. The plumbing was deleted rather than left inert.
+# The two remaining rows are the same shape and did not fall to it, so something
+# else holds their receivers open. The twelve-line repro in
+# UserCodeElaborationGateTest is clean now, so a new small case is the first job.
 #
-#   Reduced to twelve lines in UserCodeElaborationGateTest — see
-#   `a fold whose accumulator element is fixed only inside the callback`. Two
-#   explanations were checked and are WRONG, so nobody need re-check them: it is
-#   NOT two reads of `acc.i` decoupling (the single-read variant fails
-#   identically, and is pinned beside it), and `fold_left`'s signature is sound
-#   (`init`, `f`'s `acc`, `f`'s return and the result are one variable). The
-#   HasField constraint is emitted and its VarType arm does unify the receiver
-#   against an open row, so that is not it either.
-#
-#   This produces no wrong answer — the annotation is what callers see and the
-#   runtime record holds an Int — but it is a real inference gap and it is a
-#   SOLVER question, not something a call site can be read for.
-#
-#   impl Seq.is_sorted / is_sorted_descending — an inherent op forwarding to a
-#   free function constrained `with Ord 'a`. The variable a DICTIONARY is keyed
-#   on is deliberately left alone at call sites (renaming it makes the lookup
-#   miss and the call fail outright), so the impl's own name for it and the
-#   solver's stay distinct here.
-#
-# Neither is a guess that changes an answer; both are places a type stays open.
+# RULED OUT ALONG THE WAY, so nobody re-checks:
+#   - not two reads of `acc.i` decoupling (the single-read variant behaved the same)
+#   - not a split in `fold_left`'s signature (init, f's acc, f's return and the
+#     result are ONE variable, measured)
+#   - not an inference failure (the UNANNOTATED form infers the right type)
+#   - not the emitted lambda's return type (preferring the declared return over a
+#     bare-variable body closed nothing and doubled `flatten`'s count)
+#   - not `callCalleeTypes`, a per-call record of the solved callee type: it
+#     reached only evidence-keyed callees, where rewriting their variables breaks
+#     dictionary lookup — 6 tests, reverted in 0ae8e2bc9
 #
 # What the kinds mean:
 #   UNBOUND_TYPE_VAR  a node's type carries a variable bound by no enclosing
@@ -73,7 +54,6 @@
 # (964 declarations). Almost all sit in impl operations, whose bodies are
 # keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
 # this file to empty and makes a miss a hard ElaborationError.
-UNBOUND_TYPE_VAR	let:enumerate
 UNBOUND_TYPE_VAR	let:flatten
 UNBOUND_TYPE_VAR	let:intersperse
 UNTYPED_PARAM	let:intersperse

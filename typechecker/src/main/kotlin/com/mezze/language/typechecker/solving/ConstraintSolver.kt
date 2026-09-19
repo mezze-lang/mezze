@@ -1052,6 +1052,19 @@ class ConstraintSolver(
     }
 
     private fun solveHasField(constraint: Constraint.HasField, currentSubst: Substitution = Substitution.empty): ConstraintResult {
+        if (constraint.completionOnly) {
+            // Only a receiver that is ALREADY a concrete record with this field
+            // can be completed here. Anything else is left alone: the per-binding
+            // solve has had its go, and this pass exists to finish what became
+            // knowable since, not to infer or to re-judge.
+            val recv = currentSubst.apply(constraint.recordType)
+            val present = (recv as? MezzeType.RecordType)?.fields?.get(constraint.fieldName)
+                ?: return ConstraintResult.Deferred("completion pass: receiver is not a concrete record with this field")
+            return when (val r = unify(present, currentSubst.apply(constraint.fieldType), registry)) {
+                is UnificationResult.Success -> ConstraintResult.Success(r.substitution)
+                is UnificationResult.Failure -> ConstraintResult.Deferred("completion pass: ${r.message}")
+            }
+        }
         val recordType = constraint.recordType
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType

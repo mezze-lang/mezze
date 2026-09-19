@@ -171,7 +171,8 @@ class UserCodeElaborationGateTest {
     )
 
     /**
-     * The one shape the elaboration work did NOT close, reduced to twelve lines.
+     * CLOSED. Kept because it was the last shape standing and it took three
+     * wrong explanations to find, reduced to twelve lines.
      *
      * `init = { acc = empty {}, i = 0 }` says nothing about what the list holds.
      * The only thing that does is the `cons` inside the callback, whose type
@@ -180,17 +181,23 @@ class UserCodeElaborationGateTest {
      * `acc.i` (which resolved to `Int` in the same record) and the declaration's
      * own return type says `Int` and is unified against by the final `reverse`.
      *
-     * Two explanations were checked against measurement and are WRONG, so nobody
-     * needs to check them again: it is not two reads of `acc.i` decoupling — one
-     * read fails identically, which is why that variant is here beside it. And
-     * `fold_left`'s signature is sound: `init`, `f`'s `acc` parameter, `f`'s
-     * return and the result are one variable (`'acc#18562`), not four.
+     * THE CAUSE, after three wrong guesses: `acc.i` is a field read whose receiver
+     * is still a type VARIABLE when the constraint is generated, so it DEFERS in
+     * the per-binding solve. `acc` is pinned later, by `init`. And
+     * `collectGlobalConstraints` stripped every `HasField` before the global
+     * solve — so nothing ever revisited the read, and its variable stayed open
+     * forever. The global pass now re-solves them in COMPLETION mode.
      *
-     * This produces no wrong answer — callers see the annotation, and the record
-     * really does hold an Int. It is where `enumerate`, `intersperse` and
-     * `flatten` get their rows in the stdlib baseline, and closing it is a
-     * solver question. Pinned here so it cannot get worse, and so whoever takes
-     * it has the small case rather than `enumerate`.
+     * Ruled out by measurement along the way, so nobody re-checks: it is not two
+     * reads of `acc.i` decoupling (the single-read variant behaved identically,
+     * which is why it is still here beside this one); `fold_left`'s signature is
+     * sound (`init`, `f`'s `acc`, `f`'s return and the result are ONE variable);
+     * and inference was right all along — the unannotated form infers
+     * `List { value: 'a, index: Int }` correctly.
+     *
+     * Both cells now measure clean. They stay as a regression guard: this shape
+     * is where `enumerate`, and until recently `intersperse` and `flatten`, got
+     * their rows in the stdlib baseline.
      */
     @Test
     fun `a fold whose accumulator element is fixed only inside the callback`() = assertGaps(
@@ -207,7 +214,7 @@ class UserCodeElaborationGateTest {
             },
           }).acc }
         """.trimIndent(),
-        listOf("UNBOUND_TYPE_VAR let:go x9"),
+        emptyList(),
     )
 
     @Test
@@ -225,8 +232,8 @@ class UserCodeElaborationGateTest {
             },
           }).acc }
         """.trimIndent(),
-        // Identical to the two-read case, which is the point: the number of reads
-        // is not what leaves `index` open.
-        listOf("UNBOUND_TYPE_VAR let:go2 x9"),
+        // Identical to the two-read case, which is how the read-count theory was
+        // ruled out — and identical again now that both are clean.
+        emptyList(),
     )
 }

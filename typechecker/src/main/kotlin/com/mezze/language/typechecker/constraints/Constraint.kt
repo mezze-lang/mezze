@@ -125,7 +125,20 @@ sealed interface Constraint {
         val fieldType: MezzeType,
         override val context: String? = null,
         override val loc: Loc? = null,
-        val strictFieldCheck: Boolean = false
+        val strictFieldCheck: Boolean = false,
+        /**
+         * Global COMPLETION pass: succeed where the receiver is now a concrete
+         * record carrying the field, and defer everywhere else — invent nothing,
+         * reject nothing.
+         *
+         * A field read whose receiver is still a variable DEFERS in the
+         * per-binding solve, and these constraints used to be stripped before the
+         * global solve, so nothing ever finished them. Re-running them normally
+         * grows open rows by inventing the field; re-running them STRICTLY
+         * rejects a field a spread legitimately provides. This third mode does
+         * neither.
+         */
+        val completionOnly: Boolean = false,
     ) : Constraint {
         override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(recordType = f(recordType), fieldType = f(fieldType))
     }

@@ -904,7 +904,28 @@ class TypeChecker(
     ): List<Constraint> {
         return constraintResults.values.flatMap { it.constraints }
             .filter { constraint ->
-                constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
+                constraint !is Constraint.HasConstructor
+            }
+            .map { constraint ->
+                // HasField reaches the global solve, but STRICTLY.
+                //
+                // It used to be stripped entirely, alongside HasConstructor. A
+                // field read whose receiver is still a variable DEFERS in the
+                // per-binding solve — and with the constraint stripped here,
+                // nothing ever finished it. That is why `enumerate`'s accumulator
+                // kept an open `index`: `acc.i` deferred while `acc` was a
+                // variable, `acc` was pinned later by `init`, and the read was
+                // never revisited.
+                //
+                // In COMPLETION mode. Re-running normally grows an open row by
+                // inventing the field, which kept a record open that had settled
+                // closed (a `from_json` target then failed its FromJson
+                // obligation). Re-running STRICTLY rejects a field a spread
+                // legitimately provides. Completion mode does neither: it finishes
+                // a read whose receiver is now a concrete record, and defers
+                // otherwise.
+                if (constraint is Constraint.HasField) constraint.copy(completionOnly = true)
+                else constraint
             } + constraintResults.values.flatMap { it.abilityConstraints } +
               constraintResults.values.flatMap { it.associatedTypeConstraints }
     }
