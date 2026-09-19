@@ -280,6 +280,10 @@ public final class BytecodeCompiler {
      * {@code __entry__.body} may legitimately re-use a slot and we only
      * want the semantic to fire on the outermost statement level.
      */
+    /** One-shot: set by {@link #compileEntryFn} and consumed by the next
+     *  {@link #compile}, which captures it before any nested compile can see it. */
+    private boolean compilingEntry = false;
+
     private java.util.IdentityHashMap<StmtIR.Let, Boolean> entryTopLevelLets =
             new java.util.IdentityHashMap<>();
 
@@ -1234,18 +1238,17 @@ public final class BytecodeCompiler {
      * top-level lets recorded here by identity.
      */
     public RootNode compileEntryFn(FunctionIR ir) {
-        entryTopLevelLets.clear();
-        if (ir.getBody() instanceof BlockIR blk) {
-            for (StmtIR s : blk.getStmts()) {
-                if (s instanceof StmtIR.Let l) {
-                    entryTopLevelLets.put(l, Boolean.TRUE);
-                }
-            }
-        }
+        // Signal only — the set itself is built INSIDE the parser lambda, per
+        // parse. Populating it here and clearing it in a finally is what made
+        // the debugger unable to attach: Truffle re-invokes the parser later to
+        // materialize instrumentation, by which time the finally had emptied the
+        // set, so the second parse emitted every top-level `let` WITHOUT its
+        // RegisterGlobal and endRoot asserted on the mismatched constant pool.
+        this.compilingEntry = true;
         try {
             return compile(ir);
         } finally {
-            entryTopLevelLets.clear();
+            this.compilingEntry = false;
         }
     }
 
@@ -1335,15 +1338,51 @@ public final class BytecodeCompiler {
         // #356 — when a debugger is attached, use COMPLETE so source
         // sections, statement tags and named locals materialize. Off by
         // default keeps the hot path lean (no per-op source bytes).
+        //
+        // The CONFIG is the switch; the parser always DESCRIBES its source
+        // sections and statement tags. That split is the Bytecode DSL's design:
+        // `prepareForInstrumentation` re-invokes the parser to materialize what
+        // a later config asks for, and a parser that only describes them when a
+        // flag happened to be set at first-compile time has nothing to
+        // materialize on the way back. Gating the description too is why a plain
+        // Truffle debugger session — which does not flip our flag, only our own
+        // DAP bridge does — could never resolve a line breakpoint.
         final boolean debug = MezzeLanguage.isBdslDebugInstrumentation();
         BytecodeConfig config = debug ? BytecodeConfig.COMPLETE : BytecodeConfig.DEFAULT;
-        final com.oracle.truffle.api.source.Source source =
-                debug ? resolveSource(ir.getSourceFile()) : null;
+        final com.oracle.truffle.api.source.Source source = resolveSource(ir.getSourceFile());
         final int[] rootRange = (source != null)
                 ? toCharRange(source, ir.getSourceSection())
                 : null;
-        this.currentSource = source;
+        // Consumed here, so a nested compile during this emit cannot inherit it.
+        final boolean isEntryParse = this.compilingEntry;
+        this.compilingEntry = false;
         var nodes = MezzeBytecodeRootNodeGen.create(language, config, b -> {
+            // Rebuilt per parse, and the previous value restored on the way out
+            // so a compile nested inside this emit does not strand the outer one
+            // with an empty set. Same reason as `currentSource` below: anything
+            // this lambda READS must be established by this lambda.
+            var outerEntryLets = this.entryTopLevelLets;
+            var outerSource = this.currentSource;
+            this.entryTopLevelLets = new java.util.IdentityHashMap<>();
+            if (isEntryParse && ir.getBody() instanceof BlockIR entryBlk) {
+                for (StmtIR st : entryBlk.getStmts()) {
+                    if (st instanceof StmtIR.Let el) {
+                        this.entryTopLevelLets.put(el, Boolean.TRUE);
+                    }
+                }
+            }
+            try {
+            // Inside the lambda, not before it. A Bytecode DSL parser must be
+            // REPARSEABLE: Truffle re-invokes it to materialize instrumentation
+            // when a debugger attaches, and endRoot then asserts the second parse
+            // produced the same local count, constant-pool length and stack
+            // height. `currentSource` is instance state that emit reads to decide
+            // whether to emit a source section at all (`debug = currentSource !=
+            // null`) and to compute each char range — so a nested compile during
+            // this emit left it pointing at ANOTHER function, and the reparse
+            // emitted a different number of sections. Assigning it here makes
+            // every parse start from this function's own captured source.
+            this.currentSource = source;
             if (source != null) {
                 b.beginSource(source);
                 if (rootRange != null) {
@@ -1580,6 +1619,10 @@ public final class BytecodeCompiler {
                     b.endSourceSection();
                 }
                 b.endSource();
+            }
+            } finally {
+                this.entryTopLevelLets = outerEntryLets;
+                this.currentSource = outerSource;
             }
         });
         RootNode inner = nodes.getNode(0);

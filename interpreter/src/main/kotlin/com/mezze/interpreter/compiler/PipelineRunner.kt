@@ -240,11 +240,10 @@ object PipelineRunner {
         val source: com.oracle.truffle.api.source.Source
         val bodyNode: com.mezze.interpreter.nodes.MezzeNode
 
-        // #374 — helper: compile a FunctionIR's body. Prefer BDSL (via the
-        // dedicated entry path that emits RegisterGlobal for top-level lets)
-        // so the AST TruffleCompiler.compileNode path becomes unreachable
-        // for real programs. Falls back to AST when BDSL rejects the shape
-        // (returns null) so tests / edge cases still compile.
+        // #374 — helper: compile a FunctionIR's body through BDSL, via the
+        // dedicated entry path that emits RegisterGlobal for top-level lets.
+        // There is no fallback: the AST compiler was deleted in #391, so a
+        // shape BDSL rejects raises an error naming the rejected node.
         fun bodyOf(fn: com.mezze.language.truffleir.FunctionIR): com.mezze.interpreter.nodes.MezzeNode {
             val entryTarget = language.compileEntryFn(fn)
             if (entryTarget != null) {
@@ -271,15 +270,15 @@ object PipelineRunner {
                     }
                 }
             }
-            // #391 — BDSL rejected this entry FunctionIR shape. No AST fallback
-            // exists anymore. Any hit here is a real bug: BDSL supports() said
-            // no, or compile() threw. The only known hit (DebuggerBreakpointTest
-            // "a line breakpoint suspends execution at that line") is @Disabled
-            // pending Truffle-BDSL prepareForInstrumentation fix.
+            // Reaching here means BDSL is switched OFF — compileEntryFn now
+            // throws on a shape it cannot compile, naming the rejected node, so
+            // a null return has exactly one cause left. It used to cover both,
+            // which is why #391's failures arrived as "an IR shape supports()
+            // doesn't accept or emit() throws on" with no way to tell which.
             throw IllegalStateException(
-                "BDSL cannot compile entry-body for '${fn.name}' hash=${fn.hash} file=${fn.sourceFile}. " +
-                "This indicates an IR shape BDSL supports() doesn't accept or emit() throws on. " +
-                "Add BDSL support or @Disable the triggering test with a link to #391."
+                "Cannot compile entry-body for '${fn.name}' (hash=${fn.hash}, file=${fn.sourceFile}): " +
+                "the bytecode compiler is disabled. Unset MEZZE_BDSL (or set it to 1) — " +
+                "there is no other compiler to fall back to."
             )
         }
 

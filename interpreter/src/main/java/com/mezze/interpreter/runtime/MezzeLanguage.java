@@ -119,11 +119,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         return slotTable;
     }
 
-    // BDSL routing (#284) — Phase 4 flipped to DEFAULT-ON (2026-08-02).
-    // Every per-function compile tries BytecodeCompiler first; failure ⇒
-    // falls back to TruffleCompiler AST path. BDSL coverage on the test
-    // suite is empirically 100% (per BDSL_STATS runs), so the fallback
-    // fires only in edge cases the AST path also handles safely.
+    // BDSL routing (#284) — Phase 4 flipped to DEFAULT-ON (2026-08-02),
+    // and since #391 it is the ONLY path: TruffleCompiler and its AST tree
+    // are deleted, so a BDSL failure is a hard error, not a fallback. The
+    // comment here described a fallback for long enough after the deletion
+    // to be worth correcting rather than dropping.
     //
     // Opt out via MEZZE_BDSL=0 or MEZZE_BDSL=false — kept as an escape
     // hatch while the AST interpreter still exists. Once Phase 5 deletes
@@ -555,9 +555,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * Caller (PipelineRunner) wraps a small adapter around this call to slot
      * back into {@code HashModuleLoaderNode} / {@code createResultCapturingNode}.
      *
-     * <p>Falls back to the AST body path when BDSL is disabled or doesn't
-     * support the entry IR — returns {@code null} then, and the caller keeps
-     * using {@code TruffleCompiler.compileNode(entry.body)}.
+     * <p>Returns {@code null} only when BDSL is disabled outright. An entry IR
+     * BDSL cannot compile is a hard error naming the rejected node — there is no
+     * AST body path to fall back to since #391 deleted it.
      */
     public com.oracle.truffle.api.CallTarget compileEntryFn(
             com.mezze.language.truffleir.FunctionIR entryIR) {
@@ -798,9 +798,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * stdlib CT cache — mirrors the pattern used by callers of the
      * singleton in {@link #compileOne}.
      *
-     * Falls back to AST compilation via {@link com.mezze.interpreter.compiler.TruffleCompiler}
-     * if BDSL {@link com.mezze.interpreter.bytecode.BytecodeCompiler#supports}
-     * rejects the IR — needed until every IR shape is BDSL-supported.
+     * A shape {@link com.mezze.interpreter.bytecode.BytecodeCompiler#supports}
+     * rejects is a hard error — the AST compiler this once fell back to was
+     * deleted in #391.
      */
     public com.oracle.truffle.api.nodes.RootNode compileUserIRForStub(Hash hash) {
         MezzeContext ctx;
