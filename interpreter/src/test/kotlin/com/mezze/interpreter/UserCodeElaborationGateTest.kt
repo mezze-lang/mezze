@@ -169,4 +169,64 @@ class UserCodeElaborationGateTest {
         // Each site now instantiates the callee at the types it is applied to.
         emptyList(),
     )
+
+    /**
+     * The one shape the elaboration work did NOT close, reduced to twelve lines.
+     *
+     * `init = { acc = empty {}, i = 0 }` says nothing about what the list holds.
+     * The only thing that does is the `cons` inside the callback, whose type
+     * `init` is supposed to give — and the accumulator's element comes out as
+     * `{ value: Int, index: 'v }` with `index` open, although it is assigned
+     * `acc.i` (which resolved to `Int` in the same record) and the declaration's
+     * own return type says `Int` and is unified against by the final `reverse`.
+     *
+     * Two explanations were checked against measurement and are WRONG, so nobody
+     * needs to check them again: it is not two reads of `acc.i` decoupling — one
+     * read fails identically, which is why that variant is here beside it. And
+     * `fold_left`'s signature is sound: `init`, `f`'s `acc` parameter, `f`'s
+     * return and the result are one variable (`'acc#18562`), not four.
+     *
+     * This produces no wrong answer — callers see the annotation, and the record
+     * really does hold an Int. It is where `enumerate`, `intersperse` and
+     * `flatten` get their rows in the stdlib baseline, and closing it is a
+     * solver question. Pinned here so it cannot get worse, and so whoever takes
+     * it has the small case rather than `enumerate`.
+     */
+    @Test
+    fun `a fold whose accumulator element is fixed only inside the callback`() = assertGaps(
+        "recursive accumulator, two reads",
+        """
+        use std::collections::list::{ reverse, fold_left, empty, cons }
+        let go: { xs: List Int } -> List { value: Int, index: Int } = { xs } ->
+          reverse { xs = (fold_left {
+            xs = xs,
+            init = { acc = empty {}, i = 0 },
+            f = { acc, x } -> {
+              acc = cons { head = { value = x, index = acc.i }, tail = acc.acc },
+              i = acc.i + 1,
+            },
+          }).acc }
+        """.trimIndent(),
+        listOf("UNBOUND_TYPE_VAR let:go x9"),
+    )
+
+    @Test
+    fun `the same fold with a single read of the field`() = assertGaps(
+        "recursive accumulator, one read",
+        """
+        use std::collections::list::{ reverse, fold_left, empty, cons }
+        let go2: { xs: List Int } -> List { value: Int, index: Int } = { xs } ->
+          reverse { xs = (fold_left {
+            xs = xs,
+            init = { acc = empty {}, i = 0 },
+            f = { acc, x } -> {
+              acc = cons { head = { value = x, index = acc.i }, tail = acc.acc },
+              i = 0,
+            },
+          }).acc }
+        """.trimIndent(),
+        // Identical to the two-read case, which is the point: the number of reads
+        // is not what leaves `index` open.
+        listOf("UNBOUND_TYPE_VAR let:go2 x9"),
+    )
 }

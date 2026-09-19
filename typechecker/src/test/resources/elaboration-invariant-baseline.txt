@@ -21,8 +21,16 @@
 #   independent routes: it is assigned `acc.i`, and `acc.i` resolved to `Int` in
 #   the same record; and the declaration's own return type is written
 #   `List { value: 'a, index: Int }`, which `reverse { xs = both.acc }` unifies
-#   against. Neither closed it. Two reads of `acc.i` in one callback appear to
-#   produce independent variables, and only the one flowing into `i` is pinned.
+#   against. Neither closed it.
+#
+#   Reduced to twelve lines in UserCodeElaborationGateTest — see
+#   `a fold whose accumulator element is fixed only inside the callback`. Two
+#   explanations were checked and are WRONG, so nobody need re-check them: it is
+#   NOT two reads of `acc.i` decoupling (the single-read variant fails
+#   identically, and is pinned beside it), and `fold_left`'s signature is sound
+#   (`init`, `f`'s `acc`, `f`'s return and the result are one variable). The
+#   HasField constraint is emitted and its VarType arm does unify the receiver
+#   against an open row, so that is not it either.
 #
 #   This produces no wrong answer — the annotation is what callers see and the
 #   runtime record holds an Int — but it is a real inference gap and it is a
