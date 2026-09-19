@@ -1865,6 +1865,28 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   real variable; refusing for all variables was tried and fails ten tests, because
   a user `Ord`/`Eq` on a container element reaches its impl precisely that way.
   `UnknownPlaceholderGateTest` bounds the set of reasons.
+- **A.2 CAN go to zero — measured, with the cause named.** The remaining rows have
+  ONE cause, and it is not a design decision. An INHERENT impl op has no ability
+  signature, so only its receiver gets a type from the impl target; its other
+  parameters have nothing to come from, because the native it calls has no declared
+  Mezze type. `impl Int where { clamp = { it, min, max } -> __native_int_clamp {…} }`
+  types `it` and leaves `min`/`max` as variables.
+
+  Proven twice, not argued: every impl op IS seeded (821 of 821 — the earlier
+  claim that these were an unseeded "laundered surface" was wrong), and annotating
+  12 ops in `int.mz` closed 6 baseline rows immediately.
+
+  Two ways to close it, and only one is right:
+  - annotate the stdlib's 105 raw-native impl ops. Reduces the count, but an
+    annotation would then be REQUIRED to type a program, which is precisely the
+    rule this whole effort exists to enforce. Tried on `int.mz` to get the number
+    above, then reverted for that reason.
+  - give `__native_*` a declared Mezze type. One mechanism, closes all of them, and
+    generalises to user code. The type is already written down — every native has a
+    `pub let` wrapper declaring it (`clamp: { n: Int, min: Int, max: Int } -> Int`)
+    — so the work is making the constraint generator read it, which needs a
+    module-level pre-pass collecting native→type before the solve.
+
 - **MEASURED, and the single biggest lever left: 793 of 795 unknown types are
   `__native_*` references.** Compiling one small module mints 795 placeholders;
   793 are native references, whose Mezze type is simply never declared anywhere.
