@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.mono
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.holdsTypeVar
 import com.mezze.language.ast.holdsUnknownPlaceholder
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.collectTypeVarsInOrder
@@ -1088,7 +1089,18 @@ class Monomorphizer(
         // unmodified call and the compiler resolves it separately, with the
         // field-access receiver and its slot-type recovery still in hand.
         if (receiverType.holdsUnknownPlaceholder()) return null
-        if (entries.size == 1) return entries.first()
+        // A lone candidate is checked like any other whenever the receiver is
+        // KNOWN. Entries are gathered by operation NAME from the specialization's
+        // ability impls, so one entry means "this spec carries one impl that
+        // happens to declare an op with this name", never "this impl is for this
+        // receiver" — and taking it unchecked rewrote `x.m == Get`, a VARIANT
+        // comparison, to `Eq Int`'s operation, handing `__native_int_eq` a
+        // MezzeVariant on a program that type-checks clean.
+        //
+        // An unresolved receiver still takes it. That is mono's signal that the
+        // specialization's evidence decides, and it is load-bearing: a user
+        // `Ord`/`Eq` on a container element reaches its impl that way.
+        if (entries.size == 1 && receiverType.holdsTypeVar()) return entries.first()
         val matches = entries.filter { e ->
             val recvTarget = e.impl.targetTypes.lastOrNull() ?: return@filter false
             typeMatchesTarget(receiverType, recvTarget, MonoDriver::variantDeclHasConstructors)

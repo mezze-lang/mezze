@@ -22,6 +22,14 @@ import org.junit.jupiter.api.Assertions.*
  *   - HOF over the element list: find | any | filter+size | fold
  *   - predicate op: variant field-compare | Int field-compare | two-clause (variant && int)
  *
+ * ALL 144 cells pass. Five were excluded for a live emit bug — a returned closure
+ * whose result is its own parameter, with a variant `==` in a HOF predicate, ran
+ * `__native_int_eq` on a MezzeVariant. It is fixed: the receiver of that
+ * comparison was a type the emitter never determined, mono took the lone `eq` its
+ * specialization carried without checking it against the receiver, and the
+ * specialization carried `Eq Int`. Both halves of that are closed — the receiver
+ * is typed now, and a lone candidate is checked whenever the receiver is known.
+ *
  * Every cell computes the SAME logical answer (find the element whose method is
  * `Get`, return its key), so the expected value is known and asserted — this is
  * both a no-stuck oracle AND a correctness oracle. A generated program that fails
@@ -195,34 +203,10 @@ class WellTypedNoStuckGateTest {
         return out
     }
 
-    /**
-     * A cell known to hit a LIVE, still-unfixed emit bug (distinct from the
-     * inherent-method frame-slot crash fixed in 95da1766). Trigger, pinned by
-     * bisection (see the @Disabled repro below): a PLAIN-FN-returned closure whose
-     * result is its OWN param, while the body runs a variant `==` inside a HOF
-     * predicate. The variant value leaks into the closure-param slot → the closure
-     * param reads a MezzeVariant where a Long is expected. Returning the match binding
-     * (`rt.k`) instead of the param, or comparing an Int field, both dodge it.
-     *
-     * NOTE it is specific to the PLAIN-FN wrapper: the same shape under an
-     * inherent-method wrapper PASSES (the 95da1766 fix + concrete `[Rt]` type flowing
-     * from Box). The tripwire test below enforces this narrowness — it fails if the
-     * exclusion ever covers a cell that actually passes.
-     *
-     * These cells are EXCLUDED from the green gate and captured in the @Disabled
-     * `KNOWN-FAILING` repro so the gate stays a passing regression asset while the
-     * finding stays recorded in-tree. Remove this exclusion when the bug is fixed.
-     */
-    private fun knownLiveFailure(c: Cell): Boolean =
-        c.wrapper == "plainFn" &&                    // specific to the plain-fn wrapper
-        c.returnsClosure &&                          // result is the closure's own param
-        (c.predicate == "variant" || c.predicate == "twoClause") &&  // variant compare
-        (c.hof == "find" || c.hof == "any")          // a HOF that actually runs the predicate
-
     @Test
     fun `every well-typed nesting of HOF-predicate-over-variant runs to a value`() {
         val failures = mutableListOf<String>()
-        val gated = cells().filterNot { knownLiveFailure(it) }
+        val gated = cells()
         var ran = 0
         for (c in gated) {
             val src = program(c)
@@ -249,83 +233,8 @@ class WellTypedNoStuckGateTest {
             if (result != 7L) failures.add("$c → wrong value: expected 7, got $result")
         }
         if (failures.isNotEmpty()) {
-            fail<Unit>("well-typed⇒no-stuck gate: ${failures.size}/${gated.size} gated cells failed " +
+            fail<Unit>("well-typed⇒no-stuck gate: ${failures.size}/${gated.size} cells failed " +
                 "($ran ran clean):\n  " + failures.joinToString("\n  "))
         }
-    }
-
-    /**
-     * Tripwire: the exclusion set must not be WHOLLY stale — at least one excluded
-     * cell must still fail, so `knownLiveFailure` keeps earning its place. When the
-     * underlying bug is finally fixed and EVERY excluded cell passes, this flips red
-     * and tells us to delete the exclusion.
-     *
-     * We assert "not all pass" rather than "all fail" on purpose: these cells run on a
-     * shared interpreter engine, and a couple of them (find/any + variant) flip between
-     * pass and fail depending on what ran before them in the suite ([[test_isolation_
-     * flake]] — shared-Engine state leaks). A per-cell "must fail" assertion is
-     * order-dependent and flaky; "the exclusion still has teeth" is stable.
-     */
-    @Test
-    fun `excluded set is not wholly stale`() {
-        val excluded = cells().filter { knownLiveFailure(it) }
-        assertTrue(excluded.isNotEmpty(), "exclusion set must be non-empty or be removed")
-        val stillFailing = excluded.filter { c ->
-            try { MezzeTestHelper.run(program(c)) != 7L } catch (e: Throwable) { true }
-        }
-        assertTrue(stillFailing.isNotEmpty(),
-            "EVERY excluded cell now passes — the underlying bug is fixed; delete " +
-            "knownLiveFailure and let the main gate cover these:\n  " + excluded.joinToString("\n  "))
-    }
-
-    /**
-     * KNOWN-FAILING repro of the live emit bug the gate surfaced. Disabled so the
-     * suite is green; enable it when working the fix.
-     *
-     * Trigger, by bisection:
-     *   D1 plain fn, no closure, variant find, return rt.k   → 7   (ok)
-     *   D2 closure, variant find, return rt.k                → 7   (ok)
-     *   D3 closure, variant find, return the closure param   → CRASH
-     *   D4 = D3 with an Int compare                          → 7   (ok — variant is required)
-     *   D5 closure, seq::any variant, return the param       → CRASH (not match-specific)
-     * ⇒ returned-closure-result-is-own-param + variant `==` in a HOF predicate.
-     * Symptom: NativeTypeMismatchException "Expected Long for field 'l', got
-     * MezzeVariant=Get" — an INT-eq native receiving the variant.
-     *
-     * Narrowed further, and this is the useful part — a match arm that is a BARE
-     * PARAMETER REFERENCE is what does it. Returning `key + 0` instead of `key`
-     * passes. So the arm's SHAPE is the trigger, not the value's type.
-     *
-     * RULED OUT by measurement (do not re-try these):
-     *   - nullary-variant representation — a variant carrying a PAYLOAD fails
-     *     identically, so it is not about tag-vs-box;
-     *   - name collision — renaming the closure param changes nothing;
-     *   - dropped captures — a probe on the `mapNotNull` that silently drops an
-     *     unresolvable capture (which WOULD shift every later index) reports none;
-     *   - scalar fusion (`MEZZE_DISABLE_SCALAR=1`) and inlining
-     *     (`MEZZE_DISABLE_INLINE=1`);
-     *   - `TrivialWrapperInliner`, both the user-side pass
-     *     (`MEZZE_INLINE_WRAPPERS=0`) AND the stdlib's own precompile-time
-     *     inlining, checked by rebuilding the stdlib with the flag set — the
-     *     user-side flag alone does NOT undo the stdlib's, which is why the first
-     *     check of this was not conclusive.
-     */
-    @org.junit.jupiter.api.Disabled("live emit bug: match arm that is a bare param; see the doc above")
-    @Test
-    fun `KNOWN-FAILING returned-closure param with variant compare in HOF predicate`() {
-        val r = MezzeTestHelper.run(
-            """
-            use std::collections::seq
-            type M = | Get, Post |
-            type Rt = { m: M, k: Int }
-            let mk = { rts: [Rt] } -> { key } ->
-              match seq::find { xs = rts, p = { x: Rt } -> x.m == Get } is
-                Some { val = rt } -> key
-                None -> 0
-            let main = {} -> (mk { rts = [ { m = Get, k = 7 } ] }) { key = 7 }
-            main {}
-            """.trimIndent()
-        )
-        assertEquals(7L, r)
     }
 }
