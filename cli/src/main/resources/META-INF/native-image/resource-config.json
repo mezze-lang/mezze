@@ -15,6 +15,14 @@
       },
       {
         "pattern": "\\Q.*.interp\\E"
+      },
+      {
+        "pattern": "\\Qorg/apache/maven/model/pom-4.0.0.xml\\E",
+        "comment": "Maven's SUPER POM, read by the model builder for every [maven] dependency. It lives inside maven-model-builder.jar and native-image does not embed jar resources unless told to, so `mez sync` failed with 'The super POM /org/apache/maven/model/pom-4.0.0.xml was not found, please verify the integrity of your Maven installation' AFTER the artifact had downloaded."
+      },
+      {
+        "pattern": "\\Qlogback.xml\\E",
+        "comment": "The CLI's own logging config, which pins the root logger to ERROR. native-image does not embed it unless told to, so the native binary fell back to logback's DEBUG default and `mez sync` printed 1311 lines of Apache HttpClient wire debug (measured; the JVM build printed 0) around the real output."
       }
     ]
   },

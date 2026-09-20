@@ -111,6 +111,13 @@ dependencies {
     implementation("org.apache.maven.resolver:maven-resolver-transport-http:1.9.20")
     implementation("org.apache.maven.resolver:maven-resolver-transport-file:1.9.20")
     implementation("org.apache.maven.resolver:maven-resolver-connector-basic:1.9.20")
+    // Explicit wiring for the RepositorySystem. The ServiceLocator it replaces
+    // instantiates services REFLECTIVELY, which native-image cannot do without
+    // per-class config — `mez sync` with `[maven]` deps died on the installed
+    // native binary with "RepositorySystem missing from service locator" while
+    // working fine on the JVM. This supplier wires the same graph with plain
+    // constructor calls, so it needs no native-image configuration at all.
+    implementation("org.apache.maven.resolver:maven-resolver-supplier:1.9.20")
     implementation("org.apache.maven:maven-resolver-provider:3.9.6")
 
     // Store module for content-addressed storage (SQLite implementation)

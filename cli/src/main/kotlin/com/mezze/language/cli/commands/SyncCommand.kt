@@ -87,14 +87,24 @@ class SyncCommand {
             return 1
         }
 
+        // EVERY kind of dependency this command fetches, not just the three
+        // package-graph ones. `[maven]` and `[jars]` were missing, so a project
+        // whose only dependency was a maven coord was told "No dependencies to
+        // sync" and nothing was fetched — the resolve phases below never ran.
+        // Silent, and it looks like success.
         val hasDeps = manifest.dependencies.isNotEmpty() ||
             manifest.devDependencies.isNotEmpty() ||
-            manifest.pathDependencies.isNotEmpty()
+            manifest.pathDependencies.isNotEmpty() ||
+            manifest.maven.isNotEmpty() ||
+            manifest.jars.isNotEmpty() ||
+            manifest.polyglot?.python?.packages?.isNotEmpty() == true ||
+            manifest.polyglot?.js?.packages?.isNotEmpty() == true
         if (!hasDeps) {
             println("${Glyphs.OK} No dependencies to sync.")
             println()
             println("${Glyphs.TIP} Add a local dep under [path-dependencies] (name = \"../path\"),")
-            println("   or a registry dep under [dependencies] (name = \"<url>#sha256:<hash>\").")
+            println("   a registry dep under [dependencies] (name = \"<url>#sha256:<hash>\"),")
+            println("   or a maven dep under [maven] (\"group:artifact\" = \"version\").")
             return 0
         }
 

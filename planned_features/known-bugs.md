@@ -2245,6 +2245,46 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   `AbilityIdentityCrossModuleTest` carries the repro and all three properties,
   enabled and passing.
 
+- **B-AETHER (FIXED) — native `mez sync` could not resolve `[maven]` deps.** Three
+  distinct defects, each hidden behind the one in front of it. Verified END TO END
+  on the NATIVE binary (`cli/build/native/nativeCompile/mez sync` against a real
+  Maven Central coord), not on the JVM.
+
+  1. **`hasDeps` did not count `[maven]`.** Sync's "no dependencies" short-circuit
+     looked at `[dependencies]`, `[dev-dependencies]` and `[path-dependencies]`
+     only, so a package whose sole dependency was a maven coord printed "No
+     dependencies to sync" and returned 0 — success, nothing fetched. It survived
+     because every maven test added a path-dep purely to get past it, with the
+     comment "Sync short-circuits on 'no deps' — force one path-dep". Now counts
+     maven, jars and the polyglot package lists; `SyncMavenTest` has a maven-only
+     case with no workaround.
+  2. **The reported bug: `RepositorySystem missing from service locator`.**
+     `MavenRepositorySystemUtils.newServiceLocator()` instantiates services by
+     REFLECTION, which native-image cannot do unconfigured. Replaced with
+     `RepositorySystemSupplier` (maven-resolver-supplier), which builds the same
+     graph with plain constructor calls and needs no native-image config at all —
+     and is the supported replacement, the ServiceLocator API being deprecated. It
+     is Maven-aware (its `getArtifactDescriptorReader` takes Maven's
+     `ModelBuilder`), and it supplies the connector and file/http transports
+     itself, so the three `addService` calls are gone rather than moved.
+  3. **The super POM was not in the image.** With Aether wired, resolution got as
+     far as downloading and then failed: "The super POM
+     /org/apache/maven/model/pom-4.0.0.xml was not found, please verify the
+     integrity of your Maven installation". It lives inside
+     `maven-model-builder.jar`; native-image embeds no jar resource unless told.
+     Added to `resource-config.json`.
+
+  Found while verifying, and fixed alongside: **`logback.xml` was not in the image
+  either**, so the native binary fell back to logback's DEBUG default and `mez
+  sync` printed **1311 lines** of Apache HttpClient wire debug around its output
+  (the JVM build printed 0). Same cause, same fix; now 0 on both.
+
+  OPEN, newly observed, NOT investigated: `commons-text:1.12.0`'s compile-scope
+  `commons-lang3` was not fetched — only the direct artifact and its parent POM.
+  The JVM build does exactly the same, so this is PRE-EXISTING and unrelated to
+  the above, but it does not match the resolver's own
+  "transitive dep is resolved alongside its parent" test and deserves its own look.
+
 Guarantee after Track 2: every ability use is resolved to one instance or a
 dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a
 gap is a compile error, and the runtime never decides equality/ordering/hashing

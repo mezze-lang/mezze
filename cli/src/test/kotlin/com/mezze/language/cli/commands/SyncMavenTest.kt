@@ -94,6 +94,42 @@ class SyncMavenTest {
 
     // ─── tests ───────────────────────────────────────────────────────
 
+    /**
+     * A package whose ONLY dependency is a `[maven]` coord still syncs.
+     *
+     * It did not. `hasDeps` counted `[dependencies]`, `[dev-dependencies]` and
+     * `[path-dependencies]` and nothing else, so a maven-only package printed
+     * "No dependencies to sync" and returned 0 — success, with nothing fetched.
+     * Every other test in this file hid it by adding a path-dep purely to get
+     * past the short-circuit, which is what kept it alive.
+     */
+    @Test
+    fun `a maven-only package is not short-circuited as having no dependencies`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val mavenCache = File(root, "maven-cache").apply { mkdirs() }
+        val store = File(root, "store")
+        val repoDir = File(root, "repo").apply { mkdirs() }
+
+        publishArtifact(repoDir, "com.example", "solo", "2.0.0")
+
+        val app = File(root, "app")
+        writePkg(
+            app, "app",
+            maven = mapOf("com.example:solo" to "2.0.0"),
+            repos = listOf("local" to repoDir.toURI().toString()),
+        )
+        // Deliberately NO path-dep, NO registry dep — the maven entry is the only one.
+
+        assertEquals(0, runSync(app, mavenCache, store))
+
+        val jar = File(mavenCache, "com/example/solo/2.0.0/solo-2.0.0.jar")
+        assertTrue(
+            jar.isFile,
+            "a maven-only package must still resolve its coords — sync reported success " +
+                "without fetching anything at ${jar.absolutePath}",
+        )
+    }
+
     @Test
     fun `root maven entry lands in the cache and the lock`(@TempDir tmp: Path) {
         val root = tmp.toFile()
@@ -109,7 +145,10 @@ class SyncMavenTest {
             maven = mapOf("com.example:hello" to "1.0.0"),
             repos = listOf("local" to repoDir.toURI().toString()),
         )
-        // Sync short-circuits on "no deps" — force one path-dep to exercise the full flow.
+        // A path-dep alongside the maven one. This used to be REQUIRED — sync's
+        // "no deps" short-circuit did not count `[maven]`, so without it nothing
+        // ran. That is fixed (see the maven-only test below); the path-dep stays
+        // here because this test is about the two coexisting.
         val leaf = File(root, "leaf").also { writePkg(it, "leaf") }
         File(app, "Mezze.toml").appendText("\n[path-dependencies]\nleaf = \"${leaf.absolutePath}\"\n")
 

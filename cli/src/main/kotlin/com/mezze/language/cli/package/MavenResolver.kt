@@ -1,6 +1,7 @@
 package com.mezze.language.cli.`package`
 
 import org.apache.maven.repository.internal.MavenRepositorySystemUtils
+import org.eclipse.aether.supplier.RepositorySystemSupplier
 import org.eclipse.aether.DefaultRepositorySystemSession
 import org.eclipse.aether.RepositorySystem
 import org.eclipse.aether.artifact.DefaultArtifact
@@ -135,19 +136,27 @@ object MavenResolver {
     // ─── Aether wiring ────────────────────────────────────────────────
 
     /**
-     * Aether's `RepositorySystem` is assembled via a
-     * ServiceLocator whose defaults come from `MavenRepositorySystemUtils`.
-     * The connector + transports are the only optional bits that need
-     * explicit registration for `http` / `https` / `file` URLs to work.
+     * Aether's `RepositorySystem`, wired EXPLICITLY.
+     *
+     * This used to go through `MavenRepositorySystemUtils.newServiceLocator()`,
+     * which instantiates each service by REFLECTION. native-image cannot do that
+     * without per-class configuration, so every service came back null and the
+     * locator produced no `RepositorySystem` — `mez sync` with `[maven]` deps died
+     * on the installed native binary with "RepositorySystem missing from service
+     * locator" while working perfectly on the JVM.
+     *
+     * `RepositorySystemSupplier` builds the same graph with plain constructor
+     * calls, so it needs no native-image configuration at all. It is also the
+     * supported replacement — the ServiceLocator API is deprecated in this line of
+     * maven-resolver.
+     *
+     * It supplies the connector and the file/http transports itself, so the three
+     * `addService` calls that used to be here are gone rather than moved: they
+     * were registering what the supplier already wires. It is Maven-aware too —
+     * its `getArtifactDescriptorReader` takes Maven's `ModelBuilder`, which is what
+     * reads POMs, so transitive resolution is unaffected.
      */
-    private fun newRepositorySystem(): RepositorySystem {
-        val locator = MavenRepositorySystemUtils.newServiceLocator()
-        locator.addService(RepositoryConnectorFactory::class.java, BasicRepositoryConnectorFactory::class.java)
-        locator.addService(TransporterFactory::class.java, HttpTransporterFactory::class.java)
-        locator.addService(TransporterFactory::class.java, FileTransporterFactory::class.java)
-        return locator.getService(RepositorySystem::class.java)
-            ?: error("Aether: RepositorySystem missing from service locator")
-    }
+    private fun newRepositorySystem(): RepositorySystem = RepositorySystemSupplier().get()
 
     private fun newSession(system: RepositorySystem, cacheDir: File): DefaultRepositorySystemSession {
         val session = MavenRepositorySystemUtils.newSession()
