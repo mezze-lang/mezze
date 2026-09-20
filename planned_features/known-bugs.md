@@ -2279,11 +2279,35 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   sync` printed **1311 lines** of Apache HttpClient wire debug around its output
   (the JVM build printed 0). Same cause, same fix; now 0 on both.
 
-  OPEN, newly observed, NOT investigated: `commons-text:1.12.0`'s compile-scope
+  FOLLOW-UP, now FIXED (see below): `commons-text:1.12.0`'s compile-scope
   `commons-lang3` was not fetched — only the direct artifact and its parent POM.
-  The JVM build does exactly the same, so this is PRE-EXISTING and unrelated to
-  the above, but it does not match the resolver's own
-  "transitive dep is resolved alongside its parent" test and deserves its own look.
+
+- **TRANSITIVE MAVEN DEPS WERE SILENTLY DROPPED (FIXED).** Every real-world
+  `[maven]` dependency resolved to ITSELF ALONE, on JVM and native alike, and
+  `mez sync` reported success. Two defects compounding:
+
+  1. **The session carried no system properties.** POM PROFILE ACTIVATION is
+     evaluated against them, and `MavenRepositorySystemUtils.newSession()` leaves
+     them empty for the caller to fill. So the model builder could not answer
+     `<activation><jdk>[11,)</jdk></activation>` and reported "Failed to determine
+     Java version for profile java-11-up" — eight times for `commons-text`, whose
+     parent `commons-parent` declares eight such profiles. The effective model
+     failed to build.
+  2. **A failed descriptor was treated as "no dependencies".** Aether's default
+     policy ignores both missing and invalid descriptors, so the model failure
+     above turned into an EMPTY dependency list rather than an error. Resolution
+     "succeeded" with the transitive closure truncated to the roots — silently,
+     which is what made this invisible for so long.
+
+  Both fixed: the session takes `System.getProperties()`, and the descriptor
+  policy is strict so an unreadable POM is an error instead of an empty answer.
+  Verified on the NATIVE binary: `commons-lang3:3.14.0` now lands in the cache and
+  in `Mezze.lock` with `transitive_from` pointing at `commons-text`.
+
+  Why the tests never caught it: every fixture POM in `MavenResolverTest` has no
+  `<profiles>` at all, so `transitive dep is resolved alongside its parent` passed
+  throughout. There is now a fixture with a jdk-activated profile, and it fails
+  without the fix.
 
 Guarantee after Track 2: every ability use is resolved to one instance or a
 dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a

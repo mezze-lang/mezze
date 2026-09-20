@@ -81,6 +81,52 @@ class MavenResolverTest {
         assertEquals(listOf("com.example:leaf:1.0.0", "com.example:parent:1.0.0"), coords)
     }
 
+    /**
+     * A transitive dep resolves even when the POM carries a `<jdk>`-activated
+     * profile — which nearly every real parent POM does.
+     *
+     * Profile activation is evaluated against the session's system properties, and
+     * `MavenRepositorySystemUtils.newSession()` leaves those EMPTY. The model
+     * builder then reports "Failed to determine Java version for profile
+     * java-11-up", the whole effective model fails, and Aether's default lenient
+     * descriptor policy turns that into an empty dependency list. Resolution
+     * "succeeds" with the transitive closure silently truncated to the roots.
+     *
+     * Measured against the real thing before the fix: `commons-text:1.12.0`
+     * resolved to itself alone — its compile-scope `commons-lang3` was never
+     * fetched, and `mez sync` reported success. `commons-parent` declares eight
+     * such profiles.
+     *
+     * The other fixtures here have no profiles at all, which is exactly why
+     * `transitive dep is resolved alongside its parent` passed throughout.
+     */
+    @Test
+    fun `a transitive dep resolves through a POM with a jdk-activated profile`(@TempDir tmp: Path) {
+        val repoDir = File(tmp.toFile(), "repo").also { it.mkdirs() }
+        val cacheDir = File(tmp.toFile(), "cache").also { it.mkdirs() }
+
+        publishArtifact(repoDir, "com.example", "pleaf", "1.0.0", deps = emptyList())
+        publishArtifact(
+            repoDir, "com.example", "pparent", "1.0.0",
+            deps = listOf(Triple("com.example", "pleaf", "1.0.0")),
+            jdkActivatedProfile = true,
+        )
+
+        val remotes = listOf(MavenResolver.MavenRemote(id = "local", url = repoDir.toURI().toString()))
+        val resolved = MavenResolver.resolve(
+            coords = listOf("com.example:pparent:1.0.0"),
+            cacheDir = cacheDir.toPath(),
+            repos = remotes,
+        )
+
+        assertEquals(
+            listOf("com.example:pleaf:1.0.0", "com.example:pparent:1.0.0"),
+            resolved.map { it.coord },
+            "the transitive was dropped — the POM's jdk-activated profile could not be " +
+                "evaluated, so the effective model failed and the dependency list came back empty",
+        )
+    }
+
     // ─── errors ──────────────────────────────────────────────────────
 
     @Test
@@ -140,6 +186,10 @@ class MavenResolverTest {
         artifact: String,
         version: String,
         deps: List<Triple<String, String, String>>,
+        /** Add a `<jdk>`-activated profile, as nearly every real-world parent POM
+         *  has. Evaluating it needs the JVM's properties on the session; without
+         *  them the model build fails and the dependency list comes back EMPTY. */
+        jdkActivatedProfile: Boolean = false,
     ) {
         val dir = File(repoDir, "${group.replace('.', '/')}/$artifact/$version").also { it.mkdirs() }
 
@@ -171,6 +221,14 @@ class MavenResolverTest {
                     appendLine("    </dependency>")
                 }
                 appendLine("  </dependencies>")
+            }
+            if (jdkActivatedProfile) {
+                appendLine("  <profiles>")
+                appendLine("    <profile>")
+                appendLine("      <id>java-11-up</id>")
+                appendLine("      <activation><jdk>[11,)</jdk></activation>")
+                appendLine("    </profile>")
+                appendLine("  </profiles>")
             }
             appendLine("</project>")
         })

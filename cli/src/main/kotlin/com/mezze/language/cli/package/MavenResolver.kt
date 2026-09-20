@@ -9,6 +9,7 @@ import org.eclipse.aether.collection.CollectRequest
 import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory
 import org.eclipse.aether.graph.Dependency
 import org.eclipse.aether.repository.LocalRepository
+import org.eclipse.aether.util.repository.SimpleArtifactDescriptorPolicy
 import org.eclipse.aether.repository.RemoteRepository
 import org.eclipse.aether.resolution.DependencyRequest
 import org.eclipse.aether.resolution.DependencyResolutionException
@@ -166,6 +167,30 @@ object MavenResolver {
         // alongside every artifact; a mismatch is a hard fail — same
         // supply-chain guarantee our `[jars]` handler enforces).
         session.checksumPolicy = "fail"
+
+        // The JVM's own properties, which POM PROFILE ACTIVATION is evaluated
+        // against. `MavenRepositorySystemUtils.newSession()` leaves these empty and
+        // expects the caller to supply them; without them the model builder cannot
+        // answer `<activation><jdk>[11,)</jdk></activation>` and reports "Failed to
+        // determine Java version for profile java-11-up".
+        //
+        // That made real-world dependencies resolve to NOTHING but themselves.
+        // `commons-parent` (the parent of every Apache Commons artifact) declares
+        // eight such profiles, so building commons-text's effective model failed
+        // with eight errors, and the lenient descriptor policy below turned that
+        // into an EMPTY dependency list — its compile-scope `commons-lang3` was
+        // never fetched, silently, and `mez sync` reported success. Fixture POMs in
+        // the tests have no profiles, which is why the transitive test passed
+        // throughout.
+        session.setSystemProperties(System.getProperties())
+
+        // A descriptor that cannot be read is an ERROR, not an empty set of
+        // dependencies. Aether's default policy ignores both missing and invalid
+        // descriptors, which is how the above stayed invisible: resolution
+        // "succeeded" with the transitive closure quietly truncated to the roots.
+        // Failing loudly here is what turns a wrong answer into a message.
+        session.setArtifactDescriptorPolicy(SimpleArtifactDescriptorPolicy(false, false))
+
         session.isOffline = false
         return session
     }
