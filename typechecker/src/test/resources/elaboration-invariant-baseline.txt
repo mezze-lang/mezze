@@ -120,9 +120,40 @@
 # ORDER only decides which representation happens to win, which is why swapping
 # the arms makes the row vanish.
 #
+# NARROWED AGAIN 2026-09-20, and the anomaly is now sharper than "two forms".
+#
+# `unifyVariants` is NEVER CALLED for this case. Instrumented it: the only Option
+# pairs reaching it come from the stdlib compile (Int/Str arguments), never from
+# the repro. So the two representations never actually meet in the unifier — which
+# also means a fix THERE cannot work. Unifying the two sides' `typeArgs` inside
+# `unifyVariants` was written, measured, and reverted: it fires on real stdlib
+# pairs but changes these rows not at all.
+#
+# What that leaves is the real anomaly. For `Option.flatten` the solved
+# substitution holds BOTH of these at once:
+#
+#     'c#245  ->  Option([Some, None])                 (the None arm)
+#     'd#246  ->  TypeApplication(Option 'a#239)       (the match result var)
+#
+# while the constraint set contains `Equality('c#245, 'd#246)` — dumped, present,
+# and the solve reports success. Two variables with an equality between them, each
+# separately bound to a DIFFERENT value, and nothing reconciled them. In a
+# consistent union-find that cannot happen: one should point at the other, or both
+# at a unified value.
+#
+# So the next question is not about representations at all — it is how the solver
+# can finish with an unhonoured Equality between two bound variables. Start at
+# `ConstraintSolver.solve`'s ordering (`HasConstructor` has priority 2) and at how
+# per-constraint substitutions are COMPOSED: a composition that overwrites rather
+# than unifies would produce exactly this.
+#
+# Note both values are mutually unifiable — `Option([Some,None])` expands from the
+# TypeApplication — so this is not a conflict the solver reported and recovered
+# from. It simply never compared them.
+#
 # What IS settled: the fix is not "pick the right one at emit" (measured twice,
-# below) and not in the match — the arms and the result var are correctly one
-# class already.
+# below), not in the match (the arms and the result var are correctly one class),
+# and not in `unifyVariants`.
 #
 # Twelve-line repro, and the boundary as it stands, in
 # ConstructorInMatchArmElaborationTest.
