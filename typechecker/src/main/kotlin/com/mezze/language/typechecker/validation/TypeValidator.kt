@@ -543,11 +543,31 @@ class TypeValidator(
     /**
      * The two constraint lists demand the same abilities, BY NAME.
      *
-     * Keying on the declaration hash was tried and reverted: `abilityHash` is not
-     * populated consistently across the routes a constraint reaches here by, so
-     * the same ability arrives with a hash on one side and null on the other, and
-     * hash-keying failed 10+ ability-annotation tests. Populating it consistently
-     * is the prerequisite; until then the name is what both sides agree on.
+     * Hash-keying this was re-tried after BUG 24 carried ability identity end to
+     * end — the two `AnnotationValidator` sites DO key on the hash now — and it
+     * still cannot be done here, for a reason worth recording rather than
+     * rediscovering.
+     *
+     * With pairwise hash matching (equal hashes, or equal names when either side
+     * lacks one), four tests fail, and the diagnostic says why: the SAME ability
+     * arrives on the two sides with DIFFERENT declaration hashes —
+     *
+     *   only in c1: Ord/ab719864ba   vs c2=[Ord/a3cf063944, Same/d6ee318367]
+     *   only in c2: Ord/a3cf063944   vs c1=[Ord/ab719864ba]
+     *
+     * (MethodLevelConstraintPropagationTest, AbilityValidationTest). One `Ord`,
+     * two hashes, inside a single comparison. The name check passes because it
+     * cannot see the difference; a hash check must reject it. So the blocker is
+     * not this comparison — it is that something upstream is resolving `Ord` to
+     * two different declarations, and THAT is the thing to find. Until then,
+     * keying here would reject programs that are fine.
+     *
+     * Do NOT "fix" this by falling back to the name when the hashes differ: that
+     * is the collision BUG 24 closed, reopened.
+     *
+     * A first, cheap step for whoever picks it up: dump both declarations behind
+     * those two hashes. If one is the stdlib `Ord` and the other a test-local
+     * ability of the same name, this is BUG 24's shape inside one program.
      */
     private fun abilityNamesMatch(
         c1: List<MezzeType.FunctionAbilityConstraint>,

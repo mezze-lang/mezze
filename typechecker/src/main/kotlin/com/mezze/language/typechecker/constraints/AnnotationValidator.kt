@@ -258,7 +258,10 @@ internal class AnnotationValidator(
             // annotation-vs-inference agreement check within ONE declaration, where
             // the name is unambiguous; cross-module identity is decided at impl
             // resolution, not here.
-            val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
+            val matchingAnnotatedList = annotatedAbilities.filter { a ->
+                val ah = a.abilityHash; val uh = usage.abilityHash
+                if (ah != null && uh != null) ah == uh else a.abilityName == usage.abilityName
+            }
 
             if (matchingAnnotatedList.isNotEmpty()) {
                 val resolvedUsageTypeVar = substitution.apply(MezzeType.VarType(usage.typeVar))
@@ -343,8 +346,14 @@ internal class AnnotationValidator(
             // concrete resolution for the assoc name is what we check R2 against.
             val resolvedForAbility: Map<String, MezzeType> =
                 inferredAbilityConstraints
-                    // Hash-first, for the same reason as above.
-                    .filter { it.abilityName == abilityName }
+                    // Hash-first, for the same reason as above. The annotation side
+                    // is PARSED and has only a name, so the declaration it resolves
+                    // to supplies the identity to compare against.
+                    .filter { ic ->
+                        val ih = ic.abilityHash
+                        val dh = abilityDecl.contentHash
+                        if (ih != null && dh != null) ih == dh else ic.abilityName == abilityName
+                    }
                     .fold(emptyMap()) { acc, ic ->
                         acc + (resolvedAssociatedBindings[abilityName to ic.typeVar.id] ?: emptyMap())
                     }
