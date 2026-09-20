@@ -2194,8 +2194,8 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   giving them to mono would make it match more eagerly and seed wrong
   specializations. Needs its own pass with targeted tests per arm.
 
-- **BUG 24 (new, SOUNDNESS, OPEN) — two same-named abilities in different modules
-  are one ability.** `show_a` and `show_b` each declare `ability Show for 'a`.
+- **BUG 24 (FIXED, 6263f91b1) — two same-named abilities in different modules
+  were one ability.** `show_a` and `show_b` each declare `ability Show for 'a`.
   They are different abilities: implementing one says nothing about the other. A
   value implementing `show_b::Show` discharges a demand for `show_a::Show`, with
   no diagnostic, and the call then dispatches to an operation whose declaration
@@ -2207,16 +2207,28 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   correctly tagged `a070db73`, but `use_a`'s demand — declared in `show_a`, so
   `56e38553` — ARRIVES as `a070db73`. The demand is wrong before any lookup runs.
 
-  Root cause: `DeclarationRegistry` keys abilities BY NAME (`abilitiesByName`).
-  Importing two same-named abilities keeps one, and `resolveAbilityHash("Show")`
-  answers with whichever was registered last. The two declarations have collapsed
-  into one entry before anything compares them — which is why every attempt to fix
-  the COMPARISONS changed nothing. Re-keying the registry by declaration hash, with
-  the name as a per-module view, is the fix; it is the sibling of the type-identity
-  work, and a refactor rather than a patch.
+  FIXED, and the registry was not the thing to change. The identity was DROPPED and
+  then guessed back from the spelling, in two independent places — which is why
+  closing either alone measured as a no-op:
 
-  Do NOT re-try these; each was measured and reverted, with its failure column
-  recorded in the code:
+  - DEMAND: generalization converted the constraint to a scheme `AbilityConstraint`
+    with no hash field, `instantiate()` produced a `FreshAbilityConstraint` with
+    none either, and the call site re-resolved the NAME in the importing module's
+    table. All three now carry `abilityHash`.
+  - IMPL: an imported impl's ability was resolved by name in the IMPORTER's table,
+    which answers null when the importer never imported it, so `show_b`'s impl
+    arrived untagged. Identity now comes from the impl's OWN module, and the name
+    channel may only supply impls that do not claim a DIFFERENT ability.
+
+  `DeclarationRegistry` still keys abilities by name; nothing on this path asks it
+  to any more. Kept deliberately conservative: an impl whose module merely IMPORTED
+  the ability still takes its tag from the importer's table (a tag is REQUIRED —
+  the static-op path matches it strictly, and leaving those untagged lost
+  `impl Default for Int` and `for Bool`), only STAMPED hashes are used, and the
+  name channel is filtered rather than removed.
+
+  The four approaches below were measured and reverted BEFORE the root was found.
+  They are kept because each names a real constraint on any future change here:
   - hash-keying the three name comparisons (`AnnotationValidator` x2,
     `TypeValidator`) — 10+ ability-annotation tests fail, because an annotation's
     constraints and the inferred usages derive their hashes by different routes and
@@ -2227,11 +2239,11 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   - pinning each imported impl's ability identity in its own module — produces
     hashes that disagree with the ones demands carry, the same defect one level down.
 
-  What DID land: `checkAbilityImplementation` held an inline duplicate of
+  Also landed on the way: `checkAbilityImplementation` held an inline duplicate of
   `abilityImpls`'s lookup that had drifted, so fixes to the helper never ran on the
   path that decides discharge. It is now the one helper.
-  `AbilityIdentityCrossModuleTest` carries the repro, two live properties, and the
-  diagnosis.
+  `AbilityIdentityCrossModuleTest` carries the repro and all three properties,
+  enabled and passing.
 
 Guarantee after Track 2: every ability use is resolved to one instance or a
 dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a
