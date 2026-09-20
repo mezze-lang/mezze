@@ -53,15 +53,23 @@
 #
 # What is NOT in that class is the DECLARED RETURN. At emit the pushed context
 # (the declaration's own return type, substituted) reads `Option 'f583` while the
-# match result reads `Option 'a` — two live roots, neither bound to the other. So
-# the body's match result and the type the declaration promises were never
-# unified; they were only checked against each other. Whichever of the two a node
-# happens to be stamped from decides whether the gate sees it as bound, and that
-# is what the arm order changes.
+# match result reads `Option 'a`. Both are substituted, and neither resolves to
+# the other: two live roots. Whichever of the two a node happens to be stamped
+# from decides whether the gate sees it as bound, and that is what the arm order
+# changes.
 #
-# So the fix is not "pick the right one at emit" (measured twice, below) and not
-# in the match at all — it is that a declaration's annotated type and its
-# inferred body must come out of ONE solve sharing one set of variables.
+# WHY they are two roots is NOT yet established, and one plausible answer has
+# already been checked and is WRONG: `bindLet` DOES emit
+# `Equality(exprResult.type, annotatedType)`, so it is not that the annotation is
+# merely validated against the body instead of unified with it. The remaining
+# candidate is that the two are solved in DIFFERENT solves (the per-binding solve
+# and the module solve) so the equality never relates these two instances — the
+# same split the `enumerate` fix had to cross. That is a hypothesis, not a
+# measurement; whoever picks this up should confirm it before acting.
+#
+# What IS settled: the fix is not "pick the right one at emit" (measured twice,
+# below) and not in the match — the arms and the result var are correctly one
+# class already.
 #
 # Twelve-line repro, and the boundary as it stands, in
 # ConstructorInMatchArmElaborationTest.
