@@ -58,8 +58,27 @@
 # from decides whether the gate sees it as bound, and that is what the arm order
 # changes.
 #
-# WHY they are two roots is NOT yet established, and one plausible answer has
-# already been checked and is WRONG: `bindLet` DOES emit
+# WHY they are two roots is NOT yet established. TWO plausible answers have been
+# checked and BOTH are wrong.
+#
+# (a) The constraint set is complete and correct. Dumped every Equality the
+#     per-binding solve receives for `Option.flatten` — there are three, and they
+#     say exactly the right thing:
+#       arm1  `Option 'a#239`  ==  resultVar `'d#246`
+#       arm2  `'c#245`         ==  resultVar `'d#246`
+#       body  ret `'d#246`     ==  annotation ret `Option 'a#239`
+#            (params identical on both sides: `{opt: Option (Option 'a#239)}`)
+#     Everything is in ONE class before the solve runs. So nothing is missing at
+#     generation, and the match is not the problem.
+#
+# (b) `callReturnTypes` is the ONLY side-table in `aggregateConstraintResults`
+#     that is not `substitution.apply`-ed (matchCaseBindings, matchScrutineeTypes,
+#     expectedTypeAt and doBindingSolvedTypes all are). That looks exactly like a
+#     dropped per-binding solve. It is not: applying it there changes the row
+#     counts NOT AT ALL — emit already applies the module substitution itself. A
+#     comment at the site records the measurement so it is not re-tried.
+#
+# A third answer has also been checked and is WRONG: `bindLet` DOES emit
 # `Equality(exprResult.type, annotatedType)`, so it is not that the annotation is
 # merely validated against the body instead of unified with it. The remaining
 # candidate is that the two are solved in DIFFERENT solves (the per-binding solve

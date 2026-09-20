@@ -761,6 +761,11 @@ class TypeChecker(
         val tailCallLocations = constraintResults.values.flatMap { it.tailCalls }.filterNotNull().toSet()
         val methodCallResolutions = constraintResults.values
             .fold(emptyMap<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r -> acc + r.methodCallResolutions }
+        // Deliberately NOT substitution-applied here, unlike every sibling table
+        // below. Emit applies the module substitution to these itself, and adding
+        // it here as well was MEASURED to change nothing at all — the elaboration
+        // row counts are identical with and without. It was tried on the theory
+        // that a per-binding solve's bindings were being lost; they are not.
         val callReturnTypes = constraintResults.values
             .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.callReturnTypes }
         val matchCaseBindings = constraintResults.values
