@@ -563,6 +563,13 @@ class AbilityChecker internal constructor(
         if (byHash.isEmpty()) return byName
         // Union, deduped by impl content hash (an impl reachable by BOTH channels
         // must appear once).
+        //
+        // Restricting this to the hash channel — or to hash + impls carrying NO hash
+        // of their own — was tried and reverted. Both broke `Default.default` at Int
+        // and at Bool: the hash an impl is registered under and the hash a demand
+        // arrives with are not always the same value for the same ability, so the
+        // name channel is currently repairing that mismatch. The mismatch is the
+        // real defect, and it is upstream of here — see AbilityIdentityCrossModuleTest.
         val seen = HashSet<Hash>()
         return (byHash + byName).filter { seen.add(it.contentHash) }
     }
@@ -599,12 +606,13 @@ class AbilityChecker internal constructor(
             }
         }
 
-        val impls = if (abilityHash != null) {
-            val byHash = context.getAbilityImplsByDeclHash(abilityHash)
-            if (byHash.isNotEmpty()) byHash else context.getAbilityImpls(abilityName)
-        } else {
-            context.getAbilityImpls(abilityName)
-        }
+        // One lookup, not a second copy of it. This was an inline duplicate of
+        // `abilityImpls` that had drifted: it consulted the hash index and then fell
+        // back to the NAME with no check that the impls it got back were impls of
+        // THIS ability. That is the path a cross-module same-name collision took —
+        // `show_b`'s impl for `B` discharged a demand for `show_a::Show`, because the
+        // fix applied to `abilityImpls` never ran here.
+        val impls = abilityImpls(abilityName, effectiveHash)
 
         val unwrappedTypeArgs = typeArgs
 
@@ -663,6 +671,8 @@ class AbilityChecker internal constructor(
                     } else {
                         resolvedTypeArgs
                     }
+                    // A PARSED constraint: it carries a name and nothing else, so the
+                    // registry is the only thing that can turn it into an identity.
                     checkAbilityImplementation(constraint.abilityName, paddedTypeArgs, registry.resolveAbilityHash(constraint.abilityName))
                 }
             } else {
@@ -979,6 +989,13 @@ class AbilityChecker internal constructor(
         seen: MutableSet<Any> = mutableSetOf(),
     ): Boolean {
         if (canDeriveAbility(abilityName, type, abilityHash, seen)) return true
+        // The retry WITHOUT the hash is load-bearing and must stay until the demand
+        // side is fixed. Making the hash answer final was tried and reverted: it
+        // broke `Default.default` at Int and at Bool (StaticAbilityOpTest), because
+        // the hash a demand arrives with is not always the one its ability is
+        // registered under, and the by-name retry is what currently repairs that.
+        // The hash is only trustworthy once `DeclarationRegistry` stops keying
+        // abilities by name — see AbilityIdentityCrossModuleTest.
         if (abilityHash != null && checkAbilityImplementation(abilityName, listOf(type), abilityHash)) return true
         return checkAbilityImplementation(abilityName, listOf(type))
     }

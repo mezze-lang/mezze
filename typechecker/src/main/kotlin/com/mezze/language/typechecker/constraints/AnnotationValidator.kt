@@ -251,6 +251,13 @@ internal class AnnotationValidator(
         for (usage in actualUsageConstraints) {
             if (WellKnownHashConstants.isInspect(usage.abilityHash)) continue
 
+            // Deliberately BY NAME. Hash-keying here was tried and reverted: the
+            // annotation's constraints and the inferred usages derive their hashes
+            // by different routes, so the same ability can carry two, and keying on
+            // them failed 10+ ability-annotation tests. This is an
+            // annotation-vs-inference agreement check within ONE declaration, where
+            // the name is unambiguous; cross-module identity is decided at impl
+            // resolution, not here.
             val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
 
             if (matchingAnnotatedList.isNotEmpty()) {
@@ -336,6 +343,7 @@ internal class AnnotationValidator(
             // concrete resolution for the assoc name is what we check R2 against.
             val resolvedForAbility: Map<String, MezzeType> =
                 inferredAbilityConstraints
+                    // Hash-first, for the same reason as above.
                     .filter { it.abilityName == abilityName }
                     .fold(emptyMap()) { acc, ic ->
                         acc + (resolvedAssociatedBindings[abilityName to ic.typeVar.id] ?: emptyMap())

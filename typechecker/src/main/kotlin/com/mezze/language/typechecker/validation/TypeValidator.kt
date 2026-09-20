@@ -540,6 +540,15 @@ class TypeValidator(
         else -> false
     }
 
+    /**
+     * The two constraint lists demand the same abilities, BY NAME.
+     *
+     * Keying on the declaration hash was tried and reverted: `abilityHash` is not
+     * populated consistently across the routes a constraint reaches here by, so
+     * the same ability arrives with a hash on one side and null on the other, and
+     * hash-keying failed 10+ ability-annotation tests. Populating it consistently
+     * is the prerequisite; until then the name is what both sides agree on.
+     */
     private fun abilityNamesMatch(
         c1: List<MezzeType.FunctionAbilityConstraint>,
         c2: List<MezzeType.FunctionAbilityConstraint>

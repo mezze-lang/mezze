@@ -119,6 +119,11 @@ internal fun mergeImportContext(
                 opConstraints = opConstraints
             )
         } else {
+            // NOTE: this resolves the ability BY NAME in the importer's table, which
+            // is wrong when the importer imported a same-named ability from elsewhere.
+            // Pinning identity in the impl's own module was tried and reverted — it
+            // produced hashes that disagreed with the ones demands carry, which is
+            // itself the open defect (AbilityIdentityCrossModuleTest).
             val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
                 importContext.importedAbilities[name]?.contentHash
             }
