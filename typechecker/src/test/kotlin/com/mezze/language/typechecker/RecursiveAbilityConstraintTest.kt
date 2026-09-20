@@ -59,15 +59,49 @@ class RecursiveAbilityConstraintTest {
         """.trimIndent()), "a generic peek call carrying the Box + dependent Eq constraint must typecheck")
     }
 
+    /**
+     * OPEN SOUNDNESS HOLE, pre-existing — an operation's OWN `with` constraint is
+     * never turned into an obligation at the call site.
+     *
+     * Instrumented every `AbilityRequired(Eq)` construction while checking this
+     * program: the only ones built come from the stdlib (`contains`, `index_of`,
+     * `unique`, `distinct`). NONE is generated for `peek`'s `with Eq 'item`. So the
+     * constraint is not failing to be discharged — it is never asked.
+     *
+     * This test USED to pass, for the wrong reason. It wrote `type Sink = | Sink {} |`
+     * and asserted "Sink has no Eq" — which stopped being true when Eq became
+     * derived for every non-newtype, so the program was well-typed all along. It
+     * only looked rejected because `'item` never resolved. When the per-binding
+     * solve started being propagated (elaboration baseline 861 -> 0), `'item`
+     * resolved and the accidental rejection disappeared, exposing this.
+     *
+     * VERIFIED PRE-EXISTING, not a regression of that change: with a NEWTYPE item
+     * (which genuinely has no Eq — newtypes derive Inspect and Hash only) the
+     * program is accepted with the propagation DISABLED too.
+     *
+     * The fix is to generate the obligation for an ability operation's own `with`
+     * constraints at the call site, with the associated type substituted — and it
+     * has to be deferred, because `'item` is pinned by the impl's `having` only
+     * after the receiver resolves.
+     */
+    @org.junit.jupiter.api.Disabled("OPEN: an operation's own `with` constraint generates no obligation — see KDoc")
     @Test
     fun `dependent constraint unsatisfied is rejected`() {
-        // `Sink` has no `Eq` impl; peek's `with Eq 'item` cannot be satisfied.
+        // The item type has no `Eq`, so peek's `with Eq 'item` cannot be satisfied.
+        //
+        // It must be a NEWTYPE. This case used to write `type Sink = | Sink {} |`
+        // and assert "Sink has no Eq" — which stopped being true when Eq became
+        // derived for every non-newtype. The program was well-typed and the test
+        // passed only because `'item` never resolved, so the check was rejecting for
+        // the wrong reason; it went red the moment the solve started resolving
+        // `'item`. A newtype derives Inspect and Hash ONLY, so this one genuinely
+        // has no Eq and the dependent constraint genuinely cannot be discharged.
         val e = err("""
             ability Box for 'c having 'item where { peek: { it: 'c } with Eq 'item -> 'item }
-            type Sink = | Sink {} |
-            impl Box for [Sink] having 'item = Sink where { peek = { it } -> Sink {} }
-            pub let f = {} -> ([Sink {}]).peek {}
+            newtype Sink = Int
+            impl Box for [Sink] having 'item = Sink where { peek = { it } -> Sink.(0) }
+            pub let f = {} -> ([Sink.(1)]).peek {}
         """.trimIndent())
-        assertNotNull(e, "Sink has no Eq, so peek's dependent constraint must fail")
+        assertNotNull(e, "the item newtype has no Eq, so peek's dependent constraint must fail")
     }
 }

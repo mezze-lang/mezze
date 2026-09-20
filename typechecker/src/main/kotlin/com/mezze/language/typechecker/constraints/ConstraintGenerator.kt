@@ -349,6 +349,33 @@ class ConstraintGenerator(
                             // propagates is a new answer rather than this binding's.
                             // Equalities alone, re-solved, close nothing — also
                             // measured.
+                            // Plus the bindings for the variables the DECLARATION
+                            // ITSELF names.
+                            //
+                            // `bindLet` emits `Equality(bodyType, annotatedType)` and
+                            // the per-binding solve honours it — but that solve was
+                            // then dropped, so the annotation's variables and the
+                            // body's stayed two unrelated ROOTS in the substitution
+                            // emit reads. A node stamped from one carried a variable
+                            // the scheme, quantified from the other, does not bind:
+                            // the `Option.flatten` / `Result.flatten` elaboration
+                            // rows. Measured — the solve held `'a#239 -> 'e#247` and
+                            // the module substitution did not.
+                            //
+                            // WHY ONLY THE DECLARATION'S OWN VARIABLES. Propagating
+                            // the whole solve also closes `intersperse`, and it
+                            // MISCOMPILES: `JsonDecodeExhaustiveTest` decodes a Bool
+                            // field as False where it must be True. Three ways of
+                            // narrowing it were measured and none accommodates the
+                            // codec — excluding bindings that carry an open record
+                            // row, excluding every record-valued binding, and
+                            // excluding variables whose shape this binding is still
+                            // determining through HasField. A wrong decode is worse
+                            // than an open ratchet row, so the broad version does not
+                            // ship until that is understood.
+                            //
+                            // A variable the declaration NAMES has to mean the same
+                            // thing everywhere; one internal to its solve does not.
                             val declaredVars = preConvertedAnnotationType
                                 ?.let { com.mezze.language.ast.solving.collectFreeTypeVars(it) }
                                 .orEmpty()

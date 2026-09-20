@@ -8,55 +8,57 @@
 # Do NOT regenerate this file to make a build green. Every line is a place the
 # compiler is guessing, and adding one is a decision to allow another guess.
 #
-# WHAT IS LEFT: 2 rows, from 861. Both are `intersperse`.
+# WHAT IS LEFT: 2 rows, from 861. Both are `intersperse`, and the reason they are
+# still here is recorded below rather than unknown.
 #
-# `Option.flatten` and `Result.flatten` are CLOSED, and the cause was not where
-# this file spent a long time looking. `ConstraintGenerator` propagated only the
+# `Option.flatten` and `Result.flatten` are CLOSED. The cause was not where this
+# file spent a long time looking. `ConstraintGenerator` propagated only the
 # HasConstructor subset of each per-binding solve; everything else that solve
-# learned was used to type the binding and then dropped. Among the dropped was the
-# EQUALITY `bindLet` emits between a declaration's ANNOTATION and its inferred
-# body, so the annotation's variables and the body's stayed two unrelated ROOTS in
-# the substitution emit reads. A node stamped from one carried a variable the
+# learned was used to type the binding and then DROPPED — including the EQUALITY
+# `bindLet` emits between a declaration's ANNOTATION and its inferred body. So the
+# annotation's variables and the body's stayed two unrelated ROOTS in the
+# substitution emit reads, and a node stamped from one carried a variable the
 # scheme — quantified from the other — does not bind.
 #
-# Measured on `Option.flatten`: the per-binding solve held `'a#239 -> 'e#247`; the
-# module substitution did not; at emit the node read `'a` and the declaration
-# `'e`. Propagating the bindings for the variables the DECLARATION NAMES makes
-# both read `'e`.
+# Measured on `Option.flatten`: the solve held `'a#239 -> 'e#247`, the module
+# substitution did not, and at emit the node read `'a` while the declaration read
+# `'e`. Propagating the bindings for the variables the DECLARATION NAMES makes both
+# read `'e`.
 #
-# WHY ONLY THE ANNOTATION'S VARIABLES. Propagating the whole solve closes these
-# rows AND `intersperse`'s two — and carries each binding's private constraint
-# resolution into the module substitution with it. Measured cost: records that
-# must print closed reopen (RecordInferenceOpenClosedTest) and an UNSATISFIED
-# dependent ability constraint starts looking satisfied
-# (RecursiveAbilityConstraintTest) — the second accepts a program that must be
-# rejected, so the broad version is not an option. A variable the declaration
-# NAMES has to mean the same thing everywhere; one internal to its solve does not.
+# WHY `intersperse` IS STILL HERE, and it is not for want of a fix. Its open
+# variable is the `fold_left` callback's `x` param, which no annotation names, so
+# the narrow rule does not reach it. Propagating the WHOLE solve closes it — and
+# MISCOMPILES: JsonDecodeExhaustiveTest decodes a Bool field as False where it must
+# be True. Three narrowings were measured and none accommodates the codec:
+#   - hold back bindings whose value carries an OPEN record row
+#   - hold back every RECORD-valued binding
+#   - hold back variables whose shape the binding is still determining via HasField
+# A wrong decode is worse than an open row here, so the broad version does not ship
+# until the codec interaction is understood. That is the whole remaining job.
 #
-# WHAT IS LEFT, then: `intersperse`'s open variable is the `fold_left` callback's
-# `x` param, which the declaration does not name, so the narrow rule does not
-# reach it. Closing it needs a principled account of WHICH internal variables may
-# propagate — not the blanket answer, which is measured unsound.
-#
-# ALSO MEASURED AND DISCARDED (do not re-try):
-#   - re-solving a FILTERED subset instead of using the solve: HasConstructor
-#     mints fresh variables via the declared variant's type params, so it
-#     propagates a NEW answer rather than the binding's own
+# WRONG EXPLANATIONS, ALL MEASURED — do not re-try:
+#   - re-solving a FILTERED subset instead of using the solve: HasConstructor mints
+#     fresh variables via the declared variant's type params, so it propagates a
+#     NEW answer rather than the binding's own
 #   - re-solving the EQUALITIES alone: closes nothing, all three rows return
-#   - the constructor's instantiation, the annotation converter's typeVarCache,
-#     the match arms' equalities, the generated constraint set, `callReturnTypes`
-#     being the only unsubstituted side-table, `unifyVariants` not unifying
-#     typeArgs (it is never even reached for this case)
+#   - the constructor's instantiation, the annotation converter's typeVarCache, the
+#     match arms' equalities, the generated constraint set, `callReturnTypes` being
+#     the only unsubstituted side-table, `unifyVariants` not unifying typeArgs
+#     (never even reached for this case)
 #   - preferring the context type at the constructor emit, and the same merged
 #     per-argument: each closes flatten and opens FIVE (map, map2, map_err,
 #     or_else, zip_with)
 #
 # The `Option` "two representations" reading was a symptom: with the two sides
-# unlinked, which representation each settled on decided what the gate saw, which
-# is why the row looked order-dependent on the match arms.
+# unlinked, which representation each settled on decided what the gate saw — hence
+# the apparent dependence on match-arm order.
 #
-# RELATED, still open: `Substitution.compose` discards a conflicting binding
-# instead of unifying (194 sites, SubstitutionClobberGateTest).
+# FOUND BY THIS WORK, tracked separately:
+#   - `Substitution.compose` discards a conflicting binding instead of unifying
+#     (194 sites, SubstitutionClobberGateTest)
+#   - an ability operation's OWN `with` constraint generates NO obligation at the
+#     call site — pre-existing, and it was masked by a test whose premise had gone
+#     stale (RecursiveAbilityConstraintTest)
 #
 # What the kinds mean:
 #   UNBOUND_TYPE_VAR  a node's type carries a variable bound by no enclosing

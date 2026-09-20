@@ -120,9 +120,9 @@ class ConstructorInMatchArmElaborationTest {
                 f = { acc, x } -> cons { head = x, tail = cons { head = sep, tail = acc } },
               }
         """)
-        // STILL OPEN: `x` is the fold callback's param, which the declaration does
-        // not name, so the annotation-variable rule does not reach it. See the
-        // baseline header — the blanket rule that would close it is measured unsound.
+        // STILL OPEN. `x` is the fold callback's param, which no annotation names.
+        // Propagating the whole per-binding solve closes it and miscompiles a codec
+        // decode — see the baseline header for the three narrowings that were tried.
         assertEquals(2, inMatch, "the fold INSIDE a match arm (std/collections/list.mz:236)")
         assertEquals(0, lifted, "the SAME fold lifted out of the match")
     }
