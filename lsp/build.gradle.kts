@@ -37,15 +37,27 @@ application {
 
 tasks.test {
     useJUnitPlatform()
-    // Known issue: this suite hangs after all tests pass. lsp4j's launcher
-    // and the typechecker/store transitive deps leave non-daemon threads
-    // alive. Tried both `LauncherSessionListener` and `AfterAllCallback`
-    // via ServiceLoader — gradle's test integration didn't pick either up.
-    //   - CI workaround: wrap `./gradlew :lsp:test` in `timeout 300`
-    //   - Dev workaround: Ctrl-C once all tests print PASSED
+    // Was: "this suite hangs after all tests pass" (lsp4j's launcher and the
+    // typechecker/store transitive deps leaving non-daemon threads alive), with
+    // `timeout 300` and Ctrl-C given as the workarounds. Re-checked 2026-09-20
+    // across several full runs: it does NOT hang — every run completed on its own
+    // in ~3 minutes. What DID happen, every time, was the worker dying of heap
+    // exhaustion after the last test passed, which presents the same way from the
+    // outside. That is fixed below; the workarounds are no longer needed.
     // forkEvery=1 isolates each class JVM so a hang in one doesn't poison
     // siblings.
     forkEvery = 1
+    // These tests typecheck real modules against the stdlib — the same work the
+    // typechecker suite does, which is configured at 1500m. This module was never
+    // given a size at all, so it ran at Gradle's 512m default and the worker died
+    // with "Java heap space: failed reallocation of scalar replaced objects"
+    // AFTER every test had passed. The task failed; the tests did not. That is why
+    // it went unnoticed — `:lsp:test` is outside the typechecker+interpreter gate
+    // pair, and the report reads 122 tests / 0 failures / 0 errors.
+    // 1500m matches the typechecker suite, which does the same work. The set is
+    // BOUNDED, not leaking: 768m also passes, so 512m was merely a little short and
+    // this is headroom rather than a lid on a leak.
+    maxHeapSize = "1500m"
 }
 
 // Create a fat JAR for the LSP server
