@@ -1328,7 +1328,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     (freshMethodType as? MezzeType.FunctionType)?.abilityConstraints?.forEach { c ->
         abilityObligationAtCallSite(
             constraint = c,
-            abilityHash = c.abilityHash ?: context.abilityDeclarations[c.abilityName]?.contentHash,
+            // Just the fallback — `abilityObligationAtCallSite` prefers the
+            // constraint's own hash now, for every caller.
+            abilityHash = context.abilityDeclarations[c.abilityName]?.contentHash,
             context = "Inherent-method constraint: ${c.abilityName} on ${methodInfo?.targetTypeName}.${methodInfo?.methodName}",
             loc = expr.loc,
         )?.let { inherentMethodAbilityConstraints.add(it) }

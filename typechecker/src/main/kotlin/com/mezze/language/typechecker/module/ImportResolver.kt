@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.module
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility
+import com.mezze.language.typechecker.ProgramIndex
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedExpr
 import com.mezze.language.typedast.TypedLambda
@@ -520,7 +521,8 @@ class ImportResolver(
             importedImpls = impls,
             importedAbilityImpls = abilityImpls,
             effectsByHash = effectsByHash,
-            abilitiesByHash = abilitiesByHash
+            abilitiesByHash = abilitiesByHash,
+            abilityDeclHashByImpl = module?.let { abilityIdentityForImpls(it.index) } ?: emptyMap()
         )
     }
 
@@ -686,7 +688,8 @@ class ImportResolver(
             importedImpls = impls,
             importedAbilityImpls = abilityImpls,
             effectsByHash = effectsByHash,
-            abilitiesByHash = abilitiesByHash
+            abilitiesByHash = abilitiesByHash,
+            abilityDeclHashByImpl = module?.let { abilityIdentityForImpls(it.index) } ?: emptyMap()
         )
     }
 
@@ -1046,5 +1049,30 @@ class ImportResolver(
             }
         }
         return result
+    }
+}
+
+/**
+ * Which ability each of a module's impls implements, keyed by the impl's own
+ * content hash.
+ *
+ * Resolved HERE because this is the last point where the answer is unambiguous:
+ * inside one module `impl Show for B` can only mean that module's `Show`.
+ * Downstream, every module's impls are merged into one flat map and the name
+ * means nothing.
+ *
+ * ONLY the stamped hash. Recomputing one for an unstamped declaration was tried
+ * and reverted: the recomputed value does not always equal what the registry
+ * stamped, and an impl tagged with a hash nobody else agrees on stops matching
+ * its own ability (`impl Default for Int` and `for Bool` vanished that way). An
+ * impl whose module merely IMPORTED the ability is left untagged, which is what
+ * it had before.
+ */
+private fun abilityIdentityForImpls(index: ProgramIndex): Map<Hash, Hash> = buildMap {
+    for ((implKey, implDecl) in index.abilityImplsByHash) {
+        if (implDecl.isInherent) continue
+        val name = implDecl.abilityName ?: continue
+        val declHash = index.abilityDeclarations[name]?.contentHash ?: continue
+        put(implKey, declHash)
     }
 }

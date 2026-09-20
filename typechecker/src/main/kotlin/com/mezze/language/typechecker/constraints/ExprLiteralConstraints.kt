@@ -155,7 +155,11 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                     val instantiation = binding.scheme.instantiate()
 
                     val abilityConstraints = instantiation.freshConstraints.map { freshConstraint ->
-                        val abilityHash = context.abilityDeclarations[freshConstraint.abilityName]?.contentHash
+                        // The callee's OWN ability, carried through generalization and
+                        // instantiation. The table lookup is the fallback for a
+                        // constraint that never had a hash, not the answer.
+                        val abilityHash = freshConstraint.abilityHash
+                            ?: context.abilityDeclarations[freshConstraint.abilityName]?.contentHash
                         Constraint.AbilityRequired(
                             typeVar = freshConstraint.typeVar,
                             abilityName = freshConstraint.abilityName,

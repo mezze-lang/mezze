@@ -14,6 +14,17 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class AbilityConstraint(
     val abilityName: String,
+    /**
+     * WHICH ability, not just what it is called.
+     *
+     * Generalization used to keep only the name, so an imported function's
+     * obligation arrived at the call site nameless-but-for-its-spelling and was
+     * re-resolved in the CALLER's ability table. Two modules each declaring
+     * `ability Show for 'a` then made `show_b::Show` answer a demand for
+     * `show_a::Show` (BUG 24). The `FunctionAbilityConstraint` this is built from
+     * already knows; it just was not carried.
+     */
+    val abilityHash: com.mezze.language.typedast.Hash? = null,
     val typeParam: String,
     val typeArgs: List<MezzeType> = emptyList(),
     // Associated-type bindings (`having 'out = 'c`). Carried through

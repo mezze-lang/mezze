@@ -560,18 +560,19 @@ class AbilityChecker internal constructor(
         val byName = context.getAbilityImpls(abilityName)
         if (hash == null) return byName
         val byHash = context.getAbilityImplsByDeclHash(hash)
-        if (byHash.isEmpty()) return byName
-        // Union, deduped by impl content hash (an impl reachable by BOTH channels
-        // must appear once).
+        // The name channel stays — impls whose module merely IMPORTED the ability
+        // are untagged and it is the only key they have — but it may not supply an
+        // impl that says it is for a DIFFERENT ability. That is the impl's own
+        // testimony, so excluding it cannot lose a real answer, and admitting it is
+        // how `show_b::Show`'s impl discharged a demand for `show_a::Show`.
         //
-        // Restricting this to the hash channel — or to hash + impls carrying NO hash
-        // of their own — was tried and reverted. Both broke `Default.default` at Int
-        // and at Bool: the hash an impl is registered under and the hash a demand
-        // arrives with are not always the same value for the same ability, so the
-        // name channel is currently repairing that mismatch. The mismatch is the
-        // real defect, and it is upstream of here — see AbilityIdentityCrossModuleTest.
+        // Narrowing this further was tried and reverted twice: dropping the name
+        // channel entirely, and admitting only untagged impls while ignoring byHash
+        // when non-empty. Both broke `Default.default` at Int and at Bool.
+        val nameAdmissible = byName.filter { it.abilityDeclHash == null || it.abilityDeclHash == hash }
+        if (byHash.isEmpty()) return nameAdmissible
         val seen = HashSet<Hash>()
-        return (byHash + byName).filter { seen.add(it.contentHash) }
+        return (byHash + nameAdmissible).filter { seen.add(it.contentHash) }
     }
 
     internal fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Boolean {

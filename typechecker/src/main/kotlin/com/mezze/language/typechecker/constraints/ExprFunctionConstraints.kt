@@ -1201,7 +1201,13 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                         Constraint.AbilityRequired(
                             typeVar = constrainedType.variable,
                             abilityName = constraint.abilityName,
-                            abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
+                            // The callee's OWN identity first. Re-resolving its
+                            // name in THIS module's table answers with whatever
+                            // ability that spelling means here, which is how a
+                            // demand for `show_a::Show` arrived carrying
+                            // `show_b::Show`'s hash. See BUG 24.
+                            abilityHash = constraint.abilityHash
+                                ?: context.abilityDeclarations[constraint.abilityName]?.contentHash,
                             typeArgs = constraint.typeArgs.drop(1),
                             context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
                             loc = expr.loc
@@ -1301,6 +1307,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             val methodLevelConstraints = funcType.abilityConstraints.mapNotNull { constraint ->
                 abilityObligationAtCallSite(
                     constraint = constraint,
+                    // Fallback only — see abilityObligationAtCallSite.
                     abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                     context = "Method-level constraint: ${constraint.abilityName}",
                     loc = expr.loc,

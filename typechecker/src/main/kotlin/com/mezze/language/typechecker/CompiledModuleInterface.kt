@@ -137,14 +137,15 @@ data class CompiledModuleInterface(
                 } else {
                     // registry in TypingContext silently drifted (#304 follow-up,
                     // #307 consolidation).
-                    // NOTE: this resolves the ability BY NAME in the importer's table, which
-                    // is wrong when the importer imported a same-named ability from elsewhere.
-                    // Pinning identity in the impl's own module was tried and reverted — it
-                    // produced hashes that disagreed with the ones demands carry, which is
-                    // itself the open defect (AbilityIdentityCrossModuleTest).
-                    val abilityDeclHash = implDecl.abilityName?.let { name ->
-                        importContext.importedAbilities[name]?.contentHash
-                    }
+                    // The impl's OWN module first: inside it, `impl Show for B` can only mean
+                    // the `Show` that module declares, and that is the identity to carry.
+                    // When its module merely IMPORTED the ability it has no answer, and the
+                    // importer's table is the same answer it always was — both modules
+                    // imported the same declaration, so there is nothing to disambiguate.
+                    // A tag is REQUIRED here: the static-op path matches it strictly, and
+                    // leaving these untagged lost `impl Default for Int` and `for Bool`.
+                    val abilityDeclHash = importContext.abilityDeclHashByImpl[implKey]
+                        ?: implDecl.abilityName?.let { name -> importContext.importedAbilities[name]?.contentHash }
                     val implInfo = AbilityImplFactory.build(
                         implDecl, abilityDeclHash
                     )

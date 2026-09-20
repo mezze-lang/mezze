@@ -20,6 +20,7 @@ data class TypeScheme(
             val monoConstraints = constraints.map { constraint ->
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
+                    abilityHash = constraint.abilityHash,
                     typeVar = TypeVar.freshWithName(constraint.typeParam),
                     typeArgs = constraint.typeArgs,
                     associatedTypeBindings = constraint.associatedTypeBindings,
@@ -61,6 +62,7 @@ data class TypeScheme(
             if (freshTypeVar != null) {
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
+                    abilityHash = constraint.abilityHash,
                     typeVar = freshTypeVar,
                     typeArgs = instantiatedTypeArgs,
                     associatedTypeBindings = instantiatedBindings,
@@ -69,6 +71,7 @@ data class TypeScheme(
             } else {
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
+                    abilityHash = constraint.abilityHash,
                     typeVar = TypeVar.freshWithName(constraint.typeParam),
                     typeArgs = instantiatedTypeArgs,
                     associatedTypeBindings = instantiatedBindings,
@@ -92,6 +95,8 @@ data class TypeScheme(
 
         data class FreshAbilityConstraint(
         val abilityName: String,
+        /** The ability's identity, carried from the scheme — see AbilityConstraint. */
+        val abilityHash: com.mezze.language.typedast.Hash? = null,
         val typeVar: TypeVar,
         val typeArgs: List<MezzeType> = emptyList(),
         // Associated-type bindings freshened alongside typeVar/typeArgs. The bound

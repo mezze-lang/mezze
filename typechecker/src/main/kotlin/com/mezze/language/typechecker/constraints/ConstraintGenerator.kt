@@ -880,6 +880,7 @@ class ConstraintGenerator(
                     if (typeVarArg != null) {
                         AbilityConstraint(
                             abilityName = constraint.abilityName,
+                            abilityHash = constraint.abilityHash,
                             typeParam = typeVarArg.variable.name,
                             typeArgs = constraint.typeArgs,
                             associatedTypeBindings = constraint.associatedTypeBindings
@@ -917,6 +918,7 @@ class ConstraintGenerator(
                             ?: resolvedConstraintVar
                         AbilityConstraint(
                             abilityName = constraint.abilityName,
+                            abilityHash = constraint.abilityHash,
                             typeParam = quantVar?.name ?: constraint.typeVar.name,
                             typeArgs = resolvedTypeArgs,
                             associatedTypeBindings = bindingsFor(

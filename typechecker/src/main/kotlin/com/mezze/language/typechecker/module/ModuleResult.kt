@@ -221,7 +221,15 @@ data class ModuleImportContext(
     // impl op whose inferred type carries a `with FromJson 'a Str` (etc.)
     // constraint must re-surface that constraint at the call site, or the
     // concrete decode target never pins 'a and the codec derivation never fires.
-    val inherentImplOpConstraints: Map<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>> = emptyMap()
+    val inherentImplOpConstraints: Map<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>> = emptyMap(),
+    // Which ability each imported impl implements, keyed by the impl's own content
+    // hash and resolved in the impl's OWN module, where the ability name is
+    // unambiguous. By the time a consumer sees these, every module's impls have
+    // been merged into one flat map and two modules may each declare `Show`.
+    // Absent means "that module did not declare the ability it implements" (it
+    // imported it); such an impl stays untagged and reachable by name, exactly as
+    // before. See BUG 24.
+    val abilityDeclHashByImpl: Map<Hash, Hash> = emptyMap()
 ) {
     companion object {
         fun empty() = ModuleImportContext(
@@ -248,6 +256,7 @@ data class ModuleImportContext(
             inherentImplOpReturnTypes = inherentImplOpReturnTypes + other.inherentImplOpReturnTypes,
             inherentImplOpParamTypes = inherentImplOpParamTypes + other.inherentImplOpParamTypes,
             inherentImplOpEffects = inherentImplOpEffects + other.inherentImplOpEffects,
+            abilityDeclHashByImpl = abilityDeclHashByImpl + other.abilityDeclHashByImpl,
             inherentImplOpConstraints = inherentImplOpConstraints + other.inherentImplOpConstraints
         )
     }

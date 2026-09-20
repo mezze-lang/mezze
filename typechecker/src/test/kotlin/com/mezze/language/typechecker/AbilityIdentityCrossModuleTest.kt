@@ -11,23 +11,39 @@ import kotlin.test.fail
 /**
  * An ability is identified by its DECLARATION, not by its spelling.
  *
- * Two modules may each declare `ability Show for 'a`. They are different abilities:
- * implementing one says nothing about the other. The impl lookup used to answer by
- * name, so a value implementing `show_b::Show` discharged a demand for
- * `show_a::Show` — accepted with no diagnostic, and the call then dispatched to an
- * operation whose declaration the caller had never seen.
+ * Two modules may each declare `ability Show for 'a`. They are different
+ * abilities: implementing one says nothing about the other. This used to be
+ * ACCEPTED — a value implementing `show_b::Show` discharged a demand for
+ * `show_a::Show`, with no diagnostic, and the call then dispatched to an
+ * operation whose declaration the caller had never seen (BUG 24).
  *
- * Two routes reached that answer and BOTH had to be closed; the first fix looked
- * like it had no effect because the second was a copy:
+ * The identity was being dropped and then GUESSED BACK, in two independent
+ * places, and closing either one alone changed nothing:
  *
- *  - `AbilityChecker.abilityImpls` consulted the hash index and then UNIONED the
- *    name-keyed one in.
- *  - `checkAbilityImplementation` carried its own inline duplicate of that lookup,
- *    which had drifted and never got the fix. It is now the same one helper.
+ *  - The DEMAND side. `use_a`'s constraint is stamped correctly at its own
+ *    declaration (`Show/56e38553`) and survives import intact — verified. But
+ *    generalization converted it to a scheme `AbilityConstraint` that had no hash
+ *    field, `instantiate()` produced a `FreshAbilityConstraint` that had none
+ *    either, and the call site then re-resolved the NAME in the importing
+ *    module's ability table. Where that spelling meant `show_b::Show`, the demand
+ *    came back as `a070db73`. All three records now carry the hash.
  *
- * The identity itself comes from the impl's own module (`ImportResolver`), because
- * by the time a consumer sees the impl every module's impls are merged into one flat
- * map where the name means nothing.
+ *  - The IMPL side. An imported impl's ability was resolved by name in the
+ *    IMPORTER's table, which answers null when the importer never imported that
+ *    ability. `show_b`'s impl arrived untagged, so the name channel handed it to
+ *    a demand for a different `Show`. Identity is now resolved in the impl's OWN
+ *    module, where the name is unambiguous, and the name channel may only supply
+ *    impls that do not claim a DIFFERENT ability.
+ *
+ * Both halves are deliberately conservative about what they do NOT know. An impl
+ * whose module merely imported the ability stays untagged and remains reachable
+ * by name, and a constraint that never had a hash still falls back to the table —
+ * because narrowing those was measured to break `Default.default` at Int and at
+ * Bool, twice.
+ *
+ * `DeclarationRegistry` still keys abilities by name, and that remains the reason
+ * a bare name cannot distinguish the two. What changed is that nothing on this
+ * path asks it to: the identity travels with the constraint and with the impl.
  */
 class AbilityIdentityCrossModuleTest {
     private lateinit var parser: MezzeParser
@@ -55,31 +71,6 @@ class AbilityIdentityCrossModuleTest {
     private fun check(src: String) =
         TypeChecker().typeCheck(parser.parseParsedModule(src.trimIndent(), "t.mz"), tempDir, enablePrelude = true)
 
-    /**
-     * OPEN — traced to the root, which is upstream of every comparison this class
-     * was written to check. Measured with both hashes in hand:
-     *
-     *   show_a::Show (render -> Str) hashes to 56e38553
-     *   show_b::Show (render -> Int) hashes to a070db73
-     *   show_b's impl is correctly tagged a070db73 by ImportResolver
-     *   but `use_a`'s demand — declared in show_a, so 56e38553 — ARRIVES as a070db73
-     *
-     * The demand is already wrong before any lookup runs, so no fix in the lookup can
-     * close this. `DeclarationRegistry.abilitiesByName` is a NAME-keyed map: main
-     * imports two abilities both spelled `Show`, one overwrites the other, and
-     * `resolveAbilityHash("Show")` then answers with whichever was registered last.
-     * The two declarations have already collapsed into one entry by the time anything
-     * compares them.
-     *
-     * The fix is to key the registry by declaration hash and make the name a
-     * per-module view onto it — the same shape as the type-identity work, and a
-     * refactor rather than a patch. Until then the lookups below are correct and
-     * moot: they are handed an identity that is already the wrong one.
-     *
-     * The two live tests in this class are what currently holds: a type implementing
-     * NOTHING is rejected, and an impl reached through its own ability is found.
-     */
-    @org.junit.jupiter.api.Disabled("OPEN: name-keyed DeclarationRegistry collapses two same-named abilities — see KDoc")
     @Test
     fun `an impl of a same-named ability from another module does not satisfy the constraint`() {
         val err = try {

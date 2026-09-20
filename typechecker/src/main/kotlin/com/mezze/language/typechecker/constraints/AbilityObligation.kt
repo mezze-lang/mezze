@@ -40,6 +40,17 @@ import com.mezze.language.typedast.Hash
  */
 internal fun abilityObligationAtCallSite(
     constraint: MezzeType.FunctionAbilityConstraint,
+    /**
+     * FALLBACK identity, used only when the constraint carries none of its own.
+     *
+     * The constraint's `abilityHash` wins, always. Two of the three callers used to
+     * pass `context.abilityDeclarations[name]?.contentHash` INSTEAD of it — a name
+     * lookup in the CALLER's table — which is how a demand for `show_a::Show`
+     * arrived carrying `show_b::Show`'s hash: the callee's obligation was stamped
+     * correct at its own declaration, imported correct, and then re-resolved by
+     * spelling in a module where that spelling meant something else. Deciding it
+     * here rather than at each call site is what keeps the three in agreement.
+     */
     abilityHash: Hash?,
     context: String,
     loc: Loc?,
@@ -52,7 +63,7 @@ internal fun abilityObligationAtCallSite(
     return Constraint.AbilityRequired(
         typeVar = freshen(primary),
         abilityName = constraint.abilityName,
-        abilityHash = abilityHash,
+        abilityHash = constraint.abilityHash ?: abilityHash,
         // POSITION IS THE MEANING here, and `AbilityRequired` splits the tuple
         // into `typeVar` + `typeArgs` without recording where the split happened.
         // `AbilityChecker.trackAbilityConstraint` rebuilds the full positional

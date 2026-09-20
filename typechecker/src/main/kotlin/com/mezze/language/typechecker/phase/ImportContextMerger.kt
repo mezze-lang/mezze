@@ -119,14 +119,15 @@ internal fun mergeImportContext(
                 opConstraints = opConstraints
             )
         } else {
-            // NOTE: this resolves the ability BY NAME in the importer's table, which
-            // is wrong when the importer imported a same-named ability from elsewhere.
-            // Pinning identity in the impl's own module was tried and reverted — it
-            // produced hashes that disagreed with the ones demands carry, which is
-            // itself the open defect (AbilityIdentityCrossModuleTest).
-            val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
-                importContext.importedAbilities[name]?.contentHash
-            }
+            // The impl's OWN module first: inside it, `impl Show for B` can only mean
+            // the `Show` that module declares, and that is the identity to carry.
+            // When its module merely IMPORTED the ability it has no answer, and the
+            // importer's table is the same answer it always was — both modules
+            // imported the same declaration, so there is nothing to disambiguate.
+            // A tag is REQUIRED here: the static-op path matches it strictly, and
+            // leaving these untagged lost `impl Default for Int` and `for Bool`.
+            val abilityDeclHashForImpl = importContext.abilityDeclHashByImpl[implKey]
+                ?: implDecl.abilityName?.let { name -> importContext.importedAbilities[name]?.contentHash }
             val implInfo = AbilityImplFactory.build(
                 implDecl, abilityDeclHashForImpl
             )
@@ -218,6 +219,11 @@ private fun importedAbilityConstraints(bindingType: MezzeType): List<AbilityCons
             ?: return@mapNotNull null
         AbilityConstraint(
             abilityName = fac.abilityName,
+            // WHICH ability the imported function demands, carried from its own
+            // declaration. Dropping it here left the scheme holding a spelling, and
+            // the call site then re-resolved that spelling in THIS module — so a
+            // demand for `show_a::Show` came back as `show_b::Show` (BUG 24).
+            abilityHash = fac.abilityHash,
             typeParam = varArg.variable.name,
             typeArgs = fac.typeArgs
         )
