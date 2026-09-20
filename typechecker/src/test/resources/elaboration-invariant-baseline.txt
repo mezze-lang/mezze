@@ -86,6 +86,40 @@
 # same split the `enumerate` fix had to cross. That is a hypothesis, not a
 # measurement; whoever picks this up should confirm it before acting.
 #
+# ROOT CAUSE FOUND 2026-09-20 — `Option` is solved in TWO REPRESENTATIONS.
+#
+# Dumped the per-binding solve's substitution for the dirty case and the clean
+# one (the same program with its two match arms swapped). The difference is not
+# about variables at all:
+#
+#   DIRTY (`Some{val}->val` first, `None` last):
+#     'c#245  (the None arm)  ->  Option([Some, None])                 <- VariantType, NO type argument
+#     'd#246  (the result var) ->  TypeApplication(Option 'a#239)      <- applied form, HAS the argument
+#
+#   CLEAN (`None` first):
+#     'a#241  (the None arm)  ->  Option([Some, None])
+#     'f#249  (the result var) ->  Option([Some, None])                <- BOTH the variant form; consistent
+#
+# The `Equality(arm == resultVar)` is present in both and is honoured in both.
+# What differs is that in the dirty case the two sides settle on DIFFERENT
+# REPRESENTATIONS of `Option`: the bare `VariantType([Some, None])` that the
+# constructor path (HasConstructor / VariantSolver) produces, and the
+# `TypeApplication("Option", ['a])` everything else uses. Unifying those two
+# leaves the type ARGUMENT with no path between them, so `'a` is never tied to
+# the declaration's variable and the node reaches emit carrying a variable the
+# scheme does not quantify.
+#
+# This is B.1's family, one level up: B.1 deleted six DEDICATED CONTAINER NODES
+# because a producer picking one form made a pass given the other silently do
+# nothing. `Option`/`Result` still have exactly that duality — see the
+# `result_option_two_representations` note — and it is what these rows are.
+#
+# So the fix is a REPRESENTATION fix, not a solver-ordering or emit-preference
+# one: the constructor path must produce the applied form (carrying its type
+# arguments), or unification must merge the two forms argument-wise. The arm
+# ORDER only decides which representation happens to win, which is why swapping
+# the arms makes the row vanish.
+#
 # What IS settled: the fix is not "pick the right one at emit" (measured twice,
 # below) and not in the match — the arms and the result var are correctly one
 # class already.
