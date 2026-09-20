@@ -10,22 +10,47 @@
 #
 # WHAT IS LEFT: 3 rows, from 861.
 #
-# `intersperse` and `flatten`, both in the fold-with-a-record-accumulator family
-# whose main case — `enumerate` — is now CLOSED.
+# CORRECTED. The previous note here said these were `list`/`seq` `flatten` and
+# `intersperse`, "both in the fold-with-a-record-accumulator family". That was
+# wrong on both counts, and it sent the first attempt at these down the wrong
+# path. Measured, with locations:
 #
-# THAT CLOSURE IS THE THING TO READ IF YOU PICK THESE UP. `acc.i` is a field read
-# whose receiver is still a type VARIABLE when the constraint is generated, so it
-# DEFERS in the per-binding solve; `acc` is pinned later, by `init`. And
-# `collectGlobalConstraints` STRIPPED every HasField before the global solve, so
-# nothing ever revisited the read and its variable stayed open forever. The
-# global pass now re-solves them in COMPLETION mode — finish a read whose
-# receiver became a concrete record, invent nothing, reject nothing. Plain
-# re-running grows open rows (a `from_json` target then failed its obligation);
-# strict re-running rejects a field a spread legitimately provides.
+#   let:flatten      std/option.mz:139:11-139:14   `None -> None`
+#   let:flatten      std/result.mz:128:22-128:42   `Err { error } -> Err { error = error }`
+#   let:intersperse  std/collections/list.mz:236   the `fold_left` call + its `x` param
 #
-# The two remaining rows are the same shape and did not fall to it, so something
-# else holds their receivers open. The twelve-line repro in
-# UserCodeElaborationGateTest is clean now, so a new small case is the first job.
+# `list::flatten` is `{ xss } -> concat { xss = xss }` and has no row at all. The
+# two flatten rows are Option's and Result's, and neither is a fold — both are a
+# CONSTRUCTOR IN A MATCH ARM that does not name the type parameter.
+#
+# WHAT ACTUALLY HOLDS THEM OPEN, measured. A constructor node is stamped from
+# `callReturnTypes[loc]` (per-loc) in preference to the pushed context type. For
+# these nodes the two are both solved, both substituted, and they name DIFFERENT
+# type variables for the same type:
+#
+#   None at option.mz:139   per-loc = Option 'a(27584)   context = Option 'f583(27592)
+#
+# and the declaration's own scheme quantifies the second. So the node carries a
+# variable the scheme does not bind, and the gate — which compares by NAME, over-
+# approximating on purpose — reports it. This is the recurring "one written type
+# variable becomes two" defect, not a fold and not a receiver.
+#
+# It is ORDER-DEPENDENT, which is the cleanest evidence that it is a solver
+# artifact rather than a property of the code: swapping the two arms of
+# Option.flatten so the bare constructor comes FIRST makes the row disappear.
+#
+# Twelve-line repro, and the boundary as it stands, in
+# ConstructorInMatchArmElaborationTest.
+#
+# TRIED AND REVERTED at the constructor emit (neither is a fix — each trades one
+# row for five, and the 5 are map, map2, map_err, or_else and zip_with, whose
+# per-loc variable is the BOUND one, so the preference has to flip per
+# declaration and no local rule can do that):
+#   - prefer the context type whenever per-loc still holds a variable
+#   - the same, merged per ARGUMENT so payload-pinned arguments survive
+#
+# The fix is upstream: elaborate once, so one written type variable is one
+# TypeVar everywhere — phases A and B of the elaboration plan.
 #
 # RULED OUT ALONG THE WAY, so nobody re-checks:
 #   - not two reads of `acc.i` decoupling (the single-read variant behaved the same)
@@ -37,6 +62,9 @@
 #   - not `callCalleeTypes`, a per-call record of the solved callee type: it
 #     reached only evidence-keyed callees, where rewriting their variables breaks
 #     dictionary lookup — 6 tests, reverted in 0ae8e2bc9
+#   - not the match arms going unlinked: `generateMatch` DOES emit an Equality
+#     from every arm to the result var (ExprControlFlowConstraints), so the
+#     constraint side is right and the divergence is in the solve
 #
 # What the kinds mean:
 #   UNBOUND_TYPE_VAR  a node's type carries a variable bound by no enclosing
@@ -50,10 +78,9 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 706 UNBOUND_TYPE_VAR, 150 UNTYPED_PARAM, 3 VARTYPE_RECEIVER
-# (964 declarations). Almost all sit in impl operations, whose bodies are
-# keeping the impl-op body solves; what remains sits in impl operations, and A.2 drives
-# this file to empty and makes a miss a hard ElaborationError.
+# Counts: 3 rows over 964 declarations. (The paragraph that stood here quoted
+# 706/150/3 — the numbers from the 861-row state, left behind when the rows were
+# driven down. Kept accurate or deleted, never stale.)
 UNBOUND_TYPE_VAR	let:flatten
 UNBOUND_TYPE_VAR	let:intersperse
 UNTYPED_PARAM	let:intersperse

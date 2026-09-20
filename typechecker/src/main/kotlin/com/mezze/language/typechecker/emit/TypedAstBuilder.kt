@@ -955,6 +955,19 @@ class TypedAstBuilder(
                     // wins when both are.
                     val perLoc = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     val fromCtx = contextType?.let { substitution.apply(it) }
+                    // MEASURED, twice, and reverted both times. `perLoc` and
+                    // `fromCtx` are two solved descriptions of ONE node that name
+                    // DIFFERENT type variables for the same type — that disagreement
+                    // is the `flatten` elaboration row, and no rule HERE can settle
+                    // it, because which side carries the variable the enclosing
+                    // scheme quantifies flips from declaration to declaration:
+                    //   - prefer the context whenever per-loc is still open:
+                    //     closes `flatten`, opens 5 (map, map2, map_err, or_else,
+                    //     zip_with) whose per-loc variable is the bound one.
+                    //   - same, merged per ARGUMENT so payload-pinned args survive:
+                    //     identical outcome, same 5.
+                    // The fix is upstream — one elaboration, one variable per written
+                    // one — see the baseline file's header.
                     val solvedType = when {
                         perLoc != null && perLoc !is MezzeType.VarType -> perLoc
                         fromCtx !is MezzeType.VarType -> fromCtx
