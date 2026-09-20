@@ -9,29 +9,25 @@ import kotlin.test.assertEquals
 import kotlin.test.fail
 
 /**
- * The repro for the elaboration baseline's two `flatten` rows, in twelve lines.
+ * The shapes that carried the last three elaboration rows, now closed.
  *
- * A constructor in a match arm that does not name a type parameter — `None`, or
- * `Err { error = error }` in a `Result 'a 'e` — reaches the end of elaboration
- * carrying a type variable the enclosing declaration's scheme does not quantify.
- * Measured at `std/option.mz:139` and `std/result.mz:128`:
+ * A constructor in a match arm that does not name a type parameter (`None`, or
+ * `Err { error = error }` in a `Result 'a 'e`), and a polymorphic call inside a
+ * match arm, used to reach the end of elaboration carrying a type variable the
+ * enclosing declaration's scheme does not quantify.
  *
- *   None    per-loc = Option 'a(27584)    context = Option 'f583(27592)
+ * The cause was not in the match, nor in how constructors are typed. Each
+ * per-binding solve propagated only its HasConstructor subset, RE-SOLVED on its
+ * own, and everything else it learned was dropped — including the equality tying
+ * the declaration's ANNOTATION to its inferred body. The annotation's variable and
+ * the body's stayed two unrelated roots in the substitution emit reads, so a node
+ * stamped from one carried a variable the scheme, quantified from the other, does
+ * not bind. Whichever variable a node happened to be stamped from decided whether
+ * the gate saw it as bound, which is why swapping the match arms used to make the
+ * row disappear.
  *
- * Both are solved, both substituted, and they name DIFFERENT variables for one
- * type. The node is stamped from per-loc; the scheme quantifies the other. That
- * is the row — one written type variable that became two, not a fold and not a
- * receiver (the baseline header used to say both).
- *
- * The giveaway that it is a solver artifact and not a property of the code is
- * that it is ORDER-DEPENDENT: the same function with its arms swapped is clean.
- * `generateMatch` emits an Equality from EVERY arm to the result var, so the
- * constraint side is right and the two variables should already be one.
- *
- * These tests pin the boundary as measured. When the upstream fix lands (one
- * elaboration, one variable per written one) `bare constructor last` starts
- * passing with 0, and THAT is the signal to delete its expectation here and the
- * `flatten` rows from the baseline — not a reason to edit the number.
+ * `ConstraintGenerator` now propagates the whole solve. These cases are kept —
+ * they are the ones that broke, and they are cheap.
  */
 class ConstructorInMatchArmElaborationTest {
     private lateinit var parser: MezzeParser
@@ -53,23 +49,23 @@ class ConstructorInMatchArmElaborationTest {
     fun `bare constructor last leaves a variable the scheme does not bind`() {
         // std/option.mz:139 and std/result.mz:128, reduced. Currently 1 each.
         assertEquals(
-            1,
+            0,
             openTypeVarCount("""
                 pub let f: { opt: Option (Option 'a) } -> Option 'a = { opt } -> match opt is
                   Some { val } -> val
                   None -> None
             """),
-            "Option.flatten's shape",
+            "Option.flatten's shape — a bare constructor last in a match",
         )
         assertEquals(
-            1,
+            0,
             openTypeVarCount("""
                 pub let g: { r: Result (Result 'a 'e) 'e } -> Result 'a 'e = { r } ->
                   match r is
                     Ok { val } -> val
                     Err { error } -> Err { error = error }
             """),
-            "Result.flatten's shape",
+            "Result.flatten's shape — a payload constructor that names no 'a",
         )
     }
 
@@ -84,7 +80,7 @@ class ConstructorInMatchArmElaborationTest {
                   None -> None
                   Some { val } -> val
             """),
-            "arms swapped — if this ever reports > 0, the artifact has spread",
+            "arms swapped — this was the CLEAN side of the old order-dependence",
         )
     }
 
@@ -124,6 +120,9 @@ class ConstructorInMatchArmElaborationTest {
                 f = { acc, x } -> cons { head = x, tail = cons { head = sep, tail = acc } },
               }
         """)
+        // STILL OPEN: `x` is the fold callback's param, which the declaration does
+        // not name, so the annotation-variable rule does not reach it. See the
+        // baseline header — the blanket rule that would close it is measured unsound.
         assertEquals(2, inMatch, "the fold INSIDE a match arm (std/collections/list.mz:236)")
         assertEquals(0, lifted, "the SAME fold lifted out of the match")
     }

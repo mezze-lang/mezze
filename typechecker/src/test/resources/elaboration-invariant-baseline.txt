@@ -8,179 +8,55 @@
 # Do NOT regenerate this file to make a build green. Every line is a place the
 # compiler is guessing, and adding one is a decision to allow another guess.
 #
-# WHAT IS LEFT: 3 rows, from 861.
+# WHAT IS LEFT: 2 rows, from 861. Both are `intersperse`.
 #
-# CORRECTED. The previous note here said these were `list`/`seq` `flatten` and
-# `intersperse`, "both in the fold-with-a-record-accumulator family". That was
-# wrong on both counts, and it sent the first attempt at these down the wrong
-# path. Measured, with locations:
+# `Option.flatten` and `Result.flatten` are CLOSED, and the cause was not where
+# this file spent a long time looking. `ConstraintGenerator` propagated only the
+# HasConstructor subset of each per-binding solve; everything else that solve
+# learned was used to type the binding and then dropped. Among the dropped was the
+# EQUALITY `bindLet` emits between a declaration's ANNOTATION and its inferred
+# body, so the annotation's variables and the body's stayed two unrelated ROOTS in
+# the substitution emit reads. A node stamped from one carried a variable the
+# scheme — quantified from the other — does not bind.
 #
-#   let:flatten      std/option.mz:139:11-139:14   `None -> None`
-#   let:flatten      std/result.mz:128:22-128:42   `Err { error } -> Err { error = error }`
-#   let:intersperse  std/collections/list.mz:236   the `fold_left` call + its `x` param
+# Measured on `Option.flatten`: the per-binding solve held `'a#239 -> 'e#247`; the
+# module substitution did not; at emit the node read `'a` and the declaration
+# `'e`. Propagating the bindings for the variables the DECLARATION NAMES makes
+# both read `'e`.
 #
-# `list::flatten` is `{ xss } -> concat { xss = xss }` and has no row at all. The
-# two flatten rows are Option's and Result's, and neither is a fold — both are a
-# CONSTRUCTOR IN A MATCH ARM that does not name the type parameter.
+# WHY ONLY THE ANNOTATION'S VARIABLES. Propagating the whole solve closes these
+# rows AND `intersperse`'s two — and carries each binding's private constraint
+# resolution into the module substitution with it. Measured cost: records that
+# must print closed reopen (RecordInferenceOpenClosedTest) and an UNSATISFIED
+# dependent ability constraint starts looking satisfied
+# (RecursiveAbilityConstraintTest) — the second accepts a program that must be
+# rejected, so the broad version is not an option. A variable the declaration
+# NAMES has to mean the same thing everywhere; one internal to its solve does not.
 #
-# WHAT ACTUALLY HOLDS THEM OPEN, measured. A constructor node is stamped from
-# `callReturnTypes[loc]` (per-loc) in preference to the pushed context type. For
-# these nodes the two are both solved, both substituted, and they name DIFFERENT
-# type variables for the same type:
+# WHAT IS LEFT, then: `intersperse`'s open variable is the `fold_left` callback's
+# `x` param, which the declaration does not name, so the narrow rule does not
+# reach it. Closing it needs a principled account of WHICH internal variables may
+# propagate — not the blanket answer, which is measured unsound.
 #
-#   None at option.mz:139   per-loc = Option 'a(27584)   context = Option 'f583(27592)
+# ALSO MEASURED AND DISCARDED (do not re-try):
+#   - re-solving a FILTERED subset instead of using the solve: HasConstructor
+#     mints fresh variables via the declared variant's type params, so it
+#     propagates a NEW answer rather than the binding's own
+#   - re-solving the EQUALITIES alone: closes nothing, all three rows return
+#   - the constructor's instantiation, the annotation converter's typeVarCache,
+#     the match arms' equalities, the generated constraint set, `callReturnTypes`
+#     being the only unsubstituted side-table, `unifyVariants` not unifying
+#     typeArgs (it is never even reached for this case)
+#   - preferring the context type at the constructor emit, and the same merged
+#     per-argument: each closes flatten and opens FIVE (map, map2, map_err,
+#     or_else, zip_with)
 #
-# and the declaration's own scheme quantifies the second. So the node carries a
-# variable the scheme does not bind, and the gate — which compares by NAME, over-
-# approximating on purpose — reports it. This is the recurring "one written type
-# variable becomes two" defect, not a fold and not a receiver.
+# The `Option` "two representations" reading was a symptom: with the two sides
+# unlinked, which representation each settled on decided what the gate saw, which
+# is why the row looked order-dependent on the match arms.
 #
-# It is ORDER-DEPENDENT, which is the cleanest evidence that it is a solver
-# artifact rather than a property of the code: swapping the two arms of
-# Option.flatten so the bare constructor comes FIRST makes the row disappear.
-#
-# NARROWED FURTHER (2026-09-20), and this is the statement to act on. Traced the
-# whole chain for the repro and everything on the way is CORRECT:
-#   - `generateVariantConstruction` gives `None` a fresh var + a HasConstructor,
-#     and `VariantSolver` instantiates the declaration's params with fresh vars —
-#     so the node's variable is not the type declaration's leaking out.
-#   - `TypeAnnotationConverter` threads ONE `typeVarCache` through a whole
-#     annotation, so a single written `'a` is one variable across params and
-#     return. The "annotation converted twice" shape is NOT what this is.
-#   - `generateMatch` emits `Equality(arm, resultVar)` for EVERY arm, and the
-#     solve honours it: for `Option.flatten` the arms and `resultVar` all end up
-#     in one class (`'c#245 -> Option 'a`).
-#
-# What is NOT in that class is the DECLARED RETURN. At emit the pushed context
-# (the declaration's own return type, substituted) reads `Option 'f583` while the
-# match result reads `Option 'a`. Both are substituted, and neither resolves to
-# the other: two live roots. Whichever of the two a node happens to be stamped
-# from decides whether the gate sees it as bound, and that is what the arm order
-# changes.
-#
-# WHY they are two roots is NOT yet established. TWO plausible answers have been
-# checked and BOTH are wrong.
-#
-# (a) The constraint set is complete and correct. Dumped every Equality the
-#     per-binding solve receives for `Option.flatten` — there are three, and they
-#     say exactly the right thing:
-#       arm1  `Option 'a#239`  ==  resultVar `'d#246`
-#       arm2  `'c#245`         ==  resultVar `'d#246`
-#       body  ret `'d#246`     ==  annotation ret `Option 'a#239`
-#            (params identical on both sides: `{opt: Option (Option 'a#239)}`)
-#     Everything is in ONE class before the solve runs. So nothing is missing at
-#     generation, and the match is not the problem.
-#
-# (b) `callReturnTypes` is the ONLY side-table in `aggregateConstraintResults`
-#     that is not `substitution.apply`-ed (matchCaseBindings, matchScrutineeTypes,
-#     expectedTypeAt and doBindingSolvedTypes all are). That looks exactly like a
-#     dropped per-binding solve. It is not: applying it there changes the row
-#     counts NOT AT ALL — emit already applies the module substitution itself. A
-#     comment at the site records the measurement so it is not re-tried.
-#
-# A third answer has also been checked and is WRONG: `bindLet` DOES emit
-# `Equality(exprResult.type, annotatedType)`, so it is not that the annotation is
-# merely validated against the body instead of unified with it. The remaining
-# candidate is that the two are solved in DIFFERENT solves (the per-binding solve
-# and the module solve) so the equality never relates these two instances — the
-# same split the `enumerate` fix had to cross. That is a hypothesis, not a
-# measurement; whoever picks this up should confirm it before acting.
-#
-# ROOT CAUSE FOUND 2026-09-20 — `Option` is solved in TWO REPRESENTATIONS.
-#
-# Dumped the per-binding solve's substitution for the dirty case and the clean
-# one (the same program with its two match arms swapped). The difference is not
-# about variables at all:
-#
-#   DIRTY (`Some{val}->val` first, `None` last):
-#     'c#245  (the None arm)  ->  Option([Some, None])                 <- VariantType, NO type argument
-#     'd#246  (the result var) ->  TypeApplication(Option 'a#239)      <- applied form, HAS the argument
-#
-#   CLEAN (`None` first):
-#     'a#241  (the None arm)  ->  Option([Some, None])
-#     'f#249  (the result var) ->  Option([Some, None])                <- BOTH the variant form; consistent
-#
-# The `Equality(arm == resultVar)` is present in both and is honoured in both.
-# What differs is that in the dirty case the two sides settle on DIFFERENT
-# REPRESENTATIONS of `Option`: the bare `VariantType([Some, None])` that the
-# constructor path (HasConstructor / VariantSolver) produces, and the
-# `TypeApplication("Option", ['a])` everything else uses. Unifying those two
-# leaves the type ARGUMENT with no path between them, so `'a` is never tied to
-# the declaration's variable and the node reaches emit carrying a variable the
-# scheme does not quantify.
-#
-# This is B.1's family, one level up: B.1 deleted six DEDICATED CONTAINER NODES
-# because a producer picking one form made a pass given the other silently do
-# nothing. `Option`/`Result` still have exactly that duality — see the
-# `result_option_two_representations` note — and it is what these rows are.
-#
-# So the fix is a REPRESENTATION fix, not a solver-ordering or emit-preference
-# one: the constructor path must produce the applied form (carrying its type
-# arguments), or unification must merge the two forms argument-wise. The arm
-# ORDER only decides which representation happens to win, which is why swapping
-# the arms makes the row vanish.
-#
-# NARROWED AGAIN 2026-09-20, and the anomaly is now sharper than "two forms".
-#
-# `unifyVariants` is NEVER CALLED for this case. Instrumented it: the only Option
-# pairs reaching it come from the stdlib compile (Int/Str arguments), never from
-# the repro. So the two representations never actually meet in the unifier — which
-# also means a fix THERE cannot work. Unifying the two sides' `typeArgs` inside
-# `unifyVariants` was written, measured, and reverted: it fires on real stdlib
-# pairs but changes these rows not at all.
-#
-# What that leaves is the real anomaly. For `Option.flatten` the solved
-# substitution holds BOTH of these at once:
-#
-#     'c#245  ->  Option([Some, None])                 (the None arm)
-#     'd#246  ->  TypeApplication(Option 'a#239)       (the match result var)
-#
-# while the constraint set contains `Equality('c#245, 'd#246)` — dumped, present,
-# and the solve reports success. Two variables with an equality between them, each
-# separately bound to a DIFFERENT value, and nothing reconciled them. In a
-# consistent union-find that cannot happen: one should point at the other, or both
-# at a unified value.
-#
-# So the next question is not about representations at all — it is how the solver
-# can finish with an unhonoured Equality between two bound variables. Start at
-# `ConstraintSolver.solve`'s ordering (`HasConstructor` has priority 2) and at how
-# per-constraint substitutions are COMPOSED: a composition that overwrites rather
-# than unifies would produce exactly this.
-#
-# Note both values are mutually unifiable — `Option([Some,None])` expands from the
-# TypeApplication — so this is not a conflict the solver reported and recovered
-# from. It simply never compared them.
-#
-# What IS settled: the fix is not "pick the right one at emit" (measured twice,
-# below), not in the match (the arms and the result var are correctly one class),
-# and not in `unifyVariants`.
-#
-# Twelve-line repro, and the boundary as it stands, in
-# ConstructorInMatchArmElaborationTest.
-#
-# TRIED AND REVERTED at the constructor emit (neither is a fix — each trades one
-# row for five, and the 5 are map, map2, map_err, or_else and zip_with, whose
-# per-loc variable is the BOUND one, so the preference has to flip per
-# declaration and no local rule can do that):
-#   - prefer the context type whenever per-loc still holds a variable
-#   - the same, merged per ARGUMENT so payload-pinned arguments survive
-#
-# The fix is upstream: elaborate once, so one written type variable is one
-# TypeVar everywhere — phases A and B of the elaboration plan.
-#
-# RULED OUT ALONG THE WAY, so nobody re-checks:
-#   - not two reads of `acc.i` decoupling (the single-read variant behaved the same)
-#   - not a split in `fold_left`'s signature (init, f's acc, f's return and the
-#     result are ONE variable, measured)
-#   - not an inference failure (the UNANNOTATED form infers the right type)
-#   - not the emitted lambda's return type (preferring the declared return over a
-#     bare-variable body closed nothing and doubled `flatten`'s count)
-#   - not `callCalleeTypes`, a per-call record of the solved callee type: it
-#     reached only evidence-keyed callees, where rewriting their variables breaks
-#     dictionary lookup — 6 tests, reverted in 0ae8e2bc9
-#   - not the match arms going unlinked: `generateMatch` DOES emit an Equality
-#     from every arm to the result var (ExprControlFlowConstraints), so the
-#     constraint side is right and the divergence is in the solve
+# RELATED, still open: `Substitution.compose` discards a conflicting binding
+# instead of unifying (194 sites, SubstitutionClobberGateTest).
 #
 # What the kinds mean:
 #   UNBOUND_TYPE_VAR  a node's type carries a variable bound by no enclosing
@@ -194,9 +70,6 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 3 rows over 964 declarations. (The paragraph that stood here quoted
-# 706/150/3 — the numbers from the 861-row state, left behind when the rows were
-# driven down. Kept accurate or deleted, never stale.)
-UNBOUND_TYPE_VAR	let:flatten
+# Counts: 2 rows over 964 declarations.
 UNBOUND_TYPE_VAR	let:intersperse
 UNTYPED_PARAM	let:intersperse

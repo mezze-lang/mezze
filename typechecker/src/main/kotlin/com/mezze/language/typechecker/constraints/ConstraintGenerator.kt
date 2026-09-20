@@ -250,6 +250,65 @@ class ConstraintGenerator(
                             // The bug is only that a bare variant field stays `'a`;
                             // solely HasConstructor pins it to its declared alias, so
                             // that is all we propagate.
+                            // PLUS the EQUALITIES. This is what ties a declaration's
+                            // ANNOTATION to its inferred body: `bindLet` emits
+                            // `Equality(bodyType, annotatedType)`, the per-binding
+                            // solve honours it, and then — before this — the binding
+                            // it produced was dropped on the floor with the rest of
+                            // the solve. The annotation's variable and the body's
+                            // stayed two unrelated ROOTS in the substitution emit
+                            // reads, so a node stamped from one carried a variable the
+                            // declaration's scheme (quantified from the other) does not
+                            // bind. That is the `flatten` / `intersperse` elaboration
+                            // rows: measured, `'a#239 -> 'e#247` existed in the
+                            // per-binding solve and was absent from the module
+                            // substitution, where both were roots.
+                            // Feed this binding's WHOLE solve into the shared
+                            // perBindingSubstitution.
+                            //
+                            // It used to propagate only the HasConstructor subset,
+                            // re-solved on its own. Everything else the per-binding
+                            // solve learned was computed, used locally to type this
+                            // binding, and then dropped — including the EQUALITY that
+                            // ties a declaration's ANNOTATION to its inferred body.
+                            // The annotation's variable and the body's therefore
+                            // stayed two unrelated ROOTS in the substitution emit
+                            // reads, so a node stamped from one carried a variable the
+                            // scheme (quantified from the other) does not bind.
+                            //
+                            // Measured on `Option.flatten`: the per-binding solve held
+                            // `'a#239 -> 'e#247`, the module substitution did not, and
+                            // at emit the node read `'a` while the declaration read
+                            // `'e`. Propagating the solve makes both read `'e#247` —
+                            // and closes the last three rows of the elaboration
+                            // baseline (`flatten` x2, `intersperse`).
+                            //
+                            // Re-solving a FILTERED subset cannot do this, which is
+                            // why the old shape could not: a fresh solve mints fresh
+                            // variables, so what it propagates is a new answer rather
+                            // than the one this binding was actually typed with.
+                            //
+                            // `compose` keeps the receiver on overlap, so a later
+                            // binding's solve does not overwrite an earlier one's, and
+                            // TypeChecker's `solveResult.substitution.compose(...)`
+                            // keeps the module solve authoritative over all of it.
+                            // Only the bindings for the variables the DECLARATION
+                            // ITSELF names. That is the annotation-to-body link and
+                            // nothing else: propagating the whole solve carries this
+                            // binding's private constraint resolution into the module
+                            // substitution, which reopens records that must print
+                            // closed (RecordInferenceOpenClosedTest) and — worse —
+                            // makes an unsatisfied dependent ability constraint look
+                            // satisfied (RecursiveAbilityConstraintTest). Both
+                            // measured.
+                            // The VARIANT (HasConstructor) resolution, re-solved on
+                            // its own. This is what pins a bare variant field to its
+                            // declared alias — `let order = { status = Queued }`
+                            // hovering as `Status` rather than `'a`
+                            // (HoverMatchAndAliasTest). NOT HasField: that governs
+                            // record OPENNESS, and merging its per-binding solve
+                            // reopens records that must print closed (a `from_json`
+                            // decode target — RecordInferenceOpenClosedTest).
                             val variantBindingConstraints = allBindingConstraints.filter {
                                 it is Constraint.HasConstructor
                             }
@@ -258,6 +317,46 @@ class ConstraintGenerator(
                                 if (variantSolve is ConstraintSolver.SolveResult.Success) {
                                     perBindingSubstitution =
                                         variantSolve.substitution.compose(perBindingSubstitution)
+                                }
+                            }
+
+                            // Plus the bindings for the variables the DECLARATION
+                            // ITSELF names.
+                            //
+                            // `bindLet` emits `Equality(bodyType, annotatedType)` and
+                            // the per-binding solve honours it — but that solve was
+                            // then dropped, so the annotation's variables and the
+                            // body's stayed two unrelated ROOTS in the substitution
+                            // emit reads. A node stamped from one carried a variable
+                            // the scheme, quantified from the other, does not bind:
+                            // the `Option.flatten` / `Result.flatten` elaboration
+                            // rows. Measured, the solve held `'a#239 -> 'e#247` and
+                            // the module substitution did not.
+                            //
+                            // Restricted to the ANNOTATION's variables on purpose.
+                            // Propagating the whole solve also closes these rows, and
+                            // carries this binding's private constraint resolution
+                            // with it: records that must print closed reopen
+                            // (RecordInferenceOpenClosedTest) and an unsatisfied
+                            // dependent ability constraint starts looking satisfied
+                            // (RecursiveAbilityConstraintTest). Both measured. A
+                            // variable the declaration NAMES has to mean the same
+                            // thing everywhere; one internal to its solve does not.
+                            //
+                            // Re-solving a filtered subset instead does not work and
+                            // is not equivalent: HasConstructor mints fresh variables
+                            // through the declared variant's type params, so what it
+                            // propagates is a new answer rather than this binding's.
+                            // Equalities alone, re-solved, close nothing — also
+                            // measured.
+                            val declaredVars = preConvertedAnnotationType
+                                ?.let { com.mezze.language.ast.solving.collectFreeTypeVars(it) }
+                                .orEmpty()
+                            if (declaredVars.isNotEmpty()) {
+                                val declaredOnly = substitution.mappings.filterKeys { it in declaredVars }
+                                if (declaredOnly.isNotEmpty()) {
+                                    perBindingSubstitution =
+                                        Substitution(mappings = declaredOnly).compose(perBindingSubstitution)
                                 }
                             }
 
