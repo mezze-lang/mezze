@@ -39,6 +39,30 @@
 # artifact rather than a property of the code: swapping the two arms of
 # Option.flatten so the bare constructor comes FIRST makes the row disappear.
 #
+# NARROWED FURTHER (2026-09-20), and this is the statement to act on. Traced the
+# whole chain for the repro and everything on the way is CORRECT:
+#   - `generateVariantConstruction` gives `None` a fresh var + a HasConstructor,
+#     and `VariantSolver` instantiates the declaration's params with fresh vars —
+#     so the node's variable is not the type declaration's leaking out.
+#   - `TypeAnnotationConverter` threads ONE `typeVarCache` through a whole
+#     annotation, so a single written `'a` is one variable across params and
+#     return. The "annotation converted twice" shape is NOT what this is.
+#   - `generateMatch` emits `Equality(arm, resultVar)` for EVERY arm, and the
+#     solve honours it: for `Option.flatten` the arms and `resultVar` all end up
+#     in one class (`'c#245 -> Option 'a`).
+#
+# What is NOT in that class is the DECLARED RETURN. At emit the pushed context
+# (the declaration's own return type, substituted) reads `Option 'f583` while the
+# match result reads `Option 'a` — two live roots, neither bound to the other. So
+# the body's match result and the type the declaration promises were never
+# unified; they were only checked against each other. Whichever of the two a node
+# happens to be stamped from decides whether the gate sees it as bound, and that
+# is what the arm order changes.
+#
+# So the fix is not "pick the right one at emit" (measured twice, below) and not
+# in the match at all — it is that a declaration's annotated type and its
+# inferred body must come out of ONE solve sharing one set of variables.
+#
 # Twelve-line repro, and the boundary as it stands, in
 # ConstructorInMatchArmElaborationTest.
 #
