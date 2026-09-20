@@ -294,6 +294,17 @@ object TypeAnnotationConverter {
         // Resolve a declared type's content hash so faithful TypeApplications carry
         // real nominal identity (Declared), never Named.
         resolveTypeHash: (String) -> com.mezze.language.typedast.Hash? = { null },
+        // WHICH ability a `with <Name> 'a` names, in the MODULE being converted.
+        //
+        // The default is the generated stdlib table, which maps a NAME to a fixed
+        // hash and cannot see a local declaration. A module that declares its own
+        // `ability Ord` therefore had its annotation stamped with the STDLIB's Ord
+        // while the inferred side carried the local one — one ability, two
+        // identities, in a single comparison. A caller holding a registry should
+        // pass it, so the local declaration shadows the prelude as it does
+        // everywhere else.
+        resolveAbilityHash: (String) -> com.mezze.language.typedast.Hash? =
+            { WellKnownHashConstants.resolveAbilityHash(it) },
     ): MezzeType {
         return when (annotation) {
             is ParsedNamedType -> {
@@ -302,7 +313,7 @@ object TypeAnnotationConverter {
                     resolveTypeAlias(annotation.name)?.let { (aliased, _) ->
                         recursionGuard.add(annotation.name)
                         try {
-                            return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
+                            return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash)
                         } finally { recursionGuard.remove(annotation.name) }
                     }
                 }
@@ -327,16 +338,16 @@ object TypeAnnotationConverter {
                     annotation.abilityConstraints.map { c ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) },
-                            abilityHash = WellKnownHashConstants.resolveAbilityHash(c.abilityName)
+                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash) },
+                            abilityHash = resolveAbilityHash(c.abilityName)
                         )
                     }
                 } else {
                     emptyList()
                 }
                 MezzeType.FunctionType(
-                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash),
-                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash),
+                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash),
+                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash),
                     effects = effectRow,
                     abilityConstraints = abilityConstraints
                 )
@@ -379,7 +390,7 @@ object TypeAnnotationConverter {
                     val ctorIdentity = TypeIdentity.derive(annotation.constructor, ctorHash, allowBuiltin = true)
                     MezzeType.TypeApplication(
                         annotation.constructor,
-                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) },
+                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash) },
                         identity = ctorIdentity
                     )
                 } else {

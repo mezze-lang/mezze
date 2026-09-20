@@ -396,6 +396,11 @@ class TypeValidator(
             TypeAnnotationConverter.convert(
                 parsedAnnotation,
                 resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+                // THIS module's abilities, so a local `ability Ord` shadows the
+                // prelude's as it does everywhere else. Without it the annotation
+                // was stamped from the generated stdlib table and compared against
+                // an inferred side carrying the local declaration.
+                resolveAbilityHash = { name -> registry.resolveAbilityHash(name) },
                 resolveTypeAlias = { name ->
                     registry.lookupType(name)?.let { d ->
                         com.mezze.language.typechecker.context.ContextBuilder
@@ -541,39 +546,40 @@ class TypeValidator(
     }
 
     /**
-     * The two constraint lists demand the same abilities, BY NAME.
+     * The two constraint lists demand the same abilities — by DECLARATION, not by
+     * spelling.
      *
-     * Hash-keying this was re-tried after BUG 24 carried ability identity end to
-     * end — the two `AnnotationValidator` sites DO key on the hash now — and it
-     * still cannot be done here, for a reason worth recording rather than
-     * rediscovering.
+     * Keyed on the declaration hash when both sides carry one, on the name only
+     * when either does not. Matching is PAIRWISE and not via a single key: a
+     * constraint carrying a hash and its counterpart without one would produce
+     * different keys (`hash` vs `name`) for the same ability.
      *
-     * With pairwise hash matching (equal hashes, or equal names when either side
-     * lacks one), four tests fail, and the diagnostic says why: the SAME ability
-     * arrives on the two sides with DIFFERENT declaration hashes —
+     * Hash-keying this failed for a long time, and the failure was real. Two
+     * separate defects had to be fixed first:
+     *   - BUG 24: identity was dropped at generalization and re-resolved by
+     *     spelling at the call site;
+     *   - the annotated side was converted with the GENERATED stdlib name->hash
+     *     table, which cannot see a local declaration, so a module declaring its
+     *     own `ability Ord` had its annotation stamped with the STDLIB's Ord while
+     *     the inferred side carried the local one. `TypeValidator` now passes the
+     *     module's registry as the converter's ability resolver.
      *
-     *   only in c1: Ord/ab719864ba   vs c2=[Ord/a3cf063944, Same/d6ee318367]
-     *   only in c2: Ord/a3cf063944   vs c1=[Ord/ab719864ba]
-     *
-     * (MethodLevelConstraintPropagationTest, AbilityValidationTest). One `Ord`,
-     * two hashes, inside a single comparison. The name check passes because it
-     * cannot see the difference; a hash check must reject it. So the blocker is
-     * not this comparison — it is that something upstream is resolving `Ord` to
-     * two different declarations, and THAT is the thing to find. Until then,
-     * keying here would reject programs that are fine.
-     *
-     * Do NOT "fix" this by falling back to the name when the hashes differ: that
-     * is the collision BUG 24 closed, reopened.
-     *
-     * A first, cheap step for whoever picks it up: dump both declarations behind
-     * those two hashes. If one is the stdlib `Ord` and the other a test-local
-     * ability of the same name, this is BUG 24's shape inside one program.
+     * `Inspect` is excluded on both sides: it is derived for everything, so its
+     * presence says nothing about whether the two lists demand the same abilities.
      */
     private fun abilityNamesMatch(
         c1: List<MezzeType.FunctionAbilityConstraint>,
         c2: List<MezzeType.FunctionAbilityConstraint>
-    ): Boolean = c1.mapNotNullTo(mutableSetOf()) { it.abilityName.takeIf { n -> n != "Inspect" } } ==
-                 c2.mapNotNullTo(mutableSetOf()) { it.abilityName.takeIf { n -> n != "Inspect" } }
+    ): Boolean {
+        fun same(a: MezzeType.FunctionAbilityConstraint, b: MezzeType.FunctionAbilityConstraint): Boolean {
+            val ah = a.abilityHash
+            val bh = b.abilityHash
+            return if (ah != null && bh != null) ah == bh else a.abilityName == b.abilityName
+        }
+        val l1 = c1.filter { it.abilityName != "Inspect" }
+        val l2 = c2.filter { it.abilityName != "Inspect" }
+        return l1.all { a -> l2.any { b -> same(a, b) } } && l2.all { b -> l1.any { a -> same(a, b) } }
+    }
 
     private fun validateBuiltInAbilityUsage(type: MezzeType, context: String): List<ValidationError> {
         if (type !is MezzeType.VariantType) return emptyList()
