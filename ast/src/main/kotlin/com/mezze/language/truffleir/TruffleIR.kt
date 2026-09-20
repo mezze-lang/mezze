@@ -55,6 +55,36 @@ data class FileTable(
 )
 
 
+/**
+ * A body's SHAPE — what it computes — with the parts that only say where it came
+ * from removed.
+ *
+ * `NodeIR` equality includes `SourceInfo`, so two emissions of the same code at
+ * different lines compare unequal while being the same function. Anything asking
+ * "are these the same body?" means this, not raw equality: `NewtypeErasureIRTest`
+ * had already written it privately, and the dedupe-collision check was comparing
+ * raw bodies and counting line numbers as semantic differences.
+ *
+ * Rendered rather than structural: `NodeIR` is a wide sealed hierarchy and a
+ * hand-written walk would silently stop covering it as nodes are added, which is
+ * the failure mode this is meant to catch.
+ */
+fun NodeIR.shapeKey(): String = toString()
+    .replace(Regex("SourceInfo\\([^)]*\\)"), "SRC")
+    .replace(Regex("contentHash=[0-9a-f]+\\.\\.\\.,\\s*"), "")
+
+/**
+ * A whole function's shape: its body PLUS the interface that body is compiled
+ * against. Two functions with identical bodies but different capture or parameter
+ * lists are different functions — a dedupe keyed on the body alone would keep one
+ * and silently discard the other.
+ *
+ * `name` and `qualifiedName` are excluded on purpose: they are labels, and the
+ * same function reached by two names is still one function.
+ */
+fun FunctionIR.shapeKey(): String =
+    "$paramNames|$paramSlots|$captureNames|$captureSlots|$localSlots|${body.shapeKey()}"
+
 @Serializable
 data class FunctionIR(
     val hash: Hash,

@@ -1346,8 +1346,12 @@ class TypedASTCompiler(
                 // first-occurrence-wins then discards a body some call site needed.
                 // Off by default — comparing whole IR bodies is not free — and
                 // switched on by `DedupeCollisionGateTest`, which holds the count.
+                // The whole function's shape, not just its body: two functions with
+                // the same body but different CAPTURE lists are different functions,
+                // and the dedupe would keep one and discard the other. Comparing
+                // bodies alone left that unguarded.
                 val kept = keptByHash[fn.hash]
-                if (kept != null && kept.body != fn.body) {
+                if (kept != null && kept.shapeKey() != fn.shapeKey()) {
                     dedupeCollisions.add(fn.hash.hex)
                 }
             }
@@ -3964,15 +3968,23 @@ class TypedASTCompiler(
         b.append("spec_lambda")
         b.append(base.hex)
         if (salt != null) b.append(salt.hex)
-        // The expr hash is type- and environment-blind: textually identical
-        // comparator closures in different parents capture their `__dict_<m>` from
-        // DIFFERENT parent frame slots (is_sorted's dict sits at slot 1, min_by's at
-        // slot 2). Without folding the capture layout in, all copies collide onto
-        // one registry entry and last-registration-wins executes the wrong slots —
-        // the #106 collision, environment flavor. See SeqKeyOrdTest.
-        for ((name, slot) in dictCaptures) {
+        // The expr hash is type-blind, so the capture LIST has to be folded in:
+        // two textually identical comparators that capture different dicts are
+        // different functions, and without this they collide onto one registry
+        // entry and last-registration-wins runs the wrong one — the #106 collision,
+        // environment flavor. See SeqKeyOrdTest.
+        //
+        // The names, NOT the parent frame slot they are read from. The slot is where
+        // the PARENT keeps the dict; it appears in the parent's MakeLambda capture
+        // list, never in this lambda's body or its own capture names. Folding it in
+        // gave one lambda several identities for a difference it does not contain —
+        // over-separation, and the opposite of the stated rule that identity comes
+        // from what the lambda IS. Measured on removal: zero change across the
+        // interpreter suite (6242 tests), the typechecker suite, SeqKeyOrdTest which
+        // is the test the slot was added for, and DedupeCollisionGateTest, which
+        // would fail if two differing functions started sharing a hash.
+        for ((name, _) in dictCaptures) {
             b.append(name)
-            b.append(slot.toString())
         }
         return Hash(b.build().toFullHexString())
     }
