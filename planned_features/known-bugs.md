@@ -2194,6 +2194,45 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   giving them to mono would make it match more eagerly and seed wrong
   specializations. Needs its own pass with targeted tests per arm.
 
+- **BUG 24 (new, SOUNDNESS, OPEN) — two same-named abilities in different modules
+  are one ability.** `show_a` and `show_b` each declare `ability Show for 'a`.
+  They are different abilities: implementing one says nothing about the other. A
+  value implementing `show_b::Show` discharges a demand for `show_a::Show`, with
+  no diagnostic, and the call then dispatches to an operation whose declaration
+  the caller has never seen. This is BUG 9's shape (same operation name, two
+  abilities) one level up: same ABILITY name, two modules.
+
+  Traced with both hashes in hand. `show_a::Show` (render -> Str) hashes to
+  `56e38553`, `show_b::Show` (render -> Int) to `a070db73`; `show_b`'s impl is
+  correctly tagged `a070db73`, but `use_a`'s demand — declared in `show_a`, so
+  `56e38553` — ARRIVES as `a070db73`. The demand is wrong before any lookup runs.
+
+  Root cause: `DeclarationRegistry` keys abilities BY NAME (`abilitiesByName`).
+  Importing two same-named abilities keeps one, and `resolveAbilityHash("Show")`
+  answers with whichever was registered last. The two declarations have collapsed
+  into one entry before anything compares them — which is why every attempt to fix
+  the COMPARISONS changed nothing. Re-keying the registry by declaration hash, with
+  the name as a per-module view, is the fix; it is the sibling of the type-identity
+  work, and a refactor rather than a patch.
+
+  Do NOT re-try these; each was measured and reverted, with its failure column
+  recorded in the code:
+  - hash-keying the three name comparisons (`AnnotationValidator` x2,
+    `TypeValidator`) — 10+ ability-annotation tests fail, because an annotation's
+    constraints and the inferred usages derive their hashes by different routes and
+    one ability carries two;
+  - restricting the impl lookup to the hash channel, or to hash plus impls carrying
+    no hash of their own — both break `Default.default` at `Int` and at `Bool`;
+  - making the hash answer final in `canDeriveOrHasImpl` — same two;
+  - pinning each imported impl's ability identity in its own module — produces
+    hashes that disagree with the ones demands carry, the same defect one level down.
+
+  What DID land: `checkAbilityImplementation` held an inline duplicate of
+  `abilityImpls`'s lookup that had drifted, so fixes to the helper never ran on the
+  path that decides discharge. It is now the one helper.
+  `AbilityIdentityCrossModuleTest` carries the repro, two live properties, and the
+  diagnosis.
+
 Guarantee after Track 2: every ability use is resolved to one instance or a
 dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a
 gap is a compile error, and the runtime never decides equality/ordering/hashing
