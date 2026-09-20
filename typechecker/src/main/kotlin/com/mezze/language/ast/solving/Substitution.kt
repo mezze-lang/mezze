@@ -363,7 +363,27 @@ data class Substitution(
 
     // s1's mappings take precedence — we DON'T apply this to other's values because
     // that would bake in intermediate results (e.g. partial variant fields).
+    //
+    // "Take precedence" hides a real question. When both sides bind the SAME
+    // variable to DIFFERENT values, the loser is discarded and the two are never
+    // unified — a choice between two answers rather than a union of information,
+    // with nothing checking they agreed. Measured: 245 such collisions in one
+    // small program's solve, 194 distinct variables across the stdlib compile.
+    //
+    // Most look harmless (`Bool([True, False])` replaced by `BoolType` — one type
+    // in two representations, which is itself the duality behind the remaining
+    // elaboration rows), but "mostly harmless" is not a property anything here
+    // enforces. Bounded by SubstitutionClobberGateTest rather than changed:
+    // unification's most central operation deserves its own pass, not a drive-by.
     fun compose(other: Substitution): Substitution {
+        if (SubstitutionClobbers.recording) {
+            for ((v, newValue) in mappings) {
+                val previous = other.mappings[v]
+                if (previous != null && previous != newValue) {
+                    SubstitutionClobbers.seen.add(v.name + "#" + v.id)
+                }
+            }
+        }
         return Substitution(
             mappings = other.mappings + mappings,
             rowVarMappings = other.rowVarMappings + rowVarMappings,
