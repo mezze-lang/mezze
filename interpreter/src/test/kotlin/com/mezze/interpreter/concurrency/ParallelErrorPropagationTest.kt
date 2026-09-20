@@ -364,7 +364,6 @@ class ParallelErrorPropagationTest {
     // Concurrent Group Operations
     // =============================================================================
 
-    @org.junit.jupiter.api.Disabled("Typechecker inference bug — tracked as #174 (NestedResultAliasInferenceTest reproducer)")
     @Test
     fun `test concurrent group operations`() {
         val code = """
@@ -396,7 +395,7 @@ class ParallelErrorPropagationTest {
             seq::fold {
                 xs = groups,
                 init = 0,
-                f = { acc, g } -> match g is
+                f = { acc, x } -> match x is
                     Ok { val } -> acc + sum_arr { arr = val }
                     Err { error = _ } -> acc
             }

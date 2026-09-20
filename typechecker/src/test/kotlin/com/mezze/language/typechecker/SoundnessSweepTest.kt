@@ -315,9 +315,10 @@ class SoundnessSweepTest {
      * carrying a residual effect ROW), the residual concrete effect on the return
      * row is never validated against "the entry must discharge all effects".
      *
-     * This test is @Disabled because asserting the CLI strict-top-level entry rule
-     * from the typechecker unit is out of scope; the fix (reject a concrete
-     * residual effect on the entry decl's function-type row) is a separate ticket.
+     * This test is NOT disabled — it is RE-SCOPED, and the sentence that stood here
+     * claiming it was `@Disabled` was stale. Entry runnability is a CLI rule
+     * (EntryPointCheck), so the typechecker unit asserts what the typechecker
+     * decides: this program is well-typed. EntryPointCheckTest covers the rejection.
      */
     // Entry runnability is a CLI rule now (EntryPointCheck): the TYPECHECKER
     // accepts this — `main : {} -> Int <Oracle, *>` is well-typed. The CLI

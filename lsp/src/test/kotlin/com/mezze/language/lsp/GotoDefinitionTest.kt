@@ -200,7 +200,7 @@ class GotoDefinitionTest {
     // ~/.mezze/bin/mez and against real stdlib symbols (e.g. cmd-click on
     // `println` in a workspace project) — see the cmd-line repro under
     // /tmp/gotodef_repro for reference.
-    @org.junit.jupiter.api.Disabled("requires stdlib on test classpath")
+    @org.junit.jupiter.api.Disabled("requires stdlib on test classpath — VERIFIED still blocking 2026-09-20: enabling it fails in the test JVM")
     @Test
     fun `cmd-click on cross-module import lands in the other module's file`() {
         val ws = mkWorkspace(
