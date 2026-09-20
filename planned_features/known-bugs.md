@@ -1138,7 +1138,7 @@ runtime's primitive fallback.
 
 ---
 
-## BUG 6 — Types are RECONSTRUCTED, not carried; instances decided by shape, name, or Java
+## BUG 6 — CLOSED as a class: types are CARRIED, and instances decided by evidence
 
 **This is the class BUG 1 and the `.size {}` crash are instances of.** Landed
 work on `feat/soundness` (`1c8ce2802` on main, `8270986b2` on the branch)
@@ -1159,14 +1159,43 @@ into a compile error.
   compiled UNTYPED, so every `==`/`<` inside fell to the structural default.
 - `Result 'a 'e` could hold only ONE `__dict_eq` (dicts keyed by method NAME).
 - `impl Eq` on a record that derives Eq was silently accepted as an override.
-- OPEN: ~50 collection natives still compare/order elements structurally
-  (`interpreter/src/test/resources/native-structural-compare-allowlist.txt`);
-  `SortedSet`/`SortedMap` order every non-primitive as EQUAL
-  (`SortedSetNatives.compareElements` returns 0 → a sorted set of records
-  collapses to one element); `Map`/`Set` hash keys with Java `hashCode` and
-  there is no `Hash` ability.
+- CLOSED 2026-09-20. The allowlist
+  (`interpreter/src/test/resources/native-structural-compare-allowlist.txt`) is
+  EMPTY, down from ~50. `SortedSet`/`SortedMap` carry their comparator from
+  construction (T1.3). There IS a `Hash` ability and a hand-written
+  `impl Hash` is honoured — verified with a newtype whose `Eq` and `Hash` both
+  compare `mod 10`.
 
-### Root cause (five diseases, one class)
+  The last entry was `SortedMapNatives.compare`, and it hid two defects. Its
+  `impl Ord for SortedMap 'k 'v` declared `with Ord 'k, Ord 'v` and used only
+  `'k`: the VALUES were ordered with the KEY's comparator, so a value type's own
+  `Ord` was silently ignored. And `compareMaps` walked
+  `getKeysInternal().length` — the BACKING ARRAY's capacity, not the entry count
+  — so it compared pairs of nulls past the end, and its final length compare
+  asked which CAPACITY was larger, making a one-entry and a three-entry map
+  answer EQUAL. Both are fixed and pinned by `SortedMapValueOrdTest`. A dead
+  private `compare(Object, Object)` that ordered records by
+  `System.identityHashCode` — wrong and unstable across runs — was deleted with
+  them; nothing called it.
+
+### Status of the five diseases (all settled; remaining work is tracked, not here)
+
+1. Types reconstructed → the elaboration baseline is 861 rows → 3. The
+   remainder is `intersperse` and `flatten`, tracked separately.
+2. Two representations per type → B.1 DELETED all six dedicated container
+   nodes; a builtin container has exactly one form.
+3. Dictionaries keyed by method name → now per (ability hash, type var).
+4. Implicit instances → derived Eq is a real impl; Inspect is the one freebie
+   a newtype gets, which is the owner's rule, not a gap.
+5. Duplicated logic → task F merged the derive predicate, the substitutions and
+   `typeMatchesTarget`.
+
+Two known soundness risks that outlived this section are tracked on their own:
+ability constraints compared by NAME rather than hash (AnnotationValidator,
+TypeValidator), and `saltedLambdaHash` being type-blind so the dedupe can
+discard a body a call site needed.
+
+### Root cause, as originally diagnosed (five diseases, one class)
 
 1. **Types reconstructed, not carried.** The solver produces a substitution +
    side tables keyed by `Loc` (`matchCaseBindings`, `constraintResults[name]`);

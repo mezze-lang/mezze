@@ -122,28 +122,71 @@ public final class SortedMapNatives {
     }
 
     /**
-     * Lexicographic comparison of two sorted maps (by key order, then value order).
-     * Returns -1, 0, or 1.
+     * Lexicographic comparison of two sorted maps: KEYS by the map's own ordering,
+     * which it carries from construction, and VALUES by the VALUE'S OWN `cmp`,
+     * threaded in.
+     *
+     * The values used to be compared with `order` — the KEY's comparator. That is
+     * wrong twice: the values are not ordered by the key's `Ord`, and the value's
+     * own `Ord` was never consulted, so a value type with a hand-written ordering
+     * was silently ignored. The `impl Ord for SortedMap 'k 'v` above it has
+     * declared `with Ord 'k, Ord 'v` the whole time; only `'k` was ever used.
+     * Same shape as BUG 21, and as the `equals` directly above this.
      */
     @TruffleBoundary
-    public static long compareMaps(MezzeSortedMap map1, MezzeSortedMap map2) {
+    public static long compareMaps(MezzeSortedMap map1, MezzeSortedMap map2,
+                                   MezzeFunction cmpFn,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var order = map1.comparator();
         Object[] keys1 = map1.getKeysInternal();
         Object[] keys2 = map2.getKeysInternal();
         Object[] vals1 = map1.getValuesInternal();
         Object[] vals2 = map2.getValuesInternal();
-        int minLen = Math.min(keys1.length, keys2.length);
+        // map.size(), NOT keys.length. `getKeysInternal` hands back the BACKING
+        // ARRAY, whose capacity runs ahead of the entry count — a one-entry map
+        // returns an array of four. Walking `.length` compared three pairs of
+        // nulls past the end, and the length compare below asked which CAPACITY
+        // was larger, so two maps of different sizes could answer equal.
+        int size1 = map1.size();
+        int size2 = map2.size();
+        int minLen = Math.min(size1, size2);
         for (int i = 0; i < minLen; i++) {
             int cmp = order.compare(keys1[i], keys2[i]);
             if (cmp != 0) {
                 return cmp < 0 ? -1L : 1L;
             }
-            cmp = order.compare(vals1[i], vals2[i]);
-            if (cmp != 0) {
-                return cmp < 0 ? -1L : 1L;
+            long v = callCmp(cmpFn, vals1[i], vals2[i], callNode);
+            if (v != 0L) {
+                return v < 0 ? -1L : 1L;
             }
         }
-        return Integer.compare(keys1.length, keys2.length);
+        return Integer.compare(size1, size2);
+    }
+
+    /**
+     * Call a `{ a, b } -> Int` comparator through the RECORD path, closures first.
+     *
+     * Deliberately not `ScalarCall.prepare2`, whose scalar bypass passes arguments
+     * positionally to an inner CallTarget: a comparator body that dispatches TWICE
+     * (`if a < b … else if b < a …`, which is every `Ord` comparator the stdlib
+     * writes) then received a captured dictionary where a value belonged, and the
+     * Int `<` native was handed a function. `SeqNatives.cmpInt` has always used
+     * this shape and handles the same comparator correctly.
+     */
+    @TruffleBoundary
+    private static long callCmp(MezzeFunction cmpFn, Object a, Object b,
+                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closures = cmpFn.getClosureValues();
+        Object[] args = new Object[closures.length + 1];
+        System.arraycopy(closures, 0, args, 0, closures.length);
+        args[closures.length] = MezzeRecord.wrapAB(a, b);
+        Object r = callNode.call(cmpFn.getCallTarget(), args);
+        if (!(r instanceof Long l)) {
+            throw new RuntimeException("sorted-map value comparator returned "
+                + (r == null ? "null" : r.getClass().getName() + " (" + r + ")")
+                + " rather than an Int; closures=" + closures.length);
+        }
+        return l;
     }
 
     @TruffleBoundary
@@ -633,25 +676,9 @@ public final class SortedMapNatives {
         return result;
     }
 
-    // ==================== Comparison Helper ====================
-
-    @TruffleBoundary
-    @SuppressWarnings("unchecked")
-    private static int compare(Object a, Object b) {
-        if (a instanceof Long && b instanceof Long) {
-            return Long.compare((Long) a, (Long) b);
-        }
-        if (a instanceof Double && b instanceof Double) {
-            return Double.compare((Double) a, (Double) b);
-        }
-        if (a instanceof String && b instanceof String) {
-            return ((String) a).compareTo((String) b);
-        }
-        if (a instanceof Boolean && b instanceof Boolean) {
-            return Boolean.compare((Boolean) a, (Boolean) b);
-        }
-        // Fallback: compare hash codes
-        return Integer.compare(System.identityHashCode(a), System.identityHashCode(b));
-    }
-
+    // The private `compare(Object, Object)` that used to live here is DELETED. It
+    // ordered anything non-primitive by `System.identityHashCode`, so records
+    // sorted by JVM identity — wrong, and unstable across runs. Nothing called it:
+    // key ordering comes from the map's own comparator, captured at construction,
+    // and value ordering from the `cmp` threaded into `compareMaps`.
 }

@@ -1644,7 +1644,8 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.equals(getSortedMap(r, "m1"), getSortedMap(r, "m2"),
                 getFunction(r, "eq"), c));
         HANDLERS.put("__native_sorted_map_compare", (r, c) ->
-            SortedMapNatives.compareMaps(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
+            SortedMapNatives.compareMaps(getSortedMap(r, "m1"), getSortedMap(r, "m2"),
+                getFunction(r, "cmp"), c));
         HANDLERS.put("__native_sorted_map_min_entry", (r, c) ->
             SortedMapNatives.minEntry(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_max_entry", (r, c) ->

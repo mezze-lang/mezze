@@ -1,3 +1,8 @@
 # Natives that still decide equality/ordering of a Mezze value in Java.
-# May only SHRINK — see NativeEvidenceGateTest. Tasks T1.2 (containers) / T1.3 (sorted).
-SortedMapNatives.java:compare
+# May only SHRINK — see NativeEvidenceGateTest.
+#
+# EMPTY. The last entry was SortedMapNatives.java:compare, which ordered the
+# VALUES with the KEY's comparator and never consulted the value's own Ord — the
+# `impl Ord for SortedMap 'k 'v` had declared `with Ord 'k, Ord 'v` the whole
+# time and only ever used `'k`. It now threads the value's `cmp` the way every
+# other container threads its element's.

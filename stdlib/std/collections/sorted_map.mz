@@ -33,15 +33,21 @@ impl Eq for SortedMap 'k 'v where {
 }
 
 ## Lexicographic ordering for sorted maps.
+## Lexicographic comparison: KEYS by the map's own ordering, VALUES by the
+## VALUE's Ord, threaded in — the same split `sorted_map_equals_with_eq` uses.
+let sorted_map_compare_with_cmp
+  : { m1: SortedMap 'k 'v, m2: SortedMap 'k 'v, cmp: { a: 'v, b: 'v } -> Int } -> Int = { m1, m2, cmp } ->
+  __native_sorted_map_compare { m1 = m1, m2 = m2, cmp = cmp }
+
 impl Ord for SortedMap 'k 'v where {
   lt: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } ->
-    __native_sorted_map_compare { m1 = it, m2 = r } == (0 - 1),
+    sorted_map_compare_with_cmp { m1 = it, m2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == (0 - 1),
   le: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } ->
-    __native_sorted_map_compare { m1 = it, m2 = r } != 1,
+    sorted_map_compare_with_cmp { m1 = it, m2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != 1,
   gt: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } ->
-    __native_sorted_map_compare { m1 = it, m2 = r } == 1,
+    sorted_map_compare_with_cmp { m1 = it, m2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } == 1,
   ge: { it: SortedMap 'k 'v, r: SortedMap 'k 'v } with Ord 'k, Ord 'v -> Bool = { it, r } ->
-    __native_sorted_map_compare { m1 = it, m2 = r } != (0 - 1),
+    sorted_map_compare_with_cmp { m1 = it, m2 = r, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 } != (0 - 1),
 }
 
 ## Creates an empty sorted map.
