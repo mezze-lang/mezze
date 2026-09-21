@@ -966,6 +966,27 @@ class SyncCommand {
             return
         }
 
+        // A provider's `runtime_dir` is part of what it DECLARES, so sync
+        // materializes it for every provider on the graph — whether or not
+        // there is anything to install into it.
+        //
+        // It used to appear only as a side effect of npm/pip running, which
+        // needs a non-empty `packages`. So a project that opts in to plain
+        // ECMAScript with a bare `[polyglot.js]` — the documented way, and what
+        // `examples/polyglot_js` does — never got `.deps/node`, and the runtime
+        // still pointed GraalJS at it: EVERY eval failed, including `1 + 1`,
+        // with "Invalid CommonJS root folder". The declaration is the contract;
+        // honouring it is sync's job, not something the runtime should have to
+        // guess around.
+        for ((lang, prov) in providers) {
+            val dir = File(projectRoot, prov.runtimeDir).absoluteFile
+            if (!dir.isDirectory && !dir.mkdirs()) {
+                println("  ${Glyphs.ERROR} [polyglot.$lang]: could not create runtime_dir ${dir.absolutePath}")
+                failures.add("[polyglot.$lang]")
+            }
+        }
+        if (failures.isNotEmpty()) return
+
         // Only languages with a user-declared, non-empty `packages` list get invoked.
         val declared = collectDeclaredPackages(rootToml)
         if (declared.isEmpty()) return

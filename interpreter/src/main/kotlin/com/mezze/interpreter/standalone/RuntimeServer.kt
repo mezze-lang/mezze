@@ -315,15 +315,11 @@ object RuntimeServer {
         }
         if (enableJs) {
             contextBuilder.option("js.ecmascript-version", "2024")
-            // CommonJS require: prefer the user's explicit `node_modules`
-            // override; else auto-derive from the JS provider's
-            // `runtime_dir` under `.deps/mezze/*/Mezze.toml`. With
-            // mezze-js@0.2.1's `runtime_dir = .deps/node`, packages land
-            // at `.deps/node/node_modules/<pkg>/` and CommonJS require
-            // resolution walks up from `.deps/node` to find them.
-            val jsCwd = polyglot.jsNodeModules?.takeIf { it.isNotBlank() }
-                ?: com.mezze.interpreter.polyglot.PolyglotManifest
-                    .findProviderRuntimeDir(projectRoot, "js")
+            // CommonJS require: the user's explicit `node_modules` override,
+            // else the JS provider's `runtime_dir` — and only when that
+            // directory EXISTS. See PolyglotManifest.commonJsRoot.
+            val jsCwd = com.mezze.interpreter.polyglot.PolyglotManifest
+                .commonJsRoot(projectRoot, polyglot.jsNodeModules)
             if (jsCwd != null) {
                 contextBuilder.option("js.commonjs-require", "true")
                 contextBuilder.option("js.commonjs-require-cwd", jsCwd)

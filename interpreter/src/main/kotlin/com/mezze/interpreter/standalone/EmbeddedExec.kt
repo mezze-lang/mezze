@@ -452,15 +452,11 @@ object EmbeddedExec {
             // across GraalJS bumps. `latest` (the GraalJS default)
             // silently changes when users update the provider.
             contextBuilder.option("js.ecmascript-version", "2024")
-            // CommonJS require: prefer the user's explicit `node_modules`
-            // override; otherwise auto-derive from the JS provider's
-            // `runtime_dir` under `.deps/mezze/*/Mezze.toml` — with
-            // mezze-js@0.2.1's `runtime_dir = .deps/node`, packages land
-            // at `.deps/node/node_modules/<pkg>/` and require walking up
-            // from `.deps/node` finds them naturally.
-            val jsCwd = polyglot.jsNodeModules?.takeIf { it.isNotBlank() }
-                ?: com.mezze.interpreter.polyglot.PolyglotManifest
-                    .findProviderRuntimeDir(File("."), "js")
+            // CommonJS require: the user's explicit `node_modules` override,
+            // else the JS provider's `runtime_dir` — and only when that
+            // directory EXISTS. See PolyglotManifest.commonJsRoot.
+            val jsCwd = com.mezze.interpreter.polyglot.PolyglotManifest
+                .commonJsRoot(File("."), polyglot.jsNodeModules)
             if (jsCwd != null) {
                 contextBuilder.option("js.commonjs-require", "true")
                 contextBuilder.option("js.commonjs-require-cwd", jsCwd)

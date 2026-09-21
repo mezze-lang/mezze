@@ -143,6 +143,35 @@ object PolyglotManifest {
      * hand-write a path pointing at wherever the provider decided to
      * put them.
      */
+    /**
+     * The directory GraalJS should resolve `require(…)` from, or null when
+     * CommonJS support must stay OFF.
+     *
+     * Null when the directory DOES NOT EXIST — a backstop, not the mechanism.
+     * `mez sync` creates every provider's declared `runtime_dir`, so in a
+     * synced project it is there; this covers the project that was never
+     * synced, or whose `.deps` was removed by hand.
+     *
+     * The guarantee used to be neither: sync created `.deps/node` only as a
+     * side effect of npm running, which needs a non-empty `packages`, and the
+     * callers enabled `js.commonjs-require-cwd` on the declared path
+     * regardless. So a project opting in to plain ECMAScript with a bare
+     * `[polyglot.js]` had EVERY eval fail, including `1 + 1`:
+     *
+     *     Error: Invalid CommonJS root folder: <root>/.deps/node
+     *
+     * An explicit `node_modules` is checked the same way. If the user names a
+     * directory that is not there, `require` cannot work either way; the
+     * choice is whether that breaks one call or the whole context, and one
+     * call is strictly better.
+     */
+    fun commonJsRoot(projectRoot: File, explicitNodeModules: String?): String? {
+        val candidate = explicitNodeModules?.takeIf { it.isNotBlank() }
+            ?: findProviderRuntimeDir(projectRoot, "js")
+            ?: return null
+        return candidate.takeIf { File(it).isDirectory }
+    }
+
     fun findProviderRuntimeDir(projectRoot: File, language: String): String? {
         val depsDir = File(projectRoot, ".deps/mezze")
         if (!depsDir.isDirectory) return null
