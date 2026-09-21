@@ -237,7 +237,10 @@ object PipelineRunner {
         val namedEntry = if (entryHash != null) functions.find { it.hash == entryHash } else null
 
         val mainFn: com.mezze.language.truffleir.FunctionIR
-        val source: com.oracle.truffle.api.source.Source
+        // Nullable: a path with neither a registered buffer nor a readable
+        // file has no Source, and SourceHelper says so rather than handing back
+        // an empty one whose every line lookup fails further away.
+        val source: com.oracle.truffle.api.source.Source?
         val bodyNode: com.mezze.interpreter.nodes.MezzeNode
 
         // #374 — helper: compile a FunctionIR's body through BDSL, via the

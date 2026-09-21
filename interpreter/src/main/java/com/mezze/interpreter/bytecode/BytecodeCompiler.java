@@ -168,32 +168,19 @@ public final class BytecodeCompiler {
     private final MezzeLanguage language;
 
     /**
-     * #356 — Source cache keyed by file path. Materialising
-     * com.oracle.truffle.api.source.Source is IO-heavy (reads the file);
-     * cache so repeated compiles of fns from the same module share one.
+     * Resolve a Truffle Source for a FunctionIR's source file. Returns null on
+     * unreadable files.
+     *
+     * #356 — this used to build and cache its OWN Source, with the basename as
+     * name and always re-read from disk. That made a second Source object for a
+     * file this process already had one of: a breakpoint resolves against the
+     * Source a section was built from, so the BDSL path's sections were
+     * invisible to a breakpoint set through the AST path's Source, and an
+     * unsaved buffer registered via SourceHelper.register was silently ignored
+     * in favour of whatever was on disk. One registry now owns the answer.
      */
-    private final java.util.concurrent.ConcurrentHashMap<String, com.oracle.truffle.api.source.Source> sourceCache =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Resolve a Truffle Source for a FunctionIR's source file. Returns null on unreadable files. */
     private com.oracle.truffle.api.source.Source resolveSource(String path) {
-        if (path == null || path.isEmpty()) return null;
-        var cached = sourceCache.get(path);
-        if (cached != null) return cached;
-        try {
-            var f = new java.io.File(path);
-            if (!f.exists()) return null;
-            String text = new String(java.nio.file.Files.readAllBytes(f.toPath()),
-                                     java.nio.charset.StandardCharsets.UTF_8);
-            var src = com.oracle.truffle.api.source.Source
-                    .newBuilder("mezze", text, f.getName())
-                    .uri(f.toURI())
-                    .build();
-            sourceCache.putIfAbsent(path, src);
-            return src;
-        } catch (Exception e) {
-            return null;
-        }
+        return com.mezze.interpreter.runtime.SourceHelper.sourceFor(path);
     }
 
     /**
