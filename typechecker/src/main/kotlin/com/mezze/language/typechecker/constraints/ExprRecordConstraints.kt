@@ -525,6 +525,7 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
             context = "Field access ${expr.member}",
             loc = expr.loc,
             strictFieldCheck = isStrictFieldCheck,
+            methodCallee = context.memberAccessIsCallee,
         )
     )
 

@@ -269,16 +269,7 @@ class ConstraintGenerator(
                                 }
                             }
 
-                            val declaredVars = preConvertedAnnotationType
-                                ?.let { com.mezze.language.ast.solving.collectFreeTypeVars(it) }
-                                .orEmpty()
-                            if (declaredVars.isNotEmpty()) {
-                                val declaredOnly = substitution.mappings.filterKeys { it in declaredVars }
-                                if (declaredOnly.isNotEmpty()) {
-                                    perBindingSubstitution =
-                                        Substitution(mappings = declaredOnly).compose(perBindingSubstitution)
-                                }
-                            }
+
 
                             val letResult = bindLet(
                                 item = item,
@@ -292,6 +283,64 @@ class ConstraintGenerator(
                                 solver = solver,
                             )
                             val solvedBindingsWithEffects = letResult.solvedBindingsWithEffects
+
+                            // (2) EVERYTHING ELSE this solve learned, with the same
+                            //     row-closing `bindLet` applies to the binding's own
+                            //     type. Propagated AFTER `bindLet` so it uses the
+                            //     identical `mustBeOpenRowVars`.
+                            //
+                            //     Closing is what makes it safe. The raw solve holds
+                            //     the OPEN rows field access grew while inferring —
+                            //     `{ conds: [{ temp: Str, ... }], ... }` — and the
+                            //     binding closes them at finalization, so propagating
+                            //     the raw solve published the inference artifact and
+                            //     let it win: `from_json`'s target reopened and the
+                            //     codec refused to derive for a `...` record.
+                            //     Row-polymorphism the author wrote, or that
+                            //     `mustBeOpenRowVars` proved, is untouched — that is
+                            //     the carve-out `closeGeneratedRowVars` already owns.
+                            //     One EXCLUSION, and it is structural, not a list of
+                            //     names: a decode target. `from_json` returns
+                            //     `Result 'a DecodeError` where `'a` is inferred from
+                            //     the fields the program later reads, and that variable
+                            //     must stay BARE where emit reads it — codegen resolves
+                            //     each call's `.decode` dictionary per call site
+                            //     (DecodeTargetResolver), and a call node carrying the
+                            //     record instead of the variable wires the wrong
+                            //     decoder. Identified by the constraint's ABILITY HASH,
+                            //     so a user codec's own decode ability is covered and a
+                            //     user ability that merely has a `decode`-shaped op is
+                            //     not.
+                            val decodeTargetVars = result.abilityConstraints
+                                .filter {
+                                    val h = it.abilityHash ?: registry.resolveAbilityHash(it.abilityName)
+                                    WellKnownHashConstants.isDecodeFlavoredCodec(h) ||
+                                        WellKnownHashConstants.isDecodeEntryAbility(h)
+                                }
+                                .flatMap { c ->
+                                    c.typeArgs.flatMap {
+                                        com.mezze.language.ast.solving.collectFreeTypeVars(it)
+                                    } + c.typeVar
+                                }
+                                .toSet()
+
+                            //     A METHOD-grown receiver is held back for a
+                            //     sibling reason. A method call whose family has no
+                            //     representative signature and whose receiver is
+                            //     genuinely polymorphic is typed by growing the
+                            //     receiver into `{ to_str: {} -> 'a }`; the runtime
+                            //     dispatches on the value. That shape is the call's,
+                            //     not a record the program has.
+                            val closeOpen = solver.getMustBeOpenRowVars()
+                            perBindingSubstitution = Substitution(
+                                mappings = substitution.mappings
+                                    .filterKeys {
+                                        it !in decodeTargetVars && it !in solver.methodGrownReceiverVars
+                                    }
+                                    .mapValues { closeGeneratedRowVars(it.value, closeOpen) },
+                                rowVarMappings = substitution.rowVarMappings,
+                                recordRowMappings = substitution.recordRowMappings,
+                            ).compose(perBindingSubstitution)
 
                             // An obligation whose arguments came out CONCRETE and
                             // unsatisfied is an error, not something to carry on the

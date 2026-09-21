@@ -1075,7 +1075,18 @@ class ConstraintSolver(
         return ConstraintResult.Success(Substitution.empty)
     }
 
+    /**
+     * Receivers a METHOD call grew a row on — see [Constraint.HasField.methodCallee].
+     * The per-binding propagation leaves these alone: the shape types the call,
+     * but it is not a record the program has.
+     */
+    internal val methodGrownReceiverVars = mutableSetOf<TypeVar>()
+
     private fun solveHasField(constraint: Constraint.HasField, currentSubst: Substitution = Substitution.empty): ConstraintResult {
+        if (constraint.methodCallee) {
+            methodGrownReceiverVars.addAll(collectFreeTypeVars(constraint.recordType))
+            methodGrownReceiverVars.addAll(collectFreeTypeVars(currentSubst.apply(constraint.recordType)))
+        }
         if (constraint.completionOnly) {
             // Only a receiver that is ALREADY a concrete record with this field
             // can be completed here. Anything else is left alone: the per-binding

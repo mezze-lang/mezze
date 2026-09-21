@@ -8,33 +8,50 @@
 # Do NOT regenerate this file to make a build green. Every line is a place the
 # compiler is guessing, and adding one is a decision to allow another guess.
 #
-# WHAT IS LEFT: 2 rows, from 861. Both are `intersperse`, and the reason they are
-# still here is recorded below rather than unknown.
+# WHAT IS LEFT: NOTHING. 861 -> 0 over 964 declarations. Elaboration finishes
+# knowing every type. A line appearing here again is a regression, and the fix is
+# the gap it names, never this file.
 #
-# `Option.flatten` and `Result.flatten` are CLOSED. The cause was not where this
-# file spent a long time looking. `ConstraintGenerator` propagated only the
-# HasConstructor subset of each per-binding solve; everything else that solve
-# learned was used to type the binding and then DROPPED — including the EQUALITY
-# `bindLet` emits between a declaration's ANNOTATION and its inferred body. So the
-# annotation's variables and the body's stayed two unrelated ROOTS in the
-# substitution emit reads, and a node stamped from one carried a variable the
-# scheme — quantified from the other — does not bind.
+# HOW THE LAST ONES CLOSED, because the answer was not where this file spent a
+# long time looking.
 #
-# Measured on `Option.flatten`: the solve held `'a#239 -> 'e#247`, the module
-# substitution did not, and at emit the node read `'a` while the declaration read
-# `'e`. Propagating the bindings for the variables the DECLARATION NAMES makes both
-# read `'e`.
+# `ConstraintGenerator` propagated only the HasConstructor subset of each
+# per-binding solve; everything else that solve learned was used to type the
+# binding and then DROPPED — including the EQUALITY `bindLet` emits between a
+# declaration's ANNOTATION and its inferred body. So the annotation's variables
+# and the body's stayed two unrelated ROOTS in the substitution emit reads, and a
+# node stamped from one carried a variable the scheme — quantified from the
+# other — does not bind. Measured on `Option.flatten`: the solve held
+# `'a#239 -> 'e#247`, the module substitution did not, and at emit the node read
+# `'a` while the declaration read `'e`.
 #
-# WHY `intersperse` IS STILL HERE, and it is not for want of a fix. Its open
-# variable is the `fold_left` callback's `x` param, which no annotation names, so
-# the narrow rule does not reach it. Propagating the WHOLE solve closes it — and
-# MISCOMPILES: JsonDecodeExhaustiveTest decodes a Bool field as False where it must
-# be True. Three narrowings were measured and none accommodates the codec:
-#   - hold back bindings whose value carries an OPEN record row
-#   - hold back every RECORD-valued binding
-#   - hold back variables whose shape the binding is still determining via HasField
-# A wrong decode is worse than an open row here, so the broad version does not ship
-# until the codec interaction is understood. That is the whole remaining job.
+# Propagating the bindings for the variables the DECLARATION NAMES closed the two
+# `flatten` rows. It could not reach `intersperse`, whose open variable is the
+# `fold_left` callback's `x` param — no annotation names it. The WHOLE solve
+# reaches it, and propagating the whole solve is what ships now. Two things had to
+# be true first, and each was a real defect:
+#
+#  - The solve holds the OPEN rows field access grew while inferring
+#    (`{ conds: [{ temp: Str, ... }], ... }`) and the binding closes them at
+#    finalization. Propagating the raw solve published the inference artifact and
+#    let it win, so a `from_json` target reopened and the codec refused to derive
+#    for a `...` record. The propagated mappings now carry the same
+#    `closeGeneratedRowVars` the binding applies to its own type.
+#
+#  - `DecodeTargetResolver.structural` spelled every VariantType
+#    `t.javaClass.simpleName`. A Bool in VARIANT form spelled "VariantType" while
+#    a Bool in BoolType form spelled "Bool", so a `{ flag: Bool }` decode target
+#    matched no derived impl, its call site went unwired, and it ran the first
+#    decoder in scope — decoding `true` as `False`. In the other direction every
+#    variant spelled "VariantType", so two DIFFERENT variants compared EQUAL.
+#    Which of the two fired depended on which representation the solve settled on,
+#    which is why this looked like "the broad propagation miscompiles a codec".
+#
+# One EXCLUSION remains and it is structural: a decode target. `from_json` returns
+# `Result 'a DecodeError` where `'a` is inferred from the fields the program later
+# reads, and that variable must stay BARE where emit reads it — codegen resolves
+# each call's `.decode` dictionary per call site. Keyed on the constraint's
+# ABILITY HASH (decode-flavored or decode-entry), never on a name.
 #
 # WRONG EXPLANATIONS, ALL MEASURED — do not re-try:
 #   - re-solving a FILTERED subset instead of using the solve: HasConstructor mints
@@ -48,17 +65,23 @@
 #   - preferring the context type at the constructor emit, and the same merged
 #     per-argument: each closes flatten and opens FIVE (map, map2, map_err,
 #     or_else, zip_with)
+#   - holding back bindings whose value carries an open record row, every
+#     RECORD-valued binding, or variables the binding is still determining via
+#     HasField: three narrowings tried against the codec, none of them the cause
 #
 # The `Option` "two representations" reading was a symptom: with the two sides
 # unlinked, which representation each settled on decided what the gate saw — hence
 # the apparent dependence on match-arm order.
 #
-# FOUND BY THIS WORK, tracked separately:
-#   - `Substitution.compose` discards a conflicting binding instead of unifying
-#     (194 sites, SubstitutionClobberGateTest)
-#   - an ability operation's OWN `with` constraint generates NO obligation at the
-#     call site — pre-existing, and it was masked by a test whose premise had gone
-#     stale (RecursiveAbilityConstraintTest)
+# FOUND BY THIS WORK, fixed separately:
+#   - `Substitution.compose` discarded a conflicting binding instead of unifying
+#     (216 collisions, SubstitutionClobberGateTest)
+#   - an ability operation's OWN `with` constraint generated NO obligation at the
+#     call site — pre-existing, masked by a test whose premise had gone stale
+#     (RecursiveAbilityConstraintTest)
+#   - `TypeValidator` re-checked every ability constraint with a SECOND, drifted
+#     implementation that knows nothing about auto-derived codec impls, so a
+#     decode target the solver accepted was reported as having no `FromJson`
 #
 # What the kinds mean:
 #   UNBOUND_TYPE_VAR  a node's type carries a variable bound by no enclosing
@@ -72,6 +95,4 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 2 rows over 964 declarations.
-UNBOUND_TYPE_VAR	let:intersperse
-UNTYPED_PARAM	let:intersperse
+# Counts: 0 rows over 964 declarations.

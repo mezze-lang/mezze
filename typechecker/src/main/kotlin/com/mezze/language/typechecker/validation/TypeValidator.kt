@@ -29,7 +29,6 @@ class TypeValidator(
 ) {
     private val typeDeclarations: Map<String, ParsedTypeDecl> get() = registry.typeDeclarations
     private val effectDeclarations: Map<String, ParsedEffectDecl> get() = registry.effectDeclarations
-    private val abilityResolver = AbilityResolver(context, registry)
     private val effectValidator = EffectValidator(context)
     private val matchValidator = MatchValidator(typeDeclarations, registry)
     private val performValidator = PerformValidator(typeDeclarations, implDeclarations)
@@ -165,18 +164,17 @@ class TypeValidator(
 
         for (constraint in constraints) {
             when (constraint) {
-                is Constraint.AbilityRequired -> {
-                    if (BuiltInAbilities.isBuiltInAbility(constraint.abilityName)) continue
-                    val type = substitution.apply(MezzeType.VarType(constraint.typeVar))
-                    val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
-                    val result = abilityResolver.checkAbility(type, constraint.abilityName, resolvedTypeArgs, constraint.abilityHash)
-                    if (result is AbilityResolver.AbilityCheckResult.Unsatisfied) {
-                        errors.add(ValidationError.AbilityNotSatisfied(
-                            type = type, abilityName = constraint.abilityName,
-                            requiredBy = constraint.context, loc = constraint.loc
-                        ))
-                    }
-                }
+                // An ability constraint is NOT re-checked here. It used to be, by
+                // `AbilityResolver` — a second implementation of the same question
+                // that had drifted from the solver's: it knew nothing about
+                // auto-derived codec impls and nothing about the arity padding a
+                // multi-slot codec ability needs, so once a `from_json` target
+                // resolved to a concrete record it reported `{ nums: [Int] }
+                // doesn't support FromJson` for a program the solver had already
+                // accepted. The solver discharges these (V0402) and reports what
+                // fails; one answer, from the checker that has the derivation
+                // machinery. `AbilityResolver` had no other caller and is deleted.
+                is Constraint.AbilityRequired -> {}
 
                 is Constraint.HasConstructor -> {
                     val appliedType = substitution.apply(constraint.variantType)

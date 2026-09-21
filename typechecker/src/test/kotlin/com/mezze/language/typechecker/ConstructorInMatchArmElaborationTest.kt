@@ -85,19 +85,19 @@ class ConstructorInMatchArmElaborationTest {
     }
 
     /**
-     * The baseline's THIRD row, `intersperse`, reduced — the same root seen from
-     * the other side.
+     * The baseline's LAST rows, `intersperse`, reduced — the same root seen from
+     * the other side, and now closed too.
      *
-     * A polymorphic call inside a match arm does not tie its type variable to the
-     * enclosing scheme: `fold_left` over a list bound by the arm reports its
-     * callee, its call, and its callback's `x` param as open. Lift the identical
-     * fold OUT of the match and it is clean, which is what makes this the same
+     * A polymorphic call inside a match arm did not tie its type variable to the
+     * enclosing scheme: `fold_left` over a list bound by the arm reported its
+     * callee, its call, and its callback's `x` param as open. Lifting the
+     * identical fold OUT of the match was clean, which is what made this the same
      * defect as the constructor rows rather than something about `fold_left`.
      *
-     * Unlike the constructor case this is NOT order-dependent — either arm
-     * position reports it, and so does a simple `Some { val = rest }` binding in
-     * place of `intersperse`'s nested `{ head, tail }` one. The arm, not the
-     * pattern, is what breaks the tie.
+     * Unlike the constructor case it was NOT order-dependent — either arm position
+     * reported it, and so did a simple `Some { val = rest }` binding in place of
+     * `intersperse`'s nested `{ head, tail }` one. The arm, not the pattern, was
+     * what broke the tie.
      */
     @Test
     fun `a polymorphic call inside a match arm leaves its variable open`() {
@@ -120,10 +120,10 @@ class ConstructorInMatchArmElaborationTest {
                 f = { acc, x } -> cons { head = x, tail = cons { head = sep, tail = acc } },
               }
         """)
-        // STILL OPEN. `x` is the fold callback's param, which no annotation names.
-        // Propagating the whole per-binding solve closes it and miscompiles a codec
-        // decode — see the baseline header for the three narrowings that were tried.
-        assertEquals(2, inMatch, "the fold INSIDE a match arm (std/collections/list.mz:236)")
+        // CLOSED. `x` is the fold callback's param, which no annotation names, so
+        // the narrow "variables the declaration names" rule never reached it; the
+        // whole solve does.
+        assertEquals(0, inMatch, "the fold INSIDE a match arm (std/collections/list.mz:236)")
         assertEquals(0, lifted, "the SAME fold lifted out of the match")
     }
 

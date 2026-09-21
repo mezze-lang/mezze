@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.emit
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typedast.*
@@ -347,16 +348,43 @@ object DecodeTargetResolver {
         }
     }
 
+    /**
+     * One spelling per type, so two targets compare equal exactly when they are
+     * the same shape.
+     *
+     * A VariantType used to fall through to `t.javaClass.simpleName`, which is
+     * wrong in both directions at once. A Bool in its VARIANT form spelled
+     * "VariantType" while a Bool in its BoolType form spelled "Bool", so a
+     * `{ flag: Bool }` decode target matched no derived impl, its call site went
+     * unwired, and it ran the FIRST decoder in scope — `"{\"flag\":true}"`
+     * decoded as the default `False`. And in the other direction every variant
+     * spelled "VariantType", so `{ x: Color }` and `{ x: Status }` compared EQUAL
+     * and could select each other's decoder. Which of the two fired depended on
+     * which representation the solve happened to settle on.
+     */
     private fun structural(t: MezzeType): String = when (t) {
         is MezzeType.RecordType ->
             "{" + t.fields.toSortedMap().entries.joinToString(",") { "${it.key}:${structural(it.value)}" } + "}"
         is MezzeType.TypeApplication -> t.constructor + "(" + t.args.joinToString(",") { structural(it) } + ")"
+        is MezzeType.VariantType ->
+            // Bool is one type with two representations; both spell "Bool".
+            if (BuiltinTypes.isBoolVariant(t)) "Bool"
+            else "|" + t.constructors.toSortedMap().entries.joinToString(",") { (name, payload) ->
+                name + (payload?.let { ":" + structural(it) } ?: "")
+            } + (if (t.rowVar != null) ",..." else "") + "|"
+        // A newtype is NOMINAL: its declaration identity decides, not its shape.
+        is MezzeType.NewtypeType -> "newtype " + (t.identity.displayNameOrNull() ?: t.name) +
+            "(" + structural(t.wrappedType) + ")"
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
         is MezzeType.StringType -> "Str"
         is MezzeType.BoolType -> "Bool"
+        is MezzeType.CharType -> "Char"
+        is MezzeType.FracType -> "Frac"
+        is MezzeType.BytesType -> "Bytes"
         is MezzeType.VarType -> "?"
-        else -> t.javaClass.simpleName
+        is MezzeType.FunctionType -> "fn(" + structural(t.paramType) + "->" + structural(t.returnType) + ")"
+        is MezzeType.EffectRow -> "<row>"
     }
 
     private fun withChildren(e: TypedExpr, g: (TypedExpr) -> TypedExpr): TypedExpr = when (e) {

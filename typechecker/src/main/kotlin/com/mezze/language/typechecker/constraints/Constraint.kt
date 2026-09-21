@@ -139,6 +139,21 @@ sealed interface Constraint {
          * neither.
          */
         val completionOnly: Boolean = false,
+        /**
+         * This access is a CALL's function — `x.m {…}`, not a data-field read.
+         *
+         * A method call reaches the field path only when its candidate family is
+         * NON-homogeneous (`to_str` is `{it} -> Str` on six types and
+         * `{it} -> Result Str Str` on Bytes) AND the receiver is genuinely
+         * polymorphic, so there is no representative signature to type it with and
+         * no impl to pick. Growing the receiver into `{ to_str: {} -> 'a }` types
+         * the call and the runtime dispatches on the value, which works — but that
+         * shape is not a record the program has, so it must not be PUBLISHED into
+         * the shared substitution: emit would see a record where the value is a
+         * Long and lower a data-field read.
+         * [ConstraintSolver.methodGrownReceiverVars] records the receivers it grew.
+         */
+        val methodCallee: Boolean = false,
     ) : Constraint {
         override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(recordType = f(recordType), fieldType = f(fieldType))
     }
@@ -563,6 +578,8 @@ data class ConstraintContext(
     // separate from typingContext, which is flat and can't tell a param from an
     // outer-scope name.
     val currentScopeBindings: Set<String> = emptySet(),
+    /** The member access being generated is a CALL's function (`x.m {…}`). */
+    val memberAccessIsCallee: Boolean = false,
     // #392: solved types for the current arm's match-pattern bindings, recorded by
     // generateMatch after a local incremental solve. Consulted ONLY by
     // getReceiverConcreteType for method dispatch — NOT by unification (the

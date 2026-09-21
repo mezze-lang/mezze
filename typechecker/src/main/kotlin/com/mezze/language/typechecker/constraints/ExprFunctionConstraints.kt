@@ -1008,7 +1008,13 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
         }
     }
 
-    val functionResult = generate(expr.function, context.notInTailPosition())
+    // The callee is generated as an ordinary expression, so a `x.m {…}` whose
+    // method did not resolve above lands in the field-access path. Tell it: the
+    // row it grows is a method's, not a record the program has.
+    val functionResult = generate(
+        expr.function,
+        context.notInTailPosition().copy(memberAccessIsCallee = expr.function is ParsedMemberAccess),
+    )
 
     // Bidirectional: the callee's type is known before its arguments are
     // generated, so push its parameter type down as the expected type of the

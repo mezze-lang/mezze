@@ -259,6 +259,28 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             // bare GENERALIZED param (`{x} -> x.m {}`) is genuinely polymorphic
             // with no runtime impl to dispatch to; it falls through to null (a
             // structural field-access) — receiverHasSolvableType excludes it.
+            // The RULE: a name some `impl T where { m }` declares is a METHOD
+            // CALL. Only a name nothing declares is a record field.
+            //
+            // A HOMOGENEOUS family types the call without knowing the receiver —
+            // every `to_str` is `{ it } -> Str`, so the call is the same whichever
+            // impl runs and only the PICK waits for the receiver. That is decided
+            // over the whole candidate set, not over `concrete`: an inherent op
+            // written `to_str = { it } -> …` has no annotation on `it`, so its
+            // param is a fresh var and it is never "concrete" — which is why this
+            // family used to miss the fast path, return null, and become a field
+            // access. `n.to_str {}` then grew `n` into `{ to_str: {} -> 'a }`, a
+            // record the program does not have: the value is a Long and emit
+            // lowers a data-field read against it.
+            val family = if (concrete.size >= 2) concrete else inherentMethods
+            if (family.size >= 2) {
+                val wholeFamily = homogeneousCandidateGroup(family)
+                if (wholeFamily.size >= 2 && wholeFamily.size == family.size) {
+                    return generateInherentMethodCall(
+                        expr, memberAccess, wholeFamily, context, deferImplByReceiver = true
+                    )
+                }
+            }
             if (receiverHasSolvableType(memberAccess.receiver, context) && concrete.size >= 2) {
                 val homogeneous = homogeneousCandidateGroup(concrete)
                 // Homogeneous fast path is only sound when the group covers EVERY
@@ -281,6 +303,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 }
                 return generateDeferredInherentMethodCall(expr, memberAccess, concrete, context)
             }
+            // A NON-homogeneous family (the return varies by receiver: `first`,
+            // `get_or`) on a receiver that produces no solvable type. There is no
+            // representative signature to type the call with and nothing to pick
+            // from, so this stays as it was.
             return null
         }
         // #188: when the receiver IS concrete but anonymous (a record literal
