@@ -10,23 +10,42 @@
 #
 # Baseline for tasks #86-#92. Run via bench/scripts/run.sh on the NATIVE binary.
 #
-# MEASURED 2026-09-22, JVM dev path, before any of #87-#90:
-#   iters      wall     loop      ns/iteration
-#   200k       4.587s   0.59s     ~978
-#   1M         6.225s   2.23s     ~742
-#   4M        11.759s   7.76s     ~647     (startup ~4.0s, measured at iters=1)
-#   marginal 1M -> 4M:  5.534s / 9M  =  615 ns/iteration, ~307 ns per interop message
+# MEASURED 2026-09-22, JVM dev path, GraalJS, iters = 4M, before #87-#90.
+# Timed INSIDE the process, so startup is excluded:
 #
-# The number PLATEAUS — more iterations stop making it faster. That is the whole
-# finding: this code never gets optimised however hot it gets, which is what
-# @TruffleBoundary + InteropLibrary.getUncached() produce together. A cached,
-# un-bounded interop message should be low tens of ns.
+#   read  (chain)    553-579 ns/iter
+#   read  (matched)  468-482 ns/iter
+#   invoke           767-820 ns/iter
+#   index            524     ns/iter
+#
+# TWO THINGS THE TABLE SAYS.
+#
+# 1. The dot-chain costs ~20% MORE than the matched spelling — about 95 ns an
+#    iteration, consistently. Same two interop messages either way; the
+#    difference is the extra dispatch through `impl Result JsForeign
+#    InteropError` that threading the Result implicitly goes through. "Write it
+#    either way, get the same speed" is not true yet. That is #92.
+#
+# 2. The absolute numbers do not improve with more heat. Measured over the whole
+#    process first: 978 -> 742 -> 647 ns/iter at 200k -> 1M -> 4M, converging,
+#    with a startup-free marginal cost of 615 ns between the last two. Code that
+#    stops getting faster however hot it gets is code the compiler cannot
+#    optimise — here, every native call sits behind a @TruffleBoundary by
+#    design (#402) and every interop message goes through
+#    InteropLibrary.getUncached(). That is #87.
+#
+# Whole-process timing could NOT resolve this: three identical 4M runs spread
+# 11.147-11.818s, wider than the effects being looked for. Hence the in-process
+# monotonic clock.
+
 use std::effects::log::{println, Console, Log}
+use std::effects::time::{ monotonic, Time, SystemTime }
+use std::datetime::{ Duration, sub_duration, duration_to_nanos }
 use std::polyglot::core::{ InteropError }
 use mezze_js::js::{ Js, GraalJs, JsForeign }
 use std::int
 
-let iters = 2000000
+let iters = 4000000
 
 ## ---- member read, DOT-CHAIN spelling ----
 ## `.property{...}.as_int{}` threads the Result implicitly, dispatching the
@@ -67,34 +86,55 @@ let invoke_loop: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
 ## ---- indexed element read ----
 ## Walks a guest array element by element — this is the ForeignContainers path,
 ## where an N-element consumer pays N crossings.
+## Wraps around a 1000-element array so it runs `n` times, not 1000 — a
+## 1000-iteration loop never warms up and reports cold-start cost, which in an
+## otherwise-warm table reads as though indexing were 10x worse than a read.
 let index_loop: { arr: JsForeign, i: Int, n: Int, acc: Int } -> Int <Js> =
   { arr, i, n, acc } ->
     if i >= n then acc
     else do
-      let got = match arr.index { i = i }.as_int {} is
+      let got = match arr.index { i = i % 1000 }.as_int {} is
         Ok { val = v } -> v
         Err { error = _ } -> 0
       index_loop { arr = arr, i = i + 1, n = n, acc = acc + got }
 
-let report: { label: Str, got: Int } -> {} <Log> =
-  { label, got } -> println { msg = "  $(label) = $(int::to_str { n = got })" }
+## ns per iteration, measured INSIDE the process so ~4s of startup and the
+## run-to-run noise that came with it are not part of the number. Measuring the
+## whole process could not resolve a 5% change; the spread between three
+## identical 4M runs was 0.67s, wider than the effect being looked for.
+let report: { label: Str, got: Int, n: Int, t0: Duration, t1: Duration } -> {} <Log> =
+  { label, got, n, t0, t1 } -> do
+    let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+    let per = if n <= 0 then 0 else ns / n
+    println { msg = "  $(label)  $(int::to_str { n = per }) ns/iter   (got $(int::to_str { n = got }))" }
 
-let main = {} -> perform Console in perform GraalJs in do
+let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
   println { msg = "polyglot_interop: $(int::to_str { n = iters }) iterations per workload" }
 
   match Js.eval { source = "({ v: 7, get: function () { return 7; } })" } is
     Ok { val = obj } -> do
-      # Same answer three ways: iters * 7. Printing it keeps the loop live.
-      let a = read_chain   { obj = obj, n = iters, acc = 0 }
-      let _ = report { label = "read  (chain)  ", got = a }
-      let b = read_matched { obj = obj, n = iters, acc = 0 }
-      let _ = report { label = "read  (matched)", got = b }
-      let c = invoke_loop  { obj = obj, n = iters, acc = 0 }
-      report { label = "invoke         ", got = c }
+      # Each workload is timed on its own, so the dot-chain and the matched
+      # spelling can be compared against each other — that comparison IS #92.
+      let c0 = monotonic {}
+      let a  = read_chain { obj = obj, n = iters, acc = 0 }
+      let c1 = monotonic {}
+      let _  = report { label = "read  (chain)  ", got = a, n = iters, t0 = c0, t1 = c1 }
+
+      let m0 = monotonic {}
+      let b  = read_matched { obj = obj, n = iters, acc = 0 }
+      let m1 = monotonic {}
+      let _  = report { label = "read  (matched)", got = b, n = iters, t0 = m0, t1 = m1 }
+
+      let i0 = monotonic {}
+      let c  = invoke_loop { obj = obj, n = iters, acc = 0 }
+      let i1 = monotonic {}
+      report { label = "invoke         ", got = c, n = iters, t0 = i0, t1 = i1 }
     Err { error = _ } -> println { msg = "  eval of the test object FAILED" }
 
   match Js.eval { source = "Array.from({length: 1000}, function (_, i) { return i; })" } is
     Ok { val = arr } -> do
-      let d = index_loop { arr = arr, i = 0, n = 1000, acc = 0 }
-      report { label = "index (1000)   ", got = d }
+      let x0 = monotonic {}
+      let d  = index_loop { arr = arr, i = 0, n = iters, acc = 0 }
+      let x1 = monotonic {}
+      report { label = "index          ", got = d, n = iters, t0 = x0, t1 = x1 }
     Err { error = _ } -> println { msg = "  eval of the test array FAILED" }

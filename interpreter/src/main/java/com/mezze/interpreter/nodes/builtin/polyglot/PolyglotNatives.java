@@ -376,20 +376,45 @@ public final class PolyglotNatives {
         return InteropLibrary.getUncached().isMemberReadable(f.getDelegate(), name);
     }
 
+    /**
+     * Read a named member. ONE interop message on the happy path.
+     *
+     * This used to ask {@code isMemberReadable} first and only then
+     * {@code readMember} — two messages per read, on the hottest polyglot
+     * operation there is. The check is not needed to get the answer: a member
+     * that is not there makes {@code readMember} throw
+     * UnknownIdentifierException, which {@link #translateException} already
+     * turns into the same {@code NotFound{name}}. It only distinguished one
+     * case — a member that EXISTS but is not readable, which the check called
+     * NotFound and a bare read would call Unsupported. So the probe moved to
+     * {@link #readFailure}, where it runs only if the read actually failed and
+     * costs a successful read nothing.
+     */
     @TruffleBoundary
     public static MezzeVariant readMember(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
         String name = getString(args, "name");
+        Object recv = f.getDelegate();
         try {
-            InteropLibrary lib = InteropLibrary.getUncached(f.getDelegate());
-            if (!lib.isMemberReadable(f.getDelegate(), name)) {
-                return MezzeVariant.err(errorNotFound(name));
-            }
-            Object result = lib.readMember(f.getDelegate(), name);
+            Object result = InteropLibrary.getUncached(recv).readMember(recv, name);
             return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeVariant.err(readFailure(recv, name, t));
         }
+    }
+
+    /**
+     * Which InteropError a FAILED member read means. Only reached on failure,
+     * so the extra probe here is off the hot path — it preserves the
+     * "exists but unreadable reads as NotFound" answer the old pre-check gave.
+     */
+    @TruffleBoundary
+    private static MezzeVariant readFailure(Object recv, String name, Throwable t) {
+        if (t instanceof UnsupportedMessageException
+                && !InteropLibrary.getUncached(recv).isMemberReadable(recv, name)) {
+            return errorNotFound(name);
+        }
+        return translateException(t);
     }
 
     @TruffleBoundary
