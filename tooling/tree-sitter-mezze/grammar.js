@@ -112,6 +112,13 @@ module.exports = grammar({
     // A metadata value that is a bare literal/identifier could reduce directly
     // or via the _metadata_value wrapper; harmless, resolve either way.
     [$._metadata_value, $._literal],
+    // `impl Name atom atom …` — after an atom, the next token could continue
+    // the ability's ARGUMENT list or be part of a type_application that is the
+    // inherent-impl TARGET (`impl Seq Int where …`). GLR decides at the `for`:
+    // present means the atoms were arguments, absent means they were the
+    // target. Latent until the inline-variant argument made the lookahead
+    // reachable.
+    [$.impl_declaration, $.type_application],
   ],
 
   rules: {
@@ -264,21 +271,22 @@ module.exports = grammar({
     // `repeat(_type_atom)` is greedy — without prec.right, a following
     // top-level expression starting with `{` looks like another type
     // argument.
+    // `newtype Name 'params = <type>`. The constructor name is INFERRED from
+    // the declaration name — the parser rejects the old redundant form
+    // `newtype UserId = UserId Int` outright ("the constructor name is now
+    // inferred … drop the leading `UserId`"). This rule used to require that
+    // rejected shape (`'=' upper_identifier payload…`), so the grammar
+    // accepted only what the parser refuses and rejected what it accepts:
+    // `newtype Handler = { x: Int } -> Str` and `newtype MyOption 'a = 'a`
+    // both errored, while `newtype Sink = Int` parsed by accident, reading
+    // `Int` as a constructor.
     newtype_declaration: $ => prec.right(seq(
       optional($.visibility_modifier),
       'newtype',
       field('name', $.upper_identifier),
       repeat(field('parameter', $.type_variable)),
       '=',
-      field('constructor', $.upper_identifier),
-      // The wrapped payload is either a run of plain type atoms
-      // (`Pair Int String`) OR a single function type
-      // (`Handler { x: Int } -> String`, optionally with an effect row). The
-      // two disambiguate on the presence of `->`.
-      optional(choice(
-        field('payload', $.function_type),
-        repeat1(field('argument', $._type_atom)),
-      )),
+      field('wrapped', $._type),
     )),
 
     _type_definition: $ => choice(
@@ -329,6 +337,12 @@ module.exports = grammar({
       repeat(field('parameter', $.type_variable)),
       'for',
       field('self', $.type_variable),
+      // Associated types, DECLARATION form — bare variables, as
+      // `effect_declaration` already had: `ability Box for 'c having 'item`.
+      // (The `impl` side binds them, `having 'item = Sink`, and that is
+      // `having_clause` over `type_binding`.) Missing here entirely, so every
+      // `having` ability in the stdlib — Tryable, Box, Exception — failed.
+      optional(seq('having', sepBy1(',', $.type_variable))),
       'where',
       '{',
       sepBy(',', $.ability_operation),
@@ -375,7 +389,12 @@ module.exports = grammar({
         // is what tells the parser this is a module path and not an argument.
         optional(field('module_path', repeat1(seq($.lower_identifier, '::')))),
         field('name', $.upper_identifier),
-        repeat(field('argument', $._type_atom)),
+        // An ability type argument can be an inline VARIANT, which the stdlib
+        // uses for a failure channel:
+        //   impl TryInto Nat | ConversionError { msg: Str } | for Int where …
+        // `_type_atom` does not cover that, so int.mz, char.mz, float.mz and
+        // nat.mz all failed to parse at their TryInto impls.
+        repeat(field('argument', choice($._type_atom, $.variant_type))),
         'for',
         field('target', $._type),
         optional(field('performer_args', $.record_type)),
@@ -727,10 +746,16 @@ module.exports = grammar({
       field('arguments', $.record_expression),
     )),
 
-    // module::name
+    // `module::name`, with as many module segments as the source writes:
+    // `int::from_nat`, `std::int::from_nat`, `std::collections::seq::map`.
+    //
+    // This allowed exactly ONE segment, so every fully-qualified reference in
+    // the stdlib was a parse error — `std::int::from_nat { n = it }` in
+    // `nat.mz`, and the same shape across the codec and effects modules. The
+    // sibling `qualified_perform_name` below already repeats its segments;
+    // this is the same path with a value leaf.
     qualified_reference: $ => prec(PREC.qualified, seq(
-      field('module', $.lower_identifier),
-      '::',
+      field('module', alias(repeat1(seq($.lower_identifier, '::')), $.module_path)),
       field('name', choice($.lower_identifier, $.upper_identifier)),
     )),
 

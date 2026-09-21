@@ -47,7 +47,7 @@ impl Into Str for Bool where {
 newtype
 ==================
 
-pub newtype Promise 'a = Promise __NativePromise
+pub newtype Promise 'a = __NativePromise
 
 ---
 
@@ -56,8 +56,7 @@ pub newtype Promise 'a = Promise __NativePromise
     (visibility_modifier)
     name: (upper_identifier)
     parameter: (type_variable)
-    constructor: (upper_identifier)
-    argument: (named_type (upper_identifier))))
+    wrapped: (named_type (upper_identifier))))
 
 ==================
 variant type with type parameters

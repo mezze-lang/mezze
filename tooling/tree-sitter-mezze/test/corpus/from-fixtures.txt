@@ -4,20 +4,6 @@
 # authoritative 'must parse' gate; this file guards tree SHAPE.
 
 ==================
-declarations: simple let
-==================
-
-let x = 1
-
----
-
-(source_file
-  (let_declaration
-    pattern: (variable_pattern
-      (lower_identifier))
-    body: (integer_literal)))
-
-==================
 declarations: let with natural literal
 ==================
 
@@ -90,30 +76,28 @@ type Option 'a = | Some { val: 'a }, None |
 declarations: newtype wrapper
 ==================
 
-newtype Email = Email String
+newtype Email = String
 
 ---
 
 (source_file
   (newtype_declaration
     name: (upper_identifier)
-    constructor: (upper_identifier)
-    argument: (named_type
+    wrapped: (named_type
       (upper_identifier))))
 
 ==================
 declarations: newtype with record payload
 ==================
 
-newtype Handler = Handler { x: Int } -> String
+newtype Handler = { x: Int } -> String
 
 ---
 
 (source_file
   (newtype_declaration
     name: (upper_identifier)
-    constructor: (upper_identifier)
-    payload: (function_type
+    wrapped: (function_type
       parameters: (record_type
         (record_type_field
           name: (lower_identifier)
@@ -126,7 +110,7 @@ newtype Handler = Handler { x: Int } -> String
 declarations: newtype generic
 ==================
 
-newtype Option 'a = Option 'a
+newtype MyOption 'a = 'a
 
 ---
 
@@ -134,8 +118,7 @@ newtype Option 'a = Option 'a
   (newtype_declaration
     name: (upper_identifier)
     parameter: (type_variable)
-    constructor: (upper_identifier)
-    argument: (type_variable)))
+    wrapped: (type_variable)))
 
 ==================
 declarations: whole-module import
@@ -191,10 +174,10 @@ use std::collections::seq::{ map as m }
         alias: (lower_identifier)))))
 
 ==================
-declarations: let with lambda
+declarations: simple let
 ==================
 
-let f = {x} -> x + 1
+let x = 1
 
 ---
 
@@ -202,14 +185,7 @@ let f = {x} -> x + 1
   (let_declaration
     pattern: (variable_pattern
       (lower_identifier))
-    body: (binary_expression
-      left: (lambda_expression
-        parameters: (lambda_parameters
-          (lambda_parameter
-            name: (lower_identifier)))
-        body: (variable
-          (lower_identifier)))
-      right: (integer_literal))))
+    body: (integer_literal)))
 
 ==================
 declarations: pub let
@@ -316,6 +292,27 @@ let run
           name: (lower_identifier)))
       body: (variable
         (lower_identifier)))))
+
+==================
+declarations: let with lambda
+==================
+
+let f = {x} -> x + 1
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern
+      (lower_identifier))
+    body: (binary_expression
+      left: (lambda_expression
+        parameters: (lambda_parameters
+          (lambda_parameter
+            name: (lower_identifier)))
+        body: (variable
+          (lower_identifier)))
+      right: (integer_literal))))
 
 ==================
 declarations: let with empty-param lambda
@@ -606,20 +603,6 @@ let go = {} -> perform info { msg = "hi" }
               (string_content))))))))
 
 ==================
-expressions: integer literal
-==================
-
-let x = 1
-
----
-
-(source_file
-  (let_declaration
-    pattern: (variable_pattern
-      (lower_identifier))
-    body: (integer_literal)))
-
-==================
 expressions: member access chain
 ==================
 
@@ -677,7 +660,8 @@ let result = int::to_string {value = 42}
       (lower_identifier))
     body: (function_call
       callee: (qualified_reference
-        module: (lower_identifier)
+        module: (module_path
+          (lower_identifier))
         name: (lower_identifier))
       arguments: (record_expression
         (record_field
@@ -863,10 +847,10 @@ let describe = {x} -> match x is
           body: (integer_literal))))))
 
 ==================
-expressions: negative integer with underscores
+expressions: integer literal
 ==================
 
-let x = -1_000
+let x = 1
 
 ---
 
@@ -927,6 +911,20 @@ let nothing = {}
     pattern: (variable_pattern
       (lower_identifier))
     body: (record_expression)))
+
+==================
+expressions: negative integer with underscores
+==================
+
+let x = -1_000
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern
+      (lower_identifier))
+    body: (integer_literal)))
 
 ==================
 expressions: float literal
