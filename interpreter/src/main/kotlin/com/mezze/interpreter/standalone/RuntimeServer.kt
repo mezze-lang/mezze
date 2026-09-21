@@ -1013,28 +1013,47 @@ private class ServerState(
      * accumulate across reloads — imported Python modules, JS `require` globals.
      * The Engine (JIT'd CallTargets) is preserved.
      *
-     * EXCEPTION: when a guest polyglot language is active, DON'T recreate the
-     * Context. A guest language that loaded a native C extension (e.g. numpy's
-     * _multiarray_umath.so) cannot have that module re-loaded into a second
-     * Context in the same process on macOS — GraalPy would need to patch the
-     * Mach-O ("Modifying Mach-O files is not yet supported"), and isolating
-     * native modules per-context also fails there. So a polyglot program reuses
-     * one Context across reloads (accepting minor guest-state accumulation);
-     * a pure-Mezze / non-native program gets a fresh Context each run. Best-effort
-     * close of the old context — a wedged guest shouldn't block the next run.
+     * EXCEPTION, and it is narrower than "a guest language is active". A guest
+     * that loaded a native C extension (e.g. numpy's _multiarray_umath.so) cannot
+     * have that module re-loaded into a second Context in the same process ON
+     * macOS — GraalPy would need to patch the Mach-O ("Modifying Mach-O files is
+     * not yet supported"), and isolating native modules per-context also fails
+     * there. That is the whole of the reason, and it names one OS and one
+     * language: GraalJS loads no native modules anywhere, and on Linux/Windows
+     * GraalPy isolates them per-context. The carve-out used to fire for ANY guest
+     * language on ANY OS, so a JS-only reload — or any polyglot reload on Linux —
+     * accumulated guest state until "Resource exhausted: Stack overflow", for a
+     * macOS-and-GraalPy reason that did not apply to it.
+     *
+     * Everything else gets a fresh Context each run (the Engine, and its JIT'd
+     * CallTargets, is preserved). Best-effort close of the old context — a wedged
+     * guest shouldn't block the next run.
+     *
+     * UNVERIFIED for the polyglot cases: this build has only the `mezze` language
+     * installed, so the JS and Linux-GraalPy paths are reasoned from the rule
+     * above rather than measured. The macOS+GraalPy behaviour is BYTE-IDENTICAL
+     * to what it was.
      */
     fun maybeResetContextForNewRun() {
         if (startupContextUnused) {
             startupContextUnused = false
             return
         }
-        // Guest polyglot languages present → reuse the Context (native modules
-        // can't safely reload into a fresh Context on macOS). See docstring.
-        if (polyglotLanguagesToWarm.isNotEmpty()) return
+        if (nativeModulesPinTheContext()) return
         val old = context
         context = contextFactory()
         polyglotWarmed = false  // the new context must re-warm its guest languages
         try { old.close(true) } catch (_: Exception) {}
+    }
+
+    /**
+     * True only where a guest's NATIVE modules make a second Context unsafe:
+     * GraalPy on macOS. See [maybeResetContextForNewRun] for why that is the
+     * entire rule, and why it is not "any guest language".
+     */
+    private fun nativeModulesPinTheContext(): Boolean {
+        if ("python" !in polyglotLanguagesToWarm) return false
+        return System.getProperty("os.name").orEmpty().startsWith("Mac", ignoreCase = true)
     }
     @Volatile var activeRunId: Long? = null
         private set
