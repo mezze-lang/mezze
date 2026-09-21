@@ -35,7 +35,7 @@ class ImportResolver(
             when (result) {
                 is ProcessResult.Success -> {
                     importContext = importContext.merge(result.context)
-                    result.module?.let { loadedModules[ModulePath.parse(it.modulePath)] = it }
+                    result.modules.forEach { loadedModules[ModulePath.parse(it.modulePath)] = it }
                 }
                 is ProcessResult.Failure -> errors.addAll(result.errors)
             }
@@ -110,7 +110,14 @@ class ImportResolver(
 
                 val qualifierName = alias ?: path.segments.lastOrNull()
 
-                val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
+                val ownExports = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
+                // What the module re-exports is part of its surface: `use mid` then
+                // `mid::greet` must see what `use mid::{ greet }` sees. The module's
+                // OWN exports win on a name clash — a module that declares `greet`
+                // and also re-exports one means its own.
+                val reexports = reexportedExports(module, mutableSetOf())
+                    .mapValues { (_, v) -> v.second }
+                val exportsToUse = reexports + ownExports
 
                 var context = buildContextFromExports(
                     exports = exportsToUse,
@@ -243,6 +250,14 @@ class ImportResolver(
                 // intermediary that re-exports it doesn't declare it).
                 val reexportedAbilities = mutableMapOf<String, ParsedAbilityDecl>()
                 val reexportedEffects = mutableMapOf<String, ParsedEffectDecl>()
+                // A re-exported TYPE needs its DECL too, for the same reason an
+                // ability does: a binding alone gives the consumer a name with no
+                // declaration behind it, so `pub use inner::{ Color }` then
+                // `use mid::{ Color }` failed with "unknown type 'Color'". Its
+                // module's inherent impls come along, so `b.bump {}` on a
+                // re-exported type dispatches instead of reading a record field.
+                val reexportedTypes = mutableMapOf<String, ParsedTypeDecl>()
+                val reexportedInherentImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
                 val reexportedAbilitiesByHash = mutableMapOf<Hash, ParsedAbilityDecl>()
                 val reexportedEffectsByHash = mutableMapOf<Hash, ParsedEffectDecl>()
                 val reexportedAbilityImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
@@ -281,6 +296,22 @@ class ImportResolver(
                                         eff.contentHash?.let { reexportedEffectsByHash[it] = eff }
                                     }
                                 }
+                                // A CONSTRUCTOR export is the same case: a variant whose
+                                // constructor shares the type's name (`type Box = | Box
+                                // { n: Int } |`) exports as CONSTRUCTOR, not TYPE, and
+                                // without its decl the consumer's `b: Box` resolved to
+                                // the payload record — `b.bump {}` then read a field
+                                // instead of dispatching ("Available fields: 'n'"). The
+                                // direct import path already handles both the same way.
+                                ExportedItemType.TYPE, ExportedItemType.CONSTRUCTOR -> {
+                                    originModule?.index?.typeDeclarations?.get(export.originalName)?.let { td ->
+                                        reexportedTypes[localName] = td
+                                    }
+                                    // An inherent `impl <Type> where { … }` lives in the
+                                    // ORIGIN module and is keyed by hash, so carry them
+                                    // all — the same rule the ability arm uses.
+                                    originModule?.index?.abilityImplsByHash?.let { reexportedInherentImpls.putAll(it) }
+                                }
                                 else -> {}
                             }
                             continue
@@ -310,13 +341,20 @@ class ImportResolver(
                     return ProcessResult.Failure(errors)
                 }
 
-                if (reexportedBindings.isNotEmpty() || reexportedAbilities.isNotEmpty() || reexportedEffects.isNotEmpty()) {
+                if (reexportedBindings.isNotEmpty() || reexportedAbilities.isNotEmpty() ||
+                    reexportedEffects.isNotEmpty() || reexportedTypes.isNotEmpty()
+                ) {
                     context = context.merge(
                         ModuleImportContext.empty().copy(
                             importedBindings = reexportedBindings,
+                            importedTypes = reexportedTypes,
+                            // A type named in a `use … { … }` group is EXPLICIT, and
+                            // a re-exported one is no less so — it must act as the
+                            // same nominal wall (#148) as a directly imported one.
+                            explicitlyImportedTypeNames = reexportedTypes.keys,
                             importedAbilities = reexportedAbilities,
                             importedEffects = reexportedEffects,
-                            importedAbilityImpls = reexportedAbilityImpls,
+                            importedAbilityImpls = reexportedAbilityImpls + reexportedInherentImpls,
                             abilitiesByHash = reexportedAbilitiesByHash,
                             effectsByHash = reexportedEffectsByHash,
                         )
@@ -329,32 +367,63 @@ class ImportResolver(
                 )
             }
             is ModuleLoadResult.Failure -> {
-                // #340: `use std::collections::{ map, seq }` names a directory-only path
-                // (`std::collections` has no module file — it's a folder of submodules),
-                // so the load fails with a bare "Module not found". If the grouped items
-                // are actually SUBMODULES of that path, say so and show the real fix
-                // instead of the generic error. (Grouped submodule imports aren't yet
-                // supported — one `use` per submodule — but the diagnostic should teach
-                // that rather than leave a newcomer guessing.)
-                val submoduleItems = path.items.filter { item ->
-                    loader.loadModule(ModulePath(path.module + item.name)) is ModuleLoadResult.Success
+                // #340: `use std::collections::{ map, seq }` names a directory-only
+                // path — `std::collections` has no module file, it is a folder of
+                // submodules — so the load fails with a bare "Module not found".
+                // Every grouped item is a submodule here, and the group means the
+                // same as one `use` per submodule.
+                val submodulePaths = path.items.associateWith { ModulePath(path.module + it.name) }
+                    .filterValues { loader.loadModule(it) is ModuleLoadResult.Success }
+                if (submodulePaths.size == path.items.size && path.items.isNotEmpty()) {
+                    return processSubmoduleGroup(submodulePaths, isPublic, sourceLoc)
                 }
-                if (submoduleItems.isNotEmpty()) {
-                    val names = submoduleItems.joinToString(", ") { it.name }
-                    val perLine = submoduleItems.joinToString("\n   ") { "use ${modulePath}::${it.name}" }
-                    val one = submoduleItems.size == 1
+                // A MIXED group: the path has no module file, so the items that are
+                // not submodules cannot resolve to anything. Name them — the group
+                // is not the problem, those items are.
+                if (submodulePaths.isNotEmpty()) {
+                    val unknown = path.items.filter { it !in submodulePaths }.joinToString(", ") { it.name }
                     return ProcessResult.Failure(listOf(ModuleError.ImportError(
                         modulePath = modulePath,
-                        itemName = names,
-                        reason = "$names ${if (one) "is a submodule" else "are submodules"} of '$modulePath', " +
-                            "not ${if (one) "an item" else "items"} it exports. A `{ … }` group selects " +
-                            "declarations FROM one module; it can't group submodules. Import each on its own line:" +
-                            "\n   $perLine"
+                        itemName = unknown,
+                        reason = "'$modulePath' is a folder of submodules, not a module — it declares " +
+                            "nothing itself, so it cannot export $unknown. The other names in this " +
+                            "group are submodules and resolve; these do not."
                     )))
                 }
                 ProcessResult.Failure(loadResult.errors)
             }
         }
+    }
+
+    /**
+     * `use a::{ b, c }` where b and c are SUBMODULES.
+     *
+     * Exactly `use a::b` + `use a::c`: each is imported QUALIFIED under its own
+     * last segment (or its alias), so the group is a spelling, not a second
+     * meaning. Each submodule is processed by the same [processModulePath] a
+     * single-line `use` goes through, and the contexts merge in written order.
+     *
+     * This used to be an error that told the reader to split the group by hand.
+     */
+    private fun processSubmoduleGroup(
+        submodulePaths: Map<ImportItem, ModulePath>,
+        isPublic: Boolean,
+        sourceLoc: Loc?,
+    ): ProcessResult {
+        var merged = ModuleImportContext.empty()
+        val loaded = mutableListOf<TypedModuleResult>()
+        val errors = mutableListOf<ModuleError>()
+        for ((item, submodule) in submodulePaths) {
+            when (val r = processModulePath(submodule, item.alias, isPublic, sourceLoc)) {
+                is ProcessResult.Success -> {
+                    merged = merged.merge(r.context)
+                    loaded.addAll(r.modules)
+                }
+                is ProcessResult.Failure -> errors.addAll(r.errors)
+            }
+        }
+        return if (errors.isEmpty()) ProcessResult.Success(merged, loaded)
+        else ProcessResult.Failure(errors)
     }
 
     private fun buildContextFromExports(
@@ -706,33 +775,54 @@ class ImportResolver(
         module: LoadedModule,
         wantedName: String,
         visited: MutableSet<String>,
-    ): Pair<String, ExportedItem>? {
-        if (!visited.add(module.modulePath)) return null
+    ): Pair<String, ExportedItem>? = reexportedExports(module, visited)[wantedName]
 
+    /**
+     * Everything [module] re-exports via `pub use`, as localName -> (origin module
+     * path, the origin's export).
+     *
+     * One walk for both questions asked of a re-export: "does this module supply
+     * NAME?" (a selective `use mid::{ greet }`) and "what does this module supply?"
+     * (a qualified `use mid` that then writes `mid::greet`). The second used to have
+     * no answer at all — `processModulePath` built its namespace from the module's
+     * OWN exports, so `mid::greet` was an undefined variable while
+     * `use mid::{ greet }` resolved. A re-export is part of a module's surface in
+     * both spellings or in neither.
+     *
+     * A selective `pub use src::{ a, b as c }` supplies `a` and `c`; a glob
+     * `pub use src` supplies every one of src's exports under its own name. Chains
+     * are followed, and [visited] breaks `pub use` cycles.
+     */
+    private fun reexportedExports(
+        module: LoadedModule,
+        visited: MutableSet<String>,
+    ): Map<String, Pair<String, ExportedItem>> {
+        if (!visited.add(module.modulePath)) return emptyMap()
+        val out = mutableMapOf<String, Pair<String, ExportedItem>>()
         for (pubUse in module.index.pubUseDeclarations) {
-            // What does this `pub use` bring into scope, and under what local name?
-            // For a Selective import the local name is the item's alias-or-name; the
-            // ORIGINAL name in the source module is item.name. A bare Module glob
-            // re-exports every source export under its own name.
-            val (srcSegments, originalName) = when (val p = pubUse.path) {
-                is ParsedUsePath.Selective -> {
-                    val match = p.items.firstOrNull { (it.alias ?: it.name) == wantedName }
-                        ?: continue
-                    p.modulePath.segments to match.name
-                }
-                is ParsedUsePath.Module -> p.path.segments to wantedName
+            val srcSegments = when (val p = pubUse.path) {
+                is ParsedUsePath.Selective -> p.modulePath.segments
+                is ParsedUsePath.Module -> p.path.segments
             }
-
             val srcModule = when (val r = loader.loadModule(ModulePath(srcSegments))) {
                 is ModuleLoadResult.Success -> r.module
                 is ModuleLoadResult.Failure -> continue
             }
+            // What the source supplies, its own exports first and then whatever it
+            // re-exports in turn.
+            val fromSource: Map<String, Pair<String, ExportedItem>> =
+                srcModule.exports.mapValues { (_, e) -> srcModule.modulePath to e } +
+                    reexportedExports(srcModule, visited)
 
-            srcModule.exports[originalName]?.let { return srcModule.modulePath to it }
-            // Chain: the source itself may re-export the item.
-            resolvePubUseReexport(srcModule, originalName, visited)?.let { return it }
+            when (val p = pubUse.path) {
+                is ParsedUsePath.Selective ->
+                    for (item in p.items) {
+                        fromSource[item.name]?.let { out[item.alias ?: item.name] = it }
+                    }
+                is ParsedUsePath.Module -> out.putAll(fromSource)
+            }
         }
-        return null
+        return out
     }
 
     private fun checkIfItemExistsButPrivate(module: LoadedModule, itemName: String): Boolean {
@@ -829,8 +919,16 @@ class ImportResolver(
     private sealed class ProcessResult {
         data class Success(
             val context: ModuleImportContext,
-            val module: TypedModuleResult? = null
-        ) : ProcessResult()
+            /**
+             * Every module this `use` loaded. A list because one `use` can load
+             * several: `use a::{ b, c }` where b and c are SUBMODULES is the same
+             * import as two `use` lines, so it loads two modules.
+             */
+            val modules: List<TypedModuleResult> = emptyList()
+        ) : ProcessResult() {
+            constructor(context: ModuleImportContext, module: TypedModuleResult?) :
+                this(context, listOfNotNull(module))
+        }
 
         data class Failure(
             val errors: List<ModuleError>

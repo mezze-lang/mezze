@@ -97,30 +97,29 @@ class ModuleSystemTest {
     }
 
     @Test
-    fun `#340 grouped SUBMODULE import gives a submodule-aware error, not bare Module not found`() {
-        // `pkg` is a directory of submodules (pkg/a.mz, pkg/b.mz), not a module file.
-        // `use pkg::{ a, b }` names the directory, so the load fails — but the items
-        // are submodules, so the error must SAY so and show the one-use-per-submodule
-        // fix, instead of the generic "Module not found".
+    fun `#340 a grouped SUBMODULE import resolves`() {
+        // `pkg` is a directory of submodules (pkg/a.mz, pkg/b.mz), not a module
+        // file, so `use pkg::{ a, b }` names a path with nothing to load. The items
+        // ARE submodules, and the group means one `use` per submodule: each is
+        // imported qualified under its own name.
+        //
+        // This used to be an ERROR that told the reader to split the group by hand.
         val srcDir = tempDir.resolve("src")
         Files.createDirectories(srcDir.resolve("pkg"))
-        Files.writeString(srcDir.resolve("pkg/a.mz"), "pub let ay = { } -> 1")
-        Files.writeString(srcDir.resolve("pkg/b.mz"), "pub let bee = { } -> 2")
+        Files.writeString(srcDir.resolve("pkg/a.mz"), "pub let ay: {} -> Int = { } -> 1")
+        Files.writeString(srcDir.resolve("pkg/b.mz"), "pub let bee: {} -> Int = { } -> 2")
 
         val main = """
             use pkg::{ a, b }
-            let x = 5
+            let x: {} -> Int = {} -> a::ay {} + b::bee {}
         """.trimIndent()
         Files.writeString(srcDir.resolve("main.mz"), main)
 
         val parsed = parser.parseParsedModule(main, "main.mz")
-        val ex = assertThrows(Exception::class.java) {
-            typeChecker.typeCheck(parsed, srcDir)
-        }
-        val msg = ex.message ?: ""
-        assertTrue(msg.contains("submodule"), "expected submodule guidance, got: $msg")
-        assertTrue(msg.contains("use pkg::a") && msg.contains("use pkg::b"),
-            "expected per-submodule fix lines, got: $msg")
+        assertNotNull(
+            typeChecker.typeCheck(parsed, srcDir),
+            "both submodules must be imported, each under its own qualifier",
+        )
     }
 
     @Test
@@ -793,6 +792,62 @@ class ModuleSystemTest {
         val parsed = parser.parseParsedModule(main.trimIndent(), "test.mz")
         val typed = typeChecker.typeCheck(parsed, tempDir)
         assertNotNull(typed, "the re-export alias `hello` must be importable")
+    }
+
+    /**
+     * A re-exported TYPE needs its DECLARATION, not just a binding.
+     *
+     * `pub use inner::{ Color }` then `use mid::{ Color }` failed with
+     * "unknown type 'Color'": the fold carried a re-exported ABILITY's and
+     * EFFECT's decls but nothing for a TYPE, so the consumer got a name with no
+     * declaration behind it.
+     */
+    @Test
+    fun `pub use re-export carries the type declaration`() {
+        writeModule("tinner", "pub type Color = | Red, Green |")
+        writeModule("tmid", "pub use tinner::{ Color }")
+        val main = "use tmid::{ Color }\nlet go: { c: Color } -> Int = { c } -> 1"
+        writeModule("main", main)
+        assertNotNull(
+            typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir),
+            "a re-exported type must be usable in an annotation",
+        )
+    }
+
+    /**
+     * A variant whose constructor shares the type's name exports as CONSTRUCTOR,
+     * not TYPE — so it took a different arm and its decl was dropped. The
+     * consumer's `b: Box` then resolved to the PAYLOAD RECORD, and `b.bump {}`
+     * read a field instead of dispatching ("Available fields: 'n'").
+     */
+    @Test
+    fun `pub use re-export carries a same-named constructor's type and its inherent impls`() {
+        writeModule("cinner", "pub type Box = | Box { n: Int } |\nimpl Box where { bump = { it } -> 1 }")
+        writeModule("cmid", "pub use cinner::{ Box }")
+        val main = "use cmid::{ Box }\nlet go: { b: Box } -> Int = { b } -> b.bump {}"
+        writeModule("main", main)
+        assertNotNull(
+            typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir),
+            "an inherent method on a re-exported type must dispatch",
+        )
+    }
+
+    /**
+     * A re-export is part of the module's surface in BOTH spellings.
+     *
+     * `use mid::{ greet }` resolved while `use mid` + `mid::greet` did not: the
+     * qualified path built its namespace from the module's OWN exports only.
+     */
+    @Test
+    fun `a qualified import sees what the module re-exports`() {
+        writeModule("qinner", "pub let greet: { name: Str } -> Str = { name } -> \"hi\"")
+        writeModule("qmid", "pub use qinner::{ greet }")
+        val main = "use qmid\nlet go: {} -> Str = { } -> qmid::greet { name = \"x\" }"
+        writeModule("main", main)
+        assertNotNull(
+            typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir),
+            "`use qmid` then `qmid::greet` must see the re-export",
+        )
     }
 
     @Test
