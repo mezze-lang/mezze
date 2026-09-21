@@ -14,6 +14,18 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  *
  * The specialized Truffle nodes in datastructures module are for AST-embedded
  * use cases where node rewriting and profiling provide benefits.
+ *
+ * <h2>Everything here must be safe to call with any Mezze input</h2>
+ *
+ * This class is the SHARED implementation the native routes call, so a method
+ * here has to carry its own guards — see {@link #intDivide}. It used to also
+ * hold unguarded twins of operations that were guarded elsewhere
+ * ({@code stringSubstring} raw next to {@code NativeDispatch}'s clamped
+ * private copy of the same name, and {@code NativeDispatch} wildcard-imports
+ * this package). Nothing called the twins, but deleting a private copy in
+ * favour of "the shared helper" would have silently switched to the unguarded
+ * one. The 54 uncalled methods are gone; keep it that way — add a method here
+ * when a route needs it, not in advance.
  */
 public final class PrimitiveNatives {
 
@@ -77,47 +89,6 @@ public final class PrimitiveNatives {
         return Long.signum(n);
     }
 
-    // Bitwise operations - direct implementations
-    public static long intBitwiseAnd(long l, long r) {
-        return l & r;
-    }
-
-    public static long intBitwiseOr(long l, long r) {
-        return l | r;
-    }
-
-    public static long intBitwiseXor(long l, long r) {
-        return l ^ r;
-    }
-
-    public static long intBitwiseNot(long n) {
-        return ~n;
-    }
-
-    public static long intShiftLeft(long n, long bits) {
-        return n << bits;
-    }
-
-    public static long intShiftRight(long n, long bits) {
-        return n >> bits;
-    }
-
-    public static long intUnsignedShiftRight(long n, long bits) {
-        return n >>> bits;
-    }
-
-    public static long intPopCount(long n) {
-        return Long.bitCount(n);
-    }
-
-    public static long intCountLeadingZeros(long n) {
-        return Long.numberOfLeadingZeros(n);
-    }
-
-    public static long intCountTrailingZeros(long n) {
-        return Long.numberOfTrailingZeros(n);
-    }
-
     // Comparisons - direct implementations
     public static boolean intLt(long l, long r) {
         return l < r;
@@ -141,10 +112,6 @@ public final class PrimitiveNatives {
 
     public static boolean intNeq(long l, long r) {
         return l != r;
-    }
-
-    public static long intCompare(long l, long r) {
-        return Long.compare(l, r);
     }
 
     // ==================== Float Operations ====================
@@ -190,10 +157,6 @@ public final class PrimitiveNatives {
         return Math.sqrt(n);
     }
 
-    public static double floatFma(double a, double b, double c) {
-        return Math.fma(a, b, c);
-    }
-
     // Math functions - direct intrinsic calls
     public static double floatFloor(double n) {
         return Math.floor(n);
@@ -205,10 +168,6 @@ public final class PrimitiveNatives {
 
     public static long floatRound(double n) {
         return Math.round(n);
-    }
-
-    public static double floatTrunc(double n) {
-        return n >= 0 ? Math.floor(n) : Math.ceil(n);
     }
 
     public static double floatSin(double n) {
@@ -255,40 +214,8 @@ public final class PrimitiveNatives {
         return Math.pow(base, exp);
     }
 
-    public static double floatHypot(double x, double y) {
-        return Math.hypot(x, y);
-    }
-
-    public static double floatCbrt(double n) {
-        return Math.cbrt(n);
-    }
-
-    public static double floatSinh(double n) {
-        return Math.sinh(n);
-    }
-
-    public static double floatCosh(double n) {
-        return Math.cosh(n);
-    }
-
-    public static double floatTanh(double n) {
-        return Math.tanh(n);
-    }
-
-    public static double floatExpm1(double n) {
-        return Math.expm1(n);
-    }
-
-    public static double floatLog1p(double n) {
-        return Math.log1p(n);
-    }
-
     public static double floatSignum(double n) {
         return Math.signum(n);
-    }
-
-    public static double floatCopySign(double magnitude, double sign) {
-        return Math.copySign(magnitude, sign);
     }
 
     // Comparisons - direct implementations
@@ -387,66 +314,6 @@ public final class PrimitiveNatives {
         return s.length();
     }
 
-    public static boolean stringIsEmpty(String s) {
-        return s.isEmpty();
-    }
-
-    public static char stringCharAt(String s, int index) {
-        return s.charAt(index);
-    }
-
-    public static int stringCodePointAt(String s, int index) {
-        return s.codePointAt(index);
-    }
-
-    @TruffleBoundary
-    public static String stringSubstring(String s, int start, int end) {
-        return s.substring(start, end);
-    }
-
-    @TruffleBoundary
-    public static int stringIndexOf(String s, String target) {
-        return s.indexOf(target);
-    }
-
-    @TruffleBoundary
-    public static int stringLastIndexOf(String s, String target) {
-        return s.lastIndexOf(target);
-    }
-
-    @TruffleBoundary
-    public static boolean stringStartsWith(String s, String prefix) {
-        return s.startsWith(prefix);
-    }
-
-    @TruffleBoundary
-    public static boolean stringEndsWith(String s, String suffix) {
-        return s.endsWith(suffix);
-    }
-
-    @TruffleBoundary
-    public static boolean stringContains(String s, String target) {
-        return s.contains(target);
-    }
-
-    public static boolean stringEquals(String s, String other) {
-        return s.equals(other);
-    }
-
-    @TruffleBoundary
-    public static boolean stringEqualsIgnoreCase(String s, String other) {
-        return s.equalsIgnoreCase(other);
-    }
-
-    @TruffleBoundary
-    public static int stringCompareTo(String s, String other) {
-        return s.compareTo(other);
-    }
-
-    public static int stringHashCode(String s) {
-        return s.hashCode();
-    }
-
     @TruffleBoundary
     public static String stringToLowerCase(String s) {
         return s.toLowerCase();
@@ -460,11 +327,6 @@ public final class PrimitiveNatives {
     @TruffleBoundary
     public static String stringTrim(String s) {
         return s.trim();
-    }
-
-    @TruffleBoundary
-    public static String stringStrip(String s) {
-        return s.strip();
     }
 
     @TruffleBoundary
@@ -498,16 +360,6 @@ public final class PrimitiveNatives {
         return s.concat(other);
     }
 
-    @TruffleBoundary
-    public static String stringRepeat(String s, int count) {
-        return s.repeat(count);
-    }
-
-    @TruffleBoundary
-    public static boolean stringIsBlank(String s) {
-        return s.isBlank();
-    }
-
     // ==================== Conversion Operations ====================
 
     public static double intToFloat(long n) {
@@ -518,68 +370,9 @@ public final class PrimitiveNatives {
         return (long) n;
     }
 
-    public static long floatToIntTruncate(double n) {
-        return (long) n;
-    }
-
-    public static long floatToIntRound(double n) {
-        return Math.round(n);
-    }
-
-    public static long floatToIntFloor(double n) {
-        return (long) Math.floor(n);
-    }
-
-    public static long floatToIntCeil(double n) {
-        return (long) Math.ceil(n);
-    }
-
     @TruffleBoundary
     public static String intToString(long n) {
         return Long.toString(n);
-    }
-
-    @TruffleBoundary
-    public static String floatToString(double n) {
-        return Double.toString(n);
-    }
-
-    // ==================== Char Operations ====================
-
-    public static long charToInt(char c) {
-        return c;
-    }
-
-    public static char intToChar(long n) {
-        return (char) n;
-    }
-
-    public static boolean charIsDigit(char c) {
-        return Character.isDigit(c);
-    }
-
-    public static boolean charIsLetter(char c) {
-        return Character.isLetter(c);
-    }
-
-    public static boolean charIsWhitespace(char c) {
-        return Character.isWhitespace(c);
-    }
-
-    public static boolean charIsUpperCase(char c) {
-        return Character.isUpperCase(c);
-    }
-
-    public static boolean charIsLowerCase(char c) {
-        return Character.isLowerCase(c);
-    }
-
-    public static char charToUpperCase(char c) {
-        return Character.toUpperCase(c);
-    }
-
-    public static char charToLowerCase(char c) {
-        return Character.toLowerCase(c);
     }
 
     // ==================== Nat Operations ====================
@@ -587,10 +380,6 @@ public final class PrimitiveNatives {
 
     public static long natAdd(long l, long r) {
         return l + r;
-    }
-
-    public static long natSubtract(long l, long r) {
-        return l - r;  // Caller should check for underflow
     }
 
     public static long natMultiply(long l, long r) {
@@ -603,14 +392,6 @@ public final class PrimitiveNatives {
 
     public static long natModulo(long l, long r) {
         return l % r;
-    }
-
-    public static long natMin(long l, long r) {
-        return Math.min(l, r);
-    }
-
-    public static long natMax(long l, long r) {
-        return Math.max(l, r);
     }
 
     // Nat comparisons (same as int since both are long)
