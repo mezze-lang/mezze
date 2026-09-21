@@ -39,25 +39,28 @@ class MethodOnVariantCrashTest {
         }
 
     /**
-     * OPEN. The crash is real and PRE-EXISTING — it reproduces byte-identically
-     * with this session's method-routing change temporarily reverted.
+     * FIXED, and the fix was an ORDERING, not a new diagnostic.
      *
-     * TWO FIXES MEASURED AND REVERTED, so do not re-try either:
+     * The T0206 this asserts was already being produced, by
+     * `undispatchableInherentMethodErrors`, from the SAME receiver read the
+     * invariant uses — so the two always agreed about which dispatches are
+     * unresolved. But `checkNoUnresolvedDispatchVar` ran FIRST and threw, and
+     * the diagnostic sitting directly below it never got to speak. The
+     * invariant exists to catch a SILENT wrong answer (the "defaults to Bytes"
+     * mis-dispatch class); a program being rejected with a precise error is not
+     * silent, so it now skips whatever the error pass reports.
      *
-     *  - "receiver IS concrete and no candidate targets it → defer": inert. The
-     *    crash does not come through that rung, so `candidateNames` is empty for
-     *    `(Red)` — `getReceiverConcreteType` does not give a usable type here.
-     *  - "receiver type not usable and >1 candidate → defer instead of
-     *    dispatching over all of them": does NOT fix this AND breaks
-     *    `InherentMethodDispatchRegressionTest.multi-candidate get_or chained on
-     *    inherent Result result with match-bound receiver`, which relies on the
-     *    all-candidates dispatch being pinned later by unification.
+     * TWO EARLIER ATTEMPTS, both measured and reverted — they aimed at the
+     * method-resolution ladder, which was never the problem:
      *
-     * So the emitting rung is somewhere else in the ladder and wants locating
-     * before anything is changed. The route users took into it is closed (the
-     * interpolation hint no longer offers `.to_str {}` first).
+     *  - "receiver IS concrete and no candidate targets it → defer": inert.
+     *  - "receiver type not usable and >1 candidate → defer": did not fix it AND
+     *    broke `InherentMethodDispatchRegressionTest.multi-candidate get_or
+     *    chained on inherent Result result with match-bound receiver`.
+     *
+     * A probe over every return in `tryGenerateMethodCall` settled it: the
+     * DEFERRED rung was already firing. The constraint was right all along.
      */
-    @org.junit.jupiter.api.Disabled("OPEN: pre-existing crash — see KDoc for the two fixes already ruled out")
     @Test
     fun `to_str on a user variant is rejected, not a crash`() {
         val r = outcome(

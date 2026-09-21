@@ -647,23 +647,35 @@ class TypeChecker(
                     .flatMap { com.mezze.language.ast.solving.collectFreeTypeVars(it.type) }
                     .map { it.id }
                     .toSet()
-                InvariantChecker.checkNoUnresolvedDispatchVar(
-                    unresolvedInherentMethods = solveResult.unresolvedInherentMethods,
-                    substitution = substitution,
-                    callReturnTypes = aggregated.callReturnTypes,
-                    generalizedVarIds = generalizedVarIds,
-                )
-
                 // #160: inherent-method dispatch the solver left unresolved. A
                 // receiver still not concrete — checked BOTH via the flat
                 // substitution AND the per-call-site callReturnTypes (which emit
                 // dispatches on; it can pin forward-ref / effect-context receivers
                 // the flat subst misses) — is genuinely undispatchable (no runtime
                 // impl), e.g. `{a} -> (id {v=a}).abs`. Report it as T0206.
-                collectedErrors.addAll(
-                    undispatchableInherentMethodErrors(
-                        solveResult.unresolvedInherentMethods, substitution, aggregated.callReturnTypes
-                    )
+                //
+                // Collected BEFORE the invariant runs, and the invariant then skips
+                // what this reports. Both read the same receiver the same way, so
+                // they always agreed about which dispatches are unresolved — but
+                // the invariant THREW first, and the diagnostic sitting right here
+                // never got to speak. `(Red).to_str {}` on a user variant died with
+                // `[no-unresolved-dispatch-var] Inherent dispatch of 'to_str' …`
+                // instead of "Cannot resolve inherent method 'to_str'". The
+                // invariant exists to catch a SILENT wrong answer (the
+                // "defaults to Bytes" mis-dispatch class); a program we are
+                // rejecting with a precise error is not silent.
+                val undispatchable = undispatchableInherentMethodErrors(
+                    solveResult.unresolvedInherentMethods, substitution, aggregated.callReturnTypes
+                )
+                collectedErrors.addAll(undispatchable)
+
+                val reportedDispatchLocs = undispatchable.mapNotNull { it.loc }.toSet()
+                InvariantChecker.checkNoUnresolvedDispatchVar(
+                    unresolvedInherentMethods = solveResult.unresolvedInherentMethods
+                        .filterNot { it.loc in reportedDispatchLocs },
+                    substitution = substitution,
+                    callReturnTypes = aggregated.callReturnTypes,
+                    generalizedVarIds = generalizedVarIds,
                 )
 
                 val validator = TypeValidator(context, registry, buildResult.implDeclarations, strictTopLevel)
