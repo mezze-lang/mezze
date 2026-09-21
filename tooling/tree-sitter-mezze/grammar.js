@@ -981,7 +981,11 @@ module.exports = grammar({
     // (the alpha character after any leading underscores is uppercase),
     // `__native_foo` is lower-style. So we split on the first
     // alpha-character's case, ignoring any leading underscore run.
-    lower_identifier: _ => /_*[a-z][a-zA-Z0-9_]*/,
+    // The parser's identifier is `[A-Za-z_][A-Za-z0-9_]*` — the first LETTER
+    // decides case, and there need not be one: `_1` is a valid name. This
+    // required a lowercase letter after the underscores, so `_1` lexed as
+    // nothing at all.
+    lower_identifier: _ => /_*[a-z][a-zA-Z0-9_]*|_+[0-9][a-zA-Z0-9_]*/,
     upper_identifier: _ => /_*[A-Z][a-zA-Z0-9_]*/,
   },
 });
