@@ -1,0 +1,100 @@
+# polyglot_interop — how much does ONE crossing into a guest language cost?
+#
+# Every workload here is a tight loop whose body is a single interop message,
+# so the number that comes out is the per-crossing cost and not the guest's own
+# work: the JS side is a plain property read or a one-expression function.
+#
+# It also runs the SAME workload written two ways — the flat dot-chain and the
+# explicitly-matched form. Those are supposed to be two spellings of one thing,
+# so their times are supposed to match. A gap between them is a finding.
+#
+# Baseline for tasks #86-#92. Run via bench/scripts/run.sh on the NATIVE binary.
+#
+# MEASURED 2026-09-22, JVM dev path, before any of #87-#90:
+#   iters      wall     loop      ns/iteration
+#   200k       4.587s   0.59s     ~978
+#   1M         6.225s   2.23s     ~742
+#   4M        11.759s   7.76s     ~647     (startup ~4.0s, measured at iters=1)
+#   marginal 1M -> 4M:  5.534s / 9M  =  615 ns/iteration, ~307 ns per interop message
+#
+# The number PLATEAUS — more iterations stop making it faster. That is the whole
+# finding: this code never gets optimised however hot it gets, which is what
+# @TruffleBoundary + InteropLibrary.getUncached() produce together. A cached,
+# un-bounded interop message should be low tens of ns.
+use std::effects::log::{println, Console, Log}
+use std::polyglot::core::{ InteropError }
+use mezze_js::js::{ Js, GraalJs, JsForeign }
+use std::int
+
+let iters = 2000000
+
+## ---- member read, DOT-CHAIN spelling ----
+## `.property{...}.as_int{}` threads the Result implicitly, dispatching the
+## second step through `impl Result JsForeign InteropError`.
+let read_chain: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
+  { obj, n, acc } ->
+    if n <= 0 then acc
+    else do
+      let got = match obj.property { name = "v" }.as_int {} is
+        Ok { val = i } -> i
+        Err { error = _ } -> 0
+      read_chain { obj = obj, n = n - 1, acc = acc + got }
+
+## ---- member read, MATCHED spelling ----
+## Same two messages, destructured between them instead of chained.
+let read_matched: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
+  { obj, n, acc } ->
+    if n <= 0 then acc
+    else do
+      let got = match obj.property { name = "v" } is
+        Ok { val = f } -> match f.as_int {} is
+          Ok { val = i } -> i
+          Err { error = _ } -> 0
+        Err { error = _ } -> 0
+      read_matched { obj = obj, n = n - 1, acc = acc + got }
+
+## ---- method invoke ----
+## `obj.get()` on the guest side: one invoke_member per iteration.
+let invoke_loop: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
+  { obj, n, acc } ->
+    if n <= 0 then acc
+    else do
+      let got = match obj.method { name = "get", args = [] }.as_int {} is
+        Ok { val = i } -> i
+        Err { error = _ } -> 0
+      invoke_loop { obj = obj, n = n - 1, acc = acc + got }
+
+## ---- indexed element read ----
+## Walks a guest array element by element — this is the ForeignContainers path,
+## where an N-element consumer pays N crossings.
+let index_loop: { arr: JsForeign, i: Int, n: Int, acc: Int } -> Int <Js> =
+  { arr, i, n, acc } ->
+    if i >= n then acc
+    else do
+      let got = match arr.index { i = i }.as_int {} is
+        Ok { val = v } -> v
+        Err { error = _ } -> 0
+      index_loop { arr = arr, i = i + 1, n = n, acc = acc + got }
+
+let report: { label: Str, got: Int } -> {} <Log> =
+  { label, got } -> println { msg = "  $(label) = $(int::to_str { n = got })" }
+
+let main = {} -> perform Console in perform GraalJs in do
+  println { msg = "polyglot_interop: $(int::to_str { n = iters }) iterations per workload" }
+
+  match Js.eval { source = "({ v: 7, get: function () { return 7; } })" } is
+    Ok { val = obj } -> do
+      # Same answer three ways: iters * 7. Printing it keeps the loop live.
+      let a = read_chain   { obj = obj, n = iters, acc = 0 }
+      let _ = report { label = "read  (chain)  ", got = a }
+      let b = read_matched { obj = obj, n = iters, acc = 0 }
+      let _ = report { label = "read  (matched)", got = b }
+      let c = invoke_loop  { obj = obj, n = iters, acc = 0 }
+      report { label = "invoke         ", got = c }
+    Err { error = _ } -> println { msg = "  eval of the test object FAILED" }
+
+  match Js.eval { source = "Array.from({length: 1000}, function (_, i) { return i; })" } is
+    Ok { val = arr } -> do
+      let d = index_loop { arr = arr, i = 0, n = 1000, acc = 0 }
+      report { label = "index (1000)   ", got = d }
+    Err { error = _ } -> println { msg = "  eval of the test array FAILED" }

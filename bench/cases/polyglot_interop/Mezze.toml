@@ -1,0 +1,16 @@
+[package]
+name = "polyglot_interop"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_interop"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+mezze-js = "github:mezze-lang/mezze-js@0.2.1"
+
+[dev-dependencies]
+
+# Opt in to GraalJS. No external prerequisites — `mez sync` fetches the jars.
+[polyglot.js]
