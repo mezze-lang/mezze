@@ -224,6 +224,8 @@ class ConstraintGenerator(
                         }
                         is ConstraintSolver.SolveResult.Success -> {
                             val substitution = solveResult.substitution
+                            com.mezze.language.typechecker.debug.ConstraintDumper
+                                .dumpPerBindingSolve(getBindingName(item), substitution)
 
                             // What this binding's own solve contributes to the
                             // shared `perBindingSubstitution`. Two disjoint pieces,

@@ -30,6 +30,14 @@ class CheckCommand {
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
         val quietMode = args.contains("-q") || args.contains("--quiet")
         val jsonMode = args.contains("--json")
+        // `--dump-constraints`: print each binding's constraints, its own solve,
+        // and the final substitution. `ConstraintDumper` already did this behind
+        // a JVM system property, which meant knowing the property exists and
+        // getting it into the right JVM; the check runs the typechecker
+        // in-process, so the flag is the property.
+        if (args.contains("--dump-constraints")) {
+            System.setProperty("mezze.dump.constraints", "true")
+        }
         val appIndex = args.indexOf("--app")
         val appName = args.find { it.startsWith("--app=") }?.substringAfter("=")
             ?: if (appIndex >= 0 && appIndex + 1 < args.size) args[appIndex + 1] else null

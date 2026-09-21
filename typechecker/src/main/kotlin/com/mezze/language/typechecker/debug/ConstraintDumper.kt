@@ -11,6 +11,9 @@ object ConstraintDumper {
     private val enabled: Boolean
         get() = System.getProperty("mezze.dump.constraints", "false") == "true"
 
+    /** True when dumping is on, for callers that would otherwise do work for it. */
+    val isEnabled: Boolean get() = enabled
+
     fun dumpGeneratedConstraints(
         constraintResults: Map<String, ConstraintResult>,
     ) {
@@ -23,8 +26,34 @@ object ConstraintDumper {
             for (constraint in result.constraints) {
                 println("    ${formatConstraint(constraint)}")
             }
+            // Ability obligations are constraints too, and they were missing
+            // here — so a dump could not answer "what did this binding demand?",
+            // which is most of what one asks a dump.
+            for (constraint in result.abilityConstraints) {
+                println("    ${formatConstraint(constraint)}")
+            }
+            for (constraint in result.associatedTypeConstraints) {
+                println("    ${formatConstraint(constraint)}")
+            }
         }
         println("=== END GENERATED CONSTRAINTS ===")
+    }
+
+    /**
+     * What ONE binding's own solve concluded, before anything is propagated.
+     *
+     * The global substitution ([dumpSolverResult]) is the merge of every
+     * binding's answers, and a question like "did THIS binding's solve link the
+     * annotation's variable to the body's?" cannot be read out of it. Answering
+     * that meant hand-editing `ConstraintGenerator` to add a println, twice in
+     * one session; this is that println, kept.
+     */
+    fun dumpPerBindingSolve(binding: String, substitution: Substitution) {
+        if (!enabled) return
+        println("=== PER-BINDING SOLVE: $binding (${substitution.mappings.size} mappings) ===")
+        for ((typeVar, type) in substitution.mappings) {
+            println("  ${typeVar.name}#${typeVar.id} → ${prettyPrintType(type)}")
+        }
     }
 
     fun dumpSolverInput(constraints: List<Constraint>) {

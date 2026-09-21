@@ -298,6 +298,8 @@ private fun showCommandHelp(command: String) {
             println("  -q, --quiet        Only show errors (no type info)")
             println("  --app <name>       Check specific app from Mezze.toml")
             println("  --json             Emit machine-readable JSON instead of text")
+            println("  --dump-constraints Print each binding's constraints, its own solve,")
+            println("                     and the final substitution (compiler debugging)")
             println("  -h, --help         Show this help message")
             println()
             println("EXAMPLES:")
@@ -306,6 +308,7 @@ private fun showCommandHelp(command: String) {
             println("  mezze check                    # Check package app")
             println("  mezze check --app server       # Check specific app")
             println("  mezze check --json app.mz      # JSON output for CI/tooling")
+            println("  mezze check --dump-constraints # What did the solver conclude, and where")
         }
         
         "init" -> {
