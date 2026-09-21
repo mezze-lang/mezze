@@ -73,6 +73,24 @@ object EntryPointCheck {
         return cursor.effects
     }
 
+    /**
+     * The whole entry rule for a module: find the entry the manifest names, then
+     * judge it. Null when the entry is present and acceptable.
+     *
+     * One place, because there were three — `mez check`, `mez build` and the wire
+     * runner each found the decl, checked it, and wrote their own message. They had
+     * drifted: build and the runner rejected a MISSING entry, `check` skipped its
+     * whole entry block when the decl was absent. So a manifest naming an entry no
+     * module defines passed `mez check` and then failed `mez build`, and the one
+     * command whose job is to tell you in advance stayed quiet.
+     */
+    fun entryError(decls: List<TypedLetDecl>, entryName: String): String? {
+        val decl = decls.find { it.name == entryName }
+            ?: return "App must define a '$entryName' function with type `{} -> {} <*>` " +
+                "(the entry named by Mezze.toml's `entry = \"$entryName\"`)"
+        return errorMessage(check(decl), entryName)
+    }
+
     /** Format a [Result] into a one-line user-facing error, or null if Ok. */
     fun errorMessage(result: Result, entryName: String): String? = when (result) {
         Result.Ok -> null

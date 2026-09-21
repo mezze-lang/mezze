@@ -329,19 +329,20 @@ class CheckCommand {
             // concrete effect (an unhandled effect has no handler at the entry and
             // leaks at runtime). `mez check` enforces the same rule as build/exec/dev,
             // so a leaky entry fails here rather than silently at runtime.
+            // A MISSING entry is part of that same rule, and `check` used to skip
+            // its whole entry block when the decl was absent. This path is
+            // app-only: `check` already bailed above when the manifest has no
+            // `[[app]]`, so a library never reaches it.
             val entryName = appConfig.entry
-            val entryDecl = typeCheckResult.typedModule?.decls
-                ?.filterIsInstance<TypedLetDecl>()
-                ?.find { it.name == entryName }
-            if (entryDecl != null) {
-                EntryPointCheck.errorMessage(EntryPointCheck.check(entryDecl), entryName)?.let { msg ->
-                    if (jsonMode) {
-                        jsonExitWith(null, appConfig.name,
-                            DiagnosticJson(Severity.ERROR, code = "V0501", message = msg), exitCode = 4)
-                    }
-                    println("Error: $msg")
-                    kotlin.system.exitProcess(4)
+            val decls = typeCheckResult.typedModule?.decls
+                ?.filterIsInstance<TypedLetDecl>().orEmpty()
+            EntryPointCheck.entryError(decls, entryName)?.let { msg ->
+                if (jsonMode) {
+                    jsonExitWith(null, appConfig.name,
+                        DiagnosticJson(Severity.ERROR, code = "V0501", message = msg), exitCode = 4)
                 }
+                println("Error: $msg")
+                kotlin.system.exitProcess(4)
             }
 
             // Scatter into store, including the entry + per-import ParsedModules.

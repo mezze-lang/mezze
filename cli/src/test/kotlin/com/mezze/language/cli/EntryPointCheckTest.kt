@@ -24,6 +24,15 @@ import java.nio.file.Paths
  */
 class EntryPointCheckTest {
 
+    /** Every top-level `let` the module typechecks to — what the CLI hands the rule. */
+    private fun typedDecls(source: String): List<TypedLetDecl> {
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
+        val result = TypeChecker().checkParsedModule(parsedModule, Paths.get("."), currentModulePath = null)
+        val success = result as? TypeChecker.TypeCheckResult.Success
+            ?: error("typecheck failed: ${(result as TypeChecker.TypeCheckResult.Failure).errors.joinToString { it.message }}")
+        return (success.typedModule ?: error("typedModule is null")).decls.filterIsInstance<TypedLetDecl>()
+    }
+
     private fun checkMain(source: String): EntryPointCheck.Result {
         val parser = MezzeParser()
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -123,6 +132,40 @@ class EntryPointCheckTest {
         assertNotNull(msg)
         assertTrue(msg!!.contains("perform"),
             "message must tell the user to add a handler, got: $msg")
+    }
+
+    /**
+     * The manifest names an entry no module defines.
+     *
+     * `mez build` and the wire runner rejected this; `mez check` SKIPPED its whole
+     * entry block when the decl was absent, so the one command whose job is to
+     * tell you in advance stayed quiet and the failure surfaced at build. All
+     * three now ask [EntryPointCheck.entryError], which owns both halves of the
+     * rule — is there an entry, and is it acceptable.
+     */
+    @Test
+    fun `a missing entry is an error, not a skipped check`() {
+        val decls = typedDecls("let other = {} -> {}")
+        val msg = EntryPointCheck.entryError(decls, "main")
+        assertNotNull(msg, "an app whose declared entry is absent must be rejected")
+        assertTrue(msg!!.contains("main"), "the message must name the missing entry, got: $msg")
+    }
+
+    @Test
+    fun `entryError is null when the entry is present and acceptable`() {
+        assertNull(EntryPointCheck.entryError(typedDecls("let main = {} -> {}"), "main"))
+    }
+
+    @Test
+    fun `entryError reports an unhandled effect on the entry it found`() {
+        val source = """
+            use std::effects::log::{println, Console}
+
+            let main = {} -> println { msg = "hi" }
+        """.trimIndent()
+        val msg = EntryPointCheck.entryError(typedDecls(source), "main")
+        assertNotNull(msg)
+        assertTrue(msg!!.contains("perform"), "must tell the user to add a handler, got: $msg")
     }
 
     @Test

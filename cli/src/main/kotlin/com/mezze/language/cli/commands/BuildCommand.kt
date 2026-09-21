@@ -250,15 +250,8 @@ class BuildCommand {
             // fresh-compile path.
             val entryName = appConfig.entry
             if (typedModuleForValidation != null) {
-                val mainBinding = typedModuleForValidation.decls
-                    .filterIsInstance<TypedLetDecl>()
-                    .find { it.name == entryName }
-
-                if (mainBinding == null) {
-                    println("Error: App must define a '$entryName' function with type {} -> {} <*>")
-                    kotlin.system.exitProcess(4)
-                }
-                EntryPointCheck.errorMessage(EntryPointCheck.check(mainBinding!!), entryName)?.let { msg ->
+                val decls = typedModuleForValidation.decls.filterIsInstance<TypedLetDecl>()
+                EntryPointCheck.entryError(decls, entryName)?.let { msg ->
                     println("Error: $msg")
                     kotlin.system.exitProcess(4)
                 }

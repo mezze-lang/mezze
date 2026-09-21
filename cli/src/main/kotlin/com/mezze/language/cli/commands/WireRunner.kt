@@ -451,17 +451,12 @@ object WireRunner {
         )
         if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${result.loweredFunctions.size} fns)")
 
-        val entry = result.typedModule?.decls
-            ?.filterIsInstance<TypedLetDecl>()
-            ?.find { it.name == entryName }
-        if (entry == null) {
-            System.err.println("Error: App must define a '$entryName' function with type `{} -> {} <*>`")
-            return null
-        }
-        EntryPointCheck.errorMessage(EntryPointCheck.check(entry), entryName)?.let { msg ->
+        val decls = result.typedModule?.decls?.filterIsInstance<TypedLetDecl>().orEmpty()
+        EntryPointCheck.entryError(decls, entryName)?.let { msg ->
             System.err.println("Error: $msg")
             return null
         }
+        val entry = decls.first { it.name == entryName }
 
         // Entry identity = content hash (== entry FunctionIR.hash). Resolved
         // once here at the front door from the user-named entry; carried as a
