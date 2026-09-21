@@ -1,0 +1,15 @@
+[package]
+name = "polyglot_seq_crossing"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_seq_crossing"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+mezze-js = "github:mezze-lang/mezze-js@0.2.1"
+
+[dev-dependencies]
+
+[polyglot.js]

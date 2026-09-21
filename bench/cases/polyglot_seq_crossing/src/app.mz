@@ -1,0 +1,92 @@
+# polyglot_seq_crossing — what does it cost to hand a Mezze seq to a guest?
+#
+# This is the shape people actually write: build data in Mezze, pass it to a
+# guest library, run a few guest operations on it. The numpy demo is the same
+# program with `numpy.array` in place of the JS reduce.
+#
+# TODAY THERE IS ONLY ONE WAY TO WRITE IT, and it is the slow one. Neither
+# provider implements the container half of the codec — mezze-python's codec.mz
+# says so in its own header: "Records / lists / maps are NOT implemented here —
+# a caller who wants to hand numpy a list should build a Python list explicitly
+# by `Python.eval { source = "[1, 2, 3]" }`". mezze-js says the same. So a seq
+# crosses by being PRINTED INTO GUEST SOURCE and parsed back: O(n) string
+# building in Mezze, then an O(n) parse in the guest, every time.
+#
+# The runtime half of the fix is already landed — `__native_<lang>_make_list`
+# wraps a Mezze seq as an interop VIEW, no copy, O(1). Only the provider's
+# `impl EncodeList` is missing (BUG 2's provider half; patches written and
+# validated, unlanded in the provider repos).
+#
+# MEASURED 2026-09-22 (GraalJS, 2000 reps, warmed):
+#
+#   n=3      19 us/crossing
+#   n=100    24 us/crossing
+#   n=1000  102 us/crossing
+#
+# ~19 us fixed + ~0.085 us per element: O(n), with a large constant. For scale,
+# a single interop member read is ~0.5 us, so handing a 1000-element seq across
+# costs about 200 member reads — and grows with the data.
+#
+# The view path would be O(1): `make_list` wraps the seq, it does not copy or
+# parse. So the missing codec turns an O(1) operation into an O(n) one, and the
+# O(1) implementation already exists and is sitting unreachable.
+#
+# Take the numbers warm. At 200 reps with no warm-up this reads 162/103/246 us
+# and n=3 costs MORE than n=100, which is JIT warm-up, not a real shape.
+use std::effects::log::{println, Console, Log}
+use std::effects::time::{ monotonic, Time, SystemTime }
+use std::datetime::{ Duration, sub_duration, duration_to_nanos }
+use std::polyglot::core::{ InteropError }
+use mezze_js::js::{ Js, GraalJs, JsForeign }
+use std::collections::seq
+use std::str
+use std::int
+
+let reps = 2000
+
+## 1..n as a Mezze seq.
+let build: { i: Int, n: Int, acc: [Int] } -> [Int] =
+  { i, n, acc } -> if i > n then acc else build { i = i + 1, n = n, acc = seq::push { xs = acc, x = i } }
+
+## THE WORKAROUND: print the seq into JS source, then make the guest parse it.
+let cross_via_source: { xs: [Int] } -> Result JsForeign InteropError <Js> =
+  { xs } -> do
+    let parts = seq::map { xs = xs, f = { x } -> int::to_str { n = x } }
+    let joined = str::join { strings = parts, separator = "," }
+    let src = "[$(joined)]"
+    Js.eval { source = src }
+
+let repeat_source: { xs: [Int], n: Int, acc: Int } -> Int <Js> =
+  { xs, n, acc } ->
+    if n <= 0 then acc
+    else do
+      let r = cross_via_source { xs = xs }
+      let got = match r is
+        Ok { val = _ } -> 1
+        Err { error = _ } -> 0
+      repeat_source { xs = xs, n = n - 1, acc = acc + got }
+
+## THE CODEC PATH CANNOT BE WRITTEN HERE. `__native_polyglot_make_list` is
+## landed and would wrap the seq as an O(1) interop VIEW, but `__native_*`
+## intrinsics are stdlib-only (#109), so the only door to it is a provider's
+## `impl EncodeList` — which neither provider has. See the header.
+
+let ms_between: { t0: Duration, t1: Duration } -> Int =
+  { t0, t1 } -> duration_to_nanos { d = sub_duration { a = t1, b = t0 } } / 1000
+
+let run_size: { n: Int } -> {} <Log, Js, Time> = { n } -> do
+  let xs = build { i = 1, n = n, acc = [] }
+
+  let _w = repeat_source { xs = xs, n = 300, acc = 0 }
+  let a0 = monotonic {}
+  let _a = repeat_source { xs = xs, n = reps, acc = 0 }
+  let a1 = monotonic {}
+
+  let src_us = ms_between { t0 = a0, t1 = a1 } / reps
+  println { msg = "  n=$(int::to_str { n = n })\tvia source: $(int::to_str { n = src_us }) us/crossing" }
+
+let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
+  println { msg = "seq -> guest, $(int::to_str { n = reps }) reps each" }
+  let _ = run_size { n = 3 }
+  let _ = run_size { n = 100 }
+  run_size { n = 1000 }
