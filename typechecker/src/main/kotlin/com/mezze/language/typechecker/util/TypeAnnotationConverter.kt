@@ -505,7 +505,6 @@ object TypeAnnotationConverter {
             is MezzeType.RecordType -> type.fields.values.forEach { collectCaughtByAncestorInto(it, into) }
             is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectCaughtByAncestorInto(it, into) } }
             is MezzeType.TypeApplication -> type.args.forEach { collectCaughtByAncestorInto(it, into) }
-            is MezzeType.ParametricBuiltin -> type.typeArgs.forEach { collectCaughtByAncestorInto(it, into) }
             is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
             is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
@@ -539,7 +538,6 @@ object TypeAnnotationConverter {
                 constructors = type.constructors.mapValues { (_, v) -> v?.let { stampCaughtOnAllEffectRows(it, caught) } }
             )
             is MezzeType.TypeApplication -> type.copy(args = type.args.map { stampCaughtOnAllEffectRows(it, caught) })
-            is MezzeType.ParametricBuiltin -> type.rebuild(type.typeArgs.map { stampCaughtOnAllEffectRows(it, caught) })
             is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnAllEffectRows(type.wrappedType, caught))
             is MezzeType.EffectRow -> type.copy(caughtByAncestor = type.caughtByAncestor + caught)
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
@@ -586,8 +584,6 @@ object TypeAnnotationConverter {
         is MezzeType.TypeApplication -> type.copy(
             args = type.args.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames) }
         )
-        is MezzeType.ParametricBuiltin ->
-            type.rebuild(type.typeArgs.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames) })
         is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames))
         is MezzeType.EffectRow, is MezzeType.VarType,
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,

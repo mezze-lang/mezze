@@ -85,8 +85,6 @@ private fun collectTypeVarsRecursive(type: MezzeType, collector: MutableList<Typ
                 collectTypeVarsRecursive(arg, collector, sortFields)
             }
         }
-        is MezzeType.ParametricBuiltin ->
-            type.typeArgs.forEach { collectTypeVarsRecursive(it, collector, sortFields) }
         is MezzeType.NewtypeType -> collectTypeVarsRecursive(type.wrappedType, collector, sortFields)
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.FracType,

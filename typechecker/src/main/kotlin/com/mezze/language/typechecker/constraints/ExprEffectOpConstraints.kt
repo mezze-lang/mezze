@@ -301,8 +301,6 @@ internal fun ExpressionConstraintGenerator.substituteAssociatedTypesInType(
             identity = type.identity,
             ascriptionWall = type.ascriptionWall
         )
-        is MezzeType.ParametricBuiltin ->
-            type.rebuild(type.typeArgs.map { substituteAssociatedTypesInType(it, associatedTypeBindings) })
         is MezzeType.NewtypeType -> type.copy(
             wrappedType = substituteAssociatedTypesInType(type.wrappedType, associatedTypeBindings)
         )

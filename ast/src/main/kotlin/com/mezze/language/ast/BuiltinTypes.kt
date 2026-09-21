@@ -92,16 +92,18 @@ object BuiltinTypes {
      * the container and codec machinery keyed on the type), so the two coexisted
      * and disagreed. Rejecting the declaration is the only reading that stays true.
      *
-     * [LIST] is the one hold-out, and for a reason that is itself a defect: the
-     * builtin `List` cannot be USED by name. `let f: { l: List Int } -> Int` with a
-     * `match l is Nil -> …` fails with "Cannot resolve type 'List' to check for
-     * constructor 'Nil'", while the identical program in `Option` or `Result` works.
-     * Several fixtures declare `type List 'a = | Cons …, Nil |` precisely to work
-     * around that, so reserving the name would take away a workaround before the
-     * thing it works around is fixed. Add LIST here once it resolves like its
-     * siblings.
+     * [LIST] used to be held out, because the builtin `List` could not be USED by
+     * name — `{ l: List Int }` with a `match l is Nil -> …` failed to resolve the
+     * constructor, so fixtures declared `type List 'a = | Cons …, Nil |` to work
+     * around it and reserving the name would have taken away the workaround before
+     * the thing it worked around was fixed. That resolution defect is fixed, the
+     * workaround is gone from the fixtures, and `List` is reserved like its
+     * siblings. The hold-out mattered: identity for these types is CARRIED BY THE
+     * NAME (TypeIdentity.Builtin), which is only sound because the name is
+     * reserved — a user `type List` would have been a second type answering to the
+     * one name the compiler keys on.
      */
-    val reservedTypeNames: Set<String> = PrimitiveTypes.allNames + (coreTypeNames - LIST)
+    val reservedTypeNames: Set<String> = PrimitiveTypes.allNames + coreTypeNames
 
     /** True iff [name] is a type name the compiler owns. Single authority. */
     fun isReservedTypeName(name: String): Boolean = name in reservedTypeNames

@@ -49,8 +49,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test List constructors have List type`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let lst = Cons { head = 1, tail = Nil }
         """.trimIndent()
 
@@ -69,8 +67,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test Seq and List are distinct types`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let arr = [1, 2, 3]
             let lst = Cons { head = 1, tail = Nil }
 
@@ -89,8 +85,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test List cannot be assigned to Array`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let lst = Cons { head = 1, tail = Nil }
 
             # This should fail - List and Seq are not the same type
@@ -112,8 +106,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test function expecting Seq rejects List`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let take_array : { arr: [Int] } -> Int = { arr } ->
                 match arr is
                     [] -> 0
@@ -136,8 +128,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test function expecting List rejects Array`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let take_list : { lst: (List Int) } -> Int = { lst } ->
                 match lst is
                     Nil -> 0
@@ -179,8 +169,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test function accepting List works with List`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let get_head : { lst: (List Int) } -> Int = { lst } ->
                 match lst is
                     Nil -> 0
@@ -205,8 +193,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test array pattern only matches arrays`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let process : { val: [Int] } -> Str = { val } ->
                 match val is
                     [] -> "empty array"
@@ -229,8 +215,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test list pattern only matches lists`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let process : { val: (List Int) } -> Str = { val } ->
                 match val is
                     Nil -> "empty list"
@@ -281,8 +265,6 @@ class SeqVsListTypeDistinctionTest {
         // Note: Since we return 0 for Nil, the function is not truly polymorphic -
         // it only works for List Int. The annotation reflects this.
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let get_head : { lst: (List Int) } -> Int = { lst } ->
                 match lst is
                     Nil -> 0
@@ -305,8 +287,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test passing Array to List function fails`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let map_list : { lst: (List 'a), f: { x: 'a } -> 'b } -> (List 'b) = { lst, f } ->
                 match lst is
                     Nil -> Nil
@@ -329,8 +309,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test passing List to Seq function fails`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let get_element : { arr: ['a] } -> 'a = { arr } ->
                 match arr is
                     [x] -> x
@@ -356,8 +334,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test nested Seq and List are distinct`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             # Seq of Seqs
             let arr_of_arrs = [[1, 2], [3, 4]]
 
@@ -379,8 +355,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test Array of Lists is valid`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let list1 = Cons { head = 1, tail = Nil }
             let list2 = Cons { head = 2, tail = Nil }
 
@@ -408,8 +382,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test List of Arrays is valid`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let arr1 = [1, 2]
             let arr2 = [3, 4]
 
@@ -439,8 +411,6 @@ class SeqVsListTypeDistinctionTest {
     fun `test stdlib list module with List type`() {
         val source = """
             use std::list::{concat}
-
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let list1 = Cons { head = 1, tail = Nil }
             let list2 = Cons { head = 2, tail = Nil }
@@ -502,8 +472,6 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test clear error message when Seq and List mismatch`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             let arr = [1, 2, 3]
             let lst = Cons { head = 1, tail = Nil }
 

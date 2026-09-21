@@ -132,8 +132,6 @@ data class Substitution(
             is MezzeType.TypeApplication ->
                 type.args.any { needsSubstitution(it) }
 
-            is MezzeType.ParametricBuiltin -> type.typeArgs.any { needsSubstitution(it) }
-
             is MezzeType.NewtypeType -> needsSubstitution(type.wrappedType)
 
             is MezzeType.EffectRow -> needsSubstitutionInEffectRow(type)
@@ -287,9 +285,6 @@ data class Substitution(
                 args = type.args.map { applyWithVisited(it, visitedVars, chainCache) },
                 identity = type.identity
             )
-
-            is MezzeType.ParametricBuiltin ->
-                type.rebuild(type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) })
 
             is MezzeType.NewtypeType -> type.copy(
                 wrappedType = applyWithVisited(type.wrappedType, visitedVars, chainCache)
@@ -563,8 +558,6 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         effects = type.effects,
         abilityConstraints = type.abilityConstraints
     )
-    is MezzeType.ParametricBuiltin ->
-        type.rebuild(type.typeArgs.map { closeGeneratedRowVars(it, mustBeOpenRowVars) })
     is MezzeType.TypeApplication -> MezzeType.TypeApplication(
         constructor = type.constructor,
         args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
@@ -610,8 +603,6 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
 
         is MezzeType.TypeApplication ->
             type.args.any { occursCheck(typeVar, it) }
-
-        is MezzeType.ParametricBuiltin -> type.typeArgs.any { occursCheck(typeVar, it) }
 
         is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
 
@@ -664,9 +655,6 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
 
         is MezzeType.TypeApplication ->
             type.args.flatMap { collectFreeTypeVars(it) }.toSet()
-
-        is MezzeType.ParametricBuiltin ->
-            type.typeArgs.flatMap { collectFreeTypeVars(it) }.toSet()
 
         is MezzeType.NewtypeType -> collectFreeTypeVars(type.wrappedType)
 

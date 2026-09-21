@@ -852,7 +852,6 @@ object MonoDriver {
                 is MezzeType.FunctionType -> { go(t.paramType); go(t.returnType) }
                 is MezzeType.RecordType -> t.fields.values.forEach(::go)
                 is MezzeType.VariantType -> t.constructors.values.forEach { it?.let(::go) }
-                is MezzeType.ParametricBuiltin -> t.typeArgs.forEach(::go)
                 is MezzeType.NewtypeType -> go(t.wrappedType)
                 is MezzeType.TypeApplication -> t.args.forEach(::go)
                 is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
@@ -880,7 +879,6 @@ object MonoDriver {
             is MezzeType.VariantType -> type.constructors.values.any {
                 it != null && typeParamAppearsIn(typeParamName, it)
             }
-            is MezzeType.ParametricBuiltin -> type.typeArgs.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.NewtypeType -> typeParamAppearsIn(typeParamName, type.wrappedType)
             is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,

@@ -167,7 +167,6 @@ sealed interface MezzeType {
         is VariantType -> constructors.values.any { it != null && predicate(it) } ||
             typeArgs.any(predicate)
         is TypeApplication -> args.any(predicate)
-        is ParametricBuiltin -> typeArgs.any(predicate)
         is NewtypeType -> predicate(wrappedType)
         // A standalone effect row's associated types are children too (a function's
         // effect row is reached via the FunctionType arm above).
@@ -190,7 +189,6 @@ sealed interface MezzeType {
             typeArgs = typeArgs.map(f)
         )
         is TypeApplication -> copy(args = args.map(f))
-        is ParametricBuiltin -> rebuild(typeArgs.map(f))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is EffectRow -> mapEffectRowChildren(this, f)
         is VarType, is IntType, is FloatType, is StringType, is BoolType,
@@ -320,26 +318,12 @@ sealed interface MezzeType {
     //   Option 'a = Some { val: 'a } | None
     //   Result 'a 'e = Ok { val: 'a } | Err { error: 'e }
 
-    /**
-     * A builtin type constructor parameterized by type arguments — the collection
-     * family (Seq/List/Set/SortedSet, keyed by one arg; Map/SortedMap, keyed by
-     * two). Exposes its args positionally ([typeArgs]) and reconstructs itself from
-     * new args ([rebuild]), so a structural pass folds the whole family through ONE
-     * `is ParametricBuiltin` arm instead of six identical `is SeqType`/`is MapType`
-     * copies. This is an ACCESSOR, not a demotion: each type stays a distinct
-     * primitive `MezzeType` with its own hash tag and serialized identity — grouping
-     * them here changes no runtime shape and no content hash. Only use it where the
-     * per-collection arms are genuinely uniform (recurse on args, rebuild same
-     * constructor); sites that special-case one collection keep their explicit arms.
-     * TypeApplication/VariantType are deliberately NOT members — they carry a
-     * nominal identity and are special-cased everywhere.
-     */
-    sealed interface ParametricBuiltin : MezzeType {
-        /** Type arguments in constructor order (Map/SortedMap: [key, value]). */
-        val typeArgs: List<MezzeType>
-        /** Reconstruct this same constructor with [args] (same arity as [typeArgs]). */
-        fun rebuild(args: List<MezzeType>): ParametricBuiltin
-    }
+    // A builtin container has ONE representation: a TypeApplication. `[T]` is
+    // TypeApplication("Seq", [T], Builtin("Seq")), a Map is ("Map", [K, V]). The
+    // `ParametricBuiltin` accessor interface that used to fold the six dedicated
+    // container nodes into one `when` arm went with them — it outlived its last
+    // implementor and left 23 unreachable `is ParametricBuiltin ->` arms behind,
+    // so it is deleted rather than kept for a future member.
 
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor

@@ -73,8 +73,6 @@ object AliasStripper {
             effects = type.effects?.let { stripEffectRow(it, inScope, registry, recursionGuard) },
             abilityConstraints = stripAbilityConstraints(type.abilityConstraints, inScope, registry, recursionGuard)
         )
-        is MezzeType.ParametricBuiltin ->
-            type.rebuild(type.typeArgs.map { stripImpl(it, inScope, registry, recursionGuard) })
         is MezzeType.NewtypeType -> type.copy(
             wrappedType = stripImpl(type.wrappedType, inScope, registry, recursionGuard)
         )

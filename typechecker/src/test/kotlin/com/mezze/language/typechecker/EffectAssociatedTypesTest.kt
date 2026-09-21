@@ -67,8 +67,6 @@ class EffectAssociatedTypesTest {
     fun `test effect implementation with complex type binding type checks`() {
         // Define List type first, then use Nil for empty list
         val code = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             effect State having 'state where {
                 get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
@@ -403,8 +401,6 @@ class EffectAssociatedTypesTest {
     fun `test list of associated type`() {
         // Define List type first, then use Nil for empty list
         val code = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
-
             effect Collection having 'item where {
                 getAll: {} -> (List 'item) <Collection>
             }

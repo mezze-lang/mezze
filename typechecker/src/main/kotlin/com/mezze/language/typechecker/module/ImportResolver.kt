@@ -864,9 +864,6 @@ class ImportResolver(
             is MezzeType.VariantType -> {
                 type.constructors.values.forEach { collectTypeApplicationConstructors(it, result) }
             }
-            is MezzeType.ParametricBuiltin -> {
-                type.typeArgs.forEach { collectTypeApplicationConstructors(it, result) }
-            }
             is MezzeType.EffectRow -> {
             }
             is MezzeType.NewtypeType -> {

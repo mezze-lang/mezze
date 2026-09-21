@@ -936,10 +936,6 @@ class AbilityChecker internal constructor(
                 }
                 MezzeType.VariantType(closedConstructors, rowVar = null, identity = type.identity)
             }
-            is MezzeType.ParametricBuiltin -> {
-                if (type.typeArgs.none { needsRowClosing(it) }) return type
-                type.rebuild(type.typeArgs.map { closeOpenRecords(it) })
-            }
             is MezzeType.FunctionType -> {
                 if (!needsRowClosing(type.paramType) && !needsRowClosing(type.returnType)) return type
                 MezzeType.FunctionType(

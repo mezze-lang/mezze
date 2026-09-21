@@ -526,11 +526,6 @@ class TypedAstBuilder(
             ) {
                 for (i in declared.args.indices) linkDeclaredVars(declared.args[i], inferred.args[i], out)
             }
-            is MezzeType.ParametricBuiltin -> if (inferred is MezzeType.ParametricBuiltin &&
-                declared.typeArgs.size == inferred.typeArgs.size
-            ) {
-                for (i in declared.typeArgs.indices) linkDeclaredVars(declared.typeArgs[i], inferred.typeArgs[i], out)
-            }
             is MezzeType.NewtypeType -> if (inferred is MezzeType.NewtypeType)
                 linkDeclaredVars(declared.wrappedType, inferred.wrappedType, out)
             else -> Unit
@@ -2520,9 +2515,6 @@ class TypedAstBuilder(
             pattern is MezzeType.TypeApplication && value is MezzeType.TypeApplication ->
                 if (pattern.constructor == value.constructor && pattern.args.size == value.args.size)
                     pattern.args.zip(value.args).forEach { (p, v) -> harvestVarBindings(p, v, out) }
-            pattern is MezzeType.ParametricBuiltin && value is MezzeType.ParametricBuiltin ->
-                if (pattern.typeArgs.size == value.typeArgs.size)
-                    pattern.typeArgs.zip(value.typeArgs).forEach { (p, v) -> harvestVarBindings(p, v, out) }
             pattern is MezzeType.VariantType && value is MezzeType.VariantType ->
                 for ((k, pt) in pattern.constructors)
                     if (pt != null) value.constructors[k]?.let { harvestVarBindings(pt, it, out) }

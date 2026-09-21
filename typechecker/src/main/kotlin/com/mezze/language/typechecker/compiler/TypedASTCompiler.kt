@@ -3188,9 +3188,9 @@ class TypedASTCompiler(
      */
     /** The element (or map value) type of a container type, else null. */
     private fun containerElementType(type: MezzeType): MezzeType? = when (type) {
-        // A container has TWO representations: the ParametricBuiltin cases above and
-        // `TypeApplication("List"|"Map"|…, args)` (see Unification ~299, which already
-        // bridges the SEQ pair). Only the former were handled, so `List P == List P`
+        // A container used to have TWO representations — the dedicated container
+        // nodes and `TypeApplication("List"|"Map"|…, args)` — and only the former
+        // were read here, which is the bug this arm exists for: `List P == List P`
         // yielded NO element type — element-first dict resolution couldn't descend, no
         // `__dict_eq` was injected, and the comparator reached the native as a
         // captureless stub whose `a == b` fell back to STRUCTURAL equality, silently

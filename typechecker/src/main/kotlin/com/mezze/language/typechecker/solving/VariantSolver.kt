@@ -600,8 +600,6 @@ internal class VariantSolver(
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is MezzeType.ParametricBuiltin ->
-                type.rebuild(type.typeArgs.map { closeRowVarsInType(it, rowVarsToClose) })
             is MezzeType.TypeApplication -> {
                 WellKnownTypeApp.of(
                     constructor = type.constructor,

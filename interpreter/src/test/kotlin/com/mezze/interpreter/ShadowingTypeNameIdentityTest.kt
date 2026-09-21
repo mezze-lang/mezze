@@ -50,15 +50,36 @@ class ShadowingTypeNameIdentityTest {
         )
     }
 
+    /**
+     * Driven off [com.mezze.language.ast.BuiltinTypes.coreTypeNames] itself rather
+     * than a hand-written list, so a name added there cannot quietly go unreserved.
+     * That is not hypothetical: `List` sat outside the reserved set for as long as
+     * the builtin could not be USED by name, and the hand-written list here carried
+     * the exemption with it. Identity for these types is CARRIED BY THE NAME
+     * (TypeIdentity.Builtin), so an unreserved one is a second type answering to the
+     * name the compiler keys on.
+     */
     @Test
-    fun `a core built-in type name cannot be declared`() {
-        // `List` is deliberately absent: the builtin cannot be USED by name
-        // (`match l is Nil` against a `List Int` annotation fails to resolve), so
-        // fixtures declare their own as a workaround and reserving the name would
-        // remove the workaround before the defect. See BuiltinTypes.reservedTypeNames.
-        for (n in listOf("Option", "Result", "Seq", "Map", "Set", "Deque", "Iter")) {
+    fun `every core built-in type name cannot be declared`() {
+        val core = com.mezze.language.ast.BuiltinTypes.coreTypeNames
+        assertTrue(core.contains("List"), "List belongs to the core builtins")
+        for (n in core) {
             assertReserved(n, "type $n = | Yes, No |")
         }
+    }
+
+    /** The builtin `List` is usable by name, which is why reserving it is safe. */
+    @Test
+    fun `the builtin List resolves by name with its own constructors`() {
+        val e = errorFrom(
+            """
+            let f = { l: List Int } -> match l is
+              Nil -> 0
+              Cons { head = h, tail = _ } -> h
+            f { l = Nil }
+            """.trimIndent(),
+        )
+        assertTrue(e == null, "the builtin List must resolve by name; got: $e")
     }
 
     @Test
