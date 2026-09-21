@@ -281,6 +281,37 @@ object BuiltinTypes {
         )
     }
 
+    /**
+     * `Option value` as its variant shape — the sibling of [listVariantShape], and
+     * here for the same reason: a BUILTIN's constructors are not in doubt, so
+     * expanding one must not depend on a user registry having `Option` in it.
+     * `Some`/`None` are reserved to Option exactly as `Cons`/`Nil` are to List.
+     *
+     * Builtin identity rather than Declared: this shape carries no content hash,
+     * and unification vetoes only when BOTH sides carry one, so meeting the
+     * stdlib's declared `Option` falls through to a structural comparison of the
+     * arms — which is the intent.
+     */
+    fun optionVariantShape(value: MezzeType): MezzeType.VariantType =
+        MezzeType.VariantType(
+            constructors = mapOf(SOME to MezzeType.RecordType(mapOf(VAL_FIELD to value)), NONE to null),
+            rowVar = null,
+            typeArgs = listOf(value),
+            identity = TypeIdentity.Builtin(OPTION),
+        )
+
+    /** `Result value error` as its variant shape. Sibling of [optionVariantShape]. */
+    fun resultVariantShape(value: MezzeType, error: MezzeType): MezzeType.VariantType =
+        MezzeType.VariantType(
+            constructors = mapOf(
+                OK to MezzeType.RecordType(mapOf(VAL_FIELD to value)),
+                ERR to MezzeType.RecordType(mapOf(ERROR_FIELD to error)),
+            ),
+            rowVar = null,
+            typeArgs = listOf(value, error),
+            identity = TypeIdentity.Builtin(RESULT),
+        )
+
     fun isOptionVariant(type: MezzeType): Boolean {
         return type is MezzeType.VariantType &&
                type.constructors.size == 2 &&

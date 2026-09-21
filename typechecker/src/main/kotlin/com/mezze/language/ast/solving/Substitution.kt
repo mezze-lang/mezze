@@ -3,6 +3,8 @@ package com.mezze.language.ast.solving
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.solving.UnificationResult
+import com.mezze.language.typechecker.solving.unify
 
 data class Substitution(
     val mappings: Map<TypeVar, MezzeType> = emptyMap(),
@@ -364,31 +366,80 @@ data class Substitution(
     // s1's mappings take precedence — we DON'T apply this to other's values because
     // that would bake in intermediate results (e.g. partial variant fields).
     //
-    // "Take precedence" hides a real question. When both sides bind the SAME
-    // variable to DIFFERENT values, the loser is discarded and the two are never
-    // unified — a choice between two answers rather than a union of information,
-    // with nothing checking they agreed. Measured: 245 such collisions in one
-    // small program's solve, 194 distinct variables across the stdlib compile.
+    // On a COLLISION — both sides binding the same variable to different values —
+    // precedence is not enough. Discarding the loser is a choice between two
+    // answers rather than a union of information, and nothing checked the two
+    // agreed. Measured across a stdlib compile: 216 collisions, 164 of them one
+    // type in two representations (`Bool([True,False])` vs `BoolType`,
+    // `Option([Some,None])` vs `TypeApplication(Option 'a)`) and 52 of them two
+    // DIFFERENT type variables for one variable — the link between them simply
+    // dropped, which is the "one written 'a becomes two TypeVars" shape.
     //
-    // Most look harmless (`Bool([True, False])` replaced by `BoolType` — one type
-    // in two representations, which is itself the duality behind the remaining
-    // elaboration rows), but "mostly harmless" is not a property anything here
-    // enforces. Bounded by SubstitutionClobberGateTest rather than changed:
-    // unification's most central operation deserves its own pass, not a drive-by.
+    // So a collision now UNIFIES. Both sides claim to be this variable's value, so
+    // they are equal, and unification says what that costs: nothing for the two
+    // representation dualities (`unify` knows both), and the missing `'s -> 'z`
+    // link for two variables. Those extra bindings are ADDED; the winner for the
+    // colliding variable itself is unchanged, so this is monotone — it can only
+    // add information, never replace an answer.
+    //
+    // A binding unification already produced is never overwritten here: extras go
+    // in only for variables neither side had bound, so the merge cannot clobber
+    // while fixing clobbering.
     fun compose(other: Substitution): Substitution {
-        if (SubstitutionClobbers.recording) {
-            for ((v, newValue) in mappings) {
-                val previous = other.mappings[v]
-                if (previous != null && previous != newValue) {
-                    SubstitutionClobbers.seen.add(v.name + "#" + v.id)
-                }
-            }
-        }
+        val extras = collisionUnifications(other)
         return Substitution(
-            mappings = other.mappings + mappings,
+            mappings = if (extras == null) other.mappings + mappings else extras + other.mappings + mappings,
             rowVarMappings = other.rowVarMappings + rowVarMappings,
             recordRowMappings = other.recordRowMappings + recordRowMappings
         )
+    }
+
+    /**
+     * The bindings implied by every collision between this and [other], or null
+     * when there is no collision (the overwhelmingly common case — this returns
+     * without allocating).
+     *
+     * `unify` composes internally, so this is re-entrancy guarded: a collision met
+     * while already resolving one is left to unification's own rules rather than
+     * recursing into this same merge.
+     */
+    private fun collisionUnifications(other: Substitution): Map<TypeVar, MezzeType>? {
+        if (mappings.isEmpty() || other.mappings.isEmpty()) return null
+        var extras: MutableMap<TypeVar, MezzeType>? = null
+        for ((v, newValue) in mappings) {
+            val previous = other.mappings[v] ?: continue
+            if (previous == newValue) continue
+            SubstitutionClobbers.record(v, previous, newValue)
+            if (SubstitutionClobbers.resolving) continue
+            SubstitutionClobbers.resolving = true
+            try {
+                when (val unified = unify(previous, newValue)) {
+                    is UnificationResult.Success ->
+                        for ((ev, evalue) in unified.substitution.mappings) {
+                            if (ev == v) continue
+                            // Only the ALIASES. A collision says the two values are
+                            // equal, and `'x = 'y` follows from that no matter when
+                            // it is learned — which is the whole of the missing link.
+                            // `'x = SomeShape` does not: the collision does not say
+                            // which of the two shapes is the refined one, and pinning
+                            // the variable to the argument-less representation
+                            // (`Option([Some,None])`, the declaration's own payload
+                            // var) closes it before the solve can reach the real
+                            // element type. Measured: doing that decodes
+                            // `{"flag":true}` against the wrong target and returns the
+                            // default. Shapes stay the solver's business.
+                            if (evalue !is MezzeType.VarType) continue
+                            if (ev in mappings || ev in other.mappings) continue
+                            val target = extras ?: mutableMapOf<TypeVar, MezzeType>().also { extras = it }
+                            target[ev] = evalue
+                        }
+                    is UnificationResult.Failure -> SubstitutionClobbers.recordConflict(v, unified.message)
+                }
+            } finally {
+                SubstitutionClobbers.resolving = false
+            }
+        }
+        return extras
     }
 
     // S0.4/#373 — make this substitution IDEMPOTENT by resolving each RHS through

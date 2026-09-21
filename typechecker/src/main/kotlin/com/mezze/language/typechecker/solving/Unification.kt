@@ -1379,6 +1379,23 @@ private fun declarationFor(
         }
 }
 
+/**
+ * `Option`/`Result` as variant shapes when the registry cannot supply them.
+ *
+ * Both are DECLARED in the stdlib, so every caller with a real registry keeps
+ * using the declaration and nothing changes for them. A caller without one —
+ * `unify(a, b)` at its default `DeclarationRegistry.EMPTY` — used to get null and
+ * report `Option 'a is not compatible with Option 'b` for two spellings of one
+ * type. Their constructors are reserved and not in doubt; this is the same
+ * answer `List` already gets one line below.
+ */
+private fun builtinVariantShape(typeApp: MezzeType.TypeApplication): MezzeType.VariantType? = when (typeApp.constructor) {
+    BuiltinTypes.OPTION -> typeApp.args.singleOrNull()?.let { BuiltinTypes.optionVariantShape(it) }
+    BuiltinTypes.RESULT ->
+        if (typeApp.args.size == 2) BuiltinTypes.resultVariantShape(typeApp.args[0], typeApp.args[1]) else null
+    else -> null
+}
+
 internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.VariantType? {
     // `List` has no `ParsedTypeDecl` — it is a compiler builtin with a dedicated
     // `MezzeType.ListType` — so there was nothing to expand it against, and
@@ -1398,7 +1415,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     BuiltinTypes.listElementType(typeApp)?.let { return BuiltinTypes.listVariantShape(it) }
 
     val typeDecl = declarationFor(typeApp, registry)
-        ?: return null
+        ?: return builtinVariantShape(typeApp)
 
     val variantDef = when (val def = typeDecl.definition) {
         is ParsedVariantDef -> def

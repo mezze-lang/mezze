@@ -12,28 +12,32 @@ import kotlin.test.fail
  * `Substitution.compose` must not quietly choose between two answers.
  *
  * Composition is a union in which one side wins on a collision. When both sides
- * bind the SAME variable to DIFFERENT values, the loser is discarded and the two
- * are never unified — so a solve can finish holding one of two answers with
- * nothing having checked that they agreed. The correct response to a collision is
- * to UNIFY the two values; picking one is a guess wearing a union's clothes.
+ * bind the SAME variable to DIFFERENT values, picking one is a guess wearing a
+ * union's clothes: the correct response is to UNIFY the two, because both sides
+ * claim to be that variable's value and so they are equal.
  *
- * This is not hypothetical. It is the mechanism behind the last elaboration rows:
- * for `Option.flatten` the solved substitution ends up holding
+ * Collisions now unify, and the two tests below say what that has to mean.
  *
- *     'c  ->  Option([Some, None])              (the None arm)
- *     'd  ->  TypeApplication(Option 'a)        (the match result var)
+ * The first is the INVARIANT and it is absolute: no collision may FAIL to unify.
+ * A collision whose two values contradict each other is a type error the solve is
+ * about to swallow — it keeps one value, the contradiction never surfaces, and
+ * the program compiles on an answer nothing checked. Measured at zero, and zero
+ * is the only acceptable number.
  *
- * with an `Equality('c, 'd)` in the constraint set that the solve reports as
- * satisfied. Two mutually unifiable values, never compared.
+ * Getting there took a second fix. Unification without a registry could not
+ * expand `Option`/`Result`, so `Option([Some, None])` against
+ * `TypeApplication(Option 'b)` — one type in two spellings — reported
+ * "Option 'a is not compatible with Option 'b" and counted as a contradiction.
+ * `Some`/`None` and `Ok`/`Err` are reserved constructors, so those shapes are now
+ * builtin knowledge exactly as `Cons`/`Nil` already were. That took the count
+ * from 11 to 0.
  *
- * Most collisions look benign — `Bool([True, False])` replaced by `BoolType` is
- * one type in two representations — but nothing enforces that, which is the point
- * of counting them.
- *
- * The gate is an UPPER BOUND, like the other ratchets here. Fixing compose to
- * unify on collision is a change to the most central operation in the solver and
- * wants its own pass with both suites; until then this keeps the number from
- * growing while nobody is looking.
+ * The second is a RATCHET on how often collisions happen at all. Unifying makes
+ * a collision harmless, not desirable: it is still two passes disagreeing about
+ * one variable, 216 times in the smallest program that pulls in the stdlib —
+ * 164 of them one type in two representations and 52 two different variables for
+ * one variable, which is the "one written 'a becomes two TypeVars" shape. It may
+ * only go DOWN.
  */
 class SubstitutionClobberGateTest {
 
@@ -51,6 +55,7 @@ class SubstitutionClobberGateTest {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
         SubstitutionClobbers.seen.clear()
+        SubstitutionClobbers.conflicts.clear()
         SubstitutionClobbers.recording = true
     }
 
@@ -58,6 +63,34 @@ class SubstitutionClobberGateTest {
     fun tearDown() {
         SubstitutionClobbers.recording = false
         SubstitutionClobbers.seen.clear()
+        SubstitutionClobbers.conflicts.clear()
+    }
+
+    /**
+     * The invariant. Zero, not a ratchet: a collision that does not unify is a
+     * contradiction, and the solve is about to keep one side of it.
+     */
+    @Test
+    fun `every collision unifies`() {
+        TypeChecker().typeCheck(
+            MezzeParser().parseParsedModule("let f = { x } -> x\nf { x = 1 }", "test.mz"),
+            Paths.get("."),
+        )
+        val conflicts = SubstitutionClobbers.conflicts
+        if (conflicts.isNotEmpty()) {
+            fail(
+                buildString {
+                    appendLine("${conflicts.size} collision(s) in compose did NOT unify:")
+                    conflicts.take(10).forEach { appendLine("  $it") }
+                    appendLine()
+                    appendLine("Both sides claim to be that variable's value, so they must be equal.")
+                    appendLine("Two that do not unify are a contradiction, and compose is about to keep")
+                    appendLine("one of them with nothing reporting the other. Either the two spellings")
+                    appendLine("denote one type and unification cannot see it, or a pass upstream is")
+                    appendLine("binding the same variable twice to genuinely different types.")
+                },
+            )
+        }
     }
 
     @Test
