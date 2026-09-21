@@ -104,17 +104,45 @@ final class ForeignContainers {
             return entries.size();
         }
 
+        /**
+         * A guest STRING key is normalized to a Java String before lookup.
+         *
+         * `entries` is keyed by whatever the encoder put in — for a record, the
+         * field names, which are Java Strings. A guest asking `m['alpha']` passes
+         * ITS OWN string object, and `LinkedHashMap.containsKey` compares by Java
+         * `equals`, so a Python `str` never matched a Java `String` and every
+         * subscript raised UnknownKey. Iteration worked (the keys come back out as
+         * guest strings), which is why the dict looked right while reads failed.
+         *
+         * Only strings are normalized. A non-string key keeps identity semantics —
+         * there is no cross-language equality to appeal to for an arbitrary object,
+         * and inventing one would be a guess.
+         */
+        @TruffleBoundary
+        private static Object normalizeKey(Object key) {
+            InteropLibrary interop = InteropLibrary.getUncached();
+            if (key instanceof String || !interop.isString(key)) {
+                return key;
+            }
+            try {
+                return interop.asString(key);
+            } catch (UnsupportedMessageException e) {
+                return key;
+            }
+        }
+
         @ExportMessage
         @TruffleBoundary
         boolean isHashEntryReadable(Object key) {
-            return entries.containsKey(key);
+            return entries.containsKey(normalizeKey(key));
         }
 
         @ExportMessage
         @TruffleBoundary
         Object readHashValue(Object key) throws UnknownKeyException {
-            Object found = entries.get(key);
-            if (found == null && !entries.containsKey(key)) {
+            Object normalized = normalizeKey(key);
+            Object found = entries.get(normalized);
+            if (found == null && !entries.containsKey(normalized)) {
                 throw UnknownKeyException.create(key);
             }
             return found;
