@@ -60,29 +60,39 @@ class RecursiveAbilityConstraintTest {
     }
 
     /**
-     * OPEN SOUNDNESS HOLE, pre-existing — an operation's OWN `with` constraint is
-     * never turned into an obligation at the call site.
+     * OPEN SOUNDNESS HOLE, pre-existing — and an ANNOTATION changes what the
+     * program means, which the language forbids outright.
      *
-     * Instrumented every `AbilityRequired(Eq)` construction while checking this
-     * program: the only ones built come from the stdlib (`contains`, `index_of`,
-     * `unique`, `distinct`). NONE is generated for `peek`'s `with Eq 'item`. So the
-     * constraint is not failing to be discharged — it is never asked.
+     * The same program is ACCEPTED unannotated and REJECTED with `: {} -> Sink`
+     * written on it. Verified both ways; the annotated half is locked in by the
+     * test below, which passes.
      *
-     * This test USED to pass, for the wrong reason. It wrote `type Sink = | Sink {} |`
-     * and asserted "Sink has no Eq" — which stopped being true when Eq became
-     * derived for every non-newtype, so the program was well-typed all along. It
-     * only looked rejected because `'item` never resolved. When the per-binding
-     * solve started being propagated (elaboration baseline 861 -> 0), `'item`
-     * resolved and the accidental rejection disappeared, exposing this.
+     * Traced end to end. The obligation IS generated at the call site
+     * (`AbilityRequired(Eq)`, context "Method-level constraint: Eq on Box.peek")
+     * and `Sink` IS correctly judged to have no Eq — `DerivabilityRules` resolves
+     * the `TypeApplication(Sink)` to its declaration and honours "a newtype derives
+     * Inspect and Hash ONLY". What goes wrong is in between: for an UNANNOTATED
+     * binding the obligation is ABSORBED into the inferred signature as a
+     * `with Eq …` constraint instead of being discharged, and since `f` is never
+     * called, nothing ever demands it. The annotation forbids absorption — it says
+     * the type has no such constraint — so the obligation must discharge, and it
+     * correctly fails.
      *
-     * VERIFIED PRE-EXISTING, not a regression of that change: with a NEWTYPE item
-     * (which genuinely has no Eq — newtypes derive Inspect and Hash only) the
-     * program is accepted with the propagation DISABLED too.
+     * That absorption is wrong here for a specific reason: the argument is
+     * CONCRETE. A concrete type either has the ability or it does not; there is
+     * nothing to generalize over, so `with Eq Sink` on the signature is not a
+     * weaker claim, it is a meaningless one.
      *
-     * The fix is to generate the obligation for an ability operation's own `with`
-     * constraints at the call site, with the associated type substituted — and it
-     * has to be deferred, because `'item` is pinned by the impl's `having` only
-     * after the receiver resolves.
+     * FIX: when generalizing an unannotated binding, do not absorb an ability
+     * constraint whose type arguments are fully concrete — discharge it, and report
+     * it when it fails. `addAbilityConstraintsToFunctionType` is where absorption
+     * happens; `dropDischargedConstraints` (true exactly when there is no
+     * annotation) is the flag that distinguishes the two paths today.
+     *
+     * The premise also had to be fixed to see this at all. The case used to write
+     * `type Sink = | Sink {} |` and assert "Sink has no Eq", which stopped being
+     * true when Eq became derived for every non-newtype — so it was passing for the
+     * wrong reason. A newtype genuinely has no Eq.
      */
     @org.junit.jupiter.api.Disabled("OPEN: an operation's own `with` constraint generates no obligation — see KDoc")
     @Test
@@ -103,5 +113,29 @@ class RecursiveAbilityConstraintTest {
             pub let f = {} -> ([Sink.(1)]).peek {}
         """.trimIndent())
         assertNotNull(e, "the item newtype has no Eq, so peek's dependent constraint must fail")
+    }
+
+    /**
+     * The half that WORKS, locked in: with the return type written, the very same
+     * program is rejected and names both the ability and the type.
+     *
+     * This is what makes the case above a hole rather than a missing feature — the
+     * checker can decide this, and does, the moment absorption is not available to
+     * it. It is also the measurement behind "an annotation changes what the program
+     * means": these two tests differ by `: {} -> Sink` and nothing else.
+     */
+    @Test
+    fun `an annotated binding discharges the dependent constraint and is rejected`() {
+        val e = err("""
+            ability Box for 'c having 'item where { peek: { it: 'c } with Eq 'item -> 'item }
+            newtype Sink = Int
+            impl Box for [Sink] having 'item = Sink where { peek = { it } -> Sink.(0) }
+            pub let f: {} -> Sink = {} -> ([Sink.(1)]).peek {}
+        """.trimIndent())
+        assertNotNull(e, "annotated, the unsatisfiable `with Eq 'item` must be reported")
+        assertTrue(
+            e!!.contains("Eq") && e.contains("Sink"),
+            "the error must name the ability and the type; got: $e",
+        )
     }
 }
