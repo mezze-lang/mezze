@@ -29,7 +29,7 @@ public abstract class DirectDivideNode extends MezzeNode {
     public static long divLongs(long left, long right) {
         if (right == 0) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new com.mezze.interpreter.values.MezzeGuestException("Division by zero");
+            throw com.mezze.interpreter.values.MezzeGuestException.dividingByZero("Division");
         }
         return left / right;
     }

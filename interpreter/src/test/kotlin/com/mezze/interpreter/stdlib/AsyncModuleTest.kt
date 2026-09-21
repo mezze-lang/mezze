@@ -7,7 +7,14 @@ import org.junit.jupiter.api.BeforeEach
 
 /**
  * Tests for std/async module.
- * Tests asynchronous computation using LoomAsync (cooperative scheduling) for deterministic testing.
+ *
+ * These run under `LoomAsync`, which is the Project Loom VIRTUAL-THREAD
+ * handler with `max_concurrent = 0` — genuinely concurrent, not cooperative.
+ * (This file used to claim the opposite, and a test built on that claim
+ * failed intermittently in the gate.) So a test here may assert on results
+ * that are ordered by their INPUT — `all`, `settle`, `try_all` all keep the
+ * caller's order — but never on which task happens to finish first.
+ *
  * Migrated from V1 to V2 with unboxed values.
  */
 class AsyncModuleTest {
@@ -105,7 +112,7 @@ class AsyncModuleTest {
     // === race Tests ===
 
     @Test
-    fun `test race returns first completed`() {
+    fun `test race returns one of the racers, not an error`() {
         val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
@@ -113,8 +120,15 @@ class AsyncModuleTest {
               Ok { val } -> val
               Err { error = _ } -> -1
         """))
-        // In coop scheduler, first one wins
-        assertEquals(1L, result)
+        // The racers run on virtual threads, so which one finishes first is
+        // the scheduler's call. `race` promises Ok with SOME racer's value,
+        // and that is what this checks; the old assertEquals(1L) encoded a
+        // first-wins guarantee the Loom handler does not make, and failed in
+        // the gate whenever p2 won.
+        assertTrue(
+            result == 1L || result == 2L,
+            "race must yield one of the racers' values, got: $result",
+        )
     }
 
     // === join Tests ===

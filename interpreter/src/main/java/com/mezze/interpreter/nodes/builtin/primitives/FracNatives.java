@@ -97,7 +97,7 @@ public final class FracNatives {
         long rn = numerator(r);
         long rd = denominator(r);
         if (rn == 0) {
-            throw new ArithmeticException("Division by zero fraction");
+            throw com.mezze.interpreter.values.MezzeGuestException.dividingByZero("Fraction division");
         }
         return make(ln * rd, ld * rn);
     }

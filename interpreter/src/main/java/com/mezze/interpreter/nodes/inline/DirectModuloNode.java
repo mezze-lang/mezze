@@ -28,7 +28,7 @@ public abstract class DirectModuloNode extends MezzeNode {
     public static long modLongs(long left, long right) {
         if (right == 0) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new ArithmeticException("Modulo by zero");
+            throw com.mezze.interpreter.values.MezzeGuestException.dividingByZero("Modulo");
         }
         return left % right;
     }

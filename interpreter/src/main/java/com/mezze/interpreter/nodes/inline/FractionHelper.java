@@ -72,7 +72,7 @@ public final class FractionHelper {
     public static MezzeRecord divideFractions(MezzeRecord left, MezzeRecord right) {
         long ln = getNumerator(left), ld = getDenominator(left);
         long rn = getNumerator(right), rd = getDenominator(right);
-        if (rn == 0) throw new ArithmeticException("Division by zero fraction");
+        if (rn == 0) throw com.mezze.interpreter.values.MezzeGuestException.dividingByZero("Fraction division");
         return makeFraction(ln * rd, ld * rn);
     }
 

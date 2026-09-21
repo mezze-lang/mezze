@@ -175,7 +175,7 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
 
 ---
 
-## BUG 2 — PARTIALLY FIXED: the runtime primitive exists; provider impls remain
+## BUG 2 — FIXED in-tree; both provider patches written and validated
 
 **Runtime half fixed on `feat/soundness`.** `ForeignContainers` (interpreter)
 adds guest-readable list and dict VIEWS, and `PolyglotNatives.makeList` /
@@ -189,9 +189,22 @@ covered by `PolyglotCoreTest` — including a case that hands a built list to
 `java.util.Arrays.asList`, which only works if the value genuinely answers the
 interop array messages.
 
-**Still open, and outside this repo:** steps 2 and 3 below — the `EncodeList` /
-`EncodeMap` / `EncodeRecord` impls and their decode mirrors live in the
-`mezze-python` and `mezze-js` provider packages. They now have a native to call.
+**Provider half: DONE, but it lands outside this repo.** Steps 2 and 3 below —
+the `EncodeList` / `EncodeMap` / `EncodeRecord` impls and their decode mirrors —
+live in the `mezze-python` and `mezze-js` provider packages. Both patches are
+written and were validated against real GraalPy and GraalJS, not just reviewed:
+
+  ~/Projects/mezze-python-bug2.patch
+  ~/Projects/mezze-js-bug2.patch
+
+They apply to `github:mezze-lang/mezze-python` and `github:mezze-lang/mezze-js`
+and need to be committed there; nothing in this repo blocks them.
+
+Validating them surfaced a genuine runtime-half defect that WAS ours and is
+fixed here (54f31eab1): `ForeignContainers.ForeignDict` looked entries up by
+the guest's own string object, so a dict built from Mezze read back empty from
+Python. `normalizeKey` now makes a guest string and a Java `String` the same
+key.
 
 ### Original report
 

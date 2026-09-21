@@ -1,5 +1,6 @@
 package com.mezze.interpreter.nodes.builtin.primitives;
 
+import com.mezze.interpreter.values.MezzeGuestException;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
@@ -36,11 +37,18 @@ public final class PrimitiveNatives {
         return l * r;
     }
 
+    // Guarded here, not just in DirectDivideNode/DirectModuloNode: `a / b`
+    // reaches the primitive by four routes (the inline node, the scalar-ABI
+    // NativeOp, the typed LLL handler, and the record-ABI NativeDispatch
+    // entry), and the same expression must fail the same way whichever route
+    // the compiler picks for it.
     public static long intDivide(long l, long r) {
+        if (r == 0) throw MezzeGuestException.dividingByZero("Division");
         return l / r;
     }
 
     public static long intModulo(long l, long r) {
+        if (r == 0) throw MezzeGuestException.dividingByZero("Modulo");
         return l % r;
     }
 

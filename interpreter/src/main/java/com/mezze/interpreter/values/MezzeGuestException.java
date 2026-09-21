@@ -18,6 +18,22 @@ public final class MezzeGuestException extends AbstractTruffleException {
         super(message);
     }
 
+    /**
+     * The one spelling of "this arithmetic has no answer".
+     *
+     * `/` and `%` by zero are the same situation, so a program must not be
+     * able to tell them apart by how they fail — and every route to the same
+     * operation must agree. Both used to be open-coded: divide raised this
+     * exception, modulo raised a bare JVM {@code ArithmeticException}, which
+     * Truffle classifies as a HOST error and surfaces to the user as an
+     * internal failure with a JVM stack trace.
+     *
+     * @param operation the failing operation, capitalised — "Division", "Modulo"
+     */
+    public static MezzeGuestException dividingByZero(String operation) {
+        return new MezzeGuestException(operation + " by zero");
+    }
+
     public MezzeGuestException(String message, Node location) {
         super(message, location);
     }
