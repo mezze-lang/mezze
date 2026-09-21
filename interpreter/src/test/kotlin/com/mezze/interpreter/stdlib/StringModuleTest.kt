@@ -323,6 +323,58 @@ class StringModuleTest {
         assertEquals("hello there there", eval(source))
     }
 
+    /**
+     * `replace` and `replace_all` are the same operation differing only in how
+     * many occurrences they take, so `new` must mean the same thing to both:
+     * the text to put there.
+     *
+     * `replace` used to reach `String.replaceFirst`, whose SECOND argument is a
+     * regex replacement template — `$` and `\` are metacharacters in it. Quoting
+     * only the search side left that template live, so replacing with an
+     * ordinary price threw IndexOutOfBoundsException out of the regex engine,
+     * a trailing `$` or `\` threw IllegalArgumentException, and `$0` silently
+     * substituted the matched text instead of itself. `replace_all` was always
+     * literal, so the two disagreed.
+     */
+    /** `str::<op> { s = "cost: X", old = "X", new = <newLiteral> }` */
+    private fun replacingX(op: String, newLiteral: String): Any =
+        eval(
+            """
+            use std::str
+            str::$op { s = "cost: X", old = "X", new = "$newLiteral" }
+            """.trimIndent(),
+        )
+
+    @Test
+    fun `replace puts the replacement in literally, like replace_all`() {
+        val d = "${'$'}"
+
+        // Threw IndexOutOfBoundsException: No group 5
+        assertEquals("cost: ${d}5", replacingX("replace", "${d}5"))
+        // Threw IllegalArgumentException: Illegal group reference
+        assertEquals("cost: c$d", replacingX("replace", "c$d"))
+        // Silently substituted the MATCHED text: gave "cost: X"
+        assertEquals("cost: ${d}0", replacingX("replace", "${d}0"))
+        // Threw IllegalArgumentException: character to be escaped is missing
+        assertEquals("cost: \\", replacingX("replace", "\\\\"))
+
+        // …and the sibling has always been literal, so the two must agree.
+        assertEquals(replacingX("replace_all", "${d}5"), replacingX("replace", "${d}5"))
+        assertEquals(replacingX("replace_all", "${d}0"), replacingX("replace", "${d}0"))
+        assertEquals(replacingX("replace_all", "\\\\"), replacingX("replace", "\\\\"))
+    }
+
+    /** The search side stays literal too — `old` is text, not a pattern. */
+    @Test
+    fun `replace matches old literally, not as a regex`() {
+        val source = """
+            use std::str
+            str::replace { s = "a.b.c", old = ".", new = "-" }
+        """.trimIndent()
+
+        assertEquals("a-b.c", eval(source), "`.` must match a literal dot, not any char")
+    }
+
     @Test
     fun `test string char_at - found`() {
         val source = """

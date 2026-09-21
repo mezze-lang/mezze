@@ -57,7 +57,7 @@ object StringOps {
     private val REPLACE_ALL = NativeOp("__native_string_replace_all",
         listOf(Param("s", SlotKind.OBJECT), Param("old", SlotKind.OBJECT), Param("new", SlotKind.OBJECT)),
         SlotKind.OBJECT, pure = true,
-    ) { args -> args.string(0).replace(args.string(1), args.string(2)) }
+    ) { args -> PrimitiveNatives.stringReplace(args.string(0), args.string(1), args.string(2)) }
 
     // ==================== String, Int -> String ====================
     private val REPEAT = NativeOp("__native_string_repeat",
@@ -147,6 +147,6 @@ object StringOps {
     private val REPLACE = NativeOp("__native_string_replace",
         listOf(Param("s", SlotKind.OBJECT), Param("old", SlotKind.OBJECT), Param("new", SlotKind.OBJECT)),
         SlotKind.OBJECT, pure = true,
-    ) { args -> args.string(0).replaceFirst(java.util.regex.Pattern.quote(args.string(1)), args.string(2)) }
+    ) { args -> PrimitiveNatives.stringReplaceFirst(args.string(0), args.string(1), args.string(2)) }
 
 }

@@ -485,9 +485,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_string_ends_with", (r, c) ->
             getString(r, "s").endsWith(getString(r, "suffix")));
         HANDLERS.put("__native_string_replace", (r, c) ->
-            getString(r, "s").replaceFirst(java.util.regex.Pattern.quote(getString(r, "old")), getString(r, "new")));
+            PrimitiveNatives.stringReplaceFirst(getString(r, "s"), getString(r, "old"), getString(r, "new")));
         HANDLERS.put("__native_string_replace_all", (r, c) ->
-            getString(r, "s").replace(getString(r, "old"), getString(r, "new")));
+            PrimitiveNatives.stringReplace(getString(r, "s"), getString(r, "old"), getString(r, "new")));
         HANDLERS.put("__native_string_split", (r, c) ->
             stringSplit(getString(r, "s"), getString(r, "delimiter")));
         HANDLERS.put("__native_string_join", (r, c) ->

@@ -464,6 +464,28 @@ public final class PrimitiveNatives {
         return s.replace(target, replacement);
     }
 
+    /**
+     * Replace the FIRST occurrence of {@code target}, literally.
+     *
+     * Both sides are literal, exactly as in {@link #stringReplace}: the two
+     * are the same operation differing only in how many occurrences they
+     * take, so they must not disagree about what their arguments mean.
+     *
+     * This deliberately does not go through {@code String.replaceFirst}.
+     * That takes a regex for the search AND a replacement TEMPLATE, in which
+     * {@code $} and {@code \} are metacharacters — so quoting only the search
+     * side (the previous implementation) left the replacement live: replacing
+     * with a price like {@code "$5"} threw IndexOutOfBoundsException out of
+     * the regex engine, {@code "c$"} threw IllegalArgumentException, and
+     * {@code "$0"} silently substituted the matched text instead of itself.
+     */
+    @TruffleBoundary
+    public static String stringReplaceFirst(String s, String target, String replacement) {
+        int at = s.indexOf(target);
+        if (at < 0) return s;
+        return s.substring(0, at) + replacement + s.substring(at + target.length());
+    }
+
     public static String stringConcat(String s, String other) {
         return s.concat(other);
     }
