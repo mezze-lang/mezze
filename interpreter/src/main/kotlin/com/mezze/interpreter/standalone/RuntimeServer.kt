@@ -1029,10 +1029,17 @@ private class ServerState(
      * CallTargets, is preserved). Best-effort close of the old context — a wedged
      * guest shouldn't block the next run.
      *
-     * UNVERIFIED for the polyglot cases: this build has only the `mezze` language
-     * installed, so the JS and Linux-GraalPy paths are reasoned from the rule
-     * above rather than measured. The macOS+GraalPy behaviour is BYTE-IDENTICAL
-     * to what it was.
+     * VERIFIED end to end on Linux with GraalJS, by A/B against the old
+     * condition. A `mez dev` watch project whose app evaluates
+     * `globalThis.mez_runs = (globalThis.mez_runs || 0) + 1` and prints it,
+     * across an initial run plus three reloads:
+     *
+     *     old `if (polyglotLanguagesToWarm.isNotEmpty()) return`   1, 2, 3, 4
+     *     this condition                                           1, 1, 1, 1
+     *
+     * So the guest state really did accumulate for a language that loads no
+     * native modules, and it no longer does. The macOS+GraalPy behaviour is
+     * BYTE-IDENTICAL to what it was, and is the one case not reachable here.
      */
     fun maybeResetContextForNewRun() {
         if (startupContextUnused) {
