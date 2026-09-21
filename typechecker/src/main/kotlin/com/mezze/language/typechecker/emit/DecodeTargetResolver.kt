@@ -361,6 +361,11 @@ object DecodeTargetResolver {
      * spelled "VariantType", so `{ x: Color }` and `{ x: Status }` compared EQUAL
      * and could select each other's decoder. Which of the two fired depended on
      * which representation the solve happened to settle on.
+     *
+     * Only the Bool half has a regression test (`threeDifferentShapes`): the
+     * derived codec does not decode a user variant from a JSON string, so two
+     * variant-fielded targets cannot be reached through `from_json` today. The
+     * collision is still closed here rather than left for whoever adds that.
      */
     private fun structural(t: MezzeType): String = when (t) {
         is MezzeType.RecordType ->
