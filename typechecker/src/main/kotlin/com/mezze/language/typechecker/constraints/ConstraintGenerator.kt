@@ -225,90 +225,39 @@ class ConstraintGenerator(
                         is ConstraintSolver.SolveResult.Success -> {
                             val substitution = solveResult.substitution
 
-                            // Feed this binding's STRUCTURAL resolution into the
-                            // shared perBindingSubstitution, exactly as the
-                            // ParsedTopLevelExpr path does (see below). This binding's
-                            // solve already pins e.g. a bare variant field
-                            // (`let order = { status = Queued }`) to its declared
-                            // alias (`status: Status`) via HasConstructor; without
-                            // merging it here that resolution is discarded (only the
-                            // GLOBAL solve's substitution is composed into the final
-                            // one at TypeChecker's compose(perBindingSubstitution)),
-                            // so emit reads a bare `'a` for the field and hover/inlay
-                            // show `'a`. A top-level `let` never hit this because its
-                            // value is re-solved globally; a do-block-local `let` is
-                            // not, so its per-binding resolution must be propagated
-                            // here. Mirror the expr path: compose only the STRUCTURAL
-                            // subset (HasField / HasConstructor) so equality /
-                            // method-resolution ordering stays owned by the global
-                            // solver.
-                            // Compose only the VARIANT (HasConstructor) resolution —
-                            // NOT HasField. HasField governs record OPENNESS (open
-                            // `{ a, ... }` vs closed `{ a }`); merging its per-binding
-                            // solve here reopens records that must print closed (e.g.
-                            // a `from_json` decode target — RecordInferenceOpenClosedTest).
-                            // The bug is only that a bare variant field stays `'a`;
-                            // solely HasConstructor pins it to its declared alias, so
-                            // that is all we propagate.
-                            // PLUS the EQUALITIES. This is what ties a declaration's
-                            // ANNOTATION to its inferred body: `bindLet` emits
-                            // `Equality(bodyType, annotatedType)`, the per-binding
-                            // solve honours it, and then — before this — the binding
-                            // it produced was dropped on the floor with the rest of
-                            // the solve. The annotation's variable and the body's
-                            // stayed two unrelated ROOTS in the substitution emit
-                            // reads, so a node stamped from one carried a variable the
-                            // declaration's scheme (quantified from the other) does not
-                            // bind. That is the `flatten` / `intersperse` elaboration
-                            // rows: measured, `'a#239 -> 'e#247` existed in the
-                            // per-binding solve and was absent from the module
-                            // substitution, where both were roots.
-                            // Feed this binding's WHOLE solve into the shared
-                            // perBindingSubstitution.
+                            // What this binding's own solve contributes to the
+                            // shared `perBindingSubstitution`. Two disjoint pieces,
+                            // each with its own reason:
                             //
-                            // It used to propagate only the HasConstructor subset,
-                            // re-solved on its own. Everything else the per-binding
-                            // solve learned was computed, used locally to type this
-                            // binding, and then dropped — including the EQUALITY that
-                            // ties a declaration's ANNOTATION to its inferred body.
-                            // The annotation's variable and the body's therefore
-                            // stayed two unrelated ROOTS in the substitution emit
-                            // reads, so a node stamped from one carried a variable the
-                            // scheme (quantified from the other) does not bind.
+                            // (1) The VARIANT (HasConstructor) resolution, re-solved
+                            //     on its own. It pins a bare variant field to its
+                            //     declared alias — `let order = { status = Queued }`
+                            //     hovering as `Status` rather than `'a`
+                            //     (HoverMatchAndAliasTest). NOT HasField: that governs
+                            //     record OPENNESS, and merging its per-binding answer
+                            //     reopens records that must print closed, e.g. a
+                            //     `from_json` decode target
+                            //     (RecordInferenceOpenClosedTest).
                             //
-                            // Measured on `Option.flatten`: the per-binding solve held
-                            // `'a#239 -> 'e#247`, the module substitution did not, and
-                            // at emit the node read `'a` while the declaration read
-                            // `'e`. Propagating the solve makes both read `'e#247` —
-                            // and closes the last three rows of the elaboration
-                            // baseline (`flatten` x2, `intersperse`).
+                            // (2) The bindings for the variables the DECLARATION
+                            //     NAMES. `bindLet` emits
+                            //     `Equality(bodyType, annotatedType)` and this solve
+                            //     honours it, but the solve was then dropped, so the
+                            //     annotation's variables and the body's stayed two
+                            //     unrelated ROOTS in the substitution emit reads: a
+                            //     node stamped from one carried a variable the scheme,
+                            //     quantified from the other, does not bind. Measured on
+                            //     `Option.flatten` — the solve held `'a#239 -> 'e#247`
+                            //     and the module substitution did not.
                             //
-                            // Re-solving a FILTERED subset cannot do this, which is
-                            // why the old shape could not: a fresh solve mints fresh
-                            // variables, so what it propagates is a new answer rather
-                            // than the one this binding was actually typed with.
-                            //
-                            // `compose` keeps the receiver on overlap, so a later
-                            // binding's solve does not overwrite an earlier one's, and
-                            // TypeChecker's `solveResult.substitution.compose(...)`
-                            // keeps the module solve authoritative over all of it.
-                            // Only the bindings for the variables the DECLARATION
-                            // ITSELF names. That is the annotation-to-body link and
-                            // nothing else: propagating the whole solve carries this
-                            // binding's private constraint resolution into the module
-                            // substitution, which reopens records that must print
-                            // closed (RecordInferenceOpenClosedTest) and — worse —
-                            // makes an unsatisfied dependent ability constraint look
-                            // satisfied (RecursiveAbilityConstraintTest). Both
-                            // measured.
-                            // The VARIANT (HasConstructor) resolution, re-solved on
-                            // its own. This is what pins a bare variant field to its
-                            // declared alias — `let order = { status = Queued }`
-                            // hovering as `Status` rather than `'a`
-                            // (HoverMatchAndAliasTest). NOT HasField: that governs
-                            // record OPENNESS, and merging its per-binding solve
-                            // reopens records that must print closed (a `from_json`
-                            // decode target — RecordInferenceOpenClosedTest).
+                            // Propagating the WHOLE solve instead also closes
+                            // `intersperse`'s rows and MISCOMPILES: a Bool field
+                            // decodes as False where it must be True
+                            // (JsonDecodeExhaustiveTest). Three narrowings were
+                            // measured and none accommodates the codec — see the
+                            // elaboration baseline header. A variable the declaration
+                            // NAMES must mean the same thing everywhere; one internal
+                            // to this solve need not.
                             val variantBindingConstraints = allBindingConstraints.filter {
                                 it is Constraint.HasConstructor
                             }
@@ -320,62 +269,6 @@ class ConstraintGenerator(
                                 }
                             }
 
-                            // Plus the bindings for the variables the DECLARATION
-                            // ITSELF names.
-                            //
-                            // `bindLet` emits `Equality(bodyType, annotatedType)` and
-                            // the per-binding solve honours it — but that solve was
-                            // then dropped, so the annotation's variables and the
-                            // body's stayed two unrelated ROOTS in the substitution
-                            // emit reads. A node stamped from one carried a variable
-                            // the scheme, quantified from the other, does not bind:
-                            // the `Option.flatten` / `Result.flatten` elaboration
-                            // rows. Measured, the solve held `'a#239 -> 'e#247` and
-                            // the module substitution did not.
-                            //
-                            // Restricted to the ANNOTATION's variables on purpose.
-                            // Propagating the whole solve also closes these rows, and
-                            // carries this binding's private constraint resolution
-                            // with it: records that must print closed reopen
-                            // (RecordInferenceOpenClosedTest) and an unsatisfied
-                            // dependent ability constraint starts looking satisfied
-                            // (RecursiveAbilityConstraintTest). Both measured. A
-                            // variable the declaration NAMES has to mean the same
-                            // thing everywhere; one internal to its solve does not.
-                            //
-                            // Re-solving a filtered subset instead does not work and
-                            // is not equivalent: HasConstructor mints fresh variables
-                            // through the declared variant's type params, so what it
-                            // propagates is a new answer rather than this binding's.
-                            // Equalities alone, re-solved, close nothing — also
-                            // measured.
-                            // Plus the bindings for the variables the DECLARATION
-                            // ITSELF names.
-                            //
-                            // `bindLet` emits `Equality(bodyType, annotatedType)` and
-                            // the per-binding solve honours it — but that solve was
-                            // then dropped, so the annotation's variables and the
-                            // body's stayed two unrelated ROOTS in the substitution
-                            // emit reads. A node stamped from one carried a variable
-                            // the scheme, quantified from the other, does not bind:
-                            // the `Option.flatten` / `Result.flatten` elaboration
-                            // rows. Measured — the solve held `'a#239 -> 'e#247` and
-                            // the module substitution did not.
-                            //
-                            // WHY ONLY THE DECLARATION'S OWN VARIABLES. Propagating
-                            // the whole solve also closes `intersperse`, and it
-                            // MISCOMPILES: `JsonDecodeExhaustiveTest` decodes a Bool
-                            // field as False where it must be True. Three ways of
-                            // narrowing it were measured and none accommodates the
-                            // codec — excluding bindings that carry an open record
-                            // row, excluding every record-valued binding, and
-                            // excluding variables whose shape this binding is still
-                            // determining through HasField. A wrong decode is worse
-                            // than an open ratchet row, so the broad version does not
-                            // ship until that is understood.
-                            //
-                            // A variable the declaration NAMES has to mean the same
-                            // thing everywhere; one internal to its solve does not.
                             val declaredVars = preConvertedAnnotationType
                                 ?.let { com.mezze.language.ast.solving.collectFreeTypeVars(it) }
                                 .orEmpty()
@@ -399,6 +292,13 @@ class ConstraintGenerator(
                                 solver = solver,
                             )
                             val solvedBindingsWithEffects = letResult.solvedBindingsWithEffects
+
+                            // An obligation whose arguments came out CONCRETE and
+                            // unsatisfied is an error, not something to carry on the
+                            // inferred signature — see `isFullyDischarged`, which
+                            // finds them. Reported here because this is the binding
+                            // that would have absorbed it.
+                            perBindingSolveErrors.addAll(letResult.absorbedUnsatisfiable)
 
                             currentContext = currentContext.extendAll(letResult.contextBindings)
 
@@ -769,6 +669,14 @@ class ConstraintGenerator(
     data class LetBindingResult(
         val contextBindings: Map<BindingKey, TypingContext.Binding>,
         val solvedBindingsWithEffects: Map<String, MezzeType>,
+        /**
+         * Obligations this binding's inferred signature would have ABSORBED whose
+         * arguments are concrete and unsatisfied. Empty for an annotated binding
+         * (there the obligation is discharged against the written type, and the
+         * solver already reports it). Returned rather than reported so bindLet
+         * stays pure w.r.t. generator state; the caller owns error collection.
+         */
+        val absorbedUnsatisfiable: List<ConstraintSolver.ConstraintError> = emptyList(),
     )
 
     /**
@@ -867,8 +775,26 @@ class ConstraintGenerator(
         }
 
         // (d) carry ability constraints into function-typed bindings.
+        val absorbedUnsatisfiable = mutableListOf<ConstraintSolver.ConstraintError>()
         val solvedBindingsWithAbilities = solvedBindings.mapValues { (name, solvedType) ->
-            val withAbilities = addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution, solveResult.resolvedAssociatedBindings, solver::isAbilityConstraintFullyDischarged, dropDischargedConstraints = item.typeAnnotation == null)
+            val withAbilities = addAbilityConstraintsToFunctionType(
+                solvedType,
+                result.abilityConstraints,
+                substitution,
+                solveResult.resolvedAssociatedBindings,
+                solver::abilityConstraintDischarge,
+                dropDischargedConstraints = item.typeAnnotation == null,
+                onAbsorbedUnsatisfiable = { origin, resolved ->
+                    absorbedUnsatisfiable.add(
+                        ConstraintSolver.ConstraintError(
+                            message = solver.describeMissingAbility(origin.abilityName, resolved),
+                            constraint = origin.copy(typeArgs = resolved),
+                            context = origin.context,
+                            code = ErrorCode.V0402_ABILITY_NOT_SATISFIED,
+                        ),
+                    )
+                },
+            )
             // S9b (#375): fold the poly-intermediary effect that the gen-time
             // harvest missed into the EMITTED row for an UN-ANNOTATED binding, so
             // the inferred type is honest (`go: {} -> {} <Log>`, not bare) when the
@@ -902,7 +828,7 @@ class ConstraintGenerator(
             )
         }.toMap()
 
-        return LetBindingResult(contextBindings, solvedBindingsWithEffects)
+        return LetBindingResult(contextBindings, solvedBindingsWithEffects, absorbedUnsatisfiable)
     }
 
     private fun buildBindingForContext(
@@ -1363,14 +1289,19 @@ class ConstraintGenerator(
         abilityConstraints: List<Constraint.AbilityRequired>,
         substitution: Substitution,
         resolvedAssociatedBindings: Map<Pair<String, Int>, Map<String, MezzeType>> = emptyMap(),
-        // Answers "are these concrete args satisfied by an impl?" — supplied by the
-        // caller (which owns the solver). Null ⇒ treat nothing as dischargeable
-        // (conservative: never drop for the concrete-satisfied reason). Only
+        // Answers "did solving settle these args, and do they have an impl?" —
+        // supplied by the caller (which owns the solver). Null ⇒ treat everything
+        // as UNDECIDED (conservative: never drop, never report). Only
         // consulted when [dropDischargedConstraints] is true — which the caller sets
         // false for a decl carrying an explicit annotation, so the inferred type
         // still reflects that written signature for the annotation-match to compare.
-        isDischarged: ((abilityName: String, args: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash?) -> Boolean)? = null,
-        dropDischargedConstraints: Boolean = false
+        discharge: ((abilityName: String, args: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash?) -> ConstraintSolver.AbilityDischarge)? = null,
+        dropDischargedConstraints: Boolean = false,
+        // Receives an obligation whose args resolved CONCRETE and UNSATISFIED while
+        // an unannotated signature was being finalized — see [isFullyDischarged].
+        // Null ⇒ nobody is listening, and the constraint is simply carried (the
+        // pre-existing behaviour, which is what the annotated path wants).
+        onAbsorbedUnsatisfiable: ((Constraint.AbilityRequired, List<MezzeType>) -> Unit)? = null,
     ): MezzeType {
         DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType") {
             val lines = mutableListOf("Type: $type")
@@ -1402,6 +1333,10 @@ class ConstraintGenerator(
             typeVars.map { "* ${it.name} (id=${it.id})" }
         }
 
+        // Each produced constraint stays PAIRED with the obligation it came from, so
+        // a failure found below can be reported at the call that raised it rather
+        // than at the `let`. The pairing is by construction — no re-matching, which
+        // would have to guess which original a solved arg tuple belongs to.
         val functionAbilityConstraints = abilityConstraints.mapNotNull { constraint ->
             val solvedTypeVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
 
@@ -1464,7 +1399,7 @@ class ConstraintGenerator(
                         typeArgs = leadArgs,
                         associatedTypeBindings = bindings,
                         abilityHash = constraint.abilityHash
-                    )
+                    ) to constraint
                 } else null
             } else null
         }
@@ -1491,11 +1426,43 @@ class ConstraintGenerator(
         // discharge oracle all KEEP the constraint, so genuine polymorphism
         // (`show : {it:'a} with Priced 'a`), unsatisfiable residuals, and the
         // explicit-annotation path above are all untouched.
-        fun isFullyDischarged(c: MezzeType.FunctionAbilityConstraint): Boolean {
+        //
+        // The unsatisfiable-concrete case is NOT one of those three. A concrete type
+        // either has the ability or it does not — there is nothing to generalize
+        // over, so `with Eq Sink` on an inferred signature is not a weaker claim,
+        // it is a meaningless one. Carrying it meant `f = {} -> ([Sink.(1)]).peek {}`
+        // inferred `{} -> Sink with Eq Sink` and type-checked, because nothing called
+        // `f` and so nothing ever demanded the `Eq`; writing `: {} -> Sink` removed
+        // the place to put it and the SAME program was correctly rejected. An
+        // annotation decided whether a program type-checked. So the constraint is
+        // still kept (dropping it would cascade), but [onAbsorbedUnsatisfiable] is
+        // told, and the binding reports it.
+        // The obligation a constraint came from, for its source location. A
+        // constraint riding on `type` was attached by an earlier pass and carries no
+        // origin of its own — but the SAME obligation is normally still in
+        // `abilityConstraints`, so recover it there: same ability (by hash where both
+        // sides carry one) and the same SOLVED argument tuple. Set-compared because
+        // the two records order receiver and class-args differently.
+        fun originFor(c: MezzeType.FunctionAbilityConstraint, resolved: List<MezzeType>): Constraint.AbilityRequired? =
+            abilityConstraints.firstOrNull { o ->
+                val sameAbility =
+                    if (o.abilityHash != null && c.abilityHash != null) o.abilityHash == c.abilityHash
+                    else o.abilityName == c.abilityName
+                sameAbility &&
+                    (listOf(MezzeType.VarType(o.typeVar)) + o.typeArgs)
+                        .map { substitution.apply(it) }.toSet() == resolved.toSet()
+            }
+
+        fun isFullyDischarged(c: MezzeType.FunctionAbilityConstraint, origin: Constraint.AbilityRequired?): Boolean {
             if (!dropDischargedConstraints) return false
             val resolved = c.typeArgs.map { substitution.apply(it) }
             if (resolved.isEmpty() || resolved.any { collectFreeTypeVars(it).isNotEmpty() }) return false
-            return isDischarged?.invoke(c.abilityName, resolved, c.abilityHash) ?: false
+            val answer = discharge?.invoke(c.abilityName, resolved, c.abilityHash)
+                ?: ConstraintSolver.AbilityDischarge.UNDECIDED
+            if (answer == ConstraintSolver.AbilityDischarge.UNSATISFIED) {
+                (origin ?: originFor(c, resolved))?.let { onAbsorbedUnsatisfiable?.invoke(it, resolved) }
+            }
+            return answer == ConstraintSolver.AbilityDischarge.DISCHARGED
         }
         // Store what solving worked out, not the variables it started from.
         //
@@ -1518,9 +1485,13 @@ class ConstraintGenerator(
             // the printed signature reads as the exact record, not `{ …, … }`.
             c.copy(typeArgs = c.typeArgs.map { closeGeneratedRowVars(substitution.apply(it)) })
 
-        val allConstraints = (type.abilityConstraints + functionAbilityConstraints)
-            .map { c -> resolveArgs(c) }
-            .filterNot { c -> isFullyDischarged(c) }
+        // A constraint already on `type` arrived from an earlier pass with no
+        // obligation attached — it has no origin, so an unsatisfiable one found
+        // there is reported by whichever binding first absorbed it, not twice here.
+        val allConstraints = (type.abilityConstraints.map { it to null } + functionAbilityConstraints)
+            .map { (c, origin) -> resolveArgs(c) to origin }
+            .filterNot { (c, origin) -> isFullyDischarged(c, origin) }
+            .map { (c, _) -> c }
             .sortedByDescending { it.associatedTypeBindings.size }
             .distinctBy { c -> c.abilityName to c.typeArgs.map(::argKey).distinct() }
 
@@ -1528,7 +1499,7 @@ class ConstraintGenerator(
             val lines = mutableListOf("All constraints: ${allConstraints.size} constraints")
             allConstraints.forEach { lines.add("  * $it") }
             lines.add("Function ability constraints added: ${functionAbilityConstraints.size}")
-            functionAbilityConstraints.forEach { lines.add("  * $it") }
+            functionAbilityConstraints.forEach { (c, _) -> lines.add("  * $c") }
             lines
         }
 

@@ -110,22 +110,46 @@ class ConstraintSolver(
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
 
     /**
-     * True when every one of [typeArgs] is a concrete type (no unresolved vars)
-     * AND an impl of [abilityName] exists for that argument tuple. Such a
-     * constraint is already fully discharged — it carries no obligation to a
-     * caller, so a finalized function type should NOT keep it as a residual.
-     * (Structural builtins like Inspect are always satisfied for a concrete
-     * type; user abilities require a matching impl.)
+     * What solving concluded about one ability constraint's arguments. The three
+     * answers are genuinely different and a caller must not collapse them:
+     * DISCHARGED carries no obligation to anyone, UNSATISFIED is an error, and
+     * UNDECIDED is neither — it is the ordinary polymorphic case.
+     *
+     * They WERE collapsed, into a single "is it discharged" boolean, and the two
+     * false answers read alike. Whoever wanted to report the failure could not:
+     * `Tryable (Result Int HttpError)` answers false because the variant's row is
+     * still open, not because Result has no `Tryable`.
      */
-    internal fun isAbilityConstraintFullyDischarged(
+    internal enum class AbilityDischarge { DISCHARGED, UNSATISFIED, UNDECIDED }
+
+    /**
+     * DISCHARGED when every one of [typeArgs] is concrete AND an impl of
+     * [abilityName] exists for that tuple — such a constraint imposes nothing on a
+     * caller, so a finalized function type should not keep it as a residual.
+     * UNSATISFIED when the args are concrete and no impl matches. UNDECIDED while
+     * any argument is still open, including an open ROW inside a variant: nothing
+     * can be concluded until the solve pins it.
+     * (Structural builtins like Inspect are always satisfied for a concrete type;
+     * user abilities require a matching impl.)
+     */
+    internal fun abilityConstraintDischarge(
         abilityName: String,
         typeArgs: List<MezzeType>,
         abilityHash: com.mezze.language.typedast.Hash?,
-    ): Boolean {
-        if (typeArgs.isEmpty()) return false
-        if (!typeArgs.all { abilityChecker.isConcrete(it) }) return false
-        return abilityChecker.checkAbilityImplementation(abilityName, typeArgs, abilityHash)
+    ): AbilityDischarge {
+        if (typeArgs.isEmpty()) return AbilityDischarge.UNDECIDED
+        if (!typeArgs.all { abilityChecker.isConcrete(it) }) return AbilityDischarge.UNDECIDED
+        return if (abilityChecker.checkAbilityImplementation(abilityName, typeArgs, abilityHash))
+            AbilityDischarge.DISCHARGED else AbilityDischarge.UNSATISFIED
     }
+
+    /**
+     * The same sentence the discharge path produces, so a constraint found
+     * unsatisfiable while generalizing reads identically to one found at a call
+     * site — including the "to enable this, implement …" skeleton.
+     */
+    internal fun describeMissingAbility(abilityName: String, typeArgs: List<MezzeType>): String =
+        abilityChecker.generateAbilityErrorMessage(abilityName, typeArgs)
 
     private val mustBeOpenTypes = mutableSetOf<TypeVar>()
     private val mustBeOpenRowVars = mutableSetOf<RowVar>()

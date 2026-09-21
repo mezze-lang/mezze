@@ -60,41 +60,40 @@ class RecursiveAbilityConstraintTest {
     }
 
     /**
-     * OPEN SOUNDNESS HOLE, pre-existing — and an ANNOTATION changes what the
-     * program means, which the language forbids outright.
+     * FIXED. The same program is now rejected with and without the annotation.
      *
-     * The same program is ACCEPTED unannotated and REJECTED with `: {} -> Sink`
-     * written on it. Verified both ways; the annotated half is locked in by the
-     * test below, which passes.
+     * It used to be ACCEPTED unannotated and REJECTED with `: {} -> Sink` written
+     * on it — an annotation deciding whether a program type-checks, which the
+     * language forbids outright.
      *
-     * Traced end to end. The obligation IS generated at the call site
-     * (`AbilityRequired(Eq)`, context "Method-level constraint: Eq on Box.peek")
-     * and `Sink` IS correctly judged to have no Eq — `DerivabilityRules` resolves
-     * the `TypeApplication(Sink)` to its declaration and honours "a newtype derives
-     * Inspect and Hash ONLY". What goes wrong is in between: for an UNANNOTATED
-     * binding the obligation is ABSORBED into the inferred signature as a
+     * The obligation was always generated at the call site (`AbilityRequired(Eq)`,
+     * context "Method-level constraint: Eq on Box.peek") and `Sink` was always
+     * correctly judged to have no Eq — `DerivabilityRules` resolves the
+     * `TypeApplication(Sink)` to its declaration and honours "a newtype derives
+     * Inspect and Hash ONLY". What went wrong was in between: for an UNANNOTATED
+     * binding the obligation was ABSORBED into the inferred signature as a
      * `with Eq …` constraint instead of being discharged, and since `f` is never
-     * called, nothing ever demands it. The annotation forbids absorption — it says
-     * the type has no such constraint — so the obligation must discharge, and it
-     * correctly fails.
+     * called, nothing ever demanded it. The annotation forbids absorption — it says
+     * the type has no such constraint — so the obligation had to discharge, and
+     * correctly failed.
      *
-     * That absorption is wrong here for a specific reason: the argument is
-     * CONCRETE. A concrete type either has the ability or it does not; there is
-     * nothing to generalize over, so `with Eq Sink` on the signature is not a
-     * weaker claim, it is a meaningless one.
+     * Absorption is wrong here for a specific reason: the argument is CONCRETE. A
+     * concrete type either has the ability or it does not; there is nothing to
+     * generalize over, so `with Eq Sink` on the signature is not a weaker claim, it
+     * is a meaningless one. `addAbilityConstraintsToFunctionType` now reports such a
+     * constraint instead of carrying it, against the obligation that raised it.
      *
-     * FIX: when generalizing an unannotated binding, do not absorb an ability
-     * constraint whose type arguments are fully concrete — discharge it, and report
-     * it when it fails. `addAbilityConstraintsToFunctionType` is where absorption
-     * happens; `dropDischargedConstraints` (true exactly when there is no
-     * annotation) is the flag that distinguishes the two paths today.
+     * The oracle it asks had to be fixed first. It was one boolean, "is this
+     * discharged", so "no impl for a concrete type" and "still open, cannot say"
+     * were the same answer; reporting on it rejected `Tryable (Result Int HttpError)`
+     * where HttpError is an open variant — the row is open, the impl exists. It now
+     * answers DISCHARGED / UNSATISFIED / UNDECIDED and only the middle is reported.
      *
      * The premise also had to be fixed to see this at all. The case used to write
      * `type Sink = | Sink {} |` and assert "Sink has no Eq", which stopped being
      * true when Eq became derived for every non-newtype — so it was passing for the
      * wrong reason. A newtype genuinely has no Eq.
      */
-    @org.junit.jupiter.api.Disabled("OPEN: an operation's own `with` constraint generates no obligation — see KDoc")
     @Test
     fun `dependent constraint unsatisfied is rejected`() {
         // The item type has no `Eq`, so peek's `with Eq 'item` cannot be satisfied.
