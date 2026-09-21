@@ -47,7 +47,16 @@ internal fun classifyConstraintError(
             )
         is ErrorContext.StringInterpolation ->
             ErrorCode.T0201_TYPE_MISMATCH to listOf(
-                "interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg {}`)"
+                // `.to_dbg {}` FIRST, and it is not a style choice. Inspect is
+                // derived for every non-newtype, so `.to_dbg {}` is available on
+                // whatever was interpolated. `.to_str {}` is an inherent impl on
+                // the scalars only, so following it on a user variant or a record
+                // lands somewhere worse than the error being explained — on a
+                // record, a second error; on a user variant, a compiler crash
+                // (see the no-unresolved-dispatch-var task). Offer the one that
+                // always works, and name the other as the scalar case it is.
+                "interpolated expressions must produce a `Str` — use `.to_dbg {}` " +
+                    "(available on any type), or `.to_str {}` on a scalar"
             )
         is ErrorContext.Simple,
         null -> classifyByConstraintAndMessage(constraint, error.message)
@@ -74,7 +83,8 @@ internal fun classifyConstraintError(
         if (ctx is ErrorContext.StringInterpolation) {
             val loc = error.constraint.loc
             if (loc != null) {
-                add(FixHint.WrapInMethodCall(loc, listOf("to_str", "to_dbg")))
+                // Order is the offer order, so the one that always works leads.
+                add(FixHint.WrapInMethodCall(loc, listOf("to_dbg", "to_str")))
             }
         }
     }
