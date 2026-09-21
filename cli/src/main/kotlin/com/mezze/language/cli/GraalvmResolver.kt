@@ -72,11 +72,27 @@ object GraalvmResolver {
         File(File(MezzeHome.home, "graalvm"), line)
 
     /** Resolve the JDK/GraalVM per the precedence chain and classify it. */
-    fun resolve(): Resolved {
-        for (candidate in candidates()) {
-            val probed = probe(candidate) ?: continue
-            return probed
-        }
+    fun resolve(): Resolved = select(candidates().mapNotNull { probe(it) })
+
+    /**
+     * Which probed JDK to run on, given the candidates in precedence order.
+     *
+     * Separate from [resolve] because it is the whole decision and it has no I/O:
+     * [resolve] shells out to `java -version` for each candidate, which a test
+     * cannot arrange, while the RULE is what can go wrong.
+     *
+     *  1. An EXPLICIT `MEZZE_GRAALVM_HOME` wins outright, even when it degrades —
+     *     that is what naming a JDK means.
+     *  2. Otherwise a MATCHING-line GraalVM, wherever it sits. This used to be
+     *     "the first candidate that probes", so a cross-line `JAVA_HOME` beat the
+     *     matching GraalVM mez had installed into `~/.mezze/graalvm/<line>` and a
+     *     machine that HAD the right one still ran degraded.
+     *  3. Otherwise the first that probes at all.
+     */
+    internal fun select(probed: List<Resolved>): Resolved {
+        probed.firstOrNull { it.source == "MEZZE_GRAALVM_HOME" }?.let { return it }
+        probed.firstOrNull { it.kind == Kind.GRAALVM_MATCHING }?.let { return it }
+        probed.firstOrNull()?.let { return it }
         return Resolved(
             kind = Kind.NONE, home = null, javaExe = null, version = null,
             majorVersion = null, graalLine = null, jit = false, native = false,
@@ -133,12 +149,28 @@ object GraalvmResolver {
                 jit = true, native = hasNativeImage(candidate.home),
                 degradeReason = null, source = candidate.source,
             )
+            // A CROSS-LINE GraalVM runs mez in the INTERPRETER, like a plain JDK.
+            //
+            // `jit = true` here was the bug. A host GraalVM on a different line
+            // has a libgraal locked to ITS line, and mez's bundled Truffle cannot
+            // initialize against it: the child JVM dies with "Could not initialize
+            // class com.oracle.truffle.api.Truffle". The resolver warned and then
+            // handed the caller a JIT it knew might not work, so the warning was
+            // followed by a crash instead of a slower run. Turning JIT off makes
+            // the degrade real — the same path a plain JDK already takes, which
+            // works.
+            //
+            // `native` stays as found: `native-image` is a separate binary that
+            // does not go through Truffle init, so a cross-line one is not known
+            // to be broken, and claiming otherwise would block a build that works.
             isGraal -> Resolved(
                 kind = Kind.GRAALVM_OTHER_LINE, home = candidate.home, javaExe = java,
                 version = versionStr, majorVersion = major, graalLine = line,
-                jit = true, native = hasNativeImage(candidate.home),
+                jit = false, native = hasNativeImage(candidate.home),
                 degradeReason = "GraalVM $versionStr is line $line, but mez bundles line " +
-                    "${BuildInfo.GRAAL_LINE} — JIT/native may be unstable across lines",
+                    "${BuildInfo.GRAAL_LINE} — running in the interpreter (no JIT), " +
+                    "because a cross-line libgraal cannot initialize mez's Truffle. " +
+                    "Install GraalVM ${BuildInfo.GRAAL_LINE} for full speed.",
                 source = candidate.source,
             )
             else -> Resolved(

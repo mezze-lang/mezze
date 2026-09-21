@@ -875,6 +875,29 @@ class SyncCommand {
     }
 
     /**
+     * What to DO about a provider install that failed, or null when the tail says
+     * nothing recognisable.
+     *
+     * The install template belongs to the provider package, so mez cannot fix the
+     * command — but it can stop handing back a bare subprocess tail for a failure
+     * with a known, one-line answer. nixpkgs' GraalPy ships without pip, so a
+     * `graalpy -m pip install …` template dies "No module named pip" and the user
+     * is left reading a Python traceback about a mez command they did not write.
+     *
+     * Matched on the INTERPRETER's own words. The provider's template is data
+     * from another package and may say anything, so it is not consulted.
+     */
+    internal fun installFailureHint(stderrTail: String): String? = when {
+        stderrTail.contains("No module named pip") ->
+            "This GraalVM's Python ships without pip (nixpkgs does this). Run " +
+                "`graalpy -m ensurepip` once, then `mez sync` again."
+        stderrTail.contains("No module named ensurepip") ->
+            "This Python has neither pip nor ensurepip — install a Python distribution " +
+                "that bundles pip, or point the provider's prefix at one."
+        else -> null
+    }
+
+    /**
      * Execute every `[polyglot.provider].install` template that
      * matches a `[polyglot.<lang>].packages` list in the user's
      * manifest. One provider per language; a graph that carries two
@@ -1000,6 +1023,7 @@ class SyncCommand {
             if (execResult.exitCode != 0) {
                 val tail = execResult.stderrTail(20)
                 println("${Glyphs.ERROR} mez sync: provider install failed for [polyglot.$lang] (exit ${execResult.exitCode}): $tail")
+                installFailureHint(tail)?.let { println("   $it") }
                 failures.add("[polyglot.$lang]")
                 continue
             }
