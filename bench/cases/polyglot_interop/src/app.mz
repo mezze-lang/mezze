@@ -10,44 +10,36 @@
 #
 # Baseline for tasks #86-#92. Run via bench/scripts/run.sh on the NATIVE binary.
 #
-# MEASURED 2026-09-22, JVM dev path, GraalJS, iters = 4M, timed IN-PROCESS so
-# startup is excluded:
+# MEASURED 2026-09-22, JVM dev path, GraalJS, iters = 4M, timed IN-PROCESS:
 #
-#   guest init (first eval)      1 ms      <- GraalJS is NOT the startup cost
-#   eval (same source)           6 us/iter
-#   read  (chain)              553-601 ns/iter
-#   read  (matched)            425-482 ns/iter
-#   invoke                     767-820 ns/iter
-#   index                      524-536 ns/iter
+#   control (no guest)   313 ns/iter   <- READ THIS ROW FIRST
+#   read  (matched)      431 ns/iter
+#   read  (chain)        618 ns/iter
+#   index                543 ns/iter
+#   invoke               858 ns/iter
+#   eval (same source)     6 us/iter
+#   guest init             1 ms
 #
-# WHAT THE TABLE SAYS.
+# WHAT THE CONTROL ROW IS FOR. It runs the same SHAPE with no guest at all —
+# two natives returning a variant, two matches, one recursive call. So:
 #
-# 1. The dot-chain costs ~20-30% MORE than the matched spelling, for the same
-#    two interop messages and the same answer. The gap is one un-inlined
-#    CallTarget: the provider's Result-threading forwarder is a `match`, and
-#    TrivialWrapperInliner refuses any body that binds locals. #92/#93/#94.
+#   loop machinery, no interop whatsoever ....... 313 ns   (72% of a read)
+#   + two interop messages ...................... 118 ns   (~59 ns each)
+#   + writing it as a dot-chain ................. 187 ns
 #
-# 2. The absolute numbers do not improve with more heat. Measured over the whole
-#    process: 978 -> 742 -> 647 ns/iter at 200k -> 1M -> 4M, converging, with a
-#    startup-free marginal cost of 615 ns. Code that stops getting faster
-#    however hot it gets is code the compiler cannot optimise — every native
-#    call sits behind a @TruffleBoundary by design (#402) and every interop
-#    message goes through InteropLibrary.getUncached(). #87.
+# THE CHAIN SPELLING COSTS MORE THAN EVERY INTEROP MESSAGE COMBINED. That is
+# the largest attributable cost on this path, and it is not interop's fault:
+# it is one un-inlined CallTarget per step, because the provider's
+# Result-threading forwarder is a `match` and TrivialWrapperInliner refuses any
+# body that binds locals (#92, #94).
 #
-# 3. `eval` is ~12x a member read EVEN WARM, so calling it in a loop is the
-#    wrong shape: eval once to get a guest function, then invoke it. But note
-#    it needs its own warm-up — 89 us/iter at 200 iterations, 6 us at 20000.
-#    That difference is warm-up, NOT a missing parse cache. A first reading at
-#    200 iterations looked exactly like `eval` re-parsing its source every call,
-#    and it does not.
-#
-# TWO MEASUREMENT TRAPS ALREADY PAID FOR, do not re-lay them:
-#   - Whole-process wall time cannot resolve these effects: three identical 4M
-#     runs spread 11.147-11.818s, wider than a 95 ns/iter difference. Hence the
-#     in-process monotonic clock.
-#   - A loop that runs 1000 times never warms. The index workload used to run
-#     1000 iterations over a 1000-element array and reported 5791 ns/iter, 11x
-#     its warm number, in an otherwise-warm table.
+# AND IT CORRECTS AN EARLIER FIGURE IN THIS FILE'S HISTORY. "~307 ns per interop
+# message" was total loop time divided by an ASSUMED message count, which
+# attributed the whole 313 ns of loop machinery to interop. Two experiments
+# then failed to move it — scalar ABI instead of record ABI, and a cached
+# InteropLibrary instead of getUncached — precisely because neither was where
+# the time went. Do not divide a loop total by a message count again; measure
+# against this control.
 
 use std::effects::log::{println, Console, Log}
 use std::effects::time::{ monotonic, Time, SystemTime }
@@ -55,6 +47,7 @@ use std::datetime::{ Duration, sub_duration, duration_to_nanos }
 use std::polyglot::core::{ InteropError }
 use mezze_js::js::{ Js, GraalJs, JsForeign }
 use std::int
+use std::str
 
 let iters = 4000000
 
@@ -127,6 +120,23 @@ let eval_loop: { n: Int, src: Str } -> Int <Js> =
       let _ = Js.eval { source = src }
       eval_loop { n = n - 1, src = src }
 
+## CONTROL — the same SHAPE with no guest at all: two natives that return a
+## variant, two matches on it, one recursive call. Whatever this costs is what
+## the loop machinery costs; interop's real share is the difference between it
+## and `read (matched)`. Without this row, dividing total loop time by an
+## assumed message count attributes ALL of it to interop, which is how the
+## earlier "~307 ns per interop message" figure came out wrong.
+let control_loop: { s: Str, n: Int, acc: Int } -> Int =
+  { s, n, acc } ->
+    if n <= 0 then acc
+    else do
+      let got = match str::index_of { s = s, sub = "l" } is
+        Some { val = i } -> match str::char_at { s = s, i = i } is
+          Some { val = _ } -> 1
+          None -> 0
+        None -> 0
+      control_loop { s = s, n = n - 1, acc = acc + got }
+
 let report: { label: Str, got: Int, n: Int, t0: Duration, t1: Duration } -> {} <Log> =
   { label, got, n, t0, t1 } -> do
     let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
@@ -166,6 +176,11 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
       let i1 = monotonic {}
       report { label = "invoke         ", got = c, n = iters, t0 = i0, t1 = i1 }
     Err { error = _ } -> println { msg = "  eval of the test object FAILED" }
+
+  let k0 = monotonic {}
+  let kk = control_loop { s = "hello", n = iters, acc = 0 }
+  let k1 = monotonic {}
+  let _ = report { label = "control (no guest)", got = kk, n = iters, t0 = k0, t1 = k1 }
 
   match Js.eval { source = "Array.from({length: 1000}, function (_, i) { return i; })" } is
     Ok { val = arr } -> do
