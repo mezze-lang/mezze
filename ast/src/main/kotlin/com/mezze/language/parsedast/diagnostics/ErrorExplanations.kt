@@ -470,6 +470,12 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.I0002_PIPELINE_NO_TYPED_MODULE ->
         "The type checking pipeline did not produce a typed module. " +
         "This is an internal compiler error — please report it."
+
+    ErrorCode.I0003_INTERNAL_EMIT_FAILURE ->
+        "Building the typed AST, deriving a codec, or lowering to IR failed for a " +
+        "reason that is not a diagnostic about your program. The message names the " +
+        "phase and the underlying exception; `--verbose` prints the full trace. " +
+        "This is a compiler bug — please report it."
 }
 
 fun explainErrorCode(codeStr: String): String? {

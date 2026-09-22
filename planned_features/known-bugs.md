@@ -175,7 +175,7 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
 
 ---
 
-## BUG 2 — FIXED in-tree; both provider patches written and validated
+## BUG 2 — FIXED: in-tree, and both providers landed and pushed
 
 **Runtime half fixed on `feat/soundness`.** `ForeignContainers` (interpreter)
 adds guest-readable list and dict VIEWS, and `PolyglotNatives.makeList` /
@@ -2147,17 +2147,43 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   ever worked by going through that desugaring. An operation declaring no receiver
   now resolves through the type the call PRODUCES, and no impl for that type is a
   loud error naming both. See `StaticAbilityOpTest`.
-- **Still open, found doing that:** a static call whose produced type NOTHING pins
-  (`Zero.zero {}` with no annotation) fails with NO DIAGNOSTIC AT ALL — the
-  typechecker returns an empty result and the runtime reports "TruffleIR not
-  produced by typechecker. typedModule is null".
-  `AbilityChecker.validateAbilityConstraints` skips any constraint whose type
-  variable is still unsolved — correct for a generic body, where the caller
-  discharges it; wrong here, where nothing can. The emit-side error that WOULD
-  name the problem is unreachable because the module is never built. Two blanket
-  `catch (e: Exception)` swallows in `TypedModuleEmitter` print only under a debug
-  env var; neither fires here, so they are not the cause, but they are the same
-  shape and worth deleting.
+- **CLOSED (2026-09-22), both halves.** The entry used to read "Still open": a
+  static call whose produced type NOTHING pins (`Zero.zero {}` with no
+  annotation) reporting no diagnostic at all. RUN IT — `StaticAbilityOpTest`'s
+  "a produced type nothing determines is a diagnostic, not silence" is green;
+  the message says "nothing here determines that type" and offers `with
+  <Ability>`. Seventh stale "open" claim in three days.
+  The second half — "two blanket `catch (e: Exception)` swallows in
+  `TypedModuleEmitter` … the same shape and worth deleting" — IS done, and there
+  were three, not two. See the section below.
+
+### Internal emit/lowering failures are reported, not swallowed
+
+Three `catch (e: Exception)` handlers in `TypedModuleEmitter` (typed-AST build,
+codec derivation, lowering) turned any non-diagnostic crash into a null module
+and printed the detail only under `MEZZE_DEBUG` / `MEZZE_COMPILER_DBG` — off for
+everyone who actually hits one. The program then died at the runtime with
+"TruffleIR not produced by typechecker. typedModule is null": no location, no
+cause, nothing to act on.
+
+They are gone. A crash now becomes an `I0003_INTERNAL_EMIT_FAILURE` diagnostic
+naming the phase and the underlying exception, with the cause attached so
+`--verbose` prints the real stack (`TypeCheckError` gained a `cause`).
+
+The ORDERING is the whole design, and deleting the swallows is what exposed it.
+Emit reads what the solver produced, so on a module that did NOT type-check it
+crashes in ways that are all downstream of an error already reported properly —
+four gate tests went red on exactly that, each one a real diagnostic
+(`missing fields … z`, `Unknown performer`, `not defined or not imported`) being
+spoken over by the crash it caused. Emit therefore RECORDS its failure in
+`EmitResult.internalFailure` and `TypeChecker.checkParsedModuleInner` decides, at
+the one point that knows the complete error list (post-emit validator included):
+
+> an emit crash is the news only when nothing else was wrong with the program.
+
+Same shape as #79 — the good error already existed, something else just threw
+first. Pinned by `InternalEmitFailureReportingTest` (4 programs that each crash
+emit past a real diagnostic) so it cannot drift back.
 - **BUG 19 — CLOSED. All four declarations are fixed and the allowlist is empty.**
   `DictJustificationGateTest.unjustifiedByOpenTypeVar` is now `emptySet()`, so the
   gate asserts the strong property: every dictionary parameter in the stdlib is

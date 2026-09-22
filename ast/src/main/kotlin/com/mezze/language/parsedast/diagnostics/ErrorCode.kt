@@ -160,6 +160,7 @@ enum class ErrorCode {
     // ─── Internal compiler errors (I00xx) ────────────────────────────────
     I0001_UNKNOWN_TYPECHECK_FAILURE,
     I0002_PIPELINE_NO_TYPED_MODULE,
+    I0003_INTERNAL_EMIT_FAILURE,
 }
 
 /** Format an [ErrorCode] for display in the error header, e.g. `T0201`. */

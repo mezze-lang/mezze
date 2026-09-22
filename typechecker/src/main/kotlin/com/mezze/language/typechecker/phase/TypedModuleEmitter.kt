@@ -3,7 +3,9 @@ package com.mezze.language.typechecker.phase
 import com.mezze.language.ast.*
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.PrecompiledDeps
 import com.mezze.language.typechecker.PrecompiledStdlib
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -28,6 +30,19 @@ internal data class EmitResult(
     val typedModule: TypedModule?,
     val loweredFunctions: List<FunctionIR>?,
     val loweredPerformers: List<Array<String>>,
+    /**
+     * Emit or lowering crashed on something that is NOT a diagnostic about the
+     * program — a compiler bug. It is REPORTED by the caller, and only when the
+     * module is otherwise well-typed: emit reads what the solver produced, so a
+     * module that already failed to type-check can crash it in a hundred ways
+     * that are all downstream of an error we have a precise message for. The
+     * decision is the caller's because only the caller knows the complete error
+     * list; the post-emit validator has not run yet when this is set.
+     *
+     * Non-null therefore means: "if nothing else was wrong with this program,
+     * this is the bug." First one wins — later crashes are consequences.
+     */
+    val internalFailure: com.mezze.language.typechecker.TypeCheckError? = null,
 )
 
 internal fun emitTypedModuleAndLower(
@@ -48,6 +63,12 @@ internal fun emitTypedModuleAndLower(
     var emittedTypedModule: TypedModule? = null
     var loweredFns: List<FunctionIR>? = null
     var loweredPerformers: List<Array<String>> = emptyList()
+    var internalFailure: com.mezze.language.typechecker.TypeCheckError? = null
+    fun recordInternalFailure(phase: String, cause: Exception) {
+        if (internalFailure == null) {
+            internalFailure = internalEmitFailure("$phase in ${currentModulePath ?: "this module"}", cause)
+        }
+    }
 
     try {
         val builder = TypedAstBuilder(
@@ -100,18 +121,11 @@ internal fun emitTypedModuleAndLower(
                 // further downstream. See the same split on the two handlers below.
                 throw e
             } catch (e: Exception) {
-                // A codec impl that fails to generate does not fail here — the
-                // program keeps going and dies later at the use site with
-                // "Field not found: decode", a long way from the cause. Keep the
-                // swallow (a generation failure is not always fatal: the codec
-                // ability may simply not apply to this target) but stop hiding it,
-                // matching the outer handler below.
-                if (System.getenv("MEZZE_DEBUG") != null) {
-                    System.err.println(
-                        "[CODEC] ${ci.abilityName} for ${ci.targetTypes}: " +
-                            "${e.javaClass.simpleName}: ${e.message}",
-                    )
-                }
+                // "Does not apply to this target" is decided ABOVE, by the `continue`
+                // branches — wrong arity, not a codec ability, not a record shape.
+                // Anything that reaches here got past all of them and then crashed,
+                // which is a compiler failure, not a shrug.
+                recordInternalFailure("deriving the ${ci.abilityName} codec impl for ${ci.targetTypes}", e)
             }
         }
 
@@ -122,17 +136,11 @@ internal fun emitTypedModuleAndLower(
         }
     } catch (e: com.mezze.language.typechecker.TypeCheckError) {
         // A TypeCheckError is a DIAGNOSTIC — a message written for the person
-        // compiling, at a location they can act on. Swallowing one can only ever
-        // replace it with silence: the module comes back null, and the runtime
-        // reports "TruffleIR not produced by typechecker" with nothing to act on.
-        // Everything else keeps the behaviour below, which is about a build step
-        // that may legitimately not apply.
+        // compiling, at a location they can act on. It propagates unchanged; the
+        // handler below is for everything that is NOT one.
         throw e
     } catch (e: Exception) {
-        if (System.getenv("MEZZE_DEBUG") != null) {
-            System.err.println("[BUILDER] ${e.javaClass.simpleName}: ${e.message}")
-            e.printStackTrace(System.err)
-        }
+        recordInternalFailure("building the typed AST", e)
     }
 
     // #311: anonymous variant constructors must have a single shape per module.
@@ -166,19 +174,40 @@ internal fun emitTypedModuleAndLower(
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
     } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-        // As above: a diagnostic propagates. Lowering that fails for any other
-        // reason still leaves the typed module standing, which is what the swallow
-        // below is for.
+        // As above: a diagnostic propagates unchanged.
         throw e
     } catch (e: Exception) {
-        if (System.getenv("MEZZE_COMPILER_DBG") != null) {
-            System.err.println("[COMPILER-DBG] ${e.javaClass.simpleName}: ${e.message}")
-            e.printStackTrace(System.err)
-        }
+        recordInternalFailure("lowering to IR", e)
     }
 
-    return EmitResult(emittedTypedModule, loweredFns, loweredPerformers)
+    return EmitResult(emittedTypedModule, loweredFns, loweredPerformers, internalFailure)
 }
+
+/**
+ * Build the diagnostic for a failure in emit or lowering that is NOT about the
+ * program — a COMPILER BUG. It names the phase and the cause, both of which are
+ * still known here and nowhere further downstream.
+ *
+ * All three call sites used to swallow every non-`TypeCheckError` exception and
+ * carry on with a null module. The program then died at the runtime with
+ * "TruffleIR not produced by typechecker. typedModule is null" — no location, no
+ * cause, and nothing anyone can act on. The detail was printed only under
+ * `MEZZE_DEBUG` / `MEZZE_COMPILER_DBG`, which are off for everyone who actually
+ * hits the failure, so in practice it was printed nowhere.
+ *
+ * The cause rides along on the diagnostic so `--verbose` can show the real
+ * stack; without `--verbose` the CLI renders the message alone.
+ */
+private fun internalEmitFailure(phase: String, cause: Exception): com.mezze.language.typechecker.TypeCheckError =
+    com.mezze.language.typechecker.TypeCheckError(
+        "Internal compiler error while $phase: " +
+            "${cause.javaClass.simpleName}: ${cause.message ?: "(no message)"}. " +
+            "This is a bug in the compiler, not an error in your program — please " +
+            "report it. Re-run with --verbose for the full stack trace.",
+        errorType = ErrorType.INTERNAL_ERROR,
+        code = ErrorCode.I0003_INTERNAL_EMIT_FAILURE,
+        cause = cause,
+    )
 
 private fun validateAnonymousConstructorShapes(
     module: ParsedModule,

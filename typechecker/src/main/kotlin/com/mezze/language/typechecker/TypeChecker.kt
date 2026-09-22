@@ -737,6 +737,19 @@ class TypeChecker(
                         importContext = importContext,
                     )
                 }
+
+                // Emit reads what the solver produced, so it crashes in a hundred
+                // ways on a module that did not type-check — every one of them
+                // downstream of an error we just reported above with a location and
+                // a sentence the author can act on. That is why the decision is
+                // HERE and not at the crash: only this point knows the complete
+                // list, the post-emit validator included.
+                //
+                // Nothing was wrong with the program, so the crash is the news. It
+                // used to be swallowed into a null module, and the program died at
+                // the runtime with "TruffleIR not produced by typechecker" — no
+                // location, no cause. Now it says which phase failed and why.
+                emitResult.internalFailure?.let { throw it }
                 return TypeCheckResult.Success(
                     substitution = substitution, importContext = importContext,
                     warnings = warnings + v2Warnings,

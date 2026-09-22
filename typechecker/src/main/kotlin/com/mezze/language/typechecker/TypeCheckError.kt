@@ -14,7 +14,15 @@ class TypeCheckError(
     /** Zero or more "what to do next" hints. */
     val hints: List<String> = emptyList(),
         val fixHints: List<FixHint> = emptyList(),
-) : Exception(message) {
+    /**
+     * The underlying throwable, when this diagnostic REPORTS one rather than
+     * describing the program — an internal compiler failure (I0003). The CLI
+     * prints a cause's stack trace only under `--verbose`, so carrying it here
+     * is what makes that flag able to show anything at all; without it the
+     * detail lived in a `MEZZE_DEBUG` print nobody has set.
+     */
+    cause: Throwable? = null,
+) : Exception(message, cause) {
 
     override fun toString(): String {
         return if (loc != null) {
