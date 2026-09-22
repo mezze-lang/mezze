@@ -126,6 +126,19 @@ module.exports = grammar({
     // falls back — but the parser must keep both alive until that token
     // arrives. GLR explores and only one survives the indentation.
     [$.do_expression, $._do_statement],
+    // ONE comma, TWO consumers. After the last arm of a `match` that is an impl
+    // operation's body, the `,` could be that arm's trailing comma or the
+    // separator before the NEXT operation. The match takes it greedily
+    // (prec.right), and then the operation list has nothing to separate on — so
+    // two operations that BOTH have match bodies failed, which is most of
+    // std/codec/*.mz and std/effects/*.mz.
+    //
+    // It cannot be resolved by dropping the arm's trailing comma: the match must
+    // still be open at the following line boundary to consume its _dedent, and
+    // handing the comma to the operation list closes it too early — the indent
+    // stack is then left unbalanced and the closing `}` fails. So both readings
+    // have to stay alive until the token after the comma decides.
+    [$.match_expression, $.impl_operation],
   ],
 
   rules: {
@@ -380,7 +393,7 @@ module.exports = grammar({
         field('target', $._type),
         'where',
         '{',
-        sepBy(',', $.impl_operation),
+        optional($._impl_operation_list),
         '}',
       ),
       // Ability or effect impl: `impl Eq for Bool where { … }`. Ability
@@ -408,7 +421,7 @@ module.exports = grammar({
         optional($.having_clause),
         'where',
         '{',
-        sepBy(',', $.impl_operation),
+        optional($._impl_operation_list),
         '}',
       ),
     ),
@@ -417,6 +430,25 @@ module.exports = grammar({
     //   eq = {it, r} -> ...
     //   encode : {val: Int} -> Str = {val} -> ...
     // The parser stores both shapes as ParsedImplOp.
+    // The operation list, with room to CLOSE AN INDENTATION LEVEL at the
+    // separator.
+    //
+    // A `match` body's arms open an indent level that the match closes with a
+    // `_dedent` at the following line boundary. When the comma after the last arm
+    // goes to THIS list instead of to the arm, the match is already closed by the
+    // time that boundary arrives, `_dedent` is no longer expected, and the level
+    // is never popped — so the NEXT operation's `match` sees its arm column as
+    // EQUAL to the stale top of the stack and gets a `_newline` where it needs an
+    // `_indent`. Two operations that both had match bodies failed exactly there.
+    //
+    // Accepting the dedent on either side of the comma lets the level close
+    // wherever the layout puts the line break.
+    _impl_operation_list: $ => seq(
+      $.impl_operation,
+      repeat(seq(optional($._dedent), ',', optional($._dedent), $.impl_operation)),
+      optional(seq(optional($._dedent), ',', optional($._dedent))),
+    ),
+
     impl_operation: $ => seq(
       field('name', $.lower_identifier),
       optional(seq(':', field('type', $._type))),

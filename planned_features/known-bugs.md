@@ -1719,8 +1719,19 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
     whose `Eq` compares only the `x` field now hashes only `x`, where the
     structural hash would have included `y` and split equal values apart.
 
-  **Still OPEN — the container threading. BUILT, MEASURED, AND REVERTED**, because
-  the discriminator it needs does not exist yet.
+  **The user-visible case is FIXED — do not re-chase it.** A `Set` or `Map` whose
+  element is a newtype with a hand-written `Eq` honours that instance today:
+  `HashContainerInstanceTest` asserts
+  `set::from_seq { xs = [P.(1), P.(11)] }.size {}` is **1** under a mod-10 `Eq`,
+  plus `contains` and the `Map` form. Those assertions are live — nothing in that
+  file is `@Disabled` — and the interpreter gate is green. So the table earlier in
+  this section ("size answered **2**, correct 1") records the state BEFORE T1.4,
+  not the state now: `Set`/`Map` declare `with Eq` on every operation that buckets
+  or looks up, and `EvidenceSetStorage` is the tier that asks the element.
+
+  **What remains open is narrower: threading the instance through GENERIC
+  container functions. BUILT, MEASURED, AND REVERTED**, because the discriminator
+  it needs does not exist yet.
 
   The whole chain was implemented and works: an `ElementInstance` (the element's
   `eq` + `hash` as JDK functional interfaces, mirroring `ElementComparator`), an
