@@ -242,6 +242,11 @@ internal fun findStdlibFreeFunctionCarriers(name: String): List<String> {
  * For an unresolved name, return the type-constructor names of any
  * prelude inherent impls whose operations include that name.
  */
+// These two catches STAY, unlike the ones deleted elsewhere for this pattern.
+// This runs while a diagnostic is already being reported, to enrich its hint; a
+// failure here must not replace the error it is describing. The rule is the same
+// one emit follows — a secondary failure never speaks over the primary
+// diagnostic. An empty hint list is a real answer: no carriers to suggest.
 internal fun findPreludeMethodCarriers(name: String): List<String> {
     val precompiled = try { PrecompiledStdlib } catch (_: Exception) { return emptyList() }
     val ctx = try { precompiled.preludeImportContext } catch (_: Throwable) { return emptyList() }

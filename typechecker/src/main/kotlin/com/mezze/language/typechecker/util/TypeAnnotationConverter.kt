@@ -438,6 +438,9 @@ object TypeAnnotationConverter {
         val suggestion = LevenshteinSuggest.closest(name, knownEffects)
         val didYouMean = suggestion?.let { ". Did you mean `$it`?" } ?: ""
 
+        // Catch STAYS: we are already building the "effect not defined" diagnostic,
+        // and a store failure while looking for `use` suggestions must not replace
+        // it. Empty means "no module to suggest", which is a real answer.
         val candidateModules: List<String> = try {
             val store = PrecompiledStdlib.getStore()
             store?.getDeclsByKind(DeclKind.EFFECT)

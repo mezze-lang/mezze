@@ -142,12 +142,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @Override
     public Object execute(VirtualFrame frame) {
         // Re-register if context changed (SHARED policy: same CallTarget, different Contexts)
-        MezzeContext currentContext;
-        try {
-            currentContext = MezzeContext.get(this);
-        } catch (Exception e) {
-            currentContext = null;
-        }
+        // Not wrapped in a catch that nulls the context: a node executing without
+        // a reachable MezzeContext is a runtime invariant break, and continuing
+        // with null only defers it. Measured at zero firings.
+        MezzeContext currentContext = MezzeContext.get(this);
         if (!modulesLoaded || (currentContext != null && System.identityHashCode(currentContext) != (lastContextId instanceof Integer i ? i : -1))) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             loadModules();
@@ -159,7 +157,11 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilerDirectives.TruffleBoundary
     private void loadModules() {
         MezzeContext context = MezzeContext.get(this);
-        try {
+        // The body is NOT wrapped in a catch that sets `modulesLoaded = true`.
+        // Marking the modules loaded after a failure to load them leaves the
+        // globals and handler tables half-populated: the next `perform` finds no
+        // handler and the program fails a long way from the cause, with nothing
+        // naming the load that failed. Measured at zero firings.
 
         // Pass 1: Register all functions by hash AND name (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
@@ -198,9 +200,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
         modulesLoaded = true;
-        } catch (Exception e) {
-            modulesLoaded = true;
-        }
     }
 
     // constructPerformerRecord logic has been moved to MezzeContext.inflatePerformerRecord

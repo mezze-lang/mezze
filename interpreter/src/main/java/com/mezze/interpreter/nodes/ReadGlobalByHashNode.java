@@ -173,16 +173,19 @@ public final class ReadGlobalByHashNode extends MezzeNode {
             // computed under the intended chain.
             Object existing = context.lookupGlobal(hash);
             if (existing != null) return existing;
-            try {
-                Object result = ct.call(com.mezze.interpreter.values.MezzeRecord.empty());
-                // Cache the evaluated value so we don't re-evaluate on every access
-                context.defineGlobal(hash, result);
-                return result;
-            } catch (Exception e) {
-                // If evaluation fails, return the function as-is (it might be
-                // a function that legitimately takes no params but has side effects)
-                return fn;
-            }
+            // NOT wrapped in a catch that returns `fn`. Whether to evaluate at all
+            // is decided ABOVE, by isThunk; once we have decided this global IS a
+            // thunk, an exception out of its body is the PROGRAM's error — a
+            // `raise`, a division by zero, an unhandled effect. Returning the
+            // function instead handed a MezzeFunction to code expecting the value,
+            // so the failure landed far from its cause. The old comment justified
+            // the swallow with "it might be a function that legitimately takes no
+            // params", which is the isThunk question, already answered. Measured at
+            // zero firings across the interpreter suite.
+            Object result = ct.call(com.mezze.interpreter.values.MezzeRecord.empty());
+            // Cache the evaluated value so we don't re-evaluate on every access
+            context.defineGlobal(hash, result);
+            return result;
         }
         return fn;
     }
