@@ -1134,18 +1134,55 @@ class AbilityChecker internal constructor(
         }
     }
 
+    /**
+     * Does an impl of [abilityName] TARGET this type — setting aside whether the
+     * impl's own `with` constraints can be discharged from HERE?
+     *
+     * That last clause is the entire purpose. [checkAbilityImplementation] answers
+     * the strict question, and for a generic impl it also recurses into the impl's
+     * `operationConstraints`: `impl Eq for List 'a … with Eq 'a` binds `'a = N` and
+     * then demands `Eq N`, which an ISOLATED impl-body solve may simply not have in
+     * scope. Deferring THAT to the top-level solve, where the imports are, is what
+     * [deferExistingAbilityImpls] exists for. A type with no impl at all still
+     * fails, because no target matches it.
+     *
+     * It used to be answered by rendering both sides to STRINGS and comparing them,
+     * with a fallback comparing only the first space-separated word. It asks the
+     * real question now, with the same matcher the strict check uses: bind the
+     * target's type variables and compare the arguments positionally.
+     *
+     * MEASURED, because the reason to change it was a rule and not a failing case,
+     * and the difference between those two matters here:
+     *  - the exact string compare decided NOTHING — 0 firings across both suites;
+     *  - the first-word fallback decided 5, every one a generic impl target against
+     *    a concrete instantiation (`List 'a` vs `List N`, `Opt 'a` vs `Opt Color`),
+     *    which it got right by accident;
+     *  - it could not see through brackets — `['a]` vs `[N]` reads as `"['a]"` vs
+     *    `"[N]"` — so it answered NO 4 times where a generic seq impl does cover
+     *    the concrete query. Those 4 are the only divergences on `:typechecker:test`
+     *    and there are none on `:interpreter:test`; both suites are green under
+     *    either answer.
+     *
+     * NOT a fix for a reachable wrong answer, and the note that claimed otherwise
+     * was wrong: the first-word hack cannot confuse `Seq Int` with `Seq Str`,
+     * because the surface syntax cannot express an impl for a concretely-applied
+     * type at all — `impl Show for Box Int` parses as TWO target slots and is
+     * rejected on arity, and the stdlib has zero such impls. The justification is
+     * the standing rule instead: a resolution path does not compare rendered type
+     * names (see the `prettyPrintType`-is-lossy rule), and this predicate should
+     * agree with its strict sibling rather than approximate it.
+     */
     private fun abilityImplExistsForType(abilityName: String, typeArgs: List<MezzeType>): Boolean {
-        val primaryType = typeArgs.firstOrNull() ?: return false
-        val primaryName = prettyPrintType(primaryType)
-        val impls = abilityImpls(abilityName)
-        return impls.any { info ->
-            val targets = info.targetTypeAnnotations
-            val rendered = when {
-                targets != null && targets.isNotEmpty() -> targets.joinToString(", ") { renderAnnotation(it) }
-                info.targetTypes.isNotEmpty() -> info.targetTypes.joinToString(", ")
-                else -> return@any false
+        if (typeArgs.isEmpty()) return false
+        return abilityImpls(abilityName).any { info ->
+            val annotations = info.targetTypeAnnotations ?: return@any false
+            if (annotations.size != typeArgs.size) return@any false
+            val typeVarBindings = mutableMapOf<String, MezzeType>()
+            typeArgs.zip(annotations).all { (actualType, annotation) ->
+                TypeAnnotationMatcher.typeMatchesAnnotation(
+                    actualType, annotation, registry.typeDeclarations, info.typeVars, typeVarBindings,
+                )
             }
-            rendered == primaryName || rendered.split(' ').firstOrNull() == primaryName.split(' ').firstOrNull()
         }
     }
 
