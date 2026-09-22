@@ -173,103 +173,82 @@ object UnusedImportLinter {
         }
     }
 
+    /**
+     * A false W0102 is worse than a missed one — acting on it deletes an import the
+     * code needs. So the recursion is NOT written per node: each arm contributes
+     * only the names that node owns, and every sub-expression is reached through
+     * [ParsedExpr.children], the one walker that is exhaustive by construction.
+     *
+     * Written out by hand, this walk treated `ParsedStringLit` as a leaf and so
+     * never saw the references inside `"$( … )"` holes — the #160 shape, reported
+     * to the user as "'sum' is never referenced in this module".
+     *
+     * The `when` stays exhaustive: it is the list of nodes that OWN a name, and a
+     * new node kind must be classified here before it compiles.
+     */
     private fun collectExprRefs(expr: ParsedExpr, into: MutableSet<String>) {
         when (expr) {
             is ParsedIdentifier -> {
                 into.add(expr.localName)
                 expr.qualifier?.segments?.firstOrNull()?.let { into.add(it) }
             }
-            is ParsedVariantConstruct -> {
-                into.add(expr.constructor)
-                expr.value?.let { collectExprRefs(it, into) }
-            }
-            is ParsedNewtypeConstruct -> {
-                into.add(expr.typeName)
-                collectExprRefs(expr.value, into)
-            }
+            is ParsedVariantConstruct -> into.add(expr.constructor)
+            is ParsedNewtypeConstruct -> into.add(expr.typeName)
             is ParsedLambda -> {
+                // Annotations are not expressions, so children() cannot reach them.
                 (expr.params as? ParsedLambdaParams.Typed)?.fields?.forEach { collectTypeRefs(it.type, into) }
                 expr.returnType?.let { collectTypeRefs(it, into) }
                 collectAbilityConstraintRefs(expr.abilityConstraints, into)
-                collectExprRefs(expr.body, into)
             }
-            is ParsedFunctionCall -> { collectExprRefs(expr.function, into); collectExprRefs(expr.arguments, into) }
-            is ParsedBinaryOp -> { collectExprRefs(expr.left, into); collectExprRefs(expr.right, into) }
-            is ParsedPipe -> { collectExprRefs(expr.left, into); collectExprRefs(expr.right, into) }
-            is ParsedParens -> collectExprRefs(expr.expr, into)
-            is ParsedMemberAccess -> {
+            is ParsedMemberAccess ->
                 // The member name matters: `x.from_json {}` is how an ability's
                 // method is referenced, and the import-usage check keys ability
                 // liveness off exactly these names.
                 into.add(expr.member)
-                collectExprRefs(expr.receiver, into)
-            }
-            is ParsedRecordLit -> for (e in expr.entries) when (e) {
-                is ParsedRecordEntry.Field -> e.value?.let { collectExprRefs(it, into) }
-                is ParsedRecordEntry.Spread -> collectExprRefs(e.expr, into)
-            }
-            is ParsedSeqLit -> for (e in expr.elements) when (e) {
-                is ParsedSeqElement.Regular -> collectExprRefs(e.expr, into)
-                is ParsedSeqElement.Spread -> collectExprRefs(e.expr, into)
-            }
-            is ParsedIf -> { collectExprRefs(expr.condition, into); collectExprRefs(expr.thenBranch, into); collectExprRefs(expr.elseBranch, into) }
-            is ParsedMatch -> {
-                collectExprRefs(expr.scrutinee, into)
-                for (case in expr.cases) {
-                    case.guard?.let { collectExprRefs(it, into) }
-                    collectExprRefs(case.body, into)
-                    for (b in case.ifLetBindings) collectExprRefs(b.expr, into)
+            is ParsedDo ->
+                // Same as ParsedLambda: the `let x : T = …` annotations are not
+                // sub-expressions. The statement VALUES come from children().
+                for (stmt in expr.statements) {
+                    if (stmt is ParsedStatement.Let) stmt.typeAnnotation?.let { collectTypeRefs(it, into) }
                 }
-            }
-            is ParsedDo -> {
-                for (stmt in expr.statements) when (stmt) {
-                    is ParsedStatement.Let -> {
-                        stmt.typeAnnotation?.let { collectTypeRefs(it, into) }
-                        collectExprRefs(stmt.value, into)
-                    }
-                    is ParsedStatement.Expr -> collectExprRefs(stmt.expr, into)
-                }
-                collectExprRefs(expr.result, into)
-            }
-            is ParsedPerform -> {
-                for (h in expr.handlers) {
-                    into.add(h.performer.localName)
-                    h.performer.qualifier?.segments?.firstOrNull()?.let { into.add(it) }
-                    h.params?.let { collectExprRefs(it, into) }
-                }
-                collectExprRefs(expr.body, into)
+            is ParsedPerform -> for (h in expr.handlers) {
+                into.add(h.performer.localName)
+                h.performer.qualifier?.segments?.firstOrNull()?.let { into.add(it) }
             }
             is ParsedEffectCall -> {
                 into.add(expr.operation.localName)
                 expr.operation.qualifier?.segments?.firstOrNull()?.let { into.add(it) }
-                collectExprRefs(expr.arguments, into)
             }
+            // Own no name; their sub-expressions are reached below.
+            is ParsedFunctionCall, is ParsedBinaryOp, is ParsedPipe, is ParsedParens,
+            is ParsedRecordLit, is ParsedSeqLit, is ParsedIf, is ParsedMatch,
             is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
             is ParsedStringLit, is ParsedCharLit, is ParsedPipePlaceholder -> {}
         }
+        for (child in expr.children()) collectExprRefs(child, into)
     }
 
+    /**
+     * Same shape as [collectExprRefs], and for the same reason: written by hand,
+     * this stopped at the arrow and missed the annotations hanging off the effect
+     * row (`<Exception having 'error = Map Str Int>`) and the `with` clause's
+     * associated-type bindings (`with Format 'a having 'out = Map Str Int`).
+     */
     private fun collectTypeRefs(t: ParsedTypeAnnotation, into: MutableSet<String>) {
         when (t) {
             is ParsedNamedType -> into.add(t.name)
             is ParsedQualifiedType -> {
                 t.modulePath.firstOrNull()?.let { into.add(it) }
                 into.add(t.typeName)
-                for (a in t.args) collectTypeRefs(a, into)
             }
-            is ParsedTypeApp -> { into.add(t.constructor); for (a in t.args) collectTypeRefs(a, into) }
-            is ParsedRecordType -> for (e in t.entries) collectTypeRefs(e.type, into)
-            is ParsedVariantType -> for (c in t.constructors) c.dataType?.let { collectTypeRefs(it, into) }
-            is ParsedSeqType -> collectTypeRefs(t.elementType, into)
+            is ParsedTypeApp -> into.add(t.constructor)
             is ParsedFunctionType -> {
-                collectTypeRefs(t.paramType, into)
-                collectTypeRefs(t.returnType, into)
                 t.effects?.let { into.addAll(it.allEffectNames) }
-                for (ac in t.abilityConstraints) {
-                    into.add(ac.abilityName)
-                    for (a in ac.typeArgs) collectTypeRefs(a, into)
-                }
+                for (ac in t.abilityConstraints) into.add(ac.abilityName)
             }
+            // Own no name; their sub-annotations are reached below.
+            is ParsedRecordType, is ParsedVariantType, is ParsedSeqType -> {}
         }
+        for (child in t.children()) collectTypeRefs(child, into)
     }
 }

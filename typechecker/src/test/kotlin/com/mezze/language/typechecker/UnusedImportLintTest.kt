@@ -118,4 +118,49 @@ class UnusedImportLintTest {
             "Expected filter + reduce unused. Got: $unused")
         assertFalse("map" in unused, "map is used bare. Got: $unused")
     }
+
+    // ---- positions the reference walkers reach and this linter used not to ----
+    //
+    // A false W0102 is worse than a missed one: acting on it (deleting the import)
+    // breaks the build. Each case below is a position where `ParsedExpr.children()`
+    // / `ParsedTypeAnnotation.children()` see a reference and the linter's own
+    // recursion did not.
+
+    @Test
+    fun `an import used only inside a string interpolation is not flagged`() {
+        // #160's shape: `ParsedStringLit` looks like a leaf, but `$( … )` holes are
+        // sub-expressions. The linter treated the literal as childless.
+        val msgs = unused("""
+            use std::collections::seq::{ sum }
+
+            let report = {xs: [Int]} -> "total: $(sum { xs = xs })"
+        """.trimIndent())
+        assertFalse(msgs.any { it.contains("sum") }, "'sum' is used in an interpolation hole. Got: $msgs")
+    }
+
+    @Test
+    fun `an import used only in an effect row's having binding is not flagged`() {
+        // `{ … } -> T <Exception having 'error = (Map Str Int)>` — the annotation
+        // hangs off the effect row, which the type walk stopped short of.
+        val msgs = unused("""
+            use std::collections::map::{ Map }
+            use std::effects::exception::{ Exception }
+
+            let risky : { x: Int } -> Int <Exception having 'error = (Map Str Int)> = {x} -> x
+        """.trimIndent())
+        assertFalse(msgs.any { it.contains("'Map'") }, "'Map' is used in the effect row. Got: $msgs")
+    }
+
+    @Test
+    fun `an import used only in a with-clause having binding is not flagged`() {
+        // `with Format 'a having 'out = Map Str Int` — same gap on the other side
+        // of the arrow's constraint list.
+        val msgs = unused("""
+            use std::collections::map::{ Map }
+            use std::codec::core::{ Format }
+
+            let render : { x: 'a } with Format 'a having 'out = (Map Str Int) -> Int = {x} -> 1
+        """.trimIndent())
+        assertFalse(msgs.any { it.contains("'Map'") }, "'Map' is used in the with-clause binding. Got: $msgs")
+    }
 }
