@@ -105,6 +105,41 @@ class ConstraintSolver(
         poisonedVars.addAll(constraintOriginVars(constraint))
     }
 
+    /**
+     * Run [round] until a pass reports no progress — the one loop control every
+     * deferred-constraint pass in this file uses.
+     *
+     * Five passes here need this shape, and before it existed each was written out
+     * by hand with its own bound (50, 100, `size + 2`, `size + 2`) and no recorded
+     * reason for the differences. The fifth was written WITHOUT a loop at all:
+     * `finalizeDeferredAbilities` made a single pass over a snapshot, so a chained
+     * `having 'out` whose outer resolution needed the inner one to land first was
+     * never retried, and `5 |> add_ten {…} |> square {…}` inferred `'a` instead of
+     * `Int`. A missing fixpoint is invisible at the call site; a missing call to
+     * this function is not.
+     *
+     * Exhausting [maxRounds] is a hard error, not a truncation. A pass that still
+     * reports progress after its budget is two solvers undoing each other's work,
+     * and silently returning the half-solved substitution turns that into a wrong
+     * inferred type somewhere far away.
+     *
+     * @param round performs one full pass; returns whether it made progress.
+     */
+    private inline fun runToFixpoint(maxRounds: Int, what: String, round: () -> Boolean) {
+        var rounds = 0
+        while (rounds < maxRounds) {
+            rounds++
+            if (!round()) return
+        }
+        error(
+            "Constraint solving did not converge: $what was still making progress after " +
+                "$maxRounds rounds. Each round composes a substitution onto the last, so a " +
+                "pass that never reaches a fixpoint means two solvers are undoing each " +
+                "other's work. This is a compiler bug rather than a problem with the " +
+                "program — please report the source that triggered it."
+        )
+    }
+
     private val abilityChecker = AbilityChecker(context, registry, deferExistingAbilityImpls, sharedGeneratedCodecImpls)
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
@@ -381,13 +416,11 @@ class ConstraintSolver(
 
         var substitution = inputSubst
         val worklist = hasConstructorConstraints.toMutableList()
-        var madeProgress = true
-        var iterationCount = 0
 
-        while (madeProgress && worklist.isNotEmpty() && iterationCount < 50) {
-            madeProgress = false
-            iterationCount++
-
+        // Each round either removes a constraint or composes a substitution, so
+        // one round per constraint plus a confirming no-op pass is the ceiling.
+        runToFixpoint(worklist.size + 2, "HasConstructor resolution") {
+            var madeProgress = false
             val iterator = worklist.iterator()
             while (iterator.hasNext()) {
                 val constraint = iterator.next()
@@ -430,6 +463,7 @@ class ConstraintSolver(
                     is ConstraintResult.Deferred -> {}
                 }
             }
+            madeProgress
         }
 
         return HasConstructorResult(substitution, worklist, otherConstraints)
@@ -516,16 +550,12 @@ class ConstraintSolver(
         var substitution = inputSubst
         val sortedConstraints = remainingConstraints.sortedBy { constraintPriority(it) }
         val constraintWorklist = sortedConstraints.toMutableList()
-        var madeProgress = true
-        var iterationCount = 0
-        val maxIterations = 100
 
-        while (madeProgress && constraintWorklist.isNotEmpty() && iterationCount < maxIterations) {
-            madeProgress = false
-            iterationCount++
+        runToFixpoint(constraintWorklist.size + 2, "the main constraint worklist") {
+            var madeProgress = false
 
             DebugLogger.debug(Category.ConstraintSolver) {
-                "Worklist iteration $iterationCount, ${constraintWorklist.size} constraints remaining"
+                "Worklist iteration, ${constraintWorklist.size} constraints remaining"
             }
 
             val iterator = constraintWorklist.iterator()
@@ -591,6 +621,7 @@ class ConstraintSolver(
                     is ConstraintResult.Deferred -> {}
                 }
             }
+            madeProgress
         }
 
         // #160: a chain of deferred InherentMethodResolve constraints (e.g.
@@ -601,11 +632,8 @@ class ConstraintSolver(
         // each Success so the pinned result/return types reach emit. Success and
         // Failure both remove the constraint (so it's reported at most once);
         // only genuinely-stuck Deferred constraints survive to the sweep below.
-        var finalProgress = true
-        var finalIterations = 0
-        while (finalProgress && constraintWorklist.isNotEmpty() && finalIterations < constraintWorklist.size + 2) {
-            finalProgress = false
-            finalIterations++
+        runToFixpoint(constraintWorklist.size + 2, "the deferred-constraint sweep") {
+            var finalProgress = false
             val it = constraintWorklist.iterator()
             while (it.hasNext()) {
                 val constraint = it.next()
@@ -637,6 +665,7 @@ class ConstraintSolver(
                     is ConstraintResult.Deferred -> { /* wait for another pass */ }
                 }
             }
+            finalProgress
         }
 
         // Terminal sweep: whatever is STILL unresolved is a genuine failure.
@@ -692,11 +721,8 @@ class ConstraintSolver(
         var substitution = inputSubst
         val worklist = deferredInherentLeftovers.toMutableList()
 
-        var progress = true
-        var iterations = 0
-        while (progress && worklist.isNotEmpty() && iterations < worklist.size + 2) {
-            progress = false
-            iterations++
+        runToFixpoint(worklist.size + 2, "deferred inherent-method resolution") {
+            var progress = false
             val it = worklist.iterator()
             while (it.hasNext()) {
                 val constraint = it.next()
@@ -725,6 +751,7 @@ class ConstraintSolver(
                     is ConstraintResult.Deferred -> { /* still unresolved — see below */ }
                 }
             }
+            progress
         }
 
         // Anything STILL Deferred here has a receiver that didn't become
@@ -826,17 +853,13 @@ class ConstraintSolver(
         // `worklist.size + 2` convention.
         val deferredCount = abilityChecker.getAssociatedTypeResolutionConstraints()
             .values.sumOf { it.size }
-        val maxRounds = deferredCount + 2
         // A Failure is reported at most once even though the constraint is revisited.
         val reportedFailures = mutableSetOf<Constraint.AssociatedTypeResolution>()
-        var assocProgress = true
-        var assocRounds = 0
-        while (assocProgress && assocRounds < maxRounds) {
-            assocProgress = false
-            assocRounds++
+        runToFixpoint(deferredCount + 2, "associated-type resolution") {
+            var assocProgress = false
             val deferredEntries = abilityChecker.getAssociatedTypeResolutionConstraints().toList()
             DebugLogger.debug(Category.ConstraintSolver) {
-                "Associated-type round $assocRounds: ${deferredEntries.size} deferred entries"
+                "Associated-type round: ${deferredEntries.size} deferred entries"
             }
             for ((typeVar, deferredConstraints) in deferredEntries) {
                 DebugLogger.debug(Category.ConstraintSolver) {
@@ -871,6 +894,7 @@ class ConstraintSolver(
                     }
                 }
             }
+            assocProgress
         }
 
         return substitution
