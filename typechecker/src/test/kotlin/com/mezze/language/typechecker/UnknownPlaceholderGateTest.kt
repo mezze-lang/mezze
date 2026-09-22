@@ -38,40 +38,45 @@ class UnknownPlaceholderGateTest {
      * that gave up. Absence of a context is now `null`, which is what it is, and
      * each genuine last resort says which position it is.
      *
-     * Three of the old six are gone entirely, replaced by a loud failure rather
-     * than a placeholder, because reaching them means emit ran on something that
-     * should not have type-checked: a `let` or destructuring `let` with no solved
-     * type, and a qualified name in no import table. A fourth — the module's
-     * trailing expression — reads the type the generator already recorded under
-     * `_toplevel` instead of inventing one.
+     * **It was 17. It is 9, and the 9 are exactly the ones that fire.**
      *
-     * Measured over the stdlib plus five programs covering literals, chained
-     * HOFs, newtypes, matches and maps, exactly TWO of these fire:
+     * The previous version of this note said "exactly TWO of these fire",
+     * measured over one program, and kept the other fifteen on the grounds that
+     * they are "reachable in principle and unreached in practice". Both halves of
+     * that were re-measured by counting every mint across `:typechecker:test`,
+     * `:interpreter:test`, `:lsp:test` and `:cli:test` — about 920,000 mints in
+     * total:
      *
-     *   field read with no solved type and no declared shape
-     *   identifier resolved nowhere and the position expects nothing
+     *   673,749  field read with no solved type and no declared shape
+     *   264,516  identifier resolved nowhere and the position expects nothing
+     *     1,373  call with no solved return, no callee arrow and no context
+     *       635  let binding with no solved type
+     *       222  variant construct with no solved or context type
+     *        49  perform op with no solved return, no resolved return and no context
+     *         6  static ability op field access with no solved signature
+     *         4  qualified identifier not in imports
+     *         3  ability op reference with no solved signature
      *
-     * The rest are reachable in principle and unreached in practice. They stay
-     * listed because the gate's job is to catch a NEW place where the compiler
-     * gives up, and an unlisted reason firing is exactly that.
+     * NINE fire, not two. The other EIGHT minted zero and are gone — each is now
+     * a loud failure naming its position (`TypedAstBuilder.unreachedPosition`),
+     * the same move this file describes three of the original six having already
+     * had. An unreached last resort is not a safety net: a placeholder is
+     * indistinguishable from an ordinary type variable once it leaves emit, and
+     * downstream reads a type variable as polymorphism and guesses from it.
+     *
+     * So every entry below is now a place the compiler ACTUALLY gives up, and
+     * shrinking the list is the elaboration work. A new reason appearing is a new
+     * guess, and should be a deliberate act with a line here.
      */
     private val allowed = setOf(
         "ability op reference with no solved signature",
-        "let binding with no solved type",
-        "qualified identifier not in imports",
-        "top-level expression with no recorded solve",
         "call with no solved return, no callee arrow and no context",
         "field read with no solved type and no declared shape",
         "identifier resolved nowhere and the position expects nothing",
-        "inherent method reference with no solved signature",
-        "match with no cases and no context",
-        "method call with no solved return, no method arrow and no context",
-        "method reference with no solved signature",
-        "perform op with no solved result and no context",
+        "let binding with no solved type",
         "perform op with no solved return, no resolved return and no context",
-        "pipe placeholder with no piped-in type",
+        "qualified identifier not in imports",
         "static ability op field access with no solved signature",
-        "static ability op with no solved, declared or context type",
         "variant construct with no solved or context type",
     )
 

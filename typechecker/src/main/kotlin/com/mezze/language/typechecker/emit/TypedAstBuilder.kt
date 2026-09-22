@@ -863,7 +863,7 @@ class TypedAstBuilder(
         // failing: the recording is per-module, and emit also runs on paths that
         // did not go through that arm.
         val type = constraintResults["_toplevel"]?.let { substitution.apply(it.type) }
-            ?: noContextType("top-level expression with no recorded solve")
+            ?: unreachedPosition("top-level expression with no recorded solve")
         val value = buildExpr(decl.expression, file, type)
         decls.add(TypedLetDecl(
             hash = hash,
@@ -1219,7 +1219,7 @@ class TypedAstBuilder(
                     }
                     val resultType = cases.firstOrNull()?.body?.type
                         ?: contextType?.let { substitution.apply(it) }
-                        ?: noContextType("match with no cases and no context")
+                        ?: unreachedPosition("match with no cases and no context")
                     // S5.0 (#376): stamp the UNERASED source-level scrutinee type
                     // (constraint-time solved, keyed by the scrutinee's Loc) onto the
                     // node. The erased `scrutinee.type` above is unchanged and still
@@ -1276,7 +1276,7 @@ class TypedAstBuilder(
             is ParsedPipePlaceholder -> {
                 TypedVar("@", BindingRef.Local(0, 0),
                     contextType?.let { substitution.apply(it) }
-                        ?: noContextType("pipe placeholder with no piped-in type"), loc)
+                        ?: unreachedPosition("pipe placeholder with no piped-in type"), loc)
             }
             is ParsedParens -> buildExpr(expr.expr, file, contextType)
             is ParsedPerform -> {
@@ -1305,7 +1305,7 @@ class TypedAstBuilder(
 
                 TypedPerformOp(effectHash, opName, argExpr,
                     contextType?.let { substitution.apply(it) }
-                        ?: noContextType("perform op with no solved result and no context"), loc)
+                        ?: unreachedPosition("perform op with no solved result and no context"), loc)
             }
         }
     }
@@ -1571,7 +1571,7 @@ class TypedAstBuilder(
             solvedCallSite != null && solvedCallSite !is MezzeType.VarType -> solvedCallSite
             solvedFnType is MezzeType.FunctionType -> substitution.apply(solvedFnType.returnType)
             else -> contextType?.let { substitution.apply(it) }
-        } ?: noContextType("static ability op with no solved, declared or context type")
+        } ?: unreachedPosition("static ability op with no solved, declared or context type")
 
         val abilityName = methodInfo.abilityName
         val abilityHash = abilityName?.let { name ->
@@ -1633,7 +1633,7 @@ class TypedAstBuilder(
             name = methodInfo.methodName,
             binding = BindingRef.ByHash(opHash),
             type = solvedFnType ?: contextType?.let { substitution.apply(it) }
-                ?: noContextType("method reference with no solved signature"),
+                ?: unreachedPosition("method reference with no solved signature"),
             loc = memberAccess.memberLoc,
         )
         return TypedCall(
@@ -1782,7 +1782,7 @@ class TypedAstBuilder(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(hash),
                 type = solvedFnType ?: contextType?.let { substitution.apply(it) }
-                    ?: noContextType("method reference with no solved signature"),
+                    ?: unreachedPosition("method reference with no solved signature"),
                 // Narrow member-name loc, not the whole `receiver.method` span,
                 // so hover/goto-def on a chained call resolve to THIS method
                 // rather than the outermost one. Safe for tree descent: the
@@ -1797,7 +1797,7 @@ class TypedAstBuilder(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(opHash),
                 type = solvedFnType ?: contextType?.let { substitution.apply(it) }
-                    ?: noContextType("inherent method reference with no solved signature"),
+                    ?: unreachedPosition("inherent method reference with no solved signature"),
                 loc = memberAccess.memberLoc
             )
         } else if (staticReceiverValue != null) {
@@ -1870,7 +1870,7 @@ class TypedAstBuilder(
                 is MezzeType.FunctionType -> substitution.apply(ft.returnType)
                 else -> solvedCallSite ?: contextType?.let { substitution.apply(it) }
             }
-        } ?: noContextType("method call with no solved return, no method arrow and no context")
+        } ?: unreachedPosition("method call with no solved return, no method arrow and no context")
 
         // Correct the method-var's displayed type to the ACTUAL call site. For a
         // deferred inherent method (receiver pinned only after solving, e.g.
@@ -2667,6 +2667,35 @@ class TypedAstBuilder(
      */
     private fun noContextType(reason: String): MezzeType =
         MezzeType.VarType(TypeVar.unknown(reason))
+
+    /**
+     * A position emit must never reach without a type.
+     *
+     * These eight were `noContextType(...)` placeholders too. MEASURED across
+     * `:typechecker:test`, `:interpreter:test`, `:lsp:test` and `:cli:test` — a run
+     * that minted roughly 920,000 placeholders in total — each of them minted
+     * ZERO. Nothing in the corpus reaches them.
+     *
+     * An unreached last resort is not a safety net. A placeholder leaves emit
+     * indistinguishable from an ordinary type variable, and downstream reads a
+     * type variable as POLYMORPHISM and guesses from it — that is how a variant
+     * comparison came to be answered by `Eq Int`'s operation. Reaching one of
+     * these means emit ran on something that should not have type-checked, so the
+     * honest answer is to say so at the position rather than invent a type and
+     * fail somewhere far away.
+     *
+     * Same move this file already made for three of the original six reasons. The
+     * NINE positions that do mint keep their placeholder — they are the remaining
+     * elaboration work and are listed in `UnknownPlaceholderGateTest`.
+     */
+    private fun unreachedPosition(position: String): Nothing =
+        throw com.mezze.language.typechecker.TypeCheckError(
+            message = "Internal compiler error: emit reached a position with no type — " +
+                "$position. This is a bug in the compiler, not an error in your program — " +
+                "please report it. Re-run with --verbose for the full stack trace.",
+            errorType = com.mezze.language.typechecker.ErrorType.INTERNAL_ERROR,
+            code = com.mezze.language.parsedast.diagnostics.ErrorCode.I0003_INTERNAL_EMIT_FAILURE,
+        )
 
     private fun resolveIdentifierType(
         name: String,
