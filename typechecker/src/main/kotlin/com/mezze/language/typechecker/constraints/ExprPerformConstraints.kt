@@ -453,45 +453,6 @@ internal fun ExpressionConstraintGenerator.hasPerformedMarkerInType(type: MezzeT
     }
 }
 
-internal fun ExpressionConstraintGenerator.wrapCallResultWithEffects(
-    valueType: MezzeType,
-    effectRow: MezzeType.EffectRow?,
-): Triple<MezzeType, Set<String>, Set<MezzeType.EffectInstance>> {
-    if (effectRow == null) return Triple(valueType, emptySet(), emptySet())
-    // Effect-model migration (S2): return the BARE value type; effects ride on the
-    // enclosing arrow via the caller's collector. The value carries no effect row.
-    // (Duplicate of the ExpressionConstraints copy.)
-    return Triple(valueType, effectRow.effects, effectRow.effectInstances)
-}
-
-internal fun ExpressionConstraintGenerator.removeEffectsFromType(
-    type: MezzeType,
-    effectsToRemove: Set<String>,
-): MezzeType {
-    return when (type) {
-        is MezzeType.FunctionType -> {
-            val effects = type.effects
-            if (effects == null) {
-                MezzeType.FunctionType(
-                    paramType = type.paramType,
-                    returnType = type.returnType,
-                    effects = MezzeType.EffectRow.simple(emptySet(), null, performed = true),
-                    abilityConstraints = type.abilityConstraints
-                )
-            } else {
-                val remainingEffects = effects.effects - effectsToRemove
-                MezzeType.FunctionType(
-                    paramType = type.paramType,
-                    returnType = type.returnType,
-                    effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, performed = true),
-                    abilityConstraints = type.abilityConstraints
-                )
-            }
-        }
-        else -> type
-    }
-}
-
 internal fun ExpressionConstraintGenerator.generateEffectCall(expr: ParsedEffectCall, context: ConstraintContext): ConstraintResult {
     val effectName = expr.operation.qualifier?.segments?.joinToString("::") ?: ""
     val operationName = expr.operation.localName
