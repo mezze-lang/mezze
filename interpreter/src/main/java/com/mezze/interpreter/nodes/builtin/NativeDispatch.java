@@ -1558,6 +1558,14 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.getOrDefault(getMap(r, "m"), getField(r, "k"), getField(r, "default")));
         HANDLERS.put("__native_map_to_seq", (r, c) ->
             MapNatives.toSeq(getMap(r, "m")));
+        // The inverse of to_seq. The codec walker decodes a map's entries and
+        // then had nothing to rebuild the Map with, so decoding INTO a Map gave
+        // back a value whose runtime shape was not its declared type.
+        HANDLERS.put("__native_map_from_seq", (r, c) ->
+            MapNatives.fromSeq(getSeq(r, "xs")));
+        HANDLERS.put("__native_map_from_seq_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(getSeq(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_map_keys_seq", (r, c) ->
             MapNatives.keysSeq(getMap(r, "m")));
         HANDLERS.put("__native_map_values_seq", (r, c) ->

@@ -182,31 +182,20 @@ class JvmCodecContainerTest {
     }
 
     /**
-     * DECODING INTO A `Map` IS UNIMPLEMENTED, FOR EVERY FORMAT.
-     *
-     * `CodecGenerator.buildDecodeMap` hands back the entry seq `decode_map`
-     * produced and never rebuilds a `Map` from it, so the value's runtime shape
-     * is not its declared target type. JSON surfaces that as a decode `Err`;
-     * JvmC gets one rung further and reaches `map::size` with the entry seq, which
-     * fails "Expected MezzeMap for field 'm'". Same missing step, two symptoms.
+     * Decoding INTO a `Map` — the walker decoded the entries but nothing rebuilt
+     * the Map from them, so the returned value's runtime shape was not its
+     * declared type. JSON surfaced that as a decode `Err`; JvmC got one rung
+     * further and reached `map::size` holding the entry seq, failing "Expected
+     * MezzeMap for field 'm'". Same missing step, two symptoms, every format.
      * There was no Map-decode test in the suite at all, which is why it stood.
-     *
-     * Deliberately NOT patched by routing through `__native_map_from_list`: that
-     * native calls `put` with no Eq/Hash evidence, which is precisely the
-     * silently-wrong-equality class BUG 13 / BUG 21 / T1.2-T1.5 exist to prevent.
-     * A real fix threads the key's evidence the way `insert_with_evidence` does.
-     *
-     * This test pins the CURRENT behaviour so the fix has a before/after — when
-     * the Map is rebuilt it will start returning 1 and this test must be updated
-     * to assert the round-trip instead.
      */
     @Test
-    fun `decoding into a Map is unimplemented in the shared walker`() {
+    fun `a map round-trips through the JSON codec`() {
         val result = eval(
             """
             use std::codec::json::{ ToJson, FromJson }
             use std::collections::map
-            let m = map::insert { m = map::empty {}, k = "a", v = 1 }
+            let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
             let j = m.to_json {}
             let back: Result (Map Str Int) DecodeError = j.from_json {}
             match back is
@@ -215,7 +204,48 @@ class JvmCodecContainerTest {
             """.trimIndent()
         )
         val v = assertOk(result)
-        assertEquals(-1L, v.getPayloadFieldByName("val"))
+        assertEquals(2L, v.getPayloadFieldByName("val"))
+    }
+
+    /** The rebuilt Map must be a real Map — its entries readable by key, not
+     *  merely countable. */
+    @Test
+    fun `a decoded map reads its values back by key`() {
+        val result = eval(
+            """
+            use std::codec::json::{ ToJson, FromJson }
+            use std::collections::map
+            let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 10 }, k = "b", v = 20 }
+            let j = m.to_json {}
+            let back: Result (Map Str Int) DecodeError = j.from_json {}
+            match back is
+              Ok { val = m2 } -> match map::get { m = m2, k = "b" } is
+                Some { val = n } -> Ok { val = n }
+                None -> Ok { val = 0 - 1 }
+              Err { error = _ } -> Ok { val = 0 - 2 }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(20L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `a map round-trips through the JVM codec`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::map
+            let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
+            let f = m.to_jvm {}
+            let back: Result (Map Str Int) DecodeError = f.from_jvm {}
+            match back is
+              Ok { val = m2 } -> Ok { val = map::size { m = m2 } }
+              Err { error = _ } -> Ok { val = 0 - 1 }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(2L, v.getPayloadFieldByName("val"))
     }
 
     // ==================== two derivations in one module ====================

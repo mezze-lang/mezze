@@ -380,16 +380,53 @@ impl DecodeList for JsonC having 'in = Json where {
     } },
 }
 
+## One encoded map entry — the `{ "key": …, "value": … }` object `encode_map`
+## writes — pulled back apart. None when the item is not that shape.
+let map_entry_of: { j: Json } -> Option { key: Json, value: Json } = { j } -> match j is
+  JObject { fields } -> match find_field_value { fields = fields, key = "key", idx = 0 } is
+    Some { val = k } -> match find_field_value { fields = fields, key = "value", idx = 0 } is
+      Some { val = v } -> Some { val = { key = k, value = v } }
+      None -> None
+    None -> None
+  _ -> None
+
+## Every entry, or None if any one of them is malformed — a half-read map is
+## worse than a reported failure.
+let read_map_entries:
+  { items: [Json], idx: Int, acc: [{ key: Json, value: Json }] }
+  -> Option [{ key: Json, value: Json }] =
+  { items, idx, acc } ->
+    if idx >= seq::size { xs = items } then Some { val = acc }
+    else match seq::get { xs = items, i = idx } is
+      Some { val = item } -> match map_entry_of { j = item } is
+        Some { val = entry } ->
+          read_map_entries { items = items, idx = idx + 1, acc = seq::add { xs = acc, x = entry } }
+        None -> None
+      None -> None
+
 impl DecodeMap for JsonC having 'in = Json where {
+  ## Reads back exactly what `encode_map` writes: a JArray whose items are
+  ## `{ "key": …, "value": … }` objects.
+  ##
+  ## This used to expect a JObject and rebuild each key as
+  ## `JString { val = <field name> }` — the inverse of nothing, since the encoder
+  ## has always emitted an array of pairs. A map therefore never round-tripped
+  ## through JSON, and nothing caught it because no test decoded one.
+  ## The array form is also the only one that survives a NON-string key, which a
+  ## JSON object cannot represent at all.
   decode_map = { it, val, ctx } -> match val is
-    JObject { fields } -> Ok { val = seq::map { xs = fields, f = { x } -> {
-      key = JString { val = x.key },
-      value = x.value,
-    } } }
+    JArray { items } -> match read_map_entries { items = items, idx = 0, acc = [] } is
+      Some { val = entries } -> Ok { val = entries }
+      None -> Err { error = {
+        path = ctx.path,
+        message = "Expected every map entry to be an object with 'key' and 'value'",
+        expected = "Array of { key, value }",
+        found = Some { val = json_type_name { json = val } },
+      } }
     _ -> Err { error = {
       path = ctx.path,
-      message = "Expected object (for map)",
-      expected = "Object",
+      message = "Expected array (for map)",
+      expected = "Array",
       found = Some { val = json_type_name { json = val } },
     } },
 }

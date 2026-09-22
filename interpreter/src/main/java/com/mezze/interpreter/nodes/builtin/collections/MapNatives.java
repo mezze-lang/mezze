@@ -359,6 +359,56 @@ public final class MapNatives {
 
     // ==================== To Seq ====================
 
+    /**
+     * The inverse of {@link #toSeq}: rebuild a map from a seq of `{k, v}` records.
+     *
+     * Exists because the codec walker had no way back. `decode_map` hands the
+     * walker its entries and the walker decoded each side, but nothing turned the
+     * entry seq into a `Map` — so decoding into a `Map` returned a value whose
+     * runtime shape was not its declared type, for EVERY format. JSON surfaced
+     * that as a decode `Err`; the polyglot codec got one rung further and failed
+     * with "Expected MezzeMap for field 'm'".
+     *
+     * Structural bucketing is the right default, exactly as it is for
+     * {@code __native_map_insert}: when the key's `Eq` is the compiler's derived
+     * one, the map's own structural comparison IS that instance. A key type that
+     * wrote its own `Eq` needs the evidence-carrying form instead, which is why
+     * this name is in TypedASTCompiler's `evidenceNativeForm` table alongside
+     * insert/get/remove.
+     */
+    @TruffleBoundary
+    public static MezzeMap fromSeq(MezzeSeq entries) {
+        MezzeMap result = MezzeMap.empty();
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i) instanceof MezzeRecord rec) {
+                result = result.put(rec.getField("k"), rec.getField("v"));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * {@link #fromSeq} using the key type's OWN hash/eq rather than the map's
+     * structural bucketing — the form the compiler substitutes when the key's
+     * instance was hand-written. Mirrors {@code insertWithEvidence}.
+     */
+    @TruffleBoundary
+    public static MezzeMap fromSeqWithEvidence(
+        MezzeSeq entries,
+        MezzeFunction hash,
+        MezzeFunction eq
+    ) {
+        // Install the key's instance ONCE and fill, rather than re-wrapping per
+        // entry: the hashing belongs to the map, not to the individual put.
+        MezzeMap result = withHashing(MezzeMap.empty(), ClosureHashing.of(hash, eq));
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i) instanceof MezzeRecord rec) {
+                result = result.put(rec.getField("k"), rec.getField("v"));
+            }
+        }
+        return result;
+    }
+
     @TruffleBoundary
     public static MezzeSeq toSeq(MezzeMap map) {
         com.mezze.datastructures.map.MezzeMap<Object, Object> delegate = map;

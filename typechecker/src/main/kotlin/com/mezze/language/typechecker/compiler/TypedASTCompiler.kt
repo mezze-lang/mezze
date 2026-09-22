@@ -3648,6 +3648,11 @@ class TypedASTCompiler(
         "__native_map_get" to "__native_map_get_with_evidence",
         "__native_map_contains_key" to "__native_map_contains_key_with_evidence",
         "__native_map_remove" to "__native_map_remove_with_evidence",
+        // The rebuild side, used by the codec walker to turn decoded entries back
+        // into a Map. Same rule as insert: a key whose `Eq` the author wrote needs
+        // its own instance installed, or the map buckets by representation and
+        // silently disagrees with that instance.
+        "__native_map_from_seq" to "__native_map_from_seq_with_evidence",
     )
 
     /**

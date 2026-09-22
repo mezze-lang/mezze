@@ -677,8 +677,12 @@ class CodecGenerator(
                             match(
                                 buildDecodeExpr(valType, member(id("x"), "value")),
                                 matchCase(
+                                    // `k`/`v`, not `key`/`value`: this is the shape
+                                    // `__native_map_from_seq` reads, and the exact
+                                    // shape `__native_map_to_seq` produces on the
+                                    // encode side. One entry spelling, both ways.
                                     okPat("__v"),
-                                    ok(record("key" to id("__k"), "value" to id("__v"))),
+                                    ok(record("k" to id("__k"), "v" to id("__v"))),
                                 ),
                                 matchCase(errPat("e"), err(id("e"))),
                             ),
@@ -688,9 +692,29 @@ class CodecGenerator(
                 ),
             ),
         )
+        // `mapped` is `Result [{k, v}]` — the decoded ENTRIES. The declared target
+        // is a `Map`, and nothing turned one into the other: the value handed back
+        // had the entry type, not its declared type, so decoding into a Map was
+        // broken for every format (a decode `Err` on JSON, "Expected MezzeMap for
+        // field 'm'" on the polyglot codec). Rebuild it here, the mirror of
+        // `__native_map_to_seq` on the encode side.
+        //
+        // Structural bucketing is the right default, exactly as for a written
+        // `map::insert`: when the key's `Eq` is the compiler's derived one, the
+        // map's structural comparison IS that instance. A key type that wrote its
+        // own gets the evidence-carrying form, because this native is in
+        // TypedASTCompiler's `evidenceNativeForm` table.
+        val rebuilt = match(
+            mapped,
+            matchCase(
+                okPat("__entries"),
+                ok(call(id("__native_map_from_seq"), record("xs" to id("__entries")))),
+            ),
+            matchCase(errPat("e"), err(id("e"))),
+        )
         return match(
             mapCall,
-            matchCase(okPat("__map_raw"), mapped),
+            matchCase(okPat("__map_raw"), rebuilt),
             matchCase(errPat("e"), err(id("e"))),
         )
     }
