@@ -222,6 +222,24 @@ object PipelineRunner {
             // Including them here would negate the lazy-stub startup savings
             // (performer compilation was the ~100ms bottleneck).
             if (roots.isEmpty() && functions.isNotEmpty()) roots.add(functions.last().hash)
+            // A DEBUGGER NEEDS EVERY ROOT BUILT BEFORE THE PROGRAM RUNS.
+            //
+            // `setBreakpoints` arrives before evaluation, and Truffle resolves a
+            // line breakpoint against whatever is loaded, then keeps that answer.
+            // With only `__entry__` built, a breakpoint inside a function body
+            // has no section to land on and resolves to the next statement in
+            // __entry__ instead — measured: a breakpoint on line 2 of a two-line
+            // function body resolved to the `let result = calc {…}` call on line
+            // 5, and the debugger stopped there having never entered `calc`.
+            //
+            // Seeding by name (main / __toplevel*) is a startup optimisation:
+            // everything else is deferred to LazyStubRootNode and built on first
+            // call. That is right for running and wrong for debugging, so take
+            // it only when instrumentation is off — a program being debugged
+            // pays a few ms of compile to become breakpointable at all.
+            if (MezzeLanguage.isBdslDebugInstrumentation()) {
+                functions.forEach { roots.add(it.hash) }
+            }
             language.eagerCompileReachable(roots, functions)
             mark("eager BDSL emitted into SlotTable (slotTable.size=${language.getSlotTable().size()})")
         }

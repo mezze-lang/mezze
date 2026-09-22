@@ -203,6 +203,43 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * The char range a `let` STATEMENT should present to the debugger.
+     *
+     * Normally the let's own section — but a `let f = {…} -> do …` spans its
+     * whole body, and that makes a line breakpoint set INSIDE the body resolve
+     * to the DECLARATION instead of to the statement the user pointed at.
+     *
+     * The ordering is what does it. `setBreakpoints` arrives before the program
+     * is evaluated, so at install time no root is loaded and nothing can match.
+     * As roots then load, Truffle resolves the breakpoint against the first
+     * section that CONTAINS the requested line — and the enclosing declaration
+     * in `__entry__` contains every line of the function it defines. The
+     * debugger stopped at the top level having never entered the function:
+     * measured, a breakpoint on line 2 resolved to `[1:1-4:8]`, the whole
+     * `let calc = {a, b} -> do …`.
+     *
+     * Clamping a lambda-valued let to its HEAD LINE leaves the body's own
+     * statements as the only sections containing their lines. The declaration
+     * stays breakpointable — on the line it is actually written on.
+     */
+    private int[] toStatementCharRange(com.oracle.truffle.api.source.Source source,
+                                       com.mezze.language.truffleir.SourceInfo si,
+                                       boolean clampToHeadLine) {
+        if (source == null || si == null) return null;
+        if (!clampToHeadLine || si.getEndLine() <= si.getStartLine()) {
+            return toCharRange(source, si);
+        }
+        try {
+            var head = source.createSection(si.getStartLine());
+            return new int[] { head.getCharIndex(), head.getCharLength() };
+        } catch (Exception e) {
+            // A clamp that cannot be built is no reason to lose the statement
+            // entirely — fall back to the unclamped section.
+            return toCharRange(source, si);
+        }
+    }
+
+    /**
      * Cache of already-compiled callee CallTargets, keyed by hash.
      * Populated by {@link #compileWithCallees} before a caller is
      * emitted so its CallDirect2 sites can bake in the callee's target.
@@ -2096,7 +2133,15 @@ public final class BytecodeCompiler {
                     // Detected via entryTopLevelLets (populated by
                     // compileEntryFn); empty for ordinary function bodies.
                     final boolean topLevel = entryTopLevelLets.containsKey(l);
-                    int[] range = debug ? toCharRange(currentSource, l.getSrc()) : null;
+                    // A lambda-valued let is clamped to its head line so a
+                    // breakpoint inside the function body does not resolve to
+                    // the declaration that encloses it — see
+                    // {@link #toStatementCharRange}.
+                    int[] range = debug
+                            ? toStatementCharRange(
+                                currentSource, l.getSrc(),
+                                l.getValue() instanceof com.mezze.language.truffleir.MakeLambdaIR)
+                            : null;
                     if (range != null) b.beginSourceSection(range[0], range[1]);
                     if (debug) b.beginTag(com.oracle.truffle.api.instrumentation.StandardTags.StatementTag.class);
                     b.beginStoreLocal(localMap[l.getSlot() - argCount]);
