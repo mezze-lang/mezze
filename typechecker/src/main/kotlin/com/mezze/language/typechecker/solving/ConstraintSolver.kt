@@ -797,39 +797,78 @@ class ConstraintSolver(
             substitution = deferredSubst.compose(substitution)
         }
 
-        val deferredEntries = abilityChecker.getAssociatedTypeResolutionConstraints().toList()
-        DebugLogger.debug(Category.ConstraintSolver) {
-            "Processing ${deferredEntries.size} deferred associated type constraints"
-        }
-        for ((typeVar, deferredConstraints) in deferredEntries) {
+        // Chained associated types need SEVERAL passes. The OUTER resolution's
+        // class-arg tuple IS the inner call's `'out`, which only becomes concrete once
+        // the inner one resolves — so `square { x = add_ten { x = 5 } }` needs the
+        // inner NumAdd settled before the outer NumMul can match an impl.
+        //
+        // This used to be a SINGLE pass over a snapshot, which resolved whichever
+        // constraint the map happened to yield first and left the other deferred
+        // forever; the nested call inferred `'a` instead of Int (and, being map-order
+        // dependent, some programs got the right answer by luck). The sibling loop
+        // below, resolveDeferredInherentMethods, already iterates for exactly this
+        // reason — "to_str only becomes concrete after abs resolves" — and this path
+        // never got the same treatment.
+        //
+        // TWO details make the snapshot wrong, not just slow:
+        //  1. solveAssociatedTypeResolution RE-ENQUEUES a constraint it defers, so
+        //     work can appear mid-pass that a snapshot taken up front cannot see.
+        //     We therefore re-read the map each round. The enqueue dedups per var
+        //     (`if (constraint !in queue)`), so the map cannot grow without bound.
+        //  2. A DEFERRAL is reported as Success(empty), NOT as ConstraintResult
+        //     .Deferred — so the Deferred arm never fires on this path and "made no
+        //     progress" is the only usable signal. Progress therefore means the
+        //     substitution gained mappings.
+        //
+        // Convergence: once a constraint resolves, its `'out` var is already mapped,
+        // so the next round unifies a concrete type with itself and yields an empty
+        // substitution. The round cap is a backstop, matching the sibling's
+        // `worklist.size + 2` convention.
+        val deferredCount = abilityChecker.getAssociatedTypeResolutionConstraints()
+            .values.sumOf { it.size }
+        val maxRounds = deferredCount + 2
+        // A Failure is reported at most once even though the constraint is revisited.
+        val reportedFailures = mutableSetOf<Constraint.AssociatedTypeResolution>()
+        var assocProgress = true
+        var assocRounds = 0
+        while (assocProgress && assocRounds < maxRounds) {
+            assocProgress = false
+            assocRounds++
+            val deferredEntries = abilityChecker.getAssociatedTypeResolutionConstraints().toList()
             DebugLogger.debug(Category.ConstraintSolver) {
-                "  TypeVar: $typeVar, ${deferredConstraints.size} constraints"
+                "Associated-type round $assocRounds: ${deferredEntries.size} deferred entries"
             }
-            for (constraint in deferredConstraints.toList()) {
-                val result = abilityChecker.solveAssociatedTypeResolution(constraint, substitution)
+            for ((typeVar, deferredConstraints) in deferredEntries) {
                 DebugLogger.debug(Category.ConstraintSolver) {
-                    "  Result: $result"
+                    "  TypeVar: $typeVar, ${deferredConstraints.size} constraints"
                 }
-                when (result) {
-                    is ConstraintResult.Success -> {
-                        if (result.substitution.mappings.isNotEmpty()) {
-                            DebugLogger.debug(Category.ConstraintSolver) {
-                                "  Composing substitution: ${result.substitution.mappings}"
+                for (constraint in deferredConstraints.toList()) {
+                    val result = abilityChecker.solveAssociatedTypeResolution(constraint, substitution)
+                    DebugLogger.debug(Category.ConstraintSolver) {
+                        "  Result: $result"
+                    }
+                    when (result) {
+                        is ConstraintResult.Success -> {
+                            if (result.substitution.mappings.isNotEmpty()) {
+                                DebugLogger.debug(Category.ConstraintSolver) {
+                                    "  Composing substitution: ${result.substitution.mappings}"
+                                }
+                                substitution = result.substitution.compose(substitution)
+                                assocProgress = true
                             }
-                            substitution = result.substitution.compose(substitution)
                         }
-                    }
-                    is ConstraintResult.Failure -> {
-                        if (!isCascade(constraint)) {
-                            errors.add(ConstraintError(
-                                message = result.message,
-                                constraint = constraint,
-                                context = constraint.context
-                            ))
-                            poison(constraint)
+                        is ConstraintResult.Failure -> {
+                            if (reportedFailures.add(constraint) && !isCascade(constraint)) {
+                                errors.add(ConstraintError(
+                                    message = result.message,
+                                    constraint = constraint,
+                                    context = constraint.context
+                                ))
+                                poison(constraint)
+                            }
                         }
+                        is ConstraintResult.Deferred -> {}
                     }
-                    is ConstraintResult.Deferred -> {}
                 }
             }
         }
