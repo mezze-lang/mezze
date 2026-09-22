@@ -95,7 +95,39 @@ class FixtureBasedTypeCheckerTest {
         val normalizedVariants = normalizeVariantConstructors(typeStr)
 
         // Then normalize ability constraints
-        return normalizeAbilityConstraints(normalizedVariants)
+        val normalizedConstraints = normalizeAbilityConstraints(normalizedVariants)
+
+        // Finally, alpha-normalize the type-variable names.
+        return normalizeTypeVarNames(normalizedConstraints)
+    }
+
+    /**
+     * Rename solver type variables to `'a, 'b, 'c …` in order of first appearance, on
+     * BOTH sides of the comparison, so a fixture pins the SHAPE of an inferred type
+     * rather than the order the solver happened to mint its variables in.
+     *
+     * Without this, `{ x: 'b, y: 'c, z: 'd, w: 'a }` and `{ x: 'a, y: 'b, z: 'c, w: 'd }`
+     * compare unequal despite being the same type, and the only way to keep such a
+     * fixture green was `permissive = true` — which asserts merely that the binding has
+     * SOME type and silently stops checking the `# expected:` comment at all. Four
+     * fixtures were in that state, and three of them had accumulated pre-migration
+     * expectations that no longer described anything.
+     *
+     * Only SOLVER-minted names are renamed: a single lowercase letter with optional
+     * digits (`'a`, `'b`, `'a1`), which is exactly what `TypeVar.fresh()` produces. A
+     * multi-letter tick name is an associated type or a rigid source-written parameter
+     * (`'out`, `'item`, `'error`) — those are part of the type's meaning and must NOT be
+     * renamed, which the `\b` after the digits guarantees.
+     */
+    private fun normalizeTypeVarNames(typeStr: String): String {
+        val solverVar = Regex("""'[a-z][0-9]*\b""")
+        val mapping = LinkedHashMap<String, String>()
+        return solverVar.replace(typeStr) { match ->
+            mapping.getOrPut(match.value) {
+                val i = mapping.size
+                "'" + ('a' + (i % 26)) + if (i >= 26) (i / 26).toString() else ""
+            }
+        }
     }
 
     /**
@@ -213,7 +245,7 @@ class FixtureBasedTypeCheckerTest {
         return "$beforeWith with ${constraints.joinToString(", ")}$returnPart"
     }
 
-    private fun testValidFixture(filename: String, permissive: Boolean = false) {
+    private fun testValidFixture(filename: String) {
         val source = loadMezzeFile("${getFixturesPath()}/valid/$filename")
         val expectedTypes = extractExpectedTypes(source)
         val filteredSource = filterComments(source)
@@ -226,18 +258,19 @@ class FixtureBasedTypeCheckerTest {
             val actualType = actualTypes[varName]
             assertNotNull(actualType, "Variable '$varName' should have a type")
 
-            if (permissive) {
-                assertTrue(actualType.isNotEmpty(), "Variable '$varName' should have a non-empty type")
-            } else {
-                // Normalize both types to allow order-independent comparison of ability constraints
-                val normalizedExpected = normalizeTypeString(expectedType)
-                val normalizedActual = normalizeTypeString(actualType)
-                assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
-            }
+            // Every fixture is checked STRICTLY. There is deliberately no opt-out:
+            // a `permissive` flag used to let four fixtures assert only that a binding
+            // had SOME type, and three of them silently accumulated `# expected:`
+            // comments that no longer described anything the compiler produced.
+            // normalizeTypeString alpha-normalizes variable names, so pinning a type
+            // here does not pin the order the solver minted its variables in.
+            val normalizedExpected = normalizeTypeString(expectedType)
+            val normalizedActual = normalizeTypeString(actualType)
+            assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
         }
     }
 
-    private fun testInferenceFixture(filename: String, permissive: Boolean = false) {
+    private fun testInferenceFixture(filename: String) {
         val source = loadMezzeFile("${getFixturesPath()}/inference/$filename")
         val expectedTypes = extractExpectedTypes(source)
         val filteredSource = filterComments(source)
@@ -250,14 +283,15 @@ class FixtureBasedTypeCheckerTest {
             val actualType = actualTypes[varName]
             assertNotNull(actualType, "Variable '$varName' should have a type")
 
-            if (permissive) {
-                assertTrue(actualType.isNotEmpty(), "Variable '$varName' should have a non-empty type")
-            } else {
-                // Normalize both types to allow order-independent comparison of ability constraints
-                val normalizedExpected = normalizeTypeString(expectedType)
-                val normalizedActual = normalizeTypeString(actualType)
-                assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
-            }
+            // Every fixture is checked STRICTLY. There is deliberately no opt-out:
+            // a `permissive` flag used to let four fixtures assert only that a binding
+            // had SOME type, and three of them silently accumulated `# expected:`
+            // comments that no longer described anything the compiler produced.
+            // normalizeTypeString alpha-normalizes variable names, so pinning a type
+            // here does not pin the order the solver minted its variables in.
+            val normalizedExpected = normalizeTypeString(expectedType)
+            val normalizedActual = normalizeTypeString(actualType)
+            assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
         }
     }
 
@@ -315,9 +349,9 @@ class FixtureBasedTypeCheckerTest {
     @Test fun `valid - open_variant_with_wildcard`() = testValidFixture("open_variant_with_wildcard.mz")
     @Test fun `valid - partial_application`() = testValidFixture("partial_application.mz")
     @Test fun `valid - pipe_operator`() = testValidFixture("pipe_operator.mz")
-    @Test fun `valid - polymorphic_arithmetic_multiparameter`() = testValidFixture("polymorphic_arithmetic_multiparameter.mz", permissive = true)
-    @Test fun `valid - polymorphic_numeric_functions`() = testValidFixture("polymorphic_numeric_functions.mz", permissive = true)
-    @Test fun `valid - record_updates`() = testValidFixture("record_updates.mz", permissive = true)
+    @Test fun `valid - polymorphic_arithmetic_multiparameter`() = testValidFixture("polymorphic_arithmetic_multiparameter.mz")
+    @Test fun `valid - polymorphic_numeric_functions`() = testValidFixture("polymorphic_numeric_functions.mz")
+    @Test fun `valid - record_updates`() = testValidFixture("record_updates.mz")
     @Test fun `valid - row_polymorphism_advanced`() = testValidFixture("row_polymorphism_advanced.mz")
     @Test fun `valid - row_polymorphism_variants`() = testValidFixture("row_polymorphism_variants.mz")
     @Test fun `valid - simple_functions`() = testValidFixture("simple_functions.mz")
@@ -326,7 +360,7 @@ class FixtureBasedTypeCheckerTest {
 
     // Inference fixture tests
     @Test fun `inference - basic_inference`() = testInferenceFixture("basic_inference.mz")
-    @Test fun `inference - function_parameter_inference`() = testInferenceFixture("function_parameter_inference.mz", permissive = true)
+    @Test fun `inference - function_parameter_inference`() = testInferenceFixture("function_parameter_inference.mz")
     @Test fun `inference - complex_inference`() = testInferenceFixture("complex_inference.mz")
     @Test fun `inference - open_record_inference`() = testInferenceFixture("open_record_inference.mz")
     @Test fun `inference - record_inference_from_access`() = testInferenceFixture("record_inference_from_access.mz")

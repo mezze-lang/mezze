@@ -1,16 +1,16 @@
 # Polymorphic numeric functions using ability constraints
-let addTwo = { x } -> x + x  # expected: addTwo : { x: 'a } with NumAdd 'a -> 'a
+let addTwo = { x } -> x + x  # expected: addTwo : { x: 'a } with NumAdd 'a 'a having 'out = 'b -> 'b
 
 let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a 'a having 'out = 'b -> 'b
 
-let isPositive = { x } -> x > 0  # expected: isPositive : { x: 'a } with Ord 'a -> Bool
+let isPositive = { x } -> x > 0  # expected: isPositive : { x: Int } -> Bool
 
 # Using with different numeric types (Int is default)
 let intResult = addTwo { x = 21 }  # expected: intResult : Int
 
 let floatResult = addTwo { x = 3.14 }  # expected: floatResult : Float
 
-let fracResult = addTwo { x = 1 / 2 }  # expected: fracResult : Frac
+let fracResult = addTwo { x = 1//2 }  # expected: fracResult : Frac
 
 # Using Nat requires explicit syntax
 let natFunction = { x: Nat } -> x + x  # Function that forces Nat
@@ -20,7 +20,7 @@ let natResult = natFunction { x = 21n }  # expected: natResult : Nat
 # Square function
 let intSquare = square { x = 7 }  # expected: intSquare : Int
 
-let fracSquare = square { x = 3 / 4 }  # expected: fracSquare : Frac
+let fracSquare = square { x = 3//4 }  # expected: fracSquare : Frac
 
 # Comparison function
 let intPositive = isPositive { x = 42 }  # expected: intPositive : Bool

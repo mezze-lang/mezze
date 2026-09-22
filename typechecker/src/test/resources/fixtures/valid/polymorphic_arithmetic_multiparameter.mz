@@ -1,9 +1,9 @@
 # Test polymorphic arithmetic with 3+ parameters
-let complex = { x, y, z } -> x + y  # expected: complex : { x: 'a, y: 'a, z: 'b} with NumAdd 'a -> 'a 
+let complex = { x, y, z } -> x + y  # expected: complex : { x: 'a, y: 'b, z: 'c } with NumAdd 'b 'a having 'out = 'd -> 'd
 
-let fourParam = { x, y, z, w } -> x + y  # expected: fourParam : { x: 'a, y: 'a, z: 'b, w: 'c } with NumAdd 'a -> 'a 
+let fourParam = { x, y, z, w } -> x + y  # expected: fourParam : { x: 'a, y: 'b, z: 'c, w: 'd } with NumAdd 'b 'a having 'out = 'e -> 'e
 
-let recordResult = { x, y, z } -> { result = x + y, other = z }  # expected: recordResult : { x: 'a, y: 'a, z: 'b } with NumAdd 'a -> { result: 'a, other: 'b }
+let recordResult = { x, y, z } -> { result = x + y, other = z }  # expected: recordResult : { x: 'a, y: 'b, z: 'c } with NumAdd 'b 'a having 'out = 'd -> { result: 'd, other: 'c }
 
 # Test do expressions with bidirectional type checking
 let doMultiple = { x, y, z } -> do
