@@ -625,13 +625,22 @@ private fun occursCheckEffectRow(typeVar: TypeVar, effectRow: MezzeType.EffectRo
 }
 
 /** #264: free vars living in an effect row's effect-instance associated types
- *  (mirrors [occursCheckEffectRow]). Used by collectFreeTypeVars for a
- *  standalone EffectRow so generalization accounts for them. */
+ *  (mirrors [occursCheckEffectRow]). */
 private fun collectFreeTypeVarsInEffectRow(effectRow: MezzeType.EffectRow): Set<TypeVar> =
     effectRow.effectInstances
         .flatMap { instance -> instance.associatedTypes.values.flatMap { collectFreeTypeVars(it) } }
         .toSet()
 
+/**
+ * The type variables generalization may quantify.
+ *
+ * MUST see a variable wherever [occursCheck] can see one: a var that occurs in the
+ * type but is not quantified is not freshened by `TypeScheme.instantiate`, so every
+ * call site of the binding shares that ONE variable and the first caller to pin it
+ * pins it for all the others.
+ *
+ * [MezzeType.anyChild] is the structural reference for which positions exist.
+ */
 fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
     return when (type) {
         is MezzeType.VarType -> setOf(type.variable)
@@ -642,7 +651,25 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
             val constraintVars = type.abilityConstraints.flatMap { constraint ->
                 constraint.typeArgs.flatMap { collectFreeTypeVars(it) }
             }.toSet()
-            paramVars + returnVars + constraintVars
+            // Effects ride on ARROWS, so this row — not the standalone EffectRow
+            // arm below — is where an `<Exception having 'error = 'e>` var lives.
+            // #264 collected the standalone row and missed the arrow-embedded one,
+            // which is the ordinary case.
+            val effectVars = type.effects?.let { collectFreeTypeVarsInEffectRow(it) } ?: emptySet()
+            // DELIBERATELY NOT COLLECTED: the ability constraints' own
+            // `associatedTypeBindings` (`having 'out = 'r`). [occursCheck] and
+            // [MezzeType.anyChild] both see those vars, so this walker really is
+            // narrower than its two siblings — but quantifying them today is a
+            // regression, not a fix. `TypeScheme.instantiate` freshens the binding
+            // into the obligation while `applySubstitutionToType` CLEARS the
+            // constraints off the instantiated type, so a freshened `'out` arrives
+            // at the call site with nothing left to re-pin it, and a result that
+            // used to be a solved `Result` degrades to a bare var. Leaving the var
+            // unquantified means every call site shares one — unsound in principle,
+            // load-bearing in practice until call-site re-resolution of a quantified
+            // `having` binding is complete. MEASURED: adding them turns
+            // `LazyEffectsTest.test suspended value in recursive function` red.
+            paramVars + returnVars + constraintVars + effectVars
         }
 
         is MezzeType.RecordType ->
