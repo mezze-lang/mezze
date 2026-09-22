@@ -10,36 +10,48 @@
 #
 # Baseline for tasks #86-#92. Run via bench/scripts/run.sh on the NATIVE binary.
 #
-# MEASURED 2026-09-22, JVM dev path, GraalJS, iters = 4M, timed IN-PROCESS:
+# MEASURED 2026-09-22, JVM dev path, GraalJS, iters = 4M, timed IN-PROCESS,
+# each of the first three rows the BEST OF 5 timed runs:
 #
-#   control (no guest)   313 ns/iter   <- READ THIS ROW FIRST
-#   read  (matched)      431 ns/iter
-#   read  (chain)        618 ns/iter
-#   index                543 ns/iter
-#   invoke               858 ns/iter
+#   control (no guest)   252 ns/iter   <- READ THIS ROW FIRST
+#   read  (matched)      424 ns/iter
+#   read  (chain)        509 ns/iter
+#   index                544 ns/iter
+#   invoke               855 ns/iter
 #   eval (same source)     6 us/iter
 #   guest init             1 ms
 #
 # WHAT THE CONTROL ROW IS FOR. It runs the same SHAPE with no guest at all —
 # two natives returning a variant, two matches, one recursive call. So:
 #
-#   loop machinery, no interop whatsoever ....... 313 ns   (72% of a read)
-#   + two interop messages ...................... 118 ns   (~59 ns each)
-#   + writing it as a dot-chain ................. 187 ns
+#   loop machinery, no interop whatsoever ....... 252 ns   (59% of a read)
+#   + two interop messages ...................... 172 ns   (~86 ns each)
+#   + writing it as a dot-chain .................  85 ns
 #
-# THE CHAIN SPELLING COSTS MORE THAN EVERY INTEROP MESSAGE COMBINED. That is
-# the largest attributable cost on this path, and it is not interop's fault:
-# it is one un-inlined CallTarget per step, because the provider's
-# Result-threading forwarder is a `match` and TrivialWrapperInliner refuses any
-# body that binds locals (#92, #94).
+# THE DOT-CHAIN COSTS ABOUT ONE INTEROP MESSAGE — one extra call frame through
+# the provider's Result-threading forwarder, which is a perfectly ordinary price
+# for a function call. There is no pathology here to remove.
 #
-# AND IT CORRECTS AN EARLIER FIGURE IN THIS FILE'S HISTORY. "~307 ns per interop
-# message" was total loop time divided by an ASSUMED message count, which
-# attributed the whole 313 ns of loop machinery to interop. Two experiments
-# then failed to move it — scalar ABI instead of record ABI, and a cached
-# InteropLibrary instead of getUncached — precisely because neither was where
-# the time went. Do not divide a loop total by a message count again; measure
-# against this control.
+# THIS FILE HAS NOW BEEN WRONG ABOUT THAT NUMBER TWICE, both times from taking a
+# single timed run as a measurement:
+#
+#   "~307 ns per interop message" was a loop total divided by an ASSUMED message
+#   count, which attributed all of the loop machinery to interop. Two fixes aimed
+#   at it failed to move anything (scalar ABI instead of record ABI; a cached
+#   InteropLibrary instead of getUncached) because neither was where the time was.
+#
+#   "187 ns to write it as a chain — more than every interop message combined"
+#   came from one run of each loop. Best-of-5 puts it at 85 ns. Two more fixes
+#   were aimed at THAT number and also moved nothing: a variant-match fold that
+#   fired zero times, and widening TrivialWrapperInliner to accept bodies that
+#   bind locals, which fired but changed no time and broke 10 gate tests (#93,
+#   #94). The chain's call site is an ability dispatch, and CallIndirect already
+#   inline-caches and force-inlines it (#92) — so there was never an un-inlined
+#   CallTarget to find.
+#
+# So: do not divide a loop total by a message count, and do not compare two
+# single runs. Both mistakes invented a bottleneck that four separate changes
+# then failed to fix. Measure against the control, best-of-N.
 
 use std::effects::log::{println, Console, Log}
 use std::effects::time::{ monotonic, Time, SystemTime }
@@ -143,6 +155,57 @@ let report: { label: Str, got: Int, n: Int, t0: Duration, t1: Duration } -> {} <
     let per = if n <= 0 then 0 else ns / n
     println { msg = "  $(label)  $(int::to_str { n = per }) ns/iter   (got $(int::to_str { n = got }))" }
 
+## ---- repeat-and-take-min -----------------------------------------------
+##
+## ONE TIMED RUN PER ROW CANNOT RESOLVE THE CHAIN-VS-MATCHED GAP. A sibling
+## bench (bench/cases/ability_dispatch) ran four loops that differ only in how
+## one call dispatches and produced rows that contradict each other — a loop
+## with a call beat the same loop with the call inlined away, by 30 ns. So on
+## this harness two structurally similar loops differ by tens of ns for reasons
+## that have nothing to do with what is being compared, and the chain penalty
+## being chased is only ~187 ns.
+##
+## Min over repeats is the right statistic: every source of noise here — a
+## late-arriving compilation, an OSR transition, a GC pause — makes a run
+## SLOWER, never faster, so the minimum is the closest thing to the steady state
+## and the noise cannot manufacture a gap that is not there.
+let min_int: { a: Int, b: Int } -> Int = { a, b } -> if a < b then a else b
+
+let ns_per: { n: Int, t0: Duration, t1: Duration } -> Int =
+  { n, t0, t1 } ->
+    if n <= 0 then 0
+    else duration_to_nanos { d = sub_duration { a = t1, b = t0 } } / n
+
+## Best of `reps` timed runs of the dot-chain loop.
+let best_chain: { obj: JsForeign, reps: Int, acc: Int } -> Int <Js, Time> =
+  { obj, reps, acc } ->
+    if reps <= 0 then acc
+    else do
+      let t0 = monotonic {}
+      let _r = read_chain { obj = obj, n = iters, acc = 0 }
+      let t1 = monotonic {}
+      best_chain { obj = obj, reps = reps - 1, acc = min_int { a = acc, b = ns_per { n = iters, t0 = t0, t1 = t1 } } }
+
+## Best of `reps` timed runs of the matched loop.
+let best_matched: { obj: JsForeign, reps: Int, acc: Int } -> Int <Js, Time> =
+  { obj, reps, acc } ->
+    if reps <= 0 then acc
+    else do
+      let t0 = monotonic {}
+      let _r = read_matched { obj = obj, n = iters, acc = 0 }
+      let t1 = monotonic {}
+      best_matched { obj = obj, reps = reps - 1, acc = min_int { a = acc, b = ns_per { n = iters, t0 = t0, t1 = t1 } } }
+
+## Best of `reps` timed runs of the no-guest control.
+let best_control: { reps: Int, acc: Int } -> Int <Time> =
+  { reps, acc } ->
+    if reps <= 0 then acc
+    else do
+      let t0 = monotonic {}
+      let _r = control_loop { s = "hello", n = iters, acc = 0 }
+      let t1 = monotonic {}
+      best_control { reps = reps - 1, acc = min_int { a = acc, b = ns_per { n = iters, t0 = t0, t1 = t1 } } }
+
 let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
   println { msg = "polyglot_interop: $(int::to_str { n = iters }) iterations per workload" }
 
@@ -159,17 +222,19 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
 
   match Js.eval { source = "({ v: 7, get: function () { return 7; } })" } is
     Ok { val = obj } -> do
-      # Each workload is timed on its own, so the dot-chain and the matched
-      # spelling can be compared against each other — that comparison IS #92.
-      let c0 = monotonic {}
-      let a  = read_chain { obj = obj, n = iters, acc = 0 }
-      let c1 = monotonic {}
-      let _  = report { label = "read  (chain)  ", got = a, n = iters, t0 = c0, t1 = c1 }
-
-      let m0 = monotonic {}
-      let b  = read_matched { obj = obj, n = iters, acc = 0 }
-      let m1 = monotonic {}
-      let _  = report { label = "read  (matched)", got = b, n = iters, t0 = m0, t1 = m1 }
+      # The dot-chain against the matched spelling — that comparison IS #92 —
+      # each as the BEST of 5 timed runs, interleaved with the no-guest control
+      # so all three see the same machine. A single run each cannot tell a real
+      # 187 ns gap from this harness's own variance; see `best_chain` above.
+      let big = 1000000000
+      let chain_ns   = best_chain   { obj = obj, reps = 5, acc = big }
+      let matched_ns = best_matched { obj = obj, reps = 5, acc = big }
+      let control_ns = best_control { reps = 5, acc = big }
+      let _ = println { msg = "  -- best of 5 timed runs each --" }
+      let _ = println { msg = "  control (no guest)  $(int::to_str { n = control_ns }) ns/iter" }
+      let _ = println { msg = "  read  (matched)     $(int::to_str { n = matched_ns }) ns/iter" }
+      let _ = println { msg = "  read  (chain)       $(int::to_str { n = chain_ns }) ns/iter" }
+      let _ = println { msg = "  chain - matched     $(int::to_str { n = chain_ns - matched_ns }) ns/iter" }
 
       let i0 = monotonic {}
       let c  = invoke_loop { obj = obj, n = iters, acc = 0 }
@@ -177,10 +242,8 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
       report { label = "invoke         ", got = c, n = iters, t0 = i0, t1 = i1 }
     Err { error = _ } -> println { msg = "  eval of the test object FAILED" }
 
-  let k0 = monotonic {}
-  let kk = control_loop { s = "hello", n = iters, acc = 0 }
-  let k1 = monotonic {}
-  let _ = report { label = "control (no guest)", got = kk, n = iters, t0 = k0, t1 = k1 }
+  # (the control row is reported above, inside the best-of-5 block, so that it
+  # is measured under the same conditions as the two rows it is subtracted from)
 
   match Js.eval { source = "Array.from({length: 1000}, function (_, i) { return i; })" } is
     Ok { val = arr } -> do
