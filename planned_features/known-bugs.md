@@ -2205,6 +2205,47 @@ the one point that knows the complete error list (post-emit validator included):
 Same shape as #79 — the good error already existed, something else just threw
 first. Pinned by `InternalEmitFailureReportingTest` (4 programs that each crash
 emit past a real diagnostic) so it cannot drift back.
+
+### The rest of the sweep: 17 more swallows, all measured before touching
+
+Those three were not alone. The method that found them generalises, and it is
+the only honest way to do this: **probe each site with a firing counter, run
+every suite with `-i --rerun-tasks`, and delete what never fires.** Guessing
+which catch is "defensive" is how they got there. Every site below measured
+ZERO firings across `:typechecker:test`, `:interpreter:test`, `:lsp:test` and
+`:cli:test`, so none was safety — each was a wrong answer waiting to happen:
+
+- `TypeAnnotationConverter.convert` wrapped seven times. On failure
+  `AbilityValidator` answered "these two impls do not overlap" (a coherence
+  check passing by failing to read), `TypeValidator` skipped the
+  annotation-vs-inferred comparison it exists to make, and
+  `ExprFunctionConstraints` DROPPED the newtype field-type pin and the
+  record-construction pin — the latter's own comment explains that omitting it
+  leaves `resultType` an unsolved var and crashes at runtime.
+- `PrecompiledStdlib`'s prescan said "best-effort — non-fatal"; a crash left a
+  module's functions with no dictionary methods recorded.
+- `ModuleLoader` read an unreadable file as `""`, so a module became EMPTY and
+  its consumers were told its names are "not exported".
+- `ModuleLoader.getModule` caught everything and answered `null`. `null` means
+  the module does not exist, so it now catches `ModuleError.ModuleNotFound` BY
+  NAME and a circular dependency propagates.
+- `TypedModuleEmitter` substituted an empty map for the stdlib prelowered
+  tables — which re-lowers the whole prelude rather than degrading.
+- `TypeChecker` made "no prelude" a silent mode; `ModuleTypeChecker.clearCache`
+  left the cache empty after a clear.
+- `ReadGlobalByHashNode` returned the FUNCTION when a global thunk's evaluation
+  threw, handing a `MezzeFunction` to code expecting the value.
+- `HashModuleLoaderNode` set `modulesLoaded = true` from a catch around the
+  load, recording a failed load as a completed one.
+
+**Two catches deliberately STAY**, and the reason is the ordering rule above:
+`findPreludeMethodCarriers` and the effect-import suggestion in
+`TypeAnnotationConverter` run while a diagnostic is ALREADY being reported, to
+enrich its hint. A failure there must not replace the error it describes, and an
+empty hint list is a real answer. Each says so in a comment, so they are not
+mistaken for the pattern that was deleted.
+
+Landed as `8c48b063d`, `a56dd6eb2`, `598150eeb`, `a944475e5`.
 - **BUG 19 — CLOSED. All four declarations are fixed and the allowlist is empty.**
   `DictJustificationGateTest.unjustifiedByOpenTypeVar` is now `emptySet()`, so the
   gate asserts the strong property: every dictionary parameter in the stdlib is
