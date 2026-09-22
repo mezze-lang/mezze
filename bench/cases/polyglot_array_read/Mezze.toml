@@ -1,0 +1,12 @@
+[package]
+name = "bench_polyglot_array_read"
+version = "0.1.0"
+
+[[app]]
+name = "bench_polyglot_array_read"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

@@ -92,6 +92,12 @@ impl JvmForeign where {
   ## Number of elements in an array-shaped Foreign.
   array_size    = { it } ->
     __native_polyglot_array_size     { val = it },
+  ## Every element of an array-shaped Foreign, as a Mezze seq of Foreigns, in
+  ## ONE crossing. `array_at` in a loop costs one native call and one Result per
+  ## element; this costs one of each for the whole array, and handing a seq the
+  ## other way is already O(1) through `jvm_list`.
+  array_to_seq  = { it } ->
+    __native_polyglot_array_to_seq   { val = it },
   ## True iff this Foreign is hash-shaped (a dict / mapping). Interop models
   ## hashes and members separately, so a mapping is NOT readable through
   ## `get_member` — it is reached through the three methods below.

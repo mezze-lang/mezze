@@ -4351,6 +4351,11 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.readHash(r));
         HANDLERS.put("__native_polyglot_hash_entries",
             (r, c) -> PolyglotNatives.hashEntries(r));
+        // Whole-array read in ONE crossing. The per-element `read_array` made
+        // pulling an N-element guest array into Mezze cost N native calls and N
+        // Results, while handing a seq the other way is already O(1) via a view.
+        HANDLERS.put("__native_polyglot_array_to_seq",
+            (r, c) -> PolyglotNatives.arrayToSeq(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",

@@ -1,0 +1,94 @@
+# polyglot_array_read — what does it cost to pull a guest array into Mezze?
+#
+# A same-binary A/B of the two ways to do it, so there is no before/after build
+# to trust:
+#
+#   per-element   `array_at { index = i }` in a loop — one native call, one
+#                 interop message and one `Result` per element, plus a
+#                 Mezze-level recursion to accumulate them. This is what the
+#                 codec's `decode_list` used to do.
+#   whole-array   `array_to_seq {}` — one crossing for the entire array. The
+#                 loop moved to the Java side of the boundary, where it is one
+#                 @TruffleBoundary either way.
+#
+# Handing a seq the OTHER direction was already O(1) (`jvm_list` builds an
+# interop VIEW, no copy), so the read side was the asymmetric half.
+#
+# Uses `JvmForeign`, so it needs no provider package and no guest runtime —
+# host interop is ambient. The costs measured are interop's, not any one guest
+# language's.
+#
+# MEASURED 2026-09-22, JVM dev path, 2000 reps each:
+#
+#   n=10      per-element  43 us    whole-array   7 us
+#   n=100     per-element  29 us    whole-array   1 us
+#   n=1000    per-element 228 us    whole-array  10 us      ~23x
+#
+# Read the n=100 and n=1000 rows. The n=10 row is the first timed loop in the
+# process and reports warm-up, not shape — that is why it costs MORE than n=100
+# on both sides. The real signal is that per-element scales with n (29 -> 228 us
+# for 10x the elements) while whole-array stays near flat: the per-element path
+# pays a crossing per element and the whole-array path pays one for the array.
+use std::effects::log::{ println, Console, Log }
+use std::effects::time::{ monotonic, Time, SystemTime }
+use std::datetime::{ Duration, sub_duration, duration_to_nanos }
+use std::polyglot::jvm::{ JvmForeign, jvm_list, from_int }
+use std::polyglot::core::{ InteropError }
+use std::collections::seq
+use std::int
+
+let reps = 2000
+
+## 1..n as Foreigns, then wrapped as one guest array.
+let build_foreigns: { i: Int, n: Int, acc: [JvmForeign] } -> [JvmForeign] =
+  { i, n, acc } ->
+    if i > n then acc
+    else build_foreigns { i = i + 1, n = n, acc = seq::add { xs = acc, x = from_int { val = i } } }
+
+## ---- per-element: one crossing per index ----
+let read_each: { f: JvmForeign, i: Int, n: Int, acc: [JvmForeign] } -> [JvmForeign] =
+  { f, i, n, acc } ->
+    if i >= n then acc
+    else match f.array_at { index = i } is
+      Ok { val = e } -> read_each { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = e } }
+      Err { error = _ } -> acc
+
+let loop_each: { f: JvmForeign, n: Int, reps: Int, acc: Int } -> Int =
+  { f, n, reps, acc } ->
+    if reps <= 0 then acc
+    else loop_each { f = f, n = n, reps = reps - 1,
+                     acc = acc + seq::size { xs = read_each { f = f, i = 0, n = n, acc = [] } } }
+
+## ---- whole-array: one crossing, total ----
+let loop_whole: { f: JvmForeign, reps: Int, acc: Int } -> Int =
+  { f, reps, acc } ->
+    if reps <= 0 then acc
+    else match f.array_to_seq {} is
+      Ok { val = es } -> loop_whole { f = f, reps = reps - 1, acc = acc + seq::size { xs = es } }
+      Err { error = _ } -> acc
+
+let us_per: { reps: Int, t0: Duration, t1: Duration } -> Int =
+  { reps, t0, t1 } ->
+    if reps <= 0 then 0
+    else duration_to_nanos { d = sub_duration { a = t1, b = t0 } } / (reps * 1000)
+
+let run_size: { n: Int } -> {} <Log, Time> = { n } -> do
+  let f = jvm_list { elems = build_foreigns { i = 1, n = n, acc = [] } }
+
+  let _w1 = loop_each { f = f, n = n, reps = 200, acc = 0 }
+  let a0 = monotonic {}
+  let _a = loop_each { f = f, n = n, reps = reps, acc = 0 }
+  let a1 = monotonic {}
+
+  let _w2 = loop_whole { f = f, reps = 200, acc = 0 }
+  let b0 = monotonic {}
+  let _b = loop_whole { f = f, reps = reps, acc = 0 }
+  let b1 = monotonic {}
+
+  println { msg = "  n=$(int::to_str { n = n })\tper-element $(int::to_str { n = us_per { reps = reps, t0 = a0, t1 = a1 } }) us\twhole-array $(int::to_str { n = us_per { reps = reps, t0 = b0, t1 = b1 } }) us" }
+
+let main = {} -> perform Console in perform SystemTime in do
+  println { msg = "guest array -> Mezze seq, $(int::to_str { n = reps }) reps each" }
+  let _ = run_size { n = 10 }
+  let _ = run_size { n = 100 }
+  run_size { n = 1000 }

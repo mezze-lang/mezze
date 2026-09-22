@@ -564,6 +564,42 @@ public final class PolyglotNatives {
         }
     }
 
+    /**
+     * A whole guest array as a Mezze seq of Foreigns, in ONE crossing.
+     *
+     * The read side was per-element: a codec's `decode_list` asked for the size
+     * and then called `read_array` once per index, so pulling an N-element guest
+     * array into Mezze cost N native calls, N interop messages and N `Result`
+     * allocations, plus a Mezze-level recursion to accumulate them. Building a
+     * seq the OTHER way is already O(1) — `makeList` hands the guest a view — so
+     * the boundary was asymmetric for no reason other than a missing native.
+     *
+     * The loop belongs on this side of the boundary: it is one
+     * {@code @TruffleBoundary} either way, and doing it here pays that cost once
+     * instead of N times. Elements stay wrapped as Foreigns, so the caller
+     * decodes them exactly as it did before.
+     */
+    @TruffleBoundary
+    public static MezzeVariant arrayToSeq(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        InteropLibrary interop = InteropLibrary.getUncached();
+        try {
+            long size = interop.getArraySize(f.getDelegate());
+            if (size > Integer.MAX_VALUE) {
+                throw new NativeTypeMismatchException(
+                    "Guest array of " + size + " elements is too large to read into a seq");
+            }
+            Object[] elements = new Object[(int) size];
+            for (int i = 0; i < elements.length; i++) {
+                elements[i] = new MezzeForeign(
+                    interop.readArrayElement(f.getDelegate(), i), f.getSourceLanguage());
+            }
+            return MezzeVariant.ok(MezzeSeq.fromArray(elements));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
     // ==================== Execution ====================
 
     @TruffleBoundary

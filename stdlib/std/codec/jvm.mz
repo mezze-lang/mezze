@@ -215,41 +215,37 @@ impl DecodeOption for JvmC having 'in = JvmForeign where {
 ## the record and map decoders go through `hash_at` / `hash_entries` rather than
 ## the member vocabulary the rest of this file uses.
 
-## Walk an array-shaped Foreign into a Mezze seq of Foreigns. Indexed rather
-## than iterated: interop hands an array its size up front, and an index walk
-## needs no cursor state.
-let read_elems: { f: JvmForeign, i: Int, n: Int, acc: [JvmForeign] } -> Result [JvmForeign] InteropError =
-  { f, i, n, acc } ->
-    if i >= n then Ok { val = acc }
-    else match f.array_at { index = i } is
-      Ok { val = e } -> read_elems { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = e } }
-      Err { error = e } -> Err { error = e }
+## One `[key, value]` pair Foreign, as the entry shape `decode_map` returns.
+## The pair itself is a two-element array, so it crosses in one read.
+let pair_entry_of: { p: JvmForeign } -> Option { key: JvmForeign, value: JvmForeign } =
+  { p } -> match p.array_to_seq {} is
+    Ok { val = kv } -> match seq::get { xs = kv, i = 0 } is
+      Some { val = k } -> match seq::get { xs = kv, i = 1 } is
+        Some { val = v } -> Some { val = { key = k, value = v } }
+        None -> None
+      None -> None
+    Err { error = _ } -> None
 
-## Walk the `[key, value]` pairs `hash_entries` produced into the entry shape
-## `decode_map` must return.
-let read_pairs: { f: JvmForeign, i: Int, n: Int, acc: [{ key: JvmForeign, value: JvmForeign }] }
-  -> Result [{ key: JvmForeign, value: JvmForeign }] InteropError =
-  { f, i, n, acc } ->
-    if i >= n then Ok { val = acc }
-    else match f.array_at { index = i } is
-      Ok { val = pair } -> match pair.array_at { index = 0 } is
-        Ok { val = k } -> match pair.array_at { index = 1 } is
-          Ok { val = v } ->
-            read_pairs { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = { key = k, value = v } } }
-          Err { error = e } -> Err { error = e }
-        Err { error = e } -> Err { error = e }
-      Err { error = e } -> Err { error = e }
+## Every pair, or None if any one is malformed — a half-read map is worse than a
+## reported failure.
+let read_pairs:
+  { pairs: [JvmForeign], idx: Int, acc: [{ key: JvmForeign, value: JvmForeign }] }
+  -> Option [{ key: JvmForeign, value: JvmForeign }] =
+  { pairs, idx, acc } ->
+    if idx >= seq::size { xs = pairs } then Some { val = acc }
+    else match seq::get { xs = pairs, i = idx } is
+      Some { val = p } -> match pair_entry_of { p = p } is
+        Some { val = entry } ->
+          read_pairs { pairs = pairs, idx = idx + 1, acc = seq::add { xs = acc, x = entry } }
+        None -> None
+      None -> None
 
+## The whole array crosses in ONE call rather than one per element — see
+## `array_to_seq`. The old index walk cost a native call and a `Result` per
+## element while `jvm_list` sends a seq the other way in O(1).
 impl DecodeList for JvmC having 'in = JvmForeign where {
-  decode_list = { it, val, ctx } -> match val.array_size {} is
-    Ok { val = n } -> match read_elems { f = val, i = 0, n = n, acc = [] } is
-      Ok { val = es } -> Ok { val = es }
-      Err { error = _ } -> decode_error {
-        path = ctx.path,
-        message = "Foreign array element could not be read",
-        expected = "List",
-        found = Some { val = val.type_name{} },
-      }
+  decode_list = { it, val, ctx } -> match val.array_to_seq {} is
+    Ok { val = es } -> Ok { val = es }
     Err { error = _ } -> decode_error {
       path = ctx.path,
       message = "Expected an array-shaped Foreign",
@@ -260,12 +256,12 @@ impl DecodeList for JvmC having 'in = JvmForeign where {
 
 impl DecodeMap for JvmC having 'in = JvmForeign where {
   decode_map = { it, val, ctx } -> match val.hash_entries {} is
-    Ok { val = pairs } -> match pairs.array_size {} is
-      Ok { val = n } -> match read_pairs { f = pairs, i = 0, n = n, acc = [] } is
-        Ok { val = es } -> Ok { val = es }
-        Err { error = _ } -> decode_error {
+    Ok { val = pairs_foreign } -> match pairs_foreign.array_to_seq {} is
+      Ok { val = pairs } -> match read_pairs { pairs = pairs, idx = 0, acc = [] } is
+        Some { val = es } -> Ok { val = es }
+        None -> decode_error {
           path = ctx.path,
-          message = "Foreign map entry could not be read",
+          message = "Expected every map entry to be a two-element key/value pair",
           expected = "Map",
           found = Some { val = val.type_name{} },
         }
