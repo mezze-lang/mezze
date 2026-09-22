@@ -2082,19 +2082,26 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   through one `sameAbility` rule. Measured live rather than assumed: the path fires
   21 times across the typechecker suite and every one has a hash on BOTH sides, so
   the name never decides.
-- **OPEN (design, not a fix): forwarding a no-receiver operation.**
-  `let make: {} with Zero 'a -> 'a = {} -> Zero.zero {}` is refused. A dictionary
-  is reached through the RECEIVER's type — the dict scan keys on a var-typed
-  receiver, and dict params are frame names with no binding form of their own — so
-  an operation with no receiver cannot express the need. Doing it properly means
-  per-call-site target resolution for ANY ability whose only target is its return,
-  which is the generalisation of what `DecodeTargetResolver` already does for
-  `from_json` alone. The call says exactly that rather than guessing an impl, and
-  `StaticAbilityOpTest` pins the refusal AND its wording so the test flips when the
-  design lands. Same root as
-  `AbilityChecker.validateAbilityConstraints` silently skipping any constraint
-  whose type variable is still unsolved — correct for a generic body where the
-  caller discharges it, wrong where nothing can — which closes with A.2.
+- **FIXED — forwarding a no-receiver operation.** This entry used to read "OPEN
+  (design, not a fix)" and say that
+  `let make: {} with Zero 'a -> 'a = {} -> Zero.zero {}` is refused. It is not:
+  verified 2026-09-22 through the CLI, it type-checks (`make : {} with Zero 'a ->
+  'a`) and RUNS, answering `0` for `impl Zero for Int`. `StaticAbilityOpTest` no
+  longer pins a refusal — it pins the POSITIVE cases: "it forwards through a
+  declared constraint", "the same wrapper resolves at each type it is used at",
+  and "the stdlib Default forwards through a wrapper too".
+
+  What the test still pins as a diagnostic is the genuinely undetermined case —
+  "a produced type nothing determines is a diagnostic, not silence" — which is
+  correct behaviour, not a gap. The old concern that a dictionary can only be
+  reached through the RECEIVER's type no longer holds: a call site types its
+  callee from THIS call, so an ability whose only target is its return resolves
+  per call site.
+
+  The related note on `AbilityChecker.validateAbilityConstraints` skipping a
+  constraint whose type variable is still unsolved is correct for a generic body
+  whose caller discharges it, and the case where nothing can discharge it is now
+  the diagnostic above.
 
 - **BUG 20 (FIXED) — every static ability operation was uncallable.** `ability
   Default for 'a where { default: {} -> 'a }` ships in the stdlib and had no
@@ -2123,14 +2130,19 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   `catch (e: Exception)` swallows in `TypedModuleEmitter` print only under a debug
   env var; neither fires here, so they are not the cause, but they are the same
   shape and worth deleting.
-- **BUG 19 — four declarations demand an arithmetic dict their types never ask
-  for.** `enumerate`, `zip_with_index`, `Nat::is_even`, `Nat::is_odd` — the four
-  exceptions allowlisted in `DictJustificationGateTest`. Each one ends elaboration
-  with an OPEN TYPE VARIABLE and is already in the elaboration baseline as
-  `UNBOUND_TYPE_VAR`; the dict demand is the downstream consequence, since
-  arithmetic on a receiver whose type never closed reads as polymorphic. A test
-  holds the two lists together so neither drifts. Two distinct origins, so closing
-  them is two pieces of work:
+- **BUG 19 — CLOSED. All four declarations are fixed and the allowlist is empty.**
+  `DictJustificationGateTest.unjustifiedByOpenTypeVar` is now `emptySet()`, so the
+  gate asserts the strong property: every dictionary parameter in the stdlib is
+  justified by a constraint its declaration makes. An entry fails the gate, and so
+  does a listed one that stops firing.
+
+  The history below is kept because the two halves closed for DIFFERENT reasons,
+  and the second one is the more useful lesson. `enumerate` / `zip_with_index`
+  were NOT fixed locally: they closed as a consequence of the elaboration work
+  that took the baseline from 861 rows to 99, because a call site now types its
+  callee from THIS call rather than leaving the callee carrying its declaration's
+  own variables — so the recursive accumulator's `'z` is pinned by the `cons` that
+  fixes it, and no dictionary is demanded for a variable nobody can supply.
   - `Nat::is_even`/`is_odd` (FIXED) computed `__native_nat_to_int {…} % 2`. A
     native reference is typed as a bare variable and pinned by whatever uses it —
     for every other operation in that impl, the operation's own declared return.
