@@ -361,9 +361,12 @@ private fun compileModule(
         declShapes = declShapesForMono,
     )
 
-    val stdlibFns = (try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap<Hash, FunctionIR>() }) +
+    // Neither table is wrapped in a catch that substitutes an empty map: an empty
+    // stdlib table does not degrade, it silently re-lowers the whole prelude and
+    // loses the dict methods the prescan recorded. Measured at zero firings.
+    val stdlibFns = PrecompiledStdlib.preloweredFunctions +
         PrecompiledDeps.preloweredFunctions   // #46: serve cached dep IR, don't re-lower
-    val stdlibDictMethods = try { PrecompiledStdlib.preloweredDictMethods } catch (_: Throwable) { emptyMap() }
+    val stdlibDictMethods = PrecompiledStdlib.preloweredDictMethods
     val compiler = TypedASTCompiler(
         abilityImpls = allAbilityImpls,
         stdlibHashes = preludeHashes,

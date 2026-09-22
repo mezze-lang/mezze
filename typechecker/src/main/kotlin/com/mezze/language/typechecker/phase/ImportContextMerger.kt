@@ -233,12 +233,12 @@ private fun importedAbilityConstraints(bindingType: MezzeType): List<AbilityCons
 private fun findEffectDeclByNameInLoadedModules(
     name: String,
 ): ParsedEffectDecl? {
-    try {
-        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
-            val decl = cached.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()
-                ?.firstOrNull { it.name == name }
-            if (decl != null) return decl
-        }
-    } catch (_: Exception) {}
+    // A scan over already-loaded modules in memory; there is nothing here to
+    // fail, and a catch-all would turn "the cache blew up" into "no such effect".
+    for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+        val decl = cached.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()
+            ?.firstOrNull { it.name == name }
+        if (decl != null) return decl
+    }
     return null
 }

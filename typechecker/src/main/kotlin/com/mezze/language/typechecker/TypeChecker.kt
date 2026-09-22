@@ -215,9 +215,14 @@ class TypeChecker(
         var loadedModules: Map<ModulePath, TypedModuleResult> = emptyMap()
         val shouldInjectPrelude = !ModulePathConventions.isStdlib(currentModulePath)
         val hasUserImports = hasImportsParsed(module)
-        val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
+        // Not wrapped in `try { … } catch (_: Exception) { null }`. Touching the
+        // object either yields the precompiled stdlib or fails to initialise it,
+        // and "no prelude" is not a usable degradation — every program then fails
+        // on names the prelude provides, blaming the program. Measured at zero
+        // firings across all four suites.
+        val precompiled = PrecompiledStdlib
 
-        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null) {
+        val enhancedContext = if (!hasUserImports && shouldInjectPrelude) {
             importContext = precompiled.preludeImportContext
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules

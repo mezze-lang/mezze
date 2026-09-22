@@ -322,17 +322,19 @@ object PrecompiledStdlib {
         val allAbilityImpls = modules.values.flatMap { it.abilityImpls }
         val allAbilityOpNames = abilityOpNamesOf(modules.values)
         val result = mutableMapOf<Hash, Set<String>>()
+        // NOT wrapped in a "best-effort — non-fatal" catch. A prescan that crashes
+        // for one module silently leaves that module's functions with no dictionary
+        // methods recorded, which is a WRONG answer downstream (a dict param that
+        // should exist does not), not a missing one. Measured at zero firings.
         for ((_, typedMod) in modules) {
-            try {
-                val compiler = TypedASTCompiler(
-                    abilityImpls = allAbilityImpls,
-                    abilityOpNames = allAbilityOpNames,
-                )
-                compiler.prescanOnly(typedMod)
-                for ((h, methods) in compiler.getDictMethodsForHash()) {
-                    result[h] = methods
-                }
-            } catch (_: Exception) { /* best-effort — non-fatal */ }
+            val compiler = TypedASTCompiler(
+                abilityImpls = allAbilityImpls,
+                abilityOpNames = allAbilityOpNames,
+            )
+            compiler.prescanOnly(typedMod)
+            for ((h, methods) in compiler.getDictMethodsForHash()) {
+                result[h] = methods
+            }
         }
         return result
     }

@@ -30,12 +30,14 @@ class ModuleTypeChecker(
             synchronized(globalCacheLock) {
                 globalCache.clear()
             }
-            try {
-                val stdlib = PrecompiledStdlib
-                for ((modulePath, module) in stdlib.loadedModules) {
-                    preloadIntoGlobalCache(modulePath.fullPath, module)
-                }
-            } catch (_: Exception) { /* PrecompiledStdlib not initialized yet */ }
+            // The catch here read "PrecompiledStdlib not initialized yet". It is an
+            // object: touching it initialises it. Swallowing the failure left the
+            // global cache empty after a clear, so the next check re-typechecked the
+            // stdlib instead of reusing it. Measured at zero firings.
+            val stdlib = PrecompiledStdlib
+            for ((modulePath, module) in stdlib.loadedModules) {
+                preloadIntoGlobalCache(modulePath.fullPath, module)
+            }
         }
 
         private fun getFromGlobalCache(modulePath: String): TypedModuleResult? {

@@ -23,9 +23,15 @@ class ModuleLoader(
 
     fun getResolver(): ModuleResolver = resolver
 
+    /**
+     * `null` means the module DOES NOT EXIST — that is the whole contract, and it
+     * is the condition this catches by name. It used to catch every exception,
+     * which reported a circular dependency and an unreadable file as "no such
+     * module" too. Measured at zero firings across all four suites.
+     */
     fun getModule(modulePath: String): LoadedModule? = try {
         convertResolverModule(resolver.resolveModule(modulePath))
-    } catch (_: Exception) {
+    } catch (_: com.mezze.language.typechecker.ModuleError.ModuleNotFound) {
         null
     }
 
@@ -68,8 +74,12 @@ class ModuleLoader(
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
         @Suppress("DEPRECATION")
         val parsedModule = resolverModule.parsedModule
+            // The read is NOT wrapped in a catch that substitutes "". A file that
+            // cannot be read is not an empty module: every name it exports would
+            // vanish and the consumer would be told those names are "not exported",
+            // pointing at the wrong file. Measured at zero firings.
             ?: MezzeParser().parseParsedModule(
-                try { java.io.File(resolverModule.filePath).readText() } catch (_: Exception) { "" },
+                java.io.File(resolverModule.filePath).readText(),
                 resolverModule.filePath
             )
         return LoadedModule(
