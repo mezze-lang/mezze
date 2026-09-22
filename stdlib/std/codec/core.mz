@@ -92,28 +92,6 @@ ability EncodeList for 'config having 'out where {
   encode_list: { it: 'config, elems: ['out], ctx: CodecCtx } -> 'out,
 }
 
-## Encode a list of PRIMITIVES without encoding each element first.
-##
-## `EncodeList` receives its elements ALREADY encoded, so a container of N
-## primitives costs N calls into the format before the list is built. For a
-## polyglot format that is N crossings into the guest — measured at ~0.25 ms
-## per 1000 elements, which made `[1..1000].to_js{}` slower than printing the
-## list into guest source and parsing it back.
-##
-## A format implements this when its own representation can hold Mezze
-## primitives directly, so the walk can be skipped entirely. One op per
-## primitive rather than one polymorphic op, mirroring `EncodeScalar` — that
-## keeps every impl monomorphic, which a `'a`-parameterised ability could not.
-##
-## OPTIONAL. A format that does not implement it simply does not get the fast
-## path; auto-derivation falls back to `EncodeList` exactly as before.
-ability EncodeRawList for 'config having 'out where {
-  encode_int_list:   { it: 'config, elems: [Int],   ctx: CodecCtx } -> 'out,
-  encode_float_list: { it: 'config, elems: [Float], ctx: CodecCtx } -> 'out,
-  encode_str_list:   { it: 'config, elems: [Str],   ctx: CodecCtx } -> 'out,
-  encode_bool_list:  { it: 'config, elems: [Bool],  ctx: CodecCtx } -> 'out,
-}
-
 ## Encode a map given per-entry key/value output already encoded.
 ability EncodeMap for 'config having 'out where {
   encode_map: { it: 'config, entries: [{ key: 'out, value: 'out }], ctx: CodecCtx } -> 'out,

@@ -32,17 +32,7 @@ class CodecGenerator(
     // consulted when a user-declared TypeApplication reaches the encode/decode
     // walk.
     private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
-    /**
-     * True iff this format implements `EncodeRawList` — it can take a seq of
-     * Mezze primitives directly, so the per-element encode walk is skipped.
-     * Defaults to "no format can", which keeps every caller that does not know
-     * about capabilities on the original path.
-     */
-    private val takesRawPrimitiveLists: (MezzeType) -> Boolean = { false },
 ) {
-
-    /** Format currently being generated for — set by [generateEncodeImpl]. */
-    private var currentFormat: MezzeType? = null
 
     private val encodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
     private val decodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
@@ -81,7 +71,6 @@ class CodecGenerator(
      * type resolves that at constraint-solve time.
      */
     fun generateEncodeImpl(formatType: MezzeType, dataType: MezzeType): ParsedImplAbilityDecl {
-        currentFormat = formatType
         val key = "$formatType|$dataType"
         encodeCache[key]?.let { return it }
 
@@ -324,19 +313,6 @@ class CodecGenerator(
             "__native_list_to_seq" -> call(id(toSeq), record("xs" to valueExpr))
             else -> call(id(toSeq), record("s" to valueExpr))
         }
-        // FAST PATH: a format that implements EncodeRawList takes the seq of
-        // primitives as-is. `EncodeList` is handed its elements ALREADY
-        // encoded, so without this a container of N primitives costs N calls
-        // into the format — N crossings into the guest for a polyglot format,
-        // measured at ~0.25 ms per 1000 elements, which made a 1000-element
-        // `.to_js{}` slower than printing the list into guest source.
-        val rawOp = rawListOpFor(elemType)
-        if (rawOp != null && currentFormat?.let(takesRawPrimitiveLists) == true) {
-            return call(
-                member(id("config"), rawOp),
-                record("elems" to asSeq, "ctx" to id("ctx")),
-            )
-        }
         // seq::map { xs = <asSeq>, f = { x } -> <encode x> } — then wrap.
         val mappedElems = call(
             id("__native_seq_map"),
@@ -390,20 +366,6 @@ class CodecGenerator(
             member(id("config"), "encode_map"),
             record("entries" to encodedEntries, "ctx" to id("ctx")),
         )
-    }
-
-    /**
-     * The `EncodeRawList` op for a primitive element type, or null when the
-     * element is not a primitive the ability covers — a seq of records or of
-     * nested containers still has to be walked, because the guest cannot read
-     * a MezzeRecord the way it reads a Mezze Int.
-     */
-    private fun rawListOpFor(elemType: MezzeType): String? = when (elemType) {
-        is MezzeType.IntType -> "encode_int_list"
-        is MezzeType.FloatType -> "encode_float_list"
-        is MezzeType.StringType -> "encode_str_list"
-        is MezzeType.BoolType -> "encode_bool_list"
-        else -> null
     }
 
     /** [buildEncodeList] entry when the container arrived as a `TypeApplication`
