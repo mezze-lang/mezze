@@ -1,14 +1,24 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-Hand-off doc for the next agent. These are open bugs surfaced while building the
-`mezze-showcase` polyglot demo (one Mezze seq → numpy stats → JS asciichart, all
-dot-chained). The dot-chaining core was landed across commits `77d10d473`,
-`3799a152a`, `790e0c047` (all gated green), but the fixes are narrow and leave
-real gaps. Each bug below has: symptom, root cause, what was already tried, and
-what a proper fix looks like.
+**STATUS 2026-09-22: every bug in this file is CLOSED.** It opened as a hand-off
+list of open bugs surfaced while building the `mezze-showcase` polyglot demo (one
+Mezze seq → numpy stats → JS asciichart, all dot-chained); it is now a record of
+how each one was closed, kept for the root causes and the ruled-out attempts,
+which is the part that saves the next person time.
 
-Repo baseline: branch `feat/cli-ux-graalvm-provisioning`, HEAD `790e0c047`.
-The demo lives at `~/Projects/mezze-showcase`.
+What is NOT closed, and is not in this file: tree-sitter (7 of 67 stdlib files
+still rejected — see `project_treesitter_plan`) and numpy's own speed on GraalPy,
+which is not a Mezze defect.
+
+**Read the case, never the prose — this file included.** Seven entries here said
+"Still open" while the test that proves them fixed was already green, and each
+one cost a re-investigation. Every claim below was re-verified by running it on
+2026-09-20/21/22; if you are about to act on one, run it again first.
+
+Each bug has: symptom, root cause, what was already tried, and what the fix was.
+
+Origin baseline: branch `feat/cli-ux-graalvm-provisioning`, HEAD `790e0c047`.
+The work landed on `feat/soundness`. The demo lives at `~/Projects/mezze-showcase`.
 
 ---
 
@@ -1941,8 +1951,9 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   key's ability. `TypedFieldAccess.abilityHash` carries the ability from emit,
   set only where the operation name is ambiguous, so unambiguous calls keep
   byte-identical keys. **BUG 9 fixed end to end** — 106, concrete and generic.
-  Still open in C.2: replacing the prescan itself with declared constraints
-  (`C.5`).
+  The one-time follow-on — replacing the prescan itself with declared
+  constraints (`C.5`) — is ANSWERED two bullets down, by measurement: it is a
+  pessimisation, not a simplification. Not open.
 - **C.3** Compiler EMITS evidence (`refToDictedOp` = materialize); no
   re-resolution at call sites. **C.4** Mono keyed on (generic hash, evidence at
   site). **C.5** Delete prescan, `refToDictedOp` guessing, `@var` names.
@@ -2062,16 +2073,26 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   the same way BUG 11's was; it fires 574×), which types their BODIES, but the
   rows stay. Closing them means changing what mono specializes on. So "drive
   misses to zero" is roughly a 710-row job, not an 861-row one.
-- **Content addressing does not hold where the compiler relies on it.** Every
-  compiled function is collapsed by hash, first occurrence wins, on the stated
-  premise that "structurally identical bodies share a hash". `saltedLambdaHash` is
-  by its own comment type- and environment-blind, so compiling
-  `let f = { x } -> x` — the smallest program there is — the dedupe discards a
-  DIFFERENT body for 7 distinct hashes (8 in the full suite), every one in the
-  stdlib. `DedupeCollisionGateTest` bounds it. Not fixed: folding the enclosing
-  function's hash into the salt separates them but ties a nested lambda's identity
-  to where it sits, so adding a `newtype` changes the IR of programs identical
-  after erasure — `NewtypeErasureIRTest` rightly rejects that.
+- **Content addressing where the compiler relies on it — CLOSED, `baseline = 0`.**
+  This entry used to read "does not hold", on a count of 7 collisions compiling
+  `let f = { x } -> x` and 8 in the full suite, every one in the stdlib. Both
+  numbers are now ZERO and `DedupeCollisionGateTest` asserts it (task #59).
+  The 8 turned out to be the GATE comparing line numbers — two registrations of
+  the same function from different source positions read as "a different body".
+  With that corrected, the remaining fix was to narrow `saltedLambdaHash` to what
+  the lambda IS: the spec salt plus the capture NAMES, and not the parent frame
+  SLOT those dicts are read from (a difference the lambda does not contain —
+  measured at zero change across both suites).
+  Two things are deliberately NOT folded in, each with its measurement:
+  the enclosing function's hash (it separates `sorted_set.mz`'s eight textually
+  identical comparators, but ties a nested lambda's identity to where it sits, so
+  adding a `newtype` would change the IR of programs identical after erasure —
+  `NewtypeErasureIRTest` rightly rejects it; tried for BUG 7 and reverted, it
+  changed no behaviour), and the frame slot above.
+  **Still a landmine, and the reason the gate exists:** `TypedASTHasher.hashExpr`
+  is type-blind, so a generic body and its mono specializations hash the same
+  before salting. Anything new that keys on a lambda hash must salt it or prove
+  it cannot span the two — see [[project_impl_op_with_constraint_dropped]].
 
 - **BUG 22 (FIXED) — a handler installed over a `perform` that already takes the
   same effect.** `perform A, A in e` was always a hard error; `perform A in
