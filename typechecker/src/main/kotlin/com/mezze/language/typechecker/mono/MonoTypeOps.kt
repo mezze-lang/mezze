@@ -73,6 +73,43 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
  * implementation — the compiler from its decl index, mono from its declared
  * shapes — so neither side silently loses the check.
  */
+/**
+ * Do a receiver's type ARGUMENTS satisfy a target's?
+ *
+ * A constructor is not a type. `Seq Int` and `Seq Str` share one, so while the
+ * TypeApplication arm below compared constructors alone, every parameterized impl
+ * of an ability was interchangeable with every other: `impl Encode JsonC for [Int]`
+ * and `impl Encode JsonC for [Str]` both answered to both receivers, and whichever
+ * was tested first won. A module encoding two seq element types silently got the
+ * first one's encoder for the second — empty output on JSON, and on the polyglot
+ * codec an outright "Expected Long for field 'val'" from `from_int` handed a Str.
+ *
+ * Two deliberate wildcards, because this check exists only to separate two KNOWN
+ * and DIFFERENT types, never to lose a match that used to resolve:
+ *   - a target argument that is still a variable — a generic `impl … for Seq 'a`
+ *     has to keep matching `Seq Int`;
+ *   - an unresolved receiver argument — refusing there would reject dispatch on a
+ *     receiver whose element simply is not solved yet.
+ *
+ * A target carrying no arguments stays element-agnostic, which is what an
+ * `impl Sized for Seq` relies on; ditto a receiver that arrives without them.
+ * Differing arity IS a mismatch: same constructor, different arity, different type.
+ */
+private fun typeArgsMatch(
+    concreteArgs: List<MezzeType>,
+    targetArgs: List<MezzeType>,
+    variantDeclHasConstructors: (String, Set<String>) -> Boolean,
+): Boolean {
+    if (targetArgs.isEmpty() || concreteArgs.isEmpty()) return true
+    if (targetArgs.size != concreteArgs.size) return false
+    return concreteArgs.indices.all { i ->
+        val c = concreteArgs[i]
+        val t = targetArgs[i]
+        c is MezzeType.VarType || t is MezzeType.VarType ||
+            typeMatchesTarget(c, t, variantDeclHasConstructors)
+    }
+}
+
 internal fun typeMatchesTarget(
     concrete: MezzeType,
     target: MezzeType,
@@ -104,8 +141,9 @@ internal fun typeMatchesTarget(
         concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication &&
             identityVerdict(concrete.identity, target.identity) == IdentityVerdict.DISTINCT -> false
         concrete is MezzeType.TypeApplication && target is MezzeType.TypeApplication ->
-            concrete.constructor == target.constructor ||
-                sameDeclaredIdentity(concrete.identity, target.identity)
+            (concrete.constructor == target.constructor ||
+                sameDeclaredIdentity(concrete.identity, target.identity)) &&
+                typeArgsMatch(concrete.args, target.args, variantDeclHasConstructors)
         concrete is MezzeType.VariantType && target is MezzeType.TypeApplication &&
             concrete.constructors.size == 1 &&
             concrete.constructors.keys.first() == target.constructor -> true

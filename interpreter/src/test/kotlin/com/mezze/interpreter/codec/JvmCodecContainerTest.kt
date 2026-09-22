@@ -221,36 +221,25 @@ class JvmCodecContainerTest {
     // ==================== two derivations in one module ====================
 
     /**
-     * SOUNDNESS, OPEN: ONLY THE FIRST SEQ CODEC DERIVATION IN A MODULE WORKS.
-     * Every later one silently encodes to nothing.
+     * SOUNDNESS: two seq derivations in one module must not collide.
      *
-     * Encode `[Int]` and then `[Str]` in one module and the second comes back
-     * empty; reverse the order and it is `[Int]` that comes back empty, plus any
-     * third. On the JVM codec the same program dies outright with "Expected Long
-     * for field 'val'" — `from_int` handed a Str. Silent for JSON, fatal for
-     * JvmC, wrong for both.
+     * Before the fix, encoding `[Int]` and then `[Str]` in one module gave
+     * `[1,2,3]` and then EMPTY; reversing the order mirrored it exactly, so any
+     * derivation after the first was wrong. On the JVM codec the same program
+     * died with "Expected Long for field 'val'" — `from_int` handed a Str.
+     * Silent for JSON, fatal for JvmC.
      *
-     * WHY: `[Int]`, `[Str]` and `[Option Int]` are all one runtime shape, a
-     * MezzeSeq. The element type is static, known at every call site, but it is
-     * erased by the time the derived `impl Encode <config> for [T]` is selected,
-     * so whichever derivation registered first answers for all of them. A RECORD
-     * encoded after a seq is fine, which is what rules out "one derivation per
-     * module" and points at shape-collision among seqs specifically.
+     * Cause was in `MonoTypeOps.typeMatchesTarget`: the TypeApplication arm
+     * compared CONSTRUCTORS only, and `Seq Int` and `Seq Str` share one. Every
+     * parameterized impl of an ability was therefore interchangeable with every
+     * other, and whichever was tested first answered for both. Not codec-specific
+     * — it applied to any `impl … for C 'a` pair.
      *
-     * NOT caused by the Option routing fix in this commit: neither `[Int]` nor
-     * `[Str]` is an Option, so that path never fires here. It went unnoticed
-     * because every codec test in the suite encodes ONE shape per module —
-     * found only by running a real multi-shape program through the CLI.
-     *
-     * The fix belongs in impl selection (the call site knows the element type
-     * and should resolve the derived impl statically rather than leaving it to a
-     * shape-keyed lookup) and is tracked separately. THIS TEST PINS THE WRONG
-     * ANSWER so the fix has a before/after — when selection is corrected it
-     * starts returning `[1,2,3]|["a","b"]` and this test must be rewritten to
-     * assert that.
+     * Found by running a real multi-shape program through the CLI: every codec
+     * test in the suite encodes ONE shape per module, so nothing compared two.
      */
     @Test
-    fun `only the first seq codec derivation in a module works — known defect`() {
+    fun `two seq derivations in one module do not collide`() {
         val result = eval(
             """
             use std::codec::json::{ ToJson, to_str }
@@ -259,7 +248,23 @@ class JvmCodecContainerTest {
             "$(to_str { json = ints.to_json {} })|$(to_str { json = strs.to_json {} })"
             """.trimIndent()
         )
-        assertEquals("[1,2,3]|", result)
+        assertEquals("[1,2,3]|[\"a\",\"b\"]", result)
+    }
+
+    /** Three element types, and the reverse order — the shape that showed the
+     *  defect was order-dependent rather than "one derivation per module". */
+    @Test
+    fun `three seq derivations in reverse order each use their own encoder`() {
+        val result = eval(
+            """
+            use std::codec::json::{ ToJson, to_str }
+            let strs: [Str] = ["a", "b"]
+            let ints: [Int] = [1, 2, 3]
+            let bools: [Bool] = [True, False]
+            "$(to_str { json = strs.to_json {} })|$(to_str { json = ints.to_json {} })|$(to_str { json = bools.to_json {} })"
+            """.trimIndent()
+        )
+        assertEquals("[\"a\",\"b\"]|[1,2,3]|[true,false]", result)
     }
 
     // ==================== options ====================
