@@ -264,9 +264,9 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                             // machinery; here we only enforce the field types, which
                             // was the missing check that let `Point { x = "no" }` pass.)
                             for (entry in wrapped.entries) {
-                                val expectedFieldType = try { TypeAnnotationConverter.convert(entry.type, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) } catch (_: Exception) { null }
+                                val expectedFieldType = TypeAnnotationConverter.convert(entry.type, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } })
                                 val actualFieldType = providedType?.fields?.get(entry.name)
-                                if (expectedFieldType != null && actualFieldType != null) {
+                                if (actualFieldType != null) {
                                     newtypeFieldConstraints.add(Constraint.Equality(
                                         left = actualFieldType, right = expectedFieldType,
                                         context = "Newtype ${expr.constructor} field '${entry.name}'", loc = expr.loc,
@@ -281,7 +281,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                             // wrapped TYPE on whatever single field was provided,
                             // without pinning the field NAME — so `Meters { val =
                             // "boom" }` (Str into an Int newtype) is now rejected.
-                            val expectedFieldType = try { TypeAnnotationConverter.convert(wrapped, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) } catch (_: Exception) { null }
+                            val expectedFieldType = TypeAnnotationConverter.convert(wrapped, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } })
                             val soleField = literalFields.singleOrNull()
                             val actualFieldType = soleField?.let { providedType?.fields?.get(it.name) }
                             if (expectedFieldType != null && actualFieldType != null) {
@@ -373,19 +373,18 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
         val recordDeclForCtor = context.typeDeclarations[expr.constructor]
             ?.takeIf { it.definition is ParsedRecordDef }
         if (recordDeclForCtor != null) {
-            val declaredType = try {
-                convertParsedTypeAnnotation(
-                    ParsedNamedType(name = expr.constructor, loc = expr.loc)
-                )
-            } catch (_: Exception) { null }
-            if (declaredType != null) {
-                constraints.add(Constraint.Equality(
-                    left = resultType,
-                    right = declaredType,
-                    context = "Record-type construction ${expr.constructor}",
-                    loc = expr.loc,
-                ))
-            }
+            // Not wrapped in a catch that drops the constraint: silently omitting
+            // it leaves `resultType` an unsolved var, which is the crash this whole
+            // block exists to prevent. Measured at zero firings.
+            val declaredType = convertParsedTypeAnnotation(
+                ParsedNamedType(name = expr.constructor, loc = expr.loc)
+            )
+            constraints.add(Constraint.Equality(
+                left = resultType,
+                right = declaredType,
+                context = "Record-type construction ${expr.constructor}",
+                loc = expr.loc,
+            ))
         }
 
         constraints.add(

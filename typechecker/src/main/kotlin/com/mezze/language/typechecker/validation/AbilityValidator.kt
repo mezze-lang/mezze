@@ -415,8 +415,12 @@ object AbilityValidator {
                 d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d)
             }
         }
-        val typeA = try { TypeAnnotationConverter.convert(a, typeVarCache = cache, resolveTypeHash = resolveTypeHash) } catch (_: Exception) { return false }
-        val typeB = try { TypeAnnotationConverter.convert(b, typeVarCache = cache, resolveTypeHash = resolveTypeHash) } catch (_: Exception) { return false }
+        // Both conversions used to be wrapped in `catch (_: Exception) { return false }`
+        // — a failure to READ an annotation answering "these two impls do not
+        // overlap", which admits the overlapping pair. Measured at ZERO firings
+        // across both suites, so there is nothing to answer for.
+        val typeA = TypeAnnotationConverter.convert(a, typeVarCache = cache, resolveTypeHash = resolveTypeHash)
+        val typeB = TypeAnnotationConverter.convert(b, typeVarCache = cache, resolveTypeHash = resolveTypeHash)
         return unify(typeA, typeB) is UnificationResult.Success
     }
 

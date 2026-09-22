@@ -318,9 +318,9 @@ class TypeValidator(
             val aliasFields = def.fields.associate { it.name to it.type }
             if (aliasFields.size != recordType.fields.size || aliasFields.keys != recordType.fields.keys) return@mapNotNull null
             val compatible = aliasFields.all { (name, parsedType) ->
-                val aliasFieldType = try { TypeAnnotationConverter.convert(parsedType, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } }) } catch (_: Exception) { null }
+                val aliasFieldType = TypeAnnotationConverter.convert(parsedType, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } })
                 val recordFieldType = recordType.fields[name]
-                aliasFieldType != null && recordFieldType != null && alphaEquivalent(aliasFieldType, recordFieldType, mutableMapOf())
+                recordFieldType != null && alphaEquivalent(aliasFieldType, recordFieldType, mutableMapOf())
             }
             if (compatible) aliasName else null
         }
@@ -390,7 +390,10 @@ class TypeValidator(
         val parsedAnnotation = decl.typeAnnotation ?: return emptyList()
         if (!decl.isSimpleBinding) return emptyList()
         val inferredType = constraintResults[decl.variableName]?.type ?: return emptyList()
-        val annotatedType = try {
+        // Not wrapped in a catch that returns emptyList(). Failing to read the
+        // annotation would silently SKIP the annotation-vs-inferred check, which is
+        // the one thing this function exists to do. Measured at zero firings.
+        val annotatedType =
             TypeAnnotationConverter.convert(
                 parsedAnnotation,
                 resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
@@ -406,7 +409,6 @@ class TypeValidator(
                     }
                 }
             )
-        } catch (_: Exception) { return emptyList() }
         val finalType = substitution.apply(inferredType)
         if (!alphaEquivalent(annotatedType, finalType, mutableMapOf())) {
             return listOf(ValidationError.AnnotationMismatch(
