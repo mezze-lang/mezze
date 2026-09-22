@@ -110,6 +110,15 @@ class ConstraintSolver(
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
 
     /**
+     * Does [format] implement `EncodeRawList` — i.e. can it take a seq of Mezze
+     * primitives directly, without each element being encoded first? Codec
+     * auto-derivation asks this to skip the per-element walk, which for a
+     * polyglot format is one crossing into the guest per element.
+     */
+    internal fun formatTakesRawPrimitiveLists(format: MezzeType): Boolean =
+        abilityChecker.checkAbilityImplementation("EncodeRawList", listOf(format))
+
+    /**
      * What solving concluded about one ability constraint's arguments. The three
      * answers are genuinely different and a caller must not collapse them:
      * DISCHARGED carries no obligation to anyone, UNSATISFIED is an error, and
