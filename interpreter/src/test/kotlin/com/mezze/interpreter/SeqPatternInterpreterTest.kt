@@ -540,4 +540,54 @@ class SeqPatternInterpreterTest {
         """
         assertEquals(3L, eval(code))
     }
+
+    // ==========================================================================
+    // SECTION 8: #102 — an open-cons head that misses an element never RUNS
+    // ==========================================================================
+
+    @Test
+    fun `an open-cons head missing a constructor is rejected before it can run`() {
+        // This program used to type-check and then die here with
+        // "Non-exhaustive match: no variant tag matched — typechecker
+        // exhaustiveness guarantee violated". The length axis was satisfied
+        // (`[]` plus an open-cons covers every length) and nothing asked whether
+        // the head accepts `None`. The typechecker answers it now; this test sits
+        // on the RUNTIME side so that sentence can never come back.
+        val e = runCatching {
+            eval(
+                """
+                use std::collections::seq
+                let f: { xs: [Option Int] } -> Int = { xs } -> match xs is
+                  [] -> 0
+                  [Some { val = x }, ...rest] -> x + 1
+                f { xs = [None] }
+                """.trimIndent(),
+            )
+        }.exceptionOrNull()
+        val message = e?.message ?: ""
+        assertTrue(message.contains("None"), "should name the uncovered element: $message")
+        assertFalse(
+            message.contains("guarantee violated"),
+            "must be a diagnostic, not a runtime guarantee break: $message",
+        )
+    }
+
+    @Test
+    fun `heads covering every constructor still run`() {
+        // The boundary: jointly-total heads ARE total, and the fix must not have
+        // turned this idiom into a rejection.
+        assertEquals(
+            41L,
+            eval(
+                """
+                use std::collections::seq
+                let f: { xs: [Option Int] } -> Int = { xs } -> match xs is
+                  [] -> 0
+                  [Some { val = x }, ...rest] -> x + 1
+                  [None, ...rest] -> 0 - 1
+                f { xs = [Some { val = 40 }] }
+                """.trimIndent(),
+            ),
+        )
+    }
 }

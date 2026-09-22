@@ -2178,6 +2178,48 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   `TypedModuleEmitter` … the same shape and worth deleting" — IS done, and there
   were three, not two. See the section below.
 
+### SOUNDNESS (FIXED) — seq exhaustiveness checked LENGTH but never ELEMENTS
+
+A well-typed program that got stuck, found by re-running a note instead of
+reading it:
+
+```
+let f: { xs: [Option Int] } -> Int = { xs } -> match xs is
+  [] -> 0
+  [Some { val = x }, ...rest] -> x + 1
+f { xs = [None] }
+```
+
+This type-checked, then died at the runtime with *"Non-exhaustive match: no
+variant tag matched — typechecker exhaustiveness guarantee violated"*.
+
+`MatchValidator.seqExhaustivenessErrors` reasoned about ONE axis: how many
+elements a seq has. `[]` plus an open-cons arm covers every length, so it said
+total — and nothing asked whether the open-cons arm's HEAD accepts the element.
+Its own doc named the gap ("we may miss a hole that is purely about element
+coverage inside an open-cons") and left it.
+
+The argument that kept it open was that requiring an irrefutable head would
+reject `[Some x, ...t]` + `[None, ...t]`, which IS total. True, and it is the
+wrong question. Take a seq longer than every arm's fixed width: no fixed-length
+arm can match it, so it is matched — if at all — through an open-cons head. The
+heads therefore have to be total TOGETHER, exactly as a variant match's arms do.
+`seqElementCoverageErrors` asks that, reusing `missingInVariantField`, so nested
+payloads recurse and a constructor destructured only refutably does not count.
+
+Conservative in the same direction as the rest of the file: an irrefutable head
+covers everything, and an element type that is not a CLOSED variant is not
+judged — `[1, ...rest]` over `[Int]` is still accepted. That narrower hole is
+[isNonEnumerablePrimitive]'s question (when is a set of literal heads total?) and
+is pinned as a recorded decision, not left as an accident.
+
+The error names the arm to add: `Missing case: [None, ...rest]`, hint `add a case
+for: [None, ...rest]`. Verified through a freshly built CLI, not just the suite.
+Pinned by 7 cases in `PatternExhaustivenessHolesTest` (including the two
+boundaries that must stay accepted) and 2 in `SeqPatternInterpreterTest`, the
+second of which lives on the runtime side so that "guarantee violated" sentence
+cannot come back.
+
 ### Internal emit/lowering failures are reported, not swallowed
 
 Three `catch (e: Exception)` handlers in `TypedModuleEmitter` (typed-AST build,

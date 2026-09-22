@@ -161,7 +161,10 @@ class MatchValidator(
             // (`[x, ...rest]`/`[x, ..._]`) that covers all lengths >= 1. A
             // fixed-length pattern (`[a]`, `[a, b]`) covers only that one length.
             if (isSeqApp(expandedType) || isListApp(expandedType)) {
-                return seqExhaustivenessErrors(matchExpr)
+                return seqExhaustivenessErrors(
+                    matchExpr,
+                    (expandedType as MezzeType.TypeApplication).args.singleOrNull(),
+                )
             }
             // #218: a record scrutinee is exhaustive iff a catch-all covers it, or its
             // finite (variant/Bool) fields are covered. Checked conservatively (see
@@ -284,19 +287,29 @@ class MatchValidator(
      * (leaving length 1 uncovered), and fixed-length patterns (`[a]`, `[a, b]`)
      * cover only that single length — so neither alone makes the match total.
      *
-     * This check is deliberately about the LENGTH axis only. An open-cons arm
-     * whose head is refutable (`[Some x, ...tail]`) still counts as covering the
-     * "non-empty" length case — whether its *elements* match every value is a
-     * separate, nested-pattern question we do NOT decide here (e.g. two arms
-     * `[Some x, ...t]` + `[None, ...t]` are jointly total and must not be
-     * rejected). Requiring an irrefutable head would false-reject that idiom, so
-     * we don't. The trade: we may miss a hole that is purely about element
-     * coverage inside an open-cons; we never invent a false length error.
+     * There are TWO axes, and length is only the first.
      *
-     * Only UNGUARDED arms count toward coverage — a guard or an if-let binding may
-     * fail at runtime, so it can't be relied on to cover its length.
+     * An open-cons arm whose head is refutable (`[Some x, ...tail]`) covers the
+     * non-empty LENGTH case, but it does not follow that it matches — whether the
+     * heads cover every ELEMENT is the second axis, and it used to be skipped
+     * entirely. That was a soundness hole: `[] -> 0` plus `[Some { val = x },
+     * ...rest] -> x + 1` over `[Option Int]` type-checked and then died at runtime
+     * on `[None]` with "no variant tag matched — typechecker exhaustiveness
+     * guarantee violated". [seqElementCoverageErrors] is that axis.
+     *
+     * The two must not be confused: requiring an irrefutable head would reject the
+     * `[Some x, ...t]` + `[None, ...t]` idiom, which IS total. The element axis
+     * asks whether the heads are total TOGETHER, exactly as a variant match asks of
+     * its arms.
+     *
+     * Only UNGUARDED arms count toward coverage on either axis — a guard or an
+     * if-let binding may fail at runtime, so it can't be relied on to cover its
+     * length or its element.
      */
-    private fun seqExhaustivenessErrors(matchExpr: ParsedMatch): ValidationResult {
+    private fun seqExhaustivenessErrors(
+        matchExpr: ParsedMatch,
+        elementType: MezzeType?,
+    ): ValidationResult {
         var hasCatchAll = false
         // Exact lengths covered by fixed-length arms (`[a, b]` -> 2). An open-cons
         // arm `[e1..em, ...rest]` covers every length >= m; `minOpenConsWidth` is
@@ -333,8 +346,15 @@ class MatchValidator(
         // ...rest]` pair (m == 1) to `[]`,`[x]`,`[x,y]` + `[x,y,...rest]` (m == 3).
         val openConsCoversTail = minOpenConsWidth != Int.MAX_VALUE &&
             (0 until minOpenConsWidth).all { it in fixedLengths }
-        val exhaustive = hasCatchAll || openConsCoversTail
-        if (exhaustive) return ValidationResult.Success()
+        // A catch-all matches any seq whatever its elements, so it settles both
+        // axes at once. An open-cons only settles LENGTH — the tail it covers is
+        // reached through its head, so the heads have to be total too.
+        if (hasCatchAll) return ValidationResult.Success()
+        if (openConsCoversTail) {
+            val elementErrors = seqElementCoverageErrors(matchExpr, elementType)
+            return if (elementErrors.isEmpty()) ValidationResult.Success()
+            else ValidationResult.Failure(elementErrors)
+        }
 
         val coversEmpty = 0 in fixedLengths
         // The non-empty case is total only when an open-cons closes its tail; a
@@ -351,6 +371,64 @@ class MatchValidator(
             missingConstructors = listOf(missing),
             loc = matchExpr.loc
         )))
+    }
+
+    /**
+     * The ELEMENT axis of seq exhaustiveness — the second half of
+     * [seqExhaustivenessErrors], and the one that used to be missing.
+     *
+     * Called only once the LENGTH axis is settled by an open-cons arm (a catch-all
+     * needs no element reasoning). Take a seq longer than every arm's fixed width:
+     * no fixed-length arm can match it, so it is matched — if at all — by an
+     * open-cons arm, and only if that arm's HEAD accepts the first element. So the
+     * heads of the unguarded open-cons arms must be total for the element type,
+     * jointly, in exactly the sense a variant match's arms must be total.
+     *
+     * That "jointly" is the whole point, and why this cannot be "require an
+     * irrefutable head": `[Some x, ...t]` + `[None, ...t]` IS total and stays
+     * accepted. `[Some x, ...t]` alone is not, and no longer type-checks.
+     *
+     * Conservative, deliberately, in the same direction as everything else in this
+     * file — when we cannot decide, we say covered:
+     *  - a head that binds irrefutably (`_`, a variable) covers everything;
+     *  - an element type that is not a CLOSED variant (Int, Str, a record, an
+     *    open variant, a still-generic `'a`) is not enumerable here, so we do not
+     *    judge it. `[1, ...rest]` over `[Int]` is still accepted — a narrower hole
+     *    on the same axis, and closing it means deciding what a total set of
+     *    literal heads is, which is [isNonEnumerablePrimitive]'s question.
+     *
+     * [missingInVariantField] does the covering itself, so a constructor whose
+     * payload is destructured only refutably does not count as covered, and nested
+     * payloads recurse for free.
+     */
+    private fun seqElementCoverageErrors(
+        matchExpr: ParsedMatch,
+        elementType: MezzeType?,
+    ): List<ValidationError> {
+        val variant = elementType?.let { resolveClosedVariant(it) } ?: return emptyList()
+
+        val heads = mutableListOf<ParsedPattern?>()
+        for (case in matchExpr.cases) {
+            if (case.guard != null || case.ifLetBindings.isNotEmpty()) continue
+            for (pattern in case.patterns) {
+                if (pattern !is ParsedSeqPattern) continue
+                if (pattern.restPattern == null) continue        // fixed length — cannot match a long seq
+                heads.add(pattern.elements.firstOrNull() ?: return emptyList())  // `[...all]` — a catch-all
+            }
+        }
+        if (heads.isEmpty()) return emptyList()
+
+        // The missing case is spelled as the ARM the author would add — `[None,
+        // ...rest]` — so the message names the fix rather than describing the
+        // check. Kept short because each missing constructor gets its own entry
+        // and a long parenthetical would repeat once per entry.
+        return missingInVariantField(
+            variant = variant,
+            subPatterns = heads,
+            loc = matchExpr.loc,
+            prefix = "[",
+            suffix = ", ...rest]",
+        )
     }
 
     /**

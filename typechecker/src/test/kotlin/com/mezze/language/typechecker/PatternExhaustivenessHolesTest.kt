@@ -225,4 +225,101 @@ class PatternExhaustivenessHolesTest {
                 [a, b] -> a + b
         """), "#203: fixed-length pattern on a List is not exhaustive")
     }
+
+    // ── #102: the ELEMENT axis ───────────────────────────────────────────
+    //
+    // The length check above reasons about how MANY elements a seq has. It said
+    // nothing about WHICH elements the open-cons heads accept, and a seq long
+    // enough that no fixed-length arm applies is matched only through a head. So
+    // `[]` + `[Some x, ...rest]` covered every length and still fell off the end
+    // of the match on `[None]` — it type-checked and died at runtime with
+    // "no variant tag matched — typechecker exhaustiveness guarantee violated".
+
+    @Test fun `a refutable open-cons head that misses a constructor is rejected`() {
+        val e = err("""
+            use std::collections::seq
+            let f = { xs: [Option Int] } ->
+              match xs is
+                [] -> 0
+                [Some { val = x }, ...rest] -> x
+        """)
+        assertNotNull(e, "#102: `[Some x, ...rest]` does not cover `[None]`")
+        assertTrue(e!!.contains("None"), "error should name the missing element constructor: $e")
+    }
+
+    @Test fun `a user variant element with an uncovered constructor is rejected`() {
+        val e = err("""
+            type Tok = | Word { s: Str }, Space, Punct |
+            let f = { xs: [Tok] } ->
+              match xs is
+                [] -> 0
+                [Word { s = w }, ...rest] -> 1
+                [Space, ...rest] -> 2
+        """)
+        assertNotNull(e, "#102: `Punct` is never covered by a head")
+        assertTrue(e!!.contains("Punct"), "error should name Punct: $e")
+    }
+
+    @Test fun `heads covering every constructor across arms stay accepted`() {
+        // The idiom the length check was careful not to break, now also carried
+        // through the element check: jointly total heads are total.
+        assertNull(err("""
+            type Tok = | Word { s: Str }, Space, Punct |
+            let f = { xs: [Tok] } ->
+              match xs is
+                [] -> 0
+                [Word { s = w }, ...rest] -> 1
+                [Space, ...rest] -> 2
+                [Punct, ...rest] -> 3
+        """))
+    }
+
+    @Test fun `an irrefutable head covers every element`() {
+        assertNull(err("""
+            use std::collections::seq
+            let f = { xs: [Option Int] } ->
+              match xs is
+                [] -> 0
+                [h, ...rest] -> 1
+        """))
+    }
+
+    @Test fun `a catch-all arm settles the element axis too`() {
+        // A trailing `_` matches any seq whatever its elements, so a refutable
+        // head alongside it is fine.
+        assertNull(err("""
+            use std::collections::seq
+            let f = { xs: [Option Int] } ->
+              match xs is
+                [Some { val = x }, ...rest] -> x
+                other -> 0
+        """))
+    }
+
+    @Test fun `a non-enumerable element type is not judged`() {
+        // `[1, ...rest]` does not cover `[2]`, but deciding when a set of literal
+        // heads is total is the non-enumerable-primitive question, not this one.
+        // Pinned so the conservatism is a recorded decision, not an accident.
+        assertNull(err("""
+            let f = { xs: [Int] } ->
+              match xs is
+                [] -> 0
+                [1, ...rest] -> 1
+        """))
+    }
+
+    @Test fun `a guarded head does not count toward element coverage`() {
+        // The guard can fail, so `[None, ...t] if …` covers no element; `None` is
+        // still missing. Same rule the length axis already applies.
+        val e = err("""
+            use std::collections::seq
+            let f = { xs: [Option Int] } ->
+              match xs is
+                [] -> 0
+                [Some { val = x }, ...rest] -> x
+                [None, ...rest] if 1 > 0 -> 0
+        """)
+        assertNotNull(e, "#102: a guarded arm can't be relied on for element coverage")
+        assertTrue(e!!.contains("None"), "error should name None: $e")
+    }
 }
