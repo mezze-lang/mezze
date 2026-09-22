@@ -649,6 +649,16 @@ internal class ImplValidator(
             k.removePrefix("'")
         }
 
+        // Converts one parameter at a time, and `convertTypeAnnotation` clears the
+        // type-variable cache per call — which LOOKS like the "one written `'a`
+        // became two" bug that was fixed in `ContextBuilder` and `TypedAstBuilder`
+        // for these same params. MEASURED, and it is not: `impl Store for Mem
+        // { a: 'a, b: 'a }` with `perform Mem { a = 1, b = "s" }` is rejected
+        // ("Field 'b' type mismatch: expected Int, got Str") BOTH with a shared
+        // scope here and without it, because the tie is already established on the
+        // context-building path. Converting these together changed nothing — the
+        // clobber count over the prelude stayed at exactly 250, same shapes.
+        // Don't "fix" this site without a case that shows a difference first.
         var baseContext = context
         for (param in impl.params) {
             val paramType = convertTypeAnnotation(param.type)

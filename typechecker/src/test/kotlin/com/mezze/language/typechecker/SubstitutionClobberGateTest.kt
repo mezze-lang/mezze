@@ -47,6 +47,36 @@ class SubstitutionClobberGateTest {
      *
      * MEASURED at 194, not chosen — the gate was first run with this set to 0 and
      * the number read off the failure. Lower is better and it may only go DOWN.
+     *
+     * CAVEAT, measured 2026-09-22: the number is ORDER-DEPENDENT. Run this class
+     * on its own and it is 250; run it inside the suite and it is at or under 194,
+     * because `ModuleResolver`/`TypeChecker` caches are already warm from earlier
+     * classes and less work is redone. So this ratchet bounds "collisions in a
+     * warm run", not "collisions", and it is weaker than it reads. Before treating
+     * a change to this number as signal, pin the condition.
+     *
+     * WHERE THE COLLISIONS COME FROM, measured on the isolated run (307 pairs over
+     * 250 variables), because the shape decides which work would reduce it:
+     *
+     *   117  `BoolType@…` vs `Bool([True, False])`        two representations
+     *    65  `VarType('s63)` vs `VarType('z62)`           one var, two vars
+     *    49  a var bound to a var and to a concrete type  mixed / ordering
+     *    43  identical rendering, different objects       two representations
+     *    24  `Option([Some,None])` vs `TypeApplication(Option 'x)`  two representations
+     *     9  records differing only in their inner vars   one var, two vars
+     *
+     * So ~184 of the 250 are ONE TYPE IN TWO REPRESENTATIONS — `Option`/`Result`
+     * as `TypeApplication` vs `VariantType`, and `Bool` as `BoolType` vs its
+     * variant spelling. Those close by unifying the representations, not by
+     * anything local. See [[project_result_option_two_representations]].
+     *
+     * The 74 "one var, two vars" are NOT the annotation-converter flavour that was
+     * swept in `ContextBuilder` / `TypedAstBuilder`. Stack-captured at the point of
+     * collision: 44 compose in `TypeChecker.checkParsedModuleInner` (the global
+     * solve merging a per-binding substitution into the module's) and 21 in
+     * `ConstraintGenerator.generateProgram`. That is the SOLVER flavour — the two
+     * sides are both solved, and each solve named the variable differently. It is
+     * the same thing the elaboration work is about, not a separate sweep.
      */
     private val baseline = 194
 
