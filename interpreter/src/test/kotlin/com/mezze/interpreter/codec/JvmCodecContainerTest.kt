@@ -218,7 +218,109 @@ class JvmCodecContainerTest {
         assertEquals(-1L, v.getPayloadFieldByName("val"))
     }
 
+    // ==================== two derivations in one module ====================
+
+    /**
+     * SOUNDNESS, OPEN: ONLY THE FIRST SEQ CODEC DERIVATION IN A MODULE WORKS.
+     * Every later one silently encodes to nothing.
+     *
+     * Encode `[Int]` and then `[Str]` in one module and the second comes back
+     * empty; reverse the order and it is `[Int]` that comes back empty, plus any
+     * third. On the JVM codec the same program dies outright with "Expected Long
+     * for field 'val'" — `from_int` handed a Str. Silent for JSON, fatal for
+     * JvmC, wrong for both.
+     *
+     * WHY: `[Int]`, `[Str]` and `[Option Int]` are all one runtime shape, a
+     * MezzeSeq. The element type is static, known at every call site, but it is
+     * erased by the time the derived `impl Encode <config> for [T]` is selected,
+     * so whichever derivation registered first answers for all of them. A RECORD
+     * encoded after a seq is fine, which is what rules out "one derivation per
+     * module" and points at shape-collision among seqs specifically.
+     *
+     * NOT caused by the Option routing fix in this commit: neither `[Int]` nor
+     * `[Str]` is an Option, so that path never fires here. It went unnoticed
+     * because every codec test in the suite encodes ONE shape per module —
+     * found only by running a real multi-shape program through the CLI.
+     *
+     * The fix belongs in impl selection (the call site knows the element type
+     * and should resolve the derived impl statically rather than leaving it to a
+     * shape-keyed lookup) and is tracked separately. THIS TEST PINS THE WRONG
+     * ANSWER so the fix has a before/after — when selection is corrected it
+     * starts returning `[1,2,3]|["a","b"]` and this test must be rewritten to
+     * assert that.
+     */
+    @Test
+    fun `only the first seq codec derivation in a module works — known defect`() {
+        val result = eval(
+            """
+            use std::codec::json::{ ToJson, to_str }
+            let ints: [Int] = [1, 2, 3]
+            let strs: [Str] = ["a", "b"]
+            "$(to_str { json = ints.to_json {} })|$(to_str { json = strs.to_json {} })"
+            """.trimIndent()
+        )
+        assertEquals("[1,2,3]|", result)
+    }
+
     // ==================== options ====================
+
+    /**
+     * The SAME encode, inside `perform … in do`.
+     *
+     * Every other Option test here runs at the top level of a module and passes.
+     * Running the identical code through the real CLI — where it lives in a
+     * `perform Console in do` — it died with "Expected Long for field 'val'",
+     * with the element type written out as `[Option Int]` at the binding. So the
+     * effect/do context, not the spelling, is what changes which encoder the
+     * walker picks. A handler must not change what a value encodes as.
+     */
+    @Test
+    fun `a seq of Option encodes the same inside a perform-do block`() {
+        val result = eval(
+            """
+            use std::effects::log::{ Log, Console, info }
+            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::seq
+
+            let main = {} -> perform Console in do
+              info { msg = "encoding" }
+              let opts: [Option Int] = [Some { val = 10 }, None, Some { val = 20 }]
+              let f = opts.to_jvm {}
+              let back: Result [Option Int] DecodeError = f.from_jvm {}
+              match back is
+                Ok { val = xs } -> Ok { val = seq::size { xs = xs } }
+                Err { error = _ } -> Ok { val = 0 - 1 }
+            main {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(3L, v.getPayloadFieldByName("val"))
+    }
+
+    /**
+     * Same value as the test below, but LET-BOUND before `.to_jvm {}` instead of
+     * written inline at the call. Spelling a value into a variable must not
+     * change how it encodes.
+     */
+    @Test
+    fun `a let-bound seq of Option encodes the same as an inline one`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::seq
+            let opts = [Some { val = 10 }, None, Some { val = 20 }]
+            let f = opts.to_jvm {}
+            let back: Result [Option Int] DecodeError = f.from_jvm {}
+            match back is
+              Ok { val = xs } -> Ok { val = seq::size { xs = xs } }
+              Err { error = _ } -> Ok { val = 0 - 1 }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(3L, v.getPayloadFieldByName("val"))
+    }
 
     /**
      * Cross-check against a format that has had containers all along. If JSON
