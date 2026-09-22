@@ -119,6 +119,13 @@ module.exports = grammar({
     // target. Latent until the inline-variant argument made the lookahead
     // reachable.
     [$.impl_declaration, $.type_application],
+    // A `do` nested inside a `do` statement: after the inner block's
+    // expression, the next token could close the INNER block (making that
+    // expression its result) or be another statement of the OUTER one. The
+    // scanner's DEDENT settles it — the inner block ends where indentation
+    // falls back — but the parser must keep both alive until that token
+    // arrives. GLR explores and only one survives the indentation.
+    [$.do_expression, $._do_statement],
   ],
 
   rules: {
@@ -836,16 +843,59 @@ module.exports = grammar({
       field('let_value', prec(PREC.and + 1, $._expression)),
     ),
 
-    // `do <stmt>* <result-expr>` — sequence of let-statements + final
-    // expression, terminated by the enclosing context's closing token.
-    // The parser handles this with newline-driven layout; we use prec.right
-    // to keep the do-block consuming let-statements as long as one starts
-    // the next token, then a single trailing expression.
-    do_expression: $ => prec.right(seq(
-      'do',
-      repeat($.let_statement),
-      field('result', $._expression),
+    // `do` — a sequence of statements, the last of which is the block's value.
+    //
+    // This used to be `repeat(let_statement) + one expression`, which modelled
+    // only ONE bare expression in a block. Two in a row landed two ways, and the
+    // silent one was the problem: inside an impl operation (where a `,` must
+    // follow) it ERRORED, but at TOP LEVEL `let f = {} -> do / g {…} / h {…}`
+    // closed the do after `g` and lifted `h` out as a SIBLING top-level item.
+    // No ERROR node, so the parity gate scored it a PASS while the tree put a
+    // statement in the wrong scope — precisely what an editor folds, highlights
+    // and navigates off.
+    //
+    // A `do` block is delimited by INDENTATION, exactly like a match arm list,
+    // and the external scanner already emits the tokens for it. So use them:
+    // open with _indent, separate statements with _newline, close on _dedent.
+    // That both admits multiple bare expressions AND stops the block from
+    // swallowing the following top-level declaration.
+    do_expression: $ => prec.right(choice(
+      // Indented block form — statements one per line, then the block's value.
+      // Keeping `result` on the LAST expression preserves what consumers query
+      // for; the leading statements are simply whatever precedes it.
+      seq(
+        'do',
+        $._indent,
+        repeat($._do_statement),
+        field('result', $._expression),
+        // A block may end on a separator — a trailing blank or comment-only
+        // line still reaches the scanner as a NEWLINE at the statement column,
+        // and without somewhere to put it the rule demands another statement.
+        optional($._newline),
+        optional($._dedent),
+      ),
+      // Single expression on the same line as `do` (`-> do f {…}`). No line
+      // break means the scanner emits no _indent, so the two forms are disjoint
+      // rather than ambiguous.
+      seq('do', field('result', $._expression)),
     )),
+
+    // A statement inside a `do`, with the separator that ends it.
+    //
+    // The two halves need DIFFERENT separators, which is why this is not one
+    // rule with a comma-style list. A `let` is self-delimiting — the keyword
+    // says where it starts and the next token cannot be a continuation of it —
+    // so `let y = 1  2` on ONE line is a binding followed by another statement,
+    // and demanding a newline there would reject it.
+    //
+    // A BARE EXPRESSION is not self-delimiting: `g {…}` followed by `h {…}`
+    // reads as one expression applied to another unless a line break separates
+    // them. Requiring the newline is exactly what lets two of them be two
+    // statements instead of silently becoming one.
+    _do_statement: $ => choice(
+      seq($.let_statement, optional($._newline)),
+      seq($._expression, $._newline),
+    ),
 
     // Inline let in a do-block. Same shape as let_declaration minus the
     // `pub` modifier (which only makes sense at top level): `let <pattern>
