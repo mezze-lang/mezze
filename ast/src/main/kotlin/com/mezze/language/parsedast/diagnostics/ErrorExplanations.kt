@@ -463,6 +463,11 @@ fun ErrorCode.explain(): String = when (this) {
         "A structural validation check failed. " +
         "This is a catch-all for miscellaneous validation errors."
 
+    ErrorCode.T0216_AMBIGUOUS_DISPATCH ->
+        "Two implementations apply to this call with the same priority, and the " +
+        "receiver's type does not say which one to use. Make the receiver's type " +
+        "specific enough to choose, or remove the overlapping implementation."
+
     ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE ->
         "An unexpected internal error occurred during type checking. " +
         "This is a compiler bug — please report it."

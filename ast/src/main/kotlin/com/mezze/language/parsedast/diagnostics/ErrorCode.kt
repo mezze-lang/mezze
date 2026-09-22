@@ -82,6 +82,7 @@ enum class ErrorCode {
     T0213_UNKNOWN_TYPE, // an uppercase type name in a type position resolves to no declaration/builtin (e.g. `{ val: Gadget }` with no `type Gadget`)
     T0214_TYPECHECK_LIMIT_EXCEEDED,
     T0215_AMBIGUOUS_ABILITY_TYPE, // an ability method whose type is decided by neither the parameters nor the result — no call site can pin it, so it could never dispatch // the typechecker hit an internal recursion/work limit on this program (pathological or malformed) — a clean bail-out instead of ever crashing/hanging
+    T0216_AMBIGUOUS_DISPATCH, // two same-priority impls apply to this call and the receiver's type does not choose between them
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────
     T0301_UNBOUND_TYPE_VAR,

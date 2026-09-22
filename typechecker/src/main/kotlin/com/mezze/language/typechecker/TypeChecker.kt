@@ -627,12 +627,29 @@ class TypeChecker(
                             methodCallResolutions = aggregated.methodCallResolutions,
                             typingContext = context,
                         )
-                    } catch (e: com.mezze.language.typechecker.solving.DispatchResolver.DispatchParityException) {
-                        if (System.getProperty("mezze.invariants", "false") == "true") throw e
-                        emptyMap()
                     } catch (e: com.mezze.language.typechecker.solving.DispatchResolver.DispatchAmbiguityException) {
-                        if (System.getProperty("mezze.invariants", "false") == "true") throw e
-                        emptyMap()
+                        // Two same-priority impls apply and the receiver does not say
+                        // which. That is the AUTHOR's ambiguity, and the exception
+                        // already carries a message naming the method, the receiver and
+                        // both impls, plus the call's loc — everything a diagnostic
+                        // needs. It used to be answered with `emptyMap()` unless
+                        // `mezze.invariants` was set, which records no resolution and
+                        // sends emit to its `firstOrNull`: one of the two impls is then
+                        // picked by map order, silently.
+                        //
+                        // The parity catch that sat beside this one is gone. Parity is
+                        // only CHECKED under `-Dmezze.invariants=true` (see
+                        // DispatchResolver.resolveAll), so outside invariants its
+                        // exception cannot be thrown and the handler was unreachable;
+                        // under invariants it rethrew, which is what not catching it
+                        // does. Measured at zero firings across both suites, as was
+                        // this one — so no program in the corpus changes.
+                        throw TypeCheckError(
+                            message = e.message ?: "Ambiguous dispatch",
+                            loc = e.loc,
+                            errorType = ErrorType.GENERAL,
+                            code = ErrorCode.T0216_AMBIGUOUS_DISPATCH,
+                        )
                     }
 
                 // S0.2 (#351): NO-UNRESOLVED-DISPATCH-VAR invariant. The DEFERRED
