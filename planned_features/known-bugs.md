@@ -189,16 +189,33 @@ covered by `PolyglotCoreTest` — including a case that hands a built list to
 `java.util.Arrays.asList`, which only works if the value genuinely answers the
 interop array messages.
 
-**Provider half: DONE, but it lands outside this repo.** Steps 2 and 3 below —
-the `EncodeList` / `EncodeMap` / `EncodeRecord` impls and their decode mirrors —
-live in the `mezze-python` and `mezze-js` provider packages. Both patches are
-written and were validated against real GraalPy and GraalJS, not just reviewed:
+**Provider half: LANDED AND PUSHED 2026-09-22.** It lives outside this repo, in
+the provider packages:
 
-  ~/Projects/mezze-python-bug2.patch
-  ~/Projects/mezze-js-bug2.patch
+  mezze-lang/mezze-python  01f59ab   0.3.0 -> 0.4.0
+  mezze-lang/mezze-js      2350397   0.2.1 -> 0.3.0
 
-They apply to `github:mezze-lang/mezze-python` and `github:mezze-lang/mezze-js`
-and need to be committed there; nothing in this repo blocks them.
+Each gained the full container half, not just the encode impls the older saved
+patches carried: `EncodeList` / `EncodeMap` / `EncodeRecord` / `EncodeVariant`
+over new `py_list`/`py_dict` and `js_list`/`js_dict` constructors, the four
+decode mirrors, the hash READ side that `make_dict` had shipped without
+(`has_hash` / `hash_size` / `hash_at` / `hash_entries` — a dict is HASH-shaped,
+so no member or array method could read one back), and `array_to_seq` so
+`decode_list` crosses once instead of once per element.
+
+VALIDATED on real GraalPy and GraalJS, not typechecked only — for each guest:
+`[1,2,3].to_py {}` / `.to_js {}` has length 3, the guest's own `sum` over the
+VIEW answers 6 (no `eval` round trip), the value round-trips back to Mezze as 6,
+and a record reaches the guest as a dict whose field reads back by key.
+
+`mezze-wasm` is deliberately NOT included: its codec is scalar-only by design
+("only i32, i64, f32, f64 cross … there are no native strings, bools, records,
+lists, options, variants, or maps in the wasm value model"), so the Tier-3
+compile error at the offending field is the correct answer there, and adding
+container impls would hand a wasm function a value it cannot accept.
+
+The two `~/Projects/mezze-*-bug2.patch` files are now superseded — they carried
+the three encode impls only.
 
 Validating them surfaced a genuine runtime-half defect that WAS ours and is
 fixed here (54f31eab1): `ForeignContainers.ForeignDict` looked entries up by
