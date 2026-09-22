@@ -317,92 +317,10 @@ object AbilityValidator {
     private fun substituteTypeParameters(
         annotation: ParsedTypeAnnotation,
         substitution: Map<String, ParsedTypeAnnotation>
-    ): ParsedTypeAnnotation {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                val paramName = annotation.name.removePrefix("'")
-                substitution[paramName] ?: substitution["'$paramName"] ?: annotation
-            }
-            is ParsedFunctionType -> {
-                ParsedFunctionType(
-                    paramType = substituteTypeParameters(annotation.paramType, substitution),
-                    returnType = substituteTypeParameters(annotation.returnType, substitution),
-                    effects = annotation.effects,
-                    abilityConstraints = annotation.abilityConstraints,
-                    loc = annotation.loc
-                )
-            }
-            is ParsedRecordType -> {
-                ParsedRecordType(
-                    entries = annotation.entries.map { entry ->
-                        ParsedRecordTypeEntry(
-                            name = entry.name,
-                            type = substituteTypeParameters(entry.type, substitution),
-                            loc = entry.loc
-                        )
-                    },
-                    isOpen = annotation.isOpen,
-                    loc = annotation.loc
-                )
-            }
-            is ParsedVariantType -> {
-                ParsedVariantType(
-                    constructors = annotation.constructors.map { ctor ->
-                        ParsedVariantTypeCtor(
-                            name = ctor.name,
-                            dataType = ctor.dataType?.let { substituteTypeParameters(it, substitution) },
-                            loc = ctor.loc
-                        )
-                    },
-                    isOpen = annotation.isOpen,
-                    loc = annotation.loc
-                )
-            }
-            is ParsedTypeApp -> {
-                ParsedTypeApp(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { substituteTypeParameters(it, substitution) },
-                    loc = annotation.loc
-                )
-            }
-            is ParsedSeqType -> {
-                ParsedSeqType(
-                    elementType = substituteTypeParameters(annotation.elementType, substitution),
-                    loc = annotation.loc
-                )
-            }
-            is ParsedQualifiedType -> {
-                ParsedQualifiedType(
-                    modulePath = annotation.modulePath,
-                    typeName = annotation.typeName,
-                    args = annotation.args.map { substituteTypeParameters(it, substitution) },
-                    loc = annotation.loc
-                )
-            }
-        }
-    }
+    ): ParsedTypeAnnotation = annotation.substituteTypeVarNames(substitution)
 
-    private fun hasTypeVariables(annotation: ParsedTypeAnnotation, allowedVars: Set<String> = emptySet()): Boolean {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                annotation.name.isTypeVarName() && annotation.name !in allowedVars
-            }
-            is ParsedFunctionType -> {
-                hasTypeVariables(annotation.paramType, allowedVars) || hasTypeVariables(annotation.returnType, allowedVars)
-            }
-            is ParsedRecordType -> {
-                annotation.entries.any { hasTypeVariables(it.type, allowedVars) }
-            }
-            is ParsedVariantType -> {
-                annotation.constructors.any { it.dataType?.let { dt -> hasTypeVariables(dt, allowedVars) } == true }
-            }
-            is ParsedTypeApp -> {
-                annotation.args.any { hasTypeVariables(it, allowedVars) }
-            }
-            is ParsedSeqType -> hasTypeVariables(annotation.elementType, allowedVars)
-            is ParsedQualifiedType -> annotation.args.any { hasTypeVariables(it, allowedVars) }
-        }
-    }
+    private fun hasTypeVariables(annotation: ParsedTypeAnnotation, allowedVars: Set<String> = emptySet()): Boolean =
+        annotation.hasTypeVarsOutside(allowedVars)
 
     fun typeAnnotationsMatchPublic(
         a: ParsedTypeAnnotation,

@@ -271,8 +271,6 @@ object TypeAnnotationConverter {
 
             is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(recurse(annotation.elementType))
 
-            is ParsedEffectRow -> MezzeType.EffectRow(annotation.effects.toSet())
-
             is ParsedQualifiedType -> {
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
                 WellKnownTypeApp.of(
@@ -606,30 +604,7 @@ object TypeAnnotationConverter {
     private fun substituteTypeVarsInAnnotation(
         annotation: ParsedTypeAnnotation,
         subst: Map<String, ParsedTypeAnnotation>
-    ): ParsedTypeAnnotation {
-        if (subst.isEmpty()) return annotation
-        fun rec(a: ParsedTypeAnnotation): ParsedTypeAnnotation = when (a) {
-            is ParsedNamedType -> {
-                // Type-var names come with or without the leading tick in
-                // different code paths — check both.
-                val stripped = a.name.removePrefix("'")
-                subst[a.name] ?: subst[stripped] ?: subst["'$stripped"] ?: a
-            }
-            is ParsedTypeApp -> a.copy(args = a.args.map { rec(it) })
-            is ParsedRecordType -> a.copy(entries = a.entries.map { it.copy(type = rec(it.type)) })
-            is ParsedVariantType -> a.copy(constructors = a.constructors.map { c ->
-                c.copy(dataType = c.dataType?.let { rec(it) })
-            })
-            is ParsedFunctionType -> a.copy(
-                paramType = rec(a.paramType),
-                returnType = rec(a.returnType),
-            )
-            is ParsedSeqType -> a.copy(elementType = rec(a.elementType))
-            is ParsedEffectRow -> a
-            is ParsedQualifiedType -> a.copy(args = a.args.map { rec(it) })
-        }
-        return rec(annotation)
-    }
+    ): ParsedTypeAnnotation = annotation.substituteTypeVarNames(subst)
 
     /**
      * When `type X = <shape>` is inlined at a use site, stamp X's own nominal
