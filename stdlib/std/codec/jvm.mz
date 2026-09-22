@@ -10,15 +10,14 @@
 ## first-class InteropLibrary value: encoding a scalar is literally
 ## `jvm::from_int { val = ... }`, and decoding is `jf.as_int{}`.
 ##
-## Records / lists / maps are NOT implemented here — a caller who wants
-## to hand numpy an int-list should build a Java `ArrayList` explicitly
-## via `jvm::class { name = "java.util.ArrayList" }` and drive it from
-## Mezze. Partial-capability formats compile-error at the offending field
-## per `docs/codec/redesign-2026-09.md`.
+## Lists, maps, records and variants cross too, and without a copy:
+## `jvm_list` / `jvm_dict` build an interop VIEW the guest reads on demand,
+## so `[1, 2, 3].to_jvm {}` is O(1) rather than the O(n) print-into-guest-source
+## workaround it replaced.
 use std::codec::core::{
   Format,
-  EncodeScalar, EncodeOption,
-  DecodeScalar, DecodeOption,
+  EncodeScalar, EncodeOption, EncodeList, EncodeMap, EncodeRecord, EncodeVariant,
+  DecodeScalar, DecodeOption, DecodeList, DecodeMap, DecodeRecord, DecodeVariant,
   Encode, Decode,
   CodecCtx, SharedConfig, DecodeError,
   default_shared,
@@ -27,8 +26,10 @@ use std::codec::core::{
 use std::polyglot::core::{ InteropError }
 use std::polyglot::jvm::{
   JvmForeign,
-  from_int, from_float, from_str, from_bool, null_val
+  from_int, from_float, from_str, from_bool, null_val,
+  jvm_list, jvm_dict
 }
+use std::collections::seq
 use std::float
 use std::int
 use std::char
@@ -68,13 +69,56 @@ impl EncodeOption for JvmC having 'out = JvmForeign where {
     None -> null_val {},
 }
 
-## No `EncodeRecord`, `EncodeList`, `EncodeMap`, `EncodeVariant` for
-## `JvmC` — a single Foreign scalar doesn't naturally carry those
-## shapes without a specific Java container choice (ArrayList vs
-## LinkedList vs int[], HashMap vs LinkedHashMap, …). Types
-## containing those shapes will fail Tier-3 auto-derivation at the
-## offending field path — the caller builds the desired Java shape
-## explicitly through `jvm::class { ... }`.
+## ---- Tier 2: encode, container shapes ----------------------------------
+##
+## These used to be absent, on the reasoning that a Foreign "doesn't naturally
+## carry those shapes without a specific Java container choice (ArrayList vs
+## LinkedList vs int[], HashMap vs LinkedHashMap, …)". That dilemma is gone:
+## `jvm_list` / `jvm_dict` do not pick a Java class at all. They build an
+## interop VIEW over the already-encoded elements, which the guest reads on
+## demand — so there is no container to choose, and no copy to pay for.
+##
+## The cost of not having them was not just an unsupported shape, it was a slow
+## one: with no `EncodeList`, `[1, 2, 3].to_jvm {}` failed to auto-derive, and
+## the only way to hand a guest a sequence was to PRINT IT INTO GUEST SOURCE and
+## have the guest parse it back — O(n) string building plus an O(n) parse, about
+## 19 us fixed and 0.085 us per element (bench/cases/polyglot_seq_crossing).
+## Through the view it is O(1): nothing is converted until the guest asks.
+
+impl EncodeList for JvmC having 'out = JvmForeign where {
+  encode_list = { it, elems, ctx } -> jvm_list { elems = elems },
+}
+
+impl EncodeMap for JvmC having 'out = JvmForeign where {
+  encode_map = { it, entries, ctx } -> jvm_dict {
+    keys = seq::map { xs = entries, f = { x } -> x.key },
+    vals = seq::map { xs = entries, f = { x } -> x.value },
+  },
+}
+
+## A record becomes a dict keyed by FIELD NAME. The walker hands the keys over
+## as `Str` rather than as `'out`, so unlike the values they are encoded here.
+impl EncodeRecord for JvmC having 'out = JvmForeign where {
+  encode_record = { it, fields, ctx } -> jvm_dict {
+    keys = seq::map { xs = fields, f = { x } -> from_str { val = x.key } },
+    vals = seq::map { xs = fields, f = { x } -> x.value },
+  },
+}
+
+## A variant becomes `{ tag }` or `{ tag, value }` — the same two-key shape the
+## JSON codec uses, so a value that crosses as JSON and a value that crosses as
+## a Foreign agree on where the tag lives.
+impl EncodeVariant for JvmC having 'out = JvmForeign where {
+  encode_variant = { it, tag, payload, ctx } -> match payload is
+    Some { val = p } -> jvm_dict {
+      keys = [from_str { val = "tag" }, from_str { val = "value" }],
+      vals = [from_str { val = tag }, p],
+    }
+    None -> jvm_dict {
+      keys = [from_str { val = "tag" }],
+      vals = [from_str { val = tag }],
+    },
+}
 
 ## ---- Tier 2: decode ----------------------------------------------------
 
@@ -161,6 +205,116 @@ impl DecodeOption for JvmC having 'in = JvmForeign where {
   decode_option = { it, val, ctx } ->
     if val.is_null{} then Ok { val = None }
     else Ok { val = Some { val = val } },
+}
+
+## ---- Tier 2: decode, container shapes ----------------------------------
+##
+## The mirror of the four encode impls above. Note the asymmetry in what they
+## read: a list is ARRAY-shaped and a dict is HASH-shaped, and interop models
+## those separately — a dict is not reachable through `get_member`, which is why
+## the record and map decoders go through `hash_at` / `hash_entries` rather than
+## the member vocabulary the rest of this file uses.
+
+## Walk an array-shaped Foreign into a Mezze seq of Foreigns. Indexed rather
+## than iterated: interop hands an array its size up front, and an index walk
+## needs no cursor state.
+let read_elems: { f: JvmForeign, i: Int, n: Int, acc: [JvmForeign] } -> Result [JvmForeign] InteropError =
+  { f, i, n, acc } ->
+    if i >= n then Ok { val = acc }
+    else match f.array_at { index = i } is
+      Ok { val = e } -> read_elems { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = e } }
+      Err { error = e } -> Err { error = e }
+
+## Walk the `[key, value]` pairs `hash_entries` produced into the entry shape
+## `decode_map` must return.
+let read_pairs: { f: JvmForeign, i: Int, n: Int, acc: [{ key: JvmForeign, value: JvmForeign }] }
+  -> Result [{ key: JvmForeign, value: JvmForeign }] InteropError =
+  { f, i, n, acc } ->
+    if i >= n then Ok { val = acc }
+    else match f.array_at { index = i } is
+      Ok { val = pair } -> match pair.array_at { index = 0 } is
+        Ok { val = k } -> match pair.array_at { index = 1 } is
+          Ok { val = v } ->
+            read_pairs { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = { key = k, value = v } } }
+          Err { error = e } -> Err { error = e }
+        Err { error = e } -> Err { error = e }
+      Err { error = e } -> Err { error = e }
+
+impl DecodeList for JvmC having 'in = JvmForeign where {
+  decode_list = { it, val, ctx } -> match val.array_size {} is
+    Ok { val = n } -> match read_elems { f = val, i = 0, n = n, acc = [] } is
+      Ok { val = es } -> Ok { val = es }
+      Err { error = _ } -> decode_error {
+        path = ctx.path,
+        message = "Foreign array element could not be read",
+        expected = "List",
+        found = Some { val = val.type_name{} },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected an array-shaped Foreign",
+      expected = "List",
+      found = Some { val = val.type_name{} },
+    },
+}
+
+impl DecodeMap for JvmC having 'in = JvmForeign where {
+  decode_map = { it, val, ctx } -> match val.hash_entries {} is
+    Ok { val = pairs } -> match pairs.array_size {} is
+      Ok { val = n } -> match read_pairs { f = pairs, i = 0, n = n, acc = [] } is
+        Ok { val = es } -> Ok { val = es }
+        Err { error = _ } -> decode_error {
+          path = ctx.path,
+          message = "Foreign map entry could not be read",
+          expected = "Map",
+          found = Some { val = val.type_name{} },
+        }
+      Err { error = _ } -> decode_error {
+        path = ctx.path,
+        message = "Foreign map entries are not array-shaped",
+        expected = "Map",
+        found = Some { val = val.type_name{} },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected a hash-shaped Foreign",
+      expected = "Map",
+      found = Some { val = val.type_name{} },
+    },
+}
+
+impl DecodeRecord for JvmC having 'in = JvmForeign where {
+  decode_record_field = { it, val, key, ctx } -> match val.hash_at { key = key } is
+    Ok { val = v } -> Ok { val = v }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Missing field: $(key)",
+      expected = key,
+      found = None,
+    },
+}
+
+## Reads back the `{ tag }` / `{ tag, value }` shape `encode_variant` writes.
+## A missing `value` is a payload-free constructor, not an error — that is the
+## only reading available, since the two are encoded as exactly that difference.
+impl DecodeVariant for JvmC having 'in = JvmForeign where {
+  decode_variant = { it, val, ctx } -> match val.hash_at { key = "tag" } is
+    Ok { val = t } -> match t.as_str {} is
+      Ok { val = tag } -> match val.hash_at { key = "value" } is
+        Ok { val = p } -> Ok { val = { tag = tag, payload = Some { val = p } } }
+        Err { error = _ } -> Ok { val = { tag = tag, payload = None } }
+      Err { error = _ } -> decode_error {
+        path = ctx.path,
+        message = "Variant tag is not a string",
+        expected = "Str",
+        found = Some { val = t.type_name{} },
+      }
+    Err { error = _ } -> decode_error {
+      path = ctx.path,
+      message = "Expected a Foreign with a 'tag' entry",
+      expected = "Variant",
+      found = Some { val = val.type_name{} },
+    },
 }
 
 ## ---- Tier 4: sugar abilities + blankets --------------------------------

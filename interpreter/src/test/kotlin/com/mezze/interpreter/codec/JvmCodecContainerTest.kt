@@ -1,0 +1,283 @@
+package com.mezze.interpreter.codec
+
+import com.mezze.interpreter.MezzeTestHelper
+import com.mezze.interpreter.values.MezzeVariant
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+
+/**
+ * Container shapes through the first-party JVM polyglot codec.
+ *
+ * `std::codec::jvm` shipped only the SCALAR half — `EncodeScalar` /
+ * `EncodeOption` and their decode mirrors — so `[1, 2, 3].to_jvm {}` had no
+ * `EncodeList` to auto-derive through and failed to compile. That is the same
+ * gap the third-party `mezze-python` / `mezze-js` providers have, and it is the
+ * reason a Mezze seq reaches a guest by being PRINTED INTO GUEST SOURCE and
+ * parsed back: ~19 us fixed plus ~0.085 us per element, measured in
+ * bench/cases/polyglot_seq_crossing.
+ *
+ * The runtime half was never the blocker — `__native_<lang>_make_list` /
+ * `make_dict` build an interop VIEW over the Mezze values rather than copying,
+ * and NativeDispatch registers them for every guest language from one generic
+ * implementation. Only the codec impls that call them were missing.
+ *
+ * These tests pin the container shapes end to end: encode builds the view,
+ * decode reads it back, and a round-trip returns the original Mezze value.
+ */
+class JvmCodecContainerTest {
+
+    @BeforeEach
+    fun setUp() {
+        com.mezze.language.typechecker.ModuleResolver.clearCache()
+    }
+
+    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+
+    private fun assertOk(result: Any): MezzeVariant {
+        assertTrue(result is MezzeVariant, "Expected MezzeVariant, got $result (${result.javaClass})")
+        val v = result as MezzeVariant
+        assertTrue(v.isOk, "Expected Ok variant, got tag=${v.tag}")
+        return v
+    }
+
+    // ==================== encode: list ====================
+
+    @Test
+    fun `seq of Int encodes to a JvmForeign with array elements`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            let f = [1, 2, 3].to_jvm {}
+            f.array_size {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(3L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `an encoded seq reads back element by element`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            let f = [10, 20, 30].to_jvm {}
+            match f.array_at { index = 1 } is
+              Ok { val = e } -> e.as_int {}
+              Err { error = e } -> Err { error = e }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(20L, v.getPayloadFieldByName("val"))
+    }
+
+    // ==================== decode: list ====================
+
+    @Test
+    fun `a seq of Int round-trips through the JVM codec`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::seq
+            let f = [7, 8, 9].to_jvm {}
+            match f.from_jvm {} is
+              Ok { val = back } -> Ok { val = seq::sum { xs = back } }
+              Err { error = _ } -> Ok { val = 0 - 1 }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(24L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `a nested seq encodes as a view of views`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            let f = [[1, 2], [3, 4, 5]].to_jvm {}
+            match f.array_at { index = 1 } is
+              Ok { val = inner } -> inner.array_size {}
+              Err { error = e } -> Err { error = e }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(3L, v.getPayloadFieldByName("val"))
+    }
+
+    // ==================== records ====================
+
+    @Test
+    fun `a record encodes to a hash-shaped Foreign keyed by field name`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            let f = { count = 42, label = "hi" }.to_jvm {}
+            match f.hash_at { key = "count" } is
+              Ok { val = c } -> c.as_int {}
+              Err { error = e } -> Err { error = e }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(42L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `a record round-trips through the JVM codec`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            pub type Point = { x: Int, y: Int }
+            let f = { x = 3, y = 4 }.to_jvm {}
+            let back: Result Point DecodeError = f.from_jvm {}
+            match back is
+              Ok { val = p } -> Ok { val = p.x * 10 + p.y }
+              Err { error = _ } -> Ok { val = 0 - 1 }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(34L, v.getPayloadFieldByName("val"))
+    }
+
+    // ==================== maps ====================
+
+    @Test
+    fun `a map encodes to a hash-shaped Foreign with one entry per key`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::map
+            let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
+            let f = m.to_jvm {}
+            f.hash_size {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(2L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `an encoded map reads an entry back by key`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::map
+            let m = map::insert { m = map::empty {}, k = "a", v = 7 }
+            let f = m.to_jvm {}
+            match f.hash_at { key = "a" } is
+              Ok { val = v } -> v.as_int {}
+              Err { error = e } -> Err { error = e }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(7L, v.getPayloadFieldByName("val"))
+    }
+
+    /**
+     * DECODING INTO A `Map` IS UNIMPLEMENTED, FOR EVERY FORMAT.
+     *
+     * `CodecGenerator.buildDecodeMap` hands back the entry seq `decode_map`
+     * produced and never rebuilds a `Map` from it, so the value's runtime shape
+     * is not its declared target type. JSON surfaces that as a decode `Err`;
+     * JvmC gets one rung further and reaches `map::size` with the entry seq, which
+     * fails "Expected MezzeMap for field 'm'". Same missing step, two symptoms.
+     * There was no Map-decode test in the suite at all, which is why it stood.
+     *
+     * Deliberately NOT patched by routing through `__native_map_from_list`: that
+     * native calls `put` with no Eq/Hash evidence, which is precisely the
+     * silently-wrong-equality class BUG 13 / BUG 21 / T1.2-T1.5 exist to prevent.
+     * A real fix threads the key's evidence the way `insert_with_evidence` does.
+     *
+     * This test pins the CURRENT behaviour so the fix has a before/after — when
+     * the Map is rebuilt it will start returning 1 and this test must be updated
+     * to assert the round-trip instead.
+     */
+    @Test
+    fun `decoding into a Map is unimplemented in the shared walker`() {
+        val result = eval(
+            """
+            use std::codec::json::{ ToJson, FromJson }
+            use std::collections::map
+            let m = map::insert { m = map::empty {}, k = "a", v = 1 }
+            let j = m.to_json {}
+            let back: Result (Map Str Int) DecodeError = j.from_json {}
+            match back is
+              Ok { val = m2 } -> Ok { val = map::size { m = m2 } }
+              Err { error = _ } -> Ok { val = 0 - 1 }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(-1L, v.getPayloadFieldByName("val"))
+    }
+
+    // ==================== options ====================
+
+    /**
+     * Cross-check against a format that has had containers all along. If JSON
+     * shows the same shape, an Option inside a container is mis-encoded for
+     * EVERY format and the defect is in the shared walker, not in JvmC.
+     */
+    @Test
+    fun `an Option inside a seq encodes through encode_option, not as a tagged variant`() {
+        val result = eval(
+            """
+            use std::codec::json::{ ToJson, to_str }
+            let j = [Some { val = 5 }, None].to_json {}
+            to_str { json = j }
+            """.trimIndent()
+        )
+        assertEquals("[5,null]", result)
+    }
+
+    /**
+     * Isolates the runtime from the codec: a null put into a list view must
+     * still read back as null. If this fails, `decode_option` cannot tell None
+     * from a present value and every Option in a container decodes as its
+     * inner type.
+     */
+    @Test
+    fun `a null survives a round trip through a list view`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ jvm_list, from_int, null_val }
+            let l = jvm_list { elems = [from_int { val = 1 }, null_val {}] }
+            match l.array_at { index = 1 } is
+              Ok { val = e } -> Ok { val = e.is_null {} }
+              Err { error = er } -> Err { error = er }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(true, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `a seq of Option round-trips, preserving None`() {
+        val result = eval(
+            """
+            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ JvmForeign }
+            use std::collections::seq
+            let or_else: { o: Option Int, d: Int } -> Int = { o, d } -> match o is
+              Some { val = n } -> n
+              None -> d
+            let f = [Some { val = 5 }, None, Some { val = 7 }].to_jvm {}
+            let back: Result [Option Int] DecodeError = f.from_jvm {}
+            match back is
+              Ok { val = xs } -> Ok {
+                val = seq::sum { xs = seq::map { xs = xs, f = { x } -> or_else { o = x, d = 100 } } },
+              }
+              Err { error = e } -> Ok { val = e.message }
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(112L, v.getPayloadFieldByName("val"))
+    }
+}

@@ -834,6 +834,21 @@ class AbilityChecker internal constructor(
             return require("${prefix}Scalar")
         }
 
+        // An Option spelled structurally (`| Some { val }, None |`) needs the same
+        // Option hook its `TypeApplication` spelling does, NOT the variant hook —
+        // exactly as CodecGenerator now emits for it. The two must agree: when this
+        // demanded ...Variant while the emit called encode_option, a format carrying
+        // both got a value encoded as a tagged variant and read back as an option.
+        if (BuiltinTypes.isOptionVariant(dataType)) {
+            return require("${prefix}Option") ?: run {
+                val inner = (dataType as MezzeType.VariantType).typeArgs.firstOrNull()
+                    ?: (dataType.constructors[BuiltinTypes.SOME] as? MezzeType.RecordType)
+                        ?.fields?.get(BuiltinTypes.VAL_FIELD)
+                    ?: return@run null
+                walkTier2Capabilities(inner, configType, isEncode, path + "?")
+            }
+        }
+
         return when (dataType) {
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.CharType,

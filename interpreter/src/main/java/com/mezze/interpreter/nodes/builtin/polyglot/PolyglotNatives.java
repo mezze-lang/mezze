@@ -490,6 +490,80 @@ public final class PolyglotNatives {
         }
     }
 
+    // ==================== Hashes ====================
+    //
+    // The READ side of {@link #makeDict}. `makeDict` builds a
+    // {@link ForeignContainers.ForeignDict}, which is HASH-shaped — it exports
+    // hasHashEntries / readHashValue / getHashEntriesIterator, not members — so
+    // none of the member or array natives above can read one back. Without
+    // these four, a codec could encode a Mezze Map or record into a guest dict
+    // and then had no way to decode it: the write side shipped with no mirror.
+    //
+    // A guest dict from Python or JavaScript is hash-shaped too, so the same
+    // four natives read a guest-built mapping and a Mezze-built one alike.
+
+    @TruffleBoundary
+    public static boolean hasHashEntries(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        return InteropLibrary.getUncached().hasHashEntries(f.getDelegate());
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant hashSize(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        try {
+            return MezzeVariant.ok(InteropLibrary.getUncached().getHashSize(f.getDelegate()));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Read one entry by key. The key is unwrapped exactly like a call argument:
+     * a caller holding a `JvmForeign` key passes the Foreign, and the guest must
+     * see the delegate. A bare Mezze value (a Str field name) is passed through
+     * as-is — ForeignDict normalizes guest strings to Java Strings on lookup.
+     */
+    @TruffleBoundary
+    public static MezzeVariant readHash(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        Object key = getField(args, "key");
+        Object rawKey = key instanceof MezzeForeign mf ? mf.getDelegate() : key;
+        try {
+            Object result = InteropLibrary.getUncached().readHashValue(f.getDelegate(), rawKey);
+            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * All entries, as a list-shaped Foreign whose elements are two-element
+     * [key, value] lists.
+     *
+     * Interop hands hash entries back as an ITERATOR, which Mezze has no way to
+     * consume — there is no interop-iterator native and adding one would expose a
+     * mutable cursor to pure code. Draining it here into the same
+     * {@link ForeignContainers.ForeignList} view the rest of the surface already
+     * reads keeps `decode_map` to the array natives it already uses for lists.
+     */
+    @TruffleBoundary
+    public static MezzeVariant hashEntries(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        InteropLibrary interop = InteropLibrary.getUncached();
+        try {
+            Object iterator = interop.getHashEntriesIterator(f.getDelegate());
+            java.util.ArrayList<Object> pairs = new java.util.ArrayList<>();
+            while (interop.hasIteratorNextElement(iterator)) {
+                pairs.add(interop.getIteratorNextElement(iterator));
+            }
+            return MezzeVariant.ok(new MezzeForeign(
+                new ForeignContainers.ForeignList(pairs.toArray()), f.getSourceLanguage()));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
     // ==================== Execution ====================
 
     @TruffleBoundary

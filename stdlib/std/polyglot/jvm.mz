@@ -92,6 +92,21 @@ impl JvmForeign where {
   ## Number of elements in an array-shaped Foreign.
   array_size    = { it } ->
     __native_polyglot_array_size     { val = it },
+  ## True iff this Foreign is hash-shaped (a dict / mapping). Interop models
+  ## hashes and members separately, so a mapping is NOT readable through
+  ## `get_member` — it is reached through the three methods below.
+  has_hash      = { it } ->
+    __native_polyglot_has_hash_entries { val = it },
+  ## Number of entries in a hash-shaped Foreign.
+  hash_size     = { it } ->
+    __native_polyglot_hash_size      { val = it },
+  ## Read one entry by key. The key may be a Foreign or a bare Mezze value.
+  hash_at       = { it, key } ->
+    __native_polyglot_read_hash      { val = it, key = key },
+  ## Every entry, as an array-shaped Foreign whose elements are two-element
+  ## `[key, value]` Foreigns — the shape a codec's `decode_map` walks.
+  hash_entries  = { it } ->
+    __native_polyglot_hash_entries   { val = it },
   ## Coerce a numeric Foreign to Int.
   as_int        = { it } -> __native_polyglot_as_long    { val = it },
   ## Coerce a string Foreign to Str.

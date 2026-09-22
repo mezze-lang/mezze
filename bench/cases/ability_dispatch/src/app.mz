@@ -1,0 +1,138 @@
+# ability_dispatch — what does calling an ability method cost, versus a
+# plain function call?
+#
+# This is the control-row decomposition that `polyglot_interop` does for
+# interop, applied to dispatch. Every loop below is the SAME shape — same
+# recursion, same accumulator, same arithmetic — and differs only in how its
+# one call in the body is dispatched. So the difference between two rows is
+# the dispatch, and nothing else.
+#
+# It exists because two separate performance questions turned out to point at
+# the same suspect:
+#
+#   * the polyglot dot-chain costs 187 ns more than the matched spelling, and
+#     the second step of the chain is an ability method on `Result`;
+#   * container encode calls `config.encode_int` per element, and for JSON
+#     that method is a pure variant construction — so whatever it costs is
+#     dispatch, not work.
+#
+# Read `inline` first: it is the loop with no call at all. Everything above
+# it is what a call costs on this path.
+#
+# ---- WHAT IT ACTUALLY MEASURED, 2026-09-22 (JVM dev path, 4M iters) ----
+#
+#   inline   (no call)          150 ns/iter
+#   direct   (plain fn)         119 ns/iter
+#   ability  (concrete recv)    215 ns/iter
+#   ability  (with-constraint)  121 ns/iter
+#
+# DO NOT QUOTE THESE NUMBERS. They contradict each other twice over: `direct`
+# beats `inline`, and a call cannot cost less than no call; and dispatching
+# through a `with` constraint beats dispatching on a concrete receiver, which is
+# backwards. At this granularity the difference between two loops is dominated by
+# how each one happened to get compiled, not by its dispatch. A single run per
+# row cannot resolve the effect being looked for — take a min over several
+# interleaved runs before believing any gap here.
+#
+# The question this was built to answer was settled by READING THE CODE instead,
+# and the answer is that there is no penalty to find: BytecodeCompiler lowers an
+# ability method to `CallIndirectIR(ReadField(dict, opName), MakeRecord{…})`, and
+# `MezzeBytecodeRootNode.CallIndirect` already caches the CallTarget (guarded on
+# identity, limit 3) and calls it through a `forceInlining()` DirectCallNode. A
+# call site with a stable receiver dictionary is ALREADY direct and inlined; only
+# a 4th distinct target falls back to IndirectCallNode. See task #92.
+
+use std::effects::log::{println, Console, Log}
+use std::effects::time::{ monotonic, Time, SystemTime }
+use std::datetime::{ Duration, sub_duration, duration_to_nanos }
+use std::int
+
+let iters = 4000000
+
+## The ability under test. One method, one Int in, one Int out — deliberately
+## trivial, so the body cannot dominate the dispatch.
+ability Step for 'c where {
+  step: { it: 'c, x: Int } -> Int,
+}
+
+## A concrete config type, shaped like the codec configs (a record, not a
+## newtype) so the dispatch has a real record receiver to key on.
+pub type Cfg = {
+  bump: Int,
+}
+
+impl Step for Cfg where {
+  step = { it, x } -> x + 1,
+}
+
+let cfg: Cfg = { bump = 1 }
+
+## ---- 1. inline — no call at all. THE CONTROL ROW. ----
+let loop_inline: { n: Int, acc: Int } -> Int =
+  { n, acc } ->
+    if n <= 0 then acc
+    else loop_inline { n = n - 1, acc = acc + n + 1 }
+
+## ---- 2. direct — a plain top-level function ----
+let plain: { x: Int } -> Int = { x } -> x + 1
+
+let loop_direct: { n: Int, acc: Int } -> Int =
+  { n, acc } ->
+    if n <= 0 then acc
+    else loop_direct { n = n - 1, acc = acc + plain { x = n } }
+
+## ---- 3. ability, CONCRETE receiver ----
+## `cfg` has type `Cfg`, so the impl is knowable at compile time. This is the
+## shape a generated codec impl body has: `config` is concrete there too.
+let loop_ability: { c: Cfg, n: Int, acc: Int } -> Int =
+  { c, n, acc } ->
+    if n <= 0 then acc
+    else loop_ability { c = c, n = n - 1, acc = acc + c.step { x = n } }
+
+## ---- 4. ability, through a `with` CONSTRAINT ----
+## The caller is generic over 'c, so the impl arrives as evidence rather than
+## being known at the call. This is the shape the Tier-4 codec sugar has
+## (`to_json` is `with Encode JsonC 'a`), and the shape a polyglot chain step
+## has when it threads through `impl ... for Result`.
+let via_dict: { c: 'c, x: Int } with Step 'c -> Int = { c, x } -> c.step { x = x }
+
+let loop_dict: { c: Cfg, n: Int, acc: Int } -> Int =
+  { c, n, acc } ->
+    if n <= 0 then acc
+    else loop_dict { c = c, n = n - 1, acc = acc + via_dict { c = c, x = n } }
+
+let report: { label: Str, got: Int, t0: Duration, t1: Duration } -> {} <Log> =
+  { label, got, t0, t1 } -> do
+    let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+    let per = ns / iters
+    println { msg = "  $(label)  $(int::to_str { n = per }) ns/iter   (got $(int::to_str { n = got }))" }
+
+## Each loop is run once untimed before it is measured: a first run reports
+## interpreter cost, not steady state, and at 4M iterations the warm-up is a
+## rounding error next to the measured run.
+let main = {} -> perform Console in perform SystemTime in do
+  println { msg = "ability_dispatch: $(int::to_str { n = iters }) iterations per loop" }
+
+  let _w1 = loop_inline { n = iters, acc = 0 }
+  let a0 = monotonic {}
+  let a = loop_inline { n = iters, acc = 0 }
+  let a1 = monotonic {}
+  let _ = report { label = "inline   (no call)      ", got = a, t0 = a0, t1 = a1 }
+
+  let _w2 = loop_direct { n = iters, acc = 0 }
+  let b0 = monotonic {}
+  let b = loop_direct { n = iters, acc = 0 }
+  let b1 = monotonic {}
+  let _ = report { label = "direct   (plain fn)     ", got = b, t0 = b0, t1 = b1 }
+
+  let _w3 = loop_ability { c = cfg, n = iters, acc = 0 }
+  let c0 = monotonic {}
+  let c = loop_ability { c = cfg, n = iters, acc = 0 }
+  let c1 = monotonic {}
+  let _ = report { label = "ability  (concrete recv)", got = c, t0 = c0, t1 = c1 }
+
+  let _w4 = loop_dict { c = cfg, n = iters, acc = 0 }
+  let d0 = monotonic {}
+  let d = loop_dict { c = cfg, n = iters, acc = 0 }
+  let d1 = monotonic {}
+  report { label = "ability  (with-constraint)", got = d, t0 = d0, t1 = d1 }

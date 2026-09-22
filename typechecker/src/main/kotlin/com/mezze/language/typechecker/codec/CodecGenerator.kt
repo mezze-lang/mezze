@@ -112,6 +112,16 @@ class CodecGenerator(
     /** Encode a value of [type] bound to [valueExpr] into the format's output. */
     private fun buildEncodeExpr(type: MezzeType, valueExpr: ParsedExpr): ParsedExpr {
         if (PrimitiveTypes.isBoolVariant(type)) return scalarEncode("encode_bool", valueExpr)
+        // An Option has TWO representations — `TypeApplication(OPTION, [t])` and the
+        // structural `VariantType(Some|None)` — and only the first was caught, by the
+        // branch below. The structural one fell through to the generic VariantType
+        // case and encoded as a TAGGED VARIANT, so `[Some {val=5}, None]` came out as
+        // `[{"tag":"Some","value":{"val":5}},{"tag":"None"}]` instead of `[5,null]`,
+        // and no container of Options round-tripped in ANY format: the encode wrote a
+        // variant while the decode read `decode_option`. Checked here, ahead of the
+        // `when`, for the same reason Bool is: a builtin that happens to be spelled as
+        // a variant is not a user variant. Keyed on the ARMS, not on the type's name.
+        asOptionVariant(type)?.let { return buildEncodeOption(optionInner(it), valueExpr) }
         return when (type) {
             is MezzeType.IntType    -> scalarEncode("encode_int",   valueExpr)
             is MezzeType.FloatType  -> scalarEncode("encode_float", valueExpr)
@@ -385,6 +395,26 @@ class CodecGenerator(
         return buildEncodeMap(k, v, valueExpr, toSeqNative)
     }
 
+    /**
+     * [type] as the structural spelling of a builtin `Option`, or null if it is
+     * something else. Recognised by its ARMS — `Some` carrying a payload and a
+     * payload-free `None`, closed — never by a name, so a `TypeApplication` and a
+     * `VariantType` describing the same Option are treated as the one type they are.
+     */
+    private fun asOptionVariant(type: MezzeType): MezzeType.VariantType? =
+        (type as? MezzeType.VariantType)?.takeIf { BuiltinTypes.isOptionVariant(it) }
+
+    /**
+     * An option variant's payload type: its type-arg vector when it carries one,
+     * otherwise the `val` field of the `Some` arm, which [BuiltinTypes.isOptionVariant]
+     * has already established is present. Null means the payload is opaque, which
+     * [buildEncodeOption] and [buildDecodeOption] both accept.
+     */
+    private fun optionInner(variant: MezzeType.VariantType): MezzeType? =
+        variant.typeArgs.firstOrNull()
+            ?: (variant.constructors[BuiltinTypes.SOME] as? MezzeType.RecordType)
+                ?.fields?.get(BuiltinTypes.VAL_FIELD)
+
     private fun buildEncodeOption(innerType: MezzeType?, valueExpr: ParsedExpr): ParsedExpr {
         val optionVal = if (innerType == null) {
             valueExpr // opaque `Option 'a` — hand it to the format as-is.
@@ -411,6 +441,11 @@ class CodecGenerator(
     /** Decode [type] out of [inputExpr]. Returns `Result <type> DecodeError`. */
     private fun buildDecodeExpr(type: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
         if (PrimitiveTypes.isBoolVariant(type)) return scalarDecode("decode_bool", inputExpr)
+        // Mirrors the encode side: a structurally-spelled Option decodes through
+        // `decode_option`, not as a tagged variant. Both sides must agree on which
+        // of an Option's two representations means what, or a value encoded one way
+        // is read back the other.
+        asOptionVariant(type)?.let { return buildDecodeOption(optionInner(it), inputExpr) }
         return when (type) {
             is MezzeType.IntType    -> scalarDecode("decode_int",   inputExpr)
             is MezzeType.FloatType  -> scalarDecode("decode_float", inputExpr)

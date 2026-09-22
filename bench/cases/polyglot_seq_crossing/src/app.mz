@@ -17,6 +17,15 @@
 # `impl EncodeList` is missing (BUG 2's provider half; patches written and
 # validated, unlanded in the provider repos).
 #
+# AS OF 2026-09-22 THE FIRST-PARTY SIDE IS DONE, and this bench is now measuring
+# a workaround that only the THIRD-PARTY providers still need. `std::codec::jvm`
+# has the full container half — EncodeList / EncodeMap / EncodeRecord /
+# EncodeVariant over `jvm_list` / `jvm_dict`, plus the decode mirrors and the
+# four hash-read natives that `make_dict` had been shipped without. So
+# `[1,2,3].to_jvm {}` is the O(1) view this file says does not exist, and it is
+# the reference the mezze-python / mezze-js patches should match. This case
+# stays on GraalJS because that is where the O(n) path still lives.
+#
 # MEASURED 2026-09-22 (GraalJS, 2000 reps, warmed):
 #
 #   n=3      19 us/crossing

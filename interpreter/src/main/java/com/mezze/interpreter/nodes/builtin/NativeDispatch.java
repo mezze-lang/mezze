@@ -4331,6 +4331,18 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.makeList(r));
         HANDLERS.put("__native_polyglot_make_dict",
             (r, c) -> PolyglotNatives.makeDict(r));
+        // ...and make_dict's own mirror. A ForeignDict is HASH-shaped, so none
+        // of the member or array natives can read one back: the build side
+        // shipped without a read side, which left `decode_map` /
+        // `decode_record_field` with nothing to call.
+        HANDLERS.put("__native_polyglot_has_hash_entries",
+            (r, c) -> PolyglotNatives.hasHashEntries(r));
+        HANDLERS.put("__native_polyglot_hash_size",
+            (r, c) -> PolyglotNatives.hashSize(r));
+        HANDLERS.put("__native_polyglot_read_hash",
+            (r, c) -> PolyglotNatives.readHash(r));
+        HANDLERS.put("__native_polyglot_hash_entries",
+            (r, c) -> PolyglotNatives.hashEntries(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",
