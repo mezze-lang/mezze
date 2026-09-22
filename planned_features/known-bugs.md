@@ -1729,9 +1729,20 @@ Track 2 — elaborate once (~7–9 weeks, each phase mergeable behind a flag)
   not the state now: `Set`/`Map` declare `with Eq` on every operation that buckets
   or looks up, and `EvidenceSetStorage` is the tier that asks the element.
 
-  **What remains open is narrower: threading the instance through GENERIC
-  container functions. BUILT, MEASURED, AND REVERTED**, because the discriminator
-  it needs does not exist yet.
+  **The GENERIC case works too — verified 2026-09-22 and now pinned.** This is
+  where the entry used to say "Still OPEN", on the strength of the reverted
+  attempt described below. Measured through the CLI and added to
+  `HashContainerInstanceTest`: a generic helper (`with Eq 'a, Hash 'a`) over a
+  `Set` answers 1 for the mod-10 newtype; TWO generic layers still answer 1; the
+  SAME helper at `Int` still answers 3; and a generic `Map` key two layers deep
+  answers 1. So the element's instance does reach the container when the element
+  is a type variable the whole way — it arrives with the dictionary, via
+  `with Eq, Hash` on the operations plus the evidence natives, rather than via
+  the closure-threading below.
+
+  **What follows is the record of an ATTEMPT, not of an open defect.** It is kept
+  because it says precisely why the closure-threading design cannot be the answer,
+  which is worth knowing before anyone builds it a third time.
 
   The whole chain was implemented and works: an `ElementInstance` (the element's
   `eq` + `hash` as JDK functional interfaces, mirroring `ElementComparator`), an

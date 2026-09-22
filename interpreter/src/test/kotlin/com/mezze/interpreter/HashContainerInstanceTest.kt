@@ -122,4 +122,86 @@ class HashContainerInstanceTest {
             ),
         )
     }
+
+    // ── …and through GENERIC callers, which nothing pinned before ─────────
+    //
+    // Every case above calls the container at a CONCRETE element type. The
+    // interesting question is what happens when the element is a type variable
+    // all the way down, because then the instance cannot be chosen at the call —
+    // it has to arrive with the dictionary.
+    //
+    // known-bugs.md recorded that as still open on the strength of an
+    // implementation attempt that was built and REVERTED: having the stdlib pass
+    // the element's closures for EVERY type, which made `Set Int` instance-backed
+    // and reordered its rendering. The goal that attempt was chasing is met by a
+    // different mechanism — `with Eq, Hash` on the operations plus the evidence
+    // natives — and these tests say so, so the claim cannot drift again.
+
+    /** One generic layer: the helper is generic, the call site is concrete. */
+    @Test
+    fun `a generic caller honours the element's Eq`() {
+        assertEquals(
+            1L,
+            run(
+                """
+                use std::collections::set
+                let add_both: { s: Set 'a, x: 'a, y: 'a } with Eq 'a, Hash 'a -> Set 'a =
+                  { s, x, y } -> set::insert { s = set::insert { s = s, x = x }, x = y }
+                set::size { s = add_both { s = set::empty {}, x = P.(1), y = P.(11) } }
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** TWO generic layers, so the element is a variable in both frames. */
+    @Test
+    fun `two generic layers still honour the element's Eq`() {
+        assertEquals(
+            1L,
+            run(
+                """
+                use std::collections::set
+                let build: { xs: ['a] } with Eq 'a, Hash 'a -> Set 'a = { xs } -> set::from_seq { xs = xs }
+                let count: { xs: ['a] } with Eq 'a, Hash 'a -> Int = { xs } -> set::size { s = build { xs = xs } }
+                count { xs = [P.(1), P.(11), P.(21)] }
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** The SAME generic helper at a primitive must keep the primitive answer.
+     *  This is the half the reverted attempt broke, and it is why the fix could
+     *  never be "always pass the closures". */
+    @Test
+    fun `the same generic helper keeps distinct primitives distinct`() {
+        assertEquals(
+            3L,
+            run(
+                """
+                use std::collections::set
+                let build: { xs: ['a] } with Eq 'a, Hash 'a -> Set 'a = { xs } -> set::from_seq { xs = xs }
+                let count: { xs: ['a] } with Eq 'a, Hash 'a -> Int = { xs } -> set::size { s = build { xs = xs } }
+                count { xs = [1, 2, 3] }
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** A generic MAP key, two layers deep. */
+    @Test
+    fun `a generic Map caller honours the key's Eq`() {
+        assertEquals(
+            1L,
+            run(
+                """
+                use std::collections::map
+                let put2: { m: Map 'k Int, a: 'k, b: 'k } with Eq 'k, Hash 'k -> Map 'k Int =
+                  { m, a, b } -> map::insert { m = map::insert { m = m, k = a, v = 1 }, k = b, v = 2 }
+                let keyed: { a: 'k, b: 'k } with Eq 'k, Hash 'k -> Int =
+                  { a, b } -> map::size { m = put2 { m = map::empty {}, a = a, b = b } }
+                keyed { a = P.(1), b = P.(11) }
+                """.trimIndent(),
+            ),
+        )
+    }
 }
