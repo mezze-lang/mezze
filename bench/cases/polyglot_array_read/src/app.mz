@@ -29,6 +29,34 @@
 # on both sides. The real signal is that per-element scales with n (29 -> 228 us
 # for 10x the elements) while whole-array stays near flat: the per-element path
 # pays a crossing per element and the whole-array path pays one for the array.
+#
+# ---- AND IT PRICES THE INTEROP MESSAGE ITSELF ----
+#
+# The whole-array row does the SAME 1000 `readArrayElement` calls, with the same
+# uncached InteropLibrary, as the per-element row. It just does them on the far
+# side of one boundary. So:
+#
+#   interop op + wrapping the result, inside the boundary ....  ~10 ns each
+#     (10 us / 1000 elements, including building the seq)
+#   the same read driven from Mezze ..........................  ~228 ns each
+#   => generic native-call overhead ..........................  ~218 ns each
+#
+# THE INTEROP MESSAGE IS ~4% OF WHAT A POLYGLOT OPERATION COSTS. The rest is the
+# per-native-call path: a @TruffleBoundary, the handler-map dispatch, a `Result`
+# allocation and a `MezzeForeign` allocation, all of which are paid once per call
+# regardless of what the call does.
+#
+# That is why caching the InteropLibrary and making the member name a PE constant
+# do not pay (#89): behind a @TruffleBoundary nothing folds, nothing scalarizes
+# and no inline cache forms — and the thing they would speed up is the 10 ns, not
+# the 218. The boundary is not an oversight either: `CallNativeRecord` is
+# deliberately bounded because the SVM blocklist checker does not respect
+# @TruffleBoundary on BDSL-generated operations, which is what #402 needed for
+# the 28x native build.
+#
+# So the lever for polyglot performance is the NUMBER of crossings, not the price
+# of one — which is what this change does, and what the container codec does for
+# the other direction.
 use std::effects::log::{ println, Console, Log }
 use std::effects::time::{ monotonic, Time, SystemTime }
 use std::datetime::{ Duration, sub_duration, duration_to_nanos }
