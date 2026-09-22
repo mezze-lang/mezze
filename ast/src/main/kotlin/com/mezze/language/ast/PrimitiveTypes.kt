@@ -4,11 +4,18 @@ object PrimitiveTypes {
 
     // Canonical source-level names for the primitive types. Single source so callers
     // key on these constants instead of re-typing the literal (e.g. BuiltinAbilities).
+    //
+    // EVERY constant here round-trips through `nameToType` below. `Nat` deliberately
+    // has no constant: it is NOT a primitive, it is a stdlib newtype over Int
+    // (`pub newtype Nat = Int`, stdlib/std/nat.mz), materialised at literal sites by
+    // `natLiteralType()` in ExprLiteralConstraints. A `NAT` constant used to sit in
+    // this list with no map entry and no callers, so `fromName(NAT)` returned null
+    // and `isPrimitiveName(NAT)` was false — a constant that read as authoritative
+    // and answered nothing. If you need Nat's name, take it from its declaration.
     const val INT = "Int"
     const val FLOAT = "Float"
     const val BOOL = "Bool"
     const val STR = "Str"
-    const val NAT = "Nat"
     const val FRAC = "Frac"
     const val CHAR = "Char"
     const val BYTES = "Bytes"
