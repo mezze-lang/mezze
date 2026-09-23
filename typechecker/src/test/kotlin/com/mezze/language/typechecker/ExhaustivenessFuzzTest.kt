@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -43,22 +44,31 @@ class ExhaustivenessFuzzTest {
         parser = MezzeParser(); tc = TypeChecker()
     }
 
-    /** null ⇒ accepted; else the error message. */
-    private fun check(src: String): String? =
-        try { tc.typeCheck(parser.parseParsedModule(src, "fuzz.mz"), Paths.get("."), enablePrelude = true); null }
-        catch (e: TypeCheckError) { e.message }
+    /** null ⇒ accepted; else the rejection. */
+    private data class Rejection(val code: ErrorCode, val message: String)
 
-    /** Is this message a NON-EXHAUSTIVENESS rejection (the thing we test)? Other
-     *  rejections (unreachable arm, shadowing, parse) are unrelated noise here. */
-    private fun isNonExhaustivenessError(msg: String): Boolean {
-        val m = msg.lowercase()
-        val isExhaust = m.contains("non-exhaustive") || m.contains("not exhaustive") ||
-            m.contains("no arm covers") || m.contains("missing") ||
-            m.contains("cannot be exhaustive")
-        // An "unreachable" report is a DIFFERENT decision; don't count it as a
-        // non-exhaustiveness rejection.
-        return isExhaust && !m.contains("unreachable") && !m.contains("never execute")
-    }
+    private fun check(src: String): Rejection? =
+        try { tc.typeCheck(parser.parseParsedModule(src, "fuzz.mz"), Paths.get("."), enablePrelude = true); null }
+        catch (e: TypeCheckError) { Rejection(e.code, e.message ?: "") }
+
+    /**
+     * Is this rejection a NON-EXHAUSTIVENESS verdict — the one decision under
+     * test? Other rejections (unreachable arm, shadowing, parse) are unrelated
+     * noise and must not count either way.
+     *
+     * Keyed on the CODE. This used to ask the message: `contains("non-exhaustive")
+     * || contains("not exhaustive") || contains("no arm covers") ||
+     * contains("missing") || contains("cannot be exhaustive")`, minus
+     * `contains("unreachable")`. An oracle made of diagnostic prose degrades
+     * silently — reword the message and P1 (no false-positive rejection) simply
+     * stops noticing the rejections it is supposed to catch, while the fuzzer
+     * keeps reporting 0 violations. `contains("missing")` was the loudest problem:
+     * it also matches "missing required fields" and "missing field", so unrelated
+     * record errors were being counted as exhaustiveness verdicts.
+     */
+    private fun isNonExhaustivenessError(r: Rejection): Boolean =
+        r.code == ErrorCode.V0601_NON_EXHAUSTIVE_MATCH ||
+            r.code == ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN
 
     // Generated closed variant: name + constructor names (all nullary/unit).
     private data class Variant(val name: String, val ctors: List<String>)
@@ -150,17 +160,17 @@ ${arms.toString().trimEnd()}
                 genVariantMatch(rng, genVariant(rng, i))
             }
 
-            val msg = check(src)
-            val rejectedAsNonExhaustive = msg != null && isNonExhaustivenessError(msg)
+            val rejection = check(src)
+            val rejectedAsNonExhaustive = rejection != null && isNonExhaustivenessError(rejection)
 
             if (expectedExhaustive && rejectedAsNonExhaustive) {
                 // P1 violation: false-positive rejection.
-                failures.add("FALSE-POSITIVE (exhaustive rejected) seed=$seed iter=$i\n$src\n-> $msg")
+                failures.add("FALSE-POSITIVE (exhaustive rejected) seed=$seed iter=$i\n$src\n-> ${rejection?.code} ${rejection?.message}")
             } else if (!expectedExhaustive && !rejectedAsNonExhaustive) {
                 // P2 violation: false-negative acceptance. (msg may be non-null
                 // for an unrelated reason; only a MISSING non-exhaustiveness
                 // verdict is the bug.)
-                failures.add("FALSE-NEGATIVE (non-exhaustive accepted) seed=$seed iter=$i\n$src\n-> ${msg ?: "accepted"}")
+                failures.add("FALSE-NEGATIVE (non-exhaustive accepted) seed=$seed iter=$i\n$src\n-> ${rejection?.let { it.code.toString() + " " + it.message } ?: "accepted"}")
             }
         }
         if (failures.isNotEmpty()) {
