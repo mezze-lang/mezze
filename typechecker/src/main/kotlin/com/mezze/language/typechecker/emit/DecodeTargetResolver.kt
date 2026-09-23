@@ -362,12 +362,14 @@ object DecodeTargetResolver {
      * and could select each other's decoder. Which of the two fired depended on
      * which representation the solve happened to settle on.
      *
-     * Only the Bool half has a regression test (`threeDifferentShapes`): the
-     * derived codec does not decode a user variant from a JSON string, so two
-     * variant-fielded targets cannot be reached through `from_json` today. The
-     * collision is still closed here rather than left for whoever adds that.
+     * The Bool half has an end-to-end regression test
+     * (`JsonDecodeExhaustiveTest.threeDifferentShapes`). The variant half cannot
+     * be reached through `from_json` today — the derived codec does not decode a
+     * user variant from a JSON string — so it is pinned directly by
+     * `DecodeTargetStructuralKeyTest` instead of left to whoever adds that path.
+     * That is why this is `internal` rather than private.
      */
-    private fun structural(t: MezzeType): String = when (t) {
+    internal fun structural(t: MezzeType): String = when (t) {
         is MezzeType.RecordType ->
             "{" + t.fields.toSortedMap().entries.joinToString(",") { "${it.key}:${structural(it.value)}" } + "}"
         is MezzeType.TypeApplication -> t.constructor + "(" + t.args.joinToString(",") { structural(it) } + ")"
