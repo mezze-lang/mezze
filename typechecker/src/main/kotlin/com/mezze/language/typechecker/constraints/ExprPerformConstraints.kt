@@ -162,15 +162,26 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
                     loc = expr.loc,
                     errorType = ErrorType.CONSTRAINT_VIOLATION,
                     code = ErrorCode.V0510_HANDLER_UNNECESSARY,
+                    // Three hints, not four. The rule comes first because every
+                    // other line is an instance of it; then the ONE shape that
+                    // surprises people (a call bound to a variable has already
+                    // left the body); then the deferral idiom for when the call
+                    // genuinely cannot move.
+                    //
+                    // A fourth used to say "if you meant to handle a different
+                    // effect, change the handler". It cannot help here: this
+                    // branch fires only when the body performs NO effect at all,
+                    // so no handler would fire, whichever effect it named.
                     hints = listOf(
-                        "`perform` only handles effects performed INSIDE its body — wrap the call " +
-                            "that performs '$effectName' in it: `perform $handlerName in <that call>`.",
-                        "if you bound the call to a variable first (`let x = <call>`), its effect " +
-                            "already rose to the enclosing function; move the call into the `perform` " +
-                            "body, or wrap the enclosing block: `perform $handlerName in do …`.",
-                        "to defer handling, make it a thunk and force it in the perform: " +
-                            "`let x = {} -> <call>` then `perform $handlerName in x {}`.",
-                        "if you meant to handle a different effect, change the handler.",
+                        "`perform` handles effects performed INSIDE its body, and nothing else — " +
+                            "put the call that performs '$effectName' in it: " +
+                            "`perform $handlerName in <that call>`.",
+                        "a call bound to a variable has already left the body: after " +
+                            "`let x = <call>`, the effect rose to the enclosing function and the " +
+                            "`perform` never sees it. Move the call in, or widen the body: " +
+                            "`perform $handlerName in do …`.",
+                        "if the call cannot move, defer it — `let x = {} -> <call>`, then " +
+                            "`perform $handlerName in x {}` performs it inside the body.",
                     ),
                 )
             }
