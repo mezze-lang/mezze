@@ -1163,6 +1163,14 @@ module.exports = grammar({
     bool_literal: _ => choice('True', 'False'),
     unit_literal: _ => seq('(', ')'),
 
+    // The closing quote is REQUIRED — an optional one was tried and is a
+    // disaster. With `optional('"')` the lexer takes a lone `"` as a complete
+    // EMPTY string, so `let greeting = "hello"` parsed as: empty string, then
+    // `hello` as a VARIABLE, then another empty string. `prec.right` does not
+    // help, because the damage is done at tokenisation, before any
+    // associativity applies. Caught by the hand-written corpus trees, which
+    // parity would have missed entirely — parity only asks "any ERROR node?",
+    // and that wreck has none.
     string_literal: $ => seq(
       '"',
       repeat(choice(
@@ -1176,8 +1184,24 @@ module.exports = grammar({
     // Ordinary string text: any run of chars that isn't a quote, backslash, or
     // `$`, PLUS a lone `$` that doesn't begin an interpolation (`$100`, `$` at
     // end). The `$(` form is claimed by string_interpolation (longer token).
+    // Ordinary string text — and it does NOT cross a newline.
+    //
+    // A multi-line string is legal Mezze (the parser accepts one), but there are
+    // ZERO of them in the stdlib and examples against ~507 single-line literals.
+    // An UNTERMINATED string, by contrast, is what the editor sees on every
+    // keystroke between `"` and the closing quote — and while the string stayed
+    // open, its content ate the following declarations. Typing
+    //
+    //     let s = "total: $(f { x =
+    //
+    // used to stop everything below it from highlighting. Ending the content at
+    // the newline confines that to one line.
+    //
+    // The trade is explicit: a genuine multi-line string highlights as an
+    // unterminated one, which nothing in the corpus writes, in exchange for the
+    // half-typed case — which is continuous — staying local.
     string_content: _ => token(prec(-1, choice(
-      /[^"\\$]+/,
+      /[^"\\$\n]+/,
       /\$/,
     ))),
 
@@ -1219,7 +1243,7 @@ module.exports = grammar({
     // real expression token is preferred while the expression is still being
     // built; `)` and `"` are excluded so this can never swallow the closing
     // paren or escape the string.
-    interpolation_ignored: _ => token(prec(-1, /[^)"]+/)),
+    interpolation_ignored: _ => token(prec(-1, /[^)"\n]+/)),
 
     // ===== Identifiers =====
 
