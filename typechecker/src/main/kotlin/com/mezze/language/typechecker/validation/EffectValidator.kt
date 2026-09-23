@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.validation
 
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.ParsedEffectDecl
 import com.mezze.language.parsedast.ParsedPerformerDecl
 import com.mezze.language.ast.ScopedEffectConstants
@@ -44,6 +45,7 @@ class EffectValidator(
                             "but implementation '${implDecl.performerName}' does not provide bindings. " +
                             "Use: impl ${implDecl.effect.localName} for ${implDecl.performerName} having ${effectAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
                     loc = implDecl.loc,
+                    code = ErrorCode.V0413_MISSING_ASSOCIATED_TYPE_BINDING,
                 )
             )
         }
@@ -56,6 +58,7 @@ class EffectValidator(
                             "but implementation '${implDecl.performerName}' is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                             "All associated types must be bound in the implementation.",
                     loc = implDecl.loc,
+                    code = ErrorCode.V0413_MISSING_ASSOCIATED_TYPE_BINDING,
                 )
             )
         }
@@ -73,6 +76,7 @@ class EffectValidator(
                             "but effect '${implDecl.effect.localName}' $declaredPart. " +
                             "Remove the extra bindings or add them to the effect declaration.",
                     loc = implDecl.loc,
+                    code = ErrorCode.V0414_EXTRA_ASSOCIATED_TYPE_BINDING,
                 )
             )
         }
@@ -91,6 +95,7 @@ class EffectValidator(
                             "is missing required ${if (missingOps.size == 1) "operation" else "operations"}: $missing. " +
                             "Add: $example = {args} -> ...",
                     loc = implDecl.loc,
+                    code = ErrorCode.V0404_IMPL_MISSING_METHOD,
                 )
             )
         }
@@ -105,6 +110,7 @@ class EffectValidator(
                             "has extra ${if (extraOps.size == 1) "operation" else "operations"} not in effect: $extra. " +
                             "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the effect declaration.",
                     loc = implDecl.loc,
+                    code = ErrorCode.V0405_IMPL_EXTRA_METHOD,
                 )
             )
         }

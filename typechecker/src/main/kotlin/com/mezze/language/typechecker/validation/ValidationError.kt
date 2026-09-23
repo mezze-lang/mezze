@@ -361,11 +361,20 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
-        data class StructuralError(
+        /**
+     * @param code the specific defect, when there is one. Defaults to the generic
+     *   structural code, which is the honest answer for a one-off check — but a
+     *   defect that has its own code MUST pass it. Effect-impl conformance used to
+     *   report every missing operation and every stray associated-type binding as
+     *   V0901, while the IDENTICAL defect on an ability impl carried V0404 / V0405
+     *   / V0413 / V0414. Same mistake, two vocabularies, so nothing downstream
+     *   could treat them alike.
+     */
+    data class StructuralError(
         val reason: String,
-        val loc: Loc? = null
+        val loc: Loc? = null,
+        override val code: ErrorCode = ErrorCode.V0901_STRUCTURAL_VALIDATION,
     ) : ValidationError {
-        override val code: ErrorCode = ErrorCode.V0901_STRUCTURAL_VALIDATION
 
         override fun message(): String = reason
 
