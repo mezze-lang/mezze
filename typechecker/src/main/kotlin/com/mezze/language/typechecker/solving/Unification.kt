@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.solving
 import com.mezze.language.ast.*
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.ast.solving.occursCheck
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.DeclarationRegistry
@@ -151,7 +152,17 @@ sealed class UnificationResult {
     data class Failure(
         val message: String,
         val type1: MezzeType? = null,
-        val type2: MezzeType? = null
+        val type2: MezzeType? = null,
+        /**
+         * WHICH failure this is. Defaults to a plain mismatch because that is what
+         * unification failing means unless the site says otherwise; the occurs
+         * check is the one place that says otherwise today.
+         *
+         * Callers used to recover this by testing the rendered message
+         * (`msg.startsWith("Infinite type: ")`), so rewording that one diagnostic
+         * would have silently downgraded it to T0201.
+         */
+        val code: ErrorCode = ErrorCode.T0201_TYPE_MISMATCH,
     ) : UnificationResult()
 
     inline fun getOrElse(onFailure: (Failure) -> Nothing): Substitution = when (this) {
@@ -413,7 +424,8 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
             message = "Infinite type: type variable ${prettyPrintType(MezzeType.VarType(typeVar))} occurs inside ${prettyPrintType(type)}. " +
                     "This would create an infinitely-nested type — add a type annotation to break the cycle (often a recursive let-binding).",
             type1 = MezzeType.VarType(typeVar),
-            type2 = type
+            type2 = type,
+            code = ErrorCode.T0207_INFINITE_TYPE,
         )
     }
     return UnificationResult.Success(Substitution.single(typeVar, type))

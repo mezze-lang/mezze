@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
@@ -202,7 +203,10 @@ class AbilityChecker internal constructor(
                     return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
                 }
                 val errorMessage = generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc)
-                return ConstraintSolver.ConstraintResult.Failure(errorMessage)
+                return ConstraintSolver.ConstraintResult.Failure(
+                    errorMessage,
+                    code = ErrorCode.V0408_NO_IMPLEMENTATION,
+                )
             }
 
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
@@ -213,7 +217,8 @@ class AbilityChecker internal constructor(
             // hole). See functionOperandHasNoImpl.
             if (functionOperandHasNoImpl(abilityName, trackingArgs, constraint.abilityHash)) {
                 return ConstraintSolver.ConstraintResult.Failure(
-                    generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc)
+                    generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc),
+                    code = ErrorCode.V0408_NO_IMPLEMENTATION,
                 )
             }
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
@@ -284,7 +289,8 @@ class AbilityChecker internal constructor(
                         "No implementation of ability '$abilityName' produces the required result type " +
                             "'${prettyPrintType(resolvedOut)}'. The result was forced to that type externally " +
                             "(e.g. by a `perform … in` handler expecting a wrapped value), but the operation " +
-                            "yields a different associated result — wrap it (e.g. with `Ok`/`Some`) or adjust the types."
+                            "yields a different associated result — wrap it (e.g. with `Ok`/`Some`) or adjust the types.",
+                        code = ErrorCode.V0408_NO_IMPLEMENTATION,
                     )
                 }
             }
@@ -347,7 +353,8 @@ class AbilityChecker internal constructor(
                     }
                     is UnificationResult.Failure -> {
                         return ConstraintSolver.ConstraintResult.Failure(
-                            "Type mismatch for associated type '$assocTypeName': expected ${prettyPrintType(concreteType)} but got ${prettyPrintType(resolvedTypeVar)}"
+                            "Type mismatch for associated type '$assocTypeName': expected ${prettyPrintType(concreteType)} but got ${prettyPrintType(resolvedTypeVar)}",
+                            code = unifyResult.code,
                         )
                     }
                 }

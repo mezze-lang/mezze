@@ -59,7 +59,7 @@ internal fun classifyConstraintError(
                     "(available on any type), or `.to_str {}` on a scalar"
             )
         is ErrorContext.Simple,
-        null -> classifyByConstraintAndMessage(constraint, error.message)
+        null -> classifyByConstraintAndCode(constraint, error.code)
     }
 
     val solverFixHints: List<FixHint> = buildList {
@@ -99,43 +99,43 @@ internal fun classifyConstraintError(
     )
 }
 
-private fun classifyByConstraintAndMessage(
+/**
+ * What KIND of error this is, when no [ErrorContext] told us.
+ *
+ * This used to answer by matching the rendered message — "does not have field",
+ * "payload type mismatch", "does not take a payload", `startsWith("Infinite type: ")`
+ * and six more. Every one of those strings is a diagnostic the compiler writes for
+ * a human, so rewording a message silently reclassified the error it described, and
+ * a translated or reworded diagnostic would have fallen through to UNCATEGORIZED.
+ * The solver site that produced the failure always knew which kind it was; it just
+ * threw that away and left the text as the only surviving evidence.
+ *
+ * Now [ConstraintResult.Failure.code] carries it, so the answer is read, not
+ * re-derived. The constraint-SHAPE fallback below stays for the few failures that
+ * do not originate at a classifying site.
+ */
+private fun classifyByConstraintAndCode(
     constraint: Constraint,
-    msg: String
-): Pair<ErrorCode, List<String>> = when {
-    msg.startsWith("Infinite type: ") ->
-        ErrorCode.T0207_INFINITE_TYPE to listOf(
-            "this usually means a recursive let-binding is missing a type annotation"
-        )
-    constraint is Constraint.HasField && msg.contains("does not have field") ->
-        ErrorCode.T0205_FIELD_NOT_FOUND to emptyList()
-    constraint is Constraint.HasField && msg.contains("type mismatch") ->
-        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
-    constraint is Constraint.HasConstructor && msg.contains("does not have constructor") ->
-        ErrorCode.V0704_UNKNOWN_CONSTRUCTOR to emptyList()
-    constraint is Constraint.HasConstructor && msg.contains("payload type mismatch") ->
-        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
-    constraint is Constraint.HasConstructor && msg.contains("does not take a payload") ->
-        ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD to emptyList()
-    constraint is Constraint.HasConstructor && msg.contains("must be destructured") ->
-        ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY to emptyList()
-    constraint is Constraint.AbilityRequired ->
-        ErrorCode.V0408_NO_IMPLEMENTATION to emptyList()
-    constraint is Constraint.RecordPatternExhaustive ->
-        ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN to emptyList()
-    constraint is Constraint.Subsumes ->
-        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
-    // #160: inherent method dispatch couldn't resolve (no matching candidate for
-    // the solved receiver type, or the receiver never became concrete).
-    constraint is Constraint.InherentMethodResolve ->
-        ErrorCode.T0206_METHOD_NOT_FOUND to emptyList()
-    msg.startsWith("Field '") && msg.contains("type mismatch") ->
-        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
-    msg.contains("Cannot access field") ->
-        ErrorCode.T0205_FIELD_NOT_FOUND to emptyList()
-    msg.contains("Cannot use constructor") ->
-        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
-    else -> ErrorCode.UNCATEGORIZED to emptyList()
+    code: ErrorCode
+): Pair<ErrorCode, List<String>> {
+    if (code != ErrorCode.UNCATEGORIZED) return code to hintsFor(code)
+    return when (constraint) {
+        is Constraint.AbilityRequired -> ErrorCode.V0408_NO_IMPLEMENTATION to emptyList()
+        is Constraint.RecordPatternExhaustive -> ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN to emptyList()
+        is Constraint.Subsumes -> ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+        // #160: inherent method dispatch couldn't resolve (no matching candidate for
+        // the solved receiver type, or the receiver never became concrete).
+        is Constraint.InherentMethodResolve -> ErrorCode.T0206_METHOD_NOT_FOUND to emptyList()
+        else -> ErrorCode.UNCATEGORIZED to emptyList()
+    }
+}
+
+/** Advice that belongs to a code itself rather than to the site that raised it. */
+private fun hintsFor(code: ErrorCode): List<String> = when (code) {
+    ErrorCode.T0207_INFINITE_TYPE -> listOf(
+        "this usually means a recursive let-binding is missing a type annotation"
+    )
+    else -> emptyList()
 }
 
 /**

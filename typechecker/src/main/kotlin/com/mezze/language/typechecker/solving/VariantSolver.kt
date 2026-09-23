@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
@@ -243,7 +244,8 @@ internal class VariantSolver(
                 )
             } else {
                 return ConstraintSolver.ConstraintResult.Failure(
-                    "Cannot resolve type '${variantType.constructor}' to check for constructor '$constructorName'"
+                    "Cannot resolve type '${variantType.constructor}' to check for constructor '$constructorName'",
+                    code = ErrorCode.T0213_UNKNOWN_TYPE,
                 )
             }
         }
@@ -261,7 +263,8 @@ internal class VariantSolver(
             else -> ConstraintSolver.ConstraintResult.Failure(
                 "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}. " +
                     "`Ctor { … }` matches a VARIANT constructor; a record destructures as `{ field, … }` " +
-                    "and a newtype opens as `Name.(inner)`."
+                    "and a newtype opens as `Name.(inner)`.",
+                code = ErrorCode.T0201_TYPE_MISMATCH,
             )
         }
     }
@@ -272,12 +275,14 @@ internal class VariantSolver(
     ): ConstraintSolver.ConstraintResult {
         if (constructorName != BuiltinTypes.TRUE && constructorName != BuiltinTypes.FALSE) {
             return ConstraintSolver.ConstraintResult.Failure(
-                "Bool type only has constructors 'True' and 'False', not '$constructorName'"
+                "Bool type only has constructors 'True' and 'False', not '$constructorName'",
+                code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
             )
         }
         if (expectedPayloadType != null) {
             return ConstraintSolver.ConstraintResult.Failure(
-                "Constructor '$constructorName' does not have a payload"
+                "Constructor '$constructorName' does not have a payload",
+                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
             )
         }
         return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
@@ -291,7 +296,8 @@ internal class VariantSolver(
         if (expectedPayloadType != null) {
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' does not take a payload. " +
-                "Use '$constructorName' instead of '$constructorName { ... }'."
+                "Use '$constructorName' instead of '$constructorName { ... }'.",
+                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
             )
         }
         val boolType = MezzeType.VariantType(
@@ -319,7 +325,8 @@ internal class VariantSolver(
             when (unifyResult) {
                 is UnificationResult.Success -> resultSubst = resultSubst.compose(unifyResult.substitution)
                 is UnificationResult.Failure -> return ConstraintSolver.ConstraintResult.Failure(
-                    "Cons $context payload type mismatch: ${unifyResult.message}"
+                    "Cons $context payload type mismatch: ${unifyResult.message}",
+                    code = unifyResult.code,
                 )
             }
         }
@@ -422,6 +429,7 @@ internal class VariantSolver(
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' from type '${typeDecl.name}' requires a payload. " +
                 "Use '$constructorName { $fieldList }' instead of bare '$constructorName'.",
+                code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
                 terminal = true
             )
         }
@@ -430,6 +438,7 @@ internal class VariantSolver(
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' from type '${typeDecl.name}' does not take a payload. " +
                 "Use '$constructorName' without '{ ... }'.",
+                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
                 terminal = true
             )
         }
@@ -445,6 +454,7 @@ internal class VariantSolver(
                 if (missingFields.isNotEmpty()) {
                     return ConstraintSolver.ConstraintResult.Failure(
                         "Constructor '$constructorName' payload is missing required fields: ${missingFields.joinToString(", ")}",
+                        code = ErrorCode.T0202_RECORD_MISSING_FIELDS,
                         terminal = true
                     )
                 }
@@ -516,7 +526,8 @@ internal class VariantSolver(
             val availableConstructors = variantType.constructors.keys.toList()
             val suggestion = StringDistance.suggestOrList(constructorName, availableConstructors, "constructors")
             return ConstraintSolver.ConstraintResult.Failure(
-                "Variant type does not have constructor '$constructorName'. $suggestion"
+                "Variant type does not have constructor '$constructorName'. $suggestion",
+                code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
             )
         }
 
@@ -533,18 +544,21 @@ internal class VariantSolver(
             return when (result) {
                 is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
                 is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
-                    "Constructor '$constructorName' payload type mismatch: ${result.message}"
+                    "Constructor '$constructorName' payload type mismatch: ${result.message}",
+                    code = result.code,
                 )
             }
         } else if (expectedPayloadType == null && actualPayloadType != null) {
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' has a payload that must be destructured. " +
-                "Use '$constructorName { ... }' to match the payload."
+                "Use '$constructorName { ... }' to match the payload.",
+                code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
             )
         } else if (expectedPayloadType != null && actualPayloadType == null) {
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' does not have a payload. " +
-                "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant."
+                "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant.",
+                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
             )
         } else {
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
@@ -733,6 +747,7 @@ internal class VariantSolver(
             ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' is declared by $names, and this payload fits both. " +
                     "Annotate the value with the type you mean.",
+                code = ErrorCode.T0216_AMBIGUOUS_DISPATCH,
                 terminal = true,
             )
         } else {
@@ -779,18 +794,21 @@ internal class VariantSolver(
             when (unifyResult) {
                 is UnificationResult.Success -> resultSubst = resultSubst.compose(unifyResult.substitution)
                 is UnificationResult.Failure -> return ConstraintSolver.ConstraintResult.Failure(
-                    "Constructor '$constructorName' payload type mismatch: ${unifyResult.message}"
+                    "Constructor '$constructorName' payload type mismatch: ${unifyResult.message}",
+                    code = unifyResult.code,
                 )
             }
         } else if (expectedPayloadType == null && declaredPayload != null) {
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' has a payload that must be destructured. " +
-                "Use '$constructorName { ... }' to match the payload."
+                "Use '$constructorName { ... }' to match the payload.",
+                code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
             )
         } else if (expectedPayloadType != null && declaredPayload == null) {
             return ConstraintSolver.ConstraintResult.Failure(
                 "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
-                "Use '$constructorName' without '{ ... }'."
+                "Use '$constructorName' without '{ ... }'.",
+                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
             )
         }
 

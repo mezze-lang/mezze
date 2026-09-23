@@ -245,11 +245,17 @@ class ConstraintSolver(
         ) : SolveResult()
     }
 
+    /**
+     * @param code carried from the [ConstraintResult.Failure] that produced this,
+     *   so the classifier can ask what KIND of failure it was instead of matching
+     *   the rendered [message]. REQUIRED — a site that drops it silently
+     *   downgrades the error to [ErrorCode.UNCATEGORIZED].
+     */
     data class ConstraintError(
         val message: String,
         val constraint: Constraint,
+        val code: ErrorCode,
         val context: String? = null,
-        val code: ErrorCode = ErrorCode.UNCATEGORIZED,
         val hints: List<String> = emptyList(),
     )
 
@@ -358,6 +364,9 @@ class ConstraintSolver(
                 errors.add(ConstraintError(
                     message = errorMsg,
                     constraint = contextConstraint,
+                    // These come from variant-inference reporting, not from a
+                    // solver Failure, so there is no site-level code to carry.
+                    code = ErrorCode.UNCATEGORIZED,
                     context = "Variant type inference"
                 ))
             }
@@ -655,6 +664,7 @@ class ConstraintSolver(
                             errors.add(ConstraintError(
                                 message = result.message,
                                 constraint = appliedConstraint,
+                                code = result.code,
                                 context = appliedConstraint.context
                             ))
                             poison(constraint)
@@ -885,6 +895,7 @@ class ConstraintSolver(
                                 errors.add(ConstraintError(
                                     message = result.message,
                                     constraint = constraint,
+                                    code = result.code,
                                     context = constraint.context
                                 ))
                                 poison(constraint)
@@ -906,20 +917,28 @@ class ConstraintSolver(
             val warnings: List<String> = emptyList()
         ) : ConstraintResult()
 
+        /**
+         * @param code WHICH failure this is, decided by the site that knows.
+         *
+         * REQUIRED — deliberately has no default. Downstream used to recover the
+         * kind by matching the rendered [message] ("does not have field",
+         * "payload type mismatch", …), so rewording a diagnostic silently
+         * reclassified the error it described. Every site here already knows what
+         * it found; the code is that knowledge, written down.
+         *
+         * [ErrorCode.UNCATEGORIZED] is a real answer, not a blank: it means "this
+         * failure is not yet final". A `HasField` failure comes in two kinds that
+         * must be treated oppositely — the field is ABSENT (the receiver is a
+         * scalar, an opaque newtype, or a record without it), which can never
+         * become valid later and must be reported; or the field's TYPE has not
+         * been reconciled yet, which the global solver owns and which must stay
+         * deferred. The top-level-expression filter in ConstraintGenerator keeps
+         * errors by typed code, so only the first may carry one.
+         */
         data class Failure(
             val message: String,
+            val code: ErrorCode,
             val terminal: Boolean = false,
-            /**
-             * Lets a caller tell one KIND of failure from another without reading
-             * the message. The top-level-expression filter in ConstraintGenerator
-             * keeps errors by typed code, and a `HasField` failure comes in two
-             * kinds that must be treated oppositely: the field is ABSENT (the
-             * receiver is a scalar, an opaque newtype, or a record without it),
-             * which can never become valid later and must be reported; or the
-             * field's TYPE has not been reconciled yet, which the global solver
-             * owns and which must stay deferred. Only the first carries a code.
-             */
-            val code: ErrorCode = ErrorCode.UNCATEGORIZED,
         ) : ConstraintResult()
 
         data class Deferred(val reason: String) : ConstraintResult()
@@ -987,6 +1006,7 @@ class ConstraintSolver(
             val known = constraint.candidates.map { it.targetTypeName }.distinct().joinToString(", ")
             return ConstraintResult.Failure(
                 "No inherent method '${constraint.methodName}' for type '$shown' (candidates: $known)",
+                code = ErrorCode.T0206_METHOD_NOT_FOUND,
                 terminal = true
             )
         }
@@ -994,6 +1014,7 @@ class ConstraintSolver(
         val fn = picked.methodType as? MezzeType.FunctionType
             ?: return ConstraintResult.Failure(
                 "Inherent method '${constraint.methodName}' on '${picked.targetTypeName}' is not a function",
+                code = ErrorCode.T0206_METHOD_NOT_FOUND,
                 terminal = true
             )
         val fullParams = (fn.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
@@ -1007,14 +1028,16 @@ class ConstraintSolver(
         when (val r = unify(subst.apply(constraint.argsType), subst.apply(strippedParamType), registry)) {
             is UnificationResult.Success -> subst = r.substitution.compose(subst)
             is UnificationResult.Failure -> return ConstraintResult.Failure(
-                "Arguments to '${constraint.methodName}' don't match impl for '${picked.targetTypeName}': ${r.message}"
+                "Arguments to '${constraint.methodName}' don't match impl for '${picked.targetTypeName}': ${r.message}",
+                code = r.code,
             )
         }
         // … and the call's result type is the picked impl's return type.
         when (val r = unify(subst.apply(constraint.resultType), subst.apply(fn.returnType), registry)) {
             is UnificationResult.Success -> subst = r.substitution.compose(subst)
             is UnificationResult.Failure -> return ConstraintResult.Failure(
-                "Return type of '${constraint.methodName}' for '${picked.targetTypeName}' mismatch: ${r.message}"
+                "Return type of '${constraint.methodName}' for '${picked.targetTypeName}' mismatch: ${r.message}",
+                code = r.code,
             )
         }
         return ConstraintResult.Success(subst)
@@ -1042,7 +1065,7 @@ class ConstraintSolver(
             }
             is UnificationResult.Failure -> {
                 val betterMessage = ErrorMessageBuilder.generateBetterErrorMessage(constraint, result)
-                ConstraintResult.Failure(betterMessage)
+                ConstraintResult.Failure(betterMessage, code = result.code)
             }
         }
     }
@@ -1053,7 +1076,8 @@ class ConstraintSolver(
         return when (result) {
             is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
             is UnificationResult.Failure -> ConstraintResult.Failure(
-                "Type ${prettyPrintType(constraint.specific)} is not compatible with ${prettyPrintType(constraint.general)}: ${result.message}"
+                "Type ${prettyPrintType(constraint.specific)} is not compatible with ${prettyPrintType(constraint.general)}: ${result.message}",
+                code = result.code,
             )
         }
     }
@@ -1131,7 +1155,8 @@ class ConstraintSolver(
             val fieldList = uncoveredFields.sorted().joinToString(", ")
             return ConstraintResult.Failure(
                 "Non-exhaustive record pattern: missing field${if (uncoveredFields.size > 1) "s" else ""} $fieldList. " +
-                "Use { ${constraint.patternFields.joinToString(", ")}, ... } to ignore extra fields."
+                "Use { ${constraint.patternFields.joinToString(", ")}, ... } to ignore extra fields.",
+                code = ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN,
             )
         }
 
@@ -1197,7 +1222,8 @@ class ConstraintSolver(
                 }
                 is TypeExpansionResult.NotFound -> {
                     return ConstraintResult.Failure(
-                        "Cannot resolve type '${recordType.constructor}' to check for field '$fieldName'"
+                        "Cannot resolve type '${recordType.constructor}' to check for field '$fieldName'",
+                        code = ErrorCode.T0213_UNKNOWN_TYPE,
                     )
                 }
             }
@@ -1215,7 +1241,7 @@ class ConstraintSolver(
             val result = unify(recordType, recordWithField, registry)
             return when (result) {
                 is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
-                is UnificationResult.Failure -> ConstraintResult.Failure(result.message)
+                is UnificationResult.Failure -> ConstraintResult.Failure(result.message, code = result.code)
             }
         }
 
@@ -1307,8 +1333,13 @@ class ConstraintSolver(
             val result = unify(actualFieldType, expectedFieldType, registry)
             return when (result) {
                 is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
+                // NOT the absent-field failure: the field is THERE and its type has
+                // not been reconciled yet. T0201 says what it is; the top-level filter
+                // in ConstraintGenerator keeps an allow-list that excludes T0201, so
+                // this still stays deferred to the global solver.
                 is UnificationResult.Failure -> ConstraintResult.Failure(
-                    "Field '$fieldName' type mismatch: ${result.message}"
+                    "Field '$fieldName' type mismatch: ${result.message}",
+                    code = ErrorCode.T0201_TYPE_MISMATCH,
                 )
             }
         }
