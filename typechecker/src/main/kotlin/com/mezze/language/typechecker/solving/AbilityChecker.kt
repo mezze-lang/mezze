@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.solving
 
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.ast.*
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.ast.solving.Substitution
@@ -528,16 +529,38 @@ class AbilityChecker internal constructor(
         return null
     }
 
+    /**
+     * A LOCAL conversion, and deliberately still local — see the note below.
+     *
+     * It is lossy next to [TypeAnnotationConverter]: a record's and a variant's
+     * OPENNESS never becomes a row var, and a function type's EFFECTS and
+     * ABILITY CONSTRAINTS are simply unset.
+     *
+     * MEASURED attempt to delegate to the shared converter, both halves recorded
+     * because the failures are the useful part:
+     *  - `convert(annotation, resolveTypeHash = …, resolveAbilityHash = …)` broke
+     *    FIVE tests. Stamping a content hash turns a name-matched
+     *    `TypeApplication` into a `Declared` one, and `identityVerdict` then calls
+     *    a hashed side and a hashless side DISTINCT where they used to match by
+     *    name — so codec impls stopped being found
+     *    ("`{ code: Str }` does not implement 'FromJson'").
+     *  - `convert(annotation)` with no hash resolvers recovered three of the five.
+     *    `CrossModuleFromJsonWrapperTest.one-level wrapper, multi-field target`
+     *    and `StoredConstraintResolutionTest.an inferred binding does not carry
+     *    variables absent from its signature` still fail, so at least one more
+     *    conversion flag is load-bearing for ability matching.
+     *
+     * Those two tests are the signal for whoever finishes the merge. Until then
+     * this stays, because a converter that is lossy in a KNOWN way beats one that
+     * is faithful in an unvalidated one.
+     */
     private fun typeAnnotationToMezzeType(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            // #312, same rule as [convertAnnotationToType] twelve hundred lines
-            // below: an unbound type-var name IS a free type variable, not a
-            // nominal type that happens to be spelled `'a`. Writing it as a
-            // TypeApplication gives it a rigid identity that then refuses to
-            // unify with the caller's concrete type. MEASURED at zero firings
-            // across both suites, so this is the shape being made correct rather
-            // than a live defect being closed — but the sibling below proves the
-            // shape is reachable in general.
+            // #312, same rule as [convertAnnotationToType] below: an unbound
+            // type-var name IS a free type variable, not a nominal type that
+            // happens to be spelled `'a`. Writing it as a TypeApplication gives it
+            // a rigid identity that then refuses to unify with the caller's
+            // concrete type.
             is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
                 ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
                    else WellKnownTypeApp.of(annotation.name, emptyList())
