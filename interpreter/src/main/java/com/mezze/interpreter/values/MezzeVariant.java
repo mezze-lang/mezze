@@ -215,12 +215,13 @@ public final class MezzeVariant implements TruffleObject {
                 throw new IllegalStateException("Cannot dynamically allocate tags in non-global registry");
             }
 
-            // Use deterministic hash-based tag assignment.
-            // MUST match Resolver.kt's tag computation: name.hashCode() & 0x7FFFFFFF
-            // This ensures compiled TruffleIR code and native functions produce
-            // variants with the same tags for the same constructor names.
+            // Delegate to THE definition so compiled TruffleIR and natives cannot
+            // drift apart. This used to restate the formula
+            // (`name.hashCode() & 0x7FFFFFFF`) under a comment saying it "MUST
+            // match Resolver.kt" — a convention the compiler could not enforce,
+            // and one that silently outlived the formula it described.
             return nameToTagMap.computeIfAbsent(constructorName, name -> {
-                int newTag = name.hashCode() & 0x7FFFFFFF;
+                int newTag = com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(name, null);
                 dynamicNames.add(name);
                 return newTag;
             });

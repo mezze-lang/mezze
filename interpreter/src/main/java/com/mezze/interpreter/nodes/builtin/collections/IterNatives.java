@@ -24,9 +24,13 @@ public final class IterNatives {
     private IterNatives() {}
 
     // Step variant tags — computed once, same as TagRegistry.getOrCreateTag
-    private static final int YIELD_TAG = "Yield".hashCode() & 0x7FFFFFFF;
-    private static final int SKIP_TAG  = "Skip".hashCode()  & 0x7FFFFFFF;
-    private static final int DONE_TAG  = "Done".hashCode()  & 0x7FFFFFFF;
+    // THE definition, not a restatement of it — see BuiltinTypes.computeVariantTag.
+    private static final int YIELD_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag("Yield", null);
+    private static final int SKIP_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag("Skip", null);
+    private static final int DONE_TAG =
+        com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag("Done", null);
 
     // Register tags in global registry so pattern matching can find them
     static {

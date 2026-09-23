@@ -198,9 +198,35 @@ object BuiltinTypes {
      * `let x = Foo` and patterns whose type is a fresh solver TyVar both
      * lose the ADT hash), which produced tag mismatches when the mixed
      * form was in use.
+     *
+     * Because the tag is a function of the NAME alone, two distinct names that
+     * map to the same tag dispatch to the same match arm. That is not a
+     * cross-ADT problem the layers above can catch — both names can live in ONE
+     * type, where nothing is duplicated and nothing is shadowed.
+     *
+     * `String.hashCode` is unusable here for exactly that reason: it collides at
+     * two characters. `"Aa"` and `"BB"` both hash to 2112, so
+     * `type Collide = | Aa, BB |` compiled `BB` to the `Aa` arm and answered
+     * `Aa`'s branch with no error — and `Ea == FB` was `true`. This is FNV-1a
+     * instead, folded to 31 bits: still a pure function of the name (which is
+     * what construction/pattern agreement requires), but with avalanche, so a
+     * collision takes a deliberate search rather than two letters.
+     *
+     * THE ONE DEFINITION. `MezzeVariant.TagRegistry.getOrCreateTag` and the
+     * natives call this; they used to restate the formula under a comment
+     * saying it "MUST match", which is a convention, not a guarantee.
      */
     fun computeVariantTag(ctorName: String, typeHashHex: String?): Int {
-        return ctorName.hashCode() and 0x7FFFFFFF
+        // FNV-1a over the UTF-16 code units. Deterministic across JVMs and
+        // platforms, which a tag baked into compiled code has to be.
+        var h = -0x340d631b7bdddcdbL // 0xcbf29ce484222325 offset basis
+        for (ch in ctorName) {
+            h = h xor ch.code.toLong()
+            h *= 0x100000001b3L // FNV prime
+        }
+        // Fold the high half in so every input bit reaches the result, then
+        // clear the sign bit: tags are used as non-negative ints.
+        return (h xor (h ushr 32)).toInt() and 0x7FFFFFFF
     }
 
     // Cons-list payload field names. `Cons { head, tail }` was spelled with raw

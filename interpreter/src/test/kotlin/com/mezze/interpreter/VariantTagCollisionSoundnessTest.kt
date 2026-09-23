@@ -363,4 +363,55 @@ class VariantTagCollisionSoundnessTest {
         assertTrue(result is Rejected || result == "foo-some",
             "Unexpected outcome for stdlib constructor reuse: $result")
     }
+
+    /**
+     * The collision the three documented guards do NOT cover.
+     *
+     * [com.mezze.language.ast.BuiltinTypes.computeVariantTag] is
+     * `ctorName.hashCode() and 0x7FFFFFFF`, and the protections named in its
+     * KDoc — duplicate-constructor rejection, stdlib shadowing, row closure —
+     * all guard constructors that share a NAME. Two DIFFERENT names that share
+     * a hash are guarded by nothing, and Java string hashes collide trivially:
+     * `"Aa".hashCode() == "BB".hashCode() == 2112`.
+     *
+     * Both constructors live in ONE type here, so no cross-type rule applies
+     * and the typechecker has no reason to object. If the runtime dispatches on
+     * the tag alone, `BB` fires the `Aa` arm.
+     */
+    @Test
+    fun `two constructors of ONE type whose names hash-collide must not share an arm`() {
+        // Same-hash pairs, verified: "Aa"/"BB" and "Ea"/"FB" both hash to the
+        // same value as each other.
+        val source = """
+            type Collide = | Aa, BB |
+
+            let describe = {c: Collide} -> match c is
+                Aa -> "first"
+                BB -> "second"
+
+            describe { c = BB }
+        """.trimIndent()
+        val result = runOrReject(source)
+        if (result is Rejected) return   // rejection is a sound outcome
+        assertEquals("second", result,
+            "`BB` fired the `Aa` arm: the runtime tag is a bare String.hashCode() and " +
+                "\"Aa\" and \"BB\" collide. Both constructors are in ONE type, so none of " +
+                "the cross-type guards apply.")
+    }
+
+    /** The same collision reached through construction rather than a match arm. */
+    @Test
+    fun `hash-colliding constructors are distinguishable by equality`() {
+        val source = """
+            type Collide = | Ea, FB |
+
+            let x: Collide = Ea
+            let y: Collide = FB
+            x == y
+        """.trimIndent()
+        val result = runOrReject(source)
+        if (result is Rejected) return
+        assertEquals(false, result,
+            "`Ea` and `FB` compared EQUAL: their runtime tags collide (both 2236).")
+    }
 }
