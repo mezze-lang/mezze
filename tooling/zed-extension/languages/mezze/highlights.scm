@@ -4,8 +4,12 @@
 ;; Regenerate: tooling/syntax-generators/gen-queries.py
 ;;
 ;; Captures renamed for this editor:
+;;     @class.outer                 -> @class.around
 ;;     @comment.documentation       -> @comment.doc
+;;     @comment.outer               -> @comment.around
 ;;     @constant.builtin.boolean    -> @boolean
+;;     @function.inner              -> @function.inside
+;;     @function.outer              -> @function.around
 ;;     @number.float                -> @number
 ;;     @type.interface              -> @type
 ;;     @variable.member             -> @property

@@ -11,13 +11,13 @@ highlighting at all, and nothing said so.
 
 One generator, one profile per consumer:
 
-  zed     5 capture renames, 3 files. Zed's theme vocabulary predates
-          nvim-treesitter's split of these into sub-captures.
+  zed     9 capture renames, 3 files. Zed's theme vocabulary predates
+          nvim-treesitter's split of these into sub-captures, and its
+          textobjects are `.around`/`.inside` rather than `.outer`/`.inner`.
   nvim    identity — the canonical queries are ALREADY written in Neovim's
-          dialect, which is why only Zed needs a map. Neovim also loads
-          locals.scm and textobjects.scm, which Zed has no concept of, so it
-          gets same-name highlighting, scope-aware go-to-def and `daf`/`vif`
-          motions for free.
+          dialect, which is why only Zed needs a map. Neovim additionally
+          loads folds.scm and locals.scm (same-name highlighting, scope-aware
+          go-to-def); Zed loads neither, and derives folding from indents.
 
   ./gen-queries.py                # regenerate every consumer
   ./gen-queries.py --check        # exit 1 if any checked-in copy has drifted
@@ -36,25 +36,47 @@ TOOLING = os.path.dirname(HERE)
 SRC = os.path.join(TOOLING, "tree-sitter-mezze", "queries")
 
 # Neovim/Helix capture -> consumer capture. Everything absent is passed through.
+# Verified against the Zed 1.14.2 binary rather than assumed: its extension
+# host loads exactly `highlights outline indents injections redactions
+# runnables textobjects`, and its textobject captures are `.around`/`.inside`
+# where nvim-treesitter uses `.outer`/`.inner`.
+#
+# Two consequences that were wrong here before:
+#   - folds.scm was shipped to Zed and Zed never loads it (folding is derived
+#     from indents, not a query). Dead file.
+#   - textobjects.scm was NOT shipped to Zed, on the belief that Zed had no
+#     concept of it. It does.
+#
+# The two rename sets are merged into one table because their keys cannot
+# collide: `.outer`/`.inner` never appear in highlights.scm, and the
+# highlight captures never appear in textobjects.scm.
 ZED_CAPTURES = {
+    # highlights.scm
     "@comment.documentation": "@comment.doc",
     "@constant.builtin.boolean": "@boolean",
     "@number.float": "@number",
     "@type.interface": "@type",
     "@variable.member": "@property",
+    # textobjects.scm — Zed recognises only class/comment/function here; the
+    # rest of our captures (@assignment.*, @block.*, @call.*, @parameter.*)
+    # have no Zed equivalent and simply never match, which is harmless.
+    "@function.outer": "@function.around",
+    "@function.inner": "@function.inside",
+    "@class.outer": "@class.around",
+    "@comment.outer": "@comment.around",
 }
 
 PROFILES = {
     "zed": {
         "dest": os.path.join(TOOLING, "zed-extension", "languages", "mezze"),
         "captures": ZED_CAPTURES,
-        "files": ["highlights.scm", "indents.scm", "folds.scm"],
+        "files": ["highlights.scm", "indents.scm", "textobjects.scm"],
         "note": "Zed's theme vocabulary predates nvim-treesitter's sub-captures.",
     },
     "nvim": {
         "dest": os.path.join(TOOLING, "nvim-mezze", "queries", "mezze"),
         "captures": {},
-        # Neovim reads all five. locals/textobjects have no Zed equivalent.
+        # Neovim reads all five; Zed loads three of them.
         "files": ["highlights.scm", "indents.scm", "folds.scm",
                   "locals.scm", "textobjects.scm"],
         "note": "Identity — the canonical queries are already in this dialect.",

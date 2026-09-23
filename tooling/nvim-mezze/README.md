@@ -6,16 +6,15 @@ Neovim gets **more** than the other editors here, for a structural reason: the
 canonical queries in `../tree-sitter-mezze/queries/` are written in
 nvim-treesitter's capture dialect (`@variable.member`, `@type.interface`,
 `@number.float`). Zed is the consumer that needs a rename table; for Neovim the
-generated copy is an identity copy. Two of those files have no Zed equivalent
-at all:
+generated copy is an identity copy. Two of these files Zed does not load at all:
 
-| file              | what it buys you                                   |
-|-------------------|----------------------------------------------------|
-| `highlights.scm`  | syntax colouring                                   |
-| `indents.scm`     | auto-indent (Mezze is indentation-significant)     |
-| `folds.scm`       | folding                                            |
-| `locals.scm`      | same-name highlighting, scope-aware go-to-def      |
-| `textobjects.scm` | `daf` / `vif` / `]f` motions                        |
+| file              | what it buys you                               | Zed |
+|-------------------|------------------------------------------------|-----|
+| `highlights.scm`  | syntax colouring                               | yes |
+| `indents.scm`     | auto-indent (Mezze is indentation-significant) | yes |
+| `textobjects.scm` | `daf` / `vif` / `]f` motions                   | yes |
+| `folds.scm`       | folding                                        | no — Zed folds from indents |
+| `locals.scm`      | same-name highlighting, scope-aware go-to-def  | no  |
 
 ## Install
 

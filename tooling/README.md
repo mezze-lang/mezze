@@ -27,16 +27,26 @@ tooling/
 at it — Zed and Neovim both have to *ship* their query files — so the copies are
 structural, and `gen-queries.py` generates them:
 
-| consumer | captures        | files                                             |
-|----------|-----------------|---------------------------------------------------|
-| `nvim`   | identity        | highlights, indents, folds, **locals, textobjects** |
-| `zed`    | 5 renames       | highlights, indents, folds                        |
+| consumer | captures    | files                                                |
+|----------|-------------|------------------------------------------------------|
+| `nvim`   | identity    | highlights, indents, textobjects, **folds, locals**  |
+| `zed`    | 9 renames   | highlights, indents, textobjects                     |
 
 The canonical queries are written in **nvim-treesitter's** dialect
 (`@variable.member`, `@type.interface`, `@number.float`), so Neovim's copy is an
-identity copy and only Zed needs a rename table. Neovim consequently gets two
-files Zed has no concept of: `locals.scm` (same-name highlighting, scope-aware
-go-to-def) and `textobjects.scm` (`daf`/`vif` motions).
+identity copy and only Zed needs a rename table.
+
+The file lists were checked against the Zed 1.14.2 binary, not assumed. Its
+extension host loads exactly `highlights outline indents injections redactions
+runnables textobjects` — so Zed was being shipped a `folds.scm` it never reads
+(it derives folding from indents) and was *not* being shipped `textobjects.scm`,
+which it does support. Zed's textobject captures are `.around`/`.inside` where
+nvim-treesitter uses `.outer`/`.inner`, which is why the rename table grew.
+Neovim still gets two files Zed has no concept of: `folds.scm` and `locals.scm`
+(same-name highlighting, scope-aware go-to-def).
+
+Not yet written: `outline.scm`, which would drive Zed's outline panel and
+Neovim symbol pickers.
 
 VS Code is the exception: it uses a hand-maintained **TextMate** grammar, not
 tree-sitter, refined at runtime by LSP semantic tokens. Those tokens vanish the
