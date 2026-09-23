@@ -250,7 +250,12 @@ module.exports = grammar({
       $.effect_declaration,
       $.ability_declaration,
       $.impl_declaration,
-      $._expression,
+      // A bare expression at module root, optionally with `pub` in front of it.
+      // The parser accepts `pub e` — it reads the modifier and then whatever
+      // follows, leaving "pub belongs on a declaration" to the validator. This
+      // is also what a half-typed `pub effect …` looks like at every keystroke
+      // between `pub e` and `pub effect`.
+      seq(optional($.visibility_modifier), $._expression),
     ),
 
     // Public visibility — its OWN node so highlights.scm can tag it as
@@ -356,7 +361,10 @@ module.exports = grammar({
 
     variant_constructor: $ => seq(
       field('name', $.upper_identifier),
-      optional(field('payload', $.record_type)),
+      // Braced (`Blue { hue: Int }`) is what real code writes; the parser also
+      // accepts a bare type after the name and leaves the shape to the
+      // validator. Mirrors the same leniency in `variant_pattern`.
+      optional(field('payload', choice($.record_type, $.named_type))),
     ),
 
     // ----- effect -----
@@ -541,7 +549,12 @@ module.exports = grammar({
 
     variant_pattern: $ => seq(
       field('constructor', $.upper_identifier),
-      optional(field('payload', $.record_pattern)),
+      // The braced form `Some { val }` is what Mezze code writes — there are
+      // ZERO unbraced payloads in the whole stdlib. But the parser accepts a
+      // bare name too (`Some val`), leaving the shape to the validator, and a
+      // half-typed `Some val` is exactly the state an editor sees while the
+      // braces are still being typed.
+      optional(field('payload', choice($.record_pattern, $.variable_pattern))),
     ),
 
     // `UserId.(v)` — destructure a NEWTYPE. A newtype's constructor takes its
