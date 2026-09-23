@@ -1111,12 +1111,35 @@ module.exports = grammar({
 
     escape_sequence: _ => token(seq('\\', /./)),
 
-    // $(expr) inside "...".
+    // `$(expr)` inside a string.
+    //
+    // The parser (ExpressionParsers.parseParsedInterpolatedString) scans from
+    // `$(` to the DEPTH-MATCHED `)`, slices that text out, and parses the slice
+    // as an expression — WITHOUT requiring the slice to be fully consumed. So
+    // the body is an expression PREFIX, and whatever follows it inside the
+    // parens is simply dropped. That one rule explains every shape the parser
+    // accepts here:
+    //
+    //     $(name,)        expression `name`, trailing `,` ignored
+    //     $(age})         expression `age`,  trailing `}` ignored
+    //     $(nam\ne)       expression `nam`,  trailing `e` ignored
+    //     $(f { x = 1     expression, unbalanced `{` ignored
+    //
+    // Modelling it as "expression + ignored tail" rather than as an opaque blob
+    // is what keeps the expression HIGHLIGHTED: the valid prefix still parses
+    // into real nodes, and only the dropped remainder is anonymous.
     string_interpolation: $ => seq(
       '$(',
       $._expression,
+      optional($.interpolation_ignored),
       ')',
     ),
+
+    // The dropped remainder of an interpolation body. Low precedence so every
+    // real expression token is preferred while the expression is still being
+    // built; `)` and `"` are excluded so this can never swallow the closing
+    // paren or escape the string.
+    interpolation_ignored: _ => token(prec(-1, /[^)"]+/)),
 
     // ===== Identifiers =====
 
