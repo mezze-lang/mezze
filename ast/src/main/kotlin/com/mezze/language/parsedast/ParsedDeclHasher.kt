@@ -22,6 +22,22 @@ import com.mezze.language.typedast.Hash
  * would buy is not worth the footgun of a normalizer drawing the semantic-vs-
  * scaffolding line wrong and silently colliding two distinct definitions. Every
  * name difference is honestly a hash difference. (Decision: 2026-08-25.)
+ *
+ * TYPE VARIABLES are the case the API argument above does NOT cover, and they are
+ * included anyway — on purpose. `type Box 'a = { v: 'a }` and
+ * `type Box 'b = { v: 'b }` are the same type, and a type argument cannot be
+ * passed by name, so renaming `'a` is not an interface change the way renaming a
+ * record field is. They are hashed as-written for the SECOND reason only: the
+ * line between a name that matters and a name that does not is exactly what a
+ * normalizer has to get right every time, and getting it wrong collides two
+ * definitions silently. The cost of including them is a cache miss on a rename;
+ * the cost of excluding them wrongly is a wrong definition. We pay the cache miss.
+ *
+ * The visible consequence, so it is not a surprise: renaming a type parameter
+ * changes the declaration's content hash, so its [com.mezze.language.ast.TypeIdentity.Declared]
+ * changes with it, and anything keyed on the old hash (a precompiled artifact, a
+ * cached impl index) must be rebuilt. Within one compilation everything rehashes
+ * together and nothing observes the change.
  * → Do NOT "upgrade" this to the alpha-normalized TypedASTHasher for identity.
  *
  * Concretely hashed:
