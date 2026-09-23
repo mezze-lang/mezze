@@ -751,6 +751,19 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
         callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
         lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
+        // Propagated, not dropped. A method call COMBINES two sub-results, and
+        // every field either side carries has to survive the merge; the six below
+        // did not. MEASURED across the typechecker suite before the fix: 10,359
+        // drops, 10,299 of them `referencedBindings` and 60 `effectRowVars` —
+        // and `effectRowVars` is the one whose own declaration says that losing it
+        // means "silently inferring `launder` pure and laundering the callback's
+        // effects" (#256/#268).
+        tailCalls = receiverResult.tailCalls + argumentResult.tailCalls,
+        referencedBindings = receiverResult.referencedBindings + argumentResult.referencedBindings,
+        effectRowVars = receiverResult.effectRowVars + argumentResult.effectRowVars,
+        performed = receiverResult.performed || argumentResult.performed,
+        expectedTypeAt = receiverResult.expectedTypeAt + argumentResult.expectedTypeAt,
+        matchCaseBindings = receiverResult.matchCaseBindings + argumentResult.matchCaseBindings,
     )
 }
 
@@ -1370,6 +1383,19 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
         callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
         lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
+        // Propagated, not dropped. A method call COMBINES two sub-results, and
+        // every field either side carries has to survive the merge; the six below
+        // did not. MEASURED across the typechecker suite before the fix: 10,359
+        // drops, 10,299 of them `referencedBindings` and 60 `effectRowVars` —
+        // and `effectRowVars` is the one whose own declaration says that losing it
+        // means "silently inferring `launder` pure and laundering the callback's
+        // effects" (#256/#268).
+        tailCalls = receiverResult.tailCalls + argumentResult.tailCalls,
+        referencedBindings = receiverResult.referencedBindings + argumentResult.referencedBindings,
+        effectRowVars = receiverResult.effectRowVars + argumentResult.effectRowVars,
+        performed = receiverResult.performed || argumentResult.performed,
+        expectedTypeAt = receiverResult.expectedTypeAt + argumentResult.expectedTypeAt,
+        matchCaseBindings = receiverResult.matchCaseBindings + argumentResult.matchCaseBindings,
     )
 }
 
@@ -1506,6 +1532,19 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodName) to methodCallInfo),
         callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
         lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
+        // Propagated, not dropped. A method call COMBINES two sub-results, and
+        // every field either side carries has to survive the merge; the six below
+        // did not. MEASURED across the typechecker suite before the fix: 10,359
+        // drops, 10,299 of them `referencedBindings` and 60 `effectRowVars` —
+        // and `effectRowVars` is the one whose own declaration says that losing it
+        // means "silently inferring `launder` pure and laundering the callback's
+        // effects" (#256/#268).
+        tailCalls = receiverResult.tailCalls + argumentResult.tailCalls,
+        referencedBindings = receiverResult.referencedBindings + argumentResult.referencedBindings,
+        effectRowVars = receiverResult.effectRowVars + argumentResult.effectRowVars,
+        performed = receiverResult.performed || argumentResult.performed,
+        expectedTypeAt = receiverResult.expectedTypeAt + argumentResult.expectedTypeAt,
+        matchCaseBindings = receiverResult.matchCaseBindings + argumentResult.matchCaseBindings,
     )
 }
 
