@@ -130,7 +130,7 @@ echo "must-reject (advisory): $((REJECT_TOTAL-REJECT_FAIL))/$REJECT_TOTAL correc
 # So: this number may only go DOWN, which catches a real construct regressing,
 # and the BUILD gate is scripts/containment.sh — a mistake must stay local. That
 # is the property a syntax highlighter actually has to hold.
-BASELINE=62
+BASELINE=60
 if [[ $PARSE_FAIL -le $BASELINE ]]; then
   if [[ $PARSE_FAIL -lt $BASELINE ]]; then
     echo "OK — must-parse IMPROVED to $PARSE_FAIL (baseline $BASELINE); lower the baseline."

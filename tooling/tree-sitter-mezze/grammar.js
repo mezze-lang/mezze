@@ -151,6 +151,13 @@ module.exports = grammar({
     // target. Latent until the inline-variant argument made the lookahead
     // reachable.
     [$.impl_declaration, $.type_application],
+    // Same ambiguity as the line above, once `type_application` may be
+    // QUALIFIED: at `impl Foo •` the parser cannot yet tell an inherent impl
+    // whose target is the application `Foo Bar` from an ability impl named
+    // `Foo` taking the argument `Bar` — and with `mod::Foo` in play the module
+    // prefix is a third reading. GLR carries them and the `for` (or its
+    // absence) decides.
+    [$.impl_declaration, $.type_application, $.qualified_upper_name],
     // A `do` nested inside a `do` statement: after the inner block's
     // expression, the next token could close the INNER block (making that
     // expression its result) or be another statement of the OUTER one. The
@@ -456,10 +463,18 @@ module.exports = grammar({
       ),
       // Ability or effect impl: `impl Eq for Bool where { … }`. Ability
       // names can carry type arguments (`impl Into Str for Bool …`).
+      //
+      // prec.dynamic, because both impl branches can parse the SAME text once
+      // type names may be lowercase: in the inherent branch `for` is not an
+      // expected token, so the lexer falls back to `lower_identifier` and
+      // `impl Into Str for Bool where {…}` reads as an inherent impl whose
+      // target is the application `Into Str for Bool`. Keyword extraction does
+      // not prevent it — a keyword only wins where the grammar expects it. When
+      // both readings complete, the one with a real `for` is the right one.
       // Effect impls have an optional performer-config record after the
       // target (`impl Log for ConsoleLogger {} where …`). Unified here;
       // the typechecker disambiguates via name lookup.
-      seq(
+      prec.dynamic(1, seq(
         'impl',
         // A qualified ability/effect name: `Eq`, `log::Log`,
         // `std::effects::log::Log`. The module prefix is a run of
@@ -481,7 +496,7 @@ module.exports = grammar({
         '{',
         optional($._impl_operation_list),
         '}',
-      ),
+      )),
     ),
 
     // Impl operations can optionally carry a type annotation:
@@ -660,13 +675,9 @@ module.exports = grammar({
     named_type: $ => choice($.upper_identifier, $.lower_identifier),
 
     type_application: $ => prec.left(PREC.call, seq(
-      // NOT `qualified_upper_name` here. `codec::Entry Bool Xml` is a real
-      // qualified type application the parser accepts, but admitting it at this
-      // position collides with `impl_declaration`'s own argument list — ten
-      // interpretations of `impl X {`, because `impl Foo Bar for T` and
-      // `impl mod::Foo …` want the same prefix. Two corpus blocks; not worth
-      // that ambiguity until impl-head parsing is restructured.
-      field('constructor', choice($.upper_identifier, $.lower_identifier)),
+      // `codec::Entry Bool Xml` — a qualified type applied to arguments. Real
+      // Mezze, and it appears in real signatures, so it has to HIGHLIGHT.
+      field('constructor', choice($.upper_identifier, $.lower_identifier, $.qualified_upper_name)),
       repeat1(field('argument', $._type_atom)),
     )),
 
