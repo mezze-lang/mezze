@@ -369,7 +369,23 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                                     break
                                                 }
                                                 current = skipNewlines(current.advance())
-                                                val typeResult = atomicTypeAnnotation(current)
+                                                // A full type APPLICATION, not a single atom.
+                                                // Inside `< … >` a binding is delimited by `,` or
+                                                // `>`, so `having 'error = Map Str Int` is
+                                                // unambiguous — but `atomicTypeAnnotation` stopped
+                                                // after `Map`, the row then failed to close on `>`,
+                                                // and the whole row was silently backtracked. The
+                                                // user got "Expected '=' but got '<'", pointing at
+                                                // the `<` of a row the parser had abandoned.
+                                                // Ordered choice, application first: `Map Str Int`
+                                                // must not be read as just `Map`. The atom parser
+                                                // is still needed for the forms an application
+                                                // cannot start on — a parenthesised type, a record,
+                                                // a seq, a bare type variable.
+                                                val typeResult = when (val app = typeApplicationAnnotation(current)) {
+                                                    is ParseResult.Success -> app
+                                                    is ParseResult.Failure -> atomicTypeAnnotation(current)
+                                                }
                                                 if (typeResult !is ParseResult.Success) break
                                                 associatedTypes[typeVarName] = typeResult.value
                                                 current = skipNewlines(typeResult.remaining)
