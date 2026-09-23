@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.printing
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.prettyPrintType
@@ -238,7 +239,7 @@ object ErrorMessageBuilder {
                 if (a !is MezzeType.RecordType && a !is MezzeType.FunctionType &&
                     e !is MezzeType.RecordType && e !is MezzeType.FunctionType &&
                     a !is MezzeType.VarType && e !is MezzeType.VarType &&
-                    a != e
+                    a != e && !sameTypeDifferentRepresentation(a, e)
                 ) {
                     return Triple(childPath, a, e)
                 }
@@ -246,6 +247,27 @@ object ErrorMessageBuilder {
         }
         return null
     }
+
+    /**
+     * Two spellings of ONE type, which structural `!=` calls different.
+     *
+     * `Bool` exists as `MezzeType.BoolType` and as the constructor form
+     * `VariantType({True, False})`. They are unequal as data and identical as
+     * types, so a walk that blames the first field where `a != e` blames a `Bool`
+     * field that is perfectly fine — and then STOPS, so the field that actually
+     * failed is never reported.
+     *
+     * Observed as: `f = { c: Bool, b } -> …` called with `{ c = True, b = { x, y } }`
+     * reported "Field `c` expects Bool but got Bool", a sentence that cannot be
+     * acted on, while the real problem (b's unexpected `y`) went unmentioned. The
+     * same call with `c: Int` reports the `y` correctly.
+     *
+     * This is the diagnostic-visible face of the dual-representation problem; it
+     * goes away when Bool has one representation.
+     */
+    private fun sameTypeDifferentRepresentation(a: MezzeType, e: MezzeType): Boolean =
+        (a is MezzeType.BoolType && PrimitiveTypes.isBoolVariant(e)) ||
+            (e is MezzeType.BoolType && PrimitiveTypes.isBoolVariant(a))
 
     private fun findClosedRecordMismatch(
         actual: MezzeType,

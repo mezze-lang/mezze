@@ -515,6 +515,22 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     val return1 = paramSubst.apply(fn1.returnType)
     val return2 = paramSubst.apply(fn2.returnType)
     val returnSubst = unify(return1, return2, registry).getOrElse { return it }
+    // The same launder on the RETURN. Symmetric unification lets an open produced
+    // record absorb a field the demanded row names, so
+    // `let p : { r: { x: Int, ... } } -> { y: Int, ... } = { r } -> r` was accepted:
+    // `p { r = { x = 1 } }` then has type `{ y: Int, ... }` and `.y` typechecks on a
+    // value that has no `y`. The parameter check above cannot see this — it runs
+    // before the returns are unified and looks at the wrong pair.
+    //
+    // Direction is the same as for parameters: fn2 is the DEMAND (the annotation,
+    // or the expected callback) and fn1 is the VALUE (the body, or the actual
+    // callback). A parameter is contravariant and a return covariant, but both
+    // land on the same question here — every concrete field the demand names must
+    // be PRESENT in the value, and the value's extra fields stay fine.
+    directionalParamFieldCheck(
+        value = returnSubst.apply(return1),
+        demand = returnSubst.apply(return2),
+    )?.let { return it }
     val effects1 = fn1.effects
     val effects2 = fn2.effects
 
