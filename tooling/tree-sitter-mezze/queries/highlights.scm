@@ -182,11 +182,14 @@
 
 ;; `UserId.(5)` / `UserId.(v)` — newtype construction and destructuring. The
 ;; constructor is the type's name.
+;; Matched by POSITION, not by spelling: the constructor field admits a
+;; lowercase name too (the parser does not case-check it), and whatever sits
+;; there is the constructor.
 (newtype_constructor_expression
-  constructor: (upper_identifier) @constructor)
+  constructor: (_) @constructor)
 
 (newtype_pattern
-  constructor: (upper_identifier) @constructor)
+  constructor: (_) @constructor)
 
 ;; Qualified reference: `module::name` — the trailing name is the
 ;; thing being referenced. We tag the module path as @namespace and

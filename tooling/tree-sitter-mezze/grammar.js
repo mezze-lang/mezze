@@ -95,6 +95,11 @@ module.exports = grammar({
     // and errored on the missing `->`. Declaring the conflict lets GLR carry
     // both stacks and keep the one that parses.
     [$.match_expression],
+    // NOT declared: `[$._decl_name, $.variable]`, which a lowercase newtype
+    // head (`d.(5)` vs `d.field`) would need. MEASURED at a net LOSS — it took
+    // must-parse from 71 failures to 84. The ambiguity applies to EVERY
+    // `lower_identifier .` in the language, and the wrong stack wins often
+    // enough to cost more than the ~10 split-identifier blocks it buys.
     // {x} could be a lambda's parameter list or a record-literal punning
     // field. Resolved by whether `->` follows the closing `}`.
     [$.lambda_parameter, $.record_field],
@@ -360,7 +365,11 @@ module.exports = grammar({
     variant_ellipsis: _ => '...',
 
     variant_constructor: $ => seq(
-      field('name', $.upper_identifier),
+      // Not case-checked. `P0105_LOWERCASE_CONSTRUCTOR` exists, which is why an
+      // earlier pass here assumed the parser rejects `| red, Green |` — it does
+      // NOT; that code fires on constructor EXPRESSIONS, not on a variant
+      // declaration's arms. Verified by running both through MezzeParser.
+      field('name', $._decl_name),
       // Braced (`Blue { hue: Int }`) is what real code writes; the parser also
       // accepts a bare type after the name and leaves the shape to the
       // validator. Mirrors the same leniency in `variant_pattern`.
@@ -637,6 +646,12 @@ module.exports = grammar({
     named_type: $ => choice($.upper_identifier, $.lower_identifier),
 
     type_application: $ => prec.left(PREC.call, seq(
+      // NOT `qualified_upper_name` here. `codec::Entry Bool Xml` is a real
+      // qualified type application the parser accepts, but admitting it at this
+      // position collides with `impl_declaration`'s own argument list — ten
+      // interpretations of `impl X {`, because `impl Foo Bar for T` and
+      // `impl mod::Foo …` want the same prefix. Two corpus blocks; not worth
+      // that ambiguity until impl-head parsing is restructured.
       field('constructor', choice($.upper_identifier, $.lower_identifier)),
       repeat1(field('argument', $._type_atom)),
     )),
