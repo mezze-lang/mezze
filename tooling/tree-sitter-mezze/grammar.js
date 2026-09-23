@@ -79,6 +79,22 @@ module.exports = grammar({
   // and picks whichever yields a complete tree. The disambiguator is always
   // a token further right (`->` for lambda, `=` for let, etc.).
   conflicts: $ => [
+    // At a `_newline` after a match arm the parser must choose: another arm, or
+    // the match is over. LR(1) cannot tell — the deciding evidence is whether
+    // the NEXT line turns out to be `pattern -> body`, which is arbitrarily far
+    // ahead. This used to be settled statically by `prec.right` on
+    // `match_expression`, i.e. always "another arm", which is wrong whenever a
+    // match is followed by something else at the same indent:
+    //
+    //     let opt = match maybe is
+    //       Some { val } -> val
+    //       None
+    //
+    // The parser reads that as a ONE-arm match plus a separate top-level
+    // expression `None`; the grammar was forced to read `None` as a second arm
+    // and errored on the missing `->`. Declaring the conflict lets GLR carry
+    // both stacks and keep the one that parses.
+    [$.match_expression],
     // {x} could be a lambda's parameter list or a record-literal punning
     // field. Resolved by whether `->` follows the closing `}`.
     [$.lambda_parameter, $.record_field],
@@ -146,7 +162,21 @@ module.exports = grammar({
     // No explicit separator needed — the inner _top_level rules
     // self-terminate at their closing tokens (`= expr` for let/impl op,
     // `}` for impl/ability/effect bodies, etc.).
-    source_file: $ => repeat($._top_level_with_metadata),
+    // A block-structured construct (match arms, a do-block) ends when the next
+    // line is no longer part of it — and for the PARSER that decision is purely
+    // syntactic: `match x is / Some {v} -> v / None` is a one-arm match plus a
+    // separate top-level expression, whatever column `None` sits in.
+    //
+    // tree-sitter can only reach that reading if the leftover layout tokens are
+    // consumable HERE. Without this, the `_newline` after the last arm has no
+    // home outside the match, so "end the match and start a new declaration" is
+    // not a parse the GLR engine can even try — it is forced to keep extending
+    // the arm list and errors on the first line that is not `pattern -> body`.
+    source_file: $ => repeat(choice(
+      $._newline,
+      $._dedent,
+      $._top_level_with_metadata,
+    )),
 
     _top_level_with_metadata: $ => seq(
       repeat($.metadata_block),
@@ -834,7 +864,7 @@ module.exports = grammar({
     // with _dedent when a line dedents below the arm column — this is what stops
     // the arm list from swallowing the following top-level token. A trailing
     // comma per arm stays allowed (some sources write `pat -> body,`).
-    match_expression: $ => prec.right(seq(
+    match_expression: $ => seq(
       'match',
       field('scrutinee', $._expression),
       'is',
@@ -843,7 +873,7 @@ module.exports = grammar({
       optional(','),
       repeat(seq($._newline, $.match_arm, optional(','))),
       optional($._dedent),
-    )),
+    ),
 
     match_arm: $ => seq(
       // Alternative patterns: `1 | 2 | 3 -> "small"` matches any of three
