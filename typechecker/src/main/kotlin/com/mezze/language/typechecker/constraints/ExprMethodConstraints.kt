@@ -641,8 +641,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     constraints.addAll(argumentResult.constraints)
 
     val receiverType: MezzeType = receiverResult.type
-    val extraEffects: Set<String> = emptySet()
-    val extraEffectInstances: Set<MezzeType.EffectInstance> = emptySet()
 
     constraints.add(Constraint.Equality(
         left = receiverType,
@@ -744,8 +742,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     return ConstraintResult(
         type = callType,
         constraints = constraints,
-        effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + abilityHarvestedEffects) - abilityCaughtByOp,
-        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
+        effects = (receiverResult.effects + argumentResult.effects + methodDeclaredEffects + abilityHarvestedEffects) - abilityCaughtByOp,
+        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + methodDeclaredEffectInstances,
         abilityConstraints = abilityConstraints,
         associatedTypeConstraints = associatedTypeConstraints,
         undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
@@ -1091,8 +1089,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
     val receiverType: MezzeType = receiverResult.type
-    val extraEffects: Set<String> = emptySet()
-    val extraEffectInstances: Set<MezzeType.EffectInstance> = emptySet()
 
     // #334: default to a fresh var; reassigned below to the method's INSTANTIATED
     // named return type when that is a TypeApplication, so the call result keeps
@@ -1365,8 +1361,8 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     return ConstraintResult(
         type = callType,
         constraints = constraints,
-        effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
-        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
+        effects = (receiverResult.effects + argumentResult.effects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
+        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + methodDeclaredEffectInstances,
         abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints + inherentMethodAbilityConstraints,
         associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
         undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
@@ -1404,8 +1400,6 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
     val receiverType: MezzeType = receiverResult.type
-    val extraEffects: Set<String> = emptySet()
-    val extraEffectInstances: Set<MezzeType.EffectInstance> = emptySet()
 
     // Fresh-instantiate imported method types so their type params don't clash
     // across candidates; local ones are used as-is (mirrors generateInherentMethodCall).
@@ -1503,8 +1497,8 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     return ConstraintResult(
         type = callType,
         constraints = constraints,
-        effects = (receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects + deferredHarvestedEffects) - deferredCaughtByOp,
-        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
+        effects = (receiverResult.effects + argumentResult.effects + methodDeclaredEffects + deferredHarvestedEffects) - deferredCaughtByOp,
+        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + methodDeclaredEffectInstances,
         abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
         associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
         undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
