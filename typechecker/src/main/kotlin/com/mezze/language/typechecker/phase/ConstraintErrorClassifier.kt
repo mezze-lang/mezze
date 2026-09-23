@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.phase
 
+import com.mezze.language.parsedast.diagnostics.DiagnosticHints
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.parsedast.diagnostics.ErrorCode
@@ -16,7 +17,7 @@ internal fun classifyConstraintError(
     val ctx = (constraint as? Constraint.Equality)?.errorContext
 
     val annotationHint = listOf(
-        "either change the annotation to match the body, or change the body to produce the annotated type"
+        DiagnosticHints.ANNOTATION_VS_BODY
     )
 
     // T0211 detection runs FIRST — it inspects the constraint's types
@@ -133,7 +134,7 @@ private fun classifyByConstraintAndCode(
 /** Advice that belongs to a code itself rather than to the site that raised it. */
 private fun hintsFor(code: ErrorCode): List<String> = when (code) {
     ErrorCode.T0207_INFINITE_TYPE -> listOf(
-        "this usually means a recursive let-binding is missing a type annotation"
+        DiagnosticHints.INFINITE_TYPE_NEEDS_ANNOTATION
     )
     else -> emptyList()
 }

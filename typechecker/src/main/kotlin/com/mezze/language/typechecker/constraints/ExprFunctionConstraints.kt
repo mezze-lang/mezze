@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
+import com.mezze.language.parsedast.diagnostics.DiagnosticHints
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
@@ -68,7 +69,7 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
             errorType = ErrorType.MISSING_FIELD,
             code = ErrorCode.M0803_NOT_EXPORTED,
             hints = listOf(
-                "newtype constructors are not exported; look for a `pub` factory function in the defining module"
+                DiagnosticHints.NEWTYPE_CONSTRUCTOR_NOT_EXPORTED
             ),
         )
     }
@@ -182,7 +183,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                 errorType = ErrorType.MISSING_FIELD,
                 code = ErrorCode.M0803_NOT_EXPORTED,
                 hints = listOf(
-                    "newtype constructors are not exported; look for a `pub` factory function in the defining module"
+                    DiagnosticHints.NEWTYPE_CONSTRUCTOR_NOT_EXPORTED
                 ),
             )
         }

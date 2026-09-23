@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
+import com.mezze.language.parsedast.diagnostics.DiagnosticHints
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
@@ -79,7 +80,7 @@ internal class AnnotationValidator(
                     "but lambda has $actualParamCount parameter(s)",
                     expression.loc,
                     code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                    hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                 )
             }
         }
@@ -132,7 +133,7 @@ internal class AnnotationValidator(
                         "The implementation must work for all types, not just specific ones.",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                        hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                     )
                 }
             }
@@ -193,7 +194,7 @@ internal class AnnotationValidator(
                     "which are not used in the implementation.",
                     sourceLoc,
                     code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                    hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                 )
             }
 
@@ -285,7 +286,7 @@ internal class AnnotationValidator(
                         "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'.",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                        hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                     )
                 }
             } else {
@@ -298,7 +299,7 @@ internal class AnnotationValidator(
                         "but the annotation does not declare this constraint.",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                        hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                     )
                 }
             }

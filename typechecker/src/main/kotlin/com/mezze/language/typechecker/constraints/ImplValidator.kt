@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
+import com.mezze.language.parsedast.diagnostics.DiagnosticHints
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
@@ -600,7 +601,7 @@ internal class ImplValidator(
                         "expected $expectedTypeStr, but body returns $actualTypeStr.",
                         opLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                        hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                     )
                 }
 
@@ -885,7 +886,7 @@ internal class ImplValidator(
                         "but impl declares $implTypeStr.",
                         implOp.implementation.loc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                        hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                     )
                 }
             }

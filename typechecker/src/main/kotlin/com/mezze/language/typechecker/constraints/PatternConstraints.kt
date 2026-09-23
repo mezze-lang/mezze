@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
+import com.mezze.language.parsedast.diagnostics.DiagnosticHints
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.TypeCheckError
@@ -69,7 +70,7 @@ class PatternConstraintGenerator {
                 errorType = ErrorType.MISSING_FIELD,
                 code = ErrorCode.M0803_NOT_EXPORTED,
                 hints = listOf(
-                    "newtype constructors are not exported; look for a `pub` factory function in the defining module"
+                    DiagnosticHints.NEWTYPE_CONSTRUCTOR_NOT_EXPORTED
                 ),
             )
         }
@@ -179,7 +180,7 @@ class PatternConstraintGenerator {
                 patternLoc,
                 errorType = ErrorType.INVALID_PATTERN,
                 code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
-                hints = listOf("use a constructor pattern like `Some { ... }`"),
+                hints = listOf(DiagnosticHints.USE_CONSTRUCTOR_PATTERN),
                 // Offer each real constructor of the scrutinee as a one-click
                 // replacement for the mistaken literal pattern (Rename replaces
                 // the pattern span with the candidate text). Bare constructor
@@ -198,7 +199,7 @@ class PatternConstraintGenerator {
                 sourceLoc,
                 errorType = ErrorType.INVALID_PATTERN,
                 code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
-                hints = listOf("use a constructor pattern like `Some { ... }`"),
+                hints = listOf(DiagnosticHints.USE_CONSTRUCTOR_PATTERN),
             )
         }
 
@@ -264,7 +265,7 @@ class PatternConstraintGenerator {
                 sourceLoc ?: pattern.loc,
                 errorType = ErrorType.INVALID_PATTERN,
                 code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
-                hints = listOf("use a constructor pattern like `Some { ... }`"),
+                hints = listOf(DiagnosticHints.USE_CONSTRUCTOR_PATTERN),
             )
         }
 
