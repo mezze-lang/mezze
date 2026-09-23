@@ -97,42 +97,21 @@ class MatchValidator(
         else -> false
     }
 
+    /**
+     * Every sub-expression, via [ParsedExpr.children] — the one walker that is
+     * exhaustive over the node set by construction.
+     *
+     * This was written out by hand and ended in `else -> {}`, so it silently
+     * skipped `ParsedBinaryOp`, `ParsedNewtypeConstruct`, `ParsedEffectCall`, a
+     * match's `ifLetBindings` and a `perform`'s handler params. Since this walk
+     * is how [validateParsedMatchesInExpr] FINDS the matches to check, a match
+     * living in any of those positions — `1 + (match … )` being the easiest to
+     * write — was never exhaustiveness-checked at all. A walker that decides
+     * what gets validated must not have an `else`.
+     */
     private fun walkParsedExpr(expr: ParsedExpr, visitor: (ParsedExpr) -> Unit) {
         visitor(expr)
-        when (expr) {
-            is ParsedLambda -> walkParsedExpr(expr.body, visitor)
-            is ParsedFunctionCall -> { walkParsedExpr(expr.function, visitor); walkParsedExpr(expr.arguments, visitor) }
-            is ParsedMatch -> {
-                walkParsedExpr(expr.scrutinee, visitor)
-                for (case in expr.cases) {
-                    case.guard?.let { walkParsedExpr(it, visitor) }
-                    walkParsedExpr(case.body, visitor)
-                }
-            }
-            is ParsedIf -> { walkParsedExpr(expr.condition, visitor); walkParsedExpr(expr.thenBranch, visitor); walkParsedExpr(expr.elseBranch, visitor) }
-            is ParsedDo -> {
-                for (stmt in expr.statements) when (stmt) {
-                    is ParsedStatement.Let -> walkParsedExpr(stmt.value, visitor)
-                    is ParsedStatement.Expr -> walkParsedExpr(stmt.expr, visitor)
-                }
-                walkParsedExpr(expr.result, visitor)
-            }
-            is ParsedRecordLit -> for (entry in expr.entries) when (entry) {
-                is ParsedRecordEntry.Field -> entry.value?.let { walkParsedExpr(it, visitor) }
-                is ParsedRecordEntry.Spread -> walkParsedExpr(entry.expr, visitor)
-            }
-            is ParsedVariantConstruct -> expr.value?.let { walkParsedExpr(it, visitor) }
-            is ParsedMemberAccess -> walkParsedExpr(expr.receiver, visitor)
-            is ParsedSeqLit -> for (elem in expr.elements) when (elem) {
-                is ParsedSeqElement.Regular -> walkParsedExpr(elem.expr, visitor)
-                is ParsedSeqElement.Spread -> walkParsedExpr(elem.expr, visitor)
-            }
-            is ParsedPerform -> walkParsedExpr(expr.body, visitor)
-            is ParsedPipe -> { walkParsedExpr(expr.left, visitor); walkParsedExpr(expr.right, visitor) }
-            is ParsedStringLit -> for (part in expr.parts) if (part is ParsedStringPart.Interpolation) walkParsedExpr(part.expr, visitor)
-            is ParsedParens -> walkParsedExpr(expr.expr, visitor)
-            else -> {}
-        }
+        for (child in expr.children()) walkParsedExpr(child, visitor)
     }
 
     fun validateParsedExhaustiveness(
