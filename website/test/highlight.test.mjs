@@ -50,4 +50,17 @@ describe('highlight', () => {
     const src = '"a \\" b"'
     assert.equal(text(highlight(src)), src)
   })
+
+  // A spread is not a member access. The `.method` pattern was matching the
+  // third dot of `...ys` and colouring the name after it as a method, in both
+  // the sequence and the record form.
+  test('a spread is not coloured as a method', () => {
+    for (const src of ['[...ys, 1]', '{ ...base, a = 1 }', '[h, ...rest]']) {
+      assert.doesNotMatch(highlight(src), /tk-mth/, src)
+    }
+  })
+
+  test('a real member access is still coloured', () => {
+    assert.match(highlight('xs.size {}'), /<span class="tk-mth">\.size<\/span>/)
+  })
 })
