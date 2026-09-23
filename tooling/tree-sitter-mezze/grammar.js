@@ -95,6 +95,13 @@ module.exports = grammar({
     // and errored on the missing `->`. Declaring the conflict lets GLR carry
     // both stacks and keep the one that parses.
     [$.match_expression],
+    // NOT declared: `[$.string_interpolation, $.function_call]` /
+    // `[…, $.record_expression]`, to let an unbalanced interpolation body stop
+    // the expression early. tree-sitter reports both as UNNECESSARY — there is
+    // no parser-state ambiguity to split. The choice between "continue the call"
+    // and "start the dropped tail" is made by the LEXER, which picks one token
+    // per state and prefers `{` over the low-precedence tail token. See the note
+    // on `interpolation_ignored`.
     // NOT declared: `[$._decl_name, $.variable]`, which a lowercase newtype
     // head (`d.(5)` vs `d.field`) would need. MEASURED at a net LOSS — it took
     // must-parse from 71 failures to 84. The ambiguity applies to EVERY
@@ -685,7 +692,10 @@ module.exports = grammar({
 
     record_type: $ => seq(
       '{',
-      sepBy(',', $.record_type_field),
+      // A bare type with no `name:` is accepted by the parser (`{ a: Int, Str }`)
+      // and left to the validator. It is also what `{ a: Int, Str }` looks like
+      // while `Str` is still waiting for its field name to be typed in front.
+      sepBy(',', choice($.record_type_field, $._type_atom)),
       // Open record: `{ a: Int, ... }` — the `...` marks the row as open
       // (extra fields allowed). Only valid trailing the field list.
       optional(seq(optional(','), field('rest', $.record_type_rest))),
@@ -786,6 +796,10 @@ module.exports = grammar({
       $.record_expression,
       $.sequence_expression,
       $.newtype_constructor_expression,
+      // `'a` alone. The parser lexes a type variable anywhere and accepts it in
+      // expression position, leaving "that is a type, not a value" to the
+      // validator.
+      $.type_variable,
       $.static_ability_op,
       $.variant_constructor_expression,
       $.pipe_placeholder,
@@ -1188,8 +1202,16 @@ module.exports = grammar({
     // into real nodes, and only the dropped remainder is anonymous.
     string_interpolation: $ => seq(
       '$(',
-      $._expression,
-      optional($.interpolation_ignored),
+      choice(
+        // The common case: a real expression, then anything the parser drops.
+        seq($._expression, optional($.interpolation_ignored)),
+        // No expression parses at all. `expression()` commits to the longest
+        // prefix it can, and for a body like `f { x = inner { y = 1 }[}` that
+        // prefix is just `f` — but the grammar cannot stop mid-record, so the
+        // whole body has to be droppable too. Never EMPTY: `$()` stays an error,
+        // matching P0110_EMPTY_INTERPOLATION.
+        $.interpolation_ignored,
+      ),
       ')',
     ),
 
