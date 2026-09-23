@@ -89,6 +89,7 @@ class TypeChecker(
                     "on a value of a known type.",
                 loc = c.loc,
                 code = ErrorCode.T0206_METHOD_NOT_FOUND,
+                subjectTypeUnknown = true,
             )
         } else null
     }
@@ -108,17 +109,17 @@ class TypeChecker(
             .filter { it.value.code == ErrorCode.T0206_METHOD_NOT_FOUND && it.value.loc != null }
             .groupBy { it.value.loc }
         if (t0206ByLoc.none { it.value.size > 1 }) return errors
-        // For each loc with duplicates, keep the "most specific" message — the one
-        // that names a concrete type (heuristic: does NOT contain "could not be
-        // determined"); fall back to the longest message.
+        // For each loc with duplicates, keep the one that NAMES a concrete type.
+        // The producer says so via `subjectTypeUnknown`; this used to be recovered
+        // by testing the message for "could not be determined".
         val dropIndices = mutableSetOf<Int>()
         for ((_, group) in t0206ByLoc) {
             if (group.size <= 1) continue
-            // Prefer the concrete-type message (NOT "could not be determined");
-            // tie-break by the longer message.
+            // Length is only a tie-break BETWEEN two equally specific diagnostics,
+            // never the classification itself.
             val keep = group.sortedWith(
                 compareBy<IndexedValue<TypeCheckError>> {
-                    if (it.value.message.contains("could not be determined")) 1 else 0
+                    if (it.value.subjectTypeUnknown) 1 else 0
                 }.thenByDescending { it.value.message.length }
             ).first()
             group.forEach { if (it.index != keep.index) dropIndices.add(it.index) }
@@ -164,6 +165,17 @@ class TypeChecker(
             ErrorCode.UNCATEGORIZED,
         val hints: List<String> = emptyList(),
         val fixHints: List<FixHint> = emptyList(),
+        /**
+         * True when this diagnostic could NOT name the type it is about, because
+         * the subject was still an unsolved type variable.
+         *
+         * Two errors sharing a loc and a code are the same error seen twice, and
+         * the one that names a concrete type is the useful one. That choice used
+         * to be made by testing the message for "could not be determined", so
+         * rewording the generic diagnostic would have silently started discarding
+         * the informative one instead.
+         */
+        val subjectTypeUnknown: Boolean = false,
     )
 
         data class TypeCheckWarning(

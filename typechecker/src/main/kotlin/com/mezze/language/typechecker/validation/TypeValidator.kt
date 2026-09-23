@@ -35,7 +35,7 @@ class TypeValidator(
     private val unknownTypeValidator = UnknownTypeValidator(registry)
     private val codecGenerator = CodecGenerator()
 
-    private val typeNameCache = mutableMapOf<Int, String>()
+    private val typeNameCache = mutableMapOf<MezzeType, String>()
     fun validate(
         module: ParsedModule,
         constraintResults: Map<String, ConstraintResult>,
@@ -228,7 +228,6 @@ class TypeValidator(
             if (concreteType is MezzeType.VarType) continue
 
             val typeName = getTypeNameForAbility(concreteType)
-            if (typeName.startsWith("'") || typeName == "Unknown") continue
 
             val abilityName = constraint.abilityName
             val effectiveHash = constraint.abilityHash ?: registry.resolveAbilityHash(abilityName)
@@ -240,10 +239,25 @@ class TypeValidator(
             var hasPolymorphicTypeArg = false
             var hasConstrainedTypeInArgs = false
             for (typeArg in constraint.typeArgs) {
-                val argTypeName = getTypeNameForAbility(substitution.apply(typeArg))
-                if (argTypeName.startsWith("'") || argTypeName == "Unknown") { hasPolymorphicTypeArg = true; break }
-                if (argTypeName == typeName) hasConstrainedTypeInArgs = true
-                implTypeParts.add(argTypeName)
+                val argType = substitution.apply(typeArg)
+                // A bare type variable — ordinary polymorphism, or the compiler's
+                // "could not determine a type" placeholder. Either way there is no
+                // type here to choose an impl by, so refuse rather than guess (see
+                // TypeVar.isPlaceholder).
+                //
+                // This used to ask the RENDERED name: `startsWith("'")` for the
+                // first case and `== "Unknown"` for the second. The placeholder is
+                // named "unknown", lowercase, so that second test never matched the
+                // thing it was written for and a placeholder reached the impl-key
+                // build below.
+                if (argType is MezzeType.VarType) { hasPolymorphicTypeArg = true; break }
+                // Structural equality, not equal RENDERINGS. getTypeNameForAbility
+                // collapses a record to `Record_<fieldnames>` and a variant to
+                // `Variant_<ctornames>`, so `{ x: Int }` and `{ x: Str }` render
+                // identically and used to count as "the constrained type appears in
+                // the args".
+                if (argType == concreteType) hasConstrainedTypeInArgs = true
+                implTypeParts.add(getTypeNameForAbility(argType))
             }
             if (hasPolymorphicTypeArg) continue
             if (!hasConstrainedTypeInArgs) implTypeParts.add(0, typeName)
@@ -366,9 +380,17 @@ class TypeValidator(
             annotations.size == 1 && TypeAnnotationMatcher.typeMatchesAnnotation(type, annotations[0], typeDeclarations, implInfo.typeVars, mutableMapOf())
         }
 
+    /**
+     * A DISPLAY name for an impl key. Lossy on purpose — a record becomes
+     * `Record_<fieldnames>`, a variant `Variant_<ctornames>` — so it must never
+     * decide whether two types are the same. Compare the types.
+     */
     private fun getTypeNameForAbility(type: MezzeType): String {
-        val key = System.identityHashCode(type)
-        typeNameCache[key]?.let { return it }
+        // Keyed on the TYPE, not System.identityHashCode(type). The result is a
+        // function of the type's structure, so two equal types should share an
+        // entry; identity hashes collide between distinct objects and are reused
+        // after collection, which is a stale name for an unrelated type.
+        typeNameCache[type]?.let { return it }
         val result = when (type) {
             is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: when {
                 type.constructors.keys == setOf(BuiltinTypes.TRUE, BuiltinTypes.FALSE) -> BuiltinTypes.BOOL
@@ -378,7 +400,7 @@ class TypeValidator(
             is MezzeType.RecordType -> type.identity.displayNameOrNull() ?: ContentHashComputer.mezzeTypeToString(type)
             else -> ContentHashComputer.mezzeTypeToString(type)
         }
-        typeNameCache[key] = result
+        typeNameCache[type] = result
         return result
     }
 

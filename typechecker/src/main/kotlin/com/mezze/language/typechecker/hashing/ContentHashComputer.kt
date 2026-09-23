@@ -5,9 +5,22 @@ import com.mezze.language.ast.hashing.MezzeHash
 
 object ContentHashComputer {
 
-    private val typeStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?) = size > 1000
+    // Keyed on the TYPE, not System.identityHashCode(type). The rendering is a
+    // function of the type's structure, so equal types belong in one entry;
+    // identity hashes collide between distinct live objects and are reused after
+    // collection, which hands back a name belonging to an unrelated type.
+    private val typeStringCache = object : LinkedHashMap<MezzeType, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MezzeType, String>?) = size > 1000
     }
+
+    /**
+     * A short, LOSSY display/key name for a type.
+     *
+     * A record collapses to `Record_<fieldnames>` and a variant to
+     * `Variant_<ctornames>`, so `{ x: Int }` and `{ x: Str }` render identically
+     * and every function type is just `Function`. NEVER decide whether two types
+     * are the same by comparing these — compare the types.
+     */
     fun mezzeTypeToString(type: MezzeType): String {
         PrimitiveTypes.toName(type)?.let { return it }
 
@@ -19,8 +32,7 @@ object ContentHashComputer {
     }
 
         private fun mezzeTypeToStringCached(type: MezzeType): String {
-        val key = System.identityHashCode(type)
-        typeStringCache[key]?.let { return it }
+        typeStringCache[type]?.let { return it }
 
         val result = when (type) {
             is MezzeType.TypeApplication -> {
@@ -38,7 +50,7 @@ object ContentHashComputer {
             else -> type.toString()
         }
 
-        typeStringCache[key] = result
+        typeStringCache[type] = result
         return result
     }
 

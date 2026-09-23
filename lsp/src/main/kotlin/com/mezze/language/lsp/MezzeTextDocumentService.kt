@@ -4584,25 +4584,6 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Pull the unresolved-name token out of a typechecker error message.
-     * The typechecker emits a few variants, all roughly:
-     *   "Undefined variable or function: 'foo'"
-     *   "X is not defined or not imported"
-     * We match anything single-quoted first (preferred), else anything
-     * after the last colon, else null.
-     */
-    private fun extractUndefinedName(msg: String): String? {
-        if (!(msg.contains("Undefined variable")
-                || msg.contains("not defined")
-                || msg.contains("not imported"))) {
-            return null
-        }
-        Regex("'([\\w_]+)'").find(msg)?.let { return it.groupValues[1] }
-        Regex(":\\s*([\\w_]+)\\s*$").find(msg)?.let { return it.groupValues[1] }
-        return null
-    }
-
-    /**
      * Build a TextEdit that inserts `use <module>::<name>` in the right place:
      *
      *   - If the file already has `use` decls, append after the last one,
