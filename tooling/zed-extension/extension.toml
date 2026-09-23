@@ -20,7 +20,16 @@ language = "Mezze"
 # and whose tree contains `tooling/tree-sitter-mezze` (grammar.js + src/).
 # Update this to the pushed HEAD of the branch carrying the grammar before
 # installing. See README for the local-dev workflow.
+#
+# Check it before trusting it — `git cat-file -t <commit>` on this repo. The
+# previous value named an object that does not exist here at all, so Zed could
+# not fetch a grammar to build. A stale-but-real hash is the worse failure of
+# the two: the queries shipped in this extension are generated against the
+# CURRENT grammar, and a pin predating a new node makes them name something the
+# fetched grammar lacks — which costs the whole query file, not one pattern.
 [grammars.mezze]
 repository = "https://github.com/mezze-lang/mezze"
-commit = "5c760d4bff40d865108794516f7597d6628da3f3"
+# = origin/feat/tooling. grammar.js and src/ are byte-identical here, verified
+# with `git diff origin/feat/tooling..HEAD -- tooling/tree-sitter-mezze/{grammar.js,src}`.
+commit = "61febef866727cde65ad343db30a99cab2fb669b"
 path = "tooling/tree-sitter-mezze"
