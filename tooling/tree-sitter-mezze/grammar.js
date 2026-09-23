@@ -1251,6 +1251,15 @@ module.exports = grammar({
     // real expression token is preferred while the expression is still being
     // built; `)` and `"` are excluded so this can never swallow the closing
     // paren or escape the string.
+    // ALSO NOT external. Making this a scanner token was tried, on the reasoning
+    // that external tokens are gated on `valid_symbols` — which differ per GLR
+    // stack — so the stack that had already ended its expression could take the
+    // tail while the stack still building a record took `{`. It does not work
+    // out: offered at the body's first position the scanner claimed whole bodies
+    // and valid interpolations lost their expression tree (2 corpus tests), and
+    // restricting it to after-an-expression left the target blocks failing while
+    // costing must-parse 63 -> 97 and containment 5 -> 6 poisoned. Reverted.
+    //
     // NOT restricted to a non-identifier first character. That was tried, to stop
     // recovery on an unclosed `$(` from matching the whole NEXT DECLARATION as
     // dropped text. It does not even do that — recovery just takes the next
