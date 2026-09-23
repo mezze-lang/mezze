@@ -1339,7 +1339,29 @@ class AbilityChecker internal constructor(
                 val constraintType = typeArgs[i]
 
                 if (constraintType !is MezzeType.VarType) {
-                    if (!TypeAnnotationMatcher.typeMatchesAnnotation(constraintType, annotations[i], registry.typeDeclarations)) {
+                    // NOTE the missing `impl.typeVars` argument. It is deliberate,
+                    // and it is the only call in this file that omits it — the five
+                    // siblings all pass it, so this reads like an oversight and is
+                    // not one.
+                    //
+                    // Passing it would admit GENERIC impls (`impl Eq for ['a]`,
+                    // `impl Eq for Result 'a 'e`), which do genuinely apply. But
+                    // this loop is not asking "does this impl apply"; it is asking
+                    // "is there exactly one impl concrete enough to PIN a variable",
+                    // and the answer is then read straight out of the impl's
+                    // annotation below. A generic slot yields `'a`, so pinning a
+                    // variable to it substitutes one variable for another: no
+                    // inference, and a fresh var where the caller expects a type.
+                    //
+                    // MEASURED: passing `impl.typeVars` flips 270 decisions in the
+                    // typechecker suite, all false→true, overwhelmingly
+                    // `impl Eq for ['a]` (174) and `impl Eq for Result 'a 'e` (58).
+                    // Every one of those would enter `matchingImpls` and either
+                    // trip the ambiguity guard below or pin a variable to a
+                    // variable.
+                    val matchesConcretely = TypeAnnotationMatcher.typeMatchesAnnotation(
+                        constraintType, annotations[i], registry.typeDeclarations)
+                    if (!matchesConcretely) {
                         matches = false
                         break
                     }
