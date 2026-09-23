@@ -25,7 +25,7 @@ languages/mezze/
 ```
 
 The three `.scm` files are generated from `../tree-sitter-mezze/queries/` by
-`../syntax-generators/gen-zed-queries.py` — edit the source, not these. Zed
+`../syntax-generators/gen-queries.py` — edit the source, not these. Zed
 extensions have to ship their own query files, so the copy is unavoidable;
 maintaining it by hand was not. It had drifted onto a `"!"` token the grammar
 does not have, and tree-sitter rejects a query that names a missing node by
@@ -35,7 +35,7 @@ Two checks keep that from recurring, and both are needed — matching the source
 would not catch a fault the source also has:
 
 ```
-tooling/syntax-generators/gen-zed-queries.py --check   # copy matches its source
+tooling/syntax-generators/gen-queries.py --check       # copies match their source
 tooling/tree-sitter-mezze/scripts/check-queries.py .   # every .scm still compiles
 ```
 
@@ -43,11 +43,14 @@ tooling/tree-sitter-mezze/scripts/check-queries.py .   # every .scm still compil
 
 1. Install `mez` on your `PATH` (the extension resolves `mez` from the
    worktree, falling back to `mez`). Verify: `mez lsp --help` works.
-2. **Make the grammar commit fetchable.** Zed builds the grammar from a git
-   REMOTE by commit — it can't read your local-only branch. So push the branch
-   that contains `tooling/tree-sitter-mezze`, then set `[grammars.mezze].commit`
-   in `extension.toml` to that pushed hash (and `repository` to your fork if
-   not `shriyansbhatnagar/funk`).
+2. **The grammar commit must be fetchable** — Zed builds the grammar from a git
+   REMOTE by commit and cannot read a local-only branch. This is already
+   pinned to a pushed commit on `mezze-lang/mezze`, so there is nothing to do
+   unless you changed the grammar: then push it and bump
+   `[grammars.mezze].commit` to the pushed hash, in that order. Verify with
+   `tooling/syntax-generators/check-zed-pin.sh` — a pin that predates a grammar
+   change makes the shipped queries name a node the fetched parser lacks, which
+   costs the whole query file.
 3. In Zed: command palette → `zed: install dev extension` → pick this
    `tooling/zed-extension` folder. Zed compiles `src/lib.rs` to WASM, fetches +
    builds the grammar, and installs.
@@ -70,6 +73,10 @@ tree-sitter colors but no diagnostics/hover, do ONE of:
   ```json
   "lsp": { "mezze": { "binary": { "path": "/Users/YOU/.mezze/bin/mez" } } }
   ```
+  This takes priority over the PATH lookup. It was documented here long before
+  it worked — the shim read only PATH, so the documented escape hatch did
+  nothing for the very case it documents. `binary.arguments` is also honoured
+  and REPLACES the default `lsp` argument, for pointing at a wrapper script.
 
 Check `zed: open log` for the resolved command / server output if unsure.
 

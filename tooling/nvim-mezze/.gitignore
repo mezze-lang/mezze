@@ -1,0 +1,4 @@
+# Built by ./build.sh from tooling/tree-sitter-mezze/grammar.js. Generated, not
+# source — like src/parser.c in the grammar itself, which is why build.sh has to
+# generate that first.
+parser/

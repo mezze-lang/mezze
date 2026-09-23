@@ -2,7 +2,7 @@
   "name": "tree-sitter-mezze",
   "version": "0.0.1",
   "description": "Tree-sitter grammar for the Mezze language",
-  "repository": "github:shriyansbhatnagar/funk",
+  "repository": "github:mezze-lang/mezze",
   "license": "MIT",
   "main": "bindings/node",
   "types": "bindings/node",

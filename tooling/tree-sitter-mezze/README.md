@@ -1,6 +1,6 @@
 # tree-sitter-mezze
 
-Tree-sitter grammar for the [Mezze](https://github.com/shriyansbhatnagar/funk)
+Tree-sitter grammar for the [Mezze](https://github.com/mezze-lang/mezze)
 language. Powers syntax highlighting in Neovim, Helix, Zed, Emacs, and replaces
 the legacy TextMate grammar in the VSCode extension.
 

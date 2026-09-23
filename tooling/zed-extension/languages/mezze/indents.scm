@@ -1,18 +1,18 @@
 ;; GENERATED — do not edit.
 ;;
 ;; Source: tooling/tree-sitter-mezze/queries/indents.scm
-;; Regenerate: tooling/syntax-generators/gen-zed-queries.py
+;; Regenerate: tooling/syntax-generators/gen-queries.py
 ;;
-;; Captures renamed for Zed's theme vocabulary:
+;; Captures renamed for this editor:
 ;;     @comment.documentation       -> @comment.doc
 ;;     @constant.builtin.boolean    -> @boolean
 ;;     @number.float                -> @number
 ;;     @type.interface              -> @type
 ;;     @variable.member             -> @property
 ;;
-;; Every other capture is passed through unchanged. The `;;` commentary below
-;; came from the source file and names the SOURCE captures — read it through
-;; the table above.
+;; Every other capture is passed through unchanged. The `;;`
+;; commentary below came from the source and names the SOURCE
+;; captures — read it through the table above.
 ;; Mezze auto-indent rules. The host editor (Neovim, Helix) calls into
 ;; tree-sitter for "where should the cursor sit when I press Enter or
 ;; paste a block?"
