@@ -191,6 +191,24 @@ bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
     return true;
   }
 
+  // NOT added here: a branch absorbing an over-indented line as another item of
+  // the current block (`col > top && valid_symbols[NEWLINE] -> NEWLINE`).
+  //
+  // It is tempting, because the Kotlin parser ignores the column entirely when
+  // deciding whether a match arm continues, so arms at inconsistent indents are
+  // ONE match to the parser and a hard error here — and inconsistent indents are
+  // exactly what half-edited code looks like.
+  //
+  // MEASURED, and it is a net loss: it fixed the mixed-indent arms but took
+  // must-parse from 188 failures to 197. Returning false here PRUNES a GLR
+  // branch; emitting a NEWLINE instead keeps a wrong stack alive, and in nine
+  // other snippets that wrong stack went on to win. (must-reject moved the other
+  // way, 18227 -> 18258, i.e. the grammar got stricter elsewhere — the same
+  // effect seen from the other side.) Reverted. Closing the mixed-indent case
+  // needs the arm-list context, which this scanner cannot see from
+  // `valid_symbols` alone.
+
+
   // Shallower → the current block (and possibly several) is over. Count how
   // many levels we need to pop, emit one DEDENT now and queue the rest.
   if (col < top && valid_symbols[DEDENT]) {
