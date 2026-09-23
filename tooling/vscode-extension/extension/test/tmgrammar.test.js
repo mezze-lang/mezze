@@ -102,6 +102,52 @@ function leaf(scopes) {
   return null
 }
 
+// Mezze is highlighted three independent times — here, by the tree-sitter
+// grammar (Zed/nvim/Helix), and by website/src/lib/highlight.ts — and nothing
+// held them to the same keyword list. That is the drift that actually happens:
+// a keyword is added to the language and two of the three never hear about it.
+// tree-sitter is the reference because it is generated from the grammar.
+function keywordSync() {
+  const root = path.join(__dirname, '..', '..', '..', '..')
+  const tsGrammar = path.join(root, 'tooling', 'tree-sitter-mezze', 'src', 'grammar.json')
+  const webHighlight = path.join(root, 'website', 'src', 'lib', 'highlight.ts')
+  if (!fs.existsSync(tsGrammar) || !fs.existsSync(webHighlight)) {
+    console.error('error: cannot locate the other two highlighters from ' + root)
+    process.exit(2)
+  }
+
+  // Every keyword-shaped anonymous token in the generated grammar. `_` is the
+  // wildcard pattern, not a keyword.
+  const ts = new Set()
+  const collect = (o) => {
+    if (Array.isArray(o)) return o.forEach(collect)
+    if (!o || typeof o !== 'object') return
+    if (o.type === 'STRING' && /^[a-z_][a-z0-9_]*$/.test(o.value) && o.value !== '_') ts.add(o.value)
+    Object.values(o).forEach(collect)
+  }
+  collect(JSON.parse(fs.readFileSync(tsGrammar, 'utf8')))
+
+  const grammarSrc = fs.readFileSync(GRAMMAR, 'utf8')
+  const tm = new Set()
+  for (const m of grammarSrc.matchAll(/"match":\s*"\\\\b\(([a-z|]+)\)\\\\b"/g)) {
+    m[1].split('|').forEach((k) => tm.add(k))
+  }
+
+  const webSrc = fs.readFileSync(webHighlight, 'utf8')
+  const webList = webSrc.split('const KEYWORDS = [')[1]?.split(']')[0] ?? ''
+  const web = new Set([...webList.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]))
+
+  let bad = 0
+  for (const [name, set] of [['TextMate', tm], ['website', web]]) {
+    const missing = [...ts].filter((k) => !set.has(k)).sort()
+    const extra = [...set].filter((k) => !ts.has(k)).sort()
+    if (missing.length) { bad++; console.log(`FAIL ${name} is missing keyword(s): ${missing.join(' ')}`) }
+    if (extra.length) { bad++; console.log(`FAIL ${name} has keyword(s) tree-sitter does not: ${extra.join(' ')}`) }
+  }
+  console.log(`keyword sync: ${ts.size} keywords, TextMate and website ${bad ? 'DIVERGE' : 'both agree'}`)
+  return bad
+}
+
 const wasm = fs.readFileSync(require.resolve('vscode-oniguruma/release/onig.wasm')).buffer
 const onigLib = oniguruma.loadWASM(wasm).then(() => ({
   createOnigScanner: (p) => new oniguruma.OnigScanner(p),
@@ -149,5 +195,6 @@ registry.loadGrammar('source.mezze').then((grammar) => {
   }
   console.log('-----------------------------------------')
   console.log(`tmgrammar: ${checks - failures}/${checks} scope assertions hold`)
+  failures += keywordSync()
   process.exit(failures === 0 ? 0 : 1)
 })
