@@ -266,11 +266,19 @@ object DispatchResolver {
                 // (`Weigh.rank { it = x }`), so nothing is ambiguous: the answer
                 // is written at the call site and this pass is not reading it.
                 //
-                // So what remains is mechanical, not semantic — honour an explicit
-                // ability qualifier — and there is no language decision left here.
-                // A genuine same-op collision on an UNQUALIFIED call, where two
-                // abilities both have an impl for the same receiver type, does not
-                // occur anywhere we test.
+                // What remains is NOT the semantic question either, but it is not
+                // a one-line fix. `Weigh.rank { it = x }` names its ability, yet by
+                // the time the bucket is recorded the qualifier is gone: the
+                // receiver has been rewritten to the `it` argument (`x`), so
+                // `recordMethodResolveBucket` sees an ordinary identifier and takes
+                // its candidates from the method NAME, admitting every ability that
+                // declares `rank`.
+                //
+                // MEASURED: narrowing the bucket by an ability-named receiver was
+                // tried and fires zero times, precisely because the receiver is `x`
+                // and not `Weigh`. Closing this needs the qualifier threaded from
+                // the ability-op call site down to bucket recording — a change to
+                // what the bucket carries, not a filter over what it already has.
                 return null
             }
             val opHash = narrowed.first().opHash ?: return null
