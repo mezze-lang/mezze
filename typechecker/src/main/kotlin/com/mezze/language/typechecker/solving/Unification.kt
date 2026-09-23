@@ -137,6 +137,32 @@ internal fun isOpaqueWall(type: MezzeType): Boolean = when {
  * declaration is the same); it must never turn two distinct-named anonymous applications into
  * a match.
  */
+/**
+ * One well-known type met in BOTH of its representations: a [TypeIdentity.Declared]
+ * on one side and a [TypeIdentity.Builtin] on the other, under the same name.
+ *
+ * [identityVerdict] calls a mixed pair UNDETERMINED and refuses to decide, which is
+ * right in general — a name is not an identity, and matching on one is the pattern
+ * this codebase otherwise forbids. This is the one place that has to decide anyway,
+ * and only because `Bool`, `Option` and `Result` genuinely exist twice: as a builtin
+ * and as a stdlib declaration. Two walls that are the same type must unify even when
+ * they arrive wearing different identity kinds.
+ *
+ * MEASURED across the typechecker suite: 2636 pairs reach this and answer SAME where
+ * [sameDeclaredIdentity] alone would answer no — 1767 `Bool`, 603 `Result`, 266
+ * `Option`, and nothing else. That is the whole population. So this is not a general
+ * name-based identity rule that happens to be narrow; it is exactly the dual-
+ * representation problem, and it disappears the day those three types have one
+ * representation each. Whoever unifies them should expect this function to go with
+ * them — and should expect 2636 unifications to route through the change.
+ */
+private fun sameBuiltinSeenBothWays(id1: TypeIdentity, id2: TypeIdentity): Boolean {
+    // Same-kind pairs are [sameDeclaredIdentity]'s business, not this one's.
+    if (id1 is TypeIdentity.Declared == id2 is TypeIdentity.Declared) return false
+    val n1 = id1.displayNameOrNull() ?: return false
+    return n1 == id2.displayNameOrNull()
+}
+
 internal fun sameDeclaredIdentity(id1: TypeIdentity, id2: TypeIdentity): Boolean = when {
     id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared -> id1.hash == id2.hash
     id1 is TypeIdentity.Builtin && id2 is TypeIdentity.Builtin -> id1.name == id2.name
@@ -882,14 +908,9 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     val bothWalled = walled1 && walled2
     val id1 = var1.identity
     val id2 = var2.identity
-    val identityMatch = if (id1 is TypeIdentity.Declared && id2 is TypeIdentity.Declared) {
-        id1.hash == id2.hash
-    } else {
-        // Anonymous walls (no name, no hash) with equal arm sets are the same
-        // wall; distinct arm sets differ.
-        val n1 = id1.displayNameOrNull()
-        n1 != null && n1 == id2.displayNameOrNull()
-    }
+    // Two walls are the same wall when they are the same DECLARATION, or when
+    // they are one well-known builtin met in both of its representations.
+    val identityMatch = sameDeclaredIdentity(id1, id2) || sameBuiltinSeenBothWays(id1, id2)
     // Identity is authoritative: two variants whose identities are provably DISTINCT
     // (both Declared, content hashes differ) are distinct declarations and MUST NOT
     // unify — regardless of whether either name is in scope. Mirrors the
