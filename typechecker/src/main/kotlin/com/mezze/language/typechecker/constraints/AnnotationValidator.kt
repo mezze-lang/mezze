@@ -447,7 +447,13 @@ internal class AnnotationValidator(
      *  the associated type is still checked separately, cf. #222).
      *  Public so the constraint generator can precompute impl-declared bindings. */
     fun publicAnnToMezze(annotation: ParsedTypeAnnotation): MezzeType = when (annotation) {
-        is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
+        // #312: `'a` in a public signature is a type VARIABLE. Rendering it as
+        // `WellKnownTypeApp.of("'a")` builds a nominal type whose name lives only
+        // in `constructor`, which then refuses to unify with anything. MEASURED
+        // as reachable: one firing in the typechecker suite, with `'a`.
+        is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
+            ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
+               else WellKnownTypeApp.of(annotation.name, emptyList())
         is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { publicAnnToMezze(it) })
         is ParsedQualifiedType -> WellKnownTypeApp.of(annotation.typeName, annotation.args.map { publicAnnToMezze(it) })
         is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(publicAnnToMezze(annotation.elementType))

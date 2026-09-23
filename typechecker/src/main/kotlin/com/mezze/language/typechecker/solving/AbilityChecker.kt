@@ -538,7 +538,17 @@ class AbilityChecker internal constructor(
 
     private fun typeAnnotationToMezzeType(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
+            // #312, same rule as [convertAnnotationToType] twelve hundred lines
+            // below: an unbound type-var name IS a free type variable, not a
+            // nominal type that happens to be spelled `'a`. Writing it as a
+            // TypeApplication gives it a rigid identity that then refuses to
+            // unify with the caller's concrete type. MEASURED at zero firings
+            // across both suites, so this is the shape being made correct rather
+            // than a live defect being closed — but the sibling below proves the
+            // shape is reachable in general.
+            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
+                ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
+                   else WellKnownTypeApp.of(annotation.name, emptyList())
             is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
             is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(typeAnnotationToMezzeType(annotation.elementType))
             is ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
