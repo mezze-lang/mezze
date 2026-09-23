@@ -81,6 +81,37 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
         }
 
         /**
+         * A fresh variable for a position the compiler invented — a return slot, a
+         * seq element, a pattern's type. NOT a type variable the user wrote.
+         *
+         * This is [freshWithName]'s bare-name half, split out so the invariant is
+         * checked instead of remembered. The leading `'` decides whether
+         * instantiation preserves a variable's identity or replaces it, so a `'`
+         * that slips onto an internal name silently changes inference somewhere
+         * far away, and the only thing standing between those two meanings was
+         * the discipline to spell the argument right.
+         *
+         * The other half CANNOT be split out the same way: the sites that pass
+         * `annotation.name`, `decl.name` or `constraint.typeParam` take a name
+         * from source, where the `'` is data rather than a choice. Those keep
+         * calling [freshWithName], which is the honest signature for "the tick
+         * comes from the input".
+         */
+        fun freshInternal(name: String, level: Int = currentLevel): TypeVar {
+            require(!name.startsWith("'")) {
+                "freshInternal is for compiler-invented positions, which must NOT carry " +
+                    "the leading ' that marks an identity-preserving type variable; got '$name'. " +
+                    "If this really is a variable the user wrote, call freshWithName."
+            }
+            require(name != UNKNOWN_NAME) {
+                "Use TypeVar.unknown(reason) to mint the \"could not determine a type\" " +
+                    "placeholder — it is the one that isPlaceholder recognises and that the " +
+                    "placeholder ratchet counts."
+            }
+            return freshWithName(name, level)
+        }
+
+        /**
          * The type a pass reaches for when it could NOT determine one.
          *
          * Every such site used to write `?: VarType(freshWithName("unknown"))`

@@ -16,7 +16,7 @@ object EntryFunctionBuilder {
         val loc = decls.first().loc
 
         val statements = mutableListOf<TypedStatement>()
-        var lastType: MezzeType = MezzeType.VarType(TypeVar.freshWithName("unit"))
+        var lastType: MezzeType = MezzeType.VarType(TypeVar.freshInternal("unit"))
         var lastExprValue: TypedExpr? = null
 
         for (i in decls.indices) {
@@ -88,7 +88,7 @@ object EntryFunctionBuilder {
                   else Loc("<unknown>", 1, 1, 1, 1)
 
         val statements = mutableListOf<TypedStatement>()
-        var lastType: MezzeType = MezzeType.VarType(TypeVar.freshWithName("unit"))
+        var lastType: MezzeType = MezzeType.VarType(TypeVar.freshInternal("unit"))
 
         for (decl in decls) {
             statements.add(TypedStatement.Let(decl.name, decl.hash, decl.scheme.type, decl.value, decl.loc))

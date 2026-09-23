@@ -662,7 +662,7 @@ class TypedAstBuilder(
                         paramType = MezzeType.RecordType(mapOf("it" to targetTypeForOp)),
                         returnType = solvedReturn
                     )
-                else -> MezzeType.VarType(TypeVar.freshWithName("op_${op.name}"))
+                else -> MezzeType.VarType(TypeVar.freshInternal("op_${op.name}"))
             }
             // Every ability-impl op body is typed: a hand-written `it.q == r.q` on a
             // newtype field, or `a < b` on pattern-bound payloads in a user's
@@ -825,7 +825,7 @@ class TypedAstBuilder(
         }
 
         val ops = decl.operations.associate { op ->
-            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar.freshWithName("op_${op.name}")))
+            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar.freshInternal("op_${op.name}")))
             op.name to opExpr
         }
 
@@ -998,7 +998,7 @@ class TypedAstBuilder(
                 val params = if (seededParamTypes != null) {
                     buildLambdaParams(
                         expr.params,
-                        MezzeType.FunctionType(MezzeType.RecordType(seededParamTypes), MezzeType.VarType(TypeVar.freshWithName("ret"))),
+                        MezzeType.FunctionType(MezzeType.RecordType(seededParamTypes), MezzeType.VarType(TypeVar.freshInternal("ret"))),
                         loc,
                     )
                 } else {
@@ -1016,7 +1016,7 @@ class TypedAstBuilder(
                 val appliedCtx = contextType?.let { substitution.apply(it) }
                 val returnType = when (appliedCtx) {
                     is MezzeType.FunctionType -> substitution.apply(appliedCtx.returnType)
-                    else -> MezzeType.VarType(TypeVar.freshWithName("ret"))
+                    else -> MezzeType.VarType(TypeVar.freshInternal("ret"))
                 }
 
                 // #378: the arrow's concrete (named) effect set is what a performed
@@ -1239,8 +1239,8 @@ class TypedAstBuilder(
                     // TypeApplication since B.1, so it reads arg 0 of a `Seq`.
                     is MezzeType.TypeApplication ->
                         if (ct.constructor == BuiltinTypes.SEQ && ct.args.size == 1) ct.args[0]
-                        else MezzeType.VarType(TypeVar.freshWithName("elem"))
-                    else -> MezzeType.VarType(TypeVar.freshWithName("elem"))
+                        else MezzeType.VarType(TypeVar.freshInternal("elem"))
+                    else -> MezzeType.VarType(TypeVar.freshInternal("elem"))
                 }
                 val elements = expr.elements.map { elem ->
                     when (elem) {
@@ -1958,7 +1958,7 @@ class TypedAstBuilder(
                         val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
                         val valueType = stmt.typeAnnotation
                             ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                            ?: MezzeType.VarType(TypeVar.freshWithName("let_destr"))
+                            ?: MezzeType.VarType(TypeVar.freshInternal("let_destr"))
                         val value = buildExpr(stmt.value, file, valueType)
                         val resolvedType = substitution.apply(value.type)
                         identifierContext[destrName] = resolvedType
@@ -1975,7 +1975,7 @@ class TypedAstBuilder(
                         }
                         val valueType = stmt.typeAnnotation
                             ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                            ?: MezzeType.VarType(TypeVar.freshWithName("let_$name"))
+                            ?: MezzeType.VarType(TypeVar.freshInternal("let_$name"))
 
                         val isLambdaValue = stmt.value is ParsedLambda &&
                                              pattern is ParsedVariablePattern
@@ -2305,7 +2305,7 @@ class TypedAstBuilder(
     }
 
     private fun buildPattern(pattern: ParsedPattern, file: String): TypedPattern {
-        val unknownType = MezzeType.VarType(TypeVar.freshWithName("pat"))
+        val unknownType = MezzeType.VarType(TypeVar.freshInternal("pat"))
         val loc = pattern.loc
         return when (pattern) {
             is ParsedVariablePattern -> TypedVarPattern(pattern.name, unknownType, loc)
@@ -2943,8 +2943,8 @@ class TypedAstBuilder(
         for (entry in entries) {
             val fieldName = entry.name
             val fieldType = when (parentType) {
-                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar.freshWithName("field_$fieldName"))
-                else -> MezzeType.VarType(TypeVar.freshWithName("field_$fieldName"))
+                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar.freshInternal("field_$fieldName"))
+                else -> MezzeType.VarType(TypeVar.freshInternal("field_$fieldName"))
             }
             val parentBinding = resolveBinding(parentVarName, null)
             val parentVar = TypedVar(parentVarName, parentBinding, parentType, loc)

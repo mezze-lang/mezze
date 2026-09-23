@@ -5129,16 +5129,16 @@ class TypedASTCompiler(
         // behind printTypeDefs: rebuild the nominal application, binding the param
         // the constructed payload fixes and leaving the other fresh.
         fun payloadField(name: String): MezzeType =
-            (payloadType as? RecordType)?.fields?.get(name) ?: VarType(TypeVar.freshWithName("a"))
+            (payloadType as? RecordType)?.fields?.get(name) ?: VarType(TypeVar.freshInternal("a"))
         return when (node.tag) {
             com.mezze.language.ast.BuiltinTypes.SOME ->
                 com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.OPTION, listOf(payloadField(com.mezze.language.ast.BuiltinTypes.VAL_FIELD)))
             com.mezze.language.ast.BuiltinTypes.NONE ->
-                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.OPTION, listOf(VarType(TypeVar.freshWithName("a"))))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.OPTION, listOf(VarType(TypeVar.freshInternal("a"))))
             com.mezze.language.ast.BuiltinTypes.OK ->
-                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.RESULT, listOf(payloadField(com.mezze.language.ast.BuiltinTypes.VAL_FIELD), VarType(TypeVar.freshWithName("e"))))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.RESULT, listOf(payloadField(com.mezze.language.ast.BuiltinTypes.VAL_FIELD), VarType(TypeVar.freshInternal("e"))))
             com.mezze.language.ast.BuiltinTypes.ERR ->
-                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.RESULT, listOf(VarType(TypeVar.freshWithName("a")), payloadField(com.mezze.language.ast.BuiltinTypes.ERROR_FIELD)))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(com.mezze.language.ast.BuiltinTypes.RESULT, listOf(VarType(TypeVar.freshInternal("a")), payloadField(com.mezze.language.ast.BuiltinTypes.ERROR_FIELD)))
             else -> null
         }
     }
