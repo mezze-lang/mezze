@@ -340,10 +340,28 @@ internal class ImplValidator(
                         )
                     },
                     onSolveFailure = { solveResult ->
-                        val allFieldAccessErrors = solveResult.errors.all {
-                            it.message.contains("Cannot access field") && it.message.contains("non-record type")
+                        // A field access whose RECEIVER is not a record at all. The only
+                        // shape this catches (measured across both suites: exactly one,
+                        // `Str.length`) is an INHERENT method read as a field — inherent
+                        // dispatch has not run when an impl body is solved in isolation,
+                        // so it is not an error here and the use site checks it.
+                        //
+                        // Keyed on the constraint's shape. This used to ask the MESSAGE
+                        // whether it contained "Cannot access field" and "non-record
+                        // type", so rewording that one diagnostic would have turned a
+                        // swallowed non-error into a reported one — silently rejecting a
+                        // program that compiles today.
+                        //
+                        // A record that is simply MISSING the field carries the same
+                        // T0205 code, and must still be reported: hence the extra
+                        // structural test rather than a code check alone.
+                        val allNonRecordReceiverFieldErrors = solveResult.errors.all { err ->
+                            val c = err.constraint
+                            err.code == ErrorCode.T0205_FIELD_NOT_FOUND &&
+                                c is Constraint.HasField &&
+                                c.recordType !is MezzeType.RecordType
                         }
-                        if (!allFieldAccessErrors) {
+                        if (!allNonRecordReceiverFieldErrors) {
                             throw TypeCheckError(
                                 "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
                                 implOp.loc,
@@ -966,15 +984,37 @@ internal class ImplValidator(
                                 }
                             }
 
-                            val msg = firstError.message
-                            val hasTypeVar = Regex("'[a-z]\\b").containsMatchIn(msg)
-                            val hasEffects = msg.contains("effectful") || msg.contains("<") && msg.contains(">")
-                            val hasCollections = msg.contains("List") || msg.contains("Seq") ||
-                                msg.contains("[") || msg.contains("Set") || msg.contains("Map")
-                            val isClearTypeMismatch = msg.contains("Type mismatch") &&
-                                !hasTypeVar && !hasEffects && !hasCollections
+                            // Report a mismatch whose meaning is already SETTLED here.
+                            // A performer impl body is solved in isolation, so an error
+                            // that still mentions an unresolved type variable is not
+                            // settled — those vars are pinned at the use site, and
+                            // reporting them here rejects programs that are fine.
+                            // Effect mismatches belong to validateImplOpEffectContract,
+                            // which runs separately, so an arrow carrying effects is
+                            // likewise not this check's business.
+                            //
+                            // This used to ask the MESSAGE the same three questions: a
+                            // `'[a-z]` regex for type vars, `<` and `>` for effects, and
+                            // the substrings "List"/"Seq"/"["/"Set"/"Map" for
+                            // collections. A user type merely NAMED `Mapping` matched the
+                            // last one and suppressed a real error, and rewording any
+                            // diagnostic changed which programs compiled. The collections
+                            // test is gone: what it was groping for is "the types are not
+                            // pinned yet", which holdsTypeVar answers directly.
+                            // The two types this failure is really about. Anything whose
+                            // shape we do not recognise stays unreported (empty list).
+                            val mismatched: List<MezzeType> = when (constraint) {
+                                is Constraint.Equality -> listOf(constraint.left, constraint.right)
+                                is Constraint.HasField -> listOf(constraint.recordType, constraint.fieldType)
+                                is Constraint.Subsumes -> listOf(constraint.general, constraint.specific)
+                                else -> emptyList()
+                            }
+                            val settled = firstError.code == ErrorCode.T0201_TYPE_MISMATCH &&
+                                mismatched.isNotEmpty() &&
+                                mismatched.none { it.holdsTypeVar() } &&
+                                mismatched.none { (it as? MezzeType.FunctionType)?.effects != null }
 
-                            if (isClearTypeMismatch) {
+                            if (settled) {
                                 throw TypeCheckError(
                                     "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${firstError.message}",
                                     firstError.constraint.loc ?: implOp.implementation.loc,
