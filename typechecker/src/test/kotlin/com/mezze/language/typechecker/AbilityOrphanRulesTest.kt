@@ -28,6 +28,12 @@ class AbilityOrphanRulesTest {
 
     @BeforeEach
     fun setUp() {
+        // Both caches are process-global, so a test that does not clear them sees
+        // whatever the previous one left. This file did not, and it failed under
+        // randomised class order: `ability impl is visible when ability is
+        // imported` passed or failed depending on what ran before it.
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
         parser = MezzeParser()
         typeChecker = TypeChecker()
         tempDir = Files.createTempDirectory("mezze_orphan_test")

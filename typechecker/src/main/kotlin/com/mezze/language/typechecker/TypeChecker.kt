@@ -1214,9 +1214,24 @@ class TypeChecker(
             TypeChecker(context, strictTopLevel)
 
         @JvmStatic
+        /**
+         * Reset EVERY process-global cache a fresh typecheck should not inherit.
+         *
+         * This used to clear two of the three, and 285 test files call it as
+         * their isolation step while only 10 knew to also clear
+         * [ModuleTypeChecker]'s global module cache. The result was a suite that
+         * passed in its usual order and failed under a randomised one — a
+         * measured example being `AbilityOrphanRulesTest.ability impl is visible
+         * when ability is imported`, whose answer depended on which modules an
+         * earlier test had left typechecked.
+         *
+         * One incantation, and it is complete. A new global cache belongs here
+         * the day it is added, not the day a shuffled run finds it.
+         */
         fun clearCache() {
             ModuleResolver.clearCache()
             TypeCheckCache.clearAll()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
         }
 
         @JvmStatic
