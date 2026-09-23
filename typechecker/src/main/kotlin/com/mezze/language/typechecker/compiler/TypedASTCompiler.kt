@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.compiler
 import com.mezze.language.ast.EffectBindingKind
 import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.holdsTypeVar
 import com.mezze.language.ast.holdsUnknownPlaceholder
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeIdentity
@@ -868,16 +869,23 @@ class TypedASTCompiler(
 
     /** Like [containsVarType] but also recurses into record fields and
      *  function types — needed to detect VarType in parameter types. */
-    private fun containsVarTypeDeep(type: MezzeType): Boolean = when (type) {
-        is MezzeType.VarType -> true
-        is MezzeType.RecordType -> type.fields.values.any { containsVarTypeDeep(it) }
-        is MezzeType.FunctionType -> containsVarTypeDeep(type.paramType) || containsVarTypeDeep(type.returnType)
-        is MezzeType.TypeApplication -> type.args.any { containsVarTypeDeep(it) }
-        is MezzeType.VariantType -> type.constructors.values.any { payload ->
-            payload != null && containsVarTypeDeep(payload)
-        } || type.typeArgs.any { containsVarTypeDeep(it) }
-        else -> false
-    }
+    /**
+     * "Does this type still hold an unsolved variable?" — the guard in front of
+     * every dispatch decision in this file.
+     *
+     * Delegates to [holdsTypeVar], which walks via [MezzeType.anyChild], the one
+     * walker that knows all of a type's positions. This was a hand-written
+     * recursion covering records, applications, variants and an arrow's
+     * param/return, ending in `else -> false`. It therefore answered "concrete"
+     * for a `NewtypeType` wrapping a variable, for a standalone effect row, and
+     * for an arrow whose only variable lives in its effect row or its ability
+     * constraints.
+     *
+     * MEASURED before replacing it: 14 disagreements across the typechecker
+     * suite, every one an arrow the local version called concrete and the
+     * canonical walker did not.
+     */
+    private fun containsVarTypeDeep(type: MezzeType): Boolean = type.holdsTypeVar()
 
     /**
      * Whether a method call on a VarType receiver should be marked for
