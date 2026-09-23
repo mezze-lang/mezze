@@ -609,10 +609,16 @@ module.exports = grammar({
     // position.
     type_variable: _ => /'[a-zA-Z_][a-zA-Z0-9_]*/,
 
-    named_type: $ => $.upper_identifier,
+    // A type NAME is not case-checked at the syntax level — the parser accepts
+    // `type color`, `newtype serId`, and a lowercase argument in an application
+    // (`St r` is `St` applied to `r`), and leaves "type names are capitalised"
+    // to the validator. Matching that here is what lets those parse; the
+    // highlight query still tags the position as a type, which is what the
+    // position means regardless of how it is spelled.
+    named_type: $ => choice($.upper_identifier, $.lower_identifier),
 
     type_application: $ => prec.left(PREC.call, seq(
-      field('constructor', $.upper_identifier),
+      field('constructor', choice($.upper_identifier, $.lower_identifier)),
       repeat1(field('argument', $._type_atom)),
     )),
 
