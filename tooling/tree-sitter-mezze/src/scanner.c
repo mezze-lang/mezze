@@ -33,6 +33,8 @@ enum TokenType {
   // Zero-width. Ends a `$(…` that has NO depth-matched `)` ahead of it — see
   // scan_interpolation_unclosed.
   INTERP_UNCLOSED,
+  // Zero-width. Ends a `"…` that is never closed — see string_is_closed.
+  STRING_UNCLOSED,
 };
 
 // Indentation stack: the column (1-based, matching the Kotlin lexer) at which
@@ -150,6 +152,29 @@ static bool interpolation_is_closed(TSLexer *lexer) {
   }
 }
 
+// Is the string we are sitting inside ever closed?
+//
+// Same shape as interpolation_is_closed, and for the same reason. A string's
+// content cannot cross a newline, but after the line break the content token
+// simply matches the NEXT LINE — so `let s = "total:` consumed the declaration
+// below it. A multi-line string is legal Mezze, so a flat "end at the newline"
+// rule is wrong (it was tried and cost must-parse 63 -> 77); scanning for a real
+// closing quote distinguishes the two.
+static bool string_is_closed(TSLexer *lexer) {
+  for (;;) {
+    int32_t c = lexer->lookahead;
+    if (c == 0) return false;              // EOF: never closed
+    if (c == '\\') {                       // skip an escape pair
+      lexer->advance(lexer, false);
+      if (lexer->lookahead == 0) return false;
+      lexer->advance(lexer, false);
+      continue;
+    }
+    if (c == '"') return true;
+    lexer->advance(lexer, false);
+  }
+}
+
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 static void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
 
@@ -178,6 +203,15 @@ bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
     // a plain unterminated string its containment (2/3 -> 1/3 surviving
     // declarations) — the scanner stopped emitting the NEWLINE the recovery
     // needed.
+  }
+
+  // A string with no closing quote ahead can end here, zero-width.
+  if (valid_symbols[STRING_UNCLOSED] && !valid_symbols[INDENT]) {
+    lexer->mark_end(lexer);
+    if (!string_is_closed(lexer)) {
+      lexer->result_symbol = STRING_UNCLOSED;
+      return true;
+    }
   }
 
   // Emit any DEDENTs we still owe from a previous scan of the same line break.

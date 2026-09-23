@@ -1,0 +1,29 @@
+# Mid-typing states: what the editor sees on the way to valid code.
+#
+# The generated corpus is built by replaying the parser's tests, so it contains
+# only whole snippets the parser ran on — it has NOTHING that looks like a file
+# caught mid-keystroke, which is the state a highlighter is in most of the time.
+# Each block below is a real intermediate state; the gate wraps it in valid
+# declarations and checks those still parse.
+# === 1 string just opened
+let s = "total:
+# === 2 interpolation just opened
+let s = "total: $(count
+# === 3 interpolation with a record just opened
+let s = "total: $(f { x =
+# === 4 record just opened
+let x = f { a =
+# === 5 match with no arms yet
+let m = match xs is
+# === 6 match with one arm, next one started
+let m = match xs is
+  Some { val } -> val
+  No
+# === 7 type declaration half-written
+type Color = | Red, Gre
+# === 8 impl head half-written
+impl Eq for St
+# === 9 lambda arrow not typed yet
+let f = { x }
+# === 10 use path half-written
+use std::collections::

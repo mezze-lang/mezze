@@ -62,6 +62,7 @@ module.exports = grammar({
     // Zero-width, emitted only inside a `$(…` that is never closed. See
     // `interpolation_is_closed` in src/scanner.c.
     $._interp_unclosed,
+    $._string_unclosed,
   ],
 
   // Newlines as plain whitespace. Mezze isn't truly newline-significant —
@@ -523,6 +524,9 @@ module.exports = grammar({
 
     _pattern: $ => choice(
       $.variable_pattern,
+      // `let 'add = …`. The parser lexes a type variable anywhere and binds it
+      // like a name, leaving "that is a type, not a binding" to the validator.
+      $.type_variable,
       $.wildcard_pattern,
       $.literal_pattern,
       $.record_pattern,
@@ -1181,7 +1185,10 @@ module.exports = grammar({
         $.escape_sequence,
         $.string_interpolation,
       )),
-      '"',
+      // `_string_unclosed` is zero-width and the scanner offers it only when
+      // there is no closing quote ahead at all. Without it, an unterminated
+      // string's content matched the NEXT LINE and ate the declaration below.
+      choice('"', $._string_unclosed),
     ),
 
     // Ordinary string text: any run of chars that isn't a quote, backslash, or
