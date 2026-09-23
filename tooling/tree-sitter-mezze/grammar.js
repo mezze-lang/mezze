@@ -306,7 +306,7 @@ module.exports = grammar({
     type_declaration: $ => seq(
       optional($.visibility_modifier),
       'type',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       repeat(field('parameter', $.type_variable)),
       '=',
       field('definition', $._type_definition),
@@ -333,7 +333,7 @@ module.exports = grammar({
     newtype_declaration: $ => prec.right(seq(
       optional($.visibility_modifier),
       'newtype',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       repeat(field('parameter', $.type_variable)),
       '=',
       field('wrapped', $._type),
@@ -362,7 +362,7 @@ module.exports = grammar({
     // ----- effect -----
     effect_declaration: $ => seq(
       'effect',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       optional(seq('having', sepBy1(',', $.type_variable))),
       'where',
       '{',
@@ -383,7 +383,7 @@ module.exports = grammar({
     // ----- ability -----
     ability_declaration: $ => seq(
       'ability',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       repeat(field('parameter', $.type_variable)),
       'for',
       field('self', $.type_variable),
@@ -615,6 +615,12 @@ module.exports = grammar({
     // to the validator. Matching that here is what lets those parse; the
     // highlight query still tags the position as a type, which is what the
     // position means regardless of how it is spelled.
+    // A DECLARATION's name, not case-checked — same rule as `named_type`: the
+    // parser accepts `type color` / `newtype serId` / `ability show` and leaves
+    // capitalisation to the validator. NOT used for variant constructors, which
+    // the parser really does reject when lowercase (P0105_LOWERCASE_CONSTRUCTOR).
+    _decl_name: $ => choice($.upper_identifier, $.lower_identifier),
+
     named_type: $ => choice($.upper_identifier, $.lower_identifier),
 
     type_application: $ => prec.left(PREC.call, seq(
