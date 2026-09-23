@@ -165,7 +165,7 @@ internal fun ExpressionConstraintGenerator.createEffectInstanceFromInstantiated(
 }
 
 internal fun ExpressionConstraintGenerator.buildTypeVarMapping(original: MezzeType, instantiated: MezzeType): Map<TypeVar, TypeVar> {
-    val cacheKey = System.identityHashCode(original) to System.identityHashCode(instantiated)
+    val cacheKey = original to instantiated
 
     typeVarMappingCache[cacheKey]?.let { return it }
 

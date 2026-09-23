@@ -22,7 +22,11 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 class ExpressionConstraintGenerator {
 
-    internal val typeVarMappingCache = mutableMapOf<Pair<Int, Int>, Map<TypeVar, TypeVar>>()
+    // Keyed on the two TYPES, not their System.identityHashCode. The mapping is a
+    // function of their structure, so equal pairs belong in one entry; identity
+    // hashes collide between distinct live objects and are reused after
+    // collection, either of which returns a mapping built for unrelated types.
+    internal val typeVarMappingCache = mutableMapOf<Pair<MezzeType, MezzeType>, Map<TypeVar, TypeVar>>()
     internal val maxCacheSize = 1000
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
 

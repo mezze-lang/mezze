@@ -1,34 +1,5 @@
 package com.mezze.language.ast
 
-// TypeVar is a data class (structural equality) but normalization needs identity-based lookup.
-private class IdentityBasedTypeVarMap(
-    private val identityToValue: Map<Int, TypeVar>
-) : Map<TypeVar, TypeVar> {
-
-    override val entries: Set<Map.Entry<TypeVar, TypeVar>>
-        get() = emptySet() // Not used by substituteTypeVariables
-
-    override val keys: Set<TypeVar>
-        get() = emptySet() // Not used by substituteTypeVariables
-
-    override val size: Int
-        get() = identityToValue.size
-
-    override val values: Collection<TypeVar>
-        get() = identityToValue.values
-
-    override fun isEmpty(): Boolean = identityToValue.isEmpty()
-
-    override fun get(key: TypeVar): TypeVar? =
-        identityToValue[System.identityHashCode(key)]
-
-    override fun containsKey(key: TypeVar): Boolean =
-        identityToValue.containsKey(System.identityHashCode(key))
-
-    override fun containsValue(value: TypeVar): Boolean =
-        identityToValue.containsValue(value)
-}
-
 /**
  * Is this name a type *variable* (as opposed to a concrete/nominal type)?
  * Mezze's convention: a name that starts with a `'` (e.g. `'a`) or with a
@@ -93,30 +64,27 @@ private fun collectTypeVarsRecursive(type: MezzeType, collector: MutableList<Typ
     }
 }
 
+/**
+ * Rename a type's variables to `'a`, `'b`, … in first-seen order.
+ *
+ * Distinctness is by VALUE. The worry that motivated an identity-keyed map here
+ * — that `.distinct()` would merge two independent variables sharing a name —
+ * does not apply: [TypeVar] carries a globally unique `id` that participates in
+ * equality, so two independent variables are already unequal however they are
+ * spelled. Identity hashes were strictly worse at the job: they collide between
+ * distinct live objects and are reused after collection, either of which merges
+ * two variables that are genuinely different.
+ *
+ * MEASURED before the change: across both suites, identity-distinct and
+ * value-distinct never produced a different partition, so no normalized name —
+ * and no content hash derived from one — moves.
+ */
 fun normalizeTypeVariables(type: MezzeType): MezzeType {
-    val typeVarsInOrder = collectTypeVarsInOrder(type)
+    val uniqueTypeVars = collectTypeVarsInOrder(type).distinct()
 
-    // identity-based distinct: .distinct() would merge independent TypeVars with the same name
-    val seenIdentities = mutableMapOf<Int, TypeVar>()
-    val uniqueTypeVars = mutableListOf<TypeVar>()
-
-    for (typeVar in typeVarsInOrder) {
-        val identity = System.identityHashCode(typeVar)
-        if (!seenIdentities.containsKey(identity)) {
-            seenIdentities[identity] = typeVar
-            uniqueTypeVars.add(typeVar)
-        }
+    val mapping = uniqueTypeVars.withIndex().associate { (index, typeVar) ->
+        typeVar to TypeVar.freshWithName("'${('a' + index)}", typeVar.level)
     }
-
-    val identityToNewVar = mutableMapOf<Int, TypeVar>()
-
-    uniqueTypeVars.forEachIndexed { index, typeVar ->
-        val normalizedName = "'${('a' + index)}"
-        val newTypeVar = TypeVar.freshWithName(normalizedName, typeVar.level)
-        identityToNewVar[System.identityHashCode(typeVar)] = newTypeVar
-    }
-
-    val mapping = IdentityBasedTypeVarMap(identityToNewVar)
 
     return substituteTypeVariables(type, mapping)
 }
