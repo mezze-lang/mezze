@@ -40,6 +40,31 @@ data class TypeScheme(
 
         val instantiatedType = applySubstitutionToType(type, substitution)
 
+        // L-08/L-09: a scheme constraint names its type variable by SPELLING
+        // (`AbilityConstraint.typeParam` is a String), and the map below resolves
+        // that spelling to the fresh variable. Two quantified variables sharing a
+        // base name would therefore have one silently overwrite the other, and the
+        // constraint would be linked to whichever wrote last — the wrong variable,
+        // producing the wrong impl at the call site with no diagnostic.
+        //
+        // MEASURED at zero occurrences across both suites, so this guard costs
+        // nothing today. It exists because "never happens" and "cannot happen" are
+        // different claims, and only the second one is safe to rely on silently.
+        // The real fix is for the constraint to carry the variable's identity
+        // rather than its name; until then, an ambiguity fails loudly.
+        if (constraints.isNotEmpty()) {
+            for ((base, vars) in quantifiedVars.groupBy { it.name.removePrefix("'") }) {
+                if (vars.size > 1 && constraints.any { it.typeParam.removePrefix("'") == base }) {
+                    error(
+                        "Cannot instantiate this type scheme: ${vars.size} distinct quantified type " +
+                            "variables are all spelled '$base (ids ${vars.map { it.id }}), and an " +
+                            "ability constraint refers to that spelling. Linking the constraint would " +
+                            "pick one of them arbitrarily. This is a compiler bug rather than a problem " +
+                            "with the program — please report the source that triggered it."
+                    )
+                }
+            }
+        }
         val nameToFreshVar = mutableMapOf<String, TypeVar>()
         for ((oldVar, newType) in substitution) {
             val baseName = oldVar.name.removePrefix("'")
