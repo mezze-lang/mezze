@@ -1300,6 +1300,15 @@ private fun formatFieldMismatch(
  * regains its identity hash when it has none, while this one tolerated the `'`
  * prefix on either side of the lookup. Each was right about the thing the other
  * missed, so the merged version does both and the copy is gone.
+ *
+ * PRECONDITION, unstated until now and not checked: every variable in [type]
+ * that shares a name with a key of [subst] must BE that parameter. Replacement
+ * is by NAME, so two distinct variables spelled the same are both rewritten.
+ * This is reachable — a probe over both suites found four occurrences, all on
+ * `out` (the `having 'out` associated type) with two distinct variables sharing
+ * the name while `out` was in the substitution. No test changes result today,
+ * so it is an unguarded assumption rather than a known wrong answer; see the
+ * name-keyed-substitution task before relying on it.
  */
 internal fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, MezzeType>): MezzeType {
     // Only a type var is replaced (by name, tolerating the `'` prefix either
