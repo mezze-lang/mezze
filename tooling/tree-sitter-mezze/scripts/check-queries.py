@@ -57,11 +57,26 @@ def tokenize(src):
             out.append(('atom', src[i:j])); i = j
     return out
 
+# Every directory whose .scm files must compile against THIS grammar. The
+# extensions ship their own copies — Zed cannot point at the grammar repo — and
+# a copy is exactly as fatal as the original when it names a node the grammar
+# does not have: tree-sitter refuses the whole FILE, not the one pattern. The
+# Zed copy sat on a `"!"` token for long enough to ship with no highlighting at
+# all, because only the source directory was ever checked.
+query_dirs = [("tree-sitter", os.path.join(grammar_dir, "queries"))]
+tooling = os.path.dirname(os.path.abspath(grammar_dir.rstrip("/")))
+zed = os.path.join(tooling, "zed-extension", "languages", "mezze")
+if os.path.isdir(zed):
+    query_dirs.append(("zed", zed))
+query_dirs += [(os.path.basename(d.rstrip("/")), d) for d in sys.argv[2:]]
+
 problems = []
-for fn in sorted(os.listdir(os.path.join(grammar_dir, "queries"))):
+for label, qdir in query_dirs:
+  for fn in sorted(os.listdir(qdir)):
     if not fn.endswith(".scm"):
         continue
-    path = os.path.join(grammar_dir, "queries", fn)
+    path = os.path.join(qdir, fn)
+    fn = f"{label}/{fn}"
     src = open(path, encoding="utf-8").read()
     toks = tokenize(src)
     stack = []            # enclosing named-node context
@@ -113,3 +128,9 @@ for fn, msg in problems:
     seen.add(key)
     print(f"{fn}: {msg}")
 print(f"\n{len(seen)} distinct problem(s)")
+
+# This script had no exit code: it printed its findings and returned 0 whatever
+# they were, so wiring it into CI would have reported a pass while naming the
+# fault. That is how the Zed copy kept a `"!"` the grammar does not have, which
+# costs the whole file — tree-sitter refuses a query that names a missing node.
+sys.exit(1 if seen else 0)

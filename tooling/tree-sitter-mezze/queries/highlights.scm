@@ -211,9 +211,15 @@
 (record_pattern_field name: (lower_identifier) @variable.member)
 (record_type_field name: (lower_identifier) @variable.member)
 
-;; Record spread `{ ...base, … }` — the `...` is spread punctuation; the
-;; source expression highlights via its own rules.
+;; Spread `...`, in all three places it occurs — the record form
+;; `{ ...base, … }`, the sequence form `[...ys, 1]`, and the rest pattern
+;; `[h, ...rest]`. Only the record one was tagged, so the same three dots
+;; changed colour depending on which bracket they sat in. The name after the
+;; dots highlights via its own rules; what these tag is the punctuation.
 (record_spread "..." @punctuation.special)
+(sequence_spread "..." @punctuation.special)
+(rest_pattern "..." @punctuation.special)
+(rest_pattern (lower_identifier) @variable)
 
 ;; Open record type `{ a: Int, ... }` — the trailing `...` marks an open row.
 (record_type_rest) @punctuation.special

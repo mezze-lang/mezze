@@ -20,8 +20,23 @@ extension.toml               — manifest (language server + grammar)
 Cargo.toml, src/lib.rs       — Rust/WASM shim: launches `mez lsp` over stdio
 languages/mezze/
   config.toml                — language config (comments, brackets, suffix .mz)
-  highlights.scm             — syntax colors (Zed-mapped captures)
-  folds.scm, indents.scm     — folding + auto-indent
+  highlights.scm             — GENERATED, syntax colors (Zed-mapped captures)
+  folds.scm, indents.scm     — GENERATED, folding + auto-indent
+```
+
+The three `.scm` files are generated from `../tree-sitter-mezze/queries/` by
+`../syntax-generators/gen-zed-queries.py` — edit the source, not these. Zed
+extensions have to ship their own query files, so the copy is unavoidable;
+maintaining it by hand was not. It had drifted onto a `"!"` token the grammar
+does not have, and tree-sitter rejects a query that names a missing node by
+refusing the WHOLE file — Zed was highlighting Mezze not at all.
+
+Two checks keep that from recurring, and both are needed — matching the source
+would not catch a fault the source also has:
+
+```
+tooling/syntax-generators/gen-zed-queries.py --check   # copy matches its source
+tooling/tree-sitter-mezze/scripts/check-queries.py .   # every .scm still compiles
 ```
 
 ## Install as a DEV extension (local)
