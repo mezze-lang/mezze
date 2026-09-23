@@ -1236,6 +1236,12 @@ module.exports = grammar({
         // matching P0110_EMPTY_INTERPOLATION.
         $.interpolation_ignored,
       ),
+      // NOT `choice(')', $._newline)`. Letting a newline close an unclosed `$(`
+      // does contain the runaway — `let s = "total: $(count` goes from 1/3 to
+      // 2/3 surviving declarations — but it closes every MULTI-LINE
+      // interpolation early too, and must-parse went 63 -> 77. Measured, not
+      // guessed. Containing that case properly needs the body delimited by the
+      // scanner (the parser's own depth-matched scan), not a line rule.
       ')',
     ),
 
@@ -1243,6 +1249,11 @@ module.exports = grammar({
     // real expression token is preferred while the expression is still being
     // built; `)` and `"` are excluded so this can never swallow the closing
     // paren or escape the string.
+    // NOT restricted to a non-identifier first character. That was tried, to stop
+    // recovery on an unclosed `$(` from matching the whole NEXT DECLARATION as
+    // dropped text. It does not even do that — recovery just takes the next
+    // identifier as an expression and the junk after it — and it cost
+    // must-parse 63 -> 77. Measured, reverted.
     interpolation_ignored: _ => token(prec(-1, /[^)"\n]+/)),
 
     // ===== Identifiers =====
