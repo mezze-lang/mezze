@@ -59,6 +59,9 @@ module.exports = grammar({
     $._newline,
     $._indent,
     $._dedent,
+    // Zero-width, emitted only inside a `$(…` that is never closed. See
+    // `interpolation_is_closed` in src/scanner.c.
+    $._interp_unclosed,
   ],
 
   // Newlines as plain whitespace. Mezze isn't truly newline-significant —
@@ -1236,13 +1239,12 @@ module.exports = grammar({
         // matching P0110_EMPTY_INTERPOLATION.
         $.interpolation_ignored,
       ),
-      // NOT `choice(')', $._newline)`. Letting a newline close an unclosed `$(`
-      // does contain the runaway — `let s = "total: $(count` goes from 1/3 to
-      // 2/3 surviving declarations — but it closes every MULTI-LINE
-      // interpolation early too, and must-parse went 63 -> 77. Measured, not
-      // guessed. Containing that case properly needs the body delimited by the
-      // scanner (the parser's own depth-matched scan), not a line rule.
-      ')',
+      // `_interp_unclosed` is zero-width and the scanner only offers it when a
+      // depth-matched `)` genuinely does not exist ahead — the parser's own
+      // rule. A plain `choice(')', $._newline)` was tried first and reverted: it
+      // contained the runaway but closed every MULTI-LINE interpolation early
+      // (must-parse 63 -> 77).
+      choice(')', $._interp_unclosed),
     ),
 
     // The dropped remainder of an interpolation body. Low precedence so every

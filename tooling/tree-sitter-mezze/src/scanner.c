@@ -30,6 +30,9 @@ enum TokenType {
   NEWLINE,
   INDENT,
   DEDENT,
+  // Zero-width. Ends a `$(…` that has NO depth-matched `)` ahead of it — see
+  // scan_interpolation_unclosed.
+  INTERP_UNCLOSED,
 };
 
 // Indentation stack: the column (1-based, matching the Kotlin lexer) at which
@@ -118,12 +121,64 @@ void tree_sitter_mezze_external_scanner_deserialize(void *payload, const char *b
   if (scanner->stack.len == 0) stack_push(&scanner->stack, 0);
 }
 
+// Is the `$(` we are sitting inside ever closed?
+//
+// The Kotlin parser decides an interpolation's extent by scanning from `$(` to
+// the DEPTH-MATCHED `)`. The grammar cannot: the body is parsed with the
+// ordinary expression rules, whose whitespace `extras` include `\n`, so an
+// UNCLOSED `$(` let its expression walk into the following declarations and eat
+// them — `let s = "total: $(count` stopped everything below it from
+// highlighting, which is a state the editor is in on every keystroke.
+//
+// So do the parser's own scan here, and only when the answer is "never closed"
+// offer the parser a zero-width way out. A multi-line interpolation that DOES
+// close later still finds its `)` and is untouched — which is what separates
+// this from the line rule that was tried and reverted (it closed every
+// multi-line interpolation early, must-parse 63 -> 77).
+//
+// Bounded by the string's own `"` and by EOF, because a `)` beyond either of
+// those cannot belong to this interpolation.
+static bool interpolation_is_closed(TSLexer *lexer) {
+  int32_t depth = 1;
+  for (;;) {
+    int32_t c = lexer->lookahead;
+    if (c == 0) return false;          // EOF: never closed
+    if (c == '"') return false;        // string ended first
+    if (c == '(') depth++;
+    if (c == ')') { depth--; if (depth == 0) return true; }
+    lexer->advance(lexer, false);
+  }
+}
+
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 static void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
 
 bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
                                              const bool *valid_symbols) {
   Scanner *scanner = (Scanner *)payload;
+
+  // An interpolation with no matching `)` ahead can end here, zero-width. Asked
+  // first because it is only ever valid inside `$(…`, where no layout token is.
+  // `mark_end` before the scan so the token stays zero-width no matter how far
+  // the lookahead walked.
+  // The guard matters: in ERROR RECOVERY tree-sitter marks every external token
+  // valid, so without it this ran with no interpolation present at all, and the
+  // lookahead scan below moved the lexer out from under the layout logic — a
+  // plain unterminated string lost its containment (2/3 -> 1/3 surviving
+  // declarations). Inside a real `$(…` the layout tokens are NOT expected, so
+  // `INDENT` being valid too means this is recovery, not an interpolation.
+  if (valid_symbols[INTERP_UNCLOSED] && !valid_symbols[INDENT]) {
+    lexer->mark_end(lexer);
+    if (!interpolation_is_closed(lexer)) {
+      lexer->result_symbol = INTERP_UNCLOSED;
+      return true;
+    }
+    // Deliberately FALL THROUGH rather than returning false. The layout tokens
+    // below may also be valid at this position, and short-circuiting here cost
+    // a plain unterminated string its containment (2/3 -> 1/3 surviving
+    // declarations) — the scanner stopped emitting the NEWLINE the recovery
+    // needed.
+  }
 
   // Emit any DEDENTs we still owe from a previous scan of the same line break.
   if (scanner->pending_dedents > 0 && valid_symbols[DEDENT]) {
