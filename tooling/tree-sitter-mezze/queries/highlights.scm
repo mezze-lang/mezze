@@ -53,7 +53,7 @@
 [
   "+" "-" "*" "/" "%"
   "==" "!=" "<" ">" "<=" ">="
-  "&&" "||" "!"
+  "&&" "||"
   "|>"
   "->"
   "::"
@@ -177,11 +177,11 @@
 ;; thing being referenced. We tag the module path as @namespace and
 ;; the leaf depending on shape.
 (qualified_reference
-  module: (lower_identifier) @namespace
+  module: (module_path (lower_identifier) @namespace)
   name: (lower_identifier) @function)
 
 (qualified_reference
-  module: (lower_identifier) @namespace
+  module: (module_path (lower_identifier) @namespace)
   name: (upper_identifier) @type)
 
 ;; ============================================================

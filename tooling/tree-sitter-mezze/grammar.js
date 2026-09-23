@@ -469,6 +469,7 @@ module.exports = grammar({
       $.wildcard_pattern,
       $.literal_pattern,
       $.record_pattern,
+      $.newtype_pattern,
       $.variant_pattern,
       $.sequence_pattern,
     ),
@@ -511,6 +512,19 @@ module.exports = grammar({
     variant_pattern: $ => seq(
       field('constructor', $.upper_identifier),
       optional(field('payload', $.record_pattern)),
+    ),
+
+    // `UserId.(v)` — destructure a NEWTYPE. A newtype's constructor takes its
+    // wrapped value positionally, in parens after a dot, which is what
+    // separates it from a variant constructor's braced record payload
+    // (`Some { val }`). The inner position is a full pattern, so
+    // `Wrapper.(Some { val })` and `Wrapper.(_)` both work.
+    newtype_pattern: $ => seq(
+      field('constructor', $.upper_identifier),
+      '.',
+      '(',
+      field('value', $._pattern),
+      ')',
     ),
 
     sequence_pattern: $ => seq(
@@ -701,6 +715,7 @@ module.exports = grammar({
       $.perform_expression,
       $.record_expression,
       $.sequence_expression,
+      $.newtype_constructor_expression,
       $.variant_constructor_expression,
       $.pipe_placeholder,
       $.variable,
@@ -1001,13 +1016,29 @@ module.exports = grammar({
 
     sequence_expression: $ => seq(
       '[',
-      sepBy(',', $._expression),
+      sepBy(',', choice($.sequence_spread, $._expression)),
       ']',
     ),
+
+    // `[...ys, 1]` — splice another sequence in. Mirrors record_spread; the
+    // source is any expression, and it may appear at any position.
+    sequence_spread: $ => seq('...', field('source', $._expression)),
 
     variant_constructor_expression: $ => prec(PREC.call, seq(
       field('constructor', $.upper_identifier),
       optional(field('payload', $.record_expression)),
+    )),
+
+    // `UserId.(5)` — CONSTRUCT a newtype. Positional, in parens after a dot;
+    // the variant form takes a braced record instead. Higher precedence than
+    // the variant constructor so `UserId.(5)` is not read as the constructor
+    // `UserId` followed by a member access.
+    newtype_constructor_expression: $ => prec(PREC.call + 1, seq(
+      field('constructor', $.upper_identifier),
+      '.',
+      '(',
+      field('value', $._expression),
+      ')',
     )),
 
     variable: $ => $.lower_identifier,
