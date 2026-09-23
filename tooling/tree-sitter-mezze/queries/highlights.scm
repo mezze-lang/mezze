@@ -173,6 +173,21 @@
 (perform_expression
   operation: (qualified_perform_name (lower_identifier) @function.method))
 
+;; `Show.show` — a static ability operation. The two halves are different
+;; things and want different colours: the ability is a TYPE, the operation is a
+;; method on it.
+(static_ability_op
+  ability: (upper_identifier) @type
+  operation: (lower_identifier) @function.method)
+
+;; `UserId.(5)` / `UserId.(v)` — newtype construction and destructuring. The
+;; constructor is the type's name.
+(newtype_constructor_expression
+  constructor: (upper_identifier) @constructor)
+
+(newtype_pattern
+  constructor: (upper_identifier) @constructor)
+
 ;; Qualified reference: `module::name` — the trailing name is the
 ;; thing being referenced. We tag the module path as @namespace and
 ;; the leaf depending on shape.

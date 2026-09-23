@@ -746,6 +746,7 @@ module.exports = grammar({
       $.record_expression,
       $.sequence_expression,
       $.newtype_constructor_expression,
+      $.static_ability_op,
       $.variant_constructor_expression,
       $.pipe_placeholder,
       $.variable,
@@ -808,6 +809,23 @@ module.exports = grammar({
 
     pipe_placeholder: _ => '@',
 
+    // `Show.show`, `Default.default {}` — a STATIC ability operation: one the
+    // ability declares with NO receiver, dispatched on the type the call
+    // PRODUCES rather than on a value. `Show` here is an ABILITY name, not a
+    // value, so this is not a member access on a variant constructor — and it
+    // could not be parsed as one anyway: `variant_constructor_expression` sits
+    // at PREC.call, so `Show` reduced to a constructor and the `.` had nowhere
+    // to attach (it landed as an ERROR).
+    //
+    // Its own node rather than a widened member_access, because the two halves
+    // want different highlighting: the ability is a type, the operation is a
+    // method.
+    static_ability_op: $ => prec(PREC.call + 1, seq(
+      field('ability', $.upper_identifier),
+      '.',
+      field('operation', $.lower_identifier),
+    )),
+
     member_access: $ => prec.left(PREC.member, seq(
       field('receiver', $._expression),
       '.',
@@ -826,7 +844,7 @@ module.exports = grammar({
 
     // f {args}
     function_call: $ => prec(PREC.call, seq(
-      field('callee', choice($.variable, $.qualified_reference, $.upper_identifier)),
+      field('callee', choice($.variable, $.qualified_reference, $.static_ability_op, $.upper_identifier)),
       field('arguments', $.record_expression),
     )),
 
