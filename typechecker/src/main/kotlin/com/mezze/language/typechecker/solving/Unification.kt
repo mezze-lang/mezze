@@ -931,9 +931,19 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val var1NameInScope = isWalledVariant(var1, registry)
         val var2NameInScope = isWalledVariant(var2, registry)
         if (var1NameInScope || var2NameInScope) {
-            // #149: when both walls happen to constrain to the SAME arm set,
-            // unify successfully (their nominal identities are interchangeable
-            // for value-typing purposes). Concretely this covers the pattern
+            // #149: two walls constraining to the SAME arm set unify.
+            //
+            // This CANNOT admit two distinct declarations, which is the thing it
+            // looks like it might. Both-Declared with differing hashes is already
+            // DISTINCT and returned above; both-Declared with equal hashes makes
+            // `identityMatch` true and never enters this branch. So one side is
+            // always hash-less.
+            //
+            // MEASURED across the typechecker suite: 87 pairs reach here with
+            // equal arms, every one of them a declared `Option` meeting an
+            // anonymous `| Some, None |` — an inferred shape recognised as the
+            // declaration it matches. Zero Declared/Declared pairs, as the
+            // argument above requires.
             val sameArms = var1.constructors.keys == var2.constructors.keys
             if (!sameArms) {
                 return UnificationResult.Failure(
