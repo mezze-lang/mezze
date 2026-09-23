@@ -52,15 +52,20 @@ data class TypeScheme(
         // different claims, and only the second one is safe to rely on silently.
         // The real fix is for the constraint to carry the variable's identity
         // rather than its name; until then, an ambiguity fails loudly.
-        if (constraints.isNotEmpty()) {
+        // Only constraints that must fall back to the NAME can be mislinked; one
+        // carrying its variable is resolved by identity below and is immune. So
+        // the guard asks about those, not about every constraint.
+        if (constraints.any { it.typeVar == null }) {
             for ((base, vars) in quantifiedVars.groupBy { it.name.removePrefix("'") }) {
-                if (vars.size > 1 && constraints.any { it.typeParam.removePrefix("'") == base }) {
+                if (vars.size > 1 && constraints.any { it.typeVar == null && it.typeParam.removePrefix("'") == base }) {
                     error(
                         "Cannot instantiate this type scheme: ${vars.size} distinct quantified type " +
                             "variables are all spelled '$base (ids ${vars.map { it.id }}), and an " +
-                            "ability constraint refers to that spelling. Linking the constraint would " +
-                            "pick one of them arbitrarily. This is a compiler bug rather than a problem " +
-                            "with the program — please report the source that triggered it."
+                            "ability constraint refers to that spelling WITHOUT carrying its variable. " +
+                            "Linking it would pick one of them arbitrarily. Whichever site built that " +
+                            "constraint should pass `typeVar` — it has the variable in hand. This is a " +
+                            "compiler bug rather than a problem with the program; please report the " +
+                            "source that triggered it."
                     )
                 }
             }
@@ -74,8 +79,20 @@ data class TypeScheme(
         }
 
         val freshConstraintsWithVars = constraints.mapNotNull { constraint ->
-            val baseName = constraint.typeParam.removePrefix("'")
-            val freshTypeVar = nameToFreshVar[baseName] ?: nameToFreshVar[constraint.typeParam]
+            // Resolve by IDENTITY. `substitution` is keyed by the TypeVar itself,
+            // so a constraint that carries its variable needs no name lookup at
+            // all — and cannot be mislinked when two quantified variables happen
+            // to share a spelling.
+            //
+            // The name map below remains for constraints built before this field
+            // existed, and for any path that still cannot supply the variable. It
+            // is the thing that could mislink, which is why the guard above
+            // refuses an ambiguous spelling outright rather than picking one.
+            val freshTypeVar = constraint.typeVar?.let { (substitution[it] as? MezzeType.VarType)?.variable }
+                ?: run {
+                    val baseName = constraint.typeParam.removePrefix("'")
+                    nameToFreshVar[baseName] ?: nameToFreshVar[constraint.typeParam]
+                }
             val instantiatedTypeArgs = constraint.typeArgs.map { applySubstitutionToType(it, substitution) }
             // Freshen the associated-type binding values through the SAME
             // substitution as the type, so a binding like `'out = 'c` points at the

@@ -40,7 +40,26 @@ data class AbilityConstraint(
     // a var NAME, so a concrete receiver would otherwise degrade to a free var and
     // the call-site obligation would never fire — laundering `f {x = "s"}` past the
     // missing `NumAdd Int Str` impl. Null when the receiver is a genuine type var.
-    val concreteReceiver: MezzeType? = null
+    val concreteReceiver: MezzeType? = null,
+    /**
+     * WHICH type variable this constraint is about — the variable itself, not its
+     * spelling.
+     *
+     * [typeParam] is a name, and `TypeScheme.instantiate` used to pair a
+     * constraint with its fresh variable by looking that name up. Two quantified
+     * variables sharing a base name would have one silently overwrite the other
+     * in that map, and the constraint would link to whichever wrote last: the
+     * wrong variable, so the wrong impl at the call site, with no diagnostic
+     * anywhere. `TypeVar.fresh()` mints `'a`, `'b`, … per level, so same-spelled
+     * distinct variables are a naming convention away rather than a language
+     * impossibility.
+     *
+     * Every site that builds an [AbilityConstraint] already has the variable in
+     * hand, so this is carried rather than re-derived. [typeParam] stays for
+     * DISPLAY — `TypePrinter` groups constraints by it — and is no longer what
+     * resolution keys on.
+     */
+    val typeVar: TypeVar? = null,
 )
 
 /**

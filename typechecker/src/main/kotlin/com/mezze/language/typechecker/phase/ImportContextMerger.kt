@@ -225,6 +225,7 @@ private fun importedAbilityConstraints(bindingType: MezzeType): List<AbilityCons
             // demand for `show_a::Show` came back as `show_b::Show` (BUG 24).
             abilityHash = fac.abilityHash,
             typeParam = varArg.variable.name,
+            typeVar = varArg.variable,
             typeArgs = fac.typeArgs
         )
     }

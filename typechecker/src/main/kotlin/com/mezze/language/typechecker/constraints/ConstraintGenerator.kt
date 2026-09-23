@@ -985,6 +985,7 @@ class ConstraintGenerator(
                             abilityName = constraint.abilityName,
                             abilityHash = constraint.abilityHash,
                             typeParam = typeVarArg.variable.name,
+                            typeVar = typeVarArg.variable,
                             typeArgs = constraint.typeArgs,
                             associatedTypeBindings = constraint.associatedTypeBindings
                                 .mapValues { (_, v) -> substitution.apply(v) }
@@ -1023,6 +1024,7 @@ class ConstraintGenerator(
                             abilityName = constraint.abilityName,
                             abilityHash = constraint.abilityHash,
                             typeParam = quantVar?.name ?: constraint.typeVar.name,
+                            typeVar = quantVar ?: constraint.typeVar,
                             typeArgs = resolvedTypeArgs,
                             associatedTypeBindings = bindingsFor(
                                 constraint.abilityName,
