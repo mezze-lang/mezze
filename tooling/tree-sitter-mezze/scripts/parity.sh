@@ -127,6 +127,21 @@ echo "must-reject (advisory): $((REJECT_TOTAL-REJECT_FAIL))/$REJECT_TOTAL correc
 # highlighting to score better on a number — which is why four separate attempts
 # to close the gap all measured worse (see the notes in grammar.js).
 #
+# And the snippets are not even VALID. Run that one through the whole compiler:
+#
+#   $ mez check
+#   error[V0702]: Undefined variable or function: f
+#    --> app.mz:1:23
+#
+# The parser accepted it only by dropping `{ x = inner { y = 1 } {}` and handing
+# back `f`; the validator then rejects what is left. So an ERROR node here is the
+# CORRECT answer, and tree-sitter's location is the more useful one — it points
+# at the stray `{` that is the actual typo, where the compiler points at `f`, a
+# symptom of the text the parser discarded.
+#
+# That is the whole case for this being a ratchet and not a target. A "failure"
+# counted here can mean the grammar is RIGHT and the parser is lenient.
+#
 # So: this number may only go DOWN, which catches a real construct regressing,
 # and the BUILD gate is scripts/containment.sh — a mistake must stay local. That
 # is the property a syntax highlighter actually has to hold.
