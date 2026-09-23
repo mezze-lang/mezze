@@ -6,6 +6,7 @@ import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typechecker.constraints.ConstraintResult
+import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.constraints.MethodResolveBucket
 import com.mezze.language.typechecker.constraints.Resolution
 import com.mezze.language.typechecker.constraints.ResolutionCandidate
@@ -196,11 +197,38 @@ object DispatchResolver {
             // resolveReceiverTypeName). If narrowing lands on a non-empty subset,
             // use it; if none match (receiver has no impl for any candidate) leave
             // the full set (the downstream AbilityRequired then errors normally).
-            val receiverName = receiverTypeName(solvedReceiver)
-            val narrowed = if (ability.size > 1 && receiverName != null) {
+            // Narrow the candidate abilities to those that actually have an impl
+            // for THIS receiver, by matching the solved receiver type against each
+            // impl's target ANNOTATION.
+            //
+            // This used to test `receiverName in it.targetTypes` — a membership
+            // check over RENDERED names. The renderings do not agree: a `Seq 'a`
+            // receiver names itself `Seq` while `impl Sized for Seq 'a` stores its
+            // target as `Seq_a` (mezzeTypeToString joins the constructor and its
+            // arguments with `_`). So the check failed for EVERY candidate, the
+            // narrowing fell back to the unnarrowed set, and `Sized` and
+            // `SizedMut` were reported as a same-op collision on a `Seq` — even
+            // though `SizedMut` is implemented only by `MutSeq`, `MutString` and
+            // `MutBytes`, and cannot apply to a `Seq` at all.
+            //
+            // MEASURED: this false collision accounted for 33 of the 35 deferrals
+            // across both suites. The receiver's type does decide; the comparison
+            // just could not see it.
+            val narrowed = if (ability.size > 1) {
                 val implMatches = ability.filter { cand ->
                     val abilityName = cand.displayName ?: return@filter false
-                    typingContext.getAbilityImpls(abilityName).any { receiverName in it.targetTypes }
+                    typingContext.getAbilityImpls(abilityName).any { impl ->
+                        val annotations = impl.targetTypeAnnotations ?: return@any false
+                        val target = annotations.firstOrNull() ?: return@any false
+                        // No type-declaration map: this is a NARROWING, so a
+                        // match that cannot be proved simply leaves the candidate
+                        // in and we fall back to the unnarrowed set — exactly the
+                        // behaviour before this change. It can refine, never
+                        // mis-decide.
+                        TypeAnnotationMatcher.typeMatchesAnnotation(
+                            solvedReceiver, target, emptyMap(), impl.typeVars, mutableMapOf()
+                        )
+                    }
                 }
                 if (implMatches.isNotEmpty()) implMatches else ability
             } else ability
@@ -224,29 +252,25 @@ object DispatchResolver {
                 // (needs threading the call's effect expectation into this pass) or
                 // become a genuine error. Left UNRESOLVED here on purpose.
                 //
-                // MEASURED, so the decision is not about an unknown blast radius.
-                // Across both suites this fires 35 times, in exactly TWO shapes,
-                // and they are not the same problem:
+                // MEASURED before and after the narrowing fix above.
                 //
-                //  33x  receiver=Seq, abilities=[Sized, SizedMut]
-                //       The stdlib's pure `size` and effectful `size`. The call is
-                //       UNQUALIFIED (`x.size {}`), so the receiver's type really
-                //       does not choose, and effect context really is the only
-                //       thing that can. This is the actual question.
+                // BEFORE: 35 deferrals across both suites, 33 of them
+                // `receiver=Seq, abilities=[Sized, SizedMut]`. Those were FALSE —
+                // `SizedMut` is implemented only by `MutSeq`, `MutString` and
+                // `MutBytes` and can never apply to a `Seq`. The name-keyed
+                // narrowing simply could not see it.
                 //
-                //   2x  receiver=Item, abilities=[Price, Weigh]
-                //       Two unrelated USER abilities declaring `rank`, from
-                //       DictKeyAbilityCollisionTest. The calls there are QUALIFIED
-                //       — `Weigh.rank { it = x }` — so nothing is ambiguous; the
-                //       answer is written at the call site and this pass simply is
-                //       not reading it. Using the qualifier when present removes
-                //       this shape entirely, and it is the half that needs no
-                //       language decision.
+                // AFTER: 2 deferrals, both `receiver=Item, abilities=[Price,
+                // Weigh]` — two unrelated USER abilities declaring `rank`, from
+                // DictKeyAbilityCollisionTest. The calls there are QUALIFIED
+                // (`Weigh.rank { it = x }`), so nothing is ambiguous: the answer
+                // is written at the call site and this pass is not reading it.
                 //
-                // So the two halves can be taken separately: honour an explicit
-                // ability qualifier first (mechanical), and decide the unqualified
-                // Sized/SizedMut case on its own (semantic). The second is also
-                // narrower than it looks — one stdlib pair, on one receiver.
+                // So what remains is mechanical, not semantic — honour an explicit
+                // ability qualifier — and there is no language decision left here.
+                // A genuine same-op collision on an UNQUALIFIED call, where two
+                // abilities both have an impl for the same receiver type, does not
+                // occur anywhere we test.
                 return null
             }
             val opHash = narrowed.first().opHash ?: return null
