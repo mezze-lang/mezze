@@ -457,18 +457,10 @@ class AbilityChecker internal constructor(
     // Head constructor name for a coarse "same shape" comparison (e.g. Result 'a 'b
     // vs Result Int Exception both have head "Result"). Precise arg agreement is
     // enforced later by unification; here we only rule out "no impl yields this shape".
-    private fun typeHeadName(type: MezzeType): String = when (type) {
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "Str"
-        is MezzeType.NewtypeType -> type.name
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.TypeApplication -> type.constructor
-        is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: "|variant|"
-        is MezzeType.RecordType -> "{record}"
-        is MezzeType.FunctionType -> "{fn}"
-        else -> type::class.simpleName ?: "?"
-    }
+    // THE head-name answer. This was a hand-written list that named Int, Float,
+    // Str and Bool and fell through to `type::class.simpleName` for the rest —
+    // so a diagnostic about a `Frac`, `Char` or `Bytes` said `FracType`.
+    private fun typeHeadName(type: MezzeType): String = TypeNames.head(type)
 
     private fun findMatchingAbilityImpl(
         abilityName: String,

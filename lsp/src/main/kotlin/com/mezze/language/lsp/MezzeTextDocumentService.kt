@@ -5137,12 +5137,12 @@ class MezzeTextDocumentService(
         else -> null
     }
 
-    private fun typeConstructorName(t: com.mezze.language.ast.MezzeType): String? = when (t) {
-        is com.mezze.language.ast.MezzeType.TypeApplication -> t.constructor
-        is com.mezze.language.ast.MezzeType.RecordType -> null
-        is com.mezze.language.ast.MezzeType.FunctionType -> null
-        else -> t::class.simpleName?.removeSuffix("Type")
-    }
+    // The name of the DECLARATION this type refers to, for go-to-definition.
+    // This used to end in `t::class.simpleName.removeSuffix("Type")`, which
+    // renders MezzeType.StringType as `String` — a type name Mezze does not
+    // have, so the lookup it fed searched for a declaration that cannot exist.
+    private fun typeConstructorName(t: com.mezze.language.ast.MezzeType): String? =
+        com.mezze.language.ast.TypeNames.nominal(t)
 
     /** Find the file+range where a type with the given name is declared. */
     private fun findTypeDeclLocation(state: DocumentState, typeName: String): Location? {
