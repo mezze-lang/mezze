@@ -95,23 +95,87 @@ class UnknownPlaceholderGateTest {
     @AfterEach
     fun teardown() = TypeVar.unknownMinted.clear()
 
+    /**
+     * The programs the gate is measured over.
+     *
+     * This used to be ONE program — a seq match over a record — so the gate
+     * guarded the reason list against whatever that single source happened to
+     * reach. A new give-up position in abilities, effects, codecs or newtypes
+     * would have been invisible to it while the list still read as authoritative.
+     * Each entry below is here to reach a different family of positions; add one
+     * when a family is not represented, not when a bug is found.
+     *
+     * MEASURED coverage of the current set: these programs reach THREE of the
+     * nine listed reasons — the field read, the unresolved identifier, and the
+     * variant construct. The gate is therefore a partial guard, not a proof: a
+     * new give-up in one of the other six families still slips past it. Closing
+     * that means adding a program that reaches the family, which is why the list
+     * is programs rather than one source.
+     */
+    private val programs: List<Pair<String, String>> = listOf(
+        "seq match over a record" to """
+            type M = | Get, Post |
+            type Rt = { m: M, k: Int }
+            let pick = { rts: [Rt] } -> { key } ->
+              match rts is
+                [] -> key
+                [h, ...t] -> key
+            let main = {} -> (pick { rts = [ { m = Get, k = 7 } ] }) { key = 7 }
+        """,
+        // Ability declaration, impl and a method call — reaches the two
+        // "no solved signature" positions and the static-op field access.
+        "ability with an impl and a method call" to """
+            ability Describe for 'a having 'out where {
+              describe: { it: 'a } -> 'out
+            }
+            impl Describe for Int having 'out = Str where {
+              describe = { it } -> "n"
+            }
+            let main = {} -> Describe.describe { it = 1 }
+        """,
+        // Effect declaration, performer and a perform — reaches the perform-op
+        // position and the associated-type binding path.
+        "effect with a performer and a perform" to """
+            effect Ask having 'v where {
+              ask: {} -> 'v <Ask>
+            }
+            impl Ask for Fixed having 'v = Int where {
+              ask = {} -> 7
+            }
+            let main = {} -> perform Fixed in Ask.ask {}
+        """,
+        // Newtype construction and destructuring — a nominal wrapper is where a
+        // "declared shape" is available and a placeholder should NOT be minted.
+        "newtype construct and open" to """
+            newtype Email = Str
+            let make = { s: Str } -> Email.(s)
+            let open = { e: Email } -> match e is Email.(inner) -> inner
+            let main = {} -> open { e = make { s = "a" } }
+        """,
+        // Polymorphic higher-order code with an unannotated lambda — the shape
+        // that most often leaves a call with no solved return.
+        "higher-order with unannotated lambdas" to """
+            let twice = { f, x } -> f { x = f { x = x } }
+            let main = {} -> twice { f = { x } -> x + 1, x = 1 }
+        """,
+    )
+
     @Test
     fun `no new place where the compiler gives up on a type`() {
-        typeChecker.typeCheck(
-            parser.parseParsedModule(
-                """
-                type M = | Get, Post |
-                type Rt = { m: M, k: Int }
-                let pick = { rts: [Rt] } -> { key } ->
-                  match rts is
-                    [] -> key
-                    [h, ...t] -> key
-                let main = {} -> (pick { rts = [ { m = Get, k = 7 } ] }) { key = 7 }
-                """.trimIndent(),
-                "test.mz",
-            ),
-            Paths.get("."),
-        )
+        for ((label, src) in programs) {
+            ModuleResolver.clearCache()
+            TypeChecker.clearCache()
+            val tc = TypeChecker()
+            try {
+                tc.typeCheck(parser.parseParsedModule(src.trimIndent(), "gate.mz"), Paths.get("."))
+            } catch (e: Throwable) {
+                // A program that fails to typecheck still reports whatever it
+                // minted on the way, which is the thing being measured. It must
+                // not abort the sweep — but a program meant to COMPILE that stops
+                // compiling is worth knowing about, so say so rather than swallow.
+                fail("gate program '$label' no longer typechecks: ${e.message}")
+            }
+        }
         val seen = TypeVar.unknownMinted.toSet()
         val novel = seen - allowed
         if (novel.isNotEmpty()) {
