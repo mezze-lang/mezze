@@ -739,31 +739,14 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         typeArgs = methodCallTypeArgs
     )
 
-    return ConstraintResult(
-        type = callType,
-        constraints = constraints,
-        effects = (receiverResult.effects + argumentResult.effects + methodDeclaredEffects + abilityHarvestedEffects) - abilityCaughtByOp,
-        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + methodDeclaredEffectInstances,
+    val merged = ConstraintResult.mergeOf(callType, constraints, receiverResult, argumentResult)
+    return merged.copy(
+        effects = (merged.effects + methodDeclaredEffects + abilityHarvestedEffects) - abilityCaughtByOp,
+        effectInstances = merged.effectInstances + methodDeclaredEffectInstances,
         abilityConstraints = abilityConstraints,
         associatedTypeConstraints = associatedTypeConstraints,
-        undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
-        usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-        methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
-        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
-        lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
-        // Propagated, not dropped. A method call COMBINES two sub-results, and
-        // every field either side carries has to survive the merge; the six below
-        // did not. MEASURED across the typechecker suite before the fix: 10,359
-        // drops, 10,299 of them `referencedBindings` and 60 `effectRowVars` —
-        // and `effectRowVars` is the one whose own declaration says that losing it
-        // means "silently inferring `launder` pure and laundering the callback's
-        // effects" (#256/#268).
-        tailCalls = receiverResult.tailCalls + argumentResult.tailCalls,
-        referencedBindings = receiverResult.referencedBindings + argumentResult.referencedBindings,
-        effectRowVars = receiverResult.effectRowVars + argumentResult.effectRowVars,
-        performed = receiverResult.performed || argumentResult.performed,
-        expectedTypeAt = receiverResult.expectedTypeAt + argumentResult.expectedTypeAt,
-        matchCaseBindings = receiverResult.matchCaseBindings + argumentResult.matchCaseBindings,
+        methodCallResolutions = merged.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
+        callReturnTypes = merged.callReturnTypes + (expr.loc to callType),
     )
 }
 
@@ -1371,31 +1354,13 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         )?.let { inherentMethodAbilityConstraints.add(it) }
     }
 
-    return ConstraintResult(
-        type = callType,
-        constraints = constraints,
-        effects = (receiverResult.effects + argumentResult.effects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
-        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + methodDeclaredEffectInstances,
-        abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints + inherentMethodAbilityConstraints,
-        associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
-        undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
-        usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-        methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
-        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
-        lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
-        // Propagated, not dropped. A method call COMBINES two sub-results, and
-        // every field either side carries has to survive the merge; the six below
-        // did not. MEASURED across the typechecker suite before the fix: 10,359
-        // drops, 10,299 of them `referencedBindings` and 60 `effectRowVars` —
-        // and `effectRowVars` is the one whose own declaration says that losing it
-        // means "silently inferring `launder` pure and laundering the callback's
-        // effects" (#256/#268).
-        tailCalls = receiverResult.tailCalls + argumentResult.tailCalls,
-        referencedBindings = receiverResult.referencedBindings + argumentResult.referencedBindings,
-        effectRowVars = receiverResult.effectRowVars + argumentResult.effectRowVars,
-        performed = receiverResult.performed || argumentResult.performed,
-        expectedTypeAt = receiverResult.expectedTypeAt + argumentResult.expectedTypeAt,
-        matchCaseBindings = receiverResult.matchCaseBindings + argumentResult.matchCaseBindings,
+    val merged = ConstraintResult.mergeOf(callType, constraints, receiverResult, argumentResult)
+    return merged.copy(
+        effects = (merged.effects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
+        effectInstances = merged.effectInstances + methodDeclaredEffectInstances,
+        abilityConstraints = merged.abilityConstraints + inherentMethodAbilityConstraints,
+        methodCallResolutions = merged.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
+        callReturnTypes = merged.callReturnTypes + (expr.loc to callType),
     )
 }
 
@@ -1520,31 +1485,12 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         },
     )
 
-    return ConstraintResult(
-        type = callType,
-        constraints = constraints,
-        effects = (receiverResult.effects + argumentResult.effects + methodDeclaredEffects + deferredHarvestedEffects) - deferredCaughtByOp,
-        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + methodDeclaredEffectInstances,
-        abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
-        associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
-        undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
-        usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-        methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodName) to methodCallInfo),
-        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
-        lambdaParamTypes = receiverResult.lambdaParamTypes + argumentResult.lambdaParamTypes,
-        // Propagated, not dropped. A method call COMBINES two sub-results, and
-        // every field either side carries has to survive the merge; the six below
-        // did not. MEASURED across the typechecker suite before the fix: 10,359
-        // drops, 10,299 of them `referencedBindings` and 60 `effectRowVars` —
-        // and `effectRowVars` is the one whose own declaration says that losing it
-        // means "silently inferring `launder` pure and laundering the callback's
-        // effects" (#256/#268).
-        tailCalls = receiverResult.tailCalls + argumentResult.tailCalls,
-        referencedBindings = receiverResult.referencedBindings + argumentResult.referencedBindings,
-        effectRowVars = receiverResult.effectRowVars + argumentResult.effectRowVars,
-        performed = receiverResult.performed || argumentResult.performed,
-        expectedTypeAt = receiverResult.expectedTypeAt + argumentResult.expectedTypeAt,
-        matchCaseBindings = receiverResult.matchCaseBindings + argumentResult.matchCaseBindings,
+    val merged = ConstraintResult.mergeOf(callType, constraints, receiverResult, argumentResult)
+    return merged.copy(
+        effects = (merged.effects + methodDeclaredEffects + deferredHarvestedEffects) - deferredCaughtByOp,
+        effectInstances = merged.effectInstances + methodDeclaredEffectInstances,
+        methodCallResolutions = merged.methodCallResolutions + mapOf((expr.loc to methodName) to methodCallInfo),
+        callReturnTypes = merged.callReturnTypes + (expr.loc to callType),
     )
 }
 

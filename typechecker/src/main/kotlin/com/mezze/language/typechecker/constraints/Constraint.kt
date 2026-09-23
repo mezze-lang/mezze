@@ -451,6 +451,7 @@ data class ConstraintResult(
     // back from. Merged up like callReturnTypes.
     val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> = emptyMap(),
 ) {
+
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
      *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType
      *  fields); [caughtByOp] are effect names the op discharges (row subtraction). */
@@ -545,6 +546,58 @@ data class ConstraintResult(
         fun simple(type: MezzeType): ConstraintResult {
             return ConstraintResult(type, emptyList())
         }
+
+        /**
+         * Combine the sub-results an expression was built from.
+         *
+         * Every field below is propagated, and that is the point: this type has
+         * twenty-odd fields, nearly all defaulted to empty, so a hand-written
+         * merge that forgets one does not fail — it silently produces the empty
+         * value and the sub-expression's contribution disappears. The three
+         * method-call generators each merged only part, and dropped six fields
+         * 10,359 times across the typechecker suite before it was measured.
+         *
+         * [type] and [constraints] belong to the combining site, so they are
+         * parameters rather than merged. Everything a site ADDS on top goes in a
+         * `copy()` over the result — `merged.effects + myOwnEffects`, not a
+         * fresh union of the sub-results, so the base can never be bypassed.
+         *
+         * A new field on [ConstraintResult] is propagated the moment it is added
+         * here, for every site at once. That is the only thing standing between
+         * "twenty defaulted fields" and another silent drop.
+         */
+        fun mergeOf(
+            type: MezzeType,
+            constraints: List<Constraint>,
+            vararg subs: ConstraintResult,
+        ): ConstraintResult = ConstraintResult(
+            type = type,
+            constraints = constraints,
+            effects = subs.flatMapTo(mutableSetOf()) { it.effects },
+            effectInstances = subs.flatMapTo(mutableSetOf()) { it.effectInstances },
+            performed = subs.any { it.performed },
+            effectRowVars = subs.flatMapTo(mutableSetOf()) { it.effectRowVars },
+            abilityConstraints = subs.flatMap { it.abilityConstraints },
+            associatedTypeConstraints = subs.flatMap { it.associatedTypeConstraints },
+            undefinedVariables = subs.flatMap { it.undefinedVariables },
+            duplicateBindings = subs.flatMap { it.duplicateBindings },
+            tailCalls = subs.flatMapTo(mutableSetOf()) { it.tailCalls },
+            usedVariables = subs.flatMapTo(mutableSetOf()) { it.usedVariables },
+            unusedVariables = subs.flatMap { it.unusedVariables },
+            unusedHandlers = subs.flatMap { it.unusedHandlers },
+            patternWarnings = subs.flatMap { it.patternWarnings },
+            referencedBindings = subs.flatMapTo(mutableSetOf()) { it.referencedBindings },
+            methodCallResolutions = subs.fold(emptyMap()) { acc, r -> acc + r.methodCallResolutions },
+            callReturnTypes = subs.fold(emptyMap()) { acc, r -> acc + r.callReturnTypes },
+            expectedTypeAt = subs.fold(emptyMap()) { acc, r -> acc + r.expectedTypeAt },
+            matchCaseBindings = subs.fold(emptyMap()) { acc, r -> acc + r.matchCaseBindings },
+            matchScrutineeTypes = subs.fold(emptyMap()) { acc, r -> acc + r.matchScrutineeTypes },
+            pendingClosureArgEffects = subs.flatMap { it.pendingClosureArgEffects },
+            doBindingEffects = subs.flatMap { it.doBindingEffects },
+            doBindingSolvedTypes = subs.fold(emptyMap()) { acc, r -> acc + r.doBindingSolvedTypes },
+            performFullyDischarged = subs.fold(emptyMap()) { acc, r -> acc + r.performFullyDischarged },
+            lambdaParamTypes = subs.fold(emptyMap()) { acc, r -> acc + r.lambdaParamTypes },
+        )
     }
 }
 
