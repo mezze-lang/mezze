@@ -223,6 +223,30 @@ object DispatchResolver {
                 // whether same-op ability collisions dispatch by effect-context
                 // (needs threading the call's effect expectation into this pass) or
                 // become a genuine error. Left UNRESOLVED here on purpose.
+                //
+                // MEASURED, so the decision is not about an unknown blast radius.
+                // Across both suites this fires 35 times, in exactly TWO shapes,
+                // and they are not the same problem:
+                //
+                //  33x  receiver=Seq, abilities=[Sized, SizedMut]
+                //       The stdlib's pure `size` and effectful `size`. The call is
+                //       UNQUALIFIED (`x.size {}`), so the receiver's type really
+                //       does not choose, and effect context really is the only
+                //       thing that can. This is the actual question.
+                //
+                //   2x  receiver=Item, abilities=[Price, Weigh]
+                //       Two unrelated USER abilities declaring `rank`, from
+                //       DictKeyAbilityCollisionTest. The calls there are QUALIFIED
+                //       — `Weigh.rank { it = x }` — so nothing is ambiguous; the
+                //       answer is written at the call site and this pass simply is
+                //       not reading it. Using the qualifier when present removes
+                //       this shape entirely, and it is the half that needs no
+                //       language decision.
+                //
+                // So the two halves can be taken separately: honour an explicit
+                // ability qualifier first (mechanical), and decide the unqualified
+                // Sized/SizedMut case on its own (semantic). The second is also
+                // narrower than it looks — one stdlib pair, on one receiver.
                 return null
             }
             val opHash = narrowed.first().opHash ?: return null
