@@ -283,6 +283,20 @@ bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
   // NOT added here: a branch absorbing an over-indented line as another item of
   // the current block (`col > top && valid_symbols[NEWLINE] -> NEWLINE`).
   //
+  // RE-JUDGED against highlighting rather than against the parity count, and it
+  // still loses — for a better reason than the first time. What it breaks is
+  // REAL, IDIOMATIC code: a multi-line pipe chain
+  //
+  //     let n = "a"
+  //       |> str::to_upper { s = @ }
+  //       |> str::to_lower { s = @ }
+  //
+  // stops parsing, along with five do-block layouts, because their continuation
+  // lines ARE deeper than the block and must open a nested level rather than
+  // become the next item. It buys two mixed-indent match arms. Containment and
+  // the corpus trees are unharmed either way; the deciding evidence is which
+  // side of the trade is code someone actually writes.
+  //
   // It is tempting, because the Kotlin parser ignores the column entirely when
   // deciding whether a match arm continues, so arms at inconsistent indents are
   // ONE match to the parser and a hard error here — and inconsistent indents are
