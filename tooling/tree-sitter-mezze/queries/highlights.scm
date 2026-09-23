@@ -83,8 +83,11 @@
 ;; Literals
 ;; ============================================================
 
-(integer_literal) @number
-(float_literal)   @number.float
+(integer_literal)  @number
+(float_literal)    @number.float
+;; `1//2` — a Frac. One token, so the `//` colours as part of the number
+;; rather than as two operators with a number either side.
+(fraction_literal) @number
 (bool_literal)    @constant.builtin.boolean
 (unit_literal)    @constant.builtin
 

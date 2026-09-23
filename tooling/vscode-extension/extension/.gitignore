@@ -1,3 +1,6 @@
 # Packaged extension bundle — a build artifact produced by `vsce package`
 # (see tooling/install-dev.sh). Not source; regenerated on every install.
+# A stale mezze-language-0.4.9.vsix had been committed BEFORE this rule existed
+# and survived it, 377KB of binary that no longer matched the package.json
+# beside it (0.5.0); `git rm --cached` was needed to actually drop it.
 *.vsix

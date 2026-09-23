@@ -1168,6 +1168,7 @@ module.exports = grammar({
     _literal: $ => choice(
       $.integer_literal,
       $.float_literal,
+      $.fraction_literal,
       $.string_literal,
       $.bool_literal,
       $.unit_literal,
@@ -1178,6 +1179,12 @@ module.exports = grammar({
     // leading underscore — `_x` is an identifier.
     integer_literal: _ => /-?\d[\d_]*[nN]?/,
     float_literal: _ => /-?\d[\d_]*\.\d[\d_]*/,
+    // `1//2` — a Frac, and LITERAL syntax: `//` joins two numerals and does
+    // not join identifiers (`a//b` is rejected by the compiler), so this is a
+    // token, not an operator. `#` is Mezze's comment marker, so `//` is free.
+    // The lexer prefers the longest match, which is what keeps `1//2` from
+    // lexing as integer `1` followed by `//2`.
+    fraction_literal: _ => /-?\d[\d_]*\/\/-?\d[\d_]*/,
     bool_literal: _ => choice('True', 'False'),
     unit_literal: _ => seq('(', ')'),
 

@@ -224,7 +224,9 @@
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "package": "vsce package",
-    "test:syntax": "node test/tmgrammar.test.js"
+    "test:syntax": "node test/tmgrammar.test.js",
+    "test:snippets": "node test/snippets.test.js",
+    "test": "npm run test:syntax && npm run test:snippets"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",

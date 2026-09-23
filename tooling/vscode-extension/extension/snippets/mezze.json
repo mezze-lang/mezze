@@ -37,9 +37,9 @@
   "Typed Lambda": {
     "prefix": "lambdat",
     "body": [
-      "{${1:param}: ${2:Type}} -> ${3:ReturnType} = ${4:body}"
+      "let ${1:name}: { ${2:param}: ${3:Type} } -> ${4:ReturnType} = { ${2:param} } -> ${5:body}"
     ],
-    "description": "Create a typed lambda expression"
+    "description": "Lambda with a type annotation on the binding."
   },
   "Type Declaration": {
     "prefix": "type",
@@ -65,20 +65,20 @@
   "Effect Declaration": {
     "prefix": "effect",
     "body": [
-      "effect ${1:Name} {",
-      "  ${2:operation}: {${3:params}} -> ${4:ReturnType} <>",
+      "effect ${1:Name} where {",
+      "  ${2:operation}: { ${3:param}: ${4:Type} } -> ${5:ReturnType} <${1:Name}>",
       "}"
     ],
-    "description": "Create an effect declaration"
+    "description": "Effect declaration. Operations carry the effect in their row: `-> T <Name>`."
   },
   "Ability Declaration": {
     "prefix": "ability",
     "body": [
-      "ability ${1:Name} '${2:a} where {",
-      "  ${3:operation}: {${4:params}} -> ${5:ReturnType}",
+      "ability ${1:Name} for '${2:a} where {",
+      "  ${3:operation}: { it: '${2:a} } -> ${4:ReturnType}",
       "}"
     ],
-    "description": "Create an ability declaration"
+    "description": "Ability declaration. `for` names the type the ability is implemented FOR; `it` is the receiver."
   },
   "Impl Effect": {
     "prefix": "impl",
@@ -174,10 +174,10 @@
   "Function with Ability Constraints": {
     "prefix": "funability",
     "body": [
-      "let ${1:name}: {${2:params}} -> ${3:ReturnType} with ${4:Ability} ${5:Type} = {${6:params}} ->",
-      "  ${7:body}"
+      "let ${1:name}: { ${2:param}: '${3:a} } with ${4:Ability} '${3:a} -> ${5:ReturnType} = { ${2:param} } ->",
+      "  ${6:body}"
     ],
-    "description": "Create a function with ability constraints"
+    "description": "Function with an ability constraint. `with` goes BEFORE the arrow (P0120)."
   },
   "Record Literal": {
     "prefix": "rec",
@@ -281,19 +281,17 @@
   },
   "Fraction Literal": {
     "prefix": "frac",
-    "body": [
-      "${1:numerator}//${2:denominator}"
-    ],
-    "description": "Create a fraction literal"
+    "body": "${1:1}//${2:2}",
+    "description": "Fraction literal. `//` joins two numerals — `1//2`; it is literal syntax, not division on variables."
   },
   "Match with Multiple Patterns": {
     "prefix": "matchm",
     "body": [
       "match ${1:value} is",
-      "  ${2:Pattern1}, ${3:Pattern2} -> ${4:result}",
+      "  ${2:Pattern1} | ${3:Pattern2} -> ${4:result}",
       "  _ -> ${5:default}"
     ],
-    "description": "Create a match with multiple patterns per arm"
+    "description": "Match arm covering several patterns — alternatives are separated by `|`."
   },
   "Selective Import": {
     "prefix": "usesel",
@@ -302,14 +300,14 @@
     ],
     "description": "Import specific items from a module"
   },
-  "Ability without Where": {
+  "Ability with Class Parameter": {
     "prefix": "ability2",
     "body": [
-      "ability ${1:Name} '${2:a} {",
-      "  ${3:operation}: { ${4:param}: '${2:a} } -> ${5:ReturnType}",
+      "ability ${1:Name} '${2:e} for '${3:a} where {",
+      "  ${4:operation}: { it: '${3:a} } -> ${5:ReturnType}",
       "}"
     ],
-    "description": "Create an ability declaration without where keyword"
+    "description": "Ability with a class parameter — the params come before `for`."
   },
   "Newtype Declaration": {
     "prefix": "newtype",
