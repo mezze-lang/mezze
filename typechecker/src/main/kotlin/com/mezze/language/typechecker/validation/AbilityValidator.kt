@@ -145,49 +145,62 @@ object AbilityValidator {
         val abilityAssociatedTypes = abilityDeclaration.associatedTypes
         val implAssociatedTypeBindings = impl.associatedTypeBindings
 
-        if (abilityAssociatedTypes.isNotEmpty() && implAssociatedTypeBindings.isEmpty()) {
+        // Conformance is SEVERAL independent questions about one impl, so answer
+        // all of them before reporting. Throwing at the first made a user with
+        // three mistakes fix them one compile at a time — and the effect-side twin
+        // of this check (EffectValidator.validateEffectImpl) already accumulated,
+        // so the two halves of the same rule behaved differently.
+        val problems = mutableListOf<TypeCheckError>()
+
+        // The two "none at all" checks are better-worded special cases of the
+        // missing/extra checks below, not extra findings. Reporting both would
+        // describe ONE mistake twice, so each suppresses its general form.
+        val noBindingsAtAll = abilityAssociatedTypes.isNotEmpty() && implAssociatedTypeBindings.isEmpty()
+        val bindingsButNoneDeclared = abilityAssociatedTypes.isEmpty() && implAssociatedTypeBindings.isNotEmpty()
+
+        if (noBindingsAtAll) {
             val typesList = abilityAssociatedTypes.joinToString(", ")
-            throw TypeCheckError(
+            problems.add(TypeCheckError(
                 "Ability '${abilityName}' declares associated types [$typesList] " +
                 "but implementation does not provide bindings. " +
                 "Use: impl ${abilityName} ${impl.targetTypes.joinToString(" ") { parsedTypeAnnotationToString(it) }} " +
                 "having ${abilityAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
                 sourceLocation,
                 code = ErrorCode.V0413_MISSING_ASSOCIATED_TYPE_BINDING,
-            )
+            ))
         }
 
-        if (abilityAssociatedTypes.isEmpty() && implAssociatedTypeBindings.isNotEmpty()) {
+        if (bindingsButNoneDeclared) {
             val bindingsList = implAssociatedTypeBindings.keys.joinToString(", ")
-            throw TypeCheckError(
+            problems.add(TypeCheckError(
                 "Implementation provides associated type bindings [$bindingsList] " +
                 "but ability '${abilityName}' does not declare associated types. " +
                 "Remove the 'having' clause or add it to the ability declaration.",
                 sourceLocation,
                 code = ErrorCode.V0414_EXTRA_ASSOCIATED_TYPE_BINDING,
-            )
+            ))
         }
 
         val missingBindings = abilityAssociatedTypes.filter { it !in implAssociatedTypeBindings.keys }
-        if (missingBindings.isNotEmpty()) {
-            throw TypeCheckError(
+        if (missingBindings.isNotEmpty() && !noBindingsAtAll) {
+            problems.add(TypeCheckError(
                 "Ability '${abilityName}' declares associated types ${abilityAssociatedTypes.joinToString(", ")} " +
                 "but implementation is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                 "All associated types must be bound in the implementation.",
                 sourceLocation,
                 code = ErrorCode.V0413_MISSING_ASSOCIATED_TYPE_BINDING,
-            )
+            ))
         }
 
         val extraBindings = implAssociatedTypeBindings.keys.filter { it !in abilityAssociatedTypes }
-        if (extraBindings.isNotEmpty()) {
-            throw TypeCheckError(
+        if (extraBindings.isNotEmpty() && !bindingsButNoneDeclared) {
+            problems.add(TypeCheckError(
                 "Implementation provides bindings for ${extraBindings.joinToString(", ")} " +
                 "but ability '${abilityName}' only declares: ${abilityAssociatedTypes.joinToString(", ")}. " +
                 "Remove the extra bindings or add them to the ability declaration.",
                 sourceLocation,
                 code = ErrorCode.V0414_EXTRA_ASSOCIATED_TYPE_BINDING,
-            )
+            ))
         }
 
         val declaredOps = abilityDeclaration.operations.map { it.name }.toSet()
@@ -197,25 +210,38 @@ object AbilityValidator {
         if (missingOps.isNotEmpty()) {
             val missing = missingOps.joinToString(", ")
             val example = missingOps.first()
-            throw TypeCheckError(
+            problems.add(TypeCheckError(
                 "Implementation of '${abilityName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
                 "Add: $example = {args} -> ...",
                 sourceLocation,
                 code = ErrorCode.V0404_IMPL_MISSING_METHOD,
-            )
+            ))
         }
 
         val extraOps = implementedOps - declaredOps
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")
             val extraOpLoc = impl.operations.find { it.name in extraOps }?.loc
-            val extraOpLocation = extraOpLoc
-            throw TypeCheckError(
+            problems.add(TypeCheckError(
                 "Implementation of '${abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
                 "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration.",
-                extraOpLocation,
+                extraOpLoc,
                 code = ErrorCode.V0405_IMPL_EXTRA_METHOD,
-            )
+            ))
+        }
+
+        // Report everything found, first problem first. The remaining checks are
+        // NOT independent of these — signature checking assumes the two op sets
+        // line up — so they only run on a conforming shape, exactly as they did
+        // when the first mismatch threw.
+        if (problems.isNotEmpty()) {
+            throw problems.first().let { first ->
+                TypeCheckError(
+                    first.message, first.loc, first.errorType, first.metadata,
+                    first.code, first.hints, first.fixHints,
+                    additional = problems.drop(1),
+                )
+            }
         }
 
         validateOperationSignatures(impl, abilityDeclaration, sourceLocation, registry)

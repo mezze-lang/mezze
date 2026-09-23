@@ -22,7 +22,26 @@ class TypeCheckError(
      * detail lived in a `MEZZE_DEBUG` print nobody has set.
      */
     cause: Throwable? = null,
+    /**
+     * Other problems found at the same time, when a check can report several.
+     *
+     * Impl conformance is the case this exists for: an impl missing a method,
+     * carrying an extra one AND missing an associated-type binding is three
+     * separate mistakes, and throwing at the first made the user fix them one
+     * compile at a time. The effect-side twin of that check accumulated already;
+     * the ability side did not.
+     *
+     * Carried HERE rather than in a separate multi-error exception on purpose.
+     * Eight places catch `TypeCheckError`, and a new throwable type would escape
+     * every one that was not updated. This way the first problem is reported
+     * exactly as before and a reporter that wants the rest opts in by reading
+     * this list.
+     */
+    val additional: List<TypeCheckError> = emptyList(),
 ) : Exception(message, cause) {
+
+    /** This error and everything found alongside it, first one first. */
+    fun all(): List<TypeCheckError> = listOf(this) + additional
 
     override fun toString(): String {
         return if (loc != null) {
