@@ -56,10 +56,21 @@ class TypeValidator(
 
         errors.addAll(unknownTypeValidator.validate(module))
 
+        // Where each binding was written, so an error about one can be squiggled
+        // rather than reported against the file at large.
+        // Every name a decl BINDS, not just `variableName` — that accessor casts
+        // the pattern to ParsedVariablePattern and throws on `let { x, y } = …`.
+        val bindingLocs: Map<String, Loc> = buildMap {
+            for (decl in module.decls.filterIsInstance<ParsedLetDecl>()) {
+                for (name in decl.pattern.extractBindings()) putIfAbsent(name, decl.loc)
+            }
+        }
+
         for ((bindingName, result) in constraintResults) {
             val finalType = substitution.apply(result.type)
 
-            val abilityValueErrors = validateBuiltInAbilityUsage(finalType, bindingName)
+            val abilityValueErrors =
+                validateBuiltInAbilityUsage(finalType, bindingName, bindingLocs[bindingName])
             errors.addAll(abilityValueErrors)
 
             val abilityErrors = validateAbilityConstraints(
@@ -603,11 +614,15 @@ class TypeValidator(
         return l1.all { a -> l2.any { b -> same(a, b) } } && l2.all { b -> l1.any { a -> same(a, b) } }
     }
 
-    private fun validateBuiltInAbilityUsage(type: MezzeType, context: String): List<ValidationError> {
+    private fun validateBuiltInAbilityUsage(
+        type: MezzeType,
+        context: String,
+        loc: Loc?,
+    ): List<ValidationError> {
         if (type !is MezzeType.VariantType) return emptyList()
         return type.constructors.keys
             .filter { BuiltInAbilities.isBuiltInAbility(it) }
-            .map { ValidationError.AbilityUsedAsValue(abilityName = it, context = context, loc = null) }
+            .map { ValidationError.AbilityUsedAsValue(abilityName = it, context = context, loc = loc) }
     }
 
     fun validateParsedExhaustiveness(

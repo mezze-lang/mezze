@@ -125,7 +125,7 @@ class AbilityChecker internal constructor(
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
 
                     if (allConcrete) {
-                        val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
+                        val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash, errorLoc)
                         if (!hasImpl) {
                             if (deferExistingAbilityImpls && abilityImplExistsForType(abilityName, closedTypeArgs)) {
                                 continue
@@ -190,7 +190,7 @@ class AbilityChecker internal constructor(
         val allConcrete = trackingArgs.all { isConcrete(it) }
 
         if (allConcrete) {
-            val hasImpl = checkAbilityImplementation(abilityName, trackingArgs, constraint.abilityHash)
+            val hasImpl = checkAbilityImplementation(abilityName, trackingArgs, constraint.abilityHash, constraint.loc)
 
             if (!hasImpl) {
                 // Impl-body validation: when the impl EXISTS somewhere (just not
@@ -582,7 +582,17 @@ class AbilityChecker internal constructor(
         return (byHash + nameAdmissible).filter { seen.add(it.contentHash) }
     }
 
-    internal fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Boolean {
+    /**
+      * @param loc where the obligation was written, threaded purely so the
+      *   auto-derivation failure below can be squiggled. An error the editor
+      *   cannot place is an error the user has to go looking for.
+      */
+    internal fun checkAbilityImplementation(
+        abilityName: String,
+        typeArgs: List<MezzeType>,
+        abilityHash: Hash? = null,
+        loc: com.mezze.language.parsedast.Loc? = null,
+    ): Boolean {
         val effectiveHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         if (typeArgs.size == 1) {
             if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash)) {
@@ -601,14 +611,14 @@ class AbilityChecker internal constructor(
             if (effectiveHash == WellKnownHashConstants.ABILITY_ENCODE && typeArgs.size == 2) {
                 val formatType = typeArgs[0]
                 val dataType = typeArgs[1]
-                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType), dataType)) {
+                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType), dataType, loc)) {
                     return true
                 }
             } else if (effectiveHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 3) {
                 val formatType = typeArgs[0]
                 val dataType = typeArgs[1]
                 val inType = typeArgs[2]
-                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType, inType), dataType)) {
+                if (checkCodecAbilityImplementation(abilityName, listOf(formatType, dataType, inType), dataType, loc)) {
                     return true
                 }
             }
@@ -712,7 +722,8 @@ class AbilityChecker internal constructor(
     private fun checkCodecAbilityImplementation(
         abilityName: String,
         allTypes: List<MezzeType>,
-        dataType: MezzeType
+        dataType: MezzeType,
+        loc: com.mezze.language.parsedast.Loc? = null,
     ): Boolean {
         if (!codecGenerator.isSerializable(dataType)) {
             return false
@@ -735,7 +746,7 @@ class AbilityChecker internal constructor(
                         "format lacks ${missing.abilityName} " +
                         (if (missing.path.isEmpty()) "(at root)"
                          else "at field path .${missing.path.joinToString(".")}"),
-                    loc = null,
+                    loc = loc,
                     errorType = com.mezze.language.typechecker.ErrorType.ABILITY_ERROR,
                     code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
                 )
