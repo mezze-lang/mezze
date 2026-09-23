@@ -29,17 +29,14 @@ language = "Mezze"
 # fetched grammar lacks — which costs the whole query file, not one pattern.
 [grammars.mezze]
 repository = "https://github.com/mezze-lang/mezze"
-# = origin/feat/tooling, the newest hash that is actually PUSHED.
+# = origin/main. A pin is a coordinate into the REMOTE, so it is only ever
+# correct for a PUSHED commit — bump it as part of pushing a grammar change,
+# never before.
 #
-# STALE as of the fraction-literal commit: the grammar has gained
-# `fraction_literal` since, and the queries shipped beside this file name it, so
-# Zed would build a parser that does not have it and lose the whole query file.
-# It cannot be repaired locally — a pin is a coordinate into the REMOTE, so the
-# grammar has to be pushed first and this set to that hash.
-#
-# `tooling/syntax-generators/check-zed-pin.sh` is the check; it reports this
-# today. Do not verify a pin with `tree-sitter query` — that loads the cached
-# ~/.cache/tree-sitter/lib/mezze.so built from your worktree and will report
-# success against a grammar you are not testing.
-commit = "61febef866727cde65ad343db30a99cab2fb669b"
+# Verify with `tooling/syntax-generators/check-zed-pin.sh`, which archives this
+# exact tree and resolves the shipped queries against its node-types.json. Do
+# NOT verify with `tree-sitter query`: that resolves a language by NAME and
+# loads ~/.cache/tree-sitter/lib/mezze.so, built from whatever you last
+# generated, so it reports success against a grammar it is not testing.
+commit = "e987b953d5edbf75620f341bc0c0ad3548c4a937"
 path = "tooling/tree-sitter-mezze"
