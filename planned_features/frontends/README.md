@@ -151,27 +151,71 @@ obvious that everyone does.
 
 ### Summary
 
-| | macros / AST transforms | per-file syntax | AST as contract | syntax versioning | verifiable migration | in the compiler |
-|---|---|---|---|---|---|---|
-| Racket | ● hygienic + reader macros | ● `#lang` | ● syntax objects | — | — | ● |
-| OCaml / Reason | ● PPX | ● `-pp` / PPX | ● parsetree — **churns**, hence `ppxlib` | — | — | ◐ preprocessor |
-| Rust | ● `macro_rules!` + proc macros | ✗ item scope only | ● TokenStream (tokens, not AST — deliberate) | ● editions, per crate | ✗ trust `rustfix` | ● |
-| Babel / JS | ● plugins are AST transforms | ◐ by extension + config | ● ESTree — needs adapters | ◐ proposal syntax via plugins | ✗ source maps | ✗ **beside** |
-| Haskell | ● Template Haskell, QuasiQuotes | ◐ `LANGUAGE` pragmas | ● TH AST | ◐ pragmas / GHC2021 | ✗ | ● |
-| Svelte / Vue | ● compiler per file type | ● by extension | ● host AST | — | ✗ source maps | ✗ beside |
-| Unison | ✗ | ✗ | ● the codebase **is** the AST | ✗ | ◐ has the property, unused | ● |
-| **Mezze** | **● designed (macros)** | **possible** | **needs a versioned subset** | **possible, per file** | **● free from hashing** | **●** |
+### What each system can do — mechanism
 
-Read the columns, not the rows. The macro column is crowded — everyone has that,
-and Mezze's design already sits there. Per-file syntax is rarer. **Verifiable
-migration is empty except for Mezze**, and it is empty for a structural reason:
-in every other row identity is the text, so no amount of tooling can *prove* a
-syntax change preserved meaning. Only Unison shares the precondition, and it has
+| | macros / AST transforms | per-file syntax | AST as contract | in the compiler |
+|---|---|---|---|---|
+| Racket | ● hygienic + reader macros | ● `#lang` | ● syntax objects | ● |
+| OCaml / Reason | ● PPX | ● `-pp` / PPX | ● parsetree — **churns**, hence `ppxlib` | ◐ preprocessor |
+| Rust | ● `macro_rules!` + proc macros | ✗ item scope only | ● TokenStream (tokens, not AST — deliberate) | ● |
+| Babel / JS | ● plugins are AST transforms | ◐ by extension + config | ● ESTree — needs adapters | ✗ **beside** |
+| Haskell | ● Template Haskell, QuasiQuotes | ◐ `LANGUAGE` pragmas | ● TH AST | ● |
+| Svelte / Vue | ● compiler per file type | ● by extension | ● host AST | ✗ beside |
+| JetBrains MPS | ● language definition | n/a — projectional | ● the AST **is** the artifact | ● |
+| Unison | ✗ | ✗ | ● the codebase **is** the AST | ● |
+| **Mezze** | **● designed (macros)** | **possible** | **needs a versioned subset** | **●** |
+
+### What was actually achieved with it — outcome
+
+| | alternative **human** syntax, shipped | **machine-first** syntax | syntax versioning | verifiable migration |
+|---|---|---|---|---|
+| Racket | ● many `#lang`s, incl. non-parenthetical | ✗ | — | — |
+| OCaml / Reason | **● Reason — the reference case** | ✗ | — | — |
+| Rust | ✗ | ✗ | ● editions, per crate | ✗ trust `rustfix` |
+| Babel / JS | ● JSX, TS syntax, Flow | ✗ (minification is *output*) | ◐ proposal syntax via plugins | ✗ source maps |
+| Haskell | ✗ | ✗ | ◐ pragmas / GHC2021 | ✗ |
+| Svelte / Vue | ● markup-first component files | ✗ | — | ✗ source maps |
+| JetBrains MPS | ● multiple *notations* per concept — text, table, maths | ✗ | ● migrations | ◐ AST-level, so close |
+| Unison | ✗ | ✗ | ✗ | ◐ has the property, unused |
+| **Mezze** | **possible** | **possible — no precedent found** | **possible, per file** | **● free from hashing** |
+
+Read the columns, not the rows.
+
+**Macros are universal.** Everyone has them; Mezze's design already sits there.
+It is not a differentiator and should not be argued as one.
+
+**Alternative human syntax is rarer but proven.** Reason is the existence proof
+and the one the idea should be measured against — it shipped, shared an
+ecosystem, and survived. Racket and MPS show the same thing from the other
+direction, with MPS the most extreme: in a projectional editor, *multiple
+notations of one concept is the normal case*, which is this idea taken to its
+end state. Note what MPS pays for it — no text files, therefore no `git diff`,
+no `grep`, no editing it with anything else. That is the warning attached to
+going too far: text is a projection, but it is a projection with an enormous
+tooling ecosystem attached, and abandoning it costs more than it looks.
+
+**The machine-first column is empty everywhere.** Every alternative syntax ever
+shipped targeted a *human* reader — Reason for OCaml's unfamiliar syntax, JSX
+for designers, MPS for domain experts. JS minification is the closest relative
+and it is the wrong direction: machine-optimised *output*, generated from
+human-authored source, with source maps to get back. Nobody appears to have
+built a syntax whose intended author is a machine and whose human reading is
+delegated to a renderer.
+
+That is the genuinely unoccupied square, and it only became interesting
+recently, so its absence is not evidence that it is a bad idea. But it does mean
+there is no precedent to copy, which raises the value of the cheap experiment
+proposed above: **render a real module in a candidate compact syntax and count
+tokens** before committing to any of the machinery.
+
+**Verifiable migration is empty for a structural reason.** In every row but the
+last two, identity is the text, so no tooling can *prove* a syntax change
+preserved meaning. Only Unison and MPS share the precondition, and Unison has
 not spent it.
 
-The last column is the Babel lesson: several of these work, and the two that
-live outside the compiler pay for it permanently in source maps, double parsing,
-and AST adapters.
+The in-compiler column is the Babel lesson: several of these work, and the two
+that live outside the compiler pay for it permanently in source maps, double
+parsing, and AST adapters.
 
 ## Why this fits Mezze specifically
 
