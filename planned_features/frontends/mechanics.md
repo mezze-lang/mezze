@@ -223,12 +223,56 @@ The parsing logic is written once. The two uses differ in signature — expressi
 scope returns `Expr`, file scope returns declarations — so a package exposes two
 thin entry points over one parser rather than literally one function.
 
-**Unless macros gain declaration scope**, in which case file scope *is* a
-declaration-scope macro applied to the whole file, and it collapses to one
-mechanism. The current design returns `Expr` only
-(`macro sql: {tokens: TokenStream} -> Expr`), so this is a choice still open —
-and worth making deliberately, because it is the difference between two
-mechanisms and one.
+### Macros should return declarations, and derives are why
+
+The current design returns `Expr` only
+(`macro sql: {tokens: TokenStream} -> Expr`). It should also be able to return
+declarations. The unification argument — file scope becomes a declaration macro
+applied to the whole file, collapsing two mechanisms into one — is real but
+secondary. **The primary argument is derives, and the pain already exists in
+this repo.**
+
+`DerivabilityRules.kt`: *"A newtype derives NOTHING but Inspect and Hash."*
+`DerivedImplGenerator.kt`: *"`Nat` is deliberately absent: it is a newtype, so
+it derives nothing."* And `stdlib/std/nat.mz:80` is a hand-written
+`impl Eq for Nat`. Every newtype in every user codebase pays that tax for `Eq`,
+`Ord`, and codecs.
+
+Worse, the boilerplate carries an invariant people get wrong: a hand-written
+`Eq` **requires a matching `Hash`**, or the type is silently broken in hashed
+collections. That is precisely the class of thing a macro gets right every time
+and a human gets right most of the time.
+
+So:
+
+```mezze
+derive_eq!(Nat)        # generates impl Eq + the matching Hash, together
+```
+
+Declaration-scope macros also change *who* can derive. `DerivedImplGenerator` is
+compiler-internal and closed — the set of derivable abilities is whatever the
+compiler was built to know. Declaration macros make derivation **user-extensible**,
+which is the ecosystem point applied to the type system rather than to syntax.
+
+#### What this opens that expression scope did not
+
+Declaration scope touches the type system, so it inherits questions expression
+macros do not:
+
+- **Coherence.** A macro generating `impl Eq for X` must face the same orphan
+  rules as a hand-written one. The check exists and works; macro-generated impls
+  must route through it, not around it.
+- **Specialisation.** Generic impls permanently block specialisation here. A
+  macro that emits a generic impl makes that decision on the user's behalf,
+  possibly without them realising.
+- **Ordering.** A generated impl has to exist before the typechecker resolves
+  uses of it, which constrains when expansion runs relative to checking.
+- **Hygiene at declaration scope.** An expression macro capturing a name is a
+  local bug; a declaration macro introducing a top-level name is a global one.
+
+None of these argue against the feature. They are the reason to design it as
+part of the macro system rather than bolting declaration emission onto the
+frontend mechanism later.
 
 ### Declaration syntax: the `macro` keyword, not metadata
 
