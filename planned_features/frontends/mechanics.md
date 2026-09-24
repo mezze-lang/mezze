@@ -267,11 +267,29 @@ function and is typechecked when its package is compiled — long before it runs
 The *expanded program* is typechecked afterwards. Saying "typechecking happens
 after expansion" is true of the second and not the first.
 
-**Macros here are typed, which is unusual and good.**
-`macro sql: {tokens: TokenStream} -> Expr (SqlQuery <>)` declares not just that
-it returns an expression but the **type of the expression it generates**. That
-is stronger than token substitution and means a macro's contract is checkable at
-its definition, not only at each call site.
+**Macros are untyped in their output, and that is the consistent choice.**
+`../macros/` currently writes `macro sql: {tokens: TokenStream} -> Expr (SqlQuery <>)`
+— a return type that claims to know the type of the code it generates. **That
+syntax is superseded.** A purely syntactic expander cannot honour such a claim:
+it emits AST, and whether the result typechecks as `SqlQuery` is the
+typechecker's business, after expansion.
+
+So the signature is plain:
+
+```mezze
+{tokens: TokenStream} -> Expr        # expression scope
+{tokens: TokenStream} -> [Decl]      # declaration scope
+```
+
+They are preprocessor functions. Nothing is claimed about the generated code's
+type, so nothing can disagree with it — a whole class of "the macro declared X
+and produced Y" errors simply does not exist.
+
+A consequence worth noticing: if a macro is *just* a function of type
+`TokenStream -> Expr`, the `macro` keyword may be unnecessary. The **type is the
+marker** — `name!()` is valid exactly when `name` has that type, and the
+compiler can reject `name!()` for a function that does not. One fewer keyword,
+and the rejection message writes itself.
 
 **The limitation to accept deliberately:** purely syntactic expansion means
 macros cannot be *type-directed* — a macro cannot ask "what type is this
@@ -279,6 +297,20 @@ argument?" and branch on it. Rust chose the same restriction; Scala 3 and
 Template Haskell allow type information and pay for it in phase-ordering
 complexity. Worth stating as a decision rather than discovering it as a
 limitation.
+
+**The price of untyped output: error attribution.** When expanded code fails to
+typecheck, the diagnostic must land somewhere useful. Point it into the macro's
+own source and the user — who wrote `sql!(…)` and has never read that package —
+sees a type error in a file they do not know. Point it at the call site and the
+macro author gets blamed for the caller's argument. This is a well-known sharp
+edge in Rust, and it is the direct cost of *not* checking the macro's output at
+its definition.
+
+The fix is provenance in `Loc`: a span produced by expansion should carry where
+it came *from*, so a diagnostic can say "in this expansion of `sql!` at line 12"
+and show both. That is the same hygiene machinery declaration-scope macros need
+anyway, so it is one job rather than two — but it has to be designed in, because
+retrofitting provenance into spans after tools depend on them is painful.
 
 #### The derive problem: a macro needs the declaration, not just its name
 
