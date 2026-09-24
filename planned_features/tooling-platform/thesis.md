@@ -117,6 +117,55 @@ Small, and skipped by everyone until it hurts:
   needs its own versioned, negotiated contract — do not let it inherit the
   schema version by accident.
 
+## The fourth: produce
+
+`../frontends/` completes the set, and completes a symmetry. Read, evaluate and
+speculate are all ways of *consuming* a codebase. Custom parsers are the
+**input** side: anything that produces Mezze AST is a valid source of Mezze code.
+
+Four verbs, and every tool in these documents is a composition of them:
+
+| verb | mechanism | what it serves |
+|---|---|---|
+| **produce** | anything → AST | macros, DSL templates, alternative syntax, LLM-efficient encoding, syntax versions |
+| **read** | content-addressed store, queryable | doc browser, LLM search, LSP, "which handlers does this need" |
+| **evaluate** | wire protocol, handlers explicit | REPL, REBL, sampler, inline values, search-by-behaviour |
+| **speculate** | explicit checker world | agentic changesets, concurrency, variant exploration |
+
+Plus one shared contract that is not a verb — **the value representation** — which
+every surface renders and which is the piece most likely to be built five times
+because it feels like a detail rather than a primitive.
+
+## Where the reduction stops
+
+Four verbs is a satisfying picture, and satisfying pictures are worth
+distrusting. Three honest limits:
+
+**The verbs are interfaces, not one engine.** The temptation in a design like
+this is to build a single component that does all four. Resist it: the value of
+the framing is that surfaces compose *against* four contracts, not that one
+implementation serves them.
+
+**Interactive editing genuinely does not reduce to batch checking.** An LSP
+serving a typist wants lowest-latency partial answers on one file; an agent
+wants a complete verdict on twelve. Those are different objectives, and the
+prior art is a warning — rust-analyzer and rustc stayed separate implementations
+for real reasons, not from lack of ambition. Speculation should serve the agent
+case without being asked to also become the editor's incremental path.
+
+**Three of the four have a blocking dependency**, and naming them is more useful
+than the diagram:
+
+- *produce* → a versioned AST subset that frontends and macros both target.
+  OCaml's `ppxlib` and Babel's parser adapters are two ecosystems paying this
+  tax already.
+- *speculate* → the world/context refactor. `ModuleTypeChecker.globalCache` and
+  `typeCheckingStack` are keyed by module path and assume one world.
+- *evaluate* → socket transport, an `EVAL` message, and the value contract.
+- *read* → a signature index; the store holds no searchable type today.
+
+Only *read*'s dependency is small. That ordering is the plan.
+
 ## A third primitive, once agents write the code
 
 Read and evaluate are the right two for a human at a keyboard. An agent writes
