@@ -254,6 +254,57 @@ compiler-internal and closed — the set of derivable abilities is whatever the
 compiler was built to know. Declaration macros make derivation **user-extensible**,
 which is the ecosystem point applied to the type system rather than to syntax.
 
+#### Phase order: expansion is syntactic, typechecking comes after
+
+Frontends and macros produce AST. Typechecking runs on the **fully expanded**
+result. That is the right default — the typechecker sees ordinary AST with no
+special cases, and an error in generated code is a type error like any other.
+
+Two clarifications that are easy to conflate:
+
+**There are two typechecking events, not one.** The macro *itself* is a Mezze
+function and is typechecked when its package is compiled — long before it runs.
+The *expanded program* is typechecked afterwards. Saying "typechecking happens
+after expansion" is true of the second and not the first.
+
+**Macros here are typed, which is unusual and good.**
+`macro sql: {tokens: TokenStream} -> Expr (SqlQuery <>)` declares not just that
+it returns an expression but the **type of the expression it generates**. That
+is stronger than token substitution and means a macro's contract is checkable at
+its definition, not only at each call site.
+
+**The limitation to accept deliberately:** purely syntactic expansion means
+macros cannot be *type-directed* — a macro cannot ask "what type is this
+argument?" and branch on it. Rust chose the same restriction; Scala 3 and
+Template Haskell allow type information and pay for it in phase-ordering
+complexity. Worth stating as a decision rather than discovering it as a
+limitation.
+
+#### The derive problem: a macro needs the declaration, not just its name
+
+`derive_eq!(Nat)` cannot work if the macro receives only the token `Nat`. To
+generate `impl Eq for Nat` it must know Nat's **structure** — what it wraps,
+what its fields are. A bare name carries none of that.
+
+This is exactly why Rust's derives are **attributes on the item** rather than
+function-like macros: `#[derive(Eq)] struct Foo { … }` hands the macro the whole
+declaration's tokens. Two ways out, and the choice matters:
+
+1. **Attribute position** — the macro attaches to the declaration and receives
+   it. Purely syntactic, keeps the phase separation clean, and is the
+   well-trodden path.
+2. **Reflection** — the macro queries the environment for `Nat`'s definition.
+   More expressive (a macro could derive for a type declared elsewhere) but it
+   needs a reflection API and, since the environment it queries is the *typed*
+   one, it reopens the phase question the syntactic model just closed.
+
+Note that (2) is the same reflection capability `../correctness/property-testing.md`
+assumes for `ast_gen`. Two features want it; neither has it. Deciding whether
+derives need it is therefore also a decision about whether that API gets built.
+
+The cheap answer is attribute position for derives, reflection later if
+something genuinely needs it.
+
 #### What this opens that expression scope did not
 
 Declaration scope touches the type system, so it inherits questions expression
