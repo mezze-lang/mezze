@@ -253,6 +253,42 @@ compiler-internal and closed — the set of derivable abilities is whatever the
 compiler was built to know. Declaration macros make derivation **user-extensible**,
 which is the ecosystem point applied to the type system rather than to syntax.
 
+#### Quasi-quoting: reuse Mezze's own splice syntax
+
+Nobody will hand-build `ParsedLetDecl(...)`, so a template form is mandatory,
+not a nicety. Both candidate tokens are free — **backtick and `~` each have
+zero uses** in the grammar today (`@` is taken, as the pipe placeholder).
+
+The Lisp convention is `` `(…) `` / `~x` / `~@xs`. But Mezze already has a
+splice-a-value-into-a-template notation, and users already know it:
+
+```mezze
+"total: $(amount) items"        # string interpolation — template + splice
+```
+
+So the consistent spelling reuses it, and reuses the spread operator for the
+many-case:
+
+```mezze
+`(let ~name = $(value))              -- Lisp convention
+`(let $(name) = $(value))            -- Mezze convention  <-- recommended
+`[$(...exprs)]                       -- splice a list, matching `...` spread
+```
+
+| role | Lisp | proposed | why |
+|---|---|---|---|
+| quote a template | `` ` `` | `` ` `` | free, and the one genuinely new token |
+| splice one value | `~x` | `$(x)` | identical to string interpolation |
+| splice many | `~@xs` | `$(...xs)` | identical to the `...` spread operator |
+
+That is one new token and two borrowed meanings, versus three imported
+conventions. It also reads correctly to someone who has never written a macro:
+`$( )` already means "the value of this goes here", and `...` already means
+"spread these in".
+
+`~` stays free either way, so this is reversible if the Lisp spelling turns out
+to matter more to the audience than internal consistency.
+
 #### Phase order: expansion is syntactic, typechecking comes after
 
 Frontends and macros produce AST. Typechecking runs on the **fully expanded**
