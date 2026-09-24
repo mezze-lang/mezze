@@ -1,11 +1,35 @@
-# Swappable syntax frontends
+# Custom parsers — one mechanism, many capabilities
 
 > Status: idea, with the preconditions checked. Not planned work.
+> This is *our* framing of the idea; `../macros/` is a separate, existing design
+> and is cited here as evidence, not amended.
 
-Declare a parser — in `Mezze.toml`, or per-file at the top — and let something
-other than `MezzeParser` produce the AST. A Lisp surface syntax. A
-token-efficient syntax an LLM writes because it is cheap to emit rather than
-because it is pleasant to read. A DSL that compiles to the same nodes.
+**The idea is singular: anything that produces Mezze AST is a valid source of
+Mezze code.** Not "a pluggable parser" — that undersells it. Once the AST is the
+thing the compiler consumes and text is merely one way to arrive at it, a
+surprising number of separate-looking features turn out to be the same feature
+at different scopes.
+
+What one mechanism buys:
+
+| capability | how it falls out |
+|---|---|
+| **DSL templates** — `sql!(…)`, `html!(…)` | a parser over a token stream, returning an expression |
+| **Macros** | the same thing — this is already the macro design |
+| **LLM-efficient syntax** | a parser over a compact encoding, returning declarations |
+| **Alternative surface syntax** — Lisp, other | a parser over a whole file |
+| **Markup-first files** — `.html.mz` component shape | a parser where markup hosts the logic |
+| **Syntax versions in one project** | two parsers for two language versions, same AST |
+| **Verifiable syntax migration** | same AST ⇒ same hash ⇒ provably unchanged meaning |
+
+The last two are not DSL features at all, and are argued below to be the most
+valuable — which is the sign that the mechanism is more fundamental than any of
+its uses.
+
+The concrete forms it takes: declare a parser in `Mezze.toml` or per-file at the
+top; a Lisp surface syntax; a token-efficient syntax an LLM writes because it is
+cheap to emit rather than pleasant to read; a DSL that compiles to the same
+nodes.
 
 ## Why this fits Mezze specifically
 
