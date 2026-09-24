@@ -117,24 +117,54 @@ Small, and skipped by everyone until it hurts:
   needs its own versioned, negotiated contract — do not let it inherit the
   schema version by accident.
 
-## The fourth: produce
+## Four verbs — two in, two out
 
-`../frontends/` completes the set, and completes a symmetry. Read, evaluate and
-speculate are all ways of *consuming* a codebase. Custom parsers are the
-**input** side: anything that produces Mezze AST is a valid source of Mezze code.
-
-Four verbs, and every tool in these documents is a composition of them:
+`../frontends/` completes the set. The write path has two stages and so does the
+read path:
 
 | verb | mechanism | what it serves |
 |---|---|---|
-| **produce** | anything → AST | macros, DSL templates, alternative syntax, LLM-efficient encoding, syntax versions |
+| **author** | anything → AST | macros, DSL templates, alternative syntax, LLM-efficient encoding, syntax versions |
+| **apply** | a *declared* changeset lands coherently | agentic multi-file writes, batching, store consistency, one reload not twelve |
 | **read** | content-addressed store, queryable | doc browser, LLM search, LSP, "which handlers does this need" |
 | **evaluate** | wire protocol, handlers explicit | REPL, REBL, sampler, inline values, search-by-behaviour |
-| **speculate** | explicit checker world | agentic changesets, concurrency, variant exploration |
 
-Plus one shared contract that is not a verb — **the value representation** — which
-every surface renders and which is the piece most likely to be built five times
-because it feels like a detail rather than a primitive.
+Plus one shared contract that is not a verb — **the value representation** —
+which every surface renders and which is the piece most likely to be built five
+times because it feels like a detail rather than a primitive.
+
+### Why `apply`, and not "speculate"
+
+An earlier draft called the agentic primitive *speculation* — check a
+hypothetical codebase, keep or discard. That is a real capability but it is the
+wrong centre of gravity. The thing an agent does constantly is not hypothesise;
+it is **write a lot, fast, across many files**, and the system has to absorb that
+without thrashing.
+
+Batching already exists, and it is tuned for a human:
+
+- `WireRunner` coalesces by draining whatever is already in the watch queue,
+  then calls `invalidateChangedModules` once for the set.
+- The LSP debounces analysis at `DEBOUNCE_MS = 250` (configurable 0–5000).
+
+Both **infer the batch boundary from timing**. That is a proxy for intent, and
+it is the right proxy for a typist, whose intent is unknowable. It is the wrong
+one for an agent, which *knows* exactly where its changeset begins and ends and
+has no way to say so. Twelve files written over two seconds become several
+coalescing rounds — several store writes, several evictions, several reloads,
+several rounds of diagnostics for one logical change.
+
+So the primitive is: **an agent declares a changeset, the system applies it as a
+unit** — parse and typecheck once, write the store once, reload the runtime
+once, return one complete set of diagnostics.
+
+Speculation then falls out as a *mode* of apply — apply without committing —
+rather than needing to be its own concept. Which is the better factoring anyway:
+dry-run is a flag on a write, not a separate subsystem.
+
+`author` is the weakest name of the four and may not survive. What it means is
+unambiguous — *anything that makes AST is a source of Mezze code* — and the
+mechanism matters more than the label.
 
 ## Where the reduction stops
 
@@ -156,11 +186,13 @@ case without being asked to also become the editor's incremental path.
 **Three of the four have a blocking dependency**, and naming them is more useful
 than the diagram:
 
-- *produce* → a versioned AST subset that frontends and macros both target.
+- *author* → a versioned AST subset that frontends and macros both target.
   OCaml's `ppxlib` and Babel's parser adapters are two ecosystems paying this
   tax already.
-- *speculate* → the world/context refactor. `ModuleTypeChecker.globalCache` and
-  `typeCheckingStack` are keyed by module path and assume one world.
+- *apply* → a changeset boundary an agent can declare, and the world/context
+  refactor underneath it: `ModuleTypeChecker.globalCache` and `typeCheckingStack`
+  are keyed by module path and assume one world, which blocks both concurrent
+  apply and dry-run apply.
 - *evaluate* → socket transport, an `EVAL` message, and the value contract.
 - *read* → a signature index; the store holds no searchable type today.
 
