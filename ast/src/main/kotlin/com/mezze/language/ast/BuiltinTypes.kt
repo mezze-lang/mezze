@@ -56,6 +56,8 @@ object BuiltinTypes {
      */
     val coreVariantConstructors = setOf(SOME, NONE, OK, ERR, TRUE, FALSE, CONS, NIL)
 
+    val OPTION_RESULT_CONSTRUCTORS = setOf(SOME, NONE, OK, ERR)
+
     /**
      * Each reserved builtin constructor mapped to the builtin type it belongs to.
      * These constructor names are RESERVED — a user variant may not declare them

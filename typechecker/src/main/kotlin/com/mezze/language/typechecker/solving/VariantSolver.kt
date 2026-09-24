@@ -321,6 +321,68 @@ internal class VariantSolver(
         return ConstraintSolver.ConstraintResult.Success(resultSubst)
     }
 
+    private fun isBuiltinOptionOrResultDecl(decl: ParsedTypeDecl): Boolean {
+        if (decl.name != BuiltinTypes.OPTION && decl.name != BuiltinTypes.RESULT) return false
+        val def = decl.definition as? ParsedVariantDef ?: return false
+        val ctors = def.constructors.map { it.name }.toSet()
+        return ctors == setOf(BuiltinTypes.SOME, BuiltinTypes.NONE) ||
+            ctors == setOf(BuiltinTypes.OK, BuiltinTypes.ERR)
+    }
+
+    private fun solveOptionResultOnVar(
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        typeVar: TypeVar,
+        context: String,
+    ): ConstraintSolver.ConstraintResult {
+        val isOption = constructorName == BuiltinTypes.SOME || constructorName == BuiltinTypes.NONE
+        val valueVar = MezzeType.VarType(TypeVar.fresh())
+        val errorVar = MezzeType.VarType(TypeVar.fresh())
+        val applied: MezzeType =
+            if (isOption) WellKnownTypeApp.option(valueVar)
+            else WellKnownTypeApp.result(valueVar, errorVar)
+        var resultSubst = Substitution.single(typeVar, applied)
+
+        val expectedPayload: MezzeType? = when (constructorName) {
+            BuiltinTypes.SOME -> MezzeType.RecordType(mapOf(BuiltinTypes.VAL_FIELD to valueVar))
+            BuiltinTypes.OK -> MezzeType.RecordType(mapOf(BuiltinTypes.VAL_FIELD to valueVar))
+            BuiltinTypes.ERR -> MezzeType.RecordType(mapOf(BuiltinTypes.ERROR_FIELD to errorVar))
+            else -> null
+        }
+
+        // Whether a constructor CARRIES a payload is part of what it is, and this
+        // path has to say so itself: it answers before the declaration lookup that
+        // used to enforce it. A payload on `None`, or none on `Some`/`Ok`/`Err`, is
+        // the mistake `OpenVariantUnificationTest` pins.
+        if (expectedPayload == null && expectedPayloadType != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' does not take a payload. " +
+                    "Use '$constructorName' instead of '$constructorName { ... }'.",
+                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
+            )
+        }
+        if (expectedPayload != null && expectedPayloadType == null) {
+            val field = if (constructorName == BuiltinTypes.ERR) BuiltinTypes.ERROR_FIELD else BuiltinTypes.VAL_FIELD
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' requires a payload. " +
+                    "Use '$constructorName { $field = ... }' instead of bare '$constructorName'.",
+                code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
+                terminal = true,
+            )
+        }
+
+        if (expectedPayload != null && expectedPayloadType != null) {
+            when (val u = unify(expectedPayloadType, expectedPayload, registry)) {
+                is UnificationResult.Success -> resultSubst = resultSubst.compose(u.substitution)
+                is UnificationResult.Failure -> return ConstraintSolver.ConstraintResult.Failure(
+                    "$constructorName $context payload type mismatch: ${u.message}",
+                    code = u.code,
+                )
+            }
+        }
+        return ConstraintSolver.ConstraintResult.Success(resultSubst)
+    }
+
     private fun solveConstructorOnVar(
         variantType: MezzeType.VarType,
         constructorName: String,
@@ -330,6 +392,19 @@ internal class VariantSolver(
     ): ConstraintSolver.ConstraintResult {
         if (constructorName == BuiltinTypes.TRUE || constructorName == BuiltinTypes.FALSE) {
             return solveBoolConstructorOnVar(constructorName, expectedPayloadType, variantType.variable)
+        }
+
+        if (constructorName in BuiltinTypes.OPTION_RESULT_CONSTRUCTORS) {
+            val declared = lookupConstructorDecl(constructorName, expectedPayloadType) as? CtorLookup.Resolved
+            if (declared != null && !isBuiltinOptionOrResultDecl(declared.typeDecl)) {
+                return if (isPatternContext) {
+                    resolveConstructorAgainstDecl(declared.typeDecl, constructorName, expectedPayloadType, variantType.variable)
+                } else {
+                    solveConstructorFromDecl(declared.typeDecl, constructorName, expectedPayloadType, variantType.variable)
+                }
+            }
+            val ctx = if (isPatternContext) "pattern" else "constructor"
+            return solveOptionResultOnVar(constructorName, expectedPayloadType, variantType.variable, ctx)
         }
 
         if (isPatternContext) {

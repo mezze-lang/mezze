@@ -50,7 +50,19 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
     is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
     is MezzeType.FracType,
     is MezzeType.BytesType,
-    is MezzeType.CharType, is MezzeType.EffectRow -> true
+    is MezzeType.CharType -> true
+    // An EFFECT ROW is never a specialization type ARGUMENT, which is the only
+    // question this function is ever asked. It used to answer `true` — defensible
+    // for the narrower reading "has no variables left", and wrong for the one
+    // every caller makes: both seed gates in `collectSeedsFromExpr` admit a
+    // derived arg iff `isConcrete`, so a row reached `buildSubstitution` and was
+    // substituted into a VALUE slot. It surfaced as `PrintType: cannot render a
+    // value of non-concrete type EffectRow()` from `to_dbg` on the result of a
+    // lazy effect, once Option/Result became applied and there WAS a value slot
+    // for it to land in. Answering false makes mono decline the specialization
+    // and fall back to dict-passing, which is what it already does for every
+    // other arg it cannot specialize on.
+    is MezzeType.EffectRow -> false
 }
 
 /** Receiver-vs-target matching used by impl resolution. Looser than
