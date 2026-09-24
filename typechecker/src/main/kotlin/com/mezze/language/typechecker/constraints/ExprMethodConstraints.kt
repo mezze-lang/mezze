@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.util.receiverTypeName as resolveReceiverTypeName
+import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 
 internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
     if (methodType !is MezzeType.FunctionType) return methodType
@@ -463,15 +464,34 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // error rather than silently vanishing.
     val implFilteredAbilities = if (filteredMatchingAbilities.size > 1) {
         val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
-        val receiverTypeName = concreteReceiver?.let { resolveReceiverTypeName(it) }
-        if (receiverTypeName != null) {
-            // ALLOWED: NARROWS (never finalizes) a >1 ability candidate set by the
-            // impl registry's name-labeled targetTypes, and only when the survivor
-            // set is non-empty — a downstream AbilityRequired constraint then
-            // validates. Not a terminal identity/dispatch decision by name.
+        if (concreteReceiver != null) {
+            // NARROWS (never finalizes) a >1 ability candidate set by matching the
+            // receiver against each impl's target ANNOTATION, and only when the
+            // survivor set is non-empty — a downstream AbilityRequired constraint
+            // then validates.
+            //
+            // This used to test `receiverTypeName in it.targetTypes`, a membership
+            // check over RENDERED names, and it was the SAME bug as the one the
+            // post-solve pass carried: the renderings do not agree. A `Seq 'a`
+            // receiver names itself `Seq` while `impl Sized for Seq 'a` stores its
+            // target as `Seq_a`, so the check failed for EVERY candidate, the
+            // narrowing fell through to the unnarrowed set, and the consumer below
+            // took `.first()` — dispatch by LOAD ORDER between the pure
+            // `Sized.size` and the effectful `SizedMut.size`, on a receiver that
+            // cannot implement the second at all.
+            //
+            // MEASURED: 40 call sites reached this with >1 survivor; 33 of them
+            // were exactly `receiver=Seq, [Sized, SizedMut]` and narrow to `Sized`
+            // once the comparison can see the receiver. The remaining 7 have a
+            // polymorphic receiver and are left alone on purpose — there the
+            // signature's ability constraint is what decides, not this.
             val implMatches = filteredMatchingAbilities.filter { (abilityName, _) ->
-                context.typingContext.getAbilityImpls(abilityName)
-                    .any { receiverTypeName in it.targetTypes }
+                context.typingContext.getAbilityImpls(abilityName).any { impl ->
+                    val target = impl.targetTypeAnnotations?.firstOrNull() ?: return@any false
+                    TypeAnnotationMatcher.typeMatchesAnnotation(
+                        concreteReceiver, target, emptyMap(), impl.typeVars, mutableMapOf()
+                    )
+                }
             }
             if (implMatches.isNotEmpty()) implMatches else filteredMatchingAbilities
         } else {
