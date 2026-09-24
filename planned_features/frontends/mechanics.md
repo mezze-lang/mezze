@@ -253,41 +253,44 @@ compiler-internal and closed — the set of derivable abilities is whatever the
 compiler was built to know. Declaration macros make derivation **user-extensible**,
 which is the ecosystem point applied to the type system rather than to syntax.
 
-#### Quasi-quoting: reuse Mezze's own splice syntax
+#### Quasi-quoting
 
 Nobody will hand-build `ParsedLetDecl(...)`, so a template form is mandatory,
-not a nicety. Both candidate tokens are free — **backtick and `~` each have
-zero uses** in the grammar today (`@` is taken, as the pipe placeholder).
-
-The Lisp convention is `` `(…) `` / `~x` / `~@xs`. But Mezze already has a
-splice-a-value-into-a-template notation, and users already know it:
+not a nicety. Both candidate tokens are free — **backtick and `~` each have zero
+uses** in the grammar today (`@` is taken, as the pipe placeholder).
 
 ```mezze
-"total: $(amount) items"        # string interpolation — template + splice
+`(let ~name = ~value)          # quote a template, splice one value
+`[...~exprs]                   # splice a list
 ```
 
-So the consistent spelling reuses it, and reuses the spread operator for the
-many-case:
+| role | syntax |
+|---|---|
+| quote a template | `` ` `` |
+| splice one value | `~x` |
+| splice a list | `...~xs` |
+
+**Why `~` and not `$( )`.** Reusing string interpolation looks tempting —
+`"total: $(amount)"` is already template-plus-splice, so users know the idea. It
+is wrong here, because inside a quasiquote the two meanings collide:
 
 ```mezze
-`(let ~name = $(value))              -- Lisp convention
-`(let $(name) = $(value))            -- Mezze convention  <-- recommended
-`[$(...exprs)]                       -- splice a list, matching `...` spread
+`(let msg = "total: $(amount)")
 ```
 
-| role | Lisp | proposed | why |
-|---|---|---|---|
-| quote a template | `` ` `` | `` ` `` | free, and the one genuinely new token |
-| splice one value | `~x` | `$(x)` | identical to string interpolation |
-| splice many | `~@xs` | `$(...xs)` | identical to the `...` spread operator |
+Does `$(amount)` splice the macro's `amount` **now**, or generate code
+containing a string interpolation to be evaluated **later**? Both readings are
+reasonable, which is the definition of an ambiguity you cannot escape by
+convention. Generated code containing interpolated strings is not exotic — a
+`sql` or `html` macro produces it constantly.
 
-That is one new token and two borrowed meanings, versus three imported
-conventions. It also reads correctly to someone who has never written a macro:
-`$( )` already means "the value of this goes here", and `...` already means
-"spread these in".
+`~` has no such collision: `$(…)` always means string interpolation in the
+generated code, `~` always means splice at expansion time.
 
-`~` stays free either way, so this is reversible if the Lisp spelling turns out
-to matter more to the audience than internal consistency.
+`...~xs` composes rather than inventing: `...` is already Mezze's spread
+(`[...ys, 1]`, `{...base, a = 1}`), and it applies to `~xs` exactly as it applies
+to `ys`. So there is one genuinely new token (backtick), one new prefix (`~`),
+and the list case falls out of an operator that already exists.
 
 #### Phase order: expansion is syntactic, typechecking comes after
 
