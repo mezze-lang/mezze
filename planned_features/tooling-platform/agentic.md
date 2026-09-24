@@ -77,10 +77,24 @@ checks cannot run today is precisely that they share one world.
 That is the right foundation and does not go far enough for a consumer that is
 a program:
 
-- **Complete, not first-failure.** An agent wants every error in the changeset
-  in one round trip. Today a parse error aborts (`aborting due to N previous
-  parse errors`) before typechecking says anything, so the agent fixes syntax,
-  re-runs, and only then learns about types. Each round trip is a generation.
+- **Complete, not first-failure — already true within a file, and worth
+  keeping.** An earlier draft of this document claimed a parse error aborts
+  before typechecking runs. That is **wrong**, and the compiler already does the
+  right thing: the parser recovers per declaration, and `CheckCommand` reports
+  parse errors *and* typechecks what survived — *"Surviving decls typechecked,
+  but parse errors mean some code is missing."* `aborting due to N previous
+  errors` is a rustc-style footer on a multi-error report, not a first-failure
+  abort.
+
+  Parsing before typechecking is also correct and should stay: you cannot
+  typecheck what you cannot parse, and a phase order that reports
+  "undefined variable" for something that is really a missing brace wastes an
+  agent's round trip worse than an honest syntax error does.
+
+  The open question is **granularity across the codebase**, not within a file:
+  one module failing to parse should not deny an agent the type errors in the
+  other eleven files of its changeset. That is the changeset-level check below,
+  and it is about scope, not phase order.
 - **Ranked by cause, not position.** Fifty errors from one bad signature should
   say so. A human infers this; a program cannot.
 - **Machine-actionable.** Error codes exist and `--explain` has long-form docs —
