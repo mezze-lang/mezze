@@ -120,7 +120,86 @@ Build the host once, with three entry points. The AST subset contract
 (`README.md` §1) is then shared rather than duplicated — which is the main
 practical argument for treating these as one feature instead of two.
 
-## 5. How does it become programmable from Mezze itself?
+## 5. Mezze as the frontend language — and why it is the *best* option
+
+An earlier version of this document staged Mezze-as-frontend last, behind
+comptime, on a bootstrapping argument. **That was wrong**, and the correction
+matters because it changes the recommendation.
+
+### Running a Mezze library as a preprocessor is not comptime
+
+Comptime is staged evaluation *inside* a compilation unit. Loading an
+already-compiled Mezze package and calling a function in it is something else
+entirely: it is just **running a Mezze program**, which the toolchain
+demonstrably does. Compile the frontend package like any dependency, then call
+it while parsing. No new evaluation model.
+
+Bootstrapping is correspondingly mild. The frontend is written in the default
+syntax and compiled before the files that use it — a dependency-ordering
+problem the build system already solves. A frontend cannot be written in the
+syntax it defines, which is normal: Racket's `#lang` implementations are written
+in Racket.
+
+### Native image is not a blocker — and this is the asymmetry that matters
+
+§1 rules out JVM plugins because Native Image closes the world at build time and
+cannot load an unknown class. **Mezze code is not a class — it is data to the
+Truffle interpreter.** `mez dev` already loads and runs Mezze at runtime inside
+the native binary.
+
+So the constraint that kills Java frontends does not touch Mezze frontends. The
+language is the one plugin format the shipped binary can already load.
+
+### Effects *are* the sandbox
+
+A frontend has a type:
+
+```mezze
+{source: Str, file: Str} -> ParseResult
+```
+
+With an **empty effect row**, the typechecker has proven it cannot read the
+filesystem, open a socket, or read the clock. That is the supply-chain answer
+§1 reached for WASM to provide — except it is a *static proof, checkable before
+anything runs*, rather than runtime confinement.
+
+WASM sandboxes by containment. Mezze sandboxes by type. For this particular job
+the second is strictly better: you can reject a frontend at `mez add` time for
+declaring effects it has no business having, and the rule is legible — *a parser
+is a pure function from text to AST, and anything else is suspicious*.
+
+This is the same insight as effects gating tool-initiated execution
+(`../tooling-platform/thesis.md`), applied to plugins.
+
+### What is actually required
+
+1. **An SPI, because of layering.** `:typechecker` does not depend on
+   `:interpreter` (they are siblings over `:ast`/`:store`/`:stdlib`), and it
+   should not start. So define a `FrontendProvider` interface low in the stack,
+   have `ModuleResolver` call it when set, and let `:cli` — which has both —
+   inject an implementation backed by the runtime.
+
+   **There is a precedent to copy exactly:** `ModuleResolver.setStore(store)` is
+   already this pattern — an interface from a lower module, injected by the
+   driver, held in a `@Volatile` static.
+
+2. **A Mezze-side representation of the AST subset.** The contract of
+   `README.md` §1, expressed as Mezze types. This is arguably *better* than a
+   foreign-language contract, because the typechecker then checks frontends:
+   a frontend that builds a malformed AST fails to compile rather than failing
+   at parse time.
+
+3. **A warm runtime.** Interpreter startup per parse is the real cost. The
+   daemon already exists to amortise exactly this.
+
+### Revised recommendation
+
+Mezze first, not last. Subprocess and WASM remain useful for frontends written
+in other languages — and the SPI makes them the same plug — but the language's
+own effect system gives a safety property no external format can, and the native
+binary can load Mezze when it cannot load a JVM class.
+
+## 6. How does comptime still fit?
 
 This is the end state and it is **staged**, because of bootstrapping: a frontend
 written in Mezze must be compiled before it can parse Mezze.
@@ -135,17 +214,13 @@ The pieces are designed but unbuilt:
 - **phases** — the macro docs discuss phase separation, which is what makes
   bootstrapping tractable. Racket's answer.
 
-**Staging:**
+Comptime is still needed for **macros** — expression-scope expansion *within* a
+module being compiled, where there is no separate package to precompile. That is
+a genuine staging dependency and it remains unbuilt.
 
-1. Frontends are external plugins (subprocess or WASM) in any language. No
-   bootstrapping problem, because they are not Mezze.
-2. Macros land with comptime, giving Mezze-in-Mezze at expression scope.
-3. File-scope frontends in Mezze, once phases are settled — a frontend is then
-   just a comptime function of the right type, compiled with the default parser
-   and used for the next phase.
-
-Stage 1 is worth doing without waiting for 2 and 3, and it is also how you learn
-what the AST subset actually needs to contain.
+It is **not** needed for file-scope frontends, per §5. The two were conflated
+because both are "Mezze running at compile time", but only one of them needs
+staged evaluation inside a compilation unit.
 
 ## 6. The operational gaps this exposes
 
