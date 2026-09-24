@@ -98,6 +98,41 @@ directly on the AST.
 All of these confirm the expression-scope row is well-trodden. None of them
 attempt whole-file alternative syntax.
 
+### Babel — the closest thing to "this, as a product"
+
+The JS ecosystem built an entire parallel compiler to get what this document
+describes. `@babel/parser` produces an AST, plugins extend the *syntax* and
+transform the AST, `@babel/generator` prints back out. JSX is a syntax plugin.
+TypeScript's syntax is a plugin. Flow was a plugin. Proposal-stage syntax is
+usable years before standardisation because someone writes a plugin.
+
+**That is the demand, measured.** Every one of those exists because JavaScript
+did not offer a way to extend its own surface, so the community built one beside
+it. "Babel built into Mezze" is the right description of the ambition — and the
+word that matters is *into*.
+
+Because Babel's cost is precisely that it is **beside** rather than inside:
+
+- **A separate build step.** Parse, transform, print, then the real engine parses
+  again. Doing it in the compiler parses once.
+- **Source maps.** Babel must emit a mapping so errors and debuggers point at
+  what you wrote. Mezze does not need this: a frontend emits `Loc` into its own
+  source directly, so a diagnostic is *natively* in the author's coordinates.
+  This is a real simplification, not a small one — sourcemap fidelity is a
+  permanent, never-quite-solved tax in the JS world.
+- **AST compatibility layers, again.** ESTree is a de facto contract that Babel
+  extends, and tools that must agree on it grow adapters —
+  `@typescript-eslint/parser` exists so one toolchain's AST is legible to
+  another. The same shape as OCaml's `ppxlib`. Two independent ecosystems
+  arriving at the same workaround is the clearest possible signal about §1.
+- **Plugin ordering and config.** Transform order is semantically significant
+  and user-configured, which is a class of bug Mezze can avoid by scoping a
+  frontend to a file rather than composing a pipeline over everything.
+
+So Babel validates the ambition and prices the "beside" version. The argument
+for building it in is that parse-once, native locations, and one AST contract
+are each things Babel cannot retrofit.
+
 ### Svelte, Vue, JSX — the markup-first row
 
 `.svelte` and `.vue` files are markup-dominant sources compiled to the host
@@ -116,16 +151,27 @@ obvious that everyone does.
 
 ### Summary
 
-| | per-file syntax | AST as contract | syntax versioning | verifiable migration |
-|---|---|---|---|---|
-| Racket | ● designed in | ● syntax objects | | |
-| OCaml/Reason | ● via `-pp`/PPX | ● and it churns | | |
-| Rust | | ● TokenStream | ● editions (per crate) | ✗ trust `rustfix` |
-| Haskell | ◐ pragmas | ● TH | | |
-| Unison | | ● codebase is AST | | ◐ property unused |
-| **Mezze** | **possible** | **needs a subset** | **possible, per file** | **● free from hashing** |
+| | macros / AST transforms | per-file syntax | AST as contract | syntax versioning | verifiable migration | in the compiler |
+|---|---|---|---|---|---|---|
+| Racket | ● hygienic + reader macros | ● `#lang` | ● syntax objects | — | — | ● |
+| OCaml / Reason | ● PPX | ● `-pp` / PPX | ● parsetree — **churns**, hence `ppxlib` | — | — | ◐ preprocessor |
+| Rust | ● `macro_rules!` + proc macros | ✗ item scope only | ● TokenStream (tokens, not AST — deliberate) | ● editions, per crate | ✗ trust `rustfix` | ● |
+| Babel / JS | ● plugins are AST transforms | ◐ by extension + config | ● ESTree — needs adapters | ◐ proposal syntax via plugins | ✗ source maps | ✗ **beside** |
+| Haskell | ● Template Haskell, QuasiQuotes | ◐ `LANGUAGE` pragmas | ● TH AST | ◐ pragmas / GHC2021 | ✗ | ● |
+| Svelte / Vue | ● compiler per file type | ● by extension | ● host AST | — | ✗ source maps | ✗ beside |
+| Unison | ✗ | ✗ | ● the codebase **is** the AST | ✗ | ◐ has the property, unused | ● |
+| **Mezze** | **● designed (macros)** | **possible** | **needs a versioned subset** | **possible, per file** | **● free from hashing** | **●** |
 
-The right-hand column is the one nobody has.
+Read the columns, not the rows. The macro column is crowded — everyone has that,
+and Mezze's design already sits there. Per-file syntax is rarer. **Verifiable
+migration is empty except for Mezze**, and it is empty for a structural reason:
+in every other row identity is the text, so no amount of tooling can *prove* a
+syntax change preserved meaning. Only Unison shares the precondition, and it has
+not spent it.
+
+The last column is the Babel lesson: several of these work, and the two that
+live outside the compiler pay for it permanently in source maps, double parsing,
+and AST adapters.
 
 ## Why this fits Mezze specifically
 
