@@ -135,4 +135,15 @@ still takes attention.
 
 ## Implementation order
 
-See `implementation-plan.md`.
+See `implementation-plan.md` for sample specifically.
+
+But read `../tooling-platform/README.md` first. `mez sample` shares three
+pieces with the REPL, a REBL-style browser, the LSP panel and a doc browser —
+an evaluation channel, a value representation, and a query index — and building
+sample alone means building private versions of all three, then rewriting them.
+Stage 1 there (refuse correctly) is the exception: it is pure typechecker work
+and depends on none of it.
+
+`property-testing.md` in this directory needs a warning it does not carry: it is
+built on `ast_gen` using comptime + reflection macros, and comptime does not
+exist outside `planned_features/macros/`. It cannot be built yet.
