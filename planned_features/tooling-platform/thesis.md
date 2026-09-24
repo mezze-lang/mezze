@@ -117,6 +117,19 @@ Small, and skipped by everyone until it hurts:
   needs its own versioned, negotiated contract — do not let it inherit the
   schema version by accident.
 
+## A third primitive, once agents write the code
+
+Read and evaluate are the right two for a human at a keyboard. An agent writes
+hundreds of lines across many files at once, speculatively, and may discard the
+lot — which needs a third: **speculate**. Check a codebase that does not exist
+yet, get every diagnostic, keep or discard.
+
+Content addressing should make that nearly free. Two process-global caches
+(`ModuleTypeChecker.globalCache`, `typeCheckingStack`) make it impossible today,
+because both are keyed by module path and assume one world. See `agentic.md` —
+that refactor is the least glamorous item in these documents and probably the
+highest-leverage one.
+
 ## The one discipline that matters
 
 **Do not publish the contract until the internal consumers have shaped it.**
