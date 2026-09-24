@@ -162,9 +162,8 @@ family, different scope — so one plugin host serves both:
 
 | scope | signature | invoked by |
 |---|---|---|
-| expression | `TokenStream -> Expr` | `sql!(…)` |
-| declaration | `TokenStream -> Decl` | a directive on one decl |
-| file | `Source -> ParsedModule` | extension or `#lang` |
+| declaration | `{tokens: TokenStream} -> [Decl]` | `name!(…)` |
+| file | `{tokens: TokenStream} -> [Decl]` | a glob in `Mezze.toml` |
 
 Build the host once, with three entry points. The AST subset contract
 (`README.md` §1) is then shared rather than duplicated — which is the main
@@ -274,14 +273,24 @@ syntax is superseded.** A purely syntactic expander cannot honour such a claim:
 it emits AST, and whether the result typechecks as `SqlQuery` is the
 typechecker's business, after expansion.
 
-So the signature is plain:
+So there is **one signature**:
 
 ```mezze
-{tokens: TokenStream} -> Expr        # expression scope
-{tokens: TokenStream} -> [Decl]      # declaration scope
+{tokens: TokenStream} -> [Decl]
 ```
 
-They are preprocessor functions. Nothing is claimed about the generated code's
+That is the whole contract. A file preprocessor gets the file's tokens and
+returns its declarations; a derive gets the target declaration's tokens and
+returns the generated impls. Same function type, same host, no variants.
+
+They are preprocessor functions.
+
+**Open question this forecloses:** expression-position use — `let page =
+html!(<div>…</div>)` — does not fit `-> [Decl]`. Either macros are
+declaration-only (simplest, and covers file preprocessing and derives, which are
+the motivating cases), or expression position needs a lowering rule, e.g. the
+expansion introduces a declaration and the call site refers to it. Worth
+deciding explicitly rather than letting the signature decide by omission. Nothing is claimed about the generated code's
 type, so nothing can disagree with it — a whole class of "the macro declared X
 and produced Y" errors simply does not exist.
 
