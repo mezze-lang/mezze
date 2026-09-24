@@ -83,8 +83,15 @@ This does **not** affect sample's `--cover` and `--boundaries` modes, which is
 worth stating plainly because it is easy to conclude the opposite: those read
 the *source* AST (`ParsedModule` / `TypedModule`) to find comparisons, guards
 and match arms. Only the pipeline view — capturing intermediate values inside a
-`.`/`|>` chain at runtime — needs the instrumentation layer, and that is the
-part with a real BDSL question mark over it.
+`.`/`|>` chain at runtime — needs the instrumentation layer.
+
+And that is **less blocked than it first appears**. `@GenerateBytecode` sets
+`enableTagInstrumentation = true`, annotated *"LSP / debugger"*, so BDSL
+instrumentation is on. What is missing is granularity: only `StatementTag` is
+emitted, under `if (debug)`, and there is no `ExpressionTag`. A chain is one
+statement containing many intermediate expressions, so the work is
+expression-level tag emission, gated to cost nothing in production — real work,
+but not a feasibility question. See `../tooling-platform/readiness.md`.
 
 ## 3. What is genuinely new is smaller than it looks
 

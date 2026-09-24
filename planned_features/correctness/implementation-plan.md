@@ -155,12 +155,16 @@ additional lens rather than new infrastructure.
 
 ## Deferred: pipeline view
 
-Inline intermediate values for `.`/`|>` chains needs runtime instrumentation,
-and that is the one part with a real question over it: the interpreter moved to
-the Truffle Bytecode DSL, so the per-AST-node tagging
-`instrumentation.md` assumes is gone. Existing instrumentation is thin
-(`MezzeDebugScope`, `MezzeAllocationsInstrument`, `FrameSlotResolver`). Do not
-promise this until someone has established how BDSL exposes intermediate values.
+Inline intermediate values for `.`/`|>` chains needs runtime instrumentation.
+The per-AST-node tagging `instrumentation.md` assumes is gone — the interpreter
+moved to the Truffle Bytecode DSL — but the capability is not:
+`@GenerateBytecode(enableTagInstrumentation = true)` is set and annotated
+*"LSP / debugger"*.
+
+The gap is granularity. Only `StatementTag` is emitted, and only under
+`if (debug)`; there is no `ExpressionTag`. A chain is a single statement with
+many intermediate expressions, so this needs expression-level tags, gated so
+they cost nothing in production. Deferred for effort, not for feasibility.
 
 ## Order of value
 
