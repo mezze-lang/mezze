@@ -111,7 +111,14 @@ class SQLiteMezzeStore private constructor(
         // 10: MezzeType.SuspendType removed (effect-model migration S3) — the
         //    @Serializable variant is gone, changing the serialized type shape; drop
         //    stale blobs that may still encode a SuspendType.
-        const val SCHEMA_VERSION = 10
+        // 11: two CONTENT-HASH changes, so every derived hash moves and stale rows
+        //    would be keyed on the old ones. (a) Bool collapsed to the builtin
+        //    variant, so `MezzeType.BoolType`'s tag 0x04 is gone and any type
+        //    mentioning Bool hashes through the variant arm. (b) a function type
+        //    now hashes its EFFECTS and ABILITY CONSTRAINTS, which it did not
+        //    before — `{x: Int} -> Int` and `{x: Int} -> Int <IO>` used to share
+        //    one hash, as did `{x: 'a} -> 'a` and `{x: 'a} -> 'a with Show 'a`.
+        const val SCHEMA_VERSION = 11
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of

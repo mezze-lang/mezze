@@ -87,6 +87,35 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.FunctionType -> {
             b.append(byteArrayOf(HashTags.FUNCTION_TYPE))
             appendTypeInScope(b, type.paramType); appendTypeInScope(b, type.returnType)
+            // An arrow's EFFECTS and its ABILITY CONSTRAINTS are part of the type,
+            // and neither used to be hashed. So `{x: Int} -> Int` and
+            // `{x: Int} -> Int <IO>` had the SAME content hash, as did
+            // `{x: 'a} -> 'a` and `{x: 'a} -> 'a with Show 'a` — two distinct types
+            // sharing one identity, which is what #264 added the record-openness
+            // marker to prevent and the same reasoning applies here. A content hash
+            // keys declaration identity, dispatch and the precompile cache, so a
+            // collision there is not cosmetic.
+            //
+            // Both are hashed in a CANONICAL order rather than their stored order,
+            // because neither is stored in one: a set and a list whose order is
+            // whatever inference produced. Hashing them as they come would make the
+            // hash depend on solve order, which is the opposite of what it is for.
+            appendEffectRowContents(b, type.effects)
+            b.appendInt(type.abilityConstraints.size)
+            val orderedConstraints = type.abilityConstraints.sortedWith(
+                compareBy({ it.abilityHash?.hex ?: "" }, { it.abilityName })
+            )
+            for (c in orderedConstraints) {
+                // The ability's HASH when it has one, its name only as the
+                // last resort — a name is not an identity.
+                b.append(c.abilityHash?.hex ?: c.abilityName)
+                b.appendInt(c.typeArgs.size)
+                for (arg in c.typeArgs) appendTypeInScope(b, arg)
+                b.appendInt(c.associatedTypeBindings.size)
+                for (name in c.associatedTypeBindings.keys.sorted()) {
+                    b.append(name); appendTypeInScope(b, c.associatedTypeBindings[name]!!)
+                }
+            }
         }
         is MezzeType.RecordType -> {
             b.append(byteArrayOf(HashTags.RECORD_TYPE))
@@ -124,8 +153,39 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         }
         is MezzeType.EffectRow -> {
             b.append(byteArrayOf(HashTags.PERFORM, 0x02))
-            b.appendInt(type.effects.size)
-            for (e in type.effects.toSortedSet()) b.append(e)
+            appendEffectRowContents(b, type)
+        }
+    }
+}
+
+/**
+ * An effect row's contents, in a canonical order, for both the places a row can
+ * appear: on an ARROW (the ordinary case — effects ride on arrows) and as a
+ * standalone [MezzeType.EffectRow].
+ *
+ * A null row is hashed as an explicit absence rather than skipped, so a pure
+ * arrow cannot hash the same as one carrying an empty row.
+ *
+ * The associated types are hashed too: `<Exception having 'error = Str>` and
+ * `<Exception having 'error = Int>` are different types, and the row's NAME set
+ * alone cannot tell them apart. Openness is a marker for the same reason a
+ * record's is — an open row admits effects a closed one does not.
+ */
+private fun appendEffectRowContents(b: MezzeHashBuilder, row: MezzeType.EffectRow?) {
+    if (row == null) {
+        b.appendBoolean(false)
+        return
+    }
+    b.appendBoolean(true)
+    b.appendBoolean(row.rowVar != null)
+    b.appendInt(row.effects.size)
+    for (e in row.effects.toSortedSet()) b.append(e)
+    b.appendInt(row.effectInstances.size)
+    for (instance in row.effectInstances.sortedBy { it.name }) {
+        b.append(instance.name)
+        b.appendInt(instance.associatedTypes.size)
+        for (name in instance.associatedTypes.keys.sorted()) {
+            b.append(name); appendTypeInScope(b, instance.associatedTypes[name]!!)
         }
     }
 }
