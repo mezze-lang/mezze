@@ -103,6 +103,35 @@ frontend cannot change under you. Declaring in `Mezze.toml` rather than per-file
 is the safer half of the tension noted in `README.md` §3 — a pulled file cannot
 change how it is parsed.
 
+## 2b. Binding file patterns to preprocessors
+
+```toml
+[dependencies]
+mezze-sql-syntax  = "0.1"
+mezze-lisp-syntax = "0.1"
+
+[frontends]
+"*.sql.mz"  = "mezze-sql-syntax::parse"     # glob -> a Mezze function
+"*.html.mz" = "mezze-html-syntax::parse"
+lisp        = "mezze-lisp-syntax::parse"    # named, for `#lang lisp`
+```
+
+The right-hand side is a **qualified Mezze function reference**, not an opaque
+plugin id. That is worth insisting on: it removes a registry indirection, it is
+resolved by the module system that already exists, and it is checkable — the
+typechecker can verify the named function has the frontend type before the build
+proceeds, rather than discovering at parse time that it does not.
+
+Frontends being ordinary dependencies means hash pinning, version resolution and
+`mez add` come free. Two consequences worth stating:
+
+- A frontend package must be compiled **before** any file it parses. That is
+  dependency ordering, which the build already does — but it forbids a frontend
+  parsing files in its own package, which should be an explicit error rather
+  than a confusing cycle.
+- `resolveModuleFile` must learn the extra suffixes; today `a::b` maps to
+  `src/a/b.mz` only.
+
 ## 3. How does a file say which syntax it is?
 
 Two mechanisms, and they are not equivalent.
@@ -145,6 +174,36 @@ family, different scope — so one plugin host serves both:
 Build the host once, with three entry points. The AST subset contract
 (`README.md` §1) is then shared rather than duplicated — which is the main
 practical argument for treating these as one feature instead of two.
+
+All three are **Mezze functions over Mezze AST types**, so "the host" is: resolve
+a function reference, call it through the runtime, decode the CBOR it returns.
+The scopes differ only in what is passed in and what shape comes back.
+
+### Per-file macros, named the same way
+
+The same function-reference mechanism gives per-file macro sets without a new
+concept:
+
+```toml
+["src/queries/**"]
+macros = ["mezze-sql-syntax::sql", "mezze-sql-syntax::migration"]
+```
+
+or in the file itself, next to `#lang`:
+
+```mezze
+#use-macros mezze_sql::sql
+```
+
+A macro is then just a Mezze function the file has asked to be in scope at
+expansion time — which is the same sentence as "a frontend is a Mezze function
+the file has asked to parse it", one scope down.
+
+**The one asymmetry:** a frontend runs *before* parsing, so it cannot itself be
+written in the syntax it defines. A macro runs *during* expansion of an
+already-parsed file, so it can be written in any syntax, including one produced
+by a frontend. Worth knowing before someone tries to bootstrap a syntax out of
+its own macros.
 
 ## 5. Mezze as the frontend language — and why it is the *best* option
 
@@ -246,6 +305,87 @@ a genuine staging dependency and it remains unbuilt.
 It is **not** needed for file-scope frontends, per §5. The two were conflated
 because both are "Mezze running at compile time", but only one of them needs
 staged evaluation inside a compilation unit.
+
+## 5b. Really good error messages
+
+The risk is concrete: frontends are third-party, error quality is the first
+thing third parties skimp on, and a syntax whose errors are bad is worse than no
+syntax. Four things, in order of leverage.
+
+### 1. Make good errors the only expressible result
+
+The return type decides the ceiling. `Result<ParsedModule, Error>` caps quality
+at one error and loses recovery. The contract should be:
+
+```mezze
+type ParseResult = {
+  decls:  [Decl],          # what SURVIVED — possibly partial
+  errors: [ParseError],    # possibly many
+}
+
+type ParseError = {
+  code:    Str,            # frontend-namespaced, e.g. "LISP0003"
+  loc:     Loc,            # into the frontend's OWN source
+  message: Str,
+  hints:   [Str],
+  notes:   [{ loc: Loc, message: Str }],   # secondary spans
+}
+```
+
+Partial declarations **plus** errors, because Mezze's own parser recovers per
+declaration — one bad decl does not kill the file, and survivors still
+typecheck. A frontend returning `Result` cannot express that, so it would lose
+graceful degradation exactly where it matters most: the LSP, where half-typed
+code is the normal state, and agent changesets, where one bad decl would
+otherwise blind you to the other eleven files.
+
+Secondary spans matter more than they look — "expected `)` to close **this**"
+with a pointer at the opening paren is the difference between a usable and a
+useless parenthesis error.
+
+### 2. Validate `Loc` at the boundary
+
+A frontend emitting nonsense spans produces diagnostics pointing nowhere, and
+the failure is silent — the message looks fine, the caret is in the wrong place.
+Check at the boundary that every `Loc` is within the source, that
+`start <= end`, and that the file matches. Reject the frontend's output
+otherwise, with an error naming the frontend rather than the user's code. The
+user should never debug a frontend's bug as if it were theirs.
+
+### 3. Reuse the quality ratchet that already exists
+
+`parser/…/ParserErrorQualityTest.kt` is the mechanism, and it is better than
+most projects have. Each corpus entry asserts: it rejects, the raw message is
+non-blank, the location is valid, the message is **not** a generic ("No
+alternatives matched"), and — the part that matters — `mustMention`, a substring
+the *correct* message must contain, so a **misdiagnosis fails the test**. Plus a
+ratchet toward code coverage: an `UNCATEGORIZED` entry must stay uncategorised
+until someone assigns a code and hint, at which point the entry is updated.
+
+A frontend package should ship the same corpus shape and be held to the same
+bar. `mez` can run it — a frontend whose errors are generic or misdiagnosing
+fails its own test suite, visibly, before anyone depends on it.
+
+This is the single highest-leverage item here, because it makes quality
+*measurable* rather than aspirational, and the harness is already written.
+
+### 4. The rule for *downstream* diagnostics
+
+Type errors are produced by the typechecker, not the frontend, and located by
+the `Loc`s the frontend emitted. So locations are right for free. The trap is
+vocabulary:
+
+- **Diagnostics that quote the user's source are fine.** The rustc-style
+  `--> file:line:col` block shows the author's actual text, whatever syntax it
+  is in.
+- **Diagnostics that *generate* syntax are wrong.** "try writing `{ x = 1 }`"
+  is nonsense in a Lisp file. Anything that constructs code — code actions,
+  suggested fixes, `mez fmt` output — must go through the **frontend's printer**.
+
+Which is the fourth independent argument that a frontend must be a parser *and*
+a printer. `mez fmt` needed it, round-tripping needed it, the multi-syntax
+rendering story needed it, and now suggested fixes need it. If the contract has
+only one direction, all four break quietly.
 
 ## 6. The operational gaps this exposes
 
