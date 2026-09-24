@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.*
@@ -105,7 +106,7 @@ class PreludeAlwaysOnTest {
     @Test
     fun `Int is_even returns concrete type`() {
         val r = checkWithPrelude("let b = 4.is_even {}")
-        assertEquals(MezzeType.BoolType, assertConcrete(r, "b"))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, assertConcrete(r, "b"))
     }
 
     @Test
@@ -129,7 +130,7 @@ class PreludeAlwaysOnTest {
     @Test
     fun `Seq is_empty returns concrete type`() {
         val r = checkWithPrelude("let b = [1, 2, 3].is_empty {}")
-        assertEquals(MezzeType.BoolType, assertConcrete(r, "b"))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, assertConcrete(r, "b"))
     }
 
     @Test

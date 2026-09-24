@@ -44,7 +44,7 @@ object TypeNames {
             // MezzeType variant fails here rather than silently rendering as a
             // Kotlin class name.
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.BytesType,
+            is MezzeType.FracType, is MezzeType.BytesType,
             is MezzeType.CharType -> PrimitiveTypes.toName(type) ?: "?"
         }
     }
@@ -63,7 +63,7 @@ object TypeNames {
         is MezzeType.VariantType -> type.identity.displayNameOrNull()
         is MezzeType.RecordType -> type.identity.displayNameOrNull()
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.BytesType,
+        is MezzeType.FracType, is MezzeType.BytesType,
         is MezzeType.CharType -> PrimitiveTypes.toName(type)
         is MezzeType.FunctionType, is MezzeType.VarType, is MezzeType.EffectRow -> null
     }

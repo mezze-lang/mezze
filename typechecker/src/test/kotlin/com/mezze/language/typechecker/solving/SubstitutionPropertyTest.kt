@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.solving
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.solving.Substitution
@@ -18,7 +19,7 @@ class SubstitutionPropertyTest {
     private fun randomLeafType(seed: Int): MezzeType = when (seed % 5) {
         0 -> MezzeType.IntType
         1 -> MezzeType.StringType
-        2 -> MezzeType.BoolType
+        2 -> PrimitiveTypes.BOOL_TYPE
         3 -> MezzeType.FloatType
         else -> MezzeType.IntType
     }
@@ -73,7 +74,7 @@ class SubstitutionPropertyTest {
 
         assertSame(MezzeType.IntType, sub.apply(MezzeType.IntType))
         assertSame(MezzeType.StringType, sub.apply(MezzeType.StringType))
-        assertSame(MezzeType.BoolType, sub.apply(MezzeType.BoolType))
+        assertSame(PrimitiveTypes.BOOL_TYPE, sub.apply(PrimitiveTypes.BOOL_TYPE))
     }
 
     @RepeatedTest(10)

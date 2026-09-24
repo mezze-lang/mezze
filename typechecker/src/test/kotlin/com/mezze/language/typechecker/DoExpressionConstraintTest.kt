@@ -158,7 +158,7 @@ class DoExpressionConstraintTest {
         // Parameters should have types (could be concrete or type variables)
         assertNotNull(paramType.fields["x"], "x should have a type")
         assertNotNull(paramType.fields["y"], "y should have a type")
-        // For now, accept that comparison operations may not return BoolType correctly
+        // For now, accept that comparison operations may not return PrimitiveTypes.BOOL_TYPE correctly
         assertNotNull(compareType.returnType)
     }
 
@@ -299,13 +299,11 @@ class DoExpressionConstraintTest {
         val testType = getVariableType(typedProgram, "test") as MezzeType.FunctionType
         val returnType = testType.returnType as MezzeType.RecordType
 
-        // The field 'val' should have Bool type (either BoolType or VariantType with True/False), not a type variable
+        // The field 'val' should have Bool type, not a type variable. Bool has ONE
+        // representation, so this is an equality and not a disjunction over the
+        // spellings it used to have.
         val valType = returnType.fields["val"]
-        assertTrue(
-            valType is MezzeType.BoolType ||
-            (valType is MezzeType.VariantType && valType.constructors.keys == setOf("True", "False")),
-            "Expected Bool type but got: $valType"
-        )
+        assertEquals(PrimitiveTypes.BOOL_TYPE, valType, "Expected Bool type")
     }
 
     @Test
@@ -331,7 +329,7 @@ class DoExpressionConstraintTest {
         assertNotNull(returnType.fields["diff"])
 
         // isPositive should be Bool (variant)
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, returnType.fields["isPositive"])
 
         // doubleSum should have same type as sum

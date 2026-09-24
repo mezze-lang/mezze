@@ -52,8 +52,8 @@ class SimpleComparisonTest {
         val t = typeOf("let same = 1 == 1\nsame", "same")
         assertNotNull(t, "`same` has no inferred type")
         assertTrue(
-            t is MezzeType.BoolType || PrimitiveTypes.isBoolVariant(t!!),
-            "a comparison must yield Bool in either of its representations, got $t"
+            t == PrimitiveTypes.BOOL_TYPE,
+            "a comparison must yield Bool, got $t"
         )
     }
 
@@ -61,7 +61,7 @@ class SimpleComparisonTest {
     fun `ordering comparisons also yield a Bool`() {
         val t = typeOf("let less = 1 < 2\nless", "less")
         assertTrue(
-            t is MezzeType.BoolType || PrimitiveTypes.isBoolVariant(t!!),
+            t == PrimitiveTypes.BOOL_TYPE,
             "`<` must yield Bool, got $t"
         )
     }

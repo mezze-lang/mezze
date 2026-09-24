@@ -781,7 +781,7 @@ class PatternBugProbeTest {
         // want to NOT see is a runtime crash.
         try {
             val result = typeCheck(code)
-            assertEquals(MezzeType.BoolType, result.getVariableType("r"))
+            assertEquals(PrimitiveTypes.BOOL_TYPE, result.getVariableType("r"))
         } catch (e: TypeCheckError) {
             val msg = e.message ?: ""
             assertTrue(

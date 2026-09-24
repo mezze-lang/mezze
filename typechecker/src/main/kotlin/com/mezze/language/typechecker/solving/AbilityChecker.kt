@@ -894,7 +894,7 @@ class AbilityChecker internal constructor(
 
         return when (dataType) {
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.CharType,
+            is MezzeType.FracType, is MezzeType.CharType,
             is MezzeType.BytesType -> require("${prefix}Scalar")
 
             is MezzeType.RecordType -> require("${prefix}Record") ?: run {
@@ -1008,7 +1008,6 @@ class AbilityChecker internal constructor(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BoolType,
             is MezzeType.FracType,
             is MezzeType.CharType,
             is MezzeType.BytesType,

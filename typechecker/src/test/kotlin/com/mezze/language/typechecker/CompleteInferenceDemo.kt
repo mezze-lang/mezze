@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
+import kotlin.test.assertEquals
 
 /**
  * Demonstrates complete type inference without explicit annotations
@@ -146,11 +147,10 @@ class CompleteInferenceDemo {
         assertTrue(isWorkingType is MezzeType.FunctionType)
         
         val functionType = isWorkingType as MezzeType.FunctionType
-        // Bool can be BoolType or VariantType with True/False constructors
+        // Bool has ONE representation, so this is an equality and not a disjunction
+        // over the spellings it used to have.
         val returnType = functionType.returnType
-        assertTrue(returnType is MezzeType.BoolType ||
-                   (returnType is MezzeType.VariantType && returnType.constructors.keys == setOf("True", "False")),
-                   "Should return Boolean")
+        assertEquals(PrimitiveTypes.BOOL_TYPE, returnType, "Should return Bool")
     }
 
     @Test

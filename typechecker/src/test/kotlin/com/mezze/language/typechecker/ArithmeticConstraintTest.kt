@@ -85,7 +85,7 @@ class ArithmeticConstraintTest {
             val functionType = compareType as MezzeType.FunctionType
             
             // Return type should be Boolean for comparison
-            val boolType = MezzeType.BoolType
+            val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, functionType.returnType)
             
         } catch (e: Exception) {

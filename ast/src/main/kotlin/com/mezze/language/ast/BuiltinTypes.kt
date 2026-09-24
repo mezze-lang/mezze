@@ -302,12 +302,8 @@ object BuiltinTypes {
     /** Delegates to PrimitiveTypes.isBoolVariant -- single canonical location. */
     fun isBoolVariant(type: MezzeType): Boolean = PrimitiveTypes.isBoolVariant(type)
 
-    fun getBoolType(): MezzeType.VariantType {
-        return MezzeType.VariantType(
-            constructors = mapOf(TRUE to null, FALSE to null),
-            rowVar = null
-        )
-    }
+    /** Delegates to [PrimitiveTypes.BOOL_TYPE] -- single canonical location. */
+    fun getBoolType(): MezzeType.VariantType = PrimitiveTypes.BOOL_TYPE
 
     /**
      * `Option value` as its variant shape — the sibling of [listVariantShape], and

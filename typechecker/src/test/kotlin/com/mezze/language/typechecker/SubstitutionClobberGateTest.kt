@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.solving.SubstitutionClobbers
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.AfterEach
@@ -58,7 +59,7 @@ class SubstitutionClobberGateTest {
      * WHERE THE COLLISIONS COME FROM, measured on the isolated run (307 pairs over
      * 250 variables), because the shape decides which work would reduce it:
      *
-     *   117  `BoolType@…` vs `Bool([True, False])`        two representations
+     *   117  `PrimitiveTypes.BOOL_TYPE@…` vs `Bool([True, False])`        two representations
      *    65  `VarType('s63)` vs `VarType('z62)`           one var, two vars
      *    49  a var bound to a var and to a concrete type  mixed / ordering
      *    43  identical rendering, different objects       two representations
@@ -66,7 +67,7 @@ class SubstitutionClobberGateTest {
      *     9  records differing only in their inner vars   one var, two vars
      *
      * So ~184 of the 250 are ONE TYPE IN TWO REPRESENTATIONS — `Option`/`Result`
-     * as `TypeApplication` vs `VariantType`, and `Bool` as `BoolType` vs its
+     * as `TypeApplication` vs `VariantType`, and `Bool` as `PrimitiveTypes.BOOL_TYPE` vs its
      * variant spelling. Those close by unifying the representations, not by
      * anything local. See [[project_result_option_two_representations]].
      *

@@ -232,10 +232,10 @@ class NewMatchSyntaxTest {
 
         assertNotNull(canVoteType)
         assertTrue(canVoteType is MezzeType.FunctionType)
-        // Bool can be BoolType or VariantType with True/False constructors
+        // Bool has ONE representation, so this is an equality and not a disjunction
+        // over the spellings it used to have.
         val returnType = canVoteType.returnType
-        assertTrue(returnType is MezzeType.BoolType ||
-                   (returnType is MezzeType.VariantType && returnType.constructors.keys == setOf("True", "False")))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, returnType)
     }
 
     @Test
@@ -254,10 +254,10 @@ class NewMatchSyntaxTest {
 
         assertNotNull(isExtremeType)
         assertTrue(isExtremeType is MezzeType.FunctionType)
-        // Bool can be BoolType or VariantType with True/False constructors
+        // Bool has ONE representation, so this is an equality and not a disjunction
+        // over the spellings it used to have.
         val returnType = isExtremeType.returnType
-        assertTrue(returnType is MezzeType.BoolType ||
-                   (returnType is MezzeType.VariantType && returnType.constructors.keys == setOf("True", "False")))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, returnType)
     }
 
     @Test
@@ -315,9 +315,9 @@ class NewMatchSyntaxTest {
 
         assertNotNull(canAccessType)
         assertTrue(canAccessType is MezzeType.FunctionType)
-        // Bool can be BoolType or VariantType with True/False constructors
+        // Bool has ONE representation, so this is an equality and not a disjunction
+        // over the spellings it used to have.
         val returnType = canAccessType.returnType
-        assertTrue(returnType is MezzeType.BoolType ||
-                   (returnType is MezzeType.VariantType && returnType.constructors.keys == setOf("True", "False")))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, returnType)
     }
 }

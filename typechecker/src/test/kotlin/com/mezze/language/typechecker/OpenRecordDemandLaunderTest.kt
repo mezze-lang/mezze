@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -106,7 +107,7 @@ class OpenRecordDemandLaunderTest {
 
     @Test
     fun `a Bool field is not blamed for another field's mismatch`() {
-        // `Bool` exists as MezzeType.BoolType and as VariantType({True, False}).
+        // `Bool` exists as PrimitiveTypes.BOOL_TYPE and as VariantType({True, False}).
         // They are unequal as DATA and identical as TYPES, so the walk that looks
         // for "the first field where actual != expected" used to stop at `c` and
         // report "Field `c` expects Bool but got Bool" — a sentence nobody can act

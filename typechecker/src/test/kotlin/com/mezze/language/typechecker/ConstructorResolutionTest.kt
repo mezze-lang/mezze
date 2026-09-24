@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.BuiltinTypes
@@ -69,9 +70,7 @@ class ConstructorResolutionTest {
 
         val testType = result.getVariableType("test")
         assertNotNull(testType, "test should have an inferred type")
-        assertTrue(testType is MezzeType.BoolType ||
-            (testType is MezzeType.VariantType && BuiltinTypes.isBoolVariant(testType!!)),
-            "eq should return Bool, got: $testType")
+        assertEquals(PrimitiveTypes.BOOL_TYPE, testType, "eq should return Bool, got: $testType")
     }
 
     @Test
@@ -82,9 +81,7 @@ class ConstructorResolutionTest {
 
         val testType = result.getVariableType("test")
         assertNotNull(testType, "test should have an inferred type")
-        assertTrue(testType is MezzeType.BoolType ||
-            (testType is MezzeType.VariantType && BuiltinTypes.isBoolVariant(testType!!)),
-            "lt should return Bool, got: $testType")
+        assertEquals(PrimitiveTypes.BOOL_TYPE, testType, "lt should return Bool, got: $testType")
     }
 
     @Test
@@ -282,15 +279,11 @@ class ConstructorResolutionTest {
 
         val test2Type = result.getVariableType("test2")
         assertNotNull(test2Type, "Should find test2 type")
-        assertTrue(test2Type is MezzeType.BoolType ||
-            (test2Type is MezzeType.VariantType && BuiltinTypes.isBoolVariant(test2Type!!)),
-            "eq should return Bool, got: $test2Type")
+        assertEquals(PrimitiveTypes.BOOL_TYPE, test2Type, "eq should return Bool, got: $test2Type")
 
         val test3Type = result.getVariableType("test3")
         assertNotNull(test3Type, "Should find test3 type")
-        assertTrue(test3Type is MezzeType.BoolType ||
-            (test3Type is MezzeType.VariantType && BuiltinTypes.isBoolVariant(test3Type!!)),
-            "lt should return Bool, got: $test3Type")
+        assertEquals(PrimitiveTypes.BOOL_TYPE, test3Type, "lt should return Bool, got: $test3Type")
 
         val test4Type = result.getVariableType("test4")
         assertNotNull(test4Type, "Should find test4 type")

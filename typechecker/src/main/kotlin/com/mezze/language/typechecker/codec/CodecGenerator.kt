@@ -48,7 +48,7 @@ class CodecGenerator(
      */
     fun isSerializable(type: MezzeType): Boolean = when (type) {
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.FracType, is MezzeType.CharType,
+        is MezzeType.FracType, is MezzeType.CharType,
         is MezzeType.BytesType -> true
         is MezzeType.FunctionType -> false
         is MezzeType.EffectRow -> false
@@ -122,11 +122,13 @@ class CodecGenerator(
         // `when`, for the same reason Bool is: a builtin that happens to be spelled as
         // a variant is not a user variant. Keyed on the ARMS, not on the type's name.
         asOptionVariant(type)?.let { return buildEncodeOption(optionInner(it), valueExpr) }
+        // Bool is a builtin VARIANT, so it would otherwise reach the variant arm
+        // below and encode as a tagged constructor instead of a JSON boolean.
+        if (PrimitiveTypes.isBoolVariant(type)) return scalarEncode("encode_bool", valueExpr)
         return when (type) {
             is MezzeType.IntType    -> scalarEncode("encode_int",   valueExpr)
             is MezzeType.FloatType  -> scalarEncode("encode_float", valueExpr)
             is MezzeType.StringType -> scalarEncode("encode_str",   valueExpr)
-            is MezzeType.BoolType   -> scalarEncode("encode_bool",  valueExpr)
             is MezzeType.FracType   -> scalarEncode("encode_frac",  valueExpr)
             is MezzeType.CharType   -> scalarEncode("encode_char",  valueExpr)
             is MezzeType.BytesType  -> scalarEncode("encode_bytes", valueExpr)
@@ -446,11 +448,13 @@ class CodecGenerator(
         // of an Option's two representations means what, or a value encoded one way
         // is read back the other.
         asOptionVariant(type)?.let { return buildDecodeOption(optionInner(it), inputExpr) }
+        // Mirror of the encode side: Bool decodes from a JSON boolean, not from a
+        // tagged constructor.
+        if (PrimitiveTypes.isBoolVariant(type)) return scalarDecode("decode_bool", inputExpr)
         return when (type) {
             is MezzeType.IntType    -> scalarDecode("decode_int",   inputExpr)
             is MezzeType.FloatType  -> scalarDecode("decode_float", inputExpr)
             is MezzeType.StringType -> scalarDecode("decode_str",   inputExpr)
-            is MezzeType.BoolType   -> scalarDecode("decode_bool",  inputExpr)
             is MezzeType.FracType   -> scalarDecode("decode_frac",  inputExpr)
             is MezzeType.CharType   -> scalarDecode("decode_char",  inputExpr)
             is MezzeType.BytesType  -> scalarDecode("decode_bytes", inputExpr)

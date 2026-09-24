@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.emit
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.ast.TypeVar
@@ -84,14 +85,20 @@ class DecodeTargetStructuralKeyTest {
     // ---- the half that DOES have an end-to-end test, pinned here too ----
 
     @Test
-    fun `Bool's two representations share one key`() {
-        val boolVariant = MezzeType.VariantType(mapOf("True" to null, "False" to null))
+    fun `Bool keys as Bool whether or not it carries its identity`() {
+        // This used to read "Bool's two representations share one key", because
+        // Bool was both a primitive `BoolType` and a `| True, False |` variant and
+        // the two spelled differently — so a `{ flag: Bool }` target matched no
+        // derived impl and ran the FIRST decoder in scope. There is one Bool now,
+        // but the key is still read off the SHAPE, so a Bool-shaped variant that
+        // reaches here without its builtin identity — a partially solved type —
+        // must not spell as a user variant would.
+        assertEquals("Bool", key(PrimitiveTypes.BOOL_TYPE))
         assertEquals(
-            "Bool", key(boolVariant),
-            "a Bool in variant form must spell the same as MezzeType.BoolType, or a " +
-                "`{ flag: Bool }` target matches no derived impl"
+            "Bool", key(MezzeType.VariantType(mapOf("True" to null, "False" to null))),
+            "an identity-less Bool shape must still key as Bool, or a `{ flag: Bool }` " +
+                "target matches no derived impl"
         )
-        assertEquals(key(MezzeType.BoolType), key(boolVariant))
     }
 
     // ---- a newtype is nominal, not its shape ----
@@ -109,7 +116,7 @@ class DecodeTargetStructuralKeyTest {
     @Test
     fun `no type spells as its Kotlin class name`() {
         val all = listOf(
-            MezzeType.IntType, MezzeType.FloatType, MezzeType.StringType, MezzeType.BoolType,
+            MezzeType.IntType, MezzeType.FloatType, MezzeType.StringType, PrimitiveTypes.BOOL_TYPE,
             MezzeType.CharType, MezzeType.FracType, MezzeType.BytesType,
             MezzeType.VarType(TypeVar.freshWithName("'a")),
             MezzeType.FunctionType(MezzeType.IntType, MezzeType.IntType),

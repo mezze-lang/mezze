@@ -48,7 +48,7 @@ internal fun isConcrete(t: MezzeType): Boolean = when (t) {
     is MezzeType.NewtypeType -> isConcrete(t.wrappedType)
     is MezzeType.TypeApplication -> t.args.all { isConcrete(it) }
     is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-    is MezzeType.BoolType, is MezzeType.FracType,
+    is MezzeType.FracType,
     is MezzeType.BytesType,
     is MezzeType.CharType, is MezzeType.EffectRow -> true
 }
@@ -120,19 +120,13 @@ internal fun typeMatchesTarget(
         concrete is MezzeType.IntType && target is MezzeType.IntType -> true
         concrete is MezzeType.FloatType && target is MezzeType.FloatType -> true
         concrete is MezzeType.StringType && target is MezzeType.StringType -> true
-        concrete is MezzeType.BoolType && target is MezzeType.BoolType -> true
         concrete is MezzeType.CharType && target is MezzeType.CharType -> true
         concrete is MezzeType.FracType && target is MezzeType.FracType -> true
-        // Bool has two surface types — the primitive `MezzeType.BoolType` and the
-        // constructor-form `MezzeType.VariantType({True, False})`. A codec-generated
-        // `impl … for Bool` registers its target as `MezzeType.BoolType`, but the
-        // receiver at a bare `True.encode {…}` call keeps its constructor
-        // form. Normalise both directions so ability dispatch on a Bool
-        // constant routes through the generated impl.
-        concrete is MezzeType.VariantType && target is MezzeType.BoolType &&
-            com.mezze.language.ast.PrimitiveTypes.isBoolVariant(concrete) -> true
-        concrete is MezzeType.BoolType && target is MezzeType.VariantType &&
-            com.mezze.language.ast.PrimitiveTypes.isBoolVariant(target) -> true
+        // Bool needs no arm. It had two surface types — a primitive `BoolType` and
+        // the constructor form — so a codec-generated `impl … for Bool` registered
+        // one while the receiver at a bare `True.encode {…}` kept the other, and two
+        // normalising arms bridged them. Bool is one type now, caught by the
+        // `concrete == target` check above.
         // Hash is authoritative nominal identity: two same-named TypeApplications
         // from DIFFERENT declarations (differing content hash) must NOT match —
         // mirrors the solver's unifyTypeApplications veto (#278/F0). Name match,
@@ -379,7 +373,7 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
             else -> false
         }
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.FracType,
+        is MezzeType.FracType,
         is MezzeType.BytesType,
         is MezzeType.CharType -> pattern == v
         is MezzeType.EffectRow -> v is MezzeType.EffectRow

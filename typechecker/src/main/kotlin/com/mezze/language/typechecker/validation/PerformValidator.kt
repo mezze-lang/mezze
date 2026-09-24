@@ -398,7 +398,7 @@ class PerformValidator(
             }
             is ParsedVariantConstruct -> {
                 if (expr.constructor == BuiltinTypes.TRUE || expr.constructor == BuiltinTypes.FALSE) {
-                    MezzeType.BoolType
+                    PrimitiveTypes.BOOL_TYPE
                 } else {
                     val payloadType = expr.value?.let { constructTypeFromParsedExpression(it) }
                     MezzeType.VariantType(
@@ -468,12 +468,9 @@ class PerformValidator(
 
         if (handlerType is MezzeType.VarType) return true
 
-        if (handlerType is MezzeType.BoolType && exprType is MezzeType.VariantType) {
-            return PrimitiveTypes.isBoolVariant(exprType)
-        }
-        if (exprType is MezzeType.BoolType && handlerType is MezzeType.VariantType) {
-            return PrimitiveTypes.isBoolVariant(handlerType)
-        }
+        // The two Bool bridges that used to sit here — one per direction, pairing a
+        // primitive `BoolType` with a `| True, False |` variant — are gone with the
+        // dual representation. `handlerType == exprType` above answers Bool now.
 
         if (handlerType is MezzeType.VariantType && exprType is MezzeType.VariantType) {
             if (PrimitiveTypes.isBoolVariant(handlerType) && PrimitiveTypes.isBoolVariant(exprType)) {

@@ -246,14 +246,9 @@ class EffectAssociatedTypesTest {
         val actualType = funcType.returnType
         val typeClass = actualType?.javaClass?.simpleName
         val typeStr = actualType?.let { prettyPrintType(it) }
-        // Bool in Mezze is represented as BoolType internally (or VariantType with True/False)
-        assertTrue(
-            actualType is MezzeType.BoolType ||
-            (actualType is MezzeType.VariantType &&
-             actualType.constructors.containsKey("True") &&
-             actualType.constructors.containsKey("False")),
-            "Expected Bool but got: $typeClass ($typeStr)"
-        )
+        // Bool has ONE representation, so this is an equality and not a disjunction
+        // over the spellings it used to have.
+        assertEquals(PrimitiveTypes.BOOL_TYPE, actualType, "Expected Bool but got: $typeClass ($typeStr)")
     }
 
     @Test
@@ -559,8 +554,9 @@ class EffectAssociatedTypesTest {
         assertNotNull(program)
 
         val successFuncType = program.getVariableType("getSuccessResult") as MezzeType.FunctionType
-        // Bool is represented as BoolType internally (not VariantType)
-        assertTrue(successFuncType.returnType is MezzeType.BoolType || successFuncType.returnType is MezzeType.VariantType)
+        // Was `== Bool || is VariantType`, whose second half admitted ANY variant.
+        // Bool has one representation, so the exact one can be demanded.
+        assertEquals(PrimitiveTypes.BOOL_TYPE, successFuncType.returnType)
 
         val failFuncType = program.getVariableType("getFailResult") as MezzeType.FunctionType
         assertTrue(failFuncType.returnType is MezzeType.FloatType)

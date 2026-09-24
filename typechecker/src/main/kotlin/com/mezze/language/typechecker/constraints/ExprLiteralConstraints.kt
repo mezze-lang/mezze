@@ -389,7 +389,7 @@ private fun ExpressionConstraintGenerator.polyglotNativeSignature(
         "__native_polyglot_as_string" to MezzeType.StringType,
         "__native_polyglot_as_long" to MezzeType.IntType,
         "__native_polyglot_as_double" to MezzeType.FloatType,
-        "__native_polyglot_as_boolean" to MezzeType.BoolType,
+        "__native_polyglot_as_boolean" to PrimitiveTypes.BOOL_TYPE,
     )
     val isForeign = name in foreignReturning
     if (!isForeign && name !in coercionReturn) return null

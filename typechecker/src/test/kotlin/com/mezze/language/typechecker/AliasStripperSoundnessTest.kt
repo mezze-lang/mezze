@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeIdentity
@@ -85,7 +86,7 @@ class AliasStripperSoundnessTest {
         )
         val fnType = FunctionType(
             paramType = RecordType(fields = mapOf("x" to VarType(TypeVar.fresh()))),
-            returnType = BoolType,
+            returnType = PrimitiveTypes.BOOL_TYPE,
             abilityConstraints = listOf(constraint)
         )
 

@@ -62,12 +62,10 @@ class SeqTypeCheckerTest {
 
         val inferredType = typedProgram.getVariableType("flags") as MezzeType.TypeApplication
 
-        // Should infer [Bool] - either BoolType or VariantType with True/False
+        // Should infer [Bool]. Bool has ONE representation, so this is an equality
+        // and not a disjunction over the spellings it used to have.
         val elemType = inferredType.args[0]
-        assertTrue(
-            elemType is MezzeType.BoolType ||
-            (elemType is MezzeType.VariantType && elemType.constructors.keys == setOf("True", "False"))
-        )
+        assertEquals(PrimitiveTypes.BOOL_TYPE, elemType)
     }
 
     @Test

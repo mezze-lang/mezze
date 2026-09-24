@@ -20,10 +20,39 @@ object PrimitiveTypes {
     const val CHAR = "Char"
     const val BYTES = "Bytes"
 
+    /**
+     * Bool in its ONE representation: the builtin VARIANT `| True, False |`.
+     *
+     * Bool used to exist in four spellings at once — a dedicated `MezzeType.BoolType`
+     * object, this variant with BUILTIN identity, the same variant with DECLARED
+     * identity (from a synthetic `type Bool` that `ContextBuilder` injected), and an
+     * identity-less one. Unification bridged them by hand, which is what made Bool
+     * the single largest source of "same type, two shapes" comparisons.
+     *
+     * It is a variant because that is what the language says it is: `True` and
+     * `False` are constructors, `x = True` infers `Bool`, and a `when` over it is
+     * checked for exhaustiveness off these two arms. The runtime is unaffected — it
+     * lowers `True`/`False` to a primitive boolean and never reads a `MezzeType`.
+     *
+     * BUILTIN identity rather than DECLARED, for the same reason [BuiltinTypes]
+     * gives for Option: this shape carries no content hash. It also keeps a
+     * user-written `type Bool = | True, False |` DISTINCT — names are hashed
+     * as-written, so a declared Bool would otherwise hash identically to the
+     * builtin one and silently become it.
+     *
+     * Bool stays in the primitive maps below so that `toName` still answers "Bool"
+     * and so an `impl` for it keeps the coherence carve-out primitives get.
+     */
+    val BOOL_TYPE: MezzeType.VariantType = MezzeType.VariantType(
+        constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null),
+        rowVar = null,
+        identity = TypeIdentity.Builtin(BOOL),
+    )
+
     private val nameToType: Map<String, MezzeType> = mapOf(
         INT to MezzeType.IntType,
         FLOAT to MezzeType.FloatType,
-        BOOL to MezzeType.BoolType,
+        BOOL to BOOL_TYPE,
         STR to MezzeType.StringType,
         FRAC to MezzeType.FracType,
         CHAR to MezzeType.CharType,
@@ -57,9 +86,10 @@ object PrimitiveTypes {
     // Returns null if not a built-in type, true/false if it is and matches/doesn't
     fun matchesBuiltinType(name: String, type: MezzeType): Boolean? {
         val builtinType = nameToType[name] ?: return null
-        if (builtinType == type) return true
-        if (builtinType is MezzeType.BoolType && isBoolVariant(type)) return true
-        return false
+        // No Bool special case: Bool IS [BOOL_TYPE], so equality answers it. The
+        // line that used to bridge `BoolType` to a Bool-shaped variant here was one
+        // half of the dual representation, and bridging is what kept the two alive.
+        return builtinType == type
     }
 
     fun isBoolVariant(type: MezzeType): Boolean {

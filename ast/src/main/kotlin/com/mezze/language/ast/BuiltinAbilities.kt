@@ -96,7 +96,6 @@ object BuiltinAbilities {
             is MezzeType.IntType -> hasAutomaticImplementation(PrimitiveTypes.INT, abilityName)
             is MezzeType.FloatType -> hasAutomaticImplementation(PrimitiveTypes.FLOAT, abilityName)
             is MezzeType.StringType -> hasAutomaticImplementation(PrimitiveTypes.STR, abilityName)
-            is MezzeType.BoolType -> hasAutomaticImplementation(PrimitiveTypes.BOOL, abilityName)
             is MezzeType.FracType -> hasAutomaticImplementation(PrimitiveTypes.FRAC, abilityName)
 
             // Parameterized types - check if element types support the ability
@@ -117,14 +116,22 @@ object BuiltinAbilities {
             }
 
             // Variant types automatically derive Eq and Inspect if all constructors have these abilities
-            is MezzeType.VariantType -> {
-                when (abilityName) {
-                    EQ, INSPECT -> type.constructors.values.all { constructorDataType ->
+            is MezzeType.VariantType -> when {
+                // Bool is a builtin VARIANT, so it arrives here rather than at a
+                // primitive arm. Its abilities are the table's, not the structural
+                // rule's below: it derives Ord and both logical operators, and the
+                // structural rule knows only Eq and Inspect. Keyed on the canonical
+                // VALUE, so a user-written `| True, False |` is not mistaken for it.
+                type == PrimitiveTypes.BOOL_TYPE ->
+                    hasAutomaticImplementation(PrimitiveTypes.BOOL, abilityName)
+
+                abilityName == EQ || abilityName == INSPECT ->
+                    type.constructors.values.all { constructorDataType ->
                         // Constructors without data (like None) always support Eq and Inspect
                         constructorDataType == null || typeHasAutomaticImplementation(constructorDataType, abilityName)
                     }
-                    else -> false
-                }
+
+                else -> false
             }
 
             else -> false

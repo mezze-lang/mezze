@@ -738,7 +738,6 @@ object MonoDriver {
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "Str"
-            is MezzeType.BoolType -> "Bool"
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"
             is MezzeType.BytesType -> "Bytes"
@@ -855,7 +854,7 @@ object MonoDriver {
                 is MezzeType.NewtypeType -> go(t.wrappedType)
                 is MezzeType.TypeApplication -> t.args.forEach(::go)
                 is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-                is MezzeType.BoolType, is MezzeType.FracType,
+                is MezzeType.FracType,
                 is MezzeType.BytesType,
                 is MezzeType.CharType, is MezzeType.EffectRow -> Unit
             }
@@ -882,7 +881,7 @@ object MonoDriver {
             is MezzeType.NewtypeType -> typeParamAppearsIn(typeParamName, type.wrappedType)
             is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.FracType,
+            is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType, is MezzeType.EffectRow -> false
         }

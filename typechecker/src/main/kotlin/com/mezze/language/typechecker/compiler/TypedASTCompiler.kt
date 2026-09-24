@@ -15,6 +15,7 @@ import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.truffleir.*
 import com.mezze.language.ast.ScopedEffectConstants
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typedast.*
 
 /**
@@ -5009,13 +5010,16 @@ class TypedASTCompiler(
         return slot
     }
 
-    private fun typeToSlotKind(type: MezzeType): SlotKind = when (type) {
-        is IntType -> SlotKind.LONG
-        is FloatType -> SlotKind.DOUBLE
-        is BoolType -> SlotKind.BOOLEAN
+    private fun typeToSlotKind(type: MezzeType): SlotKind = when {
+        type is IntType -> SlotKind.LONG
+        type is FloatType -> SlotKind.DOUBLE
+        // Bool is a VARIANT in the type system and a primitive boolean at runtime.
+        // This is the one place those two facts meet, so it is a guard rather than
+        // an `is` arm — there is no `BoolType` to match on any more.
+        PrimitiveTypes.isBoolVariant(type) -> SlotKind.BOOLEAN
         // Newtype is compile-time only — runtime slot follows wrapped type. Nat
         // (`newtype Nat = Int`) picks up LONG here just like a raw Int.
-        is NewtypeType -> typeToSlotKind(type.wrappedType)
+        type is NewtypeType -> typeToSlotKind(type.wrappedType)
         else -> SlotKind.OBJECT
     }
 

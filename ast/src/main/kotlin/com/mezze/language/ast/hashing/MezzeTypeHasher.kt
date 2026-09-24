@@ -47,10 +47,12 @@ fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.IntType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x01))
         is MezzeType.FloatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
         is MezzeType.StringType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x03))
-        is MezzeType.BoolType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x04))
         is MezzeType.CharType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x07))
         is MezzeType.FracType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x08))
         is MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
+        // 0x04 belonged to BoolType, which no longer exists: Bool is a builtin
+        // VARIANT now and hashes through the VariantType arm below, so a type
+        // mentioning Bool hashes differently than it did before that collapse.
         // 0x02 through 0x05 belonged to SetType, MapType, SortedMapType and
         // SortedSetType, which no
         // longer exist — both reach here as TypeApplication now. The tags are

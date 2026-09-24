@@ -255,7 +255,12 @@ object CompletionEngine {
                 else -> generateForNamedType(ctx, expected.constructor, out)
             }
             is MezzeType.VariantType -> {
-                expected.identity.displayNameOrNull()?.let { generateForNamedType(ctx, it, out) }
+                if (PrimitiveTypes.isBoolVariant(expected)) {
+                    out += snippetItem(BuiltinTypes.TRUE, BuiltinTypes.TRUE, "Bool", 0)
+                    out += snippetItem(BuiltinTypes.FALSE, BuiltinTypes.FALSE, "Bool", 1)
+                } else {
+                    expected.identity.displayNameOrNull()?.let { generateForNamedType(ctx, it, out) }
+                }
             }
             is MezzeType.RecordType -> {
                 if (expected.fields.isNotEmpty()) {
@@ -269,10 +274,6 @@ object CompletionEngine {
                 val params = (expected.paramType as? MezzeType.RecordType)?.fields?.keys?.toList()
                     ?: listOf("x")
                 out += snippetItem("{ … } -> …", "{${params.joinToString(", ")}} -> \$1", "fill lambda", 0)
-            }
-            is MezzeType.BoolType -> {
-                out += snippetItem(BuiltinTypes.TRUE, BuiltinTypes.TRUE, "Bool", 0)
-                out += snippetItem(BuiltinTypes.FALSE, BuiltinTypes.FALSE, "Bool", 1)
             }
             // Not usefully constructible from a bare expected type.
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
@@ -325,7 +326,7 @@ object CompletionEngine {
         val expected = expectedTypeAtCursor(ctx, line, character) ?: return items
 
         val expectedVariantName = (expected as? MezzeType.TypeApplication)?.constructor
-            ?: (expected as? MezzeType.BoolType)?.let { "Bool" }
+            ?: (expected as? MezzeType.VariantType)?.identity?.displayNameOrNull()
 
         // Core-variant constructor names come from ast/BuiltinTypes (single
         // source of truth) so this can't drift from the compiler's own set.
@@ -874,7 +875,6 @@ object CompletionEngine {
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "Str"
-            is MezzeType.BoolType -> "Bool"
             is MezzeType.CharType -> "Char"
             is MezzeType.FracType -> "Frac"
             is MezzeType.BytesType -> "Bytes"
@@ -1396,12 +1396,12 @@ object CompletionEngine {
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "Str"
-            is MezzeType.BoolType -> "Bool"
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"
             is MezzeType.BytesType -> "Bytes"
             is MezzeType.TypeApplication -> type.constructor
-            is MezzeType.VariantType -> type.constructors.keys.firstOrNull()
+            is MezzeType.VariantType ->
+                type.identity.displayNameOrNull() ?: type.constructors.keys.firstOrNull()
             else -> null
         }
     }
@@ -1624,7 +1624,7 @@ object CompletionEngine {
                 if (receiverText.contains('.')) MezzeType.FloatType else MezzeType.IntType
             }
             receiverText == BuiltinTypes.TRUE || receiverText == BuiltinTypes.FALSE ||
-                receiverText == BuiltinTypes.TRUE.lowercase() || receiverText == BuiltinTypes.FALSE.lowercase() -> MezzeType.BoolType
+                receiverText == BuiltinTypes.TRUE.lowercase() || receiverText == BuiltinTypes.FALSE.lowercase() -> PrimitiveTypes.BOOL_TYPE
             else -> null
         }
     }

@@ -314,7 +314,7 @@ class ScopedEffectDetectionTest {
                 when (annotation.name) {
                     "Int" -> MezzeType.IntType
                     "Str" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BoolType
+                    "Bool" -> PrimitiveTypes.BOOL_TYPE
                     else -> MezzeType.VarType(TypeVar.fresh())
                 }
             }

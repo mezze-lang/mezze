@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.*
@@ -51,7 +52,7 @@ class InherentMethodDispatchRegressionTest {
     @Test
     fun `Int inherent is_even resolves via method syntax`() {
         val r = check("let b = 4.is_even {}")
-        assertEquals(MezzeType.BoolType, r.getVariableType("b"))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, r.getVariableType("b"))
     }
 
     @Test
@@ -71,7 +72,7 @@ class InherentMethodDispatchRegressionTest {
     @Test
     fun `Seq is_empty via method syntax`() {
         val r = check("let b = [1, 2, 3].is_empty {}")
-        assertEquals(MezzeType.BoolType, r.getVariableType("b"))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, r.getVariableType("b"))
     }
 
     /**

@@ -374,7 +374,7 @@ object DecodeTargetResolver {
             "{" + t.fields.toSortedMap().entries.joinToString(",") { "${it.key}:${structural(it.value)}" } + "}"
         is MezzeType.TypeApplication -> t.constructor + "(" + t.args.joinToString(",") { structural(it) } + ")"
         is MezzeType.VariantType ->
-            // Bool is one type with two representations; both spell "Bool".
+            // Bool IS this arm now — it is a builtin variant, not a primitive.
             if (BuiltinTypes.isBoolVariant(t)) "Bool"
             else "|" + t.constructors.toSortedMap().entries.joinToString(",") { (name, payload) ->
                 name + (payload?.let { ":" + structural(it) } ?: "")
@@ -385,7 +385,6 @@ object DecodeTargetResolver {
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
         is MezzeType.StringType -> "Str"
-        is MezzeType.BoolType -> "Bool"
         is MezzeType.CharType -> "Char"
         is MezzeType.FracType -> "Frac"
         is MezzeType.BytesType -> "Bytes"

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.solving
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.Loc
@@ -86,7 +87,7 @@ class ConstraintSimplifierTest {
     fun `preserves relative order of survivors`() {
         val c1 = Constraint.HasField(a, "x", MezzeType.IntType)
         val c2 = Constraint.HasField(a, "y", MezzeType.StringType)
-        val c3 = Constraint.HasField(a, "z", MezzeType.BoolType)
+        val c3 = Constraint.HasField(a, "z", PrimitiveTypes.BOOL_TYPE)
         val out = ConstraintSimplifier.simplify(listOf(c1, c2, c1, c3))  // c1 duplicated
         assertEquals(listOf(c1, c2, c3), out)
     }

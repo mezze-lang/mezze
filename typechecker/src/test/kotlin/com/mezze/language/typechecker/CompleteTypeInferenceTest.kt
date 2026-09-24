@@ -252,9 +252,9 @@ class CompleteTypeInferenceTest {
         assertTrue(isValidType is MezzeType.FunctionType)
         
         val resultType = getVariableType(result,"result")
-        // Bool can be BoolType or VariantType with True/False constructors
-        assertTrue(resultType is MezzeType.BoolType ||
-                   (resultType is MezzeType.VariantType && resultType.constructors.keys == setOf("True", "False")))
+        // Bool has ONE representation, so this is an equality and not a disjunction
+        // over the spellings it used to have.
+        assertEquals(PrimitiveTypes.BOOL_TYPE, resultType)
     }
 
     @Test

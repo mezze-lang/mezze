@@ -1011,9 +1011,13 @@ class ContextBuilder {
                     visibility = ParsedVisibility.PUBLIC, loc = loc)
             }
         }
-        syntheticVariant("Bool", emptyList(), listOf(
-            ParsedVariantCtorDef("True", null, loc = loc),
-            ParsedVariantCtorDef("False", null, loc = loc)))
+        // Bool's declaration is what makes `True` and `False` RESOLVE — as
+        // constructors, in an expression and in a pattern. It is not what decides
+        // Bool's type: an annotation `Bool` is answered by `PrimitiveTypes.fromName`
+        // with the canonical `BOOL_TYPE`, never by expanding this declaration.
+        syntheticVariant(PrimitiveTypes.BOOL, emptyList(), listOf(
+            ParsedVariantCtorDef(BuiltinTypes.TRUE, null, loc = loc),
+            ParsedVariantCtorDef(BuiltinTypes.FALSE, null, loc = loc)))
         syntheticVariant(BuiltinTypes.OPTION, listOf("a"), listOf(
             ParsedVariantCtorDef(BuiltinTypes.SOME, payloadField(BuiltinTypes.VAL_FIELD, "a"), loc = loc),
             ParsedVariantCtorDef(BuiltinTypes.NONE, null, loc = loc)))

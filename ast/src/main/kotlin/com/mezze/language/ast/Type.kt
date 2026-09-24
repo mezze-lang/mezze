@@ -171,7 +171,7 @@ sealed interface MezzeType {
         // A standalone effect row's associated types are children too (a function's
         // effect row is reached via the FunctionType arm above).
         is EffectRow -> effectRowAnyChild(this, predicate)
-        is VarType, is IntType, is FloatType, is StringType, is BoolType,
+        is VarType, is IntType, is FloatType, is StringType,
         is FracType, is BytesType,
         is CharType -> false
     }
@@ -191,7 +191,7 @@ sealed interface MezzeType {
         is TypeApplication -> copy(args = args.map(f))
         is NewtypeType -> copy(wrappedType = f(wrappedType))
         is EffectRow -> mapEffectRowChildren(this, f)
-        is VarType, is IntType, is FloatType, is StringType, is BoolType,
+        is VarType, is IntType, is FloatType, is StringType,
         is FracType, is BytesType,
         is CharType -> this
     }
@@ -205,9 +205,6 @@ sealed interface MezzeType {
 
     @Serializable
     object StringType : MezzeType
-
-    @Serializable
-    object BoolType : MezzeType
 
     // Enhanced numeric types
     @Serializable

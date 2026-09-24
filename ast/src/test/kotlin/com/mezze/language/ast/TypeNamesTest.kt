@@ -1,5 +1,6 @@
 package com.mezze.language.ast
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -18,7 +19,7 @@ class TypeNamesTest {
 
     private val everyType: List<MezzeType> = listOf(
         MezzeType.IntType, MezzeType.FloatType, MezzeType.StringType,
-        MezzeType.BoolType, MezzeType.FracType, MezzeType.BytesType,
+        PrimitiveTypes.BOOL_TYPE, MezzeType.FracType, MezzeType.BytesType,
         MezzeType.CharType,
         MezzeType.VarType(TypeVar.freshWithName("'a")),
         MezzeType.FunctionType(MezzeType.IntType, MezzeType.IntType),
@@ -35,7 +36,7 @@ class TypeNamesTest {
         // `Str`, not `String` — the LSP renderer used to answer `String`, which is
         // not a type name in this language.
         assertEquals("Str", TypeNames.head(MezzeType.StringType))
-        assertEquals("Bool", TypeNames.head(MezzeType.BoolType))
+        assertEquals("Bool", TypeNames.head(PrimitiveTypes.BOOL_TYPE))
         // The three the hand-written list forgot.
         assertEquals("Frac", TypeNames.head(MezzeType.FracType))
         assertEquals("Char", TypeNames.head(MezzeType.CharType))

@@ -77,7 +77,7 @@ object AliasStripper {
             wrappedType = stripImpl(type.wrappedType, inScope, registry, recursionGuard)
         )
         is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
-        is MezzeType.StringType, is MezzeType.BoolType,
+        is MezzeType.StringType,
         is MezzeType.FracType, is MezzeType.BytesType,
         is MezzeType.CharType, is MezzeType.EffectRow -> type
     }

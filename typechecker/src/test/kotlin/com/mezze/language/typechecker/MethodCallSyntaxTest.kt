@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
@@ -329,7 +330,7 @@ class MethodCallSyntaxTest {
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
-        assertEquals(MezzeType.BoolType, result.getVariableType("result"))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, result.getVariableType("result"))
     }
 
     @Test

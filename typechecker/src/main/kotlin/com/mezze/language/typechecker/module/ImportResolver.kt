@@ -873,7 +873,6 @@ class ImportResolver(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.FracType,
-            is MezzeType.BoolType,
             is MezzeType.StringType,
             is MezzeType.BytesType,
             is MezzeType.CharType -> {}

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.solving
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.solving.Substitution
@@ -15,7 +16,7 @@ class UnificationPropertyTest {
     @Test
     fun `unifying identical concrete types yields empty substitution`() {
         val concreteTypes = listOf(
-            MezzeType.IntType, MezzeType.StringType, MezzeType.BoolType,
+            MezzeType.IntType, MezzeType.StringType, PrimitiveTypes.BOOL_TYPE,
             MezzeType.FloatType, MezzeType.CharType,
         )
 
@@ -30,7 +31,7 @@ class UnificationPropertyTest {
     fun `unifying variable with concrete type binds the variable`() {
         val tv = freshVar()
         val concreteTypes = listOf(
-            MezzeType.IntType, MezzeType.StringType, MezzeType.BoolType,
+            MezzeType.IntType, MezzeType.StringType, PrimitiveTypes.BOOL_TYPE,
         )
 
         for (concrete in concreteTypes) {

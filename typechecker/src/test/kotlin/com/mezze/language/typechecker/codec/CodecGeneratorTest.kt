@@ -34,7 +34,7 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(MezzeType.IntType))
         assertTrue(generator.isSerializable(MezzeType.FloatType))
         assertTrue(generator.isSerializable(MezzeType.StringType))
-        assertTrue(generator.isSerializable(MezzeType.BoolType))
+        assertTrue(generator.isSerializable(PrimitiveTypes.BOOL_TYPE))
         // Nat is now a newtype (`newtype Nat = Int` in std/nat.mz), not a primitive.
         // Newtypes are not auto-serializable — the impls live in std/nat.mz.
         assertTrue(!generator.isSerializable(MezzeType.NewtypeType(

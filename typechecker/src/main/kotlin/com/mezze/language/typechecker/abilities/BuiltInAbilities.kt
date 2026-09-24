@@ -9,7 +9,7 @@ import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 object BuiltInAbilities {
-    private val boolType = MezzeType.BoolType
+    private val boolType = PrimitiveTypes.BOOL_TYPE
 
         private val abilities: Map<String, Map<String, (MezzeType.VarType) -> MezzeType>> by lazy {
         buildAbilitiesFromMzFiles()

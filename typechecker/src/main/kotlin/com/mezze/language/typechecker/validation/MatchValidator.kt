@@ -122,9 +122,6 @@ class MatchValidator(
 
         val expandedType = when (scrutineeType) {
             is MezzeType.TypeApplication -> expandTypeApplicationToVariant(scrutineeType, registry) ?: scrutineeType
-            is MezzeType.BoolType -> MezzeType.VariantType(
-                constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null), rowVar = null
-            )
             else -> scrutineeType
         }
 
@@ -784,9 +781,9 @@ class MatchValidator(
     private fun resolveClosedVariant(type: MezzeType): MezzeType.VariantType? {
         val v = when (type) {
             is MezzeType.VariantType -> type
-            // #218: Bool is the closed `True | False` variant (special-cased),
-            // so a Bool field is finite and must have both True and False covered.
-            is MezzeType.BoolType -> BuiltinTypes.getBoolType()
+            // #218: Bool is the closed `True | False` variant, so a Bool field is
+            // finite and must have both True and False covered. It needs no arm of
+            // its own — it IS a VariantType, caught by the first arm.
             is MezzeType.TypeApplication -> expandTypeApplicationToVariant(type, registry)
             // A field type built from a bare annotation (`inner: Inner`) via
             // TypeAnnotationConverter arrives as VarType(name = "Inner") — the type

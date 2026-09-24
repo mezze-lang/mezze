@@ -103,7 +103,6 @@ internal fun canDeriveAbilityStructurally(
                 // above: it is erased to its payload at runtime, so a derived
                 // comparison would silently be the WRAPPED type's. That is why a
                 // newtype — and only a newtype — must say what its equality is.
-                unwrappedType is MezzeType.BoolType ||
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.StringType ||
@@ -138,7 +137,7 @@ internal fun canDeriveAbilityStructurally(
 
         resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ->
-            unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType)
+            BuiltInAbilities.isBoolVariant(unwrappedType)
 
         else -> false
     }

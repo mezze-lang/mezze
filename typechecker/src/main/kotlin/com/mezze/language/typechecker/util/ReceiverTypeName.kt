@@ -120,7 +120,6 @@ fun receiverTypeName(type: MezzeType): String? = when (type) {
     is MezzeType.IntType -> "Int"
     is MezzeType.FloatType -> "Float"
     is MezzeType.StringType -> "Str"
-    is MezzeType.BoolType -> "Bool"
     is MezzeType.FracType -> "Frac"
     is MezzeType.NewtypeType -> type.name
     is MezzeType.CharType -> "Char"

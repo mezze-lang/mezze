@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeIdentity
@@ -50,7 +51,7 @@ class UnifierDifferentialGateTest {
     private val matrix: List<Pair<String, MezzeType>> = listOf(
         "Int" to IntType,
         "Str" to StringType,
-        "Bool" to BoolType,
+        "Bool" to PrimitiveTypes.BOOL_TYPE,
         "'a" to v("a"),
         "'b" to v("b"),
         "[Int]" to TypeApplication("Seq", listOf(IntType)),
@@ -97,6 +98,24 @@ class UnifierDifferentialGateTest {
         // above: solver-accepts / mono-refuses. Four new pairs, all that way.
         "List Int vs var V{X,Y}", "var V{X,Y} vs List Int",
         "List Int vs var V{X}", "var V{X} vs List Int",
+
+        // Added when #14 deleted MezzeType.BoolType and Bool became the builtin
+        // variant `| True, False |`. This is the SAME move as List's four above,
+        // for the same reason and with the same justification:
+        //
+        // Bool genuinely IS a variant — that is the whole point of the collapse,
+        // and it is why `x = True` infers Bool and a match over it is checked
+        // against two arms — so the SOLVER can relate it to an open variant
+        // variable, which it could not do through the opaque `BoolType` node.
+        // Mono still refuses, because a variant row is not a concrete binding it
+        // can seed a specialization with.
+        //
+        // The direction is what makes this safe, and the assertion above rules
+        // out the other one for the whole matrix: solver-accepts / mono-refuses.
+        // Four new pairs, all that way. Bool's RUNTIME representation is
+        // untouched by any of this — it is a primitive boolean either way.
+        "Bool vs var V{X,Y}", "var V{X,Y} vs Bool",
+        "Bool vs var V{X}", "var V{X} vs Bool",
     )
 
     @Test

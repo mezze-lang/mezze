@@ -30,7 +30,7 @@ class ComparisonAbilityConstraintTest {
         val eqType = typedProgram.getVariableType("eq")
         assertTrue(eqType is MezzeType.FunctionType)
         val functionType = eqType as MezzeType.FunctionType
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, functionType.returnType)
     }
     
@@ -46,7 +46,7 @@ class ComparisonAbilityConstraintTest {
         val neqType = typedProgram.getVariableType("neq")
         assertTrue(neqType is MezzeType.FunctionType)
         val functionType = neqType as MezzeType.FunctionType
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, functionType.returnType)
     }
     
@@ -62,7 +62,7 @@ class ComparisonAbilityConstraintTest {
         val ltType = typedProgram.getVariableType("lt")
         assertTrue(ltType is MezzeType.FunctionType)
         val functionType = ltType as MezzeType.FunctionType
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, functionType.returnType)
     }
     

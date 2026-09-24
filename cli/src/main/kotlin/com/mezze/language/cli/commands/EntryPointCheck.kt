@@ -134,7 +134,6 @@ object EntryPointCheck {
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
         is MezzeType.StringType -> "Str"
-        is MezzeType.BoolType -> "Bool"
         is MezzeType.RecordType -> {
             val visible = type.fields.filterKeys { !com.mezze.language.ast.MagicParams.isMagic(it) }
             if (visible.isEmpty() && type.isClosed) "{}"
@@ -151,6 +150,9 @@ object EntryPointCheck {
             "$params -> $returns$effects"
         }
         is MezzeType.VarType -> "'${type.variable.name}"
+        // A named variant — Bool among them, since it is a builtin variant rather
+        // than a primitive — renders as its name, not as a Kotlin toString.
+        is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: type.toString()
         else -> type.toString()
     }
 }

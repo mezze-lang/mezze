@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.compiler
 
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.truffleir.PrintType
 
 /**
@@ -78,11 +79,17 @@ class PrintTypeBuilder(private val typeDefs: Map<String, MezzeType>) {
         return PrintType.Recursive(defs.filterKeys { it in referenced }, root)
     }
 
-    private fun buildShape(type: MezzeType): PrintType = when (type) {
+    private fun buildShape(type: MezzeType): PrintType {
+        // Bool prints as a scalar, not as its two constructors — it is a builtin
+        // variant, so it has to be caught before the variant arm below.
+        if (PrimitiveTypes.isBoolVariant(type)) return PrintType.Scalar(PrintType.ScalarKind.Bool)
+        return buildShapeOfNonBool(type)
+    }
+
+    private fun buildShapeOfNonBool(type: MezzeType): PrintType = when (type) {
         is MezzeType.IntType -> PrintType.Scalar(PrintType.ScalarKind.Int)
         is MezzeType.FloatType -> PrintType.Scalar(PrintType.ScalarKind.Float)
         is MezzeType.StringType -> PrintType.Scalar(PrintType.ScalarKind.Str)
-        is MezzeType.BoolType -> PrintType.Scalar(PrintType.ScalarKind.Bool)
         is MezzeType.CharType -> PrintType.Scalar(PrintType.ScalarKind.Char)
         is MezzeType.BytesType -> PrintType.Scalar(PrintType.ScalarKind.Bytes)
 

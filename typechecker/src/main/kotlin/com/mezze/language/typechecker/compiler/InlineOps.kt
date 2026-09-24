@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.compiler
 import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.truffleir.InlineBinaryOpIR
 import com.mezze.language.truffleir.InlineOp
 import com.mezze.language.truffleir.MakeRecordIR
@@ -35,13 +36,22 @@ internal val inlineableOps = setOf(
 )
 
 private val primitiveTypes = setOf(
-    IntType::class, FloatType::class, BoolType::class,
+    IntType::class, FloatType::class,
     StringType::class, CharType::class, FracType::class
 )
 
+/**
+ * Bool inlines like a primitive even though it is a VARIANT in the type system —
+ * `and`/`or`/`not`/`eq` on it are answered by an inline node over a machine
+ * boolean. It cannot be listed in [primitiveTypes] because keying on the Kotlin
+ * class would catch every variant, so it is asked for by shape.
+ */
+private fun inlinesAsPrimitive(type: MezzeType): Boolean =
+    type::class in primitiveTypes || PrimitiveTypes.isBoolVariant(type)
+
 internal fun tryInlineOp(methodName: String, receiverType: MezzeType): InlineOp? {
     if (methodName !in inlineableOps) return null
-    if (receiverType::class !in primitiveTypes) return null
+    if (!inlinesAsPrimitive(receiverType)) return null
     return when (methodName) {
         "add" -> InlineOp.ADD
         "sub" -> InlineOp.SUB

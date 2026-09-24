@@ -189,7 +189,7 @@ class InherentImplTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(MezzeType.BoolType, result.getVariableType("result"))
+        assertEquals(PrimitiveTypes.BOOL_TYPE, result.getVariableType("result"))
     }
 
     @Test

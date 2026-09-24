@@ -255,7 +255,6 @@ internal class VariantSolver(
                 variantType, constructorName, expectedPayloadType,
                 constraint.isPatternContext, currentSubst
             )
-            is MezzeType.BoolType -> solveBoolConstructor(constructorName, expectedPayloadType)
             is MezzeType.VariantType -> solveConstructorOnVariant(
                 variantType, constructorName, expectedPayloadType,
                 currentSubst, originalConstraint
@@ -269,24 +268,13 @@ internal class VariantSolver(
         }
     }
 
-    private fun solveBoolConstructor(
-        constructorName: String,
-        expectedPayloadType: MezzeType?
-    ): ConstraintSolver.ConstraintResult {
-        if (constructorName != BuiltinTypes.TRUE && constructorName != BuiltinTypes.FALSE) {
-            return ConstraintSolver.ConstraintResult.Failure(
-                "Bool type only has constructors 'True' and 'False', not '$constructorName'",
-                code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
-            )
-        }
-        if (expectedPayloadType != null) {
-            return ConstraintSolver.ConstraintResult.Failure(
-                "Constructor '$constructorName' does not have a payload",
-                code = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD,
-            )
-        }
-        return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-    }
+    // `solveBoolConstructor` stood here to answer `True`/`False` against a Bool
+    // SCRUTINEE, because Bool used to arrive as a primitive `BoolType` with no
+    // constructor map to consult. Bool is a variant now, so `True` against it is
+    // an ordinary constructor lookup and `solveConstructorOnVariant` answers it —
+    // including the unknown-constructor and unexpected-payload rejections this
+    // used to duplicate. Only the on-a-VARIABLE case below is still special: there
+    // is no variant yet to look anything up in.
 
     private fun solveBoolConstructorOnVar(
         constructorName: String,
@@ -628,7 +616,6 @@ internal class VariantSolver(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BoolType,
             is MezzeType.FracType,
             is MezzeType.BytesType,
             is MezzeType.CharType,

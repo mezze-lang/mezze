@@ -1124,7 +1124,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         is MezzeType.RecordType -> t.identity is TypeIdentity.Declared
         is MezzeType.VariantType -> t.identity is TypeIdentity.Declared
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.FracType,
+        is MezzeType.FracType,
         is MezzeType.CharType, is MezzeType.BytesType -> true
         else -> false
     }

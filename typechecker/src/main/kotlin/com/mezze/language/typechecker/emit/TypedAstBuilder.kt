@@ -926,9 +926,9 @@ class TypedAstBuilder(
             }
             is ParsedVariantConstruct -> {
                 if (expr.constructor == BuiltinTypes.TRUE && expr.value == null) {
-                    TypedBoolLit(true, MezzeType.BoolType, loc)
+                    TypedBoolLit(true, PrimitiveTypes.BOOL_TYPE, loc)
                 } else if (expr.constructor == BuiltinTypes.FALSE && expr.value == null) {
-                    TypedBoolLit(false, MezzeType.BoolType, loc)
+                    TypedBoolLit(false, PrimitiveTypes.BOOL_TYPE, loc)
                 } else {
                     val payload = expr.value?.let { buildExpr(it, file) }
                     // #182: prefer the constraint generator's per-loc inferred
@@ -1190,7 +1190,7 @@ class TypedAstBuilder(
                 TypedRecord(entries, recordType, loc)
             }
             is ParsedIf -> {
-                val cond = buildExpr(expr.condition, file, MezzeType.BoolType)
+                val cond = buildExpr(expr.condition, file, PrimitiveTypes.BOOL_TYPE)
                 val thenBranch = buildExpr(expr.thenBranch, file, contextType)
                 val elseBranch = buildExpr(expr.elseBranch, file, thenBranch.type)
                 TypedIf(cond, thenBranch, elseBranch, thenBranch.type, loc)
@@ -2175,9 +2175,9 @@ class TypedAstBuilder(
 
         val caseGuard = case.guard
         val guard = if (caseGuard != null) {
-            buildExpr(caseGuard, file, MezzeType.BoolType)
+            buildExpr(caseGuard, file, PrimitiveTypes.BOOL_TYPE)
         } else if (case.ifLetBindings.isNotEmpty()) {
-            TypedBoolLit(true, MezzeType.BoolType, case.loc)
+            TypedBoolLit(true, PrimitiveTypes.BOOL_TYPE, case.loc)
         } else {
             null
         }
@@ -2312,9 +2312,9 @@ class TypedAstBuilder(
             is ParsedWildcardPattern -> TypedWildcardPattern(unknownType, loc)
             is ParsedConstructorPattern -> {
                 if (pattern.constructor == BuiltinTypes.TRUE && pattern.payload == null) {
-                    TypedLiteralPattern(TypedBoolLit(true, MezzeType.BoolType, loc), MezzeType.BoolType, loc)
+                    TypedLiteralPattern(TypedBoolLit(true, PrimitiveTypes.BOOL_TYPE, loc), PrimitiveTypes.BOOL_TYPE, loc)
                 } else if (pattern.constructor == BuiltinTypes.FALSE && pattern.payload == null) {
-                    TypedLiteralPattern(TypedBoolLit(false, MezzeType.BoolType, loc), MezzeType.BoolType, loc)
+                    TypedLiteralPattern(TypedBoolLit(false, PrimitiveTypes.BOOL_TYPE, loc), PrimitiveTypes.BOOL_TYPE, loc)
                 } else {
                     val payload = pattern.payload?.let { buildPattern(it, file) }
                     TypedVariantPattern(pattern.constructor, payload, unknownType, loc)
@@ -2335,7 +2335,7 @@ class TypedAstBuilder(
                     is ParsedLiteralValue.FloatValue -> TypedFloatLit(v.value, MezzeType.FloatType, loc)
                     is ParsedLiteralValue.StringValue ->
                         TypedStringLit(listOf(TypedStringPart.Literal(v.value)), MezzeType.StringType, loc)
-                    is ParsedLiteralValue.BoolValue -> TypedBoolLit(v.value, MezzeType.BoolType, loc)
+                    is ParsedLiteralValue.BoolValue -> TypedBoolLit(v.value, PrimitiveTypes.BOOL_TYPE, loc)
                 }
                 TypedLiteralPattern(value, value.type, loc)
             }

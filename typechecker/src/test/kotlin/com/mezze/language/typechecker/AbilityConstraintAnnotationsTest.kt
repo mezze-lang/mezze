@@ -210,9 +210,7 @@ class AbilityConstraintAnnotationsTest {
         assertNotNull(program)
 
         val funcType = program.getVariableType("areEqual") as MezzeType.FunctionType
-        val isBoolType = funcType.returnType is MezzeType.BoolType ||
-            (funcType.returnType is MezzeType.TypeApplication &&
-             (funcType.returnType as MezzeType.TypeApplication).constructor == "Bool") ||
+        val isBoolType = funcType.returnType == PrimitiveTypes.BOOL_TYPE ||
             (funcType.returnType is MezzeType.VariantType &&
              (funcType.returnType as MezzeType.VariantType).constructors.containsKey("True") &&
              (funcType.returnType as MezzeType.VariantType).constructors.containsKey("False"))

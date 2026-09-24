@@ -61,7 +61,7 @@ class ConstraintPropagationTest {
         // Both results should be Boolean
         val result1Type = result.getVariableType("result1")
         val result2Type = result.getVariableType("result2")
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, result1Type)
         assertEquals(boolType, result2Type)
     }
@@ -102,7 +102,7 @@ class ConstraintPropagationTest {
 
         // Result should be Boolean
         val resultType = result.getVariableType("result")
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, resultType)
     }
 
@@ -124,7 +124,7 @@ class ConstraintPropagationTest {
         val addAndCheckType = result.getVariableType("addAndCheck")
         assertTrue(addAndCheckType is MezzeType.FunctionType)
         val functionType = addAndCheckType as MezzeType.FunctionType
-        val boolType = MezzeType.BoolType
+        val boolType = PrimitiveTypes.BOOL_TYPE
         assertEquals(boolType, functionType.returnType)
     }
 

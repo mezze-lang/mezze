@@ -148,13 +148,19 @@ internal fun isOpaqueWall(type: MezzeType): Boolean = when {
  * and as a stdlib declaration. Two walls that are the same type must unify even when
  * they arrive wearing different identity kinds.
  *
- * MEASURED across the typechecker suite: 2636 pairs reach this and answer SAME where
- * [sameDeclaredIdentity] alone would answer no — 1767 `Bool`, 603 `Result`, 266
- * `Option`, and nothing else. That is the whole population. So this is not a general
- * name-based identity rule that happens to be narrow; it is exactly the dual-
- * representation problem, and it disappears the day those three types have one
- * representation each. Whoever unifies them should expect this function to go with
- * them — and should expect 2636 unifications to route through the change.
+ * MEASURED across the typechecker suite: 2636 pairs reached this and answered SAME
+ * where [sameDeclaredIdentity] alone would answer no — 1767 `Bool`, 603 `Result`,
+ * 266 `Option`, and nothing else. That was the whole population. So this is not a
+ * general name-based identity rule that happens to be narrow; it is exactly the
+ * dual-representation problem, and each type leaves it when it stops having two
+ * representations.
+ *
+ * Bool has now left: it is one value, [PrimitiveTypes.BOOL_TYPE], and a re-measure
+ * over the same tests counts ZERO Bool pairs here where there were 1767. What
+ * remains is `Option` and `Result`, which are PARAMETRIC — they are genuinely
+ * spelled both as `TypeApplication(Option, ['a])` and as their variant shape — so
+ * collapsing them is a different job from Bool's, not the same one repeated. This
+ * function goes away with the last of them.
  */
 private fun sameBuiltinSeenBothWays(id1: TypeIdentity, id2: TypeIdentity): Boolean {
     // Same-kind pairs are [sameDeclaredIdentity]'s business, not this one's.
@@ -209,16 +215,10 @@ fun unify(type1: MezzeType, type2: MezzeType, registry: DeclarationRegistry = De
 }
 
 private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationRegistry): UnificationResult {
-    if (type1 is MezzeType.BoolType && type2 is MezzeType.VariantType) {
-        if (BuiltInAbilities.isBoolVariant(type2)) {
-            return UnificationResult.Success(Substitution.empty)
-        }
-    }
-    if (type1 is MezzeType.VariantType && type2 is MezzeType.BoolType) {
-        if (BuiltInAbilities.isBoolVariant(type1)) {
-            return UnificationResult.Success(Substitution.empty)
-        }
-    }
+    // Two hand-written Bool bridges used to sit here, one per direction, teaching
+    // unification that `MezzeType.BoolType` and a `| True, False |` variant were the
+    // same type. Bool has ONE representation now (PrimitiveTypes.BOOL_TYPE), so the
+    // `type1 == type2` fast path in `unify` answers every case they did.
     when {
         type1 is MezzeType.VariantType && type2 is MezzeType.TypeApplication -> {
             val expanded = expandTypeApplicationToVariant(type2, registry)
@@ -336,7 +336,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.IntType && type2 is MezzeType.IntType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FloatType && type2 is MezzeType.FloatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.StringType && type2 is MezzeType.StringType -> UnificationResult.Success(Substitution.empty)
-        type1 is MezzeType.BoolType && type2 is MezzeType.BoolType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> UnificationResult.Success(Substitution.empty)
 
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
@@ -1481,6 +1480,16 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     // constructors without telling the derive machinery anything new. Deleting it is
     // part of making a container's derived Eq element-aware (#34/T1.4).
     BuiltinTypes.listElementType(typeApp)?.let { return BuiltinTypes.listVariantShape(it) }
+
+    // Bool, answered here for the same reason as List directly above. It DOES have
+    // a declaration — `ContextBuilder` injects one so `True` and `False` resolve as
+    // constructors — but expanding through it would stamp the result with that
+    // declaration's content hash, i.e. a DECLARED identity, and put a second Bool
+    // back into circulation for unification to bridge by name. There is one Bool,
+    // and this is it.
+    if (typeApp.constructor == PrimitiveTypes.BOOL && typeApp.args.isEmpty()) {
+        return PrimitiveTypes.BOOL_TYPE
+    }
 
     val typeDecl = declarationFor(typeApp, registry)
         ?: return builtinVariantShape(typeApp)
