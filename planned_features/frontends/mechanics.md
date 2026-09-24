@@ -132,32 +132,27 @@ Frontends being ordinary dependencies means hash pinning, version resolution and
 - `resolveModuleFile` must learn the extra suffixes; today `a::b` maps to
   `src/a/b.mz` only.
 
-## 3. How does a file say which syntax it is?
+## 3. How does a file say which syntax it is? — the glob already said it
 
-Two mechanisms, and they are not equivalent.
+**Extension only. There is no in-file directive, and `#lang` is not needed.**
 
-### By extension — `foo.lisp.mz`
+An earlier draft proposed `#lang lisp` alongside the glob. That was redundant:
+if `Mezze.toml` maps `*.lisp.mz` to a parser, the file has already declared its
+syntax by being named that. A second mechanism would only create the question of
+which wins.
 
-Needs `resolveModuleFile` to learn additional suffixes; today the module path
-`a::b` maps to `src/a/b.mz`. Extension-based is unambiguous, visible in a
-directory listing, and lets editors pick a highlighter by filename — which
-matters, since every editor integration keys off the extension.
+It is also the safer half of the supply-chain tension in `README.md` §3 — with
+configuration-only binding, a pulled file cannot change how it is parsed.
 
-### By directive — `#lang lisp`
+What this does need: `resolveModuleFile` learning additional suffixes, since
+`a::b` maps to `src/a/b.mz` today. Extension-based binding is also what every
+editor integration keys off, so it is the form that makes highlighting possible
+at all.
 
-**This token is available.** The lexer defines
-`line_comment: token(seq('#', optional(/[ \t][^\n]*/)))` — `#` alone or `# text`
-is a comment, `##` and `#{` win as longer tokens, and **`#foo` with no space
-matches nothing**. So `#lang` is currently a lexical error, not a comment, which
-means it can be claimed as a new token with no ambiguity and no risk of a file
-silently parsing two ways.
-
-That is a small, lucky piece of design headroom. Racket's `#lang` works for the
-same reason — `#` is not its comment character either.
-
-**Recommendation:** extension for the file-type cases (`.html.mz`), directive for
-alternative whole-language syntax, because a `.mz` file that is Lisp inside is
-better announced in its first line than in its name.
+(For the record, `#lang` *would* have been available — the lexer is
+`token(seq('#', optional(/[ \t][^\n]*/)))`, so `#` or `# text` is a comment,
+`##`/`#{` win as longer tokens, and `#foo` with no space matches nothing. Noted
+only so nobody re-derives it as a reason to add the directive.)
 
 ## 4. How do frontends and macros end up being one thing?
 
@@ -179,31 +174,77 @@ All three are **Mezze functions over Mezze AST types**, so "the host" is: resolv
 a function reference, call it through the runtime, decode the CBOR it returns.
 The scopes differ only in what is passed in and what shape comes back.
 
-### Per-file macros, named the same way
+### Macros need no per-file mechanism at all
 
-The same function-reference mechanism gives per-file macro sets without a new
-concept:
-
-```toml
-["src/queries/**"]
-macros = ["mezze-sql-syntax::sql", "mezze-sql-syntax::migration"]
-```
-
-or in the file itself, next to `#lang`:
+An earlier draft invented `#use-macros` and a `[macros]` glob table. **Both were
+unnecessary.** A macro is a *name*. It comes into scope the way every other name
+does:
 
 ```mezze
-#use-macros mezze_sql::sql
+use mezze_html::{ html }
+
+let page = html!(<div>hello</div>)
 ```
 
-A macro is then just a Mezze function the file has asked to be in scope at
-expansion time — which is the same sentence as "a frontend is a Mezze function
-the file has asked to parse it", one scope down.
+`use` to import, `!()` to expand — and `!()` is already the designed expansion
+operator (`../macros/04_SYNTAX_EXPANSION.md`). Nothing new is required.
 
-**The one asymmetry:** a frontend runs *before* parsing, so it cannot itself be
-written in the syntax it defines. A macro runs *during* expansion of an
-already-parsed file, so it can be written in any syntax, including one produced
-by a frontend. Worth knowing before someone tries to bootstrap a syntax out of
-its own macros.
+### Macros are a *Mezze-syntax* concept
+
+This is the simplification that removes the rest of the machinery. A macro
+invocation is written in Mezze's surface syntax, so it only has to exist there.
+A Lisp frontend defines whatever invocation form Lisp wants; an HTML frontend
+may have no macro concept at all. **The host language of a file decides how
+macros are spelled in it**, and that is the frontend author's problem, not the
+compiler's.
+
+Consequences: no declaration-scope syntax marker is needed, and the earlier
+"one mechanism at three scopes" table over-generalised. There are two:
+
+| scope | how | who defines the spelling |
+|---|---|---|
+| expression | `html!(…)` in a `.mz` file | Mezze — the `!()` operator |
+| file | `*.mz.html` glob in `Mezze.toml` | configuration, no syntax at all |
+
+### One parser, two entry points
+
+The unification worth having is that **the same Mezze code** — an HTML-to-AST
+converter — serves both:
+
+```toml
+"*.mz.html" = "custom_html_preprocessor::html"   # whole file
+```
+```mezze
+use custom_html_preprocessor::{ html }
+let page = html!(<div>…</div>)                    # one expression
+```
+
+The parsing logic is written once. The two uses differ in signature — expression
+scope returns `Expr`, file scope returns declarations — so a package exposes two
+thin entry points over one parser rather than literally one function.
+
+**Unless macros gain declaration scope**, in which case file scope *is* a
+declaration-scope macro applied to the whole file, and it collapses to one
+mechanism. The current design returns `Expr` only
+(`macro sql: {tokens: TokenStream} -> Expr`), so this is a choice still open —
+and worth making deliberately, because it is the difference between two
+mechanisms and one.
+
+### Why not `#{ macro: True }`
+
+Reusing metadata to declare a macro is tempting — no new keyword, syntax already
+parsed — but it breaks metadata's own contract. `metadata.md` is explicit that
+metadata is *"information **about** code, not code itself"*, that it *"does not
+change runtime behavior"*, and that it is **excluded from the content hash**.
+
+A macro declaration is semantic: it changes what the code compiles to. Declaring
+it in metadata would either make metadata semantic — losing the property that a
+rendering hint can never invalidate a cache — or leave a semantic declaration
+outside the hash, so two modules that compile differently would hash the same.
+
+Hash exclusion is load-bearing elsewhere: **verifiable syntax migration**
+(`README.md`) depends on hashes ignoring everything that is not meaning. The
+existing `macro` keyword keeps that intact and costs one word.
 
 ## 5. Mezze as the frontend language — and why it is the *best* option
 
