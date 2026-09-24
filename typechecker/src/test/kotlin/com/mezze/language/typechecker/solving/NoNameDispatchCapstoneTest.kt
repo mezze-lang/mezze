@@ -162,4 +162,83 @@ class NoNameDispatchCapstoneTest {
             "receiver hashC shares the NAME 'Widget' with the hashA impl but not its hash — must NOT dispatch",
         )
     }
+
+    // ---- the ability the SOURCE named at the call site ----
+
+    /**
+     * `Weigh.rank { it = x }` names its ability, and that is the answer — not a
+     * hint to be weighed against the other ability that also declares `rank`.
+     *
+     * This was the last deferral in the S2.2 pass. The qualifier is not visible
+     * on the receiver by the time a bucket is recorded: `Ability.op { it = … }`
+     * desugars to a method call on the `it` ARGUMENT, so the receiver is `x` and
+     * never `Weigh` — a narrowing that looked there fired zero times. The name is
+     * resolved to its declaration's HASH at generation, where the scope to
+     * resolve it in is still known, and the bucket carries that.
+     */
+    @Test
+    fun `an explicitly qualified call dispatches to the named ability, not the other one`() {
+        val receiver = MezzeType.RecordType(
+            mapOf("kg" to MezzeType.IntType),
+            identity = TypeIdentity.Declared(hashA, "Item"),
+        )
+        val price = ResolutionCandidate(
+            opHash = opHashWidgetA, kind = ResolutionKind.Ability, displayName = "Price",
+        )
+        val weigh = ResolutionCandidate(
+            opHash = opHashWidgetB, kind = ResolutionKind.Ability, displayName = "Weigh",
+        )
+        val loc = Loc("cap.mz", 4, 1, 4, 8)
+
+        val resolution = DispatchResolver.resolveDispatch(
+            buckets = listOf(
+                MethodResolveBucket(loc, "rank", receiver, listOf(price, weigh),
+                    explicitAbilityHash = opHashWidgetB)
+            ),
+            substitution = Substitution.empty,
+            methodCallResolutions = emptyMap(),
+            typingContext = TypingContext.empty,
+        )[loc]
+
+        assertNotNull(resolution, "a qualified call is not ambiguous — it must resolve, not defer")
+        assertEquals(
+            opHashWidgetB, resolution.opHash,
+            "must dispatch to the ability the source NAMED, not to the other one declaring `rank`",
+        )
+    }
+
+    /**
+     * The control. Without the qualifier the SAME two candidates are a genuine
+     * same-op collision, and this pass defers rather than guessing — so the test
+     * above is not passing merely because one candidate happens to win.
+     */
+    @Test
+    fun `the same two candidates UNQUALIFIED defer instead of guessing`() {
+        val receiver = MezzeType.RecordType(
+            mapOf("kg" to MezzeType.IntType),
+            identity = TypeIdentity.Declared(hashA, "Item"),
+        )
+        val loc = Loc("cap.mz", 5, 1, 5, 8)
+
+        val resolutions = DispatchResolver.resolveDispatch(
+            buckets = listOf(
+                MethodResolveBucket(
+                    loc, "rank", receiver,
+                    listOf(
+                        ResolutionCandidate(opHashWidgetA, ResolutionKind.Ability, displayName = "Price"),
+                        ResolutionCandidate(opHashWidgetB, ResolutionKind.Ability, displayName = "Weigh"),
+                    ),
+                )
+            ),
+            substitution = Substitution.empty,
+            methodCallResolutions = emptyMap(),
+            typingContext = TypingContext.empty,
+        )
+
+        assertNull(
+            resolutions[loc],
+            "two distinct ability ops sharing `rank` with nothing to choose between them must " +
+                "DEFER to the ladder, not pick one",
+        )
+    }
 }

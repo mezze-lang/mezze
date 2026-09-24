@@ -924,7 +924,10 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                         loc = expr.loc
                     )
                     val qualifiedContext = context.copy(
-                        annotationAbilityNames = setOf(receiverName)
+                        annotationAbilityNames = setOf(receiverName),
+                        // The receiver becomes `it` below, so this is the last
+                        // point at which the written qualifier exists at all.
+                        explicitAbilityQualifier = receiverName,
                     )
                     val methodResult = tryGenerateMethodCall(
                         syntheticCall,

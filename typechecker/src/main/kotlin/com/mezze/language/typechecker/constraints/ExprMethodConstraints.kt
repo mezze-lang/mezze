@@ -942,6 +942,8 @@ internal fun ExpressionConstraintGenerator.recordMethodResolveBucket(
             methodName = methodName,
             receiverType = receiverType,
             candidates = candidates,
+            explicitAbilityHash = context.explicitAbilityQualifier
+                ?.let { context.abilityDeclarations[it]?.contentHash },
         )
     )
 }

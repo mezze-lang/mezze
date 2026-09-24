@@ -352,6 +352,17 @@ data class MethodResolveBucket(
     val methodName: String,
     val receiverType: MezzeType,
     val candidates: List<ResolutionCandidate>,
+    /**
+     * The content hash of the ability the source NAMED at this call site, when it
+     * named one. A HASH and not the name: the name is resolved to the declaration
+     * it denotes once, here, where the scope to resolve it in is still known —
+     * so the consumer compares identities like every other candidate decision and
+     * never re-matches a string.
+     *
+     * Null when the call is unqualified, or when the named ability has no content
+     * hash to resolve to.
+     */
+    val explicitAbilityHash: Hash? = null,
 )
 
 data class ConstraintResult(
@@ -621,6 +632,21 @@ data class ConstraintContext(
     val inTailPosition: Boolean = false,
     // Empty set means no user-driven preference (#304).
     val annotationAbilityNames: Set<String> = emptySet(),
+    /**
+     * The ability the SOURCE named at this call site — the `Weigh` in
+     * `Weigh.rank { it = x }` — or null when the call is unqualified.
+     *
+     * Deliberately NOT [annotationAbilityNames], which carries a different claim:
+     * the abilities mentioned in an enclosing binding's type annotation, a hint
+     * about what the author probably meant. This one is what the author WROTE at
+     * the call, so a consumer may treat it as decisive. Conflating them would let
+     * a hint decide a dispatch.
+     *
+     * Set only where the `Ability.op { it = … }` form is desugared to a method
+     * call on `it` — after which the receiver is the argument and the qualifier
+     * is recoverable from nowhere else.
+     */
+    val explicitAbilityQualifier: String? = null,
     // #86 case-A shadowing: the enclosing lambda's PARAM names. A do-block `let`
     // that reuses one of these is a same-scope re-bind of a param (hard error),
     // the same class of mistake as a duplicate lambda param (#79). Reset at each

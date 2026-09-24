@@ -233,7 +233,17 @@ object DispatchResolver {
                 if (implMatches.isNotEmpty()) implMatches else ability
             } else ability
 
-            val distinctOps = narrowed.map { it.opHash }.distinct()
+            // The author named an ability at this call site (`Weigh.rank { it = x }`).
+            // That is not a hint to weigh against the others — it is the answer, so
+            // it is applied before ambiguity is even considered. Compared by HASH:
+            // the written name was resolved to its declaration once, at generation,
+            // where the scope to resolve it in was still known.
+            val qualified = bucket.explicitAbilityHash
+                ?.let { q -> narrowed.filter { it.opHash == q } }
+                ?.takeIf { it.isNotEmpty() }
+                ?: narrowed
+
+            val distinctOps = qualified.map { it.opHash }.distinct()
             if (distinctOps.size > 1) {
                 // ≥2 DISTINCT ability ops share this method name and BOTH have an
                 // impl targeting the concrete receiver (e.g. the pure `Sized.size`
@@ -274,14 +284,29 @@ object DispatchResolver {
                 // its candidates from the method NAME, admitting every ability that
                 // declares `rank`.
                 //
-                // MEASURED: narrowing the bucket by an ability-named receiver was
-                // tried and fires zero times, precisely because the receiver is `x`
-                // and not `Weigh`. Closing this needs the qualifier threaded from
-                // the ability-op call site down to bucket recording — a change to
-                // what the bucket carries, not a filter over what it already has.
+                // MEASURED AGAIN after the qualifier was threaded: ZERO deferrals
+                // across both suites, down from 2 and before that from 35. The two
+                // that remained were `receiver=Item, abilities=[Price, Weigh]` from
+                // DictKeyAbilityCollisionTest, and they were never ambiguous — the
+                // calls are written `Weigh.rank { it = x }`. The qualifier was not
+                // missing, it was being looked for in the wrong place: the receiver
+                // is rewritten to the `it` argument, so it is `x` and never `Weigh`,
+                // but the ability the author named survives on the context and is
+                // now resolved to its hash and carried on the bucket.
+                //
+                // What can still reach here is the case that is genuinely ambiguous:
+                // two DISTINCT ability ops sharing a method name, both implemented
+                // for this receiver, at an UNQUALIFIED call. No occurrence of that
+                // is known. It stays a deferral rather than an error because this
+                // pass does not decide dispatch yet — the ladder does, and it
+                // disambiguates by the call's effect signature, which is not a
+                // function of the receiver's type identity and so is not something
+                // a hash-keyed rule can reproduce. Making it an error is S2.3's
+                // call, once the ladder is gone and there is nothing left to
+                // disagree with.
                 return null
             }
-            val opHash = narrowed.first().opHash ?: return null
+            val opHash = qualified.first().opHash ?: return null
             return Resolution(
                 opHash = opHash,
                 receiverTypeIdentity = receiverIdentity ?: solvedReceiverAnyIdentity(solvedReceiver),
