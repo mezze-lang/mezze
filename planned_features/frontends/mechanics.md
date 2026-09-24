@@ -5,48 +5,74 @@ Concrete answers, grounded in what the tree already has. Companion to
 
 ## 1. What language can a frontend be written in?
 
-### Not arbitrary JVM code — the shipped `mez` forbids it
+**Mezze.** A frontend is a Mezze function. Everything else in this section is
+why the alternatives are worse, kept short because they are not the plan.
 
-`~/.mezze/bin/mez` is a **native image** (ELF, no `libjvm`, no child JVM).
-Native Image closes the world at build time, so it cannot load a Java or Kotlin
-class it did not know about when it was built. "A Java-written function" is
-viable for a JVM-hosted build path and **not** for the binary users install.
-Deciding this early matters, because it rules out the most obvious design.
+### The AST maps onto Mezze's own data constructs exactly
 
-### WASM — the strong answer, and it is already wired in
+This is the fact that makes it work, and it is not a coincidence — both sides
+are describing algebraic data:
 
-`polyglot-wasm-natives/` exists, and GraalWasm is registered as a language on
-the running engine (`RuntimeServer` and `EmbeddedExec` both add `"wasm"` to the
-enabled languages when polyglot is on).
+| `parsedast` (Kotlin) | count | Mezze |
+|---|---|---|
+| sealed hierarchies | **15** | closed variants |
+| data classes | **74** | records |
 
-That makes WASM the natural frontend format:
+Records have named fields; so do the data classes. Closed variants enumerate
+their constructors; so do the sealed types. There is no impedance mismatch to
+design around — the AST **raises to Mezze data structures** directly.
 
-- **Language-agnostic** — write the frontend in Rust, Zig, C, AssemblyScript,
-  or eventually Mezze compiled to wasm.
-- **Sandboxed by construction** — which answers §3 of `README.md` without
-  inventing a sandbox. A frontend gets no filesystem and no network unless
-  granted.
-- **Works from the native binary** — no dynamic JVM class loading needed.
-- **Precedent in this repo** — the Zed extension is exactly this shape, a
-  `wasm32-wasip1` component with a declared entry point.
+### The serialisation boundary already exists
 
-### JS and Python — available today
+`StoreSerialization.serializeParsedModule` / `deserializeParsedModule` are
+**CBOR**, and they run on every store write today. A Mezze frontend builds a
+value of the Mezze `ParsedModule` type; the boundary encodes it; the compiler
+decodes it with the function it already calls. **No new wire format, no new
+serialisation code** — the path is exercised on every compile already.
 
-`polyglot-js-natives/` and `polyglot-python-natives/` exist on the same
-mechanism. A frontend written in Python is plausible with what is already built.
-Slower to start than WASM, easier to write.
+### Effects are the sandbox, and they self-police
 
-### Subprocess — the simplest thing that works
+```mezze
+{source: Str, file: Str} -> ParseResult
+```
 
-`mez` runs `my-frontend path/to/file`, the process writes a serialised
-`ParsedModule` on stdout, `mez` deserialises it. Any language, no host
-integration, OS-level sandboxing, trivial to debug.
+An **empty effect row** is a typechecker proof that the frontend cannot read the
+filesystem, open a socket, or read the clock. Static, checkable before anything
+runs — so `mez add` can reject a frontend that declares effects a parser has no
+business having. The rule is legible: *a parser is a pure function from text to
+AST.*
 
-Cost is a process per file — but that is exactly what the **changeset**
-primitive amortises: one process invocation per batch rather than per file.
+This also dissolves the "what about parsers written in other languages"
+question. A frontend that shells out to an existing Rust parser **declares the
+effect that lets it**, and is then visibly not pure. No separate subprocess-
+frontend mechanism is needed; the escape hatch falls out of the effect system,
+and it announces itself.
 
-**Recommendation:** subprocess for the prototype, WASM for the real thing. The
-wire format is the same either way, so the choice is not load-bearing.
+### Native image is not a blocker — the asymmetry that matters
+
+`~/.mezze/bin/mez` is a native image (ELF, no `libjvm`). Native Image closes the
+world at build time, so it **cannot load a Java or Kotlin class** it did not know
+about. That rules out JVM plugins for the binary users install.
+
+It does not touch Mezze. **Mezze code is not a class — it is data to the Truffle
+interpreter**, and `mez dev` already loads and runs Mezze at runtime inside that
+same native binary. Mezze is the one plugin format the shipped binary can
+already load.
+
+### Why not WASM
+
+WASM was the previous recommendation here and it was the wrong instinct: it
+reaches for *runtime containment* to get a property the **type system already
+proves statically**, and it pays for that with the whole polyglot apparatus —
+GraalWasm on the engine, a foreign toolchain to build frontends, and a foreign
+ABI at the boundary instead of Mezze values.
+
+`polyglot-wasm-natives/` exists and GraalWasm is registered when polyglot is on,
+so it remains *possible*. It is simply not better than the language's own
+functions at anything that matters here, and it is worse at ecosystem: a Mezze
+frontend is a **Mezze package**, installed with `mez add`, versioned and
+hash-pinned like any dependency. That is the ecosystem, and it needs no new
+distribution story.
 
 ## 2. How is it passed to the toolchain?
 
@@ -192,12 +218,11 @@ This is the same insight as effects gating tool-initiated execution
 3. **A warm runtime.** Interpreter startup per parse is the real cost. The
    daemon already exists to amortise exactly this.
 
-### Revised recommendation
+### Recommendation
 
-Mezze first, not last. Subprocess and WASM remain useful for frontends written
-in other languages — and the SPI makes them the same plug — but the language's
-own effect system gives a safety property no external format can, and the native
-binary can load Mezze when it cannot load a JVM class.
+Frontends are Mezze functions, distributed as Mezze packages. A frontend needing
+a foreign parser declares the effect to call one, which keeps the escape hatch
+available and visible rather than building a second plugin system for it.
 
 ## 6. How does comptime still fit?
 
