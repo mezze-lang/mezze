@@ -285,12 +285,23 @@ returns the generated impls. Same function type, same host, no variants.
 
 They are preprocessor functions.
 
-**Open question this forecloses:** expression-position use — `let page =
-html!(<div>…</div>)` — does not fit `-> [Decl]`. Either macros are
-declaration-only (simplest, and covers file preprocessing and derives, which are
-the motivating cases), or expression position needs a lowering rule, e.g. the
-expansion introduces a declaration and the call site refers to it. Worth
-deciding explicitly rather than letting the signature decide by omission. Nothing is claimed about the generated code's
+**And it already covers expression position**, because an expression *is* a
+declaration in this AST:
+
+```kotlin
+data class ParsedTopLevelExpr(val expression: ParsedExpr, …) : ParsedDecl
+```
+
+So a macro used in expression position returns a single-element list holding a
+`ParsedTopLevelExpr`, and the expander unwraps `.expression` and splices it at
+the call site. One signature genuinely serves every scope — no lowering rule, no
+second variant, no open question.
+
+The wrapper's ordinary fate is rejection (a bare top-level expression is
+V0710), which does not conflict: at expression position it is unwrapped before
+anything validates it, and at declaration position a macro returning one is
+*correctly* rejected — a bare expression is not a declaration you can put at
+module level. Nothing is claimed about the generated code's
 type, so nothing can disagree with it — a whole class of "the macro declared X
 and produced Y" errors simply does not exist.
 
