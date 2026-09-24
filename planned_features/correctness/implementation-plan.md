@@ -119,7 +119,33 @@ suggest.
 This is where the design's central claim is actually cashed: a library sees the
 signature, sample sees the implementation.
 
-## Stage 7 — LSP
+## Stage 7 — LSP (needs an execution channel it does not have)
+
+**The language server cannot run Mezze code.** `lsp/build.gradle.kts` depends on
+`:ast`, `:parser`, `:typechecker`, `:langservice`, `:store-sqlite` and
+`:formatter` — there is no `:interpreter`, no Truffle `Engine`, no `Context`
+anywhere under `lsp/`. The design says "results appear in a panel beside the
+code" and never addresses this.
+
+So the work splits cleanly, and the split is favourable:
+
+- Everything up to execution is **typechecker work the LSP already does** —
+  resolving the function, reading its signature, computing the residual effect
+  row, and therefore choosing between `[Sample]` and `[Sample (needs handlers)]`.
+  Stage 1 lands entirely inside the server.
+- Execution has to be delegated. Three options, in increasing order of weight:
+  1. **Shell out to `mez sample --json`.** Cheapest, and `--json` exists in the
+     design precisely for editor integration. Process per request; fine for a
+     CodeLens the user clicks.
+  2. **Reuse the RuntimeServer wire protocol**
+     (`interpreter/.../standalone/RuntimeServer.kt`, [[project_wire_protocol]]).
+     A warm runtime already speaking a protocol beats a cold process per click.
+  3. **Add `:interpreter` to the LSP.** Rejected unless the others fail: it puts
+     a Truffle Engine inside a long-running server, and Engines retain every
+     CallTarget they create ([[project_oom_root_cause]]) — the exact shape of
+     leak that has already cost this project once.
+
+Option 1 to prove the feature, option 2 if latency justifies it.
 
 CodeLens above each `pub let` (`[Sample]`, or `[Sample (needs handlers)]` when
 the residual row is non-empty — Stage 1 already computes exactly that). The LSP
