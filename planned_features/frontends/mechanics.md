@@ -230,21 +230,20 @@ mechanism. The current design returns `Expr` only
 and worth making deliberately, because it is the difference between two
 mechanisms and one.
 
-### Why not `#{ macro: True }`
+### Declaration syntax: the `macro` keyword, not metadata
 
-Reusing metadata to declare a macro is tempting — no new keyword, syntax already
-parsed — but it breaks metadata's own contract. `metadata.md` is explicit that
-metadata is *"information **about** code, not code itself"*, that it *"does not
-change runtime behavior"*, and that it is **excluded from the content hash**.
+Invocation is `macro_name!()` — the `!()` expansion operator. Declaration stays
+the `macro` keyword from `../macros/`.
 
-A macro declaration is semantic: it changes what the code compiles to. Declaring
-it in metadata would either make metadata semantic — losing the property that a
-rendering hint can never invalidate a cache — or leave a semantic declaration
-outside the hash, so two modules that compile differently would hash the same.
-
-Hash exclusion is load-bearing elsewhere: **verifiable syntax migration**
-(`README.md`) depends on hashes ignoring everything that is not meaning. The
-existing `macro` keyword keeps that intact and costs one word.
+One alternative gets floated and should be recorded as rejected: declaring a
+macro via metadata, `#{ macro: True }`. It breaks metadata's own contract.
+`metadata.md` states that metadata is *"information **about** code, not code
+itself"*, *"does not change runtime behavior"*, and is **excluded from the
+content hash** — while a macro declaration is semantic. Putting it there either
+makes metadata semantic (losing the property that a rendering hint can never
+invalidate a cache) or leaves a semantic declaration outside the hash, so two
+modules that compile differently would hash the same. Hash exclusion is
+load-bearing for verifiable syntax migration.
 
 ## 5. Mezze as the frontend language — and why it is the *best* option
 
