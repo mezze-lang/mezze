@@ -1,5 +1,9 @@
 # The tooling platform — one core, many surfaces
 
+> **Read `thesis.md` first.** It argues why these are two primitives rather than
+> six features, and what makes that unusually strong in Mezze specifically.
+> This document is the mechanics: what exists, what is missing, in what order.
+
 `mez sample`, a REPL, a REBL-style value browser, LSP inline values, and a doc
 browser that an LLM can search are not five projects. They are five surfaces
 over **three shared pieces**, and building them in the wrong order means
