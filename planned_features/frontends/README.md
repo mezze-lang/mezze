@@ -106,6 +106,81 @@ syntax and count tokens. If the saving is small, the idea is interesting and not
 worth the contract cost. If it is large, the contract cost buys something real.
 Nobody has measured it.
 
+## One mechanism at three scopes
+
+The macro design already builds the core of this, which reframes the whole idea.
+`planned_features/macros/02_TAGGED_TEMPLATES.md` declares:
+
+```mezze
+macro sql: {tokens: TokenStream} -> Expr (SqlQuery <>) = {tokens} -> …
+```
+
+`TokenStream -> Expr`. **That is a parser that produces AST nodes.** "Macros
+essentially become parsers and AST generators" is not a proposal — it is the
+existing design, at expression scope.
+
+So there is one mechanism at three scopes, and only the first exists:
+
+| scope | invocation | contract | state |
+|---|---|---|---|
+| expression | `sql!("SELECT …")` | `TokenStream -> Expr` | designed (macros) |
+| declaration | a syntax marker on one decl | `TokenStream -> Decl` | new |
+| file | `foo.lisp.mz` | `TokenStream -> [Decl]` | new |
+
+That is a much better framing than "swappable parsers", because it means the
+contract question (§1 above) is *shared* with macros rather than new. Whatever
+subset of the AST macros are allowed to construct is the same subset a frontend
+constructs. Design it once.
+
+### Which scope fits which case — templates belong at macro scope
+
+`file.sql.mz` is the wrong tool for SQL, and `sql!()` is the right one. You
+rarely want a *file* of SQL; you want a query inside a Mezze function, composing
+with surrounding code, with typed interpolation — which is exactly what the
+macro gives, including `compile_error` on invalid SQL at compile time. A
+whole-file SQL frontend would have to reinvent "how is this called from Mezze".
+
+`file.html.mz` is more defensible, because markup-dominant component files (the
+`.vue` / `.svelte` shape) genuinely are file-shaped: mostly markup, a little
+logic. The test is which language dominates the file. Query embedded in logic →
+macro. Markup hosting logic → file frontend.
+
+### Declaration scope is the costly one
+
+Mixed syntaxes inside one file mean an editor highlighting different regions
+differently, the LSP switching parsers mid-file, and formatting per region.
+There is at least a standard answer for the highlighting half: tree-sitter
+`injections.scm` is exactly the embedded-language mechanism, it is one of the
+query files Zed's extension host loads, and this project has never written one.
+
+Even so, this is the scope with the highest tooling cost and the weakest
+motivating case. Expression scope covers embedded DSLs; file scope covers
+alternative whole-language syntax. It is not obvious what declaration scope
+covers that neither does.
+
+## The strongest case: syntax versions in one project
+
+Nothing in `planned_features/` mentions editions, syntax versions or migration.
+This is the idea in this document most worth having, and it is not about DSLs at
+all.
+
+If syntax is declared per file, a language syntax change stops being a big-bang
+migration. Old files declare `syntax = "1.0"`, new files `syntax = "2.0"`, both
+produce the same AST, and a project migrates a file at a time. That is Rust
+editions, at finer granularity.
+
+And there is a property here that Rust editions **cannot** have. Because hashes
+exclude syntax, comments and formatting, a file migrated from one syntax to
+another has the **same hash** if and only if it means the same thing. So a
+syntax migration is *verifiable*: run the migration, compare hashes, and a
+changed hash is a bug in the migration tool. `rustfix` has to be trusted;
+here it is checkable.
+
+That makes per-file syntax declaration valuable even if nobody ever writes a
+Lisp frontend — it is insurance on the language's own ability to change its
+surface, and the verification property is a direct dividend of content
+addressing.
+
 ## Relationship to macros
 
 `planned_features/macros/` already covers pattern macros, tagged templates and
