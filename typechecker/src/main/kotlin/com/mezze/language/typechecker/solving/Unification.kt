@@ -1347,15 +1347,50 @@ private fun formatFieldMismatch(
  * prefix on either side of the lookup. Each was right about the thing the other
  * missed, so the merged version does both and the copy is gone.
  *
- * PRECONDITION, unstated until now and not checked: every variable in [type]
- * that shares a name with a key of [subst] must BE that parameter. Replacement
- * is by NAME, so two distinct variables spelled the same are both rewritten.
- * This is reachable — a probe over both suites found four occurrences, all on
- * `out` (the `having 'out` associated type) with two distinct variables sharing
- * the name while `out` was in the substitution. No test changes result today,
- * so it is an unguarded assumption rather than a known wrong answer; see the
- * name-keyed-substitution task before relying on it.
+ * PRECONDITION: every variable in [type] that shares a name with a key of
+ * [subst] must BE that parameter. Replacement is by NAME, so two distinct
+ * variables spelled the same are both rewritten.
+ *
+ * It holds for the callers that remain, and it holds for a REASON rather than by
+ * luck: each keys on the DECLARED PARAMETER NAMES of an ability or type
+ * declaration and applies them to a freshly converted annotation, where one
+ * written name is one variable.
+ *
+ * It did NOT hold everywhere. A probe over both suites found the violation live
+ * at `TypedAstBuilder.buildFunctionCall`, on `out` (the `having 'out` associated
+ * type), with two distinct variables sharing the name while `out` was in the
+ * substitution — the map there was harvested from SOLVED types, where a shared
+ * spelling means nothing. That caller now keys on identity via
+ * [substituteTypeVars], which is what any caller holding the variables should
+ * do. Reach for this one only when a declaration's parameter names really are
+ * the only handle you have.
  */
+/**
+ * The same substitution keyed by variable IDENTITY.
+ *
+ * [substituteTypeParamsByName] exists for callers whose keys are DECLARED
+ * PARAMETER NAMES — an ability's `'a`, read off its declaration and applied to a
+ * freshly converted annotation, where one written name is one variable and the
+ * name is the only handle there is. Use this one wherever the caller HAS the
+ * variables, because a name is not one: two distinct variables spelled alike are
+ * both rewritten by the name-keyed version, and that is reachable. Measured at
+ * `TypedAstBuilder.buildFunctionCall`, twice, both on `out`.
+ */
+internal fun substituteTypeVars(type: MezzeType, subst: Map<TypeVar, MezzeType>): MezzeType {
+    if (subst.isEmpty()) return type
+    if (type is MezzeType.VarType) return subst[type.variable] ?: type
+    // Same reason as the name-keyed version: rebuilding a well-known application
+    // through transformChildren would lose an identity hash it should regain.
+    if (type is MezzeType.TypeApplication) {
+        return com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+            type.constructor,
+            type.args.map { substituteTypeVars(it, subst) },
+            (type.identity as? TypeIdentity.Declared)?.hash,
+        )
+    }
+    return type.transformChildren { substituteTypeVars(it, subst) }
+}
+
 internal fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, MezzeType>): MezzeType {
     // Only a type var is replaced (by name, tolerating the `'` prefix either
     // way); every other node just recurses via transformChildren, which

@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.emit
 import com.mezze.language.typechecker.solving.expandTypeApplicationToRecord
 import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.solving.substituteTypeParamsByName
+import com.mezze.language.typechecker.solving.substituteTypeVars
 import com.mezze.language.ast.*
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser as ParserBridge
@@ -1384,7 +1385,7 @@ class TypedAstBuilder(
             val pattern = fnParamType as? MezzeType.RecordType ?: return@run fnParamType
             if (!pattern.holdsTypeVar()) return@run fnParamType
             val args = expr.arguments as? ParsedRecordLit ?: return@run fnParamType
-            val bindings = mutableMapOf<String, MezzeType>()
+            val bindings = mutableMapOf<TypeVar, MezzeType>()
             for (entry in args.entries) {
                 if (entry !is ParsedRecordEntry.Field) continue
                 if (entry.value is ParsedLambda) continue
@@ -1404,7 +1405,7 @@ class TypedAstBuilder(
                 harvestVarBindings(declared, actual, bindings)
             }
             if (bindings.isEmpty()) fnParamType
-            else substituteTypeParamsByName(pattern, bindings)
+            else substituteTypeVars(pattern, bindings)
         }
         val argExpr = if (refinedParamType != null) buildExpr(expr.arguments, file, refinedParamType)
             else buildExpr(expr.arguments, file)
@@ -1470,7 +1471,7 @@ class TypedAstBuilder(
             else -> {
                 val declared = calleeType as? MezzeType.FunctionType
                 if (declared == null || !declared.holdsTypeVar()) fn else {
-                    val bindings = mutableMapOf<String, MezzeType>()
+                    val bindings = mutableMapOf<TypeVar, MezzeType>()
                     if (!argExpr.type.holdsUnknownPlaceholder()) {
                         harvestVarBindings(declared.paramType, argExpr.type, bindings)
                     }
@@ -1487,42 +1488,37 @@ class TypedAstBuilder(
                     // say so structurally — the ability op through its binding, the
                     // wrapper through the constraint on its own arrow — so neither
                     // needs to be recognised by name.
-                    val dictKeyed = HashSet<String>()
+                    val dictKeyed = HashSet<TypeVar>()
                     if ((fn as? TypedVar)?.binding is BindingRef.AbilityOp) {
-                        val inReturn = HashSet<TypeVar>()
-                        com.mezze.language.ast.collectTypeVariables(declared.returnType, inReturn)
-                        inReturn.forEach { dictKeyed.add(it.name) }
+                        com.mezze.language.ast.collectTypeVariables(declared.returnType, dictKeyed)
                     }
                     for (constraint in declared.abilityConstraints) {
                         for (arg in constraint.typeArgs) {
-                            val inArg = HashSet<TypeVar>()
-                            com.mezze.language.ast.collectTypeVariables(arg, inArg)
-                            inArg.forEach { dictKeyed.add(it.name) }
+                            com.mezze.language.ast.collectTypeVariables(arg, dictKeyed)
                         }
                     }
-                    val inParams = HashSet<TypeVar>()
-                    com.mezze.language.ast.collectTypeVariables(declared.paramType, inParams)
-                    val paramVarNames = inParams.mapTo(HashSet()) { it.name }
+                    val paramVars = HashSet<TypeVar>()
+                    com.mezze.language.ast.collectTypeVariables(declared.paramType, paramVars)
                     if (!callType.holdsUnknownPlaceholder()) {
-                        val fromReturn = mutableMapOf<String, MezzeType>()
+                        val fromReturn = mutableMapOf<TypeVar, MezzeType>()
                         harvestVarBindings(declared.returnType, callType, fromReturn)
-                        for ((name, to) in fromReturn) {
-                            if (name !in dictKeyed || name in paramVarNames) {
-                                bindings.putIfAbsent(name, to)
+                        for ((tv, to) in fromReturn) {
+                            if (tv !in dictKeyed || tv in paramVars) {
+                                bindings.putIfAbsent(tv, to)
                             }
                         }
                     }
                     // A dict-keyed variable stays put even when an ARGUMENT would
                     // have pinned it, for the same reason.
-                    bindings.keys.retainAll { it !in dictKeyed || it in paramVarNames }
+                    bindings.keys.retainAll { it !in dictKeyed || it in paramVars }
                     // A variable standing for itself is not an instantiation, and a
                     // binding to something still undetermined would REPLACE a real
                     // variable with a guess — strictly worse than leaving it open.
-                    val instantiation = bindings.filterNot { (name, to) ->
-                        to.holdsUnknownPlaceholder() || (to as? MezzeType.VarType)?.variable?.name == name
+                    val instantiation = bindings.filterNot { (tv, to) ->
+                        to.holdsUnknownPlaceholder() || (to as? MezzeType.VarType)?.variable == tv
                     }
                     if (instantiation.isEmpty()) fn
-                    else retypedCallee(substituteTypeParamsByName(declared, instantiation))
+                    else retypedCallee(substituteTypeVars(declared, instantiation))
                 }
             }
         }
@@ -2500,9 +2496,17 @@ class TypedAstBuilder(
     /** Bind [pattern]'s type variables by walking it against [value] in parallel.
      *  Same shape as the compiler's harvest of the same name; only the positions
      *  a variable occupies are recorded, never a name match. */
-    private fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<String, MezzeType>) {
+    /**
+     * Match [pattern] against [value] and record what each of the pattern's
+     * VARIABLES stands for.
+     *
+     * Keyed on the variable itself. It used to key on `variable.name`, which
+     * silently merged two distinct variables that happened to share a spelling —
+     * reachable, and measured twice on `out` (the `having 'out` associated type).
+     */
+    private fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<TypeVar, MezzeType>) {
         if (pattern is MezzeType.VarType) {
-            out.putIfAbsent(pattern.variable.name, value)
+            out.putIfAbsent(pattern.variable, value)
             return
         }
         when {
