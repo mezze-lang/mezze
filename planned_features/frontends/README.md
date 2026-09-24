@@ -31,6 +31,102 @@ top; a Lisp surface syntax; a token-efficient syntax an LLM writes because it is
 cheap to emit rather than pleasant to read; a DSL that compiles to the same
 nodes.
 
+## Prior art — this is not speculative
+
+Every part of this exists somewhere. The useful question is what each precedent
+got right and what it cost them.
+
+### Racket — the ideal shape
+
+`#lang` at the top of a file selects both the *reader* (text → syntax objects)
+and the *expander*. `#lang racket`, `#lang typed/racket`, `#lang datalog`,
+`#lang scribble/base` — per-file syntax declaration, with the module system
+carrying it. Racket is a language for building languages, so this was designed
+in from the start rather than retrofitted.
+
+The lesson: per-file declaration is the granularity that works. Racket did not
+need per-declaration, which is evidence for the earlier judgement that
+declaration scope is the costly one with the weakest case.
+
+### OCaml and Reason — proof it works retrofitted, and proof of the price
+
+Reason is precisely this idea: a different surface syntax producing the **same
+OCaml parsetree**, with `refmt` converting between `.re` and `.ml`. Not a
+different language — a different projection of one AST. OCaml supports it
+through `-pp` preprocessors and PPX extension points.
+
+Two things to take from it:
+
+**It validates the model.** Reason existed alongside OCaml in the same
+ecosystem, sharing libraries, because the AST was the interchange layer. That is
+exactly the claim in this document.
+
+**It validates the cost.** OCaml's parsetree changes between compiler releases,
+and every PPX breaks when it does. `ocaml-migrate-parsetree`, and later
+`ppxlib`, exist *specifically* to insulate extensions from that churn — an
+entire library ecosystem whose purpose is absorbing AST instability. That is §1
+of this document, observed in the wild. It is the strongest argument for the
+versioned-subset approach rather than exposing the live AST.
+
+Reason also needed its own printer (`refmt`) and its own editor tooling, which
+is §5 and §4 confirmed.
+
+### Rust — editions, and macros at the wrong scope for this
+
+Proc macros are `TokenStream -> TokenStream` at item and expression scope —
+close to the macro row of the table, not the file row.
+
+**Editions** are the syntax-versioning idea proven at ecosystem scale: crates
+declare an edition, editions coexist in one dependency graph, and `cargo fix`
+migrates. The granularity is per-crate rather than per-file, which is coarser
+than proposed here.
+
+And this is where Mezze would have something Rust does not. `rustfix` has to be
+*trusted* — you read the diff and hope. With content addressing, a syntax
+migration that changes meaning changes the hash, so the migration is
+**checkable** rather than reviewable. That property is not available to any of
+these precedents, because in all of them identity is the text.
+
+### Haskell, Elixir, Nim — the DSL row
+
+GHC has per-file `{-# LANGUAGE … #-}` pragmas (a language *variant* per file,
+not a full syntax swap) and `-pgmF` preprocessors. **QuasiQuotes** are the
+`sql!(…)` / `html!(…)` case almost exactly. Elixir's `quote`/`unquote` and its
+documented AST make "everything is a macro" the norm. Nim's macros operate
+directly on the AST.
+
+All of these confirm the expression-scope row is well-trodden. None of them
+attempt whole-file alternative syntax.
+
+### Svelte, Vue, JSX — the markup-first row
+
+`.svelte` and `.vue` files are markup-dominant sources compiled to the host
+language, which is the `.html.mz` shape. They also demonstrate its real cost:
+each needed a bespoke compiler, language server, and highlighting story. That is
+a large investment per file type, and it argues for markup-first files being a
+deliberate first-party thing rather than something users define casually.
+
+### Unison — the precondition without the payoff
+
+Unison has the property this whole document rests on — the codebase is the AST,
+text is a projection — and does *not* offer multiple syntaxes. So the
+combination proposed here (content-addressed codebase **plus** pluggable
+surface) appears to be genuinely unoccupied ground, rather than something
+obvious that everyone does.
+
+### Summary
+
+| | per-file syntax | AST as contract | syntax versioning | verifiable migration |
+|---|---|---|---|---|
+| Racket | ● designed in | ● syntax objects | | |
+| OCaml/Reason | ● via `-pp`/PPX | ● and it churns | | |
+| Rust | | ● TokenStream | ● editions (per crate) | ✗ trust `rustfix` |
+| Haskell | ◐ pragmas | ● TH | | |
+| Unison | | ● codebase is AST | | ◐ property unused |
+| **Mezze** | **possible** | **needs a subset** | **possible, per file** | **● free from hashing** |
+
+The right-hand column is the one nobody has.
+
 ## Why this fits Mezze specifically
 
 Most languages cannot do this cleanly because identity is the text. Here it
