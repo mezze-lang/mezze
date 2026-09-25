@@ -32,7 +32,7 @@ import com.mezze.language.typedast.*
  */
 class TypedASTCompiler(
     /** All ability impls from all visible modules — for method call resolution */
-    private val abilityImpls: List<TypedAbilityImpl>,
+    internal val abilityImpls: List<TypedAbilityImpl>,
     /** Pre-lowered stdlib function hashes — calls to these are CallDirect, not traced */
     private val stdlibHashes: Set<Hash> = emptySet(),
     /**
@@ -58,7 +58,7 @@ class TypedASTCompiler(
      *
      * Empty ⇒ no ability is in scope, so no call can be an ability call.
      */
-    private val abilityOpNames: Map<Hash, Set<String>> = emptyMap(),
+    internal val abilityOpNames: Map<Hash, Set<String>> = emptyMap(),
     /** #424 Piece 5 — for each seed call site, arg-record field names to
      *  strip before compiling to a call. Fields correspond to closure
      *  params that were dead-code eliminated from the specialized decl. */
@@ -73,7 +73,7 @@ class TypedASTCompiler(
      * because the prescan only covers `additionalModules` (a small prelude
      * subset) — not the full set of imported stdlib modules.
      */
-    private val preloweredDictMethods: Map<Hash, Set<String>> = emptyMap(),
+    internal val preloweredDictMethods: Map<Hash, Set<String>> = emptyMap(),
     /**
      * Final module substitution — used to refresh stale VarType on TypedVar
      * nodes whose type field was captured before the outer scope solved the
@@ -82,12 +82,12 @@ class TypedASTCompiler(
      * receiver at the outer scope). See #346 / project_346_stale_typevar_root_cause.
      * Empty default keeps existing behavior for callers that don't have one.
      */
-    private val substitution: com.mezze.language.ast.solving.Substitution =
+    internal val substitution: com.mezze.language.ast.solving.Substitution =
         com.mezze.language.ast.solving.Substitution.empty
 ) {
 
     /** Ability operation index: methodName → list of (implHash, targetTypes, opHash) */
-    private data class AbilityOp(
+    internal data class AbilityOp(
         val implHash: Hash,
         val targetTypes: List<MezzeType>,
         val opHash: Hash,
@@ -112,8 +112,8 @@ class TypedASTCompiler(
             .firstOrNull { com.mezze.language.typechecker.WellKnownHashConstants.isHash(it.key) }
             ?.value ?: emptySet()
 
-    private val declaredDictMethodsForHash = mutableMapOf<Hash, Set<String>>()
-    private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOp>>()
+    internal val declaredDictMethodsForHash = mutableMapOf<Hash, Set<String>>()
+    internal val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOp>>()
 
     /** Extracted lambda functions */
     private val extractedFunctions = mutableListOf<FunctionIR>()
@@ -128,7 +128,7 @@ class TypedASTCompiler(
     private var nextLocalSlot = 0
 
     /** Local variable name → slot index (current scope) */
-    private val localsByName = mutableMapOf<String, Int>()
+    internal val localsByName = mutableMapOf<String, Int>()
 
     /** #359 — persistent slot → name map for the currently-compiling
      *  FunctionIR. Populated by allocLocal/forceAllocLocal every time a
@@ -141,22 +141,22 @@ class TypedASTCompiler(
     private val slotToNameForCurrentFn = mutableMapOf<Int, String>()
 
     /** Scope stack for nested match bindings: each entry maps name → slot */
-    private val scopeStack = ArrayDeque<MutableMap<String, Int>>()
+    internal val scopeStack = ArrayDeque<MutableMap<String, Int>>()
 
     /** Current function's param names */
-    private var currentParamNames = listOf<String>()
+    internal var currentParamNames = listOf<String>()
 
     /** When true, the prescan and lambda-capture scan flag inlineable ops (lt, add, …)
      *  for dict-dispatch on VarType receivers. True during stdlib pre-compilation;
      *  false during user compilation (where phase 2 propagation carries dict
      *  requirements from preloweredDictMethods instead). */
-    private var isStdlibMode = false
+    internal var isStdlibMode = false
 
     /** Capture name → capture index (for the current lambda being compiled) */
-    private var currentCaptureNames = mapOf<String, Int>()
+    internal var currentCaptureNames = mapOf<String, Int>()
 
     /** Number of captures in the current function — offsets param slots in the frame */
-    private var currentCaptureCount = 0
+    internal var currentCaptureCount = 0
 
     /** Hash of the function currently being compiled — used to detect self-recursive
      *  CallDirectIR sites where we statically know the callee's paramNames and can
@@ -194,7 +194,7 @@ class TypedASTCompiler(
      * Keyed by SLOT INDEX (not name) so nested scopes with shadowed names don't
      * collide. Saved/restored by compileBlock/compileMatch just like localsByName.
      */
-    private val slotConcreteTypes = mutableMapOf<Int, MezzeType>()
+    internal val slotConcreteTypes = mutableMapOf<Int, MezzeType>()
 
     /** Pre-populated at compile() start: hash → callee's paramNames (regular + dict),
      *  in callee declaration order. Used by emitCallDirect to decide scalar ABI for
@@ -245,7 +245,11 @@ class TypedASTCompiler(
      * A function needs dict params when its body contains VarType method calls
      * to ability methods that require static resolution via dictionary passing.
      */
-    private val dictMethodsForHash = mutableMapOf<Hash, Set<String>>()
+    fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
+
+    fun getDeclaredDictMethodsForHash(): Map<Hash, Set<String>> = declaredDictMethodsForHash.toMap()
+
+    internal val dictMethodsForHash = mutableMapOf<Hash, Set<String>>()
 
     /**
      * Current function's dictionary param names (e.g., "__dict_to_dbg").
@@ -269,7 +273,7 @@ class TypedASTCompiler(
      * match it against the call's instantiated type and bind the variables the
      * op's `with` obligations are about. See [obligationDispatchTypes].
      */
-    private val declaredOpTypeByHash = mutableMapOf<Hash, MezzeType>()
+    internal val declaredOpTypeByHash = mutableMapOf<Hash, MezzeType>()
 
     /** Codec entry points that dispatch their inner decode on the target type.
      *  DERIVED (never literals): ops/lets whose signatures carry a constraint
@@ -303,863 +307,6 @@ class TypedASTCompiler(
         }
     }
 
-    /**
-     * Pre-scan all declarations (including ability impl operation bodies) to find
-     * functions whose bodies contain VarType method calls to ability methods.
-     * These functions will receive hidden dictionary params at compile time.
-     *
-     * Also transitively propagates dict requirements: if function A calls function B
-     * which needs dict params, then A also needs those same dict params (to forward them).
-     */
-    /**
-     * Expose the discovered dict method requirements so the stdlib pre-compilation
-     * step can accumulate them and pass them to the user-code compiler.
-     */
-    fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
-
-    /**
-     * The same question answered from the DECLARED constraints instead of from the
-     * bodies: a function constrained `with Ord 'a`, where `'a` is still a variable,
-     * needs a dict for each of `Ord`'s operations.
-     *
-     * This is where the answer actually lives for a well-typed program, and it is
-     * the standing measurement of how far [dictMethodsForHash] is from being
-     * derivable rather than scanned (C.4/C.5). `DictJustificationGateTest` holds
-     * the scan to it: nothing may demand a dict that no declared constraint
-     * justifies.
-     *
-     * It does not replace the scan outright. A dict param carries ONE operation, and
-     * a constraint names an ability, not which of its operations a body uses — so
-     * substituting this for the scan would hand every `Ord`-constrained function
-     * four dict params where it uses one.
-     */
-    fun getDeclaredDictMethodsForHash(): Map<Hash, Set<String>> = declaredDictMethodsForHash.toMap()
-
-    /**
-     * Which functions need a `__dict_*` parameter, transitively.
-     *
-     * This is load-bearing — bypassing it breaks `SeqUserTypeCompareTest`
-     * (nestedSort, variantSort, nestedLtFalse, nested3Sort, variantLtFalse) —
-     * and it survives C.1 because it answers a DIFFERENT question than evidence
-     * does. Evidence says WHICH IMPL discharges a constraint; this says WHICH
-     * FUNCTIONS need a dict at all. Nothing emitted so far carries that, so
-     * retiring the pass is blocked on C.3/C.4 emitting per-site dict
-     * requirements.
-     *
-     * Its remaining guess is that it DERIVES the requirement by scanning bodies
-     * for var-typed method calls, rather than reading it off the declared
-     * constraints — which is where the answer actually lives for a well-typed
-     * program. The magic iteration cap is gone (see the fixpoint below); the
-     * body scan is what C.3/C.4 should replace.
-     */
-    private fun prescanForDictMethods(modules: List<TypedModule>) {
-        dictMethodsForHash.clear()
-        declaredOpTypeByHash.clear()
-        declaredDictMethodsForHash.clear()
-        // Seed with pre-lowered stdlib dict methods so call sites in the user
-        // module correctly inject dicts for stdlib functions whose modules are
-        // NOT in `additionalModules` during user compilation.
-        for ((h, methods) in preloweredDictMethods) {
-            dictMethodsForHash[h] = methods
-        }
-
-        // Phase 1: find functions with direct VarType method calls
-        val allDecls = mutableListOf<TypedLetDecl>()
-        for (module in modules) {
-            for (decl in module.decls) {
-                if (decl is TypedLetDecl) {
-                    allDecls.add(decl)
-                    val value = decl.value
-                    if (value is TypedLambda) {
-                        val constrained = arrowHasAbilityConstraint(value.type)
-                        val methods = scanExprForVarTypeMethodCalls(value.body, constrained)
-                        if (methods.isNotEmpty()) {
-                            dictMethodsForHash[decl.hash] = methods
-                        }
-                        declaredDictMethods(value.type).let {
-                            if (it.isNotEmpty()) declaredDictMethodsForHash[decl.hash] = it
-                        }
-                    }
-                }
-            }
-        }
-
-        // Phase 1b: scan ability impl operation bodies for VarType method calls.
-        // Auto-generated codec impls have bodies like `fmt.encode_int { ... }` where
-        // `fmt` is a VarType param. These need dict params just like regular functions.
-        //
-        // Bug B (#86): blanket-impl bodies also gate off `with <Ability>` constraints
-        // on the enclosing arrow. When the impl is compiled at stdlib-precompile
-        // time, the abilityOpIndex has zero entries for the inner method (e.g. no
-        // `impl Encode` in scope yet), so the receiver-only check would miss the
-        // dispatch. Collect the constraint typevars from the op's own FunctionType
-        // and thread them so `receiver.method` on any of those typevars is marked
-        // regardless of impl-index size.
-        // Impl operation bodies, paired with their hashes, so phase 2 below can
-        // propagate through them as well. Keeping the list is the whole point: an
-        // impl op that needs no dict of its own may still CALL something that does.
-        val implOpBodies = mutableListOf<Pair<Hash, TypedExpr>>()
-        for (impl in abilityImpls) {
-            for ((opName, opBody) in impl.operations) {
-                val opHash = computeOpHash(impl.hash, opName)
-                val bodyExpr = if (opBody is TypedLambda) opBody.body else opBody
-                implOpBodies.add(opHash to bodyExpr)
-                declaredOpTypeByHash[opHash] = opBody.type
-                val constrained = arrowHasAbilityConstraint(opBody.type)
-                val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained)
-                if (methods.isNotEmpty()) {
-                    dictMethodsForHash[opHash] = methods
-                }
-                declaredDictMethods(opBody.type).let {
-                    if (it.isNotEmpty()) declaredDictMethodsForHash[opHash] = it
-                }
-            }
-        }
-
-        // Phase 2: transitively propagate dict requirements.
-        // If function A's body calls function B (by hash) and B needs dict
-        // methods, A also needs those same dict methods (to forward them).
-        //
-        // Census shows ~9 distinct dict-path call sites total, so the
-        // dependency graph between dict-needing functions is tiny. A real
-        // fixpoint converges in 1-2 passes; we cap at MAX_PASSES as a
-        // defensive guard against degenerate cases. If we ever hit the cap
-        // it means there's a deep call chain that needs investigation.
-        // A REAL fixpoint, run to convergence. This used to stop after three
-        // passes and log a warning if it was still changing — a magic bound that
-        // could silently leave a function short of a dict it needs, which is the
-        // shape of BUG 7 (an inherent op that never learned it must forward
-        // `__dict_lt`, so `x < acc` fell to the primitive comparison node).
-        //
-        // Termination is structural, not by counting: `dictMethodsForHash` only
-        // ever GROWS, and it is bounded by (functions x method names), so the
-        // loop cannot run forever. That is the anti-hang invariant satisfied for
-        // the right reason.
-        //
-        // Measured: converges in 1-2 passes today (98 compiles at 1, 16 at 2), so
-        // the cap was never actually reached and removing it changes nothing now.
-        // It goes anyway — a bound that silently truncates is the exact shape of
-        // the defect above, and "it has not bitten yet" is not a termination
-        // argument.
-        var changed = true
-        while (changed) {
-            changed = false
-            fun propagate(hash: Hash, body: TypedExpr) {
-                val calleeDictMethods = scanExprForCallsToDictFunctions(body)
-                if (calleeDictMethods.isEmpty()) return
-                val existing = dictMethodsForHash[hash] ?: emptySet()
-                val merged = existing + calleeDictMethods
-                if (merged.size > existing.size) {
-                    dictMethodsForHash[hash] = merged
-                    changed = true
-                }
-            }
-            for (decl in allDecls) {
-                val value = decl.value
-                if (value is TypedLambda) propagate(decl.hash, value.body)
-            }
-            // IMPL OPERATIONS propagate too. Phase 1b only asked whether an op's
-            // body uses an ability op DIRECTLY; it never asked whether the body
-            // CALLS something that needs a dict. An inherent op is exactly that
-            // shape — `impl Seq 'a { min = { it } -> min { xs = it } }` forwards to
-            // the constrained `seq::min` and does nothing else — so it was never
-            // told it must forward `__dict_lt`. The caller of `xs.min {}` then
-            // passed no dict, `seq::min` found none to use, and `x < acc` inside it
-            // fell through to the primitive comparison node: a crash on a record or
-            // variant element, and a SILENTLY WRONG answer for a newtype whose
-            // ordering differs from the type it wraps.
-            for ((opHash, body) in implOpBodies) propagate(opHash, body)
-        }
-
-    }
-
-    /**
-     * Scan an expression for calls to functions that need dictionary params.
-     * Returns the set of dict method names required by those callees.
-     */
-    private fun scanExprForCallsToDictFunctions(expr: TypedExpr): Set<String> {
-        val result = mutableSetOf<String>()
-        scanExprForDictFunctionCalls(expr, result)
-        return result
-    }
-
-    private fun scanExprForDictFunctionCalls(expr: TypedExpr, out: MutableSet<String>) {
-        when (expr) {
-            is TypedCall -> {
-                val fn = expr.function
-                // Check if the callee is a ByHash reference to a dict-needing function
-                if (fn is TypedVar && fn.binding is BindingRef.ByHash) {
-                    val calleeHash = (fn.binding as BindingRef.ByHash).hash
-                    val calleeDictMethods = dictMethodsForHash[calleeHash]
-                    if (calleeDictMethods != null) {
-                        // Check if arg types can resolve the dict methods.
-                        // If not (VarType args), the caller needs to forward its own dict params.
-                        val concreteTypes = mutableListOf<MezzeType>()
-                        if (expr.arg is TypedRecord) {
-                            for (entry in (expr.arg as TypedRecord).entries) {
-                                if (entry is TypedRecordEntry.Field) {
-                                    val refreshed = substitution.apply(entry.value.type)
-                                    val recovered = resolveVariantReceiverType(entry.value, refreshed) ?: refreshed
-                                    // Extract concrete element types from seq/list literals
-                                    // so VarType-wrapped containers (e.g. `['a]`)
-                                    // can still resolve the element-level impl.
-                                    val elementType = extractConcreteElementTypeFromExpr(entry.value)
-                                    if (elementType != null) concreteTypes.add(elementType)
-                                    concreteTypes.add(recovered)
-                                    collectDeepConcreteTypes(entry.value, concreteTypes)
-                                }
-                            }
-                        }
-                        // Filter out types that still contain VarType before resolution.
-                        // A `['a]` could match a container-level impl like
-                        // `impl Ord for ['a]` when the dict is actually for the element
-                        // type — which is unknown. Only fully-concrete types (or types
-                        // where expression-based extraction recovered the element type)
-                        // can be safely resolved.
-                        val resolvableTypes = concreteTypes.filter { !containsVarType(it) }
-                        // Try to resolve each dict method from the concrete types.
-                        // Only forward to caller when resolution actually fails.
-                        for (methodName in calleeDictMethods) {
-                            // Callers forward PLAIN slots; a per-var split is decided by
-                            // each function's own body, never inherited from a callee.
-                            val calleeMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
-                            val resolved = resolveOpHashFromConcreteTypes(calleeMethod, resolvableTypes)
-                            if (resolved == null) {
-                                out.add(calleeMethod)
-                            }
-                        }
-                    }
-                }
-                if (fn is TypedFieldAccess) {
-                    scanExprForDictFunctionCalls(fn.record, out)
-                } else {
-                    scanExprForDictFunctionCalls(fn, out)
-                }
-                scanExprForDictFunctionCalls(expr.arg, out)
-            }
-            is TypedLambda -> {
-                // #195 B2: descend into nested lambdas so transitive dict-passing
-                // sees calls inside HOF callbacks (e.g. seq::fold {f = {x} -> ...}).
-                scanExprForDictFunctionCalls(expr.body, out)
-            }
-            is TypedBlock -> {
-                for (s in expr.statements) {
-                    when (s) {
-                        is TypedStatement.Let -> scanExprForDictFunctionCalls(s.value, out)
-                        is TypedStatement.Expr -> scanExprForDictFunctionCalls(s.expr, out)
-                    }
-                }
-                scanExprForDictFunctionCalls(expr.result, out)
-            }
-            is TypedIf -> {
-                scanExprForDictFunctionCalls(expr.condition, out)
-                scanExprForDictFunctionCalls(expr.thenBranch, out)
-                scanExprForDictFunctionCalls(expr.elseBranch, out)
-            }
-            is TypedMatch -> {
-                scanExprForDictFunctionCalls(expr.scrutinee, out)
-                for (c in expr.cases) {
-                    c.guard?.let { scanExprForDictFunctionCalls(it, out) }
-                    scanExprForDictFunctionCalls(c.body, out)
-                }
-            }
-            is TypedRecord -> {
-                for (e in expr.entries) {
-                    when (e) {
-                        is TypedRecordEntry.Field -> scanExprForDictFunctionCalls(e.value, out)
-                        is TypedRecordEntry.Spread -> scanExprForDictFunctionCalls(e.expr, out)
-                    }
-                }
-            }
-            is TypedFieldAccess -> scanExprForDictFunctionCalls(expr.record, out)
-            is TypedVariantConstruct -> expr.payload?.let { scanExprForDictFunctionCalls(it, out) }
-            is TypedRecordUpdate -> {
-                scanExprForDictFunctionCalls(expr.record, out)
-                for (e in expr.updates) {
-                    if (e is TypedRecordEntry.Field) scanExprForDictFunctionCalls(e.value, out)
-                }
-            }
-            is TypedPerform -> {
-                // Handler PARAMS are expressions too. Skipping them under-reports
-                // what a function needs, and under-reporting a dict is BUG 7's
-                // shape: the callee finds no dict and falls to the primitive op.
-                for (h in expr.handlers) h.params?.let { scanExprForDictFunctionCalls(it, out) }
-                scanExprForDictFunctionCalls(expr.body, out)
-            }
-            is TypedPerformOp -> scanExprForDictFunctionCalls(expr.arg, out)
-            is TypedPipe -> {
-                scanExprForDictFunctionCalls(expr.left, out)
-                scanExprForDictFunctionCalls(expr.right, out)
-            }
-            is TypedSeq -> {
-                for (e in expr.elements) {
-                    when (e) {
-                        is TypedSeqElement.Regular -> scanExprForDictFunctionCalls(e.expr, out)
-                        is TypedSeqElement.Spread -> scanExprForDictFunctionCalls(e.expr, out)
-                    }
-                }
-            }
-            is TypedStringLit -> {
-                for (p in expr.parts) {
-                    if (p is TypedStringPart.Interpolation) scanExprForDictFunctionCalls(p.expr, out)
-                }
-            }
-            is TypedVar, is TypedIntLit, is TypedNatLit, is TypedFloatLit,
-            is TypedFracLit, is TypedBoolLit, is TypedCharLit -> {}
-        }
-    }
-
-    /**
-     * Recursively scan a TypedExpr for VarType method calls (i.e., calls where
-     * the receiver is VarType and the method is a known ability operation).
-     * Returns the set of ability method names found.
-     *
-     * `activeConstraints` — the set of TypeVar ids that the enclosing function's
-     * `with <Ability>` clause quantifies over. A receiver VarType whose id is in
-     * this set is marked for dict-passing regardless of impl-index population, so
-     * blanket-impl bodies (`with Encode JsonC 'a`) dispatch correctly even when
-     * the impl-index has zero entries at stdlib-precompile time (Bug B / #86).
-     */
-    private fun scanExprForVarTypeMethodCalls(
-        expr: TypedExpr,
-        arrowIsConstrained: Boolean = false
-    ): Set<String> {
-        val result = mutableSetOf<String>()
-        scanExprForVarTypeMethods(expr, result, arrowIsConstrained)
-        return normalizeDictKeys(result)
-    }
-
-    /** Raw scan keys are `method@var`. A function needing a method for ONE type
-     *  variable keeps the plain `method` slot (unchanged wire shape); only a
-     *  function needing the same method at two or more variables gets a slot per
-     *  variable — the case one shared slot cannot serve (`Result 'a 'e`).
-     *
-     *  BUG 9 / task C.2: this groups by METHOD NAME, which is exactly where two
-     *  abilities declaring the same operation collapse into one slot. A function
-     *  constrained `with Weigh 'a, Price 'a` raises `rank@a` from both calls, they
-     *  group together, `vars.size == 1`, and the result is a single plain `rank`
-     *  that serves both — so whichever fills it answers for the other, silently.
-     *  The grouping key has to become (ability, method); getting the ability here
-     *  needs it carried on the emitted node, because the op index this scan
-     *  consults is keyed on the name and by construction cannot tell them apart.
-     *  The CONCRETE-receiver half of the same bug is already fixed in emit. */
-    private fun normalizeDictKeys(raw: Set<String>): Set<String> =
-        // Grouped by (ABILITY, method). Grouping by method alone was BUG 9: a
-        // function constrained `with Weigh 'a, Price 'a` raises `rank@a` from both
-        // calls, they grouped under `rank`, vars.size was 1, and the result was ONE
-        // plain `rank` slot serving both abilities — whichever filled it answered
-        // for the other, silently. A key with no ability segment groups under null
-        // exactly as before, so nothing unambiguous changes shape.
-        raw.groupBy {
-            com.mezze.language.ast.MagicParams.abilityOfKey(it) to
-                com.mezze.language.ast.MagicParams.methodOfKey(it)
-        }.flatMap { (group, keys) ->
-            val (ability, method) = group
-            val vars = keys.mapNotNull { com.mezze.language.ast.MagicParams.typeVarOfKey(it) }.toSet()
-            when {
-                vars.size >= 2 -> keys.filter { com.mezze.language.ast.MagicParams.typeVarOfKey(it) != null }
-                // One variable but a DISAMBIGUATING ability: keep the ability, drop
-                // the variable — the slot must stay distinct from the other
-                // ability's, and the plain shape would collide again.
-                ability != null -> listOf("$method${com.mezze.language.ast.MagicParams.ABILITY_SEP}$ability")
-                else -> listOf(method)
-            }
-        }.toSet()
-
-    /** The dict slot NAME an enclosing function holds for [method] at type var
-     *  [typeVar]: the per-var slot when it has one, else the plain slot, else any
-     *  per-var slot of that method (a caller that only holds one). Null if none. */
-    private fun enclosingDictSlotIn(
-        params: List<String>,
-        captures: Map<String, Int>,
-        method: String,
-        typeVar: String?,
-        abilityHash: String? = null,
-    ): String? {
-        fun has(n: String) = params.indexOf(n) >= 0 || captures.containsKey(n)
-        val mp = com.mezze.language.ast.MagicParams
-        // BUG 9 / C.2: an ABILITY-qualified slot is looked up first and, when the
-        // caller asked for one, ONLY. Falling back to the plain slot would hand
-        // back the other ability's dictionary — which is the bug, not a fallback.
-        if (abilityHash != null) {
-            val ability = abilityHash.take(12)
-            if (typeVar != null) {
-                mp.dictParamName(mp.dictKey(method, typeVar, abilityHash)).let { if (has(it)) return it }
-            }
-            mp.dictParamName("$method${mp.ABILITY_SEP}$ability").let { if (has(it)) return it }
-            return null
-        }
-        if (typeVar != null) mp.dictParamName(mp.dictKey(method, typeVar)).let { if (has(it)) return it }
-        mp.dictParamName(method).let { if (has(it)) return it }
-        val prefix = mp.dictParamName(method) + mp.VAR_SEP
-        (params + captures.keys).firstOrNull { it.startsWith(prefix) }?.let { return it }
-        // An ability-qualified slot still serves an UNqualified request: the
-        // caller simply had no ambiguity to resolve at its own site.
-        val abilityPrefix = mp.dictParamName(method) + mp.ABILITY_SEP
-        return (params + captures.keys).firstOrNull { it.startsWith(abilityPrefix) }
-    }
-    /** Frame index of the dictionary parameter [name] — a param sits after the
-     *  captures, a capture at its own index. Null when this function carries no
-     *  such slot. */
-    private fun dictSlotIndex(name: String): Int? {
-        val paramIdx = currentParamNames.indexOf(name)
-        if (paramIdx >= 0) return currentCaptureCount + paramIdx
-        return currentCaptureNames[name]
-    }
-
-    /** The dictionary slot an [BindingRef.AbilityOp] reference resolves to, or a
-     *  loud failure: the reference exists only because the enclosing function
-     *  declared the constraint that supplies it, so a miss is a compiler defect,
-     *  never something to paper over. */
-    private fun abilityOpDictSlot(binding: BindingRef.AbilityOp): Int {
-        val name = enclosingDictSlot(binding.opName, binding.typeVarName, binding.abilityHash.hex)
-        val index = name?.let { dictSlotIndex(it) }
-        return index ?: throw com.mezze.language.typechecker.TypeCheckError(
-            message = "'${binding.opName}' takes no receiver, so the type it produces is what " +
-                "chooses the implementation — and nothing here determines that type. Say what " +
-                "the call produces (`let x: <Type> = … ${binding.opName} {…}`), or declare the " +
-                "constraint on the enclosing function so the caller supplies it " +
-                "(`{ … } with <Ability> '${binding.typeVarName.removePrefix("'")} -> …`).",
-            errorType = com.mezze.language.typechecker.ErrorType.CONSTRAINT_VIOLATION,
-            code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
-        )
-    }
-
-    private fun enclosingDictSlot(method: String, typeVar: String?, abilityHash: String? = null): String? =
-        enclosingDictSlotIn(currentParamNames, currentCaptureNames, method, typeVar, abilityHash)
-
-    /** Bind an op's impl type variables from the instance head: the impl whose op
-     *  is [opHash] has target `T 'a 'e…`; unify it against each of [types] (the
-     *  receiver / arg types at the site) and collect `'a → …`. Empty when the op
-     *  is not an impl op or nothing binds. */
-    /**
-     * The (ability hash, concrete type) pairs a called op's own `with` obligations
-     * resolve to AT THIS CALL SITE.
-     *
-     * An obligation names a type variable — `with Decode JsonC 'a` names `'a` —
-     * and that variable also appears in the op's declared return type
-     * (`Result 'a DecodeError`). The call's return type is concrete here, so
-     * matching the declared return against it binds the variable to THIS call's
-     * own value for it.
-     *
-     * That binding is the only thing at a decode site that distinguishes two calls
-     * of the same op: `"…".from_json {}` twice has identical receiver and argument
-     * types (both `Str`) and differs ONLY in what it decodes INTO. Resolving the
-     * dict from the receiver therefore hands both calls the same decoder, and the
-     * second one decodes against the first one's shape.
-     *
-     * Structural throughout — no ability, type or op name is matched. An obligation
-     * whose variable does not appear in the return type simply yields no pair, and
-     * the caller falls through to its existing receiver/argument resolution.
-     */
-    private fun obligationDispatchTypes(opHash: Hash, callType: MezzeType): List<Pair<Hash?, List<MezzeType>>> {
-        val declared = declaredOpTypeByHash[opHash] as? FunctionType ?: return emptyList()
-        if (declared.abilityConstraints.isEmpty()) return emptyList()
-        val bindings = HashMap<String, MezzeType>()
-        harvestVarBindings(declared.returnType, substitution.apply(callType), bindings)
-        if (bindings.isEmpty()) return emptyList()
-        return declared.abilityConstraints.mapNotNull { constraint ->
-            val args = constraint.typeArgs.map { arg ->
-                if (arg is VarType) {
-                    bindings[arg.variable.name] ?: bindings[arg.variable.name.removePrefix("'")] ?: arg
-                } else arg
-            }
-            // Partially-bound obligations dispatch nothing: a tuple with a hole in
-            // it matches more than one impl, which is the ambiguity this exists to
-            // remove. Leave those to the caller's existing resolution.
-            if (args.any { it is VarType || containsVarType(it) }) null
-            else constraint.abilityHash to args
-        }
-    }
-
-    /**
-     * The op a resolved obligation designates: the impl of that ability whose
-     * class-argument tuple agrees with the obligation's, POSITION BY POSITION.
-     *
-     * The ordinary receiver-based lookup matches only the tuple's LAST slot (the
-     * `for` type), which for a codec ability is the WIRE type — `Str` for every
-     * JSON decoder there is. Two `from_json` calls decoding different shapes have
-     * identical receivers and therefore identical last slots; what separates them
-     * sits at the slot the obligation's variable occupies. Matching the whole
-     * tuple uses that slot instead of discarding it.
-     */
-    private fun resolveOpFromObligation(method: String, abilityHash: Hash?, args: List<MezzeType>): Hash? {
-        if (abilityHash == null || args.isEmpty()) return null
-        val candidates = abilityOpIndex[method]?.filter { it.abilityHash == abilityHash } ?: return null
-        return candidates.firstOrNull { op ->
-            args.size <= op.targetTypes.size &&
-                args.indices.all { i -> typeMatchesTarget(args[i], op.targetTypes[i]) }
-        }?.opHash
-    }
-
-    private fun bindImplVarsForOp(opHash: Hash, types: List<MezzeType>): Map<String, MezzeType> {
-        val op = abilityOpIndex.values.asSequence().flatten().firstOrNull { it.opHash == opHash } ?: return emptyMap()
-        val pattern = op.targetTypes.lastOrNull() ?: return emptyMap()
-        val bindings = HashMap<String, MezzeType>()
-        for (t in types) harvestVarBindings(pattern, substitution.apply(t), bindings)
-        return bindings
-    }
-    /** The concrete type a qualified dict key's variable is bound to, or null. */
-    private fun boundTypeForKey(key: String, bindings: Map<String, MezzeType>): MezzeType? =
-        com.mezze.language.ast.MagicParams.typeVarOfKey(key)?.let { v -> bindings[v] ?: bindings["'$v"] }
-            ?.takeIf { it !is VarType && !containsVarType(it) }
-
-    /**
-     * True iff the arrow carries at least one `with <Ability>` constraint
-     * that is still genuinely polymorphic after applying the final
-     * substitution. A constraint like `NumAdd(VarType('a), IntType)` is
-     * polymorphic only if `'a` remains a VarType after substitution —
-     * if it resolves to `Int`, the constraint is `NumAdd(Int, Int)`,
-     * which is a concrete built-in operation that doesn't need
-     * dict-passing.
-     *
-     * Bug B (#86): a `with`-constrained arrow lets its body call ability
-     * ops on a still-generic receiver (`{it: 'a} with Encode JsonC 'a
-     * -> …` allows `it.encode {…}`). Any VarType-receiver method call
-     * in such an arrow must be marked for dict-passing so the resolved
-     * impl reaches the call site.
-     *
-     * Bug #X (dict-leak): recursive functions like `sum_to = {n} -> n +
-     * sum_to {n-1}` generate a `NumAdd(VarType, IntType)` constraint
-     * during inference. This constraint can leak onto enclosing function
-     * types (e.g. `main`). Under the old `isNotEmpty()` check, the
-     * leaked constraint caused `main` to be marked as constrained →
-     * lambdas inside main got spurious `__dict_mul` captures → crash
-     * when the callback's closureValues didn't match the inner BDSL
-     * root's capture count. Applying substitution filters out these
-     * resolved constraints correctly.
-     */
-    /**
-     * The dict operations [type]'s own declared constraints call for: every
-     * operation of every ability it is constrained by, for a constraint whose type
-     * argument is still a VARIABLE.
-     *
-     * A constraint on a type that resolved to something concrete needs no dict — the
-     * impl is picked at compile time — and inference leaves those behind on the
-     * arrow (see [arrowHasAbilityConstraint]), so the variable test is what separates
-     * a live constraint from a spent one.
-     */
-    private fun declaredDictMethods(type: MezzeType): Set<String> {
-        val fn = type as? MezzeType.FunctionType ?: return emptySet()
-        if (fn.abilityConstraints.isEmpty()) return emptySet()
-        return fn.abilityConstraints
-            .filter { c -> c.typeArgs.any { containsVarTypeDeep(substitution.apply(it)) } }
-            .flatMapTo(HashSet()) { c -> c.abilityHash?.let { abilityOpNames[it] } ?: emptySet() }
-    }
-
-    private fun arrowHasAbilityConstraint(type: MezzeType): Boolean {
-        if (type !is MezzeType.FunctionType) return false
-        if (type.abilityConstraints.isEmpty()) return false
-        // A function with ability constraints only needs dict-passing
-        // if its parameter type is genuinely polymorphic (contains VarType
-        // after substitution). Functions like `fib: {n: Int} -> Int`
-        // can carry stale constraints from type inference (the VarType
-        // in the constraint was resolved but the constraint wasn't
-        // cleaned up). These functions don't need dict-passing because
-        // all their operations can be resolved from concrete types at
-        // compile time.
-        //
-        // The generalized type variables in these stale constraints are
-        // NOT in the module substitution (they were let-generalized),
-        // so substitution.apply() on the constraint's typeArgs doesn't
-        // help — they remain VarType. But the function's own paramType
-        // IS fully resolved under the substitution.
-        val resolvedParam = substitution.apply(type.paramType)
-        return containsVarTypeDeep(resolvedParam)
-    }
-
-    /** Like [containsVarType] but also recurses into record fields and
-     *  function types — needed to detect VarType in parameter types. */
-    /**
-     * "Does this type still hold an unsolved variable?" — the guard in front of
-     * every dispatch decision in this file.
-     *
-     * Delegates to [holdsTypeVar], which walks via [MezzeType.anyChild], the one
-     * walker that knows all of a type's positions. This was a hand-written
-     * recursion covering records, applications, variants and an arrow's
-     * param/return, ending in `else -> false`. It therefore answered "concrete"
-     * for a `NewtypeType` wrapping a variable, for a standalone effect row, and
-     * for an arrow whose only variable lives in its effect row or its ability
-     * constraints.
-     *
-     * MEASURED before replacing it: 14 disagreements across the typechecker
-     * suite, every one an arrow the local version called concrete and the
-     * canonical walker did not.
-     */
-    private fun containsVarTypeDeep(type: MezzeType): Boolean = type.holdsTypeVar()
-
-    /**
-     * Whether a method call on a VarType receiver should be marked for
-     * dict-passing (both when SCANNING for a callee's dict params and when
-     * EMITTING the call). Single source of truth for the two mirror sites so
-     * collection and consumption can never disagree.
-     *
-     * `to_str` / `to_dbg` with no real ability op are the InspectIR path
-     * (auto-derived, receiver's shape baked at compile time) — never
-     * dict-dispatched. There are many same-named `to_str` (one per type),
-     * which would otherwise trip the multiple-candidates rule and demand a
-     * `__dict_to_str` the caller never passes.
-     *
-     * #18: comparison / arithmetic ops (`lt`, `eq`, `add`, …) also need a dict
-     * when the receiver is a still-generic `'a` under a `with Ord`/`with Eq`/
-     * `with Num*` constraint — e.g. `x < acc` inside `list::min`'s body. The
-     * old `methodName !in inlineableOps` guard excluded these entirely, so the
-     * `<` fell through to the native comparator and crashed on a user variant
-     * (`Cannot compare MezzeVariant`). The exclusion existed only so PRIMITIVE
-     * operands inline (no dict) — but a primitive receiver is a concrete type,
-     * not a VarType, so it never enters this branch; and a VarType receiver
-     * that mono later specializes to a primitive gets its dict param stripped
-     * during specialization. So for `inlineableOps` we require a REAL ability
-     * op of that name to exist (`opCandidates` non-empty) in addition to the
-     * constrained-arrow / multi-candidate rule — a bare `'a` with no `Ord`/`Eq`
-     * impl anywhere in scope still falls through to the structural default
-     * rather than demanding a dict nobody supplies.
-     */
-    private fun shouldDictDispatchVarTypeOp(
-        methodName: String,
-        arrowIsConstrained: Boolean
-    ): Boolean {
-        val isInspectSugar =
-            methodName == Keywords.TO_STR || methodName == Keywords.TO_DBG
-        if (isInspectSugar) return false
-        val opCandidates = abilityOpIndex[methodName]
-        val hasRealOp = opCandidates != null && opCandidates.isNotEmpty()
-        // Inlineable ops (comparisons / arithmetic) only dict-dispatch when a
-        // real ability op backs them — otherwise a VarType `'a` with no impl
-        // takes the structural/native default (matching the old behavior of
-        // never entering this branch for inlineable ops).
-        if (methodName in inlineableOps && !hasRealOp) return false
-        // #18 guard: in user compilation (!isStdlibMode), only flag inlineable
-        // ops when the enclosing arrow explicitly carries an ability constraint
-        // (`with Ord 'a`, `with NumMul 'a`, etc.). Without the constraint guard,
-        // every generalized user function like `{x} -> x * 2` gets `__dict_mul`
-        // in its frame — and CallIndirect callers (HOF callbacks, closures)
-        // crash because they can't inject dicts.
-        //
-        // During stdlib compilation (isStdlibMode), we allow inlineable ops
-        // unconditionally because stdlib functions (sort, min, max) are always
-        // called via CallDirect, which can inject dicts at the call site.
-        if (methodName in inlineableOps && !isStdlibMode && !arrowIsConstrained) return false
-        return when {
-            arrowIsConstrained -> true
-            opCandidates != null && opCandidates.size > 1 -> true
-            // For a non-inlineable op the historical rule required >1 candidate.
-            // For an inlineable op backed by a real ability (Ord/Eq/Num), a
-            // single candidate still needs the dict at a polymorphic call site,
-            // since the receiver stays generic until mono specializes it.
-            methodName in inlineableOps && hasRealOp -> true
-            else -> false
-        }
-    }
-
-    private fun scanExprForVarTypeMethods(
-        expr: TypedExpr,
-        out: MutableSet<String>,
-        arrowIsConstrained: Boolean = false,
-        // Concrete types of lambda params in scope (from their ANNOTATIONS, e.g.
-        // `{ x: Rt } -> …`). Used to recover an op receiver's concrete type when the
-        // node's own type was laundered to VarType(unknown) — see the field-recovery
-        // in the field-access op check below.
-        paramEnv: Map<String, MezzeType> = emptyMap()
-    ) {
-        when (expr) {
-            is TypedCall -> {
-                val fn = expr.function
-                // An operation with NO RECEIVER says which dictionary it wants —
-                // there is no variable-typed receiver for the walk below to notice,
-                // so the requirement would otherwise be invisible and the slot would
-                // never be allocated.
-                val staticOp = (fn as? TypedVar)?.binding as? BindingRef.AbilityOp
-                if (staticOp != null) {
-                    out.add(
-                        com.mezze.language.ast.MagicParams.dictKey(
-                            staticOp.opName, staticOp.typeVarName, staticOp.abilityHash.hex,
-                        ),
-                    )
-                }
-                if (fn is TypedFieldAccess) {
-                    val methodName = fn.field
-                    // Refresh against the final substitution so an inlineable op
-                    // whose receiver is a resolved primitive (e.g. `rank {..} <
-                    // rank {..}` where `rank` returns Int, but the sub-expr's
-                    // node type was still a var at build time) is NOT mistaken
-                    // for a generic-'a comparison and given a spurious dict param.
-                    // #18: without this, an `impl Ord for T` body's own internal
-                    // `<` on Int would demand a `__dict_lt` its caller never
-                    // supplies, misaligning the arg record at runtime.
-                    val receiverType = substitution.apply(fn.record.type)
-                    // Bug B (#86): a VarType receiver whose id is in the enclosing
-                    // arrow's `with`-constraint typevar set needs dict-passing even
-                    // when abilityOpIndex has zero entries at this compile step
-                    // (blanket-impl body precompiled before any user impl exists).
-                    // Otherwise fall back to the impl-index population check: only
-                    // flag as needing dict if there are multiple candidates
-                    // (ambiguous — can't resolve statically). Single candidate =
-                    // resolved in compileCall without needing a dict param.
-                    //
-                    // Frame-slot crash fix: a binary inlineable op (eq/neq/lt/… with
-                    // an `r` co-operand) is CONCRETELY resolvable when its CO-OPERAND
-                    // is a concrete type — the co-operand pins the impl (e.g. `x.m ==
-                    // Get` resolves `Eq M` from the concrete `Get`) even if the
-                    // receiver `x.m`'s node type is still an unresolved VarType (as
-                    // happens for a variant field read inside a closure returned from
-                    // a generic-`'it` inherent-method op — the field's concrete type
-                    // isn't stamped through `'it`). Requesting a dict there is wrong:
-                    // no dict exists (concrete impl = direct call), so the closure
-                    // frame is built without it and the emitted read runs off the end
-                    // (ArrayIndexOutOfBounds at the returned-closure call). Skip the
-                    // dict request when the co-operand resolves concrete.
-                    // Frame-slot crash recovery: the op receiver's node type may be
-                    // laundered to VarType(unknown) for a field read inside a closure
-                    // returned from a generic-`'it` inherent-method op (the field's
-                    // concrete type isn't stamped through `'it`). But when the op's
-                    // receiver is `param.field` and `param` has a concrete RecordType
-                    // ANNOTATION in scope (`{ x: Rt } -> x.m == …`), the real receiver
-                    // type is Rt.fields[field] = M — concrete → the op resolves to a
-                    // concrete impl (direct call, NO dict). Requesting a dict here
-                    // wrongly gives the enclosing op a spurious `__dict_eq` param whose
-                    // frame slot the inherent-method dispatch doesn't supply →
-                    // ArrayIndexOutOfBounds when the returned closure runs. So treat
-                    // the op as concretely resolvable when the annotation recovers a
-                    // concrete field type.
-                    // The op receiver is `fn.record`. For `x.m == Get` the desugared
-                    // op is `(x.m).eq(Get)`, so `fn.record` is the field access
-                    // `x.m` = TypedFieldAccess(record = TypedVar(x), field = "m").
-                    // Recover its type from x's concrete annotation: Rt.fields["m"].
-                    val recoveredConcrete = receiverType is VarType && run {
-                        val opReceiver = fn.record
-                        if (opReceiver !is TypedFieldAccess) return@run false
-                        val base = opReceiver.record
-                        if (base !is TypedVar) return@run false
-                        // The op receiver is `base.field` where `base` is a lambda
-                        // param annotated with a CONCRETE type (e.g. `{ x: Rt }`).
-                        // `Rt` surfaces as a nominal TypeApplication or an expanded
-                        // RecordType — either way it is NOT a type variable, so
-                        // `base.field` is a field of a concrete type and the op
-                        // resolves to a concrete impl (direct call, no dict). We don't
-                        // need the field's exact type — concrete base ⇒ concrete
-                        // receiver for dispatch purposes.
-                        val baseAnn = paramEnv[base.name]?.let { substitution.apply(it) } ?: return@run false
-                        // "Concrete" means no type variable anywhere in it: `['a]` or
-                        // `Box 'a` is a shape, not a concrete type, and a field read off
-                        // it can still be the element `'a` that needs the dict.
-                        baseAnn !is VarType && !containsVarType(baseAnn)
-                    }
-                    if (receiverType is VarType && !recoveredConcrete &&
-                        shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
-                        // BUG 9 / C.2: include the ABILITY the emitted node carries.
-                        // Without it two abilities declaring this operation raise the
-                        // SAME key for the same variable, normalizeDictKeys groups
-                        // them, and one slot serves both. `fn.abilityHash` is set only
-                        // where the name is ambiguous, so unambiguous calls keep the
-                        // byte-identical key they always had.
-                        out.add(
-                            com.mezze.language.ast.MagicParams.dictKey(
-                                methodName, receiverType.variable.name, fn.abilityHash?.hex,
-                            ),
-                        )
-                    }
-                    scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, paramEnv)
-                } else {
-                    scanExprForVarTypeMethods(fn, out, arrowIsConstrained, paramEnv)
-                }
-                scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, paramEnv)
-            }
-            is TypedLambda -> {
-                // #195 B2: descend into nested lambdas. When the inner body calls
-                // `x.method` on a VarType receiver (e.g. inside a `seq::fold`
-                // callback), the OUTER function holds the constraint and must
-                // request `__dict_<method>` so the inner lambda can capture it
-                // from the outer's frame. Skipping here used to make the inner
-                // call fall through to plain field access at runtime → crash.
-                //
-                // Bug B (#86): an inner arrow that carries its own `with`
-                // constraint promotes to arrowIsConstrained; the outer scan
-                // already runs constrained when the OUTER arrow was.
-                val innerConstrained = arrowIsConstrained || arrowHasAbilityConstraint(expr.type)
-                // Extend the param env with THIS lambda's params (their annotated
-                // types), so a nested `x.field` op can recover x's concrete type.
-                val innerParamEnv = paramEnv + expr.params.associate { it.name to it.type }
-                scanExprForVarTypeMethods(expr.body, out, innerConstrained, innerParamEnv)
-            }
-            is TypedBlock -> {
-                for (s in expr.statements) {
-                    when (s) {
-                        is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out, arrowIsConstrained, paramEnv)
-                        is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out, arrowIsConstrained, paramEnv)
-                    }
-                }
-                scanExprForVarTypeMethods(expr.result, out, arrowIsConstrained, paramEnv)
-            }
-            is TypedIf -> {
-                scanExprForVarTypeMethods(expr.condition, out, arrowIsConstrained, paramEnv)
-                scanExprForVarTypeMethods(expr.thenBranch, out, arrowIsConstrained, paramEnv)
-                scanExprForVarTypeMethods(expr.elseBranch, out, arrowIsConstrained, paramEnv)
-            }
-            is TypedMatch -> {
-                scanExprForVarTypeMethods(expr.scrutinee, out, arrowIsConstrained, paramEnv)
-                for (c in expr.cases) {
-                    c.guard?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
-                    scanExprForVarTypeMethods(c.body, out, arrowIsConstrained, paramEnv)
-                }
-            }
-            is TypedRecord -> {
-                for (e in expr.entries) {
-                    when (e) {
-                        is TypedRecordEntry.Field -> scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, paramEnv)
-                        is TypedRecordEntry.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, paramEnv)
-                    }
-                }
-            }
-            is TypedFieldAccess -> scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained, paramEnv)
-            is TypedVariantConstruct -> expr.payload?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
-            is TypedRecordUpdate -> {
-                scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained, paramEnv)
-                for (e in expr.updates) {
-                    if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, paramEnv)
-                }
-            }
-            is TypedPerform -> {
-                for (h in expr.handlers) {
-                    h.params?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
-                }
-                scanExprForVarTypeMethods(expr.body, out, arrowIsConstrained, paramEnv)
-            }
-            is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, paramEnv)
-            is TypedPipe -> {
-                scanExprForVarTypeMethods(expr.left, out, arrowIsConstrained, paramEnv)
-                scanExprForVarTypeMethods(expr.right, out, arrowIsConstrained, paramEnv)
-            }
-            is TypedSeq -> {
-                for (e in expr.elements) {
-                    when (e) {
-                        is TypedSeqElement.Regular -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, paramEnv)
-                        is TypedSeqElement.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, paramEnv)
-                    }
-                }
-            }
-            is TypedStringLit -> {
-                for (p in expr.parts) {
-                    if (p is TypedStringPart.Interpolation) scanExprForVarTypeMethods(p.expr, out, arrowIsConstrained, paramEnv)
-                }
-            }
-            // Leaf nodes: no children
-            is TypedVar, is TypedIntLit, is TypedNatLit, is TypedFloatLit,
-            is TypedFracLit, is TypedBoolLit, is TypedCharLit -> {}
-        }
-    }
-
-    data class CompileResult(
-        val functions: List<FunctionIR>,
-        val performerRecords: List<PerformerRecord>
-    )
-
-    data class PerformerRecord(
-        val performerHash: String,
-        val effectHash: String,
-        val operationHashes: List<String>,
-        val operationNames: List<String>
-    )
 
     /**
      * Run only the dict-method prescan for a module (no compilation).
@@ -1733,7 +880,7 @@ class TypedASTCompiler(
         }
     }
 
-    private fun compileExpr(expr: TypedExpr): NodeIR {
+    internal fun compileExpr(expr: TypedExpr): NodeIR {
         val src = locToSourceInfo(expr.loc)
         return when (expr) {
             // Literals
@@ -2962,7 +2109,7 @@ class TypedASTCompiler(
         else -> null
     }
 
-    private fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<String, MezzeType>) {
+    internal fun harvestVarBindings(pattern: MezzeType, value: MezzeType, out: MutableMap<String, MezzeType>) {
         when (pattern) {
             is VarType -> {
                 if (value !is VarType) out.putIfAbsent(pattern.variable.name, value)
@@ -3185,7 +2332,7 @@ class TypedASTCompiler(
      * types can match blanket container-level impls (e.g. `impl Ord for ['a]`)
      * when the intended resolution is for the element type.
      */
-    private fun containsVarType(type: MezzeType): Boolean = when (type) {
+    internal fun containsVarType(type: MezzeType): Boolean = when (type) {
         is VarType -> true
         is TypeApplication -> type.args.any { containsVarType(it) }
         else -> false
@@ -3224,7 +2371,7 @@ class TypedASTCompiler(
         else -> null
     }
 
-    private fun resolveOpHashFromConcreteTypes(
+    internal fun resolveOpHashFromConcreteTypes(
         methodName: String,
         concreteTypes: List<MezzeType>,
         /** BUG 9 / C.2: confine the search to ONE ability when the caller knows
@@ -3759,7 +2906,7 @@ class TypedASTCompiler(
      * Any shape not on this list (or one containing a VarType) returns null.
      * The caller treats null as "no override" — original receiverType stays.
      */
-    private fun deriveConcreteType(expr: TypedExpr): MezzeType? = when (expr) {
+    internal fun deriveConcreteType(expr: TypedExpr): MezzeType? = when (expr) {
         // An effect operation's return type is fixed by its `effect X where { op:
         // <sig> }` declaration — TypedPerformOp carries the substituted op-return
         // type directly on the node. Reading it lets an inline
@@ -3895,7 +3042,7 @@ class TypedASTCompiler(
      * Only records entries with concrete types; VarType payloads (an unsolved
      * generic scrutinee) contribute nothing.
      */
-    private fun readPatternBindings(pattern: TypedPattern, scrutinee: MezzeType, out: MutableMap<String, MezzeType>) {
+    internal fun readPatternBindings(pattern: TypedPattern, scrutinee: MezzeType, out: MutableMap<String, MezzeType>) {
         when (pattern) {
             is TypedVarPattern -> {
                 if (scrutinee !is VarType && !containsVarTypeDeep(scrutinee)) out[pattern.name] = scrutinee
@@ -4234,605 +3381,6 @@ class TypedASTCompiler(
         return BlockIR(stmts, resultIR, src)
     }
 
-    private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
-        val scrutineeIR = compileExpr(expr.scrutinee)
-        // Derive a concrete scrutinee type from AST context when the solver left
-        // `expr.scrutinee.type` as a bare VarType. This is the "walk the type
-        // environment" step for polyglot newtype dispatch: `match uuid_val is`
-        // where `uuid_val`'s let-binding RHS was `match ... -> c.static { ... }`.
-        // `slotConcreteTypes` was populated in compileBlock; deriveConcreteType
-        // walks through TypedVar → slot → RHS.
-        val concreteScrutineeType: MezzeType? = run {
-            val stated = expr.scrutinee.type
-            if (stated !is VarType && !containsVarTypeDeep(stated)) return@run stated
-            deriveConcreteType(expr.scrutinee)
-        }
-        // Use flatMap to expand or-patterns (cases with multiple patterns) into
-        // separate CaseIR entries sharing the same body. This way `[] | [_] -> True`
-        // becomes two CaseIR entries: one for `[]` and one for `[_]`.
-        val cases = expr.cases.flatMap { case ->
-            // Determine which patterns to emit. For or-patterns, case.patterns has multiple entries.
-            val patternsToEmit = if (case.patterns.size > 1) case.patterns else listOf(case.patterns.firstOrNull())
-
-            patternsToEmit.map { pat ->
-                // Push a new scope for this match case's bindings
-                val caseScope = mutableMapOf<String, Int>()
-                val savedSlotConcreteTypesInCase = slotConcreteTypes.toMap()
-
-                // Allocate slots for pattern bindings (always fresh)
-                val bindings = case.bindings.map { b ->
-                    val slot = forceAllocLocal(b.name)
-                    caseScope[b.name] = slot
-                    BindingIR(slot, typeToSlotKind(b.type))
-                }
-
-                // Structurally derive concrete types for pattern bindings whose
-                // declared PatternBinding.type is a VarType (solver left them
-                // unresolved — see slotConcreteTypes field comment). Reads the
-                // concrete scrutinee type recovered above against the pattern
-                // shape, so `Ok { val = u }` off `Result JvmForeign _` binds
-                // `u : JvmForeign` even when case.bindings[i].type is `'u`.
-                if (concreteScrutineeType != null && pat != null) {
-                    val derived = mutableMapOf<String, MezzeType>()
-                    readPatternBindings(pat, concreteScrutineeType, derived)
-                    for (b in case.bindings) {
-                        if (b.type !is VarType && !containsVarTypeDeep(b.type)) continue
-                        val slot = caseScope[b.name] ?: continue
-                        derived[b.name]?.let { slotConcreteTypes[slot] = it }
-                    }
-                }
-
-                // Push scope so nested expressions use these bindings at depth 0
-                scopeStack.addLast(caseScope)
-
-                // Collect nested destructuring info BEFORE compilePattern,
-                // so temp slots for nested records are allocated.
-                val nestedDestructures = mutableListOf<NestedDestructureInfo>()
-                collectNestedDestructuring(pat, nestedDestructures)
-
-                // Collect nested seq destructuring (nested seq patterns like [[x]])
-                val nestedSeqDestructures = mutableListOf<NestedSeqDestructureInfo>()
-                collectNestedSeqDestructuring(pat, nestedSeqDestructures)
-
-                val patternIR = compilePattern(pat)
-                var guardIR = case.guard?.let { compileExpr(it) }
-
-                // HOLE A: synthesize runtime tests for nested constructor/literal
-                // sub-patterns and fold them into the guard. The outer pattern has
-                // already bound each field to a slot, so the test reads those slots
-                // (ReadLocalIR) and recurses. A false test falls through to the next
-                // arm via the guard mechanism below. When there is also a user guard,
-                // gate it behind the nested test (IfIR short-circuit) so the guard
-                // never runs against a value whose nested shape didn't match.
-                val nestedTest: NodeIR? = when (pat) {
-                    is TypedRecordPattern -> {
-                        val terms = pat.fields.mapNotNull { fp ->
-                            if (fp.pattern is TypedVarPattern || fp.pattern is TypedWildcardPattern || fp.pattern == null) {
-                                null
-                            } else {
-                                val slot = fieldBindingSlot(fp)
-                                if (slot < 0) null
-                                else buildNestedTests(fp.pattern, ReadLocalIR(slot, SlotKind.OBJECT, src), src)
-                            }
-                        }
-                        andAll(terms, src)
-                    }
-                    is TypedVariantPattern -> {
-                        // Nested tests inside a top-level variant arm's payload fields.
-                        val payload = pat.payload
-                        if (payload is TypedRecordPattern) {
-                            val terms = payload.fields.mapNotNull { fp ->
-                                if (fp.pattern is TypedVarPattern || fp.pattern is TypedWildcardPattern || fp.pattern == null) {
-                                    null
-                                } else {
-                                    val slot = fieldBindingSlot(fp)
-                                    if (slot < 0) null
-                                    else buildNestedTests(fp.pattern, ReadLocalIR(slot, SlotKind.OBJECT, src), src)
-                                }
-                            }
-                            andAll(terms, src)
-                        } else null
-                    }
-                    is TypedSeqPattern -> {
-                        // B7: a top-level seq arm's REFUTABLE element sub-patterns
-                        // (`[Some {val=x}, ...rest]`) are bound (via collectNested-
-                        // SeqDestructuring → `__seq_tmp_$idx`) but never TESTED — the
-                        // arm matched on length alone, so `[None]` slipped through,
-                        // bound x=null, and crashed. Test each refutable element
-                        // against its already-bound temp slot.
-                        val terms = pat.elements.mapIndexedNotNull { idx, elem ->
-                            if (elem is TypedVarPattern || elem is TypedWildcardPattern) null
-                            else {
-                                val elemSlot = localsByName["__seq_tmp_$idx"]
-                                if (elemSlot == null) null
-                                else buildNestedTests(elem, ReadLocalIR(elemSlot, SlotKind.OBJECT, src), src)
-                            }
-                        }
-                        andAll(terms, src)
-                    }
-                    else -> null
-                }
-                if (nestedTest != null) {
-                    guardIR = if (guardIR == null) nestedTest
-                              else IfIR(nestedTest, guardIR, BoolLitIR(false, src), src)
-                }
-
-                // Compile if-let bindings.
-                // Also collect nested destructuring from if-let patterns.
-                val ifLetIRs = case.ifLetBindings.map { ifLet ->
-                    // Collect nested destructuring from if-let patterns too
-                    collectNestedDestructuring(ifLet.pattern, nestedDestructures)
-                    val exprIR = compileExpr(ifLet.expr)
-                    val ifLetPatternIR = compilePattern(ifLet.pattern)
-                    // Resolve binding slots from the case scope
-                    val fieldNames = ifLet.bindingNames
-                    val fieldSlots = fieldNames.map { name -> caseScope[name] ?: -1 }
-                    IfLetBindingIR(exprIR, ifLetPatternIR, fieldNames, fieldSlots, locToSourceInfo(ifLet.loc))
-                }
-
-                var bodyIR = compileExpr(case.body)
-
-                // Wrap guard AND body with nested destructuring let-bindings if needed.
-                // For pattern `Some { val = { x = px, y = py } } if x > 0 -> x`:
-                //   tempSlot holds the intermediate record {x=10, y=20}
-                //   Guard becomes: do { let px = tempSlot.x; let py = tempSlot.y; <originalGuard> }
-                //   Body becomes:  do { let px = tempSlot.x; let py = tempSlot.y; <originalBody> }
-                // Both share the same frame, so the guard's writes are visible to the body.
-                // We wrap both so the variables are available regardless of evaluation order.
-                if (nestedDestructures.isNotEmpty()) {
-                    val destructureStmts = mutableListOf<StmtIR>()
-                    for (nd in nestedDestructures) {
-                        // A level nested two-or-more deep is not bound by the flat
-                        // PatternIR; first read its record off the parent temp slot.
-                        // Outer levels are earlier in the list, so the parent slot
-                        // is already populated by the time we reach a child.
-                        val rf = nd.readFrom
-                        if (rf != null) {
-                            val readParent = ReadLocalIR(rf.first, SlotKind.OBJECT, src)
-                            val readThis = ReadFieldIR(readParent, rf.second, -1, src)
-                            destructureStmts.add(StmtIR.Let(nd.tempSlot, SlotKind.OBJECT, "__nested_lvl", Hash.ZERO, readThis, src))
-                        }
-                        for ((fieldName, bindingSlot) in nd.fieldBindings) {
-                            val readTemp = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
-                            val readField = ReadFieldIR(readTemp, fieldName, -1, src)
-                            destructureStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_" + fieldName, Hash.ZERO, readField, src))
-                        }
-                    }
-                    // Wrap guard (if present) with destructuring so guard can reference nested vars
-                    if (guardIR != null) {
-                        guardIR = BlockIR(destructureStmts.toList(), guardIR, src)
-                    }
-                    // Wrap body too (in case guard doesn't exist, or for independent body access)
-                    bodyIR = BlockIR(destructureStmts.toList(), bodyIR, src)
-                }
-
-                // Handle nested seq destructuring: for patterns like [[x, ...rest1], ...rest2],
-                // the inner [x, ...rest1] was bound to a temp slot. Now generate a nested match
-                // in the body that extracts bindings from the temp slot.
-                if (nestedSeqDestructures.isNotEmpty()) {
-                    val seqStmts = mutableListOf<StmtIR>()
-                    for (nsd in nestedSeqDestructures) {
-                        // Generate: let var = seq_get(tempSlot, index) for each binding in the inner pattern
-                        val innerPat = nsd.innerPattern
-                        if (innerPat is TypedSeqPattern) {
-                            // For each element in the inner seq pattern, generate a seq_get
-                            for ((innerIdx, innerElem) in innerPat.elements.withIndex()) {
-                                if (innerElem is TypedVarPattern) {
-                                    val bindingSlot = scopeStack.lastOrNull()?.get(innerElem.name)
-                                        ?: localsByName[innerElem.name]
-                                        ?: forceAllocLocal(innerElem.name)
-                                    val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
-                                    val getElem = SeqGetIR(readTemp, LongLitIR(innerIdx.toLong(), src), src)
-                                    seqStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, innerElem.name, Hash.ZERO, getElem, src))
-                                }
-                            }
-                            // Handle rest binding in inner seq pattern.
-                            // "_" (`..._`) matches the tail but binds nothing — skip it.
-                            val restName = innerPat.rest
-                            if (restName != null && restName != "_") {
-                                val restSlot = scopeStack.lastOrNull()?.get(restName)
-                                    ?: localsByName[restName]
-                                    ?: forceAllocLocal(restName)
-                                // Generate a nested match to bind elements and rest from the temp slot.
-                                // match tempSlot is [e0, e1, ...rest] -> rest
-                                val innerCaseBindings = mutableListOf<BindingIR>()
-                                val innerElementSlots = innerPat.elements.mapIndexed { _, iElem ->
-                                    if (iElem is TypedVarPattern) {
-                                        val s = scopeStack.lastOrNull()?.get(iElem.name)
-                                            ?: localsByName[iElem.name]
-                                            ?: forceAllocLocal(iElem.name)
-                                        s
-                                    } else -1
-                                }
-                                val innerPatternIR = PatternIR.Seq(innerElementSlots, restSlot)
-                                val innerCaseBody = ReadLocalIR(restSlot, SlotKind.OBJECT, src)
-                                val innerCase = CaseIR(innerPatternIR, innerCaseBindings, null, innerCaseBody, src)
-                                val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
-                                val innerMatch = MatchIR(readTemp, listOf(innerCase), src)
-                                seqStmts.add(StmtIR.Let(restSlot, SlotKind.OBJECT, restName, Hash.ZERO, innerMatch, src))
-                            }
-                        } else if (innerPat is TypedVariantPattern) {
-                            // Nested variant pattern in seq: [Ok {val}] -> ...
-                            // Generate a nested match on the temp slot to extract variant payload fields.
-                            val innerPatternIR = compilePattern(innerPat)
-                            val innerCaseBindings = mutableListOf<BindingIR>()
-
-                            // Collect nested record destructuring within the variant payload
-                            val innerNestedDestructures = mutableListOf<NestedDestructureInfo>()
-                            collectNestedDestructuring(innerPat, innerNestedDestructures)
-
-                            // Build inner body that produces unit (bindings are side-effects on the frame)
-                            var innerBody: NodeIR = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
-
-                            // Wrap with nested record destructuring if needed
-                            if (innerNestedDestructures.isNotEmpty()) {
-                                val dStmts = mutableListOf<StmtIR>()
-                                for (nd in innerNestedDestructures) {
-                                    for ((fieldName, bindingSlot) in nd.fieldBindings) {
-                                        val readTemp2 = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
-                                        val readField = ReadFieldIR(readTemp2, fieldName, -1, src)
-                                        dStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_$fieldName", Hash.ZERO, readField, src))
-                                    }
-                                }
-                                innerBody = BlockIR(dStmts, innerBody, src)
-                            }
-
-                            val innerCase = CaseIR(innerPatternIR, innerCaseBindings, null, innerBody, src)
-                            // Add a wildcard fallback that returns the temp slot unchanged
-                            val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src), src)
-                            val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
-                            val innerMatch = MatchIR(readTemp, listOf(innerCase, wildcardCase), src)
-                            // Use an arbitrary result slot (the match result is not used, only the bindings matter)
-                            val resultSlot = forceAllocLocal("__seq_variant_result_${nsd.tempSlot}")
-                            seqStmts.add(StmtIR.Let(resultSlot, SlotKind.OBJECT, "__seq_variant_result", Hash.ZERO, innerMatch, src))
-                        } else if (innerPat is TypedLiteralPattern) {
-                            // Nested literal pattern in seq: [1, 2] -> ...
-                            // No bindings needed for literals in seq elements
-                        }
-                    }
-                    if (seqStmts.isNotEmpty()) {
-                        if (guardIR != null) {
-                            guardIR = BlockIR(seqStmts.toList(), guardIR, src)
-                        }
-                        bodyIR = BlockIR(seqStmts.toList(), bodyIR, src)
-                    }
-                }
-
-                // Pop scope
-                scopeStack.removeLast()
-                slotConcreteTypes.clear()
-                slotConcreteTypes.putAll(savedSlotConcreteTypesInCase)
-
-                CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
-            }
-        }
-        return MatchIR(scrutineeIR, cases, src)
-    }
-
-    /**
-     * Info about a nested record destructuring that needs post-bind processing.
-     * tempSlot: the frame slot holding the intermediate record value
-     * fieldBindings: list of (fieldName, targetSlot) pairs to extract from the record
-     */
-    private data class NestedDestructureInfo(
-        val tempSlot: Int,
-        val fieldBindings: List<Pair<String, Int>>,  // (fieldName, targetSlot)
-        // Non-null for a level nested two-or-more deep: (parentTempSlot, field)
-        // to read this level's record off the parent's temp slot. Chains depth.
-        val readFrom: Pair<Int, String>? = null
-    )
-
-    /**
-     * Info about a nested seq element destructuring that needs post-bind processing.
-     * tempSlot: the frame slot holding the intermediate seq element value
-     * innerPattern: the full TypedPattern for the nested seq element, compiled to
-     *   a nested match in the body
-     */
-    private data class NestedSeqDestructureInfo(
-        val tempSlot: Int,
-        val innerPattern: TypedPattern
-    )
-
-    /**
-     * Walk a typed pattern tree and collect any nested record sub-patterns
-     * that can't be handled by a flat PatternIR. Allocates temp slots for
-     * intermediate records.
-     */
-    private fun collectNestedDestructuring(pattern: TypedPattern?, out: MutableList<NestedDestructureInfo>) {
-        if (pattern == null) return
-        when (pattern) {
-            is TypedVariantPattern -> (pattern.payload as? TypedRecordPattern)?.let {
-                collectNestedRecordFields(it, out, null)
-            }
-            is TypedRecordPattern -> collectNestedRecordFields(pattern, out, null)
-            else -> {}
-        }
-    }
-
-    // For each field of [record] whose sub-pattern is itself a record, allocate a
-    // temp slot for the field value, bind its direct-variable inner fields, and
-    // RECURSE so arbitrarily deep nesting works. The flat PatternIR only reaches
-    // the outermost level, so a field nested two-or-more deep reads its value from
-    // its parent's temp slot via [parent] (parentTempSlot to read this field off).
-    private fun collectNestedRecordFields(
-        record: TypedRecordPattern,
-        out: MutableList<NestedDestructureInfo>,
-        parent: Int?,
-    ) {
-        for (fp in record.fields) {
-            val nested = fp.pattern as? TypedRecordPattern ?: continue
-            val tempSlot = forceAllocLocal("__tmp_${fp.name}")
-            val fieldBindings = nested.fields.map { innerFp ->
-                val bindingName = if (innerFp.pattern is TypedVarPattern) (innerFp.pattern as TypedVarPattern).name else innerFp.name
-                val slot = scopeStack.lastOrNull()?.get(bindingName)
-                    ?: localsByName[bindingName]
-                    ?: forceAllocLocal(bindingName)
-                Pair(innerFp.name, slot)
-            }
-            // Top-level nested field: the flat PatternIR already bound tempSlot
-            // (parent == null). Deeper: read this field off the parent temp slot.
-            val readFrom = if (parent == null) null else Pair(parent, fp.name)
-            out.add(NestedDestructureInfo(tempSlot, fieldBindings, readFrom))
-            collectNestedRecordFields(nested, out, tempSlot)
-        }
-    }
-
-    /**
-     * HOLE A: build a runtime boolean test for nested CONSTRUCTOR/LITERAL
-     * sub-patterns inside a record field or variant payload field. A flat
-     * `PatternIR.Record`/`PatternIR.Variant` only EXTRACTS + BINDS its fields —
-     * it never tests a nested tag/literal. So `match r is { c = Red } -> …` (r a
-     * record with `c: Color`) selected its arm on the record's SHAPE alone and
-     * bound `c`'s value, silently ignoring that the nested `Red` must MATCH — a
-     * `{ c = Blue }` value wrongly ran the `Red` arm. Same for a nested variant
-     * in a variant payload (`Wrap { inner = A { n } }`) and a nested literal
-     * (`{ n = 0 }`).
-     *
-     * We synthesize a pure boolean expression that reads the field (via
-     * `accessExpr`) and tests the nested pattern, and AND it (short-circuit, see
-     * [compileMatch]) into the case guard. Because a false guard falls through to
-     * the NEXT arm (the guard→body→next-arm structure already handles that), a
-     * nested mismatch correctly abandons the arm — which a body-level test could
-     * never do. Returns null when the sub-pattern is irrefutable (var/wildcard/
-     * absent), i.e. no test is needed.
-     *
-     * Bindings are unaffected: the outer pattern + [collectNestedDestructuring]
-     * still bind every field; this only ADDS tests. Nested variant *payload*
-     * variables are bound by the synthesized `MatchIR`'s Variant pattern into the
-     * same frame slots the body reads (resolved by name), so `A { n } -> n` still
-     * sees `n`. Nested seq / string-interp sub-patterns are not tested here (they
-     * are separate, pre-existing gaps); they return null and keep prior behavior.
-     */
-    /**
-     * The frame slot that [compilePattern] binds a record/variant field's VALUE
-     * to — must mirror that logic exactly so [buildNestedTests] reads the same
-     * slot the outer pattern populated. A nested-record field goes to `__tmp_*`
-     * (allocated by [collectNestedDestructuring]); everything else goes to the
-     * field's binding name (renamed var, else the field name).
-     */
-    private fun fieldBindingSlot(fp: TypedFieldPattern): Int {
-        if (fp.pattern is TypedRecordPattern) {
-            return localsByName["__tmp_${fp.name}"] ?: -1
-        }
-        val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
-        return scopeStack.lastOrNull()?.get(bindingName)
-            ?: localsByName[bindingName]
-            ?: -1
-    }
-
-    private fun buildNestedTests(pattern: TypedPattern?, accessExpr: NodeIR, src: SourceInfo): NodeIR? {
-        if (pattern == null) return null
-        return when (pattern) {
-            is TypedVarPattern, is TypedWildcardPattern -> null
-            is TypedLiteralPattern -> InlineBinaryOpIR(InlineOp.EQ, accessExpr, compileExpr(pattern.value), src)
-            is TypedRecordPattern -> {
-                val terms = pattern.fields.mapNotNull { fp ->
-                    buildNestedTests(fp.pattern, ReadFieldIR(accessExpr, fp.name, -1, src), src)
-                }
-                andAll(terms, src)
-            }
-            is TypedVariantPattern -> {
-                // Test the tag AND (recursively) the payload, atomically, via a
-                // nested match whose true-arm binds the payload and returns the
-                // sub-tests, and whose wildcard-arm returns false.
-                val adtHashHex = ((pattern.type as? VariantType)?.identity as? TypeIdentity.Declared)?.hash?.hex
-                val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
-
-                val fieldNames = mutableListOf<String>()
-                val fieldSlots = mutableListOf<Int>()
-                var payloadTest: NodeIR? = null
-                when (val payload = pattern.payload) {
-                    is TypedRecordPattern -> {
-                        val terms = mutableListOf<NodeIR>()
-                        for (fp in payload.fields) {
-                            fieldNames.add(fp.name)
-                            val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
-                            val slot = scopeStack.lastOrNull()?.get(bindingName)
-                                ?: localsByName[bindingName]
-                                ?: forceAllocLocal(bindingName)
-                            fieldSlots.add(slot)
-                            // A nested sub-pattern inside the payload field reads the
-                            // just-bound slot and recurses.
-                            buildNestedTests(fp.pattern, ReadLocalIR(slot, SlotKind.OBJECT, src), src)
-                                ?.let { terms.add(it) }
-                        }
-                        payloadTest = andAll(terms, src)
-                    }
-                    is TypedVarPattern -> {
-                        fieldNames.add(payload.name)
-                        val slot = scopeStack.lastOrNull()?.get(payload.name)
-                            ?: localsByName[payload.name]
-                            ?: forceAllocLocal(payload.name)
-                        fieldSlots.add(slot)
-                    }
-                    else -> {}
-                }
-
-                val trueBody: NodeIR = payloadTest ?: BoolLitIR(true, src)
-                val matchCase = CaseIR(
-                    PatternIR.Variant(tag, pattern.tag, fieldNames, fieldSlots),
-                    emptyList(), null, trueBody, src,
-                )
-                val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, BoolLitIR(false, src), src)
-                MatchIR(accessExpr, listOf(matchCase, wildcardCase), src)
-            }
-            is TypedSeqPattern, is TypedStringInterpPattern -> {
-                // B4/B6: a nested seq / string-interpolation sub-pattern needs a
-                // runtime shape test (length/prefix), or the enclosing arm would
-                // match on the outer tag/field-presence alone and fire wrongly.
-                // Build a nested match over the field value: `<pattern> -> true,
-                // _ -> false`, reusing compilePattern for the PatternIR + its slot
-                // allocation (mirrors the TypedVariantPattern case above).
-                val patIR = compilePattern(pattern)
-                val trueCase = CaseIR(patIR, emptyList(), null, BoolLitIR(true, src), src)
-                val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, BoolLitIR(false, src), src)
-                MatchIR(accessExpr, listOf(trueCase, wildcardCase), src)
-            }
-        }
-    }
-
-    /** AND a list of boolean tests, short-circuit-strict; null if empty. */
-    private fun andAll(terms: List<NodeIR>, src: SourceInfo): NodeIR? =
-        terms.reduceOrNull { acc, t -> InlineBinaryOpIR(InlineOp.AND, acc, t, src) }
-
-    /**
-     * Collect nested seq element patterns that need post-bind destructuring.
-     * For pattern `[[x, ...rest1], ...rest2]`, the inner `[x, ...rest1]` is a
-     * TypedSeqPattern that can't be represented flat. We bind element 0 to a
-     * temp slot and generate a nested match in the body.
-     */
-    private fun collectNestedSeqDestructuring(pattern: TypedPattern?, out: MutableList<NestedSeqDestructureInfo>) {
-        if (pattern == null) return
-        if (pattern is TypedSeqPattern) {
-            for ((idx, elem) in pattern.elements.withIndex()) {
-                if (elem !is TypedVarPattern && elem !is TypedWildcardPattern) {
-                    // This is a nested pattern (seq, literal, etc.) that needs
-                    // to be bound to a temp slot and matched in the body.
-                    val tempSlot = forceAllocLocal("__seq_tmp_$idx")
-                    out.add(NestedSeqDestructureInfo(tempSlot, elem))
-                }
-            }
-        }
-    }
-
-    private fun compilePattern(pattern: TypedPattern?): PatternIR {
-        if (pattern == null) return PatternIR.Wildcard()
-        return when (pattern) {
-            is TypedWildcardPattern -> PatternIR.Wildcard()
-            is TypedVarPattern -> {
-                // Bind the scrutinee to the variable's frame slot
-                val slot = scopeStack.lastOrNull()?.get(pattern.name)
-                    ?: localsByName[pattern.name]
-                    ?: -1
-                PatternIR.Wildcard(slot)
-            }
-            is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
-            is TypedVariantPattern -> {
-                val adtHashHex = ((pattern.type as? VariantType)?.identity as? TypeIdentity.Declared)?.hash?.hex
-                val tag = com.mezze.language.ast.BuiltinTypes.computeVariantTag(pattern.tag, adtHashHex)
-                val fieldNames = mutableListOf<String>()
-                val fieldSlots = mutableListOf<Int>()
-                val payload = pattern.payload
-                if (payload is TypedRecordPattern) {
-                    for (fp in payload.fields) {
-                        fieldNames.add(fp.name)  // record field name (for extraction at runtime)
-                        if (fp.pattern is TypedRecordPattern) {
-                            // Nested record pattern: bind to temp slot (allocated by collectNestedDestructuring)
-                            val tempSlot = localsByName["__tmp_${fp.name}"] ?: forceAllocLocal("__tmp_${fp.name}")
-                            fieldSlots.add(tempSlot)
-                        } else {
-                            // Simple binding: { val = ys } → "ys", { val } → "val"
-                            val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
-                            val slot = scopeStack.lastOrNull()?.get(bindingName)
-                                ?: localsByName[bindingName]
-                                ?: forceAllocLocal(bindingName)
-                            fieldSlots.add(slot)
-                        }
-                    }
-                } else if (payload is TypedVarPattern) {
-                    fieldNames.add(payload.name)
-                    val slot = scopeStack.lastOrNull()?.get(payload.name)
-                        ?: localsByName[payload.name]
-                        ?: forceAllocLocal(payload.name)
-                    fieldSlots.add(slot)
-                }
-                PatternIR.Variant(tag, pattern.tag, fieldNames, fieldSlots)
-            }
-            is TypedRecordPattern -> {
-                // Field names are for runtime extraction from the record.
-                // Slots must map to the BINDING name (renamed variable), not the field name.
-                // { value = v } → fieldName="value", bindingName="v"
-                val fieldNames = pattern.fields.map { it.name }
-                val fieldSlots = pattern.fields.map { fp ->
-                    if (fp.pattern is TypedRecordPattern) {
-                        // Nested record pattern: bind to temp slot (allocated by collectNestedDestructuring)
-                        localsByName["__tmp_${fp.name}"] ?: forceAllocLocal("__tmp_${fp.name}")
-                    } else {
-                        val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
-                        scopeStack.lastOrNull()?.get(bindingName)
-                            ?: localsByName[bindingName]
-                            ?: forceAllocLocal(bindingName)
-                    }
-                }
-                PatternIR.Record(fieldNames, fieldSlots, pattern.isOpen)
-            }
-            is TypedSeqPattern -> {
-                PatternIR.Seq(
-                    pattern.elements.mapIndexed { idx, elem ->
-                        when (elem) {
-                            is TypedVarPattern -> {
-                                scopeStack.lastOrNull()?.get(elem.name)
-                                    ?: localsByName[elem.name]
-                                    ?: forceAllocLocal(elem.name)
-                            }
-                            is TypedWildcardPattern -> -1
-                            else -> {
-                                // Nested pattern (seq, literal, etc.) — bind to temp slot
-                                // (allocated by collectNestedSeqDestructuring)
-                                localsByName["__seq_tmp_$idx"] ?: forceAllocLocal("__seq_tmp_$idx")
-                            }
-                        }
-                    },
-                    run {
-                        val restName = pattern.rest
-                        // "_" is the tail-ignoring rest (`..._`): match the tail but bind nothing,
-                        // just like a wildcard element (slot -1).
-                        if (restName != null && restName != "_") {
-                            scopeStack.lastOrNull()?.get(restName)
-                                ?: localsByName[restName]
-                                ?: forceAllocLocal(restName)
-                        } else -1
-                    },
-                    // hasRest: any rest (named OR `..._`) makes this an open, length>=N pattern.
-                    hasRest = pattern.rest != null
-                )
-            }
-            is TypedStringInterpPattern -> {
-                val partTypes = mutableListOf<Int>()
-                val literals = mutableListOf<String?>()
-                // captureSlots is parallel with partTypes: -1 for literals, actual slot for captures
-                val captureSlots = mutableListOf<Int>()
-                for (part in pattern.parts) {
-                    when (part) {
-                        is TypedStringPatternPart.Literal -> {
-                            partTypes.add(0) // 0 = literal
-                            literals.add(part.value)
-                            captureSlots.add(-1) // no slot for literal parts
-                        }
-                        is TypedStringPatternPart.Capture -> {
-                            partTypes.add(1) // 1 = capture
-                            literals.add(null)
-                            val slot = scopeStack.lastOrNull()?.get(part.variableName)
-                                ?: localsByName[part.variableName]
-                                ?: forceAllocLocal(part.variableName)
-                            captureSlots.add(slot)
-                        }
-                    }
-                }
-                PatternIR.StringInterp(partTypes, literals, captureSlots)
-            }
-        }
-    }
 
     private fun tryResolveAbilityOp(
         methodName: String,
@@ -4966,7 +3514,7 @@ class TypedASTCompiler(
     // each carrying arms the other lacked — the compiler had the Bool-variant
     // normalisation, the newtype arms and this declared-variant lookup; mono had
     // the VariantType-vs-VariantType subset rule. The survivor is their union.
-    private fun typeMatchesTarget(concreteType: MezzeType, targetType: MezzeType): Boolean =
+    internal fun typeMatchesTarget(concreteType: MezzeType, targetType: MezzeType): Boolean =
         com.mezze.language.typechecker.mono.typeMatchesTarget(
             concreteType,
             targetType,
@@ -5003,14 +3551,14 @@ class TypedASTCompiler(
     }
 
     /** Force-allocate a new slot, even if name already exists (for match bindings) */
-    private fun forceAllocLocal(name: String): Int {
+    internal fun forceAllocLocal(name: String): Int {
         val slot = nextLocalSlot++
         localsByName[name] = slot  // overwrites existing entry
         slotToNameForCurrentFn.putIfAbsent(slot, name)
         return slot
     }
 
-    private fun typeToSlotKind(type: MezzeType): SlotKind = when {
+    internal fun typeToSlotKind(type: MezzeType): SlotKind = when {
         type is IntType -> SlotKind.LONG
         type is FloatType -> SlotKind.DOUBLE
         // Bool is a VARIANT in the type system and a primitive boolean at runtime.
@@ -5045,7 +3593,7 @@ class TypedASTCompiler(
         val dedupeCollisions: MutableSet<String> get() = collisions.get()
     }
 
-    private fun locToSourceInfo(loc: Loc): SourceInfo {
+    internal fun locToSourceInfo(loc: Loc): SourceInfo {
         val fileIndex = files.indexOf(loc.file).let { if (it >= 0) it else { files.add(loc.file); files.size - 1 } }
         return SourceInfo(fileIndex, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
     }
@@ -5121,7 +3669,7 @@ class TypedASTCompiler(
      * (unambiguous ctor only). Returns null otherwise — callers fall back to
      * the node's own (possibly still-var) type, unchanged.
      */
-    private fun resolveVariantReceiverType(node: TypedExpr, currentType: MezzeType): MezzeType? {
+    internal fun resolveVariantReceiverType(node: TypedExpr, currentType: MezzeType): MezzeType? {
         if (currentType !is VarType) return null
         if (node !is com.mezze.language.typedast.TypedVariantConstruct) return null
         val payloadType = node.payload?.let { substitution.apply(it.type) }
@@ -5165,7 +3713,7 @@ class TypedASTCompiler(
      * Returns the first concrete element type found, or null if all elements have
      * unresolvable types.
      */
-    private fun extractConcreteElementTypeFromExpr(expr: TypedExpr): MezzeType? {
+    internal fun extractConcreteElementTypeFromExpr(expr: TypedExpr): MezzeType? {
         val elements: List<TypedExpr> = when (expr) {
             is com.mezze.language.typedast.TypedSeq -> expr.elements.mapNotNull {
                 when (it) {
@@ -5214,7 +3762,7 @@ class TypedASTCompiler(
      * of known forms). Does NOT descend into function calls or lambdas — those
      * are opaque at the call site.
      */
-    private fun collectDeepConcreteTypes(expr: TypedExpr, out: MutableList<MezzeType>) {
+    internal fun collectDeepConcreteTypes(expr: TypedExpr, out: MutableList<MezzeType>) {
         when (expr) {
             is TypedRecord -> {
                 for (entry in expr.entries) {
