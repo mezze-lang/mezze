@@ -631,10 +631,12 @@ private fun collectFreeTypeVarsInEffectRow(effectRow: MezzeType.EffectRow): Set<
 /**
  * The type variables generalization may quantify.
  *
- * MUST see a variable wherever [occursCheck] can see one: a var that occurs in the
- * type but is not quantified is not freshened by `TypeScheme.instantiate`, so every
- * call site of the binding shares that ONE variable and the first caller to pin it
- * pins it for all the others.
+ * MUST see a variable wherever [occursCheck] can see one THAT A CALLER CAN
+ * OBSERVE: a var occurring in the type but left unquantified is not freshened by
+ * `TypeScheme.instantiate`, so every call site shares that ONE variable and the
+ * first caller to pin it pins it for the rest. The qualifier matters — see the
+ * FunctionType arm, where the one position this walk skips is skipped precisely
+ * because nothing there is observable.
  *
  * [MezzeType.anyChild] is the structural reference for which positions exist.
  */
@@ -653,19 +655,35 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
             // #264 collected the standalone row and missed the arrow-embedded one,
             // which is the ordinary case.
             val effectVars = type.effects?.let { collectFreeTypeVarsInEffectRow(it) } ?: emptySet()
-            // DELIBERATELY NOT COLLECTED: the ability constraints' own
-            // `associatedTypeBindings` (`having 'out = 'r`). [occursCheck] and
-            // [MezzeType.anyChild] both see those vars, so this walker really is
-            // narrower than its two siblings — but quantifying them today is a
-            // regression, not a fix. `TypeScheme.instantiate` freshens the binding
-            // into the obligation while `applySubstitutionToType` CLEARS the
-            // constraints off the instantiated type, so a freshened `'out` arrives
-            // at the call site with nothing left to re-pin it, and a result that
-            // used to be a solved `Result` degrades to a bare var. Leaving the var
-            // unquantified means every call site shares one — unsound in principle,
-            // load-bearing in practice until call-site re-resolution of a quantified
-            // `having` binding is complete. MEASURED: adding them turns
-            // `LazyEffectsTest.test suspended value in recursive function` red.
+            // NOT COLLECTED, and this is CORRECT rather than a gap: the ability
+            // constraints' own `associatedTypeBindings` (`having 'out = 'r`).
+            // [occursCheck] and [MezzeType.anyChild] both see those vars, so this
+            // walker is narrower than its two siblings — which reads like the
+            // soundness hole this doc's first line warns about, and is not one.
+            //
+            // The premise was that leaving them unquantified lets every call site
+            // share ONE variable, so the first caller to pin it pins it for the
+            // rest. MEASURED, that cannot happen, because the two cases are
+            // exhaustive and neither is the feared one:
+            //
+            //   `out` OCCURS elsewhere in the type — `{n, acc} -> acc + n` returns
+            //   it — and is therefore ALREADY collected, through `returnType`.
+            //   Nothing needs adding. `add_up` used at Int and at Float in one
+            //   program gives 3 and 4.0, each call site freshening its own.
+            //
+            //   `out` occurs NOWHERE else — a recursive `sum_to` whose operands
+            //   solve to Int, where the return is the if/else join rather than the
+            //   `+` result. Then no call site can observe it: it is absent from
+            //   the parameters, the return, the constraint's type arguments and
+            //   the effect row, which is everything a caller sees. Sharing an
+            //   unobservable variable is not a wrong answer anyone can obtain.
+            //
+            // Collecting them anyway was tried and is worse than inert: it mints a
+            // variable no call site can pin, the obligation resolves against
+            // nothing, and a result that was a solved `Result` degrades to a bare
+            // var — `LazyEffectsTest.test suspended value in recursive function`
+            // returns 15 instead of an Err. Pinned by
+            // `HavingBindingInstantiationTest`.
             paramVars + returnVars + constraintVars + effectVars
         }
 
