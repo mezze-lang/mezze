@@ -1175,18 +1175,22 @@ class ConstraintGenerator(
                 val refreshedInfo = methodInfo.copy(methodType = implFunctionType)
                 currentContext = currentContext.extendWithAnonymousMethod(refreshedInfo)
             }
-            results[opKey] = ConstraintResult(
+            // Built from the BODY's result rather than field-by-field. Listing the
+            // ones this op needs and letting the rest default is how an impl body's
+            // side tables were lost: ten of twenty-six were named, so everything the
+            // body recorded about itself — including the per-read field types emit
+            // wants — never reached the module. Measured: a field read inside an
+            // `impl` mints an unknown placeholder where the same read in an ordinary
+            // function does not, and that single position is the largest entry in
+            // the placeholder ratchet.
+            //
+            // `undefinedVariables` is cleared DELIBERATELY: an impl body's
+            // references are resolved against the impl's own scope, and the ones
+            // this pass could not see are not the module's undefined variables.
+            results[opKey] = bodyResult.copy(
                 type = implFunctionType,
                 constraints = constraints,
-                effects = bodyResult.effects,
-                effectInstances = bodyResult.effectInstances,
-                abilityConstraints = bodyResult.abilityConstraints,
-                associatedTypeConstraints = bodyResult.associatedTypeConstraints,
                 undefinedVariables = emptyList(),
-                usedVariables = bodyResult.usedVariables,
-                callReturnTypes = bodyResult.callReturnTypes,
-                lambdaParamTypes = bodyResult.lambdaParamTypes,
-                methodCallResolutions = bodyResult.methodCallResolutions
             )
         }
         return currentContext
