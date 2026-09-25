@@ -4,6 +4,8 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.typedast.*
 
+import com.mezze.language.ast.holdsUnknownPlaceholder
+
 /**
  * Task 0.2 — measure how often the compiler reaches the end of elaboration
  * without actually knowing a type.
@@ -28,6 +30,8 @@ import com.mezze.language.typedast.*
  * here: everything this pass does report is a variable with no binder anywhere
  * above it, which no amount of polymorphism explains.
  */
+
+
 object ElaborationInvariants {
 
     enum class Kind {
@@ -45,6 +49,16 @@ object ElaborationInvariants {
          *  the shape that reaches the runtime as a dispatch with nothing to
          *  dispatch on. */
         VARTYPE_RECEIVER,
+
+        /** A node whose type is an `unknown` PLACEHOLDER — the compiler recorded
+         *  that it gave up here, and that record survived into the emitted tree.
+         *
+         *  Distinct from [UNBOUND_TYPE_VAR], which is an ordinary variable with
+         *  no binder: a placeholder is not polymorphism at all, and anything
+         *  downstream reading it as such is guessing. Measured at ZERO, so unlike
+         *  the others this one is an invariant rather than a population to
+         *  shrink. */
+        SURVIVING_PLACEHOLDER,
     }
 
     data class Finding(
@@ -114,6 +128,24 @@ object ElaborationInvariants {
      * for the statements after it.
      */
     private fun walk(expr: TypedExpr, where: String, bound: MutableSet<String>, out: MutableList<Finding>) {
+        // A placeholder that reached the emitted tree. MEASURED at ZERO across
+        // :typechecker:test (25,458 nodes walked), which is why this is reported
+        // rather than ratcheted: the ~30,000 placeholders the census counts are
+        // all minted and then REPAIRED, almost entirely at the one rule in
+        // CallEmit that retypes an undetermined callee from the call's own
+        // argument record and solved return.
+        //
+        // That repair is load-bearing and had nothing asserting it: disabling it
+        // puts 1,564 survivors into the tree, every one a `TypedVar`, and no test
+        // in either suite noticed. The mint census cannot see this — it counts
+        // mints, not survival, so it reads 30,000 whether the repair works or not.
+        if (expr.type.holdsUnknownPlaceholder()) {
+            out.add(Finding(
+                Kind.SURVIVING_PLACEHOLDER, where,
+                "a type the compiler gave up on reached the emitted tree",
+                expr.loc,
+            ))
+        }
         if (expr is TypedLambda) {
             // A lambda's own signature BINDS for its body, and binds for itself.
             // Reporting `expr.type` against the outer scope would flag every
