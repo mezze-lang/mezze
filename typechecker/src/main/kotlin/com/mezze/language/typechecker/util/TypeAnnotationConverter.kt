@@ -315,6 +315,13 @@ object TypeAnnotationConverter {
                         } finally { recursionGuard.remove(annotation.name) }
                     }
                 }
+                // A name that is NOT a type variable is a nominal type, and must
+                // convert to one — the same split `convertWith` makes via
+                // `isTypeVarName`. Rendering `Json` as a VarType makes it unify
+                // with anything, so every check reading it is vacuous.
+                if (!annotation.name.isTypeVarName()) {
+                    return WellKnownTypeApp.of(annotation.name, emptyList(), resolveTypeHash(annotation.name))
+                }
                 if (faithful) {
                     MezzeType.VarType(
                         if (typeVarCache != null) {
