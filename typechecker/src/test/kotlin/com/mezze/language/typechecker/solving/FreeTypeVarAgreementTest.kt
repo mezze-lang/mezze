@@ -112,10 +112,14 @@ class FreeTypeVarAgreementTest {
      * breaks: its output is byte-identical either way, same shapes with different
      * fresh ids. The cause is downstream. In
      *
-     *     sum_to : {n: Int, acc: 'a} -> 'a  with NumAdd<Int,'a> having out='o
+     *     sum_to : { n: Int, acc: 'a } with NumAdd Int 'a -> 'a
      *
-     * `'o` is a DIFFERENT variable from `'a`. Quantifying it makes the call site
-     * freshen and pin a COPY, while the declaration's own stored constraint keeps
+     * whose constraint carries an internal associated-type binding `'out = 'o`.
+     * That binding has no source spelling — `having` appears only on an
+     * `ability`/`impl`/`effect` declaration, never in a `with` clause — it is
+     * the solver's `associatedTypeBindings`. And `'o` there is a DIFFERENT
+     * variable from `'a`. Quantifying it makes the call site freshen and pin a
+     * COPY, while the declaration's own stored constraint keeps
      * the original — one written variable, two TypeVars, and evidence selection
      * reads the stale one. So this needs call-site re-resolution in the EVIDENCE
      * layer; a wider walk here only moves the failure.

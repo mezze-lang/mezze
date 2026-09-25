@@ -687,10 +687,15 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
             // red — it returns a raw value where it must return an `Err`. The
             // cause is downstream of here. In
             //
-            //     sum_to : {n: Int, acc: 'a} -> 'a  with NumAdd<Int,'a> having out='o
+            //     sum_to : { n: Int, acc: 'a } with NumAdd Int 'a -> 'a
             //
-            // `'o` is a DIFFERENT variable from `'a`, so quantifying it makes the
-            // call site freshen and pin a COPY while the declaration's own stored
+            // whose constraint carries an internal associated-type binding
+            // `'out = 'o`. That binding has NO source spelling — `having`
+            // appears only on an `ability`/`impl`/`effect` declaration, never
+            // in a `with` clause — it lives in the constraint's
+            // `associatedTypeBindings` map. And `'o` there is a DIFFERENT
+            // variable from `'a`, so quantifying it makes the call site
+            // freshen and pin a COPY while the declaration's own stored
             // constraint keeps the original, unpinned — one written variable,
             // two TypeVars, and evidence selection reads the stale one. Closing
             // this needs call-site re-resolution in the evidence layer, not a
