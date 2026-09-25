@@ -27,15 +27,23 @@ import org.junit.jupiter.api.Test
  * The third saw only two and a half: it skipped `effects` entirely and skipped the
  * constraints' `associatedTypeBindings`. Those are precisely the positions a
  * `having` variable lives in (`<Exception having 'error = 'e>`,
- * `with NumAdd Int 'a having 'out = 'r`). A variable that generalization does not
- * quantify is not freshened by `TypeScheme.instantiate`, so every call site of that
- * binding shares ONE variable — the first caller to pin it pins it for the rest.
+ * a constraint's `associatedTypeBindings`). Those are where an effect's or an
+ * ability's associated type lives — `'error` on a raising arrow, `'out` on a
+ * `NumAdd` obligation. Neither has a surface spelling in a `with` clause:
+ * `having` appears only on an `ability`, `impl` or `effect` declaration, and
+ * these are the solver's own tables.
  *
- * The `effects` half is now closed. Effects ride on ARROWS only, so the
- * arrow-embedded row is the ordinary case; the standalone `EffectRow` that #264
- * fixed is the rare one. The `associatedTypeBindings` half is still OPEN and
- * deliberately so — see the @Disabled test below, which states the property and
- * records the measurement that stopped it landing.
+ * BOTH halves are now closed, by different means, and the difference is the
+ * point:
+ *
+ *  - `effects`: generalization QUANTIFIES the variable (#264 closed the
+ *    standalone row; the arrow-embedded one, the ordinary case, followed).
+ *  - `associatedTypeBindings`: generalization deliberately does NOT quantify it.
+ *    `TypeScheme.instantiate` freshens it per instantiation instead, which is
+ *    what stops a declaration and its call sites sharing one variable. Widening
+ *    this walk to quantify was tried twice and is the wrong lever — it changes
+ *    the scheme's shape, which mono and evidence selection read, and produced a
+ *    wrong answer. See the two tests below.
  */
 class FreeTypeVarAgreementTest {
 
@@ -163,8 +171,10 @@ class FreeTypeVarAgreementTest {
         val other = TypeVar.fresh()
         val shapes = listOf(
             "effect row" to arrowRaising(varType(v)),
-            // "having binding" is the one shape that does NOT hold yet — see the
-            // @Disabled test above for why quantifying it regresses a real program.
+            // "having binding" is deliberately ABSENT from this list: it is the one
+            // shape generalization does not quantify, and must not — the sharing it
+            // would otherwise cause is stopped at instantiation instead. See
+            // `a having binding is freshened per instantiation, not shared`.
             "return" to MezzeType.FunctionType(MezzeType.IntType, varType(v)),
             "param" to MezzeType.FunctionType(varType(v), MezzeType.IntType),
             "constraint type arg" to MezzeType.FunctionType(
