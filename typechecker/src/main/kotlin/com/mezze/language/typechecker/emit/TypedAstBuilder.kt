@@ -663,6 +663,11 @@ class TypedAstBuilder(
                         paramType = MezzeType.RecordType(mapOf("it" to targetTypeForOp)),
                         returnType = solvedReturn
                     )
+                // The ability-impl arm. `ImplValidator` solved this very body; the
+                // arrow it produced is a strictly better answer than a fresh
+                // variable, which is only ever a statement that nothing is known.
+                // Non-inherent by construction — the two arms above claim every
+                // inherent op, and inherent ops have their own name-keyed channel.
                 else -> MezzeType.VarType(TypeVar.freshInternal("op_${op.name}"))
             }
             // Every ability-impl op body is typed: a hand-written `it.q == r.q` on a
@@ -1813,7 +1818,28 @@ class TypedAstBuilder(
                 abilityHash = ambiguousAbilityHash,
             )
         } else {
-            val built = buildExpr(expr.function, file)
+            // The solved signature, same as every branch above. Without it this
+            // one built the callee with NO context, so `x.add {y}` — a METHOD —
+            // reached the member-access arm with nothing to consult, fell past
+            // `declaredShape(Float)` (not a record, because `add` is not a field),
+            // and minted a placeholder blaming a "field read". That mislabelled
+            // position is the largest entry in the placeholder census.
+            // `solvedFnType` is null exactly when nothing resolved the method —
+            // the builtin arithmetic ops reach here (`x.add {y}` on Int/Float).
+            // The call site still KNOWS the arrow: the argument record was just
+            // built, and the solver recorded this call's return type. Composing
+            // the two is not a guess about the method, it is this call's own
+            // signature stated from solved facts.
+            // `solvedFnType` is null exactly when nothing resolved the method —
+            // the builtin arithmetic ops reach here (`x.add {y}` on Int/Float).
+            // The call site still KNOWS the arrow: the argument record was just
+            // built, and the solver recorded this call's return type. Composing
+            // the two is not a guess about the method, it is this call's own
+            // signature stated from solved facts.
+            val calleeArrow = solvedFnType ?: callReturnTypes[loc]
+                ?.let { substitution.apply(it) }
+                ?.let { MezzeType.FunctionType(paramType = argExpr.type, returnType = it) }
+            val built = buildExpr(expr.function, file, calleeArrow)
             if (ambiguousAbilityHash != null && built is TypedFieldAccess) {
                 built.copy(abilityHash = ambiguousAbilityHash)
             } else built
