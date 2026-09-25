@@ -396,6 +396,57 @@ derives need it is therefore also a decision about whether that API gets built.
 The cheap answer is attribute position for derives, reflection later if
 something genuinely needs it.
 
+#### Is this a good macro experience? Measured against Rust
+
+**Better than Rust, structurally:**
+
+| | Rust | here |
+|---|---|---|
+| where macros live | a **separate crate** with `proc-macro = true` | an ordinary function in any package |
+| getting an AST from tokens | `syn` — a third-party crate everyone needs | the AST types, directly |
+| building an AST | `quote!` — another third-party crate | `` ` `` built in |
+| compile-time execution | none (`const fn` is restricted) | **comptime, via a `CompileTime` effect** |
+| what a macro may do | anything, silently | declared in its effect row, auditable |
+| testing a macro | awkward; `trybuild` exists for this | it is an ordinary typed function |
+
+Two of those are large. The **separate-crate rule** is a standing annoyance in
+Rust that simply would not exist here. And `syn` + `quote` are ~40k lines of
+ecosystem that exist *because* `TokenStream` is too raw to use directly — giving
+macro authors the AST types and a quasiquote out of the box removes that entire
+layer.
+
+Comptime goes further than Rust can: a macro can do real work at compile time —
+read a table, validate against a schema — with the capability **visible in the
+type**. Rust proc macros can also do real work, but invisibly; effects make the
+same power auditable.
+
+**The gap that decides whether it feels great: there is no declarative form.**
+
+Rust has two tiers. `macro_rules!` handles the majority of cases in a few lines
+of pattern matching, and proc macros exist for the rest. What is designed here
+is **only the procedural tier** — `01_PATTERN_MACROS.md` is named "Pattern
+Macros" but its signature is `{tokens: TokenStream} -> …` and the author writes
+the parser. So a two-line convenience macro costs the same as an HTML parser.
+
+That is the single biggest ergonomic risk. Either add a declarative tier, or
+make the combinator library (`parse_separated`, `parse_expr`, … — already
+sketched) good enough that the simple cases really are a few lines.
+
+**Three more, all flagged elsewhere in this document:**
+
+- **Derives need attribute position**, or `derive_eq!(Nat)` stays clunkier than
+  `#[derive(Eq)]` and cannot see the declaration it derives for.
+- **Hygiene is undecided.** `macro_rules!` is hygienic, proc macros are not.
+- **Span provenance is undesigned**, and it is what makes errors inside
+  expansions readable.
+
+**The caveat worth stating plainly:** Rust's macro *experience* is good largely
+because of years of ecosystem — `syn`, `quote`, `proc-macro2`, `trybuild`, and
+rust-analyzer expanding macros for completion. A better *design* does not
+automatically produce a better experience; the experience comes from the
+libraries, the error messages, and the IDE. The design here starts ahead. Whether
+it finishes ahead depends on the declarative tier and the diagnostics.
+
 #### What this opens that expression scope did not
 
 Declaration scope touches the type system, so it inherits questions expression
