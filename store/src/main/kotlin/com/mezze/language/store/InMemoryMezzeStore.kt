@@ -230,6 +230,53 @@ class InMemoryMezzeStore : MezzeStore {
     override fun findDeclByHash(hash: Hash): DeclRow? =
         decls.find { it.hash == hash }
 
+    /**
+     * The in-memory twin of the SQLite JSON query, and it has to agree with it
+     * on both questions: does this key exist, and does its value match.
+     *
+     * Metadata is written by StorePopulator.serializeMetadata as flat JSON —
+     * `{"deprecated": true, "since": "0.5.0"}` — so a top-level key can be
+     * found without a JSON parser, and the value is compared against BOTH its
+     * JSON form (`true`, `"0.5.0"`) and its unquoted form (`0.5.0`), matching
+     * what SQLite's `->` and `->>` return respectively.
+     */
+    override fun findDeclsByMetadata(key: String, value: String?): List<DeclRow> =
+        decls.filter { row ->
+            val raw = row.metadata ?: return@filter false
+            val found = topLevelJsonValue(raw, key) ?: return@filter false
+            value == null || found == value || found.removeSurrounding("\"") == value
+        }
+
+    /** The raw JSON text of a top-level key's value, or null if absent. */
+    private fun topLevelJsonValue(json: String, key: String): String? {
+        val marker = "\"$key\":"
+        val at = json.indexOf(marker).takeIf { it >= 0 } ?: return null
+        var i = at + marker.length
+        while (i < json.length && json[i].isWhitespace()) i++
+        if (i >= json.length) return null
+        // Scan one JSON value: a string honours escapes, a container balances,
+        // anything else runs to the next delimiter at depth zero.
+        val start = i
+        if (json[i] == '"') {
+            i++
+            while (i < json.length) {
+                if (json[i] == '\\') { i += 2; continue }
+                if (json[i] == '"') { i++; break }
+                i++
+            }
+            return json.substring(start, i)
+        }
+        var depth = 0
+        while (i < json.length) {
+            val c = json[i]
+            if (c == '{' || c == '[') depth++
+            else if (c == '}' || c == ']') { if (depth == 0) break; depth-- }
+            else if (c == ',' && depth == 0) break
+            i++
+        }
+        return json.substring(start, i).trim()
+    }
+
     // ── PARSED MODULES ──
 
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) {

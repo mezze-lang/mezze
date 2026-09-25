@@ -217,6 +217,27 @@ interface MezzeStore : AutoCloseable {
     fun getDeclsByKind(kind: DeclKind): List<DeclRow>
     fun findDeclByHash(hash: Hash): DeclRow?
 
+    /**
+     * Declarations whose `#{ }` metadata carries [key], optionally restricted to
+     * a particular [value].
+     *
+     * The `metadata` column has been written on every decl and handed back on
+     * every decl query since it existed — but only ever *alongside* a result,
+     * never as the thing selected ON. So "what metadata does `sort` have?" was
+     * answerable and "what in this codebase is deprecated?" was not, with the
+     * data sitting in the same table either way. This closes that gap.
+     *
+     * [key] is a top-level field name. [value] compares against the stored JSON
+     * rendering — `deprecated` + `"true"`, or `since` + `"0.5.0"`. Passing null
+     * matches any declaration carrying the key at all, which is what a bare flag
+     * (`#{ deprecated }`) needs.
+     *
+     * Spans every attached database like the other decl queries: a search for
+     * deprecated things that silently skipped the stdlib and dependencies would
+     * be worse than no search.
+     */
+    fun findDeclsByMetadata(key: String, value: String? = null): List<DeclRow>
+
     // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
     // ====================================================================

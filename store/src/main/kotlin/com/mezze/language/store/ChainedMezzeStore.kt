@@ -219,6 +219,8 @@ class ChainedMezzeStore(
     override fun getDeclsByKind(kind: DeclKind): List<DeclRow> =
         all.flatMap { it.getDeclsByKind(kind) }.distinct()
     override fun findDeclByHash(hash: Hash): DeclRow? = firstNonNull { it.findDeclByHash(hash) }
+    override fun findDeclsByMetadata(key: String, value: String?): List<DeclRow> =
+        all.flatMap { it.findDeclsByMetadata(key, value) }.distinct()
 
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) =
         primary.putParsedModule(modulePath, sourceHash, parsedBlob)

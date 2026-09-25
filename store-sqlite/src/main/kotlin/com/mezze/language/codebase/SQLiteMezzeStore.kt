@@ -1759,6 +1759,72 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    // Matching the VALUE needs both arrow operators, because `json_extract`
+    // loses type: on `{"deprecated": true}` it returns 1, not `true`. Probed
+    // against SQLite directly:
+    //
+    //   json_extract(m, '$.deprecated')  ->  1
+    //   m ->  '$.deprecated'             ->  true      (JSON form)
+    //   m ->> '$.since'                  ->  0.5.0     (SQL text, unquoted)
+    //   m ->  '$.since'                  ->  "0.5.0"   (JSON form, quoted)
+    //
+    // `->` alone would force the caller to quote every string; `->>` alone would
+    // make booleans unmatchable. Accepting either lets the value be written
+    // exactly as it appears in the source — `deprecated true`, `since 0.5.0` —
+    // which is the only spelling a person would guess.
+    //
+    // json_valid guards the extract: metadata is written by serializeMetadata
+    // and should always be valid JSON, but one malformed row must not error the
+    // query for every other declaration.
+    private val findDeclsByMetadataValueStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col, doc, metadata
+            FROM <DB>.decls
+            WHERE metadata IS NOT NULL AND json_valid(metadata)
+              AND (    metadata ->  ('${'$'}.' || ?) = ?
+                    OR metadata ->> ('${'$'}.' || ?) = ? )
+        """.trimIndent()) + " ORDER BY module_path, decl_name")
+    }
+
+    // Presence only. json_type gives the type name for a present key and NULL
+    // for an absent one, which is the right test for a bare flag
+    // (`#{ deprecated }`); `json_extract(...) IS NOT NULL` would additionally
+    // miss a key whose value is JSON null.
+    private val findDeclsByMetadataKeyStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col, doc, metadata
+            FROM <DB>.decls
+            WHERE metadata IS NOT NULL AND json_valid(metadata)
+              AND json_type(metadata, '${'$'}.' || ?) IS NOT NULL
+        """.trimIndent()) + " ORDER BY module_path, decl_name")
+    }
+
+    @Synchronized
+    override fun findDeclsByMetadata(key: String, value: String?): List<DeclRow> {
+        // unionAll templates the statement once per attached database, so the
+        // placeholders repeat: one param per DB for the key-only form, four for
+        // the value form (key, value, key, value — a pair per arrow operator).
+        val stmt: PreparedStatement
+        if (value == null) {
+            stmt = findDeclsByMetadataKeyStmt
+            for (db in 0..2) stmt.setString(db + 1, key)
+        } else {
+            stmt = findDeclsByMetadataValueStmt
+            for (db in 0..2) {
+                val base = db * 4
+                stmt.setString(base + 1, key)
+                stmt.setString(base + 2, value)
+                stmt.setString(base + 3, key)
+                stmt.setString(base + 4, value)
+            }
+        }
+        return stmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
     private val getDeclsByKindStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
