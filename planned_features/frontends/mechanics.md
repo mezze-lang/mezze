@@ -528,38 +528,51 @@ Two properties follow that other systems pay dearly for:
   expand once ever, across builds and machines. Rust cannot cache proc-macro
   output for exactly the reason below.
 
-#### Fix 1 — compile-time IO breaks the hashing invariant
+#### Fix 1 — compile-time IO, and why effects are the answer rather than the problem
 
 `03_COMPTIME.md` says *"Pure functions only — no I/O effects (unless using
-special compile-time handlers)"*, and the next example is:
+special compile-time handlers)"*, and its next example calls `read_file` on
+`config.json`. An earlier draft of this document called that a break in the
+hashing invariant. **That was too pessimistic**: the effect system is exactly
+what makes it fixable.
 
-```mezze
-let app_config = CompileTime.eval {code = {} ->
-    let json_str = read_file {path = "config.json"}
-    …
-```
+The naive worry is that two builds of identical source produce different
+programs with the same hash, because the hash covers source and `config.json`
+is not part of it. True *if* the IO is ambient. It is not.
 
-The restriction and the example contradict each other, and the escape hatch is
-where the damage is. **Two builds of identical source would produce different
-programs with the same hash** — because the hash covers the source, and
-`config.json` is not part of it. That is not a macro inconvenience; it breaks
-the invariant that identity is meaning, which is what verifiable migration,
-cross-machine caching, and content addressing all rest on.
+**Effects are performed through a handler, so the build supplies it.** That is
+an interception point, and it changes the problem completely:
 
-Three coherent positions, and the design must pick one rather than leave the
-hatch unlabelled:
+- the build **sees every compile-time read**, because they all go through its
+  handler
+- it can **record what was read** and fold those contents into the module's
+  identity — Nix-style input tracking
+- it can **refuse** capabilities it does not want to grant
 
-1. **Forbid IO at compile time.** Simplest, and Zig-ish. `config.json` becomes a
-   build step that generates Mezze source instead.
-2. **Hash the inputs.** Compile-time reads are tracked and folded into the
-   build's identity, Nix-style. Keeps the power, keeps determinism, costs
-   plumbing.
-3. **Allow it and give up caching + reproducibility for affected modules.**
-   Honest only if it is *stated*, and the effect row makes it detectable rather
-   than silent — which is more than Rust manages.
+Rust cannot do this. Proc macros call `std::fs` directly, there is no
+interception point, and that is precisely why Cargo cannot cache proc-macro
+output or track its inputs. Mezze can, and the reason is effects.
 
-Option 2 is the one that fits a content-addressed language, and the effect
-system is exactly the mechanism for detecting which modules need it.
+So the invariant is preserved by making the compile-time handler **record and
+hash**, not by forbidding IO.
+
+**One real limit, and the policy follows from it.** Recording works for
+*deterministic* reads — a file, an env var — where "what was read" is a value
+that can be hashed. It cannot rescue *nondeterministic* capability: the clock,
+the network, randomness. Hashing those is technically possible and practically
+useless, since every build legitimately differs.
+
+That splits the compile-time handler set cleanly:
+
+| capability | at compile time | why |
+|---|---|---|
+| read a file, read an env var | **permit, record, hash** | deterministic; becomes a build input |
+| clock, network, randomness | **refuse** | cannot be made reproducible by recording |
+
+And the effect row is how that policy is *expressed and enforced*, rather than a
+convention nobody checks. A macro declaring `<CompileTime, Clock>` fails to
+build with a message naming the capability — which is a better outcome than any
+language that permits it silently.
 
 #### Fix 2 — "infinite loops will hang the compiler" is not acceptable
 
