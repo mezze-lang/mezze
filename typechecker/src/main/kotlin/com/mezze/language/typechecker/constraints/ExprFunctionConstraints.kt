@@ -92,18 +92,9 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
                     loc = expr.loc,
                 )
             )
-            return ConstraintResult(
+            return ConstraintResult.operandOf(valueResult).copy(
                 type = fnType.returnType,
                 constraints = constraints,
-                effects = valueResult.effects,
-                effectInstances = valueResult.effectInstances,
-                performed = valueResult.performed,
-                abilityConstraints = valueResult.abilityConstraints,
-                associatedTypeConstraints = valueResult.associatedTypeConstraints,
-                undefinedVariables = valueResult.undefinedVariables,
-                usedVariables = valueResult.usedVariables,
-                referencedBindings = valueResult.referencedBindings,
-                methodCallResolutions = valueResult.methodCallResolutions,
                 // #395: record the construction's result type (the NewtypeType
                 // wrapper, or a fnType return that resolves to one) at this loc so
                 // the emitter can stamp the runtime-erased value node's STATIC type
@@ -123,18 +114,8 @@ internal fun ExpressionConstraintGenerator.generateNewtypeConstruction(expr: Par
         // distinct from a same-named newtype in another module (no name-fallback).
         identity = com.mezze.language.typechecker.phase.newtypeIdentity(typeDecl!!),
     )
-    return ConstraintResult(
+    return ConstraintResult.operandOf(valueResult).copy(
         type = newtypeType,
-        constraints = valueResult.constraints,
-        effects = valueResult.effects,
-        effectInstances = valueResult.effectInstances,
-        performed = valueResult.performed,
-        abilityConstraints = valueResult.abilityConstraints,
-        associatedTypeConstraints = valueResult.associatedTypeConstraints,
-        undefinedVariables = valueResult.undefinedVariables,
-        usedVariables = valueResult.usedVariables,
-        referencedBindings = valueResult.referencedBindings,
-        methodCallResolutions = valueResult.methodCallResolutions,
         // #395: see the fnType branch above — record the NewtypeType so emit can
         // preserve the wrapper on the erased value node's static type.
         callReturnTypes = valueResult.callReturnTypes + (expr.loc to newtypeType),
@@ -398,16 +379,9 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
             )
         )
 
-        return ConstraintResult(
+        return ConstraintResult.operandOf(payloadResult).copy(
             type = resultType,
             constraints = constraints,
-            effects = payloadResult.effects,
-            effectInstances = payloadResult.effectInstances,
-            undefinedVariables = payloadResult.undefinedVariables,
-            usedVariables = payloadResult.usedVariables,
-            abilityConstraints = payloadResult.abilityConstraints,
-            referencedBindings = payloadResult.referencedBindings,
-            methodCallResolutions = payloadResult.methodCallResolutions,
             // #182: stash the loc → inferred-type entry so TypedAstBuilder
             // can recover the post-solve variant type. See no-payload
             // branch above for the full rationale.
@@ -709,23 +683,25 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
     // ability method call in the body (e.g. `x.produce{}`, `x.first_key{}`) whose
     // receiver stays generic contributes a `having` binding to this function's
     // signature — see AbilityHavingParityTest.
-    return ConstraintResult(
+    return bodyResult.copy(
         type = functionType,
         constraints = stampedBodyConstraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
-        abilityConstraints = bodyResult.abilityConstraints,
-        associatedTypeConstraints = bodyResult.associatedTypeConstraints,
-        undefinedVariables = bodyResult.undefinedVariables,
-        tailCalls = bodyResult.tailCalls,
-        usedVariables = bodyResult.usedVariables,
+        // The ONE thing a lambda must not pass outwards. Building the function
+        // makes the body's effects the ARROW's, so they are discharged at this
+        // boundary rather than attributed to whoever wrote the lambda literal.
+        // Everything else is a side table about the body and rides along — the
+        // previous hand-written list dropped five of them (`expectedTypeAt`,
+        // `duplicateBindings`, `doBindingEffects`, `doBindingSolvedTypes`,
+        // `performFullyDischarged`) with no way to tell that from the four here.
+        effects = emptySet(),
+        effectInstances = emptySet(),
+        // Block-scoped by its own contract: `doBindingEffects` is populated by
+        // generateDo for its OWN direct bindings and must not cross a block
+        // boundary. A lambda body IS such a boundary.
+        doBindingEffects = emptyList(),
+        effectRowVars = emptySet(),
+        performed = false,
         unusedVariables = bodyResult.unusedVariables + unusedParams,
-        unusedHandlers = bodyResult.unusedHandlers,
-        patternWarnings = bodyResult.patternWarnings,
-        referencedBindings = bodyResult.referencedBindings,
-        methodCallResolutions = bodyResult.methodCallResolutions,
-        callReturnTypes = bodyResult.callReturnTypes,
-        matchCaseBindings = bodyResult.matchCaseBindings,
-        matchScrutineeTypes = bodyResult.matchScrutineeTypes,
-        pendingClosureArgEffects = bodyResult.pendingClosureArgEffects,
         lambdaParamTypes = bodyResult.lambdaParamTypes + (expr.loc to paramFields),
     )
 }

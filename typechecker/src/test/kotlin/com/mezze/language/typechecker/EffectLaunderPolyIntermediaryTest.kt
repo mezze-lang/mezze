@@ -127,4 +127,70 @@ class EffectLaunderPolyIntermediaryTest {
             """)
         )
     }
+
+    // ---- The same launder, one `perform` outwards.
+    //
+    // A pending harvest records the effects an op does NOT catch, to be re-folded
+    // into the enclosing declaration once the substitution is known. Crossing a
+    // `perform` used to DROP that list wholesale — so the poly-intermediary hole
+    // above reopened as soon as the call sat inside any handler, whether or not
+    // that handler covered the laundered effect. The boundary now widens each
+    // harvest's `caughtByOp` by what the handler actually discharges, which is the
+    // only answer that separates these two tests.
+
+    private val twoEffects = """
+        effect MyLog where {
+          info : {msg: Str} -> {} <MyLog>
+        }
+        impl MyLog for TestLogger where {
+          info : {msg: Str} -> {} = { msg } -> {}
+        }
+    """.trimIndent()
+
+    @Test @Timeout(60, unit = TimeUnit.SECONDS)
+    fun `an UNHANDLED laundered effect still surfaces through a perform boundary`() {
+        // `perform TestLogger` discharges MyLog and says nothing about Log, so
+        // leaky's Log must still reach the pure-declared `go` and be rejected.
+        val msg = err("""
+            $prelude
+            $twoEffects
+            let leaky: {} -> {} <Log> = {} -> println { msg = "x" }
+            let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
+            let id: { g: 'a } -> 'a = { g } -> g
+            let go: {} -> {} = {} -> perform TestLogger in do
+                MyLog.info {msg = "hi"}
+                apply_eff { f = id { g = leaky } }
+        """)
+        assertNotNull(
+            msg,
+            "the handler covers MyLog, not Log — a perform must not discharge an effect " +
+                "no handler names, and `go` is declared pure",
+        )
+        assertTrue(msg!!.contains("Log"), "rejection should name the laundered effect; got: $msg")
+    }
+
+    @Test @Timeout(60, unit = TimeUnit.SECONDS)
+    fun `a HANDLED laundered effect is discharged by the perform and not re-added`() {
+        // The mirror, and the reason this cannot be fixed by simply passing the
+        // harvest through: once the handler covers the effect, re-folding it at
+        // decl finalization puts back a row entry the perform just discharged.
+        //
+        // DIRECT, not through `id`, and that is forced rather than incidental. A
+        // harvest is only re-read at declaration finalization, so a callback
+        // laundered through the intermediary is still invisible to the perform's
+        // OWN "can this handler ever fire" check, which runs at generation time —
+        // the same gen-time blind spot #331 is about, reaching a second consumer.
+        // Written with `id`, this case fails on that check instead ("the perform
+        // body performs no effect"), which is a real gap but not the one here.
+        assertNull(
+            err("""
+                $twoEffects
+                let leaky: {} -> {} <MyLog> = {} -> MyLog.info { msg = "x" }
+                let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
+                let go: {} -> {} = {} -> perform TestLogger in do
+                    apply_eff { f = leaky }
+            """),
+            "TestLogger handles MyLog, so `go` really is pure and must be accepted",
+        )
+    }
 }

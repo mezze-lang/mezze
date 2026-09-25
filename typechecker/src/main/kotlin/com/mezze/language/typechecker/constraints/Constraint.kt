@@ -577,6 +577,25 @@ data class ConstraintResult(
          * here, for every site at once. That is the only thing standing between
          * "twenty defaulted fields" and another silent drop.
          */
+        /**
+         * The sub-result of an OPERAND, ready to be carried out through its
+         * enclosing expression.
+         *
+         * Tail position is syntactic, and an operand never has it: the call in
+         * `Node {next = go {..}}`, in `(go {..}).field`, or in an argument is
+         * followed by the construction, the field read or the call itself, so it
+         * cannot be a tail call — only a lambda or `perform` BODY inherits the
+         * property from its own tail.
+         *
+         * The old hand-written field lists got this right by never listing
+         * `tailCalls` at all, which is indistinguishable from forgetting it —
+         * and converting those lists to `copy` duly broke it: emit compiled a
+         * self-tail-loop for the recursive call inside a `Node` payload and a
+         * two-element `map` returned `Empty`. A WRONG ANSWER, not an error.
+         */
+        fun operandOf(sub: ConstraintResult): ConstraintResult =
+            if (sub.tailCalls.isEmpty()) sub else sub.copy(tailCalls = emptySet())
+
         fun mergeOf(
             type: MezzeType,
             constraints: List<Constraint>,

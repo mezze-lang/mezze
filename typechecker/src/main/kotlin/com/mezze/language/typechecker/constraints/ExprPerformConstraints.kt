@@ -371,7 +371,11 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     // compiler no longer inspects any value-carried effect row.
     val fullyDischargedHere = true
 
-    return ConstraintResult(
+    // Copied from the body: the comments below used to say each side table "must
+    // be threaded through this return or it is lost" — and the list still lost
+    // seven of them. `copy` carries every table by construction, leaving only the
+    // fields a perform genuinely CHANGES to be spelled out.
+    return exprResult.copy(
         type = resultType,
         constraints = allConstraints,
         effects = remainingEffects,
@@ -383,27 +387,24 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         // the reverse.
         effectRowVars = exprResult.effectRowVars,
         performed = true,
+        // Same block-scoping contract as at the lambda: these belong to the
+        // handled body's own do-block and must not escape past it.
+        doBindingEffects = emptyList(),
+        // A pending harvest records "effects this op does NOT catch", to be
+        // re-folded into the enclosing declaration's row once the substitution is
+        // known. A `perform` is a DISCHARGE boundary, so a harvest crossing it is
+        // now caught — by the handler rather than by the op. Widening `caughtByOp`
+        // is the whole correction: dropping the list would discharge effects no
+        // handler covers (what the old hand-written field list did by omission),
+        // and passing it through raw re-adds effects this handler just discharged
+        // (Time reappearing in the row after `handle SystemTime`).
+        pendingClosureArgEffects = exprResult.pendingClosureArgEffects.map {
+            it.copy(caughtByOp = it.caughtByOp + handledEffects)
+        },
         abilityConstraints = exprResult.abilityConstraints + handlerParamAbilityConstraints,
-        associatedTypeConstraints = exprResult.associatedTypeConstraints,
-        undefinedVariables = exprResult.undefinedVariables,
-        // Tail-call locations detected inside the perform body must propagate out
-        // so the aggregation in TypeChecker sees them. Without this, a self-tail-call
-        // in a do-block `let` inside `perform ... in do { ... }` is lost and the
-        // bytecode compiler never emits a self-tail-loop.
-        tailCalls = exprResult.tailCalls,
-        usedVariables = exprResult.usedVariables,
-        referencedBindings = exprResult.referencedBindings,
-        methodCallResolutions = exprResult.methodCallResolutions,
         callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
-        lambdaParamTypes = exprResult.lambdaParamTypes,
-        matchCaseBindings = exprResult.matchCaseBindings,
-        matchScrutineeTypes = exprResult.matchScrutineeTypes,
-        // Carry the body's nested-perform entries and add this perform's. Mirrors
-        // callReturnTypes: generatePerform encapsulates body generation, so body
-        // side-tables must be threaded through its return or they are lost.
         performFullyDischarged = exprResult.performFullyDischarged + (expr.loc to fullyDischargedHere),
-        // BUG 3: like the side tables above, a nested perform's dead handlers are
-        // lost unless threaded through this return.
+        // BUG 3: a nested perform's dead handlers must be unioned, not replaced.
         unusedHandlers = exprResult.unusedHandlers + deadHandlers,
     )
 }

@@ -545,20 +545,12 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
         fieldType
     }
 
-    return ConstraintResult(
+    // Copied from the receiver rather than rebuilt field-by-field: every entry in
+    // the old list was `receiverResult.<same field>`, so the list only decided
+    // which of the receiver's tables survived — and the ones nobody typed did not.
+    return ConstraintResult.operandOf(receiverResult).copy(
         type = resultType,
         constraints = constraints + receiverResult.constraints,
-        effects = receiverResult.effects,
-        effectInstances = receiverResult.effectInstances,
-        performed = receiverResult.performed,
-        abilityConstraints = receiverResult.abilityConstraints,
-        associatedTypeConstraints = receiverResult.associatedTypeConstraints,
-        undefinedVariables = receiverResult.undefinedVariables,
-        usedVariables = receiverResult.usedVariables,
-        referencedBindings = receiverResult.referencedBindings,
-        methodCallResolutions = receiverResult.methodCallResolutions,
-        callReturnTypes = receiverResult.callReturnTypes,
-        lambdaParamTypes = receiverResult.lambdaParamTypes,
     )
 }
 

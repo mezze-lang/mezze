@@ -104,19 +104,14 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         typeArgs = listOf(abilityVar),
     )
 
-    return ConstraintResult(
+    return ConstraintResult.operandOf(argumentResult).copy(
         type = opType.returnType,
         constraints = constraints,
-        effects = argumentResult.effects,
-        effectInstances = argumentResult.effectInstances,
         abilityConstraints = listOf(abilityConstraint),
         associatedTypeConstraints = emptyList(),
-        undefinedVariables = argumentResult.undefinedVariables,
-        usedVariables = argumentResult.usedVariables,
         methodCallResolutions = argumentResult.methodCallResolutions +
             mapOf((expr.loc to methodName) to methodCallInfo),
         callReturnTypes = argumentResult.callReturnTypes + (expr.loc to opType.returnType),
-        lambdaParamTypes = argumentResult.lambdaParamTypes,
     )
 }
 

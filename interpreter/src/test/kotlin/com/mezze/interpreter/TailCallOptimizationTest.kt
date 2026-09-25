@@ -166,4 +166,70 @@ class TailCallOptimizationTest {
         // 3*2 + 2*2 + 1*2 = 6 + 4 + 2 = 12
         assertEquals(12L, eval(code))
     }
+
+    // ---- The negative side of TCO: a call in an OPERAND position is not a tail
+    // call, and compiling it as one silently returns the wrong value.
+    //
+    // Tail position is syntactic. A recursive call inside a constructor payload,
+    // a field receiver or an argument is followed by the construction, the read
+    // or the call, so the self-tail-loop must not fire. It did once: converging
+    // the constraint-result plumbing onto `copy` let the payload's `tailCalls`
+    // escape, and a two-element `map` returned `Empty` — no error, just the wrong
+    // answer. `ConstraintResult.operandOf` is the rule; these are the cases.
+
+    @Test
+    @Timeout(30, unit = TimeUnit.SECONDS)
+    fun `a recursive call inside a constructor payload is NOT a tail call`() {
+        val code = """
+            type IntList = | Empty, Node { value: Int, next: IntList } |
+
+            let map = {fn, list: IntList} -> match list is
+                Empty -> Empty
+                Node {value, next} -> Node {value = fn {x = value}, next = map {fn = fn, list = next}}
+
+            let doubled = map {
+                fn = {x} -> x * 2,
+                list = Node {value = 1, next = Node {value = 2, next = Empty}}
+            }
+            match doubled is
+                Node {value, next} -> value
+                Empty -> 0 - 1
+        """
+        // The whole point is that `map` must REBUILD the list on the way out. A
+        // self-tail-loop drops every pending construction and falls out at the
+        // base case, so the wrong answer here is `Empty` — which is why the
+        // else-arm returns a value that could not arise from a correct run.
+        assertEquals(2L, eval(code), "map must rebuild the list; -1 means the payload call was tail-looped")
+    }
+
+    @Test
+    @Timeout(30, unit = TimeUnit.SECONDS)
+    fun `a recursive call under an arithmetic operand is NOT a tail call`() {
+        // The same rule without any variant involved: the `+` has to happen after
+        // the call returns, so every frame must survive it.
+        val code = """
+            let sum_to = {n} ->
+                if n == 0 then 0
+                else n + sum_to {n = n - 1}
+
+            sum_to {n = 10}
+        """
+        assertEquals(55L, eval(code))
+    }
+
+    @Test
+    @Timeout(30, unit = TimeUnit.SECONDS)
+    fun `a genuine tail call still loops`() {
+        // The control. Clearing `tailCalls` at operand positions must not reach
+        // the position that really is one — an accumulator recursion still has to
+        // run in constant stack.
+        val code = """
+            let count = {n, acc} ->
+                if n == 0 then acc
+                else count {n = n - 1, acc = acc + 1}
+
+            count {n = 200000, acc = 0}
+        """
+        assertEquals(200000L, eval(code), "a real tail call must still be looped, not stack-recursed")
+    }
 }
