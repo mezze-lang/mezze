@@ -510,6 +510,78 @@ exactly the same rules as hand-written code. The hard part was never the
 checking — it is making sure the resulting message points somewhere a human can
 act on.
 
+#### Expander + comptime as a macro system: good, with two things to fix
+
+The combination is stronger than the sum, for a reason that is easy to miss:
+**there is no macro language.** `macro_rules!` has its own pattern DSL, C++ has
+templates, Lisp has a second evaluation model. Here a macro is Mezze code
+calling Mezze libraries, and comptime is simply what lets it run during
+compilation. One language, one type system, one debugger, one set of libraries.
+
+Two properties follow that other systems pay dearly for:
+
+- **Capability is visible.** A macro's effect row says what it does at build
+  time. Rust proc macros can do anything, silently, and the ecosystem has no
+  answer to that.
+- **Expansion is cacheable, for free.** Content addressing gives a natural key:
+  `(macro hash, input token hash) -> expansion`. Deterministic macros then
+  expand once ever, across builds and machines. Rust cannot cache proc-macro
+  output for exactly the reason below.
+
+#### Fix 1 — compile-time IO breaks the hashing invariant
+
+`03_COMPTIME.md` says *"Pure functions only — no I/O effects (unless using
+special compile-time handlers)"*, and the next example is:
+
+```mezze
+let app_config = CompileTime.eval {code = {} ->
+    let json_str = read_file {path = "config.json"}
+    …
+```
+
+The restriction and the example contradict each other, and the escape hatch is
+where the damage is. **Two builds of identical source would produce different
+programs with the same hash** — because the hash covers the source, and
+`config.json` is not part of it. That is not a macro inconvenience; it breaks
+the invariant that identity is meaning, which is what verifiable migration,
+cross-machine caching, and content addressing all rest on.
+
+Three coherent positions, and the design must pick one rather than leave the
+hatch unlabelled:
+
+1. **Forbid IO at compile time.** Simplest, and Zig-ish. `config.json` becomes a
+   build step that generates Mezze source instead.
+2. **Hash the inputs.** Compile-time reads are tracked and folded into the
+   build's identity, Nix-style. Keeps the power, keeps determinism, costs
+   plumbing.
+3. **Allow it and give up caching + reproducibility for affected modules.**
+   Honest only if it is *stated*, and the effect row makes it detectable rather
+   than silent — which is more than Rust manages.
+
+Option 2 is the one that fits a content-addressed language, and the effect
+system is exactly the mechanism for detecting which modules need it.
+
+#### Fix 2 — "infinite loops will hang the compiler" is not acceptable
+
+The same section lists as a restriction: *"Terminates — infinite loops will hang
+the compiler."* That is stated as the user's obligation, not the compiler's
+guarantee, and it contradicts this project's own anti-hang invariant — the
+parser carries step budgets and depth guards precisely so that no input can hang
+a tool.
+
+A macro is *more* exposed than the parser, not less: it is third-party code, and
+in an agentic workflow it is being fed generated input all day. Compile-time
+evaluation needs a step budget and a clear error — "macro `sql` exceeded its
+expansion budget" — not a hang.
+
+#### Verdict
+
+Yes, this is a good macro system, and the no-second-language property plus
+visible capability put it ahead of Rust on design. Whether it is *great* rests on
+three things, none of which is exotic: the declarative tier for simple cases, a
+decided policy on compile-time IO, and a step budget. The first two are design
+decisions available today; the third is an afternoon.
+
 #### What this opens that expression scope did not
 
 Declaration scope touches the type system, so it inherits questions expression
