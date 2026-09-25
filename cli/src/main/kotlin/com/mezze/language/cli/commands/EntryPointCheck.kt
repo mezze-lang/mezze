@@ -57,20 +57,12 @@ object EntryPointCheck {
         // auto-discharge for "ambient" effects (a bare `println` entry prints
         // nothing). `*` (performed) and an open row-var tail are not concrete
         // effects (absent from allEffectNames), so `{} -> {} <*>` is fine.
-        val unhandled = residualEffects(type)?.allEffectNames?.sorted().orEmpty()
+        val unhandled = type.residualEffects?.allEffectNames?.sorted().orEmpty()
         if (unhandled.isNotEmpty()) {
             return Result.UnhandledEffects(unhandled)
         }
 
         return Result.Ok
-    }
-
-    /** Effects on the LAST arrow of a (possibly curried) function type. */
-    private fun residualEffects(fn: MezzeType.FunctionType): MezzeType.EffectRow? {
-        var cursor = fn
-        var inner: MezzeType = cursor.returnType
-        while (inner is MezzeType.FunctionType) { cursor = inner; inner = cursor.returnType }
-        return cursor.effects
     }
 
     /**

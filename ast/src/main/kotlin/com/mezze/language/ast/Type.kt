@@ -360,6 +360,26 @@ sealed interface MezzeType {
         val effects: EffectRow? = null,  // null = pure function, non-null = effectful function
         val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Ability constraints for this function
     ) : MezzeType {
+        /**
+         * The effect row on the LAST arrow of a (possibly curried) function —
+         * i.e. what is still undischarged once every parameter has been applied.
+         *
+         * This is the row that decides whether a caller with no enclosing
+         * handler gets a result or a `MezzeSuspend`, so every tool that wants to
+         * RUN a function needs it: the CLI's entry-point rule, and anything that
+         * executes a function on the user's behalf.
+         *
+         * Pair it with [EffectRow.allEffectNames], which deliberately excludes
+         * the `*` performed-marker and an open row-var tail — neither is a
+         * concrete effect, so `{} -> {} <*>` is runnable.
+         */
+        val residualEffects: EffectRow? get() {
+            var cursor = this
+            var inner: MezzeType = cursor.returnType
+            while (inner is FunctionType) { cursor = inner; inner = cursor.returnType }
+            return cursor.effects
+        }
+
         override fun toString(): String = safeToString(
             "FunctionType",
             truncatedContent = { "..." },
