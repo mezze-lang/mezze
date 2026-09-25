@@ -53,7 +53,7 @@
 [
   "+" "-" "*" "/" "%"
   "==" "!=" "<" ">" "<=" ">="
-  "&&" "||" "!"
+  "&&" "||"
   "|>"
   "->"
   "::"
@@ -83,8 +83,11 @@
 ;; Literals
 ;; ============================================================
 
-(integer_literal) @number
-(float_literal)   @number.float
+(integer_literal)  @number
+(float_literal)    @number.float
+;; `1//2` — a Frac. One token, so the `//` colours as part of the number
+;; rather than as two operators with a number either side.
+(fraction_literal) @number
 (bool_literal)    @constant.builtin.boolean
 (unit_literal)    @constant.builtin
 
@@ -173,15 +176,33 @@
 (perform_expression
   operation: (qualified_perform_name (lower_identifier) @function.method))
 
+;; `Show.show` — a static ability operation. The two halves are different
+;; things and want different colours: the ability is a TYPE, the operation is a
+;; method on it.
+(static_ability_op
+  ability: (upper_identifier) @type
+  operation: (lower_identifier) @function.method)
+
+;; `UserId.(5)` / `UserId.(v)` — newtype construction and destructuring. The
+;; constructor is the type's name.
+;; Matched by POSITION, not by spelling: the constructor field admits a
+;; lowercase name too (the parser does not case-check it), and whatever sits
+;; there is the constructor.
+(newtype_constructor_expression
+  constructor: (_) @constructor)
+
+(newtype_pattern
+  constructor: (_) @constructor)
+
 ;; Qualified reference: `module::name` — the trailing name is the
 ;; thing being referenced. We tag the module path as @namespace and
 ;; the leaf depending on shape.
 (qualified_reference
-  module: (lower_identifier) @namespace
+  module: (module_path (lower_identifier) @namespace)
   name: (lower_identifier) @function)
 
 (qualified_reference
-  module: (lower_identifier) @namespace
+  module: (module_path (lower_identifier) @namespace)
   name: (upper_identifier) @type)
 
 ;; ============================================================
@@ -193,9 +214,15 @@
 (record_pattern_field name: (lower_identifier) @variable.member)
 (record_type_field name: (lower_identifier) @variable.member)
 
-;; Record spread `{ ...base, … }` — the `...` is spread punctuation; the
-;; source expression highlights via its own rules.
+;; Spread `...`, in all three places it occurs — the record form
+;; `{ ...base, … }`, the sequence form `[...ys, 1]`, and the rest pattern
+;; `[h, ...rest]`. Only the record one was tagged, so the same three dots
+;; changed colour depending on which bracket they sat in. The name after the
+;; dots highlights via its own rules; what these tag is the punctuation.
 (record_spread "..." @punctuation.special)
+(sequence_spread "..." @punctuation.special)
+(rest_pattern "..." @punctuation.special)
+(rest_pattern (lower_identifier) @variable)
 
 ;; Open record type `{ a: Int, ... }` — the trailing `...` marks an open row.
 (record_type_rest) @punctuation.special

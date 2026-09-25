@@ -1,3 +1,18 @@
+;; GENERATED — do not edit.
+;;
+;; Source: tooling/tree-sitter-mezze/queries/folds.scm
+;; Regenerate: tooling/syntax-generators/gen-zed-queries.py
+;;
+;; Captures renamed for Zed's theme vocabulary:
+;;     @comment.documentation       -> @comment.doc
+;;     @constant.builtin.boolean    -> @boolean
+;;     @number.float                -> @number
+;;     @type.interface              -> @type
+;;     @variable.member             -> @property
+;;
+;; Every other capture is passed through unchanged. The `;;` commentary below
+;; came from the source file and names the SOURCE captures — read it through
+;; the table above.
 ;; Mezze code folding ranges. Each capture marks a node whose multi-line
 ;; body the editor should be able to collapse to a single placeholder.
 ;;

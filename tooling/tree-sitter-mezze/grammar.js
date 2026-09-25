@@ -59,6 +59,10 @@ module.exports = grammar({
     $._newline,
     $._indent,
     $._dedent,
+    // Zero-width, emitted only inside a `$(…` that is never closed. See
+    // `interpolation_is_closed` in src/scanner.c.
+    $._interp_unclosed,
+    $._string_unclosed,
   ],
 
   // Newlines as plain whitespace. Mezze isn't truly newline-significant —
@@ -79,6 +83,34 @@ module.exports = grammar({
   // and picks whichever yields a complete tree. The disambiguator is always
   // a token further right (`->` for lambda, `=` for let, etc.).
   conflicts: $ => [
+    // At a `_newline` after a match arm the parser must choose: another arm, or
+    // the match is over. LR(1) cannot tell — the deciding evidence is whether
+    // the NEXT line turns out to be `pattern -> body`, which is arbitrarily far
+    // ahead. This used to be settled statically by `prec.right` on
+    // `match_expression`, i.e. always "another arm", which is wrong whenever a
+    // match is followed by something else at the same indent:
+    //
+    //     let opt = match maybe is
+    //       Some { val } -> val
+    //       None
+    //
+    // The parser reads that as a ONE-arm match plus a separate top-level
+    // expression `None`; the grammar was forced to read `None` as a second arm
+    // and errored on the missing `->`. Declaring the conflict lets GLR carry
+    // both stacks and keep the one that parses.
+    [$.match_expression],
+    // NOT declared: `[$.string_interpolation, $.function_call]` /
+    // `[…, $.record_expression]`, to let an unbalanced interpolation body stop
+    // the expression early. tree-sitter reports both as UNNECESSARY — there is
+    // no parser-state ambiguity to split. The choice between "continue the call"
+    // and "start the dropped tail" is made by the LEXER, which picks one token
+    // per state and prefers `{` over the low-precedence tail token. See the note
+    // on `interpolation_ignored`.
+    // NOT declared: `[$._decl_name, $.variable]`, which a lowercase newtype
+    // head (`d.(5)` vs `d.field`) would need. MEASURED at a net LOSS — it took
+    // must-parse from 71 failures to 84. The ambiguity applies to EVERY
+    // `lower_identifier .` in the language, and the wrong stack wins often
+    // enough to cost more than the ~10 split-identifier blocks it buys.
     // {x} could be a lambda's parameter list or a record-literal punning
     // field. Resolved by whether `->` follows the closing `}`.
     [$.lambda_parameter, $.record_field],
@@ -119,6 +151,13 @@ module.exports = grammar({
     // target. Latent until the inline-variant argument made the lookahead
     // reachable.
     [$.impl_declaration, $.type_application],
+    // Same ambiguity as the line above, once `type_application` may be
+    // QUALIFIED: at `impl Foo •` the parser cannot yet tell an inherent impl
+    // whose target is the application `Foo Bar` from an ability impl named
+    // `Foo` taking the argument `Bar` — and with `mod::Foo` in play the module
+    // prefix is a third reading. GLR carries them and the `for` (or its
+    // absence) decides.
+    [$.impl_declaration, $.type_application, $.qualified_upper_name],
     // A `do` nested inside a `do` statement: after the inner block's
     // expression, the next token could close the INNER block (making that
     // expression its result) or be another statement of the OUTER one. The
@@ -146,7 +185,21 @@ module.exports = grammar({
     // No explicit separator needed — the inner _top_level rules
     // self-terminate at their closing tokens (`= expr` for let/impl op,
     // `}` for impl/ability/effect bodies, etc.).
-    source_file: $ => repeat($._top_level_with_metadata),
+    // A block-structured construct (match arms, a do-block) ends when the next
+    // line is no longer part of it — and for the PARSER that decision is purely
+    // syntactic: `match x is / Some {v} -> v / None` is a one-arm match plus a
+    // separate top-level expression, whatever column `None` sits in.
+    //
+    // tree-sitter can only reach that reading if the leftover layout tokens are
+    // consumable HERE. Without this, the `_newline` after the last arm has no
+    // home outside the match, so "end the match and start a new declaration" is
+    // not a parse the GLR engine can even try — it is forced to keep extending
+    // the arm list and errors on the first line that is not `pattern -> body`.
+    source_file: $ => repeat(choice(
+      $._newline,
+      $._dedent,
+      $._top_level_with_metadata,
+    )),
 
     _top_level_with_metadata: $ => seq(
       repeat($.metadata_block),
@@ -220,7 +273,12 @@ module.exports = grammar({
       $.effect_declaration,
       $.ability_declaration,
       $.impl_declaration,
-      $._expression,
+      // A bare expression at module root, optionally with `pub` in front of it.
+      // The parser accepts `pub e` — it reads the modifier and then whatever
+      // follows, leaving "pub belongs on a declaration" to the validator. This
+      // is also what a half-typed `pub effect …` looks like at every keystroke
+      // between `pub e` and `pub effect`.
+      seq(optional($.visibility_modifier), $._expression),
     ),
 
     // Public visibility — its OWN node so highlights.scm can tag it as
@@ -276,7 +334,7 @@ module.exports = grammar({
     type_declaration: $ => seq(
       optional($.visibility_modifier),
       'type',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       repeat(field('parameter', $.type_variable)),
       '=',
       field('definition', $._type_definition),
@@ -303,7 +361,7 @@ module.exports = grammar({
     newtype_declaration: $ => prec.right(seq(
       optional($.visibility_modifier),
       'newtype',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       repeat(field('parameter', $.type_variable)),
       '=',
       field('wrapped', $._type),
@@ -325,14 +383,21 @@ module.exports = grammar({
     variant_ellipsis: _ => '...',
 
     variant_constructor: $ => seq(
-      field('name', $.upper_identifier),
-      optional(field('payload', $.record_type)),
+      // Not case-checked. `P0105_LOWERCASE_CONSTRUCTOR` exists, which is why an
+      // earlier pass here assumed the parser rejects `| red, Green |` — it does
+      // NOT; that code fires on constructor EXPRESSIONS, not on a variant
+      // declaration's arms. Verified by running both through MezzeParser.
+      field('name', $._decl_name),
+      // Braced (`Blue { hue: Int }`) is what real code writes; the parser also
+      // accepts a bare type after the name and leaves the shape to the
+      // validator. Mirrors the same leniency in `variant_pattern`.
+      optional(field('payload', choice($.record_type, $.named_type))),
     ),
 
     // ----- effect -----
     effect_declaration: $ => seq(
       'effect',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       optional(seq('having', sepBy1(',', $.type_variable))),
       'where',
       '{',
@@ -353,7 +418,7 @@ module.exports = grammar({
     // ----- ability -----
     ability_declaration: $ => seq(
       'ability',
-      field('name', $.upper_identifier),
+      field('name', $._decl_name),
       repeat(field('parameter', $.type_variable)),
       'for',
       field('self', $.type_variable),
@@ -398,10 +463,18 @@ module.exports = grammar({
       ),
       // Ability or effect impl: `impl Eq for Bool where { … }`. Ability
       // names can carry type arguments (`impl Into Str for Bool …`).
+      //
+      // prec.dynamic, because both impl branches can parse the SAME text once
+      // type names may be lowercase: in the inherent branch `for` is not an
+      // expected token, so the lexer falls back to `lower_identifier` and
+      // `impl Into Str for Bool where {…}` reads as an inherent impl whose
+      // target is the application `Into Str for Bool`. Keyword extraction does
+      // not prevent it — a keyword only wins where the grammar expects it. When
+      // both readings complete, the one with a real `for` is the right one.
       // Effect impls have an optional performer-config record after the
       // target (`impl Log for ConsoleLogger {} where …`). Unified here;
       // the typechecker disambiguates via name lookup.
-      seq(
+      prec.dynamic(1, seq(
         'impl',
         // A qualified ability/effect name: `Eq`, `log::Log`,
         // `std::effects::log::Log`. The module prefix is a run of
@@ -423,7 +496,7 @@ module.exports = grammar({
         '{',
         optional($._impl_operation_list),
         '}',
-      ),
+      )),
     ),
 
     // Impl operations can optionally carry a type annotation:
@@ -466,9 +539,13 @@ module.exports = grammar({
 
     _pattern: $ => choice(
       $.variable_pattern,
+      // `let 'add = …`. The parser lexes a type variable anywhere and binds it
+      // like a name, leaving "that is a type, not a binding" to the validator.
+      $.type_variable,
       $.wildcard_pattern,
       $.literal_pattern,
       $.record_pattern,
+      $.newtype_pattern,
       $.variant_pattern,
       $.sequence_pattern,
     ),
@@ -510,7 +587,25 @@ module.exports = grammar({
 
     variant_pattern: $ => seq(
       field('constructor', $.upper_identifier),
-      optional(field('payload', $.record_pattern)),
+      // The braced form `Some { val }` is what Mezze code writes — there are
+      // ZERO unbraced payloads in the whole stdlib. But the parser accepts a
+      // bare name too (`Some val`), leaving the shape to the validator, and a
+      // half-typed `Some val` is exactly the state an editor sees while the
+      // braces are still being typed.
+      optional(field('payload', choice($.record_pattern, $.variable_pattern))),
+    ),
+
+    // `UserId.(v)` — destructure a NEWTYPE. A newtype's constructor takes its
+    // wrapped value positionally, in parens after a dot, which is what
+    // separates it from a variant constructor's braced record payload
+    // (`Some { val }`). The inner position is a full pattern, so
+    // `Wrapper.(Some { val })` and `Wrapper.(_)` both work.
+    newtype_pattern: $ => seq(
+      field('constructor', $.upper_identifier),
+      '.',
+      '(',
+      field('value', $._pattern),
+      ')',
     ),
 
     sequence_pattern: $ => seq(
@@ -565,10 +660,24 @@ module.exports = grammar({
     // position.
     type_variable: _ => /'[a-zA-Z_][a-zA-Z0-9_]*/,
 
-    named_type: $ => $.upper_identifier,
+    // A type NAME is not case-checked at the syntax level — the parser accepts
+    // `type color`, `newtype serId`, and a lowercase argument in an application
+    // (`St r` is `St` applied to `r`), and leaves "type names are capitalised"
+    // to the validator. Matching that here is what lets those parse; the
+    // highlight query still tags the position as a type, which is what the
+    // position means regardless of how it is spelled.
+    // A DECLARATION's name, not case-checked — same rule as `named_type`: the
+    // parser accepts `type color` / `newtype serId` / `ability show` and leaves
+    // capitalisation to the validator. NOT used for variant constructors, which
+    // the parser really does reject when lowercase (P0105_LOWERCASE_CONSTRUCTOR).
+    _decl_name: $ => choice($.upper_identifier, $.lower_identifier),
+
+    named_type: $ => choice($.upper_identifier, $.lower_identifier),
 
     type_application: $ => prec.left(PREC.call, seq(
-      field('constructor', $.upper_identifier),
+      // `codec::Entry Bool Xml` — a qualified type applied to arguments. Real
+      // Mezze, and it appears in real signatures, so it has to HIGHLIGHT.
+      field('constructor', choice($.upper_identifier, $.lower_identifier, $.qualified_upper_name)),
       repeat1(field('argument', $._type_atom)),
     )),
 
@@ -601,7 +710,10 @@ module.exports = grammar({
 
     record_type: $ => seq(
       '{',
-      sepBy(',', $.record_type_field),
+      // A bare type with no `name:` is accepted by the parser (`{ a: Int, Str }`)
+      // and left to the validator. It is also what `{ a: Int, Str }` looks like
+      // while `Str` is still waiting for its field name to be typed in front.
+      sepBy(',', choice($.record_type_field, $._type_atom)),
       // Open record: `{ a: Int, ... }` — the `...` marks the row as open
       // (extra fields allowed). Only valid trailing the field list.
       optional(seq(optional(','), field('rest', $.record_type_rest))),
@@ -701,6 +813,12 @@ module.exports = grammar({
       $.perform_expression,
       $.record_expression,
       $.sequence_expression,
+      $.newtype_constructor_expression,
+      // `'a` alone. The parser lexes a type variable anywhere and accepts it in
+      // expression position, leaving "that is a type, not a value" to the
+      // validator.
+      $.type_variable,
+      $.static_ability_op,
       $.variant_constructor_expression,
       $.pipe_placeholder,
       $.variable,
@@ -763,6 +881,23 @@ module.exports = grammar({
 
     pipe_placeholder: _ => '@',
 
+    // `Show.show`, `Default.default {}` — a STATIC ability operation: one the
+    // ability declares with NO receiver, dispatched on the type the call
+    // PRODUCES rather than on a value. `Show` here is an ABILITY name, not a
+    // value, so this is not a member access on a variant constructor — and it
+    // could not be parsed as one anyway: `variant_constructor_expression` sits
+    // at PREC.call, so `Show` reduced to a constructor and the `.` had nowhere
+    // to attach (it landed as an ERROR).
+    //
+    // Its own node rather than a widened member_access, because the two halves
+    // want different highlighting: the ability is a type, the operation is a
+    // method.
+    static_ability_op: $ => prec(PREC.call + 1, seq(
+      field('ability', $.upper_identifier),
+      '.',
+      field('operation', $.lower_identifier),
+    )),
+
     member_access: $ => prec.left(PREC.member, seq(
       field('receiver', $._expression),
       '.',
@@ -781,7 +916,7 @@ module.exports = grammar({
 
     // f {args}
     function_call: $ => prec(PREC.call, seq(
-      field('callee', choice($.variable, $.qualified_reference, $.upper_identifier)),
+      field('callee', choice($.variable, $.qualified_reference, $.static_ability_op, $.upper_identifier)),
       field('arguments', $.record_expression),
     )),
 
@@ -819,7 +954,7 @@ module.exports = grammar({
     // with _dedent when a line dedents below the arm column — this is what stops
     // the arm list from swallowing the following top-level token. A trailing
     // comma per arm stays allowed (some sources write `pat -> body,`).
-    match_expression: $ => prec.right(seq(
+    match_expression: $ => seq(
       'match',
       field('scrutinee', $._expression),
       'is',
@@ -828,7 +963,7 @@ module.exports = grammar({
       optional(','),
       repeat(seq($._newline, $.match_arm, optional(','))),
       optional($._dedent),
-    )),
+    ),
 
     match_arm: $ => seq(
       // Alternative patterns: `1 | 2 | 3 -> "small"` matches any of three
@@ -1001,13 +1136,29 @@ module.exports = grammar({
 
     sequence_expression: $ => seq(
       '[',
-      sepBy(',', $._expression),
+      sepBy(',', choice($.sequence_spread, $._expression)),
       ']',
     ),
+
+    // `[...ys, 1]` — splice another sequence in. Mirrors record_spread; the
+    // source is any expression, and it may appear at any position.
+    sequence_spread: $ => seq('...', field('source', $._expression)),
 
     variant_constructor_expression: $ => prec(PREC.call, seq(
       field('constructor', $.upper_identifier),
       optional(field('payload', $.record_expression)),
+    )),
+
+    // `UserId.(5)` — CONSTRUCT a newtype. Positional, in parens after a dot;
+    // the variant form takes a braced record instead. Higher precedence than
+    // the variant constructor so `UserId.(5)` is not read as the constructor
+    // `UserId` followed by a member access.
+    newtype_constructor_expression: $ => prec(PREC.call + 1, seq(
+      field('constructor', $.upper_identifier),
+      '.',
+      '(',
+      field('value', $._expression),
+      ')',
     )),
 
     variable: $ => $.lower_identifier,
@@ -1017,6 +1168,7 @@ module.exports = grammar({
     _literal: $ => choice(
       $.integer_literal,
       $.float_literal,
+      $.fraction_literal,
       $.string_literal,
       $.bool_literal,
       $.unit_literal,
@@ -1027,9 +1179,23 @@ module.exports = grammar({
     // leading underscore — `_x` is an identifier.
     integer_literal: _ => /-?\d[\d_]*[nN]?/,
     float_literal: _ => /-?\d[\d_]*\.\d[\d_]*/,
+    // `1//2` — a Frac, and LITERAL syntax: `//` joins two numerals and does
+    // not join identifiers (`a//b` is rejected by the compiler), so this is a
+    // token, not an operator. `#` is Mezze's comment marker, so `//` is free.
+    // The lexer prefers the longest match, which is what keeps `1//2` from
+    // lexing as integer `1` followed by `//2`.
+    fraction_literal: _ => /-?\d[\d_]*\/\/-?\d[\d_]*/,
     bool_literal: _ => choice('True', 'False'),
     unit_literal: _ => seq('(', ')'),
 
+    // The closing quote is REQUIRED — an optional one was tried and is a
+    // disaster. With `optional('"')` the lexer takes a lone `"` as a complete
+    // EMPTY string, so `let greeting = "hello"` parsed as: empty string, then
+    // `hello` as a VARIABLE, then another empty string. `prec.right` does not
+    // help, because the damage is done at tokenisation, before any
+    // associativity applies. Caught by the hand-written corpus trees, which
+    // parity would have missed entirely — parity only asks "any ERROR node?",
+    // and that wreck has none.
     string_literal: $ => seq(
       '"',
       repeat(choice(
@@ -1037,25 +1203,94 @@ module.exports = grammar({
         $.escape_sequence,
         $.string_interpolation,
       )),
-      '"',
+      // `_string_unclosed` is zero-width and the scanner offers it only when
+      // there is no closing quote ahead at all. Without it, an unterminated
+      // string's content matched the NEXT LINE and ate the declaration below.
+      choice('"', $._string_unclosed),
     ),
 
     // Ordinary string text: any run of chars that isn't a quote, backslash, or
     // `$`, PLUS a lone `$` that doesn't begin an interpolation (`$100`, `$` at
     // end). The `$(` form is claimed by string_interpolation (longer token).
+    // Ordinary string text — and it does NOT cross a newline.
+    //
+    // A multi-line string is legal Mezze (the parser accepts one), but there are
+    // ZERO of them in the stdlib and examples against ~507 single-line literals.
+    // An UNTERMINATED string, by contrast, is what the editor sees on every
+    // keystroke between `"` and the closing quote — and while the string stayed
+    // open, its content ate the following declarations. Typing
+    //
+    //     let s = "total: $(f { x =
+    //
+    // used to stop everything below it from highlighting. Ending the content at
+    // the newline confines that to one line.
+    //
+    // The trade is explicit: a genuine multi-line string highlights as an
+    // unterminated one, which nothing in the corpus writes, in exchange for the
+    // half-typed case — which is continuous — staying local.
     string_content: _ => token(prec(-1, choice(
-      /[^"\\$]+/,
+      /[^"\\$\n]+/,
       /\$/,
     ))),
 
     escape_sequence: _ => token(seq('\\', /./)),
 
-    // $(expr) inside "...".
+    // `$(expr)` inside a string.
+    //
+    // The parser (ExpressionParsers.parseParsedInterpolatedString) scans from
+    // `$(` to the DEPTH-MATCHED `)`, slices that text out, and parses the slice
+    // as an expression — WITHOUT requiring the slice to be fully consumed. So
+    // the body is an expression PREFIX, and whatever follows it inside the
+    // parens is simply dropped. That one rule explains every shape the parser
+    // accepts here:
+    //
+    //     $(name,)        expression `name`, trailing `,` ignored
+    //     $(age})         expression `age`,  trailing `}` ignored
+    //     $(nam\ne)       expression `nam`,  trailing `e` ignored
+    //     $(f { x = 1     expression, unbalanced `{` ignored
+    //
+    // Modelling it as "expression + ignored tail" rather than as an opaque blob
+    // is what keeps the expression HIGHLIGHTED: the valid prefix still parses
+    // into real nodes, and only the dropped remainder is anonymous.
     string_interpolation: $ => seq(
       '$(',
-      $._expression,
-      ')',
+      choice(
+        // The common case: a real expression, then anything the parser drops.
+        seq($._expression, optional($.interpolation_ignored)),
+        // No expression parses at all. `expression()` commits to the longest
+        // prefix it can, and for a body like `f { x = inner { y = 1 }[}` that
+        // prefix is just `f` — but the grammar cannot stop mid-record, so the
+        // whole body has to be droppable too. Never EMPTY: `$()` stays an error,
+        // matching P0110_EMPTY_INTERPOLATION.
+        $.interpolation_ignored,
+      ),
+      // `_interp_unclosed` is zero-width and the scanner only offers it when a
+      // depth-matched `)` genuinely does not exist ahead — the parser's own
+      // rule. A plain `choice(')', $._newline)` was tried first and reverted: it
+      // contained the runaway but closed every MULTI-LINE interpolation early
+      // (must-parse 63 -> 77).
+      choice(')', $._interp_unclosed),
     ),
+
+    // The dropped remainder of an interpolation body. Low precedence so every
+    // real expression token is preferred while the expression is still being
+    // built; `)` and `"` are excluded so this can never swallow the closing
+    // paren or escape the string.
+    // ALSO NOT external. Making this a scanner token was tried, on the reasoning
+    // that external tokens are gated on `valid_symbols` — which differ per GLR
+    // stack — so the stack that had already ended its expression could take the
+    // tail while the stack still building a record took `{`. It does not work
+    // out: offered at the body's first position the scanner claimed whole bodies
+    // and valid interpolations lost their expression tree (2 corpus tests), and
+    // restricting it to after-an-expression left the target blocks failing while
+    // costing must-parse 63 -> 97 and containment 5 -> 6 poisoned. Reverted.
+    //
+    // NOT restricted to a non-identifier first character. That was tried, to stop
+    // recovery on an unclosed `$(` from matching the whole NEXT DECLARATION as
+    // dropped text. It does not even do that — recovery just takes the next
+    // identifier as an expression and the junk after it — and it cost
+    // must-parse 63 -> 77. Measured, reverted.
+    interpolation_ignored: _ => token(prec(-1, /[^)"\n]+/)),
 
     // ===== Identifiers =====
 

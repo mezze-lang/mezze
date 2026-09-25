@@ -40,7 +40,12 @@ const RE = new RegExp(
     '\\b([0-9][0-9_]*(?:\\.[0-9][0-9_]*)?n?)\\b',        // numbers
     `\\b(${KEYWORDS.join('|')})\\b`,                     // keywords
     '(?<=\\blet\\s)([a-z_][A-Za-z0-9_]*)',               // binding being defined
-    '(\\.[a-z_][A-Za-z0-9_]*)',                          // .dot_methods
+    // The lookbehind is what keeps a SPREAD from rendering as a member access:
+    // in `[...ys, 1]` and `{ ...base, a = 1 }` the third dot was matching and
+    // `ys`/`base` came out coloured as methods. A spread is not a member
+    // access, and this highlighter gives operators and plain variable
+    // references no colour at all — so declining to match is the whole fix.
+    '(?<!\\.)(\\.[a-z_][A-Za-z0-9_]*)',                    // .dot_methods
     '([a-z_][A-Za-z0-9_]*)(?=\\s*=[^=])',                // record field names
     '\\b([A-Z][A-Za-z0-9_]*)\\b',                        // constructors / types
   ].join('|'),

@@ -3,16 +3,20 @@
   "name": "Mezze",
   "scopeName": "source.mezze",
   "fileTypes": ["mz"],
-  "comment": "Thin, token-only TextMate grammar — a faithful mirror of the tree-sitter grammar's TOKEN rules (keywords, operators, literals, comments). It deliberately does NOT parse declaration structure: that's exactly what made the old grammar buggy (e.g. `pub` bleeding into the following keyword). Structural / context-sensitive coloring (params vs. locals vs. functions, record field names, type names) comes from LSP semantic tokens, which layer on top. Native editors (Zed/nvim/Helix) use the tree-sitter grammar directly; this file is the VS Code base layer only.",
+  "comment": "TextMate grammar for VS Code — a mirror of the tree-sitter grammar's TOKEN rules (keywords, operators, literals, comments), plus the four identifier POSITIONS a regex can recognise without parsing: a `let` name, a module qualifier before/after `::`, a `.member`, and a record field before `=`. Those four used to be left out on the grounds that LSP semantic tokens supply them, but collectSemanticTokens opens with `state.parsedModule ?: return emptyList()` — a file that does not parse gets NO semantic tokens, which is the state a file is in while you type it, and it only covers top-level lets besides. Markdown ```mezze fences and any LSP-less consumer get this file alone. What stays out is declaration STRUCTURE: nothing here spans a declaration, because a rule that swallows more than it colors is what made `pub` bleed into the following keyword. The two multi-token rules that remain (#binding, and #keywords' isolated `pub`) are pinned by test/tmgrammar.test.js — add a case there before adding a rule here. Native editors (Zed/nvim/Helix) use the tree-sitter grammar directly.",
   "patterns": [
     { "include": "#comments" },
     { "include": "#metadata" },
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#booleans" },
+    { "include": "#binding" },
     { "include": "#keywords" },
     { "include": "#type-variable" },
+    { "include": "#namespace" },
     { "include": "#constructor" },
+    { "include": "#member" },
+    { "include": "#record-field" },
     { "include": "#operators" }
   ],
   "repository": {
@@ -132,16 +136,52 @@
       ]
     },
 
+    "binding": {
+      "comment": "The name a `let` introduces. Listed BEFORE #keywords: both rules start matching at the same `let`, and TextMate breaks an index tie by list order. A bare `let` with no name yet — the state you are in while typing — matches neither capture here and falls through to #keywords, so the keyword never loses its color. A regex cannot tell a function from a value, so both get entity.name.function, the same call website/src/lib/highlight.ts makes for its tk-fn.",
+      "match": "\\b(let)\\s+([a-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.control.mezze" },
+        "2": { "name": "entity.name.function.mezze" }
+      }
+    },
+
     "type-variable": {
       "comment": "Type variable `'a` — a leading apostrophe. Colored distinctly from concrete types (which the LSP colors as @type).",
       "name": "variable.parameter.type.mezze",
       "match": "'[a-zA-Z_][a-zA-Z0-9_]*"
     },
 
+    "namespace": {
+      "comment": "A module path segment: the lower identifier on either side of `::`. Both sides, so `use std::codec::json` tags all three — the trailing segment is the module being imported, and tree-sitter's (module_path (lower_identifier)) @namespace covers it too. Uppercase names are left to #constructor, so `codec::Entry` colors the qualifier and the type differently.",
+      "name": "entity.name.namespace.mezze",
+      "match": "(?<=::)[a-z_][A-Za-z0-9_]*|[a-z_][A-Za-z0-9_]*(?=::)"
+    },
+
     "constructor": {
       "comment": "An Upper-cased identifier is a variant constructor / type / effect / ability name at the token level. Which of those it is depends on context — the LSP refines it via semantic tokens; here we give it the type/constructor tint as a reasonable base.",
       "name": "entity.name.type.mezze",
       "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+
+    "member": {
+      "patterns": [
+        {
+          "comment": "A method CALL — `.name` applied to arguments, which in Mezze means a following `{` or `(`. Splitting on that lookahead is how one regex reproduces tree-sitter's two captures, @function.method for method_call and @variable.member for member_access. Requiring a lowercase letter after the dot also keeps `UserId.(5)` intact: newtype construction is `.(`, not a member.",
+          "name": "entity.name.function.member.mezze",
+          "match": "(?<!\\.)\\.([a-z_][A-Za-z0-9_]*)(?=\\s*[{(])"
+        },
+        {
+          "comment": "Field access. The `(?<!\\.)` guard is load-bearing: without it the third dot of a spread matches and `[...ys]` renders as if `ys` were a member of something. A spread is not an access. The website highlighter had exactly this bug.",
+          "name": "variable.other.property.mezze",
+          "match": "(?<!\\.)\\.([a-z_][A-Za-z0-9_]*)"
+        }
+      ]
+    },
+
+    "record-field": {
+      "comment": "A record field name: `{ a = 1 }`. The `[^=]` keeps `==` out. A `let` binding cannot reach here — #binding matches from the earlier `let`, and TextMate takes the leftmost match.",
+      "name": "variable.other.property.mezze",
+      "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?==[^=])"
     },
 
     "operators": {

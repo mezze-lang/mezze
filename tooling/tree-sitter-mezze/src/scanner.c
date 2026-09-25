@@ -30,6 +30,11 @@ enum TokenType {
   NEWLINE,
   INDENT,
   DEDENT,
+  // Zero-width. Ends a `$(…` that has NO depth-matched `)` ahead of it — see
+  // scan_interpolation_unclosed.
+  INTERP_UNCLOSED,
+  // Zero-width. Ends a `"…` that is never closed — see string_is_closed.
+  STRING_UNCLOSED,
 };
 
 // Indentation stack: the column (1-based, matching the Kotlin lexer) at which
@@ -118,12 +123,96 @@ void tree_sitter_mezze_external_scanner_deserialize(void *payload, const char *b
   if (scanner->stack.len == 0) stack_push(&scanner->stack, 0);
 }
 
+// Is the `$(` we are sitting inside ever closed?
+//
+// The Kotlin parser decides an interpolation's extent by scanning from `$(` to
+// the DEPTH-MATCHED `)`. The grammar cannot: the body is parsed with the
+// ordinary expression rules, whose whitespace `extras` include `\n`, so an
+// UNCLOSED `$(` let its expression walk into the following declarations and eat
+// them — `let s = "total: $(count` stopped everything below it from
+// highlighting, which is a state the editor is in on every keystroke.
+//
+// So do the parser's own scan here, and only when the answer is "never closed"
+// offer the parser a zero-width way out. A multi-line interpolation that DOES
+// close later still finds its `)` and is untouched — which is what separates
+// this from the line rule that was tried and reverted (it closed every
+// multi-line interpolation early, must-parse 63 -> 77).
+//
+// Bounded by the string's own `"` and by EOF, because a `)` beyond either of
+// those cannot belong to this interpolation.
+static bool interpolation_is_closed(TSLexer *lexer) {
+  int32_t depth = 1;
+  for (;;) {
+    int32_t c = lexer->lookahead;
+    if (c == 0) return false;          // EOF: never closed
+    if (c == '"') return false;        // string ended first
+    if (c == '(') depth++;
+    if (c == ')') { depth--; if (depth == 0) return true; }
+    lexer->advance(lexer, false);
+  }
+}
+
+// Is the string we are sitting inside ever closed?
+//
+// Same shape as interpolation_is_closed, and for the same reason. A string's
+// content cannot cross a newline, but after the line break the content token
+// simply matches the NEXT LINE — so `let s = "total:` consumed the declaration
+// below it. A multi-line string is legal Mezze, so a flat "end at the newline"
+// rule is wrong (it was tried and cost must-parse 63 -> 77); scanning for a real
+// closing quote distinguishes the two.
+static bool string_is_closed(TSLexer *lexer) {
+  for (;;) {
+    int32_t c = lexer->lookahead;
+    if (c == 0) return false;              // EOF: never closed
+    if (c == '\\') {                       // skip an escape pair
+      lexer->advance(lexer, false);
+      if (lexer->lookahead == 0) return false;
+      lexer->advance(lexer, false);
+      continue;
+    }
+    if (c == '"') return true;
+    lexer->advance(lexer, false);
+  }
+}
+
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 static void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
 
 bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
                                              const bool *valid_symbols) {
   Scanner *scanner = (Scanner *)payload;
+
+  // An interpolation with no matching `)` ahead can end here, zero-width. Asked
+  // first because it is only ever valid inside `$(…`, where no layout token is.
+  // `mark_end` before the scan so the token stays zero-width no matter how far
+  // the lookahead walked.
+  // The guard matters: in ERROR RECOVERY tree-sitter marks every external token
+  // valid, so without it this ran with no interpolation present at all, and the
+  // lookahead scan below moved the lexer out from under the layout logic — a
+  // plain unterminated string lost its containment (2/3 -> 1/3 surviving
+  // declarations). Inside a real `$(…` the layout tokens are NOT expected, so
+  // `INDENT` being valid too means this is recovery, not an interpolation.
+  if (valid_symbols[INTERP_UNCLOSED] && !valid_symbols[INDENT]) {
+    lexer->mark_end(lexer);
+    if (!interpolation_is_closed(lexer)) {
+      lexer->result_symbol = INTERP_UNCLOSED;
+      return true;
+    }
+    // Deliberately FALL THROUGH rather than returning false. The layout tokens
+    // below may also be valid at this position, and short-circuiting here cost
+    // a plain unterminated string its containment (2/3 -> 1/3 surviving
+    // declarations) — the scanner stopped emitting the NEWLINE the recovery
+    // needed.
+  }
+
+  // A string with no closing quote ahead can end here, zero-width.
+  if (valid_symbols[STRING_UNCLOSED] && !valid_symbols[INDENT]) {
+    lexer->mark_end(lexer);
+    if (!string_is_closed(lexer)) {
+      lexer->result_symbol = STRING_UNCLOSED;
+      return true;
+    }
+  }
 
   // Emit any DEDENTs we still owe from a previous scan of the same line break.
   if (scanner->pending_dedents > 0 && valid_symbols[DEDENT]) {
@@ -190,6 +279,38 @@ bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
     lexer->result_symbol = NEWLINE;
     return true;
   }
+
+  // NOT added here: a branch absorbing an over-indented line as another item of
+  // the current block (`col > top && valid_symbols[NEWLINE] -> NEWLINE`).
+  //
+  // RE-JUDGED against highlighting rather than against the parity count, and it
+  // still loses — for a better reason than the first time. What it breaks is
+  // REAL, IDIOMATIC code: a multi-line pipe chain
+  //
+  //     let n = "a"
+  //       |> str::to_upper { s = @ }
+  //       |> str::to_lower { s = @ }
+  //
+  // stops parsing, along with five do-block layouts, because their continuation
+  // lines ARE deeper than the block and must open a nested level rather than
+  // become the next item. It buys two mixed-indent match arms. Containment and
+  // the corpus trees are unharmed either way; the deciding evidence is which
+  // side of the trade is code someone actually writes.
+  //
+  // It is tempting, because the Kotlin parser ignores the column entirely when
+  // deciding whether a match arm continues, so arms at inconsistent indents are
+  // ONE match to the parser and a hard error here — and inconsistent indents are
+  // exactly what half-edited code looks like.
+  //
+  // MEASURED, and it is a net loss: it fixed the mixed-indent arms but took
+  // must-parse from 188 failures to 197. Returning false here PRUNES a GLR
+  // branch; emitting a NEWLINE instead keeps a wrong stack alive, and in nine
+  // other snippets that wrong stack went on to win. (must-reject moved the other
+  // way, 18227 -> 18258, i.e. the grammar got stricter elsewhere — the same
+  // effect seen from the other side.) Reverted. Closing the mixed-indent case
+  // needs the arm-list context, which this scanner cannot see from
+  // `valid_symbols` alone.
+
 
   // Shallower → the current block (and possibly several) is over. Count how
   // many levels we need to pop, emit one DEDENT now and queue the rest.

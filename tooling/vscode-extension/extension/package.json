@@ -223,13 +223,18 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test:syntax": "node test/tmgrammar.test.js",
+    "test:snippets": "node test/snippets.test.js",
+    "test": "npm run test:syntax && npm run test:snippets"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^2.22.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.0.0"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
