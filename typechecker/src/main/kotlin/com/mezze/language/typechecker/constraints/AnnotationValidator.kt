@@ -5,6 +5,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.util.WellKnownTypeApp
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.solving.UnificationResult
 import com.mezze.language.ast.solving.Substitution
@@ -438,36 +439,33 @@ internal class AnnotationValidator(
         }
     }
 
-    /** Annotation→type conversion for concrete `having` values (R2). Handles every
-     *  concrete annotation shape so the R2 check compares by [prettyPrintType]
-     *  equality instead of skipping. Only [ParsedFunctionType] (and any future
-     *  shape) still falls back to a fresh var — a function-typed associated value
-     *  is exotic and its structural comparison isn't worth the effort here; the
-     *  fresh var means "don't check" for that one case, never unsound (a missed
-     *  check only fails to REJECT a wrong `having`, and the impl body's own use of
-     *  the associated type is still checked separately, cf. #222).
-     *  Public so the constraint generator can precompute impl-declared bindings. */
-    fun publicAnnToMezze(annotation: ParsedTypeAnnotation): MezzeType = when (annotation) {
-        // #312: `'a` in a public signature is a type VARIABLE. Rendering it as
-        // `WellKnownTypeApp.of("'a")` builds a nominal type whose name lives only
-        // in `constructor`, which then refuses to unify with anything. MEASURED
-        // as reachable: one firing in the typechecker suite, with `'a`.
-        is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
-            ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-               else WellKnownTypeApp.of(annotation.name, emptyList())
-        is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { publicAnnToMezze(it) })
-        is ParsedQualifiedType -> WellKnownTypeApp.of(annotation.typeName, annotation.args.map { publicAnnToMezze(it) })
-        is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(publicAnnToMezze(annotation.elementType))
-        is ParsedRecordType -> MezzeType.RecordType(
-            fields = annotation.entries.associate { it.name to publicAnnToMezze(it.type) },
-            rowVar = if (annotation.isOpen) RowVar.fresh() else null,
-        )
-        is ParsedVariantType -> MezzeType.VariantType(
-            constructors = annotation.constructors.associate { it.name to it.dataType?.let { d -> publicAnnToMezze(d) } },
-            rowVar = if (annotation.isOpen) RowVar.fresh() else null,
-        )
-        is ParsedFunctionType -> MezzeType.VarType(TypeVar.fresh())  // exotic; not compared structurally
-    }
+    /**
+     * Annotation→type conversion for concrete `having` values (R2).
+     *
+     * THE shared converter, after a local copy of it lived here. The copy existed
+     * because a merge was tried, measured and reverted — but it was pointed at
+     * the WRONG entry point. `TypeAnnotationConverter` has two: `convert(...)`,
+     * whose `ParsedNamedType` arm turns EVERY non-primitive name into a `VarType`,
+     * and `convertWith(config)`, which splits on [String.isTypeVarName] and builds
+     * a nominal `TypeApplication` for an uppercase name.
+     *
+     * Through `convert`, a declared `Color` arrived as a variable, the caller's
+     * `annotatedType is VarType -> continue` skipped the check, and
+     * `having 'out = Color` against an impl declaring `Str` was silently accepted
+     * — `AbilityHavingParityTest.wrong variant-typed having on a generic
+     * annotation is a type error` is what caught it. `convertWith` was right all
+     * along, and with it the whole suite passes.
+     *
+     * The two tests the earlier attempt was blocked on — `CrossModuleFromJsonWrapperTest`'s
+     * one-level wrapper and `StoredConstraintResolutionTest`'s inferred binding —
+     * now pass too. They were failing on the hash-stamping and
+     * representation issues this branch has since closed, not on anything this
+     * conversion does.
+     *
+     * Public so the constraint generator can precompute impl-declared bindings.
+     */
+    fun publicAnnToMezze(annotation: ParsedTypeAnnotation): MezzeType =
+        TypeAnnotationConverter.convertWith(annotation, TypeAnnotationConverter.ConversionConfig())
 
     private fun collectTypeVars(type: MezzeType): Set<TypeVar> {
         val result = mutableSetOf<TypeVar>()
