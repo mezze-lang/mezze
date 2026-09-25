@@ -15,6 +15,7 @@ import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.truffleir.*
 import com.mezze.language.ast.ScopedEffectConstants
+import com.mezze.language.typechecker.comptime.ComptimeRules
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typedast.*
 
@@ -530,7 +531,10 @@ class TypedASTCompiler(
         // pass picks up user-side calls into stdlib wrappers. Disable
         // with MEZZE_INLINE_WRAPPERS=0. See TrivialWrapperInliner.
         val inlinedMap = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") erasedMap
-            else com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
+            else com.mezze.language.truffleir.TrivialWrapperInliner.inline(
+                erasedMap,
+                doNotInline = setOf(com.mezze.language.typechecker.WellKnownHashConstants.FUNCTION_COMPTIME),
+            )
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
         // go through; stdlib was already canonicalized at precompile time
@@ -556,6 +560,24 @@ class TypedASTCompiler(
             com.mezze.language.truffleir.DeadLetEliminator.eliminate(canonicalizedMap)
             else canonicalizedMap
         val final = deduped.map { cleanedMap[it.hash] ?: it }
+
+        // Rule 1 — `comptime` applied, never referenced. Decided here rather than
+        // during expression lowering because only the lowered form distinguishes
+        // the two: a value use leaves a bare `ReadGlobal*ByHash` of the comptime
+        // declaration, whereas an application consumes that read as a call's
+        // callee. Position is the whole difference, and position is what the IR
+        // makes explicit. See ComptimeIr.
+        for (fn in final) {
+            val valueUse = ComptimeRules.ir.findSites(fn.body).firstOrNull { it.isValueUse }
+            if (valueUse != null) {
+                val at = valueUse.valueUse?.src
+                ComptimeRules.rejectNonCallReference(
+                    at?.let {
+                        Loc(fn.sourceFile, it.startLine, it.startCol, it.endLine, it.endCol)
+                    }
+                )
+            }
+        }
         return CompileResult(final, performerRecords.toList())
     }
 
@@ -1010,6 +1032,93 @@ class TypedASTCompiler(
      */
     private fun isLambdaHash(hash: com.mezze.language.typedast.Hash, decl: com.mezze.language.typedast.TypedLetDecl?): Boolean {
         return decl != null && decl.value is TypedLambda
+    }
+
+    /**
+     * The two comptime rules that need a call site: the `eval` thunk must be
+     * closed, and the result type must be ground. See [ComptimeRules].
+     *
+     * Both read straight off the typed AST — `TypedLambda` already records what
+     * it closes over, so "closed" is `captures.isEmpty()` rather than a scope
+     * analysis, and the result type is the one the solver assigned to this call.
+     */
+    private fun checkComptimeCallSite(expr: TypedCall): com.mezze.language.truffleir.PrintType? {
+        val evalThunk = (expr.arg as? TypedRecord)
+            ?.entries
+            ?.filterIsInstance<TypedRecordEntry.Field>()
+            ?.firstOrNull { it.name == "eval" }
+            ?.value
+
+        // `comptime {}` is not a call the reduction pass can do anything with: row
+        // polymorphism reads the missing field as a PARTIAL APPLICATION and hands
+        // back a function still awaiting `eval`. There is no site to replace, and
+        // left alone it reaches the runtime and dies inside a dispatch node instead
+        // of being explained. Rule 1 covers it — the thing being produced here is a
+        // `comptime` value.
+        if (evalThunk == null) {
+            ComptimeRules.rejectNonCallReference(expr.loc)
+        }
+
+        if (evalThunk is TypedLambda) {
+            ComptimeRules.checkThunkIsClosed(evalThunk.captures.map { it.name }, evalThunk.loc)
+        }
+        // The solved result shape, from whichever source actually has it. The flat
+        // substitution can leave a call's own type open where the enclosing
+        // context is what pins it — the same gap #160 documents for
+        // inherent-method receivers — so the thunk's body type is consulted too.
+        val resultType = listOfNotNull(
+            substitution.apply(expr.type),
+            (evalThunk as? TypedLambda)?.body?.type?.let { substitution.apply(it) },
+            (evalThunk?.type as? FunctionType)?.returnType?.let { substitution.apply(it) },
+            expr.instantiation?.typeArgs?.firstOrNull()?.let { substitution.apply(it) },
+        ).firstOrNull { it !is VarType }
+
+        // No shape means this call CANNOT be folded — reification builds a value
+        // against its static shape and there is none. That is a limitation, not a
+        // mistake by the author: `comptime { eval = {} -> Some { val = 7 } }` is
+        // perfectly good code whose variant type stays open until a later `match`
+        // closes it. So the call is simply left alone and evaluates at run time,
+        // via the declaration's own `eval {}` body, which computes the same value.
+        //
+        // Rejecting here was tried and reverted: it turned working programs into
+        // compile errors over a compiler limitation.
+        // Built while the type is still unerased — after emit nothing can tell
+        // `Nat` from `Int`, or say which newtype a value came from. It rides out
+        // on the call node itself, which is why a runtime handed nothing but
+        // serialized `FunctionIR` can still find and fold the site.
+        //
+        // A shape has to be ground ALL THE WAY DOWN, not just at the top. The
+        // check above only rejects a bare `VarType`, and `Some { val = 7 }`
+        // whose payload never solved builds a perfectly well-formed
+        // `Variant(Some -> Dynamic)` — shaped enough to look foldable, and then
+        // unreifiable once the value is in hand. Leaving the site alone is the
+        // documented behaviour for "no shape"; a partial shape is no shape.
+        val shape = resultType?.let { PrintTypeBuilder(printTypeDefs).build(it) }
+        return if (shape != null && isGround(shape)) shape else null
+    }
+
+    /** Whether [shape] carries no [PrintType.Dynamic] anywhere inside it. */
+    private fun isGround(shape: com.mezze.language.truffleir.PrintType): Boolean {
+        return when (shape) {
+            is com.mezze.language.truffleir.PrintType.Dynamic -> false
+            is com.mezze.language.truffleir.PrintType.Function -> false
+            is com.mezze.language.truffleir.PrintType.Newtype -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.Record ->
+                shape.fields.all { isGround(it.type) }
+            is com.mezze.language.truffleir.PrintType.Variant ->
+                shape.arms.all { arm -> arm.payload?.let { isGround(it) } ?: true }
+            is com.mezze.language.truffleir.PrintType.MzList -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.MzSeq -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.MzSet -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.MzSortedSet -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.MzDeque -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.MzNonEmptyList -> isGround(shape.inner)
+            is com.mezze.language.truffleir.PrintType.MzMap ->
+                isGround(shape.key) && isGround(shape.value)
+            is com.mezze.language.truffleir.PrintType.MzSortedMap ->
+                isGround(shape.key) && isGround(shape.value)
+            else -> true
+        }
     }
 
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
@@ -1675,6 +1784,28 @@ class TypedASTCompiler(
                 }
                 is BindingRef.ByHash -> {
                     val calleeHash = binding.hash
+
+                    // A legitimate comptime call site. Check the two things the
+                    // signature cannot say — the thunk is closed, and the result type
+                    // is ground — then fall through and lower the call normally. The
+                    // reduction pass replaces it later, in the build path only; a
+                    // `mez check` stops here, which is why neither of these may be
+                    // deferred to evaluation time.
+                    if (ComptimeRules.isComptime(calleeHash)) {
+                        val shape = checkComptimeCallSite(expr)
+                        // Emitted here and returned, rather than falling through:
+                        // every path below rewrites the callee (mono redirects to a
+                        // specialized hash, inlining splices the body in and the site
+                        // stops existing at all), and a rewritten site is one the
+                        // reduction pass can no longer see. Neither rewrite buys
+                        // anything on a call that is about to be replaced by a
+                        // constant, and `Embeddable` is method-less so there is no
+                        // dictionary to inject.
+                        return CallDirectIR(
+                            calleeHash, listOf(argIR), isTailCall = false, src,
+                            comptimeShape = shape,
+                        )
+                    }
 
                     // Mono Phase 1 hybrid: if the monomorphizer specialized
                     // this call site, redirect to the specialized hash. The

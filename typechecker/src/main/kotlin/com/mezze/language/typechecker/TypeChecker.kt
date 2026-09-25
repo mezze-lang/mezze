@@ -1120,6 +1120,7 @@ class TypeChecker(
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers,
+                    comptimeHashHex = WellKnownHashConstants.FUNCTION_COMPTIME.hex,
                     loadedModules = result.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! },
                     loadedModuleSources = result.loadedModules
                         .mapNotNull { (path, m) ->

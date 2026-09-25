@@ -182,7 +182,7 @@ class PerformerValidationTest {
 
             let outerFunction : {} -> {} <Log> = {} -> Log.info {msg = "outer"}
 
-            let innerFunction : {} -> {} = {} ->
+            let innerFunction : {} -> {} <*> = {} ->
               perform Terminal, ConsoleLogger in Log.info {msg = "inner"}
 
             perform Terminal, ConsoleLogger in do

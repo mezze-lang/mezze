@@ -64,7 +64,7 @@ class ChainMapFoldDispatchTest {
               info : {msg: Str} -> {} = { msg } -> {}
             }
 
-            pub let compute: {} -> Int = {} ->
+            pub let compute: {} -> Int <*> = {} ->
               perform TestLogger in do
                 [1, 2, 3].map { f = {x} -> do
                     MyLog.info {msg = "hi"}
@@ -90,7 +90,7 @@ class ChainMapFoldDispatchTest {
               info : {msg: Str} -> {} = { msg } -> {}
             }
 
-            pub let compute: {} -> Int = {} ->
+            pub let compute: {} -> Int <*> = {} ->
               perform TestLogger in do
                 [1, 2, 3, 4].filter { p = {x} -> do
                     MyLog.info {msg = "check"}
@@ -118,7 +118,7 @@ class ChainMapFoldDispatchTest {
               op2 : {} -> {} = {} -> {}
             }
 
-            pub let compute: {} -> Int = {} ->
+            pub let compute: {} -> Int <*> = {} ->
               perform H1 in do
                 perform H2 in do
                   [1, 2, 3].map { f = {x} -> do
@@ -148,7 +148,7 @@ class ChainMapFoldDispatchTest {
               info : {msg: Str} -> {} = { msg } -> {}
             }
 
-            pub let compute: {} -> Int = {} ->
+            pub let compute: {} -> Int <*> = {} ->
               perform TestLogger in do
                 let ys = seq::map { xs = [1, 2, 3], f = {x} -> do
                     MyLog.info {msg = "hi"}

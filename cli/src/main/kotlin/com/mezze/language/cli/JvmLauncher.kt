@@ -91,7 +91,7 @@ object JvmLauncher {
      *   2. Project dev build (`interpreter/build/libs/mezze-runtime.jar`).
      *   3. Sibling to the `mez` binary or `../lib/` (relocatable installs).
      */
-    private fun findRuntimeJar(): File? {
+    internal fun findRuntimeJar(): File? {
         val installed = MezzeHome.runtimeJar
         if (installed.exists()) return installed
 

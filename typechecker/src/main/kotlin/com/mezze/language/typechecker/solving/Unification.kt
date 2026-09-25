@@ -515,6 +515,33 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     val declaredCallbackPresent = (effects1?.caughtByAncestor?.isNotEmpty() == true) ||
         (effects2?.caughtByAncestor?.isNotEmpty() == true)
 
+    // `<*>` — the declared row says the body PERFORMS effects and handles them
+    // itself, so nothing escapes. A body that performs nothing does not satisfy
+    // that, and the residual row cannot tell the two apart: a pure body and a
+    // fully-discharged one are both empty. `performed` is the only thing that
+    // distinguishes them, and `isPure` above deliberately ignores it — which is
+    // why a `<*>` slot otherwise classifies as pure and is never checked.
+    //
+    // Direction per the call-argument convention documented below:
+    // fn1 = argument/actual, fn2 = parameter/declared. Only the declared side
+    // asking for `<*>` is a demand; the reverse is a value being more specific
+    // than required, which is fine.
+    //
+    // Scoped to rows that are otherwise pure on BOTH sides, so this can only
+    // fire for a `<*>` slot — `comptime`'s `eval` is the language's only one.
+    if (isPure1 && isPure2 &&
+        effects2?.performed == true && effects1?.performed != true
+    ) {
+        return UnificationResult.Failure(
+            message = "Effect row mismatch: this slot is declared `<*>`, meaning the body " +
+                "performs effects and handles them itself — but this body performs none. " +
+                "Perform the effects the computation needs, or, if it needs none, say so " +
+                "explicitly by discharging `NoOp`.",
+            type1 = fn1,
+            type2 = fn2
+        )
+    }
+
     val effectSubst = when {
         isPure1 && isPure2 -> Substitution.empty
 

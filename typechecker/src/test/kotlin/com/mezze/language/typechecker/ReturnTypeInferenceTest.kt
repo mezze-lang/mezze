@@ -48,14 +48,14 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let check_value : {x: Int} -> Str = {x} ->
+            pub let check_value : {x: Int} -> Str <*> = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
                     else
                         "positive"
 
-            let result = check_value {x = -5}
+            let result = {} -> check_value {x = -5}
         """.trimIndent()
 
         // Should pass - handler matches return type
@@ -77,7 +77,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let get_number : {} -> Int = {} ->
+            pub let get_number : {} -> Int <*> = {} ->
                 perform WithReturn in
                     Return.return {val = 42}
         """.trimIndent()
@@ -101,7 +101,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let get_number : {} -> Int = {} ->
+            pub let get_number : {} -> Int <*> = {} ->
                 perform IntReturn in
                     Return.return {val = 42}
         """.trimIndent()
@@ -125,7 +125,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let classify : {x: Int} -> Str = {x} ->
+            pub let classify : {x: Int} -> Str <*> = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
@@ -158,7 +158,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let process : {x: Int} -> Status = {x} ->
+            pub let process : {x: Int} -> Status <*> = {x} ->
                 perform StatusReturn in do
                     if x < 0 then
                         Return.return {val = Failed {error = "negative"}}
@@ -187,7 +187,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let color_name : {c: Color} -> Str = {c} ->
+            pub let color_name : {c: Color} -> Str <*> = {c} ->
                 perform WithReturn in
                     match c is
                         Red -> Return.return {val = "red"}
@@ -214,14 +214,14 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let inner : {x: Int} -> Str = {x} ->
+            pub let inner : {x: Int} -> Str <*> = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "inner negative"}
                     else
                         "inner ok"
 
-            pub let outer : {x: Int} -> Str = {x} ->
+            pub let outer : {x: Int} -> Str <*> = {x} ->
                 perform WithReturn in do
                     let result = inner {x = x}
                     if result == "inner ok" then
@@ -249,7 +249,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let get_user : {id: Int} -> {name: Str, age: Int} = {id} ->
+            pub let get_user : {id: Int} -> {name: Str, age: Int} <*> = {id} ->
                 perform WithReturn in do
                     if id == 0 then
                         Return.return {val = {name = "Admin", age = 0}}
@@ -276,7 +276,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> Some {val = val}
             }
 
-            pub let find : {x: Int} -> Int = {x} ->
+            pub let find : {x: Int} -> Int <*> = {x} ->
                 perform WithSome in do
                     if x > 10 then
                         Return.return {val = x}
@@ -303,7 +303,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let validate : {name: Str, age: Int} -> Str = {name, age} ->
+            pub let validate : {name: Str, age: Int} -> Str <*> = {name, age} ->
                 perform WithReturn in do
                     if name == "" then
                         Return.return {val = "Name required"}
@@ -335,7 +335,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let test_int : {} -> Int = {} ->
+            pub let test_int : {} -> Int <*> = {} ->
                 perform WithReturn in Return.return {val = 42}
         """.trimIndent()
 
@@ -358,7 +358,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let process : {x: Int} -> Str = {x} ->
+            pub let process : {x: Int} -> Str <*> = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "early"}
@@ -386,7 +386,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let check : {a: Int, b: Int, c: Int} -> Str = {a, b, c} ->
+            pub let check : {a: Int, b: Int, c: Int} -> Str <*> = {a, b, c} ->
                 perform WithReturn in do
                     if a < 0 then
                         Return.return {val = "a negative"}
@@ -425,7 +425,7 @@ class ReturnTypeInferenceTest {
                 else
                     {}
 
-            pub let validate : {x: Int} -> Str = {x} ->
+            pub let validate : {x: Int} -> Str <*> = {x} ->
                 perform WithReturn in do
                     return_if {condition = x < 0, val = "negative"}
                     return_if {condition = x == 0, val = "zero"}
@@ -452,7 +452,7 @@ class ReturnTypeInferenceTest {
                 log = {msg} -> {}
             }
 
-            pub let test : {} -> {} = {} ->
+            pub let test : {} -> {} <*> = {} ->
                 perform ConsoleLogger in Log.log {msg = "test"}
         """.trimIndent()
 

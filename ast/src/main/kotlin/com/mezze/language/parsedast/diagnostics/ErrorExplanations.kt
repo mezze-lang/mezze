@@ -459,6 +459,35 @@ fun ErrorCode.explain(): String = when (this) {
         "The imported module has type errors and cannot be used. " +
         "Fix the errors in the imported module first."
 
+    ErrorCode.V0801_COMPTIME_MISUSE ->
+        "`comptime` must be applied directly at a call site — it is not a value. " +
+        "Its whole mechanism is that the call site is replaced by the result it " +
+        "computes, so there is nothing to pass around, partially apply, or store. " +
+        "Write `comptime { eval = {} -> ... }` at the point where you want the " +
+        "value. The name is also reserved, so it cannot be redeclared."
+
+    ErrorCode.V0802_COMPTIME_NOT_CLOSED ->
+        "The `eval` thunk captures a value that will not exist until the program " +
+        "runs, but `comptime` evaluates while the program is still being compiled. " +
+        "Anything reachable from an enclosing function's parameters or locals is a " +
+        "run-time value. Top-level functions and values are fine. Either move the " +
+        "computation out to the top level, or do it at run time instead."
+
+    ErrorCode.V0803_COMPTIME_NOT_PERFORMED ->
+        "`comptime`'s `eval` slot is declared `<*>`: the body performs effects " +
+        "and handles them itself, so that nothing escapes into the compiled " +
+        "program. A body that performs nothing does not meet that — and it is " +
+        "not the same as being pure, since a pure body and a fully-discharged " +
+        "one leave the same empty residual row. Say which you mean: perform the " +
+        "effects the computation needs, or discharge `NoOp` if it needs none."
+
+    ErrorCode.V0804_COMPTIME_EVAL_FAILED ->
+        "Evaluating a `comptime` block failed while compiling. Either the body " +
+        "raised — the trace shows where — or it called `compile_error` " +
+        "deliberately. Note that a `Result` is DATA, not a failure: returning " +
+        "`Err { ... }` embeds the error value and does not stop the build. Only a " +
+        "crash or an explicit `compile_error` does."
+
     ErrorCode.V0901_STRUCTURAL_VALIDATION ->
         "A structural validation check failed. " +
         "This is a catch-all for miscellaneous validation errors."

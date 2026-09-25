@@ -174,7 +174,7 @@ class CrossModuleImplFieldItMismatchTest {
         val userSource = """
             use libmod2::{Client, Req, Resp, Err, Method, client, MyHttp, MockMyHttp}
 
-            let run : {} -> Int = {} ->
+            let run : {} -> Int <*> = {} ->
               perform MockMyHttp { canned = { status = 200 } } in do
                 let c = client { base_url = "https://api.acme.com" }
                 let resp = c.get { path = "/x" }.send {}
@@ -323,7 +323,7 @@ class CrossModuleImplFieldItMismatchTest {
             use std::collections::map
             use std::collections::bytes
 
-            let run : {} -> Int = {} ->
+            let run : {} -> Int <*> = {} ->
               perform MockHttpClient { rules = [
                 { methods = [Get], url = Glob { pattern = "**" },
                   response = Ok { val = {

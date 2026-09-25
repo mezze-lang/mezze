@@ -1,5 +1,6 @@
 package com.mezze.interpreter.values;
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.exception.AbstractTruffleException;
 import com.oracle.truffle.api.nodes.Node;
 
@@ -28,8 +29,18 @@ public final class MezzeGuestException extends AbstractTruffleException {
      * Truffle classifies as a HOST error and surfaces to the user as an
      * internal failure with a JVM stack trace.
      *
+     * <p>{@code @TruffleBoundary} because the callers are the typed {@code
+     * (long, long)} native ops, which are partially evaluated. The message is
+     * built by string concatenation, and {@code StringConcatHelper.simpleConcat}
+     * is on native-image's runtime-compilation BLOCKLIST — so without the
+     * boundary, {@code native-image} fails the whole build with "blocklisted
+     * methods are reachable", for any program whose closure contains a
+     * division. Nothing is lost by the boundary: this is the path that is about
+     * to throw.
+     *
      * @param operation the failing operation, capitalised — "Division", "Modulo"
      */
+    @TruffleBoundary
     public static MezzeGuestException dividingByZero(String operation) {
         return new MezzeGuestException(operation + " by zero");
     }

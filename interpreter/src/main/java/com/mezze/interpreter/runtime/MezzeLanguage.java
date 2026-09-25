@@ -70,6 +70,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // See docs/perf/scalar-native-abi-2026-06.md.
     static {
         com.mezze.interpreter.nodes.builtin.dsl.NativeBootstrap.INSTANCE.ensureLoaded();
+        // Publish the compile-time evaluator. Having :interpreter on the class
+        // path is what makes `comptime` evaluable — the compiler holds only the
+        // `:ast` interface and never names this module. Tools that type-check
+        // without a runtime (LSP, `mez check`, the slim jar) simply find nothing
+        // installed, which is the correct state for them: evaluation belongs to
+        // code generation.
+        com.mezze.interpreter.comptime.TruffleComptimeEvaluator.install();
     }
 
     // Store last execution result for test access
@@ -1263,9 +1270,15 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 entryHashHex != null ? new com.mezze.language.typedast.Hash(entryHashHex) : null;
 
             // All modules are already included in the FunctionIR list — no import extraction needed
+            List<String[]> directPerformers =
+                performers != null ? performers : Collections.<String[]>emptyList();
+            // THE path that matters: mez dev / exec / build / native / wasm all
+            // arrive here with pre-lowered IR. Reduction is possible because the
+            // result shape rides on the call node rather than in a side table.
+            directFunctions = reduceComptime(directFunctions, directPerformers);
             return com.mezze.interpreter.compiler.PipelineRunner.compileFromIR(
                 this, directFunctions, Collections.emptyList(), projectRoot,
-                performers != null ? performers : Collections.emptyList(),
+                directPerformers,
                 entryHash
             );
         }
@@ -1310,6 +1323,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             String srcFile = source.getPath() != null ? source.getPath() : "<unknown>";
             java.util.Map<String, String> sourceOverrides =
                 java.util.Collections.singletonMap(srcFile, sourceCode);
+
+            // Reduce `comptime` before compiling. This is the RUN path, so it is
+            // the right place: type checking has already produced everything the
+            // pass needs, and a tool that only type-checks (`mez check`, the LSP)
+            // never reaches here and therefore never executes user code.
+            loweredFunctions = reduceComptime(loweredFunctions, performers);
+
             return com.mezze.interpreter.compiler.PipelineRunner.compileFromIR(
                 this, loweredFunctions, Collections.emptyList(), projectRoot,
                 performers != null ? performers : Collections.emptyList(),
@@ -1321,6 +1341,27 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         throw new RuntimeException("TruffleIR not produced by typechecker. loweredFunctions is " +
             (loweredFunctions == null ? "null" : "empty (" + loweredFunctions.size() + ")") +
             ". typedModule is " + (typedModule == null ? "null" : "present"));
+    }
+
+    /**
+     * Replace each `comptime` call with the value it computes.
+     *
+     * Runs on EVERY path into the runtime, which is what makes `mez dev` and
+     * `mez exec` fold at all: those arrive through the pre-lowered-IR branch and
+     * never see a TypeCheckResult. A comptime site identifies itself — the type
+     * checker stamped the result shape onto the call node, and `FunctionIR` is
+     * serializable, so the shape travels with the program across the wire.
+     *
+     * A build has ALREADY reduced by the time its IR reaches here (BuildCommand
+     * does it, so a jar or native image ships folded rather than re-evaluating
+     * on every launch), which leaves this a no-op there — the pass finds no
+     * sites. Keeping it unconditional is what covers every other way in.
+     */
+    private static List<FunctionIR> reduceComptime(
+            List<FunctionIR> functions, java.util.List<String[]> performers) {
+        return com.mezze.language.comptime.ComptimeReduction.INSTANCE.reduceOrThrow(
+            functions,
+            performers == null ? Collections.<String[]>emptyList() : performers);
     }
 
     /** Reflectively call a method, unwrapping InvocationTargetException. */
@@ -1471,6 +1512,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /**
      * Clear the last execution result and any accumulated state.
      */
+    /**
+     * Restore the result channel after a NESTED evaluation.
+     *
+     * Compile-time evaluation runs a whole program inside the compilation of
+     * another one, and the channel it reports through is static. Without putting
+     * the enclosing value back, the outer run reads whatever the comptime block
+     * computed — silently, and as a plain wrong answer rather than a failure.
+     */
+    public static void setLastExecutionResultForNestedEval(Object value) {
+        lastResultStore.set(value);
+    }
+
     public static void clearLastResult() {
         lastResultStore.set(null);
     }

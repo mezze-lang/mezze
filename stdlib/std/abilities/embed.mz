@@ -1,0 +1,55 @@
+# Embeddable — what `comptime` is allowed to return.
+
+use std::nat::{ Nat }
+
+## A value that can be embedded in the compiled artifact.
+##
+## `comptime` runs its body while the compiler is alive and then replaces the
+## call site with the result. So the result has to outlive the compiler: it is
+## serialized into the program's IR, written to the store, and — for
+## `mez build --native` — frozen into the image heap, then rebuilt in a
+## different process, possibly on a different machine.
+##
+## A value can make that crossing when its meaning is fully determined by data
+## it carries. It cannot when its meaning depends on:
+##
+##   - code      — a function value is a code pointer plus captured values
+##   - identity  — a mutable cell's point is that it is *that* cell; a copy is
+##                 a different cell
+##   - liveness  — a `Promise` is a running computation, a `FileHandle` an open
+##                 descriptor, a `Foreign` a live guest-language object. All
+##                 belong to the compiler process and die with it.
+##
+## This ability has no operations. Its existence *is* the content: a
+## compile-time permission, in the same sense as a marker trait. Nothing is
+## called at runtime. There is nothing for an operation to do either — newtypes
+## are erased before reification sees them, so by then the value already IS its
+## underlying representation.
+##
+## ## What has an impl
+##
+## Primitives, records, variants, and the immutable containers derive
+## structurally and on demand — you never write those. See
+## `canDeriveAbilityStructurally`.
+##
+## A NEWTYPE must opt in, exactly as it must for `Eq`:
+##
+##     newtype Meters = Int
+##     impl Embeddable for Meters where { }
+##
+## This is deliberate and it is the whole mechanism. A newtype is absolutely
+## opaque — field access is rejected even inside the defining module — so
+## deriving `Embeddable` would silently pierce that wall and bake a hidden
+## representation into the shipped artifact. `newtype Password = Str` must not
+## become embeddable because somebody returned one from a `comptime` by
+## accident. The author decides.
+##
+## It also makes the rule uniform: **no impl means not embeddable.** `Promise`
+## is rejected for precisely the same reason `Meters` is before its author opts
+## in — nobody wrote the impl. There is no separate "is this opaque" test and no
+## list of native types to maintain.
+ability Embeddable for 'a where { }
+
+## `Nat` is a newtype over `Int`, so it does not derive — stdlib opts it in
+## here. Its underlying representation is a plain integer, which embeds fine.
+impl Embeddable for Nat where { }

@@ -176,7 +176,7 @@ class BuildCommand {
             val modulePath = com.mezze.language.cli.`package`.packageNameToModule(manifest.`package`.name)
 
             val cached = BuildCache.tryLoad(store, appConfig.name)
-            val loweredFunctions: List<FunctionIR>
+            val compiledFunctions: List<FunctionIR>
             val performerRecords: List<Array<String>>
             // typedModule available only on the recompile path. The only
             // downstream consumer is entry-shape validation; that's skipped
@@ -186,7 +186,7 @@ class BuildCommand {
             var warningCount = 0
 
             if (cached != null) {
-                loweredFunctions = cached.functions
+                compiledFunctions = cached.functions
                 performerRecords = cached.performerRecords
                 typedModuleForValidation = null
                 if (timing) System.err.println("[${ms()}ms] cache hit (${cached.functions.size} fns) — skipping typecheck")
@@ -203,11 +203,26 @@ class BuildCommand {
                     timing = timing,
                     ms = ::ms,
                 )
-                loweredFunctions = compiled.loweredFunctions
+                compiledFunctions = compiled.loweredFunctions
                 performerRecords = compiled.performerRecords
                 typedModuleForValidation = compiled.typedModule
                 warningCount = compiled.warningCount
             }
+
+            // Fold every `comptime` block HERE, before anything is packed.
+            //
+            // The runtime reduces too, and for `mez dev` / `mez exec` that is
+            // where it has to happen. A built artifact is different: it is run
+            // many times, so reducing at start-up would make "compile time" mean
+            // "every launch" — the work repeated on each run, and an effectful
+            // block re-reading the world each time instead of being baked in.
+            // Doing it here is what makes the jar and the native image ship a
+            // constant. The runtime's pass then finds no sites and does nothing.
+            //
+            // Reduction rewrites bodies but keeps each function's hash, the same
+            // convention MutEraser and TrivialWrapperInliner follow, so
+            // everything already persisted by hash stays valid.
+            val loweredFunctions = reduceComptime(compiledFunctions, performerRecords)
 
             // Front-door name→hash resolution: the user names their entry in
             // Mezze.toml; we resolve it to a content hash ONCE here and carry
@@ -461,6 +476,28 @@ class BuildCommand {
         // re-typecheck, so there's nothing new to report).
         val warningCount: Int = 0,
     )
+
+    /**
+     * Run every `comptime` block and splice its value in.
+     *
+     * A no-op for a program with none, and a no-op again when the runtime jar
+     * is not on the class path — `mez check` and the LSP get the IR back
+     * untouched, which is the point: neither may execute user code.
+     *
+     * A failing block is the author's error, reported like any other build
+     * error. The message already carries the guest frames; the host stack
+     * belongs behind `--verbose` and helps nobody reading their own comptime.
+     */
+    private fun reduceComptime(
+        functions: List<FunctionIR>,
+        performers: List<Array<String>>,
+    ): List<FunctionIR> =
+        try {
+            ComptimeHost.reduce(functions, performers)
+        } catch (e: com.mezze.language.comptime.ComptimeReduction.ComptimeFailure) {
+            println(e.message)
+            kotlin.system.exitProcess(4)
+        }
 
     /**
      * Full parse + typecheck + lower path. Writes the result back to the

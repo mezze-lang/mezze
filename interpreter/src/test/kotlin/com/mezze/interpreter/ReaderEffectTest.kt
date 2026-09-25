@@ -417,7 +417,7 @@ class ReaderEffectTest {
             # layer5 only reads; no Async in body. Row is just <Reader>.
             let layer5 : {} -> Str <Reader> = {} -> Reader.ask {}
 
-            let layer4 : {} -> Str <Async> = {} -> do
+            let layer4 : {} -> Str <Async, *> = {} -> do
               # Shadow with "L4"; spawn layer5 under that.
               perform WithReader { val = "L4" } in do
                 let p = Async.spawn { f = layer5 }
@@ -430,7 +430,7 @@ class ReaderEffectTest {
               let leaf = result::get_or { result = await { p = p }, def = "missing" }
               "$(here)/$(leaf)"
 
-            let layer2 : {} -> Str <Async> = {} -> do
+            let layer2 : {} -> Str <Async, *> = {} -> do
               # Shadow with "L2"; spawn layer3 under that.
               perform WithReader { val = "L2" } in do
                 let p = Async.spawn { f = layer3 }

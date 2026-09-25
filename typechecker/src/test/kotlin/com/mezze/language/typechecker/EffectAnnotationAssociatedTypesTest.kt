@@ -70,7 +70,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            let getState: {} -> Int = {} -> perform Counter in State.get {}
+            let getState: {} -> Int <*> = {} -> perform Counter in State.get {}
         """.trimIndent()
 
         val result = typeCheck(code)
@@ -103,7 +103,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            let combined: {} -> Int = {} ->
+            let combined: {} -> Int <*> = {} ->
                 perform ConsoleLogger, Counter in do
                     Log.info { msg = "hello" }
                     State.get {}
@@ -286,7 +286,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            let pureGet: {} -> Int = {} -> perform IntState in State.get {}
+            let pureGet: {} -> Int <*> = {} -> perform IntState in State.get {}
         """.trimIndent()
 
         val result = typeCheck(code)

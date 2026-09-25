@@ -161,7 +161,28 @@ sealed interface StringPartIR {
  *    - scalar (isScalarABI = true): args[i] is the value for the callee's paramNames[i],
  *      in callee-param order. No record allocation. Only emitted when the typechecker
  *      can prove the call is fully-applied (no partial, no spread). */
-@Serializable data class CallDirectIR(val targetHash: Hash, val args: List<NodeIR>, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null, val isScalarABI: Boolean = false) : NodeIR
+@Serializable data class CallDirectIR(
+    val targetHash: Hash,
+    val args: List<NodeIR>,
+    val isTailCall: Boolean,
+    override val src: SourceInfo,
+    val typeTag: String? = null,
+    val isScalarABI: Boolean = false,
+    /**
+     * Non-null iff this call is a `comptime` block: the static shape its result
+     * must be rebuilt against, computed from the solved, PRE-ERASURE type.
+     *
+     * Carried on the node rather than in a side table because the reduction pass
+     * runs in the RUNTIME, which for `mez dev` / `exec` is a different process
+     * and receives nothing but serialized IR. A side table keyed by source span
+     * works in-process and silently does nothing across that boundary — which is
+     * every path a user actually builds with.
+     *
+     * It also makes the site self-identifying: a call carrying a shape IS a
+     * comptime call, so the pass needs no hash to recognise one.
+     */
+    val comptimeShape: PrintType? = null,
+) : NodeIR
 /** Direct call to a known function hash with INCOMPLETE args (partial application).
  *  Returns a curried closure capturing partialFields; subsequent calls fill in
  *  remaining params. Field names matter — runtime matches them against callee paramNames. */

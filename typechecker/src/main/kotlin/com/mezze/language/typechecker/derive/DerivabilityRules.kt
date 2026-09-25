@@ -70,6 +70,12 @@ internal fun canDeriveAbilityStructurally(
     // the Eq rule above: a newtype that wants its own equality must write it, and
     // writing one obliges it to write a matching Hash. So the derived hash is only
     // ever paired with the derived (structural) equality it agrees with.
+    //
+    // Embeddable leans on this rule too, and it is the entire mechanism there:
+    // because a newtype does not derive it, `no impl == not embeddable` holds
+    // uniformly. `Promise 'a` is rejected for exactly the same reason `Meters` is
+    // before its author opts in — nobody wrote the impl. That is why Embeddable
+    // needs no "is this opaque" test and no list of native types to maintain.
     if (isNewtype &&
         !WellKnownHashConstants.isInspect(resolvedHash) &&
         !WellKnownHashConstants.isHash(resolvedHash)
@@ -134,6 +140,58 @@ internal fun canDeriveAbilityStructurally(
             // type-check a program that crashes at `a < b`. A VarType stays
             // derivable so it can resolve to something that does have Ord.
             unwrappedType is MezzeType.VarType
+
+        // Embeddable: can a value of this type be written into the compiled
+        // artifact and rebuilt in a fresh process? True exactly when the value is
+        // data all the way down.
+        //
+        // Rejected by falling through to `else`: FunctionType (the value is a code
+        // pointer plus captures) and every declared type with no derivable shape.
+        // Newtypes are rejected earlier, by the rule above — that is the opt-in,
+        // and it is what makes `Promise`, `MutInt`, `Foreign` and friends fail
+        // without any of them being named here.
+        WellKnownHashConstants.isEmbeddable(resolvedHash) ->
+            // A var is still open; let it resolve. A comptime site additionally
+            // requires the result type to be fully solved (V0803), so an
+            // unresolved var cannot survive to reification by this route.
+            unwrappedType is MezzeType.VarType ||
+                // Bool needs no arm of its own: it used to have two surface types,
+                // a primitive `BoolType` and a `| True, False |` variant, and only
+                // the variant survives — so `isBoolVariant` above is the whole test.
+                BuiltInAbilities.isBoolVariant(unwrappedType) ||
+                // Primitives are data by definition.
+                unwrappedType is MezzeType.IntType ||
+                unwrappedType is MezzeType.FloatType ||
+                unwrappedType is MezzeType.StringType ||
+                unwrappedType is MezzeType.CharType ||
+                unwrappedType is MezzeType.BytesType ||
+                unwrappedType is MezzeType.FracType ||
+                // Records (including `{}`) and variants: data iff every component
+                // is. This is what makes rejection RECURSIVE — a record with a
+                // `MutInt` field, or a `Seq (Promise Int)`, fails here rather than
+                // surviving to the reifier.
+                (unwrappedType is MezzeType.RecordType &&
+                    (unwrappedType as MezzeType.RecordType).fields.values
+                        .all { componentSatisfies(abilityName, it, abilityHash, seen) }) ||
+                (unwrappedType is MezzeType.VariantType &&
+                    (unwrappedType as MezzeType.VariantType).constructors.values
+                        .all { it == null || componentSatisfies(abilityName, it, abilityHash, seen) }) ||
+                // The immutable containers — Seq, List, Map, Set, SortedMap,
+                // SortedSet, Deque, Option, Result. All of `:datastructures` is
+                // persistent, so the container itself is always data and only its
+                // arguments decide.
+                //
+                // Keyed on `isReservedTypeName`, which is the sanctioned identity
+                // channel for these types: BuiltinTypes documents that their
+                // identity is CARRIED BY THE NAME (TypeIdentity.Builtin) and that
+                // this is sound only because the name is reserved. A user type
+                // cannot reach this arm.
+                (unwrappedType is MezzeType.TypeApplication &&
+                    com.mezze.language.ast.BuiltinTypes.isReservedTypeName(
+                        (unwrappedType as MezzeType.TypeApplication).constructor
+                    ) &&
+                    (unwrappedType as MezzeType.TypeApplication).args
+                        .all { componentSatisfies(abilityName, it, abilityHash, seen) })
 
         resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ->

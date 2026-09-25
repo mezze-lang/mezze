@@ -245,7 +245,7 @@ class EffectPropagationTest {
 
             # Function that handles Database effect but TestDB adds Log effect
             # So we still have Log effect after handling Database
-            let partiallyHandledQuery : {sql: Str} -> Str <Log> = {sql} ->
+            let partiallyHandledQuery : {sql: Str} -> Str <Log, *> = {sql} ->
               perform TestDB in queryWithLog {sql = sql}
         """.trimIndent()
 

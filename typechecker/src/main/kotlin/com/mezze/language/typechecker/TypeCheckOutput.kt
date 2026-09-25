@@ -31,6 +31,15 @@ data class TypeCheckResult(
     val loweredFunctions: List<FunctionIR> = emptyList(),
     val typedModule: TypedModule? = null,
     val performerRecords: List<Array<String>> = emptyList(),
+    /**
+     * Content hash of stdlib `comptime`, so the reduction pass can recognise
+     * call sites without depending on `:typechecker` (where the generated
+     * constant lives). Travelling with the result keeps this explicit data flow
+     * rather than another piece of global state whose initialisation order
+     * someone has to reason about.
+     */
+    @Transient
+    val comptimeHashHex: String? = null,
     val loadedModules: Map<ModulePath, TypedModule> = emptyMap(),
     val loadedModuleSources: Map<ModulePath, LoadedModuleSource> = emptyMap(),
     // Per-position "expected type" for LSP completion ranking. Transient — recomputed each typecheck.

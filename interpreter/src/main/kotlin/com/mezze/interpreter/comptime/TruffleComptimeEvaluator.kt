@@ -1,0 +1,219 @@
+package com.mezze.interpreter.comptime
+
+import com.mezze.interpreter.runtime.MezzeLanguage
+import com.mezze.language.comptime.Comptime
+import com.mezze.language.comptime.ComptimeEvaluator
+import com.mezze.language.comptime.ComptimeOutcome
+import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.truffleir.PrintType
+import com.mezze.language.truffleir.SourceInfo
+import com.mezze.language.typedast.Hash
+import org.graalvm.polyglot.Context
+import org.graalvm.polyglot.Engine
+import org.graalvm.polyglot.Source
+import java.nio.file.Paths
+
+/**
+ * Runs comptime thunks on the same Truffle interpreter that runs the program.
+ *
+ * That is the point: a handler at compile time is just a handler, so there is
+ * no separate compile-time effect runtime to build or keep in step. It also
+ * means a comptime block can do anything the language can do, and the only
+ * question left is whether its RESULT can be written down — which `Embeddable`
+ * answers, statically, before anything runs.
+ *
+ * ## A fresh engine per evaluation, for now
+ *
+ * Sharing one engine across evaluations is the obvious optimisation and it is
+ * MEASURABLY WRONG today: a shared engine means a shared `MezzeLanguage`, whose
+ * CallTarget caches outlive any one Context, so a caller compiled while
+ * evaluating one thunk can be reused against another thunk's IR registry. The
+ * symptom is not a crash but a wrong VALUE — folding several comptime blocks in
+ * one module produced the same answer for all of them.
+ *
+ * That is the cross-Context staleness `MezzeLanguage.TEST_ISOLATION` exists for,
+ * and the fix there is the same one available here: drop the Language's
+ * CallTarget caches between evaluations. Until that is exposed, each evaluation
+ * gets its own engine and closes it — an engine also retains every CallTarget it
+ * creates, so not closing it leaks. Comptime blocks are few; a wrong answer is
+ * not a trade worth making for this.
+ *
+ * ## Single-threaded, deliberately
+ *
+ * Evaluation installs effect handlers on the running thread, and three of the
+ * four assumption-guarded handler caches still cache thread-local chain state on
+ * a shared node (task #1). Until that is settled, evaluating two comptime blocks
+ * concurrently could have one read the other's handler. So: one at a time.
+ */
+class TruffleComptimeEvaluator : ComptimeEvaluator {
+
+    override fun evaluate(
+        functions: List<FunctionIR>,
+        entry: Hash,
+        resultShape: PrintType,
+        performers: List<Array<String>>,
+    ): ComptimeOutcome = synchronized(LOCK) {
+        Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers) }
+    }
+
+    /** The body of [evaluate]; split out only so the re-entrancy guard wraps it
+     *  as a single expression. */
+    private fun evaluateLocked(
+        functions: List<FunctionIR>,
+        entry: Hash,
+        resultShape: PrintType,
+        performers: List<Array<String>>,
+    ): ComptimeOutcome {
+        evaluations.incrementAndGet()
+        val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
+        val engine = newEngine()
+        val context = Context.newBuilder(MezzeLanguage.ID)
+            .engine(engine)
+            .allowAllAccess(true)
+            .allowCreateThread(true)
+            .allowExperimentalOptions(true)
+            .build()
+
+        // The result channel is a STATIC on MezzeLanguage, and this evaluation is
+        // NESTED inside the compilation of the program that will use it. Leaving
+        // the store clobbered hands the enclosing run a value computed by a
+        // comptime block — or, across a shared engine, by a different program
+        // entirely. Save and restore rather than clear.
+        val enclosingResult = MezzeLanguage.getLastExecutionResult()
+        return try {
+            MezzeLanguage.clearLastResult()
+            // Make the THUNK the entry, and drop the enclosing program's
+            // `__entry__`.
+            //
+            // Handing the runtime the program's own entry plus a thunk hash does
+            // not work, and fails quietly: that path runs `__entry__` for its
+            // global-binding side effect and THEN looks the entry up in globals —
+            // but a thunk is a lambda, never registered as one. The lookup finds
+            // something else, and every comptime in the module folds to the same
+            // wrong value. It also means each evaluation re-runs the enclosing
+            // module's entire top level, side effects included.
+            //
+            // Renaming the thunk to `__entry__` instead compiles and runs exactly
+            // it. Top-level functions and values the thunk calls are unaffected —
+            // they resolve by hash, not through `__entry__`.
+            val entryFn = functions.firstOrNull { it.hash == entry }
+                ?: return ComptimeOutcome.Failed(
+                    "comptime thunk ${entry.hex.take(8)} is not among the compiled functions",
+                )
+            val forEval = functions.filterNot { it.name == ENTRY_FN } +
+                entryFn.copy(name = ENTRY_FN)
+            MezzeLanguage.setFunctionsForDirectExecution(
+                forEval, performers, projectRoot, null,
+            )
+            context.eval(Source.newBuilder(MezzeLanguage.ID, "", "<comptime>").buildLiteral())
+
+            val value = MezzeLanguage.getLastExecutionResult()
+            ComptimeOutcome.Reified(ComptimeReifier.reify(value, resultShape, SYNTHETIC))
+        } catch (e: ComptimeReifier.NotEmbeddable) {
+            // `Embeddable` admitted a shape reification cannot build. Reported as
+            // what it is — a gap between the two — rather than blamed on the user.
+            ComptimeOutcome.Failed(e.message ?: "comptime result is not embeddable")
+        } catch (e: Throwable) {
+            ComptimeOutcome.Failed(describe(e), guestFramesOf(e))
+        } finally {
+            try { context.close(true) } catch (ignored: Exception) { }
+            try { engine.close() } catch (ignored: Exception) { }
+            MezzeLanguage.setLastExecutionResultForNestedEval(enclosingResult)
+        }
+    }
+
+    /** The user-facing half of a failure: the guest message, not the host's
+     *  wrapper chain. */
+    private fun describe(e: Throwable): String {
+        var cur: Throwable? = e
+        var best = e.message ?: e.javaClass.simpleName
+        while (cur != null) {
+            val m = cur.message
+            if (m != null && cur !is RuntimeException) best = m
+            if (cur.javaClass.name.startsWith("com.mezze.interpreter.values.MezzeGuestException")) {
+                return cur.message ?: best
+            }
+            cur = cur.cause
+        }
+        return best
+    }
+
+    /** Mezze frames, innermost first. Host frames are deliberately dropped —
+     *  they belong behind `--verbose` and help nobody reading their own
+     *  comptime block. */
+    private fun guestFramesOf(e: Throwable): List<String> {
+        val polyglot = e as? org.graalvm.polyglot.PolyglotException ?: return emptyList()
+        return polyglot.polyglotStackTrace
+            .filter { it.isGuestFrame }
+            .map { frame ->
+                val where = frame.sourceLocation
+                if (where == null) frame.rootName ?: "<unknown>"
+                else "${frame.rootName ?: "<anonymous>"} at ${where.source.name}:${where.startLine}"
+            }
+            .toList()
+    }
+
+    companion object {
+        private val LOCK = Any()
+
+        /**
+         * How many thunks this process has evaluated.
+         *
+         * The only thing that distinguishes real folding from the declaration's
+         * run-time fallback — both produce the same answer, which is exactly why
+         * the fallback is safe and exactly why a test asserting the answer cannot
+         * tell them apart. It is also how the "type checking never executes user
+         * code" guarantee is held: a `mez check` must leave this untouched.
+         */
+        @JvmStatic
+        val evaluations = java.util.concurrent.atomic.AtomicLong()
+
+        /**
+         * An engine tuned for a handful of short runs — and one that still
+         * builds where those knobs do not exist.
+         *
+         * `engine.Compilation` is an OPTIMIZING-runtime option: on the fallback
+         * runtime it is not merely ignored, it makes `build()` throw. That
+         * runtime is what the CLI has (it keeps Truffle's compiler off its own
+         * class path deliberately), and the CLI is where a build folds its
+         * comptime blocks — so the untuned engine is a real configuration, not
+         * a defensive branch. `WarnInterpreterOnly` is silenced through a system
+         * property as well, because the warning is emitted before any option on
+         * the builder can take effect.
+         */
+        private fun newEngine(): Engine {
+            if (System.getProperty(WARN_INTERPRETER_ONLY) == null) {
+                System.setProperty(WARN_INTERPRETER_ONLY, "false")
+            }
+            return try {
+                Engine.newBuilder()
+                    .allowExperimentalOptions(true)
+                    .option("engine.WarnInterpreterOnly", "false")
+                    // A comptime block runs a handful of times at most, so
+                    // paying for compilation would cost more than it saves.
+                    .option("engine.Compilation", "false")
+                    .build()
+            } catch (e: IllegalArgumentException) {
+                Engine.newBuilder().allowExperimentalOptions(true).build()
+            }
+        }
+
+        private const val WARN_INTERPRETER_ONLY = "polyglot.engine.WarnInterpreterOnly"
+
+        /** Reified nodes are compiler-synthesised and have no source text of
+         *  their own; the diagnostic location comes from the call site. */
+        private val SYNTHETIC = SourceInfo(0, 0, 0, 0, 0)
+
+        /** The runtime's entry-function name, single-sourced. */
+        private val ENTRY_FN = com.mezze.language.ast.MagicParams.ENTRY_FN
+
+        /** Installs this evaluator. Called from [MezzeLanguage]'s static
+         *  initialiser, the same way `NativeBootstrap` installs itself into
+         *  `NativeSignatures` — so simply having `:interpreter` on the class
+         *  path is what makes compile-time evaluation available. */
+        @JvmStatic
+        fun install() {
+            Comptime.install(TruffleComptimeEvaluator())
+        }
+    }
+}

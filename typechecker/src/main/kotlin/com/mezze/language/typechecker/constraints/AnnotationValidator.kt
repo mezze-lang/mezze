@@ -219,6 +219,41 @@ internal class AnnotationValidator(
                     )
                 }
             }
+
+            // Under-promised `<*>`. A body that PERFORMED effects and handled
+            // them itself is not the same as a body that performed none, and an
+            // annotation must not be able to claim otherwise.
+            //
+            // The name-based checks above cannot see this: `performed` is a flag
+            // BESIDE the effects set, not a member of it, so both sides compare
+            // as the empty set and agree. `{} -> Int` written over a body that
+            // discharged `Console` therefore passed silently — erasing the one
+            // marker that says work happened in here, which is the marker a
+            // caller has to read to know a dependency is doing something it is
+            // handling out of sight.
+            //
+            // `*` is a MEMBER of the row, not a mode, so it composes with named
+            // effects: `<Log, *>` reads "Log escapes, and something else was
+            // handled in here". The check is therefore the same whether the
+            // annotation names effects or not — an annotation that lists what
+            // escapes but drops the `*` is hiding exactly as much as a pure one.
+            if (!isPolymorphic &&
+                inferredType.effects?.performed == true &&
+                annotationType.effects?.performed != true
+            ) {
+                val suggested = (annotatedEffects.sorted() + "*").joinToString(", ")
+                throw TypeCheckError(
+                    "Type annotation for '$varName' is missing `*`: the body performs " +
+                    "effects and handles them itself, and the annotation hides that. " +
+                    "A caller cannot then tell it apart from a body that handled nothing.",
+                    sourceLoc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf(
+                        "add `*` to the annotation's effect row: `<$suggested>`",
+                        "or drop the `perform` from the body if it genuinely handles nothing",
+                    ),
+                )
+            }
         }
     }
 

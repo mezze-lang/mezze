@@ -155,6 +155,26 @@ enum class ErrorCode {
     M0803_NOT_EXPORTED,
     M0804_MODULE_HAS_ERRORS,
 
+    // ─── Validator: comptime (V08xx) ──────────────────────────────────────
+    // Grouped by what the author has to DO about it, not one per rule.
+    // Two families are deliberately absent because they are reused rather than
+    // duplicated: a non-embeddable comptime result reports through the ordinary
+    // ability-obligation error (V04xx, including its field-path context), and an
+    // effect escaping the thunk reports through the ordinary effect error (V05xx).
+    /** `comptime` used as a value: bare reference, partial application, or
+     *  redeclared. It must be applied directly at a call site. */
+    V0801_COMPTIME_MISUSE,
+    /** The `eval` thunk captures a run-time value, which does not exist while
+     *  the compiler is running. The thunk must be closed. */
+    V0802_COMPTIME_NOT_CLOSED,
+    // V0803 is UNUSED pending a decision — see planned_features/content/comptime.md.
+    // An annotation is ADOPTED into the inferred row rather than checked against
+    // it, so `<*>` on a slot cannot by itself reject a body that performs nothing.
+    V0803_COMPTIME_NOT_PERFORMED,
+    /** Evaluation failed at build time: the body crashed, or it called
+     *  `compile_error`. */
+    V0804_COMPTIME_EVAL_FAILED,
+
     // ─── Validator: structural (V09xx) ────────────────────────────────────
     V0901_STRUCTURAL_VALIDATION,
 

@@ -224,7 +224,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut}
 
-            let convert: {xs: ['a]} -> MutSeq 'a = {xs} -> perform LocalMut in
+            let convert: {xs: ['a]} -> MutSeq 'a <*> = {xs} -> perform LocalMut in
                 seq_to_mut {seq = xs}
         """.trimIndent()
 
@@ -238,7 +238,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut}
 
-            let round_trip: {xs: ['a]} -> ['a] = {xs} -> perform LocalMut in do
+            let round_trip: {xs: ['a]} -> ['a] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 seq_to_immut {seq = arr}
         """.trimIndent()
@@ -257,7 +257,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutMap, map_to_mut}
 
-            let convert: {m: Map 'k 'v} -> MutMap 'k 'v = {m} -> perform LocalMut in
+            let convert: {m: Map 'k 'v} -> MutMap 'k 'v <*> = {m} -> perform LocalMut in
                 map_to_mut {map = m}
         """.trimIndent()
 
@@ -271,7 +271,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, map_to_mut, map_to_immut}
 
-            let round_trip: {m: Map 'k 'v} -> Map 'k 'v = {m} -> perform LocalMut in do
+            let round_trip: {m: Map 'k 'v} -> Map 'k 'v <*> = {m} -> perform LocalMut in do
                 let mm = map_to_mut {map = m}
                 map_to_immut {map = mm}
         """.trimIndent()
@@ -290,7 +290,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutSet, set_to_mut}
 
-            let convert: {s: Set 'a} -> MutSet 'a = {s} -> perform LocalMut in
+            let convert: {s: Set 'a} -> MutSet 'a <*> = {s} -> perform LocalMut in
                 set_to_mut {set = s}
         """.trimIndent()
 
@@ -304,7 +304,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, set_to_mut, set_to_immut}
 
-            let round_trip: {s: Set 'a} -> Set 'a = {s} -> perform LocalMut in do
+            let round_trip: {s: Set 'a} -> Set 'a <*> = {s} -> perform LocalMut in do
                 let ms = set_to_mut {set = s}
                 set_to_immut {set = ms}
         """.trimIndent()
@@ -323,7 +323,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutBytes, bytes_to_mut}
 
-            let convert: {b: Bytes} -> MutBytes = {b} -> perform LocalMut in
+            let convert: {b: Bytes} -> MutBytes <*> = {b} -> perform LocalMut in
                 bytes_to_mut {bytes = b}
         """.trimIndent()
 
@@ -337,7 +337,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, bytes_to_mut, bytes_to_immut}
 
-            let round_trip: {b: Bytes} -> Bytes = {b} -> perform LocalMut in do
+            let round_trip: {b: Bytes} -> Bytes <*> = {b} -> perform LocalMut in do
                 let mb = bytes_to_mut {bytes = b}
                 bytes_to_immut {bytes = mb}
         """.trimIndent()
@@ -356,7 +356,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut}
 
-            let convert: {n: Int} -> MutInt = {n} -> perform LocalMut in
+            let convert: {n: Int} -> MutInt <*> = {n} -> perform LocalMut in
                 int_to_mut {n = n}
         """.trimIndent()
 
@@ -370,7 +370,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, int_to_mut, read_int}
 
-            let round_trip: {n: Int} -> Int = {n} -> perform LocalMut in do
+            let round_trip: {n: Int} -> Int <*> = {n} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
                 read_int {n = mn}
         """.trimIndent()
@@ -385,7 +385,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutFloat, float_to_mut}
 
-            let convert: {n: Float} -> MutFloat = {n} -> perform LocalMut in
+            let convert: {n: Float} -> MutFloat <*> = {n} -> perform LocalMut in
                 float_to_mut {n = n}
         """.trimIndent()
 
@@ -399,7 +399,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, float_to_mut, float_to_immut}
 
-            let round_trip: {n: Float} -> Float = {n} -> perform LocalMut in do
+            let round_trip: {n: Float} -> Float <*> = {n} -> perform LocalMut in do
                 let mn = float_to_mut {n = n}
                 float_to_immut {n = mn}
         """.trimIndent()
@@ -414,7 +414,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutBool, bool_to_mut}
 
-            let convert: {b: Bool} -> MutBool = {b} -> perform LocalMut in
+            let convert: {b: Bool} -> MutBool <*> = {b} -> perform LocalMut in
                 bool_to_mut {b = b}
         """.trimIndent()
 
@@ -428,7 +428,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, bool_to_mut, bool_to_immut}
 
-            let round_trip: {b: Bool} -> Bool = {b} -> perform LocalMut in do
+            let round_trip: {b: Bool} -> Bool <*> = {b} -> perform LocalMut in do
                 let mb = bool_to_mut {b = b}
                 bool_to_immut {b = mb}
         """.trimIndent()
@@ -447,7 +447,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort}
 
-            let sort_ints: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
+            let sort_ints: {xs: [Int]} -> [Int] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 sort {seq = arr}
                 seq_to_immut {seq = arr}
@@ -463,7 +463,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort_by}
 
-            let sort_descending: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
+            let sort_descending: {xs: [Int]} -> [Int] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 sort_by {seq = arr, cmp = {a, b} -> a >= b}
                 seq_to_immut {seq = arr}
@@ -479,7 +479,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, reverse}
 
-            let reverse_seq: {xs: ['a]} -> ['a] = {xs} -> perform LocalMut in do
+            let reverse_seq: {xs: ['a]} -> ['a] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 reverse {seq = arr}
                 seq_to_immut {seq = arr}
@@ -495,7 +495,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, fill}
 
-            let fill_with: {xs: ['a], v: 'a} -> ['a] = {xs, v} -> perform LocalMut in do
+            let fill_with: {xs: ['a], v: 'a} -> ['a] <*> = {xs, v} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 fill {seq = arr, v = v}
                 seq_to_immut {seq = arr}
@@ -511,7 +511,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, fill_range}
 
-            let fill_partial: {xs: ['a], start: Int, end: Int, v: 'a} -> ['a] = {xs, start, end, v} -> perform LocalMut in do
+            let fill_partial: {xs: ['a], start: Int, end: Int, v: 'a} -> ['a] <*> = {xs, start, end, v} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 fill_range {seq = arr, start = start, end = end, v = v}
                 seq_to_immut {seq = arr}
@@ -531,7 +531,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, int_to_mut, read_int}
 
-            let get_value: {n: Int} -> Int = {n} -> perform LocalMut in do
+            let get_value: {n: Int} -> Int <*> = {n} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
                 read_int {n = mn}
         """.trimIndent()
@@ -546,7 +546,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, int_to_mut, write_int, read_int}
 
-            let set_value: {initial: Int, new_val: Int} -> Int = {initial, new_val} -> perform LocalMut in do
+            let set_value: {initial: Int, new_val: Int} -> Int <*> = {initial, new_val} -> perform LocalMut in do
                 let mn = int_to_mut {n = initial}
                 write_int {n = mn, v = new_val}
                 read_int {n = mn}
@@ -562,7 +562,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, int_to_mut, incr, read_int}
 
-            let increment: {n: Int, delta: Int} -> Int = {n, delta} -> perform LocalMut in do
+            let increment: {n: Int, delta: Int} -> Int <*> = {n, delta} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
                 incr {n = mn, delta = delta}
                 read_int {n = mn}
@@ -578,7 +578,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, int_to_mut, decr, read_int}
 
-            let decrement: {n: Int, delta: Int} -> Int = {n, delta} -> perform LocalMut in do
+            let decrement: {n: Int, delta: Int} -> Int <*> = {n, delta} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
                 decr {n = mn, delta = delta}
                 read_int {n = mn}
@@ -598,7 +598,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, for_range, int_to_mut, incr, read_int}
 
-            let sum_range: {start: Int, end: Int} -> Int = {start, end} -> perform LocalMut in do
+            let sum_range: {start: Int, end: Int} -> Int <*> = {start, end} -> perform LocalMut in do
                 let acc = int_to_mut {n = 0}
                 for_range {
                     start = start,
@@ -618,7 +618,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, while, int_to_mut, incr, read_int}
 
-            let count_to: {target: Int} -> Int = {target} -> perform LocalMut in do
+            let count_to: {target: Int} -> Int <*> = {target} -> perform LocalMut in do
                 let counter = int_to_mut {n = 0}
                 while {
                     cond = {} -> read_int {n = counter} < target,
@@ -661,7 +661,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_with_capacity}
 
-            let create_seq: {cap: Int} -> MutSeq Int = {cap} -> perform LocalMut in
+            let create_seq: {cap: Int} -> MutSeq Int <*> = {cap} -> perform LocalMut in
                 seq_with_capacity {capacity = cap}
         """.trimIndent()
 
@@ -675,7 +675,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutMap, map_with_capacity}
 
-            let create_map: {cap: Int} -> MutMap Str Int = {cap} -> perform LocalMut in
+            let create_map: {cap: Int} -> MutMap Str Int <*> = {cap} -> perform LocalMut in
                 map_with_capacity {capacity = cap}
         """.trimIndent()
 
@@ -689,7 +689,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, MutSet, set_with_capacity}
 
-            let create_set: {cap: Int} -> MutSet Int = {cap} -> perform LocalMut in
+            let create_set: {cap: Int} -> MutSet Int <*> = {cap} -> perform LocalMut in
                 set_with_capacity {capacity = cap}
         """.trimIndent()
 
@@ -733,7 +733,7 @@ class MutationEffectTest {
             let mutating: {} -> {} <Mut> = {} -> Mut.mutate {}
 
             # After perform, the effect is handled - result is pure
-            let pure_result: {} -> {} = {} -> perform LocalMut in mutating {}
+            let pure_result: {} -> {} <*> = {} -> perform LocalMut in mutating {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -768,7 +768,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, reverse}
 
-            let reverse_seq: {seq: ['a]} -> ['a] = {seq} -> perform LocalMut in do
+            let reverse_seq: {seq: ['a]} -> ['a] <*> = {seq} -> perform LocalMut in do
                 let mut_seq = seq_to_mut {seq = seq}
                 reverse {seq = mut_seq}
                 seq_to_immut {seq = mut_seq}
@@ -924,7 +924,7 @@ class MutationEffectTest {
             let good_fn: {} -> {} <Mut> = {} -> Mut.mutate {}
 
             # This is also fine - handled by performer
-            let handled_fn: {} -> {} = {} -> perform LocalMut in Mut.mutate {}
+            let handled_fn: {} -> {} <*> = {} -> perform LocalMut in Mut.mutate {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -952,7 +952,7 @@ class MutationEffectTest {
             }
 
             # This should work: Mutation is fully handled before IO
-            let sequential_fn: {} -> {} = {} -> do
+            let sequential_fn: {} -> {} <*> = {} -> do
                 # First handle mutation completely
                 perform LocalMut in Mut.mutate {}
                 # Then do IO separately
@@ -988,7 +988,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, reverse}
 
-            let reverse_array: {xs: ['a]} -> ['a] = {xs} -> perform LocalMut in do
+            let reverse_array: {xs: ['a]} -> ['a] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 reverse {seq = arr}
                 seq_to_immut {seq = arr}
@@ -1004,7 +1004,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, for_range, int_to_mut, read_int, incr}
 
-            let sum_to_n: {n: Int} -> Int = {n} -> perform LocalMut in do
+            let sum_to_n: {n: Int} -> Int <*> = {n} -> perform LocalMut in do
                 let acc = int_to_mut {n = 0}
                 for_range {
                     start = 1,
@@ -1024,7 +1024,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, while, int_to_mut, read_int, incr}
 
-            let count_to: {target: Int} -> Int = {target} -> perform LocalMut in do
+            let count_to: {target: Int} -> Int <*> = {target} -> perform LocalMut in do
                 let counter = int_to_mut {n = 0}
                 while {
                     cond = {} -> read_int {n = counter} < target,
@@ -1043,7 +1043,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort}
 
-            let sort_ints: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
+            let sort_ints: {xs: [Int]} -> [Int] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 sort {seq = arr}
                 seq_to_immut {seq = arr}
@@ -1059,7 +1059,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort_by}
 
-            let sort_descending: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
+            let sort_descending: {xs: [Int]} -> [Int] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 sort_by {seq = arr, cmp = {a, b} -> a >= b}
                 seq_to_immut {seq = arr}
@@ -1090,7 +1090,7 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, fill}
 
-            let fill_with_zeros: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
+            let fill_with_zeros: {xs: [Int]} -> [Int] <*> = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
                 fill {seq = arr, v = 0}
                 seq_to_immut {seq = arr}
@@ -1107,7 +1107,7 @@ class MutationEffectTest {
             use std::effects::mutation::{Mut, LocalMut, map_to_mut, map_to_immut}
             use std::collections::map
 
-            let process_map: {m: Map Str Int} -> Map Str Int = {m} -> perform LocalMut in do
+            let process_map: {m: Map Str Int} -> Map Str Int <*> = {m} -> perform LocalMut in do
                 let mut_m = map_to_mut {map = m}
                 map_to_immut {map = mut_m}
         """.trimIndent()
@@ -1123,7 +1123,7 @@ class MutationEffectTest {
             use std::effects::mutation::{Mut, LocalMut, set_to_mut, set_to_immut}
             use std::collections::set
 
-            let process_set: {s: Set Int} -> Set Int = {s} -> perform LocalMut in do
+            let process_set: {s: Set Int} -> Set Int <*> = {s} -> perform LocalMut in do
                 let mut_s = set_to_mut {set = s}
                 set_to_immut {set = mut_s}
         """.trimIndent()

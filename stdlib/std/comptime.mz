@@ -1,0 +1,97 @@
+# Compile-time evaluation.
+
+use std::abilities::embed::{ Embeddable }
+
+## Evaluate `eval` while the program is being compiled, and replace this call
+## site with the result.
+##
+##     use std::comptime::{ comptime }
+##
+##     let table = comptime { eval = {} -> build_lookup_table {} }
+##
+## `table` costs nothing at run time: by the time the program runs, the call is
+## gone and the value is a literal in the compiled output.
+##
+## ## What may be returned
+##
+## Whatever `Embeddable` admits — data all the way down. The result has to
+## outlive the compiler process: it is serialized into the program's IR, stored,
+## and for `mez build --native` frozen into the image heap, then rebuilt
+## elsewhere. A function, a mutable cell, a `Promise`, a foreign object cannot
+## make that crossing. See `std::abilities::embed`.
+##
+## ## Effects
+##
+## Anything, as long as the thunk handles it itself:
+##
+##     let config = comptime { eval = {} ->
+##         perform RealFileSystem in read_file { path = "app.config" }
+##     }
+##
+## The handlers are the ordinary ones — there is no separate compile-time
+## handler set, because the evaluator *is* the interpreter. Which handler you
+## perform is part of this block's content hash, so choosing a deterministic one
+## is how you get a reproducible build, and choosing a real one is how you read
+## the actual filesystem. That is your decision, not the compiler's.
+##
+## `<*>` on the `eval` slot is the contract, stated rather than implied: every
+## effect the body performs is handled by the body. Nothing escapes a comptime
+## block, and nothing it did survives into the program's type — the effects
+## happened, during compilation, and are erased.
+##
+## ## When it runs
+##
+## During `mez build` / `build --native` / `dev` / `exec` — never during
+## `mez check` or in the editor. Type checking needs this block's *type*, which
+## inference reads off the thunk; it never needs the *value*. So an editor
+## never executes your code, and a comptime that loops forever cannot hang it.
+##
+## The cost is that `check` is weaker than `build`: a comptime that crashes
+## passes `check` and fails `build`. `Embeddable` is checked either way.
+##
+## ## Restrictions
+##
+## The thunk must be **closed** — it cannot capture anything from an enclosing
+## function, because those are run-time values that do not exist yet:
+##
+##     let scale = { n } ->
+##         comptime { eval = {} -> n * 2 }   # rejected: `n` is a run-time value
+##
+## Top-level functions and values are fine; they are reachable by hash.
+##
+## `comptime` must also be **called directly**. It is not a first-class value:
+## passing it around or partially applying it is rejected, because the whole
+## mechanism is that this call site gets replaced.
+##
+## ## The body below
+##
+## `eval {}` is a deliberate run-time fallback with the same meaning: if a
+## comptime call ever reaches run time — because the reduction pass was
+## disabled — the program still computes the right answer, just not for free.
+##
+## ## The `<*>` on the RESULT
+##
+## Not decoration: calling `eval` propagates its `performed` marker, so this is
+## the row the body actually has. Saying so is what makes compile-time work
+## visible to whoever imports you — `*` cannot be annotated away, so a library
+## that runs a `comptime` block carries the mark into its own signature and a
+## consumer can tell it apart from one that does not.
+pub let comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <*> = { eval } -> eval {}
+
+## Fail the build, from inside a `comptime` block.
+##
+##     comptime { eval = {} -> match validate { config = cfg } is
+##         Ok {} -> cfg
+##         Err { error } -> compile_error { msg = "bad config: $(error)" }
+##     }
+##
+## Needed because in Mezze a failure is usually a VALUE: returning
+## `Err { … }` from a comptime block embeds the error and compiles fine,
+## which is the right default. This is how you say the other thing — that
+## this particular `Err` should stop the build — and the message is
+## reported at the `comptime` call site.
+##
+## Outside a comptime block it is an ordinary function that raises, so
+## there is no separate "compile-time only" rule to learn.
+pub let compile_error: { msg: Str } -> 'a = { msg } ->
+  __native_comptime_compile_error { msg = msg }

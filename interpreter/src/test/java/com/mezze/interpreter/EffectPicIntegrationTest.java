@@ -73,7 +73,7 @@ class EffectPicIntegrationTest {
         var source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
-            let outer : { n: Int, acc: Int } -> Int = { n, acc } ->
+            let outer : { n: Int, acc: Int } -> Int <*> = { n, acc } ->
                 if n <= 0 then acc
                 else do
                     let _ = perform ExceptionToResult in Exception.throw { error = "x" }
@@ -172,7 +172,7 @@ class EffectPicIntegrationTest {
                 tick = {} -> resume { val = 1 }
             }
 
-            let outer : { n: Int, acc: Int } -> Int = { n, acc } ->
+            let outer : { n: Int, acc: Int } -> Int <*> = { n, acc } ->
                 if n <= 0 then acc
                 else outer {
                     n = n - 1,

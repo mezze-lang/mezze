@@ -1445,7 +1445,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_to_seq", (r, c) ->
             SortedSetNatives.toSeq(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_from_seq", (r, c) ->
-            SortedSetNatives.fromArray(getArray(r, "xs"), getFunction(r, "cmp")));
+            SortedSetNatives.fromArray(getArray(r, "xs"), getFunctionOrNull(r, "cmp")));
 
         // ForEach
         HANDLERS.put("__native_sorted_set_for_each", (r, c) ->
@@ -2495,6 +2495,23 @@ public final class NativeDispatch extends MezzeNode {
         throw new NativeTypeMismatchException("Expected MezzeFunction for field '" + name + "'");
     }
 
+    /**
+     * The function at [name], or null when the field is absent.
+     *
+     * The sorted containers take a comparator, and
+     * {@code ElementComparator.of(null)} already means "natural ordering" — so
+     * the comparator is genuinely optional, it was simply not expressible.
+     * Compile-time reification is what needs that: a comparator is a FUNCTION,
+     * the one thing a reified value cannot carry, so without an ordering-free
+     * construction path a `comptime` returning a SortedSet could never fold.
+     */
+    private static MezzeFunction getFunctionOrNull(MezzeRecord r, String name) {
+        int idx = r.getFieldIndex(name);
+        if (idx < 0) return null;
+        Object val = r.getField(idx);
+        return val instanceof MezzeFunction fn ? fn : null;
+    }
+
     private static MezzeRecord getRecord(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeRecord rec) return rec;
@@ -2822,6 +2839,15 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== Environment ====================
 
     private static void registerEnvironmentHandlers() {
+        // `compile_error` — deliberately fails the build from inside a comptime
+        // block. A raise rather than a special compile-time form, so it behaves
+        // the same wherever it is written; the comptime driver turns the raise
+        // into V0804 at the call site.
+        HANDLERS.put("__native_comptime_compile_error", (r, c) -> {
+            Object msg = r.getField(r.getFieldIndex("msg"));
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                msg instanceof String s2 ? s2 : String.valueOf(msg));
+        });
         HANDLERS.put("__native_env_get", (r, c) -> EnvironmentNatives.envGet(r));
         HANDLERS.put("__native_env_set", (r, c) -> EnvironmentNatives.envSet(r));
         HANDLERS.put("__native_env_get_all", (r, c) -> EnvironmentNatives.envGetAll(r));
@@ -3080,7 +3106,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // === SortedMap from_map ===
         HANDLERS.put("__native_sorted_map_from_map", (r, c) ->
-            SortedMapNatives.fromMap(getMap(r, "m"), getFunction(r, "cmp")));
+            SortedMapNatives.fromMap(getMap(r, "m"), getFunctionOrNull(r, "cmp")));
     }
 
     // ==================== Buffer, JSON, HTTP ====================

@@ -77,18 +77,32 @@ object TrivialWrapperInliner {
     fun inline(
         functions: Map<Hash, FunctionIR>,
         externalWrappers: Map<Hash, FunctionIR> = emptyMap(),
+        /**
+         * Functions that must SURVIVE inlining even though they look trivial.
+         *
+         * `std::comptime::comptime` is `{ eval } -> eval {}` — a textbook
+         * trivial wrapper — but a later pass has to still find the call in order
+         * to replace it with the value it computes. Inlined away, the call
+         * becomes an ordinary `thunk {}` and compile-time evaluation silently
+         * stops happening: every program still produces the right answer, so
+         * nothing fails, it just quietly costs run time.
+         *
+         * Passed in rather than recognised here because the hash is generated
+         * into `:typechecker`, which `:ast` cannot see.
+         */
+        doNotInline: Set<Hash> = emptySet(),
     ): Map<Hash, FunctionIR> {
         // Pre-compute the trivial-wrapper table once: hash → wrapper IR.
         // Then walk each body, substituting eligible calls.
         val wrappers = HashMap<Hash, FunctionIR>()
         for ((hash, fn) in functions) {
-            if (isTrivialWrapper(fn)) wrappers[hash] = fn
+            if (hash !in doNotInline && isTrivialWrapper(fn)) wrappers[hash] = fn
         }
         // External wrappers (e.g. stdlib wrappers visible from user code)
         // are inlined into the body rewrites but their own definitions
         // are NOT carried into the output map.
         for ((hash, fn) in externalWrappers) {
-            if (hash !in wrappers && isTrivialWrapper(fn)) wrappers[hash] = fn
+            if (hash !in wrappers && hash !in doNotInline && isTrivialWrapper(fn)) wrappers[hash] = fn
         }
 
         if (wrappers.isEmpty()) return functions

@@ -21,6 +21,11 @@ fun main(args: Array<String>) {
     val abilityOps = mutableMapOf<String, List<String>>() // name → op names (from the decl)
     val effects = mutableMapOf<String, Hash>()
     val types = mutableMapOf<String, Hash>()     // user-defined types in stdlib
+    // Public stdlib FUNCTIONS whose identity the compiler itself must know.
+    // Only the handful named in `keptFunctions` is emitted — a function is a
+    // well-known hash when a compiler phase has to RECOGNISE a call to it
+    // structurally, which today means `comptime` and nothing else.
+    val functions = mutableMapOf<String, Hash>()
 
     fun scanFile(file: File) {
         try {
@@ -45,10 +50,28 @@ fun main(args: Array<String>) {
                             types[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashTypeDecl(decl)
                         }
                     }
+                    is ParsedLetDecl -> {
+                        if (decl.visibility == com.mezze.language.parsedast.Visibility.PUBLIC &&
+                            decl.isSimpleBinding &&
+                            !functions.containsKey(decl.variableName)
+                        ) {
+                            functions[decl.variableName] = ParsedDeclHasher.hashLetDecl(decl)
+                        }
+                    }
                     else -> {}
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Was silent. A stdlib file that fails to parse here simply vanishes
+            // from the hash tables, and the only symptom is an "Unresolved
+            // reference ABILITY_X" when something later asks for a constant that
+            // was never emitted — which points at the generated file, not at the
+            // .mz that actually broke. Warn loudly instead.
+            System.err.println(
+                "[WellKnownHashGenerator] WARNING: failed to parse ${file.path}: " +
+                    "${e.javaClass.simpleName}: ${e.message}. " +
+                    "Its abilities/effects/types will be MISSING from WellKnownHashConstants."
+            )
         }
     }
 
@@ -90,8 +113,15 @@ fun main(args: Array<String>) {
         "StreamFormat", "StreamDecodeFormat", "Format", "FromJson",
         // referenced directly by external code
         "LogicalAnd", "LogicalOr",
+        // comptime: gates what a comptime block may return (marker ability)
+        "Embeddable",
     )
     val keptEffects = setOf("Mut")
+    // Functions the compiler recognises STRUCTURALLY at a call site, by hash
+    // rather than by name (see `no_name_string_dispatch_ever`). `comptime` is
+    // recognised so its call site can be reduced away and replaced by the
+    // evaluated result.
+    val keptFunctions = setOf("comptime")
 
     sb.appendLine("object WellKnownHashConstants {")
     sb.appendLine()
@@ -103,6 +133,11 @@ fun main(args: Array<String>) {
     sb.appendLine("    // Semantic-anchor effect hashes (referenced by name below)")
     for ((name, hash) in effects.toSortedMap()) {
         if (name in keptEffects) sb.appendLine("    val EFFECT_${name.uppercase()} = Hash(\"${hash.hex}\")")
+    }
+    sb.appendLine()
+    sb.appendLine("    // Stdlib functions the compiler recognises structurally at a call site.")
+    for ((name, hash) in functions.toSortedMap()) {
+        if (name in keptFunctions) sb.appendLine("    val FUNCTION_${name.uppercase()} = Hash(\"${hash.hex}\")")
     }
     sb.appendLine()
     sb.appendLine("    // Lookup tables — name → content hash for stdlib abilities/effects/types.")
@@ -127,6 +162,11 @@ fun main(args: Array<String>) {
     }
     sb.appendLine("    )")
     sb.appendLine()
+    sb.appendLine("    /** True for a call whose callee is stdlib `comptime`. Structural — the")
+    sb.appendLine("     *  content hash, never the spelling, so a re-export or a local alias still")
+    sb.appendLine("     *  resolves and a same-named user function never does. */")
+    sb.appendLine("    fun isComptime(hash: Hash?): Boolean = hash != null && hash == FUNCTION_COMPTIME")
+    sb.appendLine()
     sb.appendLine("    fun resolveAbilityHash(name: String): Hash? = abilityHashes[name]")
     sb.appendLine("    fun resolveEffectHash(name: String): Hash? = effectHashes[name]")
     sb.appendLine("    fun resolveTypeHash(name: String): Hash? = typeHashes[name]")
@@ -139,6 +179,8 @@ fun main(args: Array<String>) {
     sb.appendLine("    fun isEncodeFlavoredCodec(hash: Hash?): Boolean = hash != null && hash in encodeFlavoredSet")
     sb.appendLine("    /** Decode-flavored codec: codec auto-gen emits a decode-shaped impl body. */")
     sb.appendLine("    fun isDecodeFlavoredCodec(hash: Hash?): Boolean = hash != null && hash in decodeFlavoredSet")
+    sb.appendLine("    /** Marker ability gating what a `comptime` block may return. */")
+    sb.appendLine("    fun isEmbeddable(hash: Hash?): Boolean = hash != null && hash == ABILITY_EMBEDDABLE")
     sb.appendLine("    fun isEq(hash: Hash?): Boolean = hash != null && hash == ABILITY_EQ")
     sb.appendLine("    fun isOrd(hash: Hash?): Boolean = hash != null && hash == ABILITY_ORD")
     sb.appendLine("    fun isHash(hash: Hash?): Boolean = hash != null && hash == ABILITY_HASH")

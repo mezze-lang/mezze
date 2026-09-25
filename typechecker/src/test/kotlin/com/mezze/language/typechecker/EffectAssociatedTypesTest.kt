@@ -722,7 +722,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let mayFail: {} -> (Result Int Str) = {} ->
+            let mayFail: {} -> (Result Int Str) <*> = {} ->
                 perform ToResult in do
                     Exception.throw { error = "something went wrong" }
                     Ok { val = 42 }
@@ -746,7 +746,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let mayFailWithCode: {} -> (Result Str Int) = {} ->
+            let mayFailWithCode: {} -> (Result Str Int) <*> = {} ->
                 perform ToIntResult in do
                     Exception.throw { error = 404 }
                     Ok { val = "success" }
@@ -767,7 +767,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let mayFailWithDetails: {} -> (Result Int {code: Int, message: Str}) = {} ->
+            let mayFailWithDetails: {} -> (Result Int {code: Int, message: Str}) <*> = {} ->
                 perform ToRecordResult in do
                     Exception.throw { error = {code = 500, message = "Internal error"} }
                     Ok { val = 42 }
@@ -788,7 +788,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> None
             }
 
-            let maybeValue: {} -> (Option Int) = {} ->
+            let maybeValue: {} -> (Option Int) <*> = {} ->
                 perform ToOption in do
                     Exception.throw { error = "ignored" }
                     Some { val = 42 }
@@ -813,7 +813,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let nested: {} -> (Result (Result Int Int) Str) = {} ->
+            let nested: {} -> (Result (Result Int Int) Str) <*> = {} ->
                 perform ToStringResult in do
                     Exception.throw { error = "outer error" }
                     let inner = perform ToIntResult in do
@@ -842,7 +842,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let safeDiv: {a: Int, b: Int} -> (Result Int Str) = {a, b} ->
+            let safeDiv: {a: Int, b: Int} -> (Result Int Str) <*> = {a, b} ->
                 perform ToResult in do
                     Exception.throw { error = "test" }
                     Ok { val = a / b }
@@ -899,7 +899,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let multipleThrows: {} -> (Result Int Str) = {} ->
+            let multipleThrows: {} -> (Result Int Str) <*> = {} ->
                 perform ToResult in do
                     Exception.throw { error = "first error" }
                     Exception.throw { error = "second error" }

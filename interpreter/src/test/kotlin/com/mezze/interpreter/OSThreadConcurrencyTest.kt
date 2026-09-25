@@ -219,7 +219,7 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            let spawn_workers: {remaining: Int, acc: Int} -> Int = {remaining, acc} ->
+            let spawn_workers: {remaining: Int, acc: Int} -> Int <*> = {remaining, acc} ->
                 if remaining <= 0
                 then acc
                 else perform SystemTime in perform OSThreadAsync in do
@@ -244,7 +244,7 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            let recursive_spawn: {n: Int} -> Int = {n} ->
+            let recursive_spawn: {n: Int} -> Int <*> = {n} ->
                 if n <= 0
                 then 0
                 else perform SystemTime in perform OSThreadAsync in do
@@ -265,7 +265,7 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            let parallel_sum: {n: Int, acc: Int} -> Int = {n, acc} ->
+            let parallel_sum: {n: Int, acc: Int} -> Int <*> = {n, acc} ->
                 if n <= 0
                 then acc
                 else perform SystemTime in perform OSThreadAsync in do
@@ -347,7 +347,7 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            let conditional: {use_async: Bool} -> Int = {use_async} ->
+            let conditional: {use_async: Bool} -> Int <*> = {use_async} ->
                 if use_async
                 then perform SystemTime in perform OSThreadAsync in do
                     let p = Async.spawn {f = {} -> 100}
@@ -357,9 +357,7 @@ class OSThreadConcurrencyTest {
                     result
                 else 50
 
-            let r1 = conditional {use_async = True}
-            let r2 = conditional {use_async = False}
-            r1 + r2
+            conditional {use_async = True} + conditional {use_async = False}
         """
         val result = eval(code)
         assertEquals(150L, result)

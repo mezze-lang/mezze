@@ -1,0 +1,41 @@
+# NoOp — the effect that does nothing, for when doing nothing must be said.
+
+## An effect with no meaning and no consequence.
+##
+## It exists so that "this computation performs nothing" can be STATED rather
+## than inferred from silence. A slot declared `<*>` — `comptime`'s `eval` is
+## the one in the language today — asks for a body that performs its effects and
+## handles them itself. A body that genuinely needs no effects still has to
+## answer that, and this is how:
+##
+##     comptime { eval = {} -> perform NoOpHandler in do
+##         let _ = NoOp.noop {}
+##         factorial { n = 5 }
+##     }
+##
+## The alternative would be to let a slot meaning "effects were handled here"
+## silently accept a body where none were, which erases exactly the distinction
+## `<*>` exists to draw: a pure body and a fully-discharged one leave the SAME
+## empty residual row, so the residual cannot tell them apart. Performing `NoOp`
+## is the author saying which of the two they meant.
+effect NoOp where {
+  ## Do nothing, and be seen doing it.
+  noop: {} -> {} <NoOp>
+}
+
+## The only handler `NoOp` needs — it does nothing, which is the whole point.
+impl NoOp for NoOpHandler where {
+  noop = {} -> resume { val = {} }
+}
+
+## Perform-and-handle `NoOp` in one call, so a computation that needs no effects
+## can still say so without spelling out a handler:
+##
+##     comptime { eval = {} -> do
+##         noop {}
+##         factorial { n = 5 }
+##     }
+##
+## `performed` propagates through the call, so this satisfies a `<*>` slot
+## exactly as an inline `perform` would.
+pub let noop: {} -> {} <*> = {} -> perform NoOpHandler in NoOp.noop {}

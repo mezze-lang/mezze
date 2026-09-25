@@ -47,6 +47,19 @@ object ErrorMessageBuilder {
                         "but lambda destructures `{ ${m.actualFields.joinToString(", ")} }`$diff"
                 }
 
+                // `<*>` — a slot asking the body to perform its effects and handle
+                // them, given a body that performs nothing. Worth naming, because
+                // the generic header is genuinely hard to read here: BOTH residual
+                // rows are empty, so the only visible difference is a `<*>` that is
+                // easy to miss inside two whole printed types.
+                findPerformedMismatch(type1, type2)?.let { field ->
+                    val callSite = if (funcName != null) " in call to `$funcName`" else ""
+                    return "`$field`$callSite is declared `<*>`: the body must perform " +
+                        "effects and handle them itself, but this body performs none. " +
+                        "Perform what the computation needs, or call `noop {}` " +
+                        "(`std::effects::noop`) to say that it needs nothing."
+                }
+
                 val fieldMismatch = findFieldTypeMismatch(type1, type2)
                 if (fieldMismatch != null) {
                     val (path, actualLeaf, expectedLeaf) = fieldMismatch
@@ -217,7 +230,36 @@ object ErrorMessageBuilder {
         return null
     }
 
-    private fun findFieldTypeMismatch(
+    /**
+ * The parameter field whose DECLARED arrow is `<*>` while the actual one is not.
+ *
+ * Both sides arrive as whole FUNCTION types — the callee's signature and the
+ * shape the call site produced — so the argument records are their parameter
+ * types. Walking those in parallel names the field that disagrees, which matters
+ * more here than for most mismatches: an empty residual row prints identically
+ * whether the body performed and handled, or never performed at all.
+ */
+private fun findPerformedMismatch(actual: MezzeType, expected: MezzeType): String? {
+    val a = (actual as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType ?: return null
+    val e = (expected as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType ?: return null
+    for ((name, expectedField) in e.fields) {
+        val ef = expectedField as? MezzeType.FunctionType ?: continue
+        if (ef.effects?.performed != true) continue
+        val af = a.fields[name] as? MezzeType.FunctionType ?: continue
+        if (af.effects?.performed == true) continue
+        // Only when the body performs NOTHING. A body that performs something and
+        // lets it escape is the more specific failure and has its own message —
+        // reporting `<*>` there would name the wrong problem, since the fix is to
+        // handle the effect, not to add a `noop`.
+        val actualRow = af.effects
+        val escapes = actualRow != null &&
+            (actualRow.effects.isNotEmpty() || actualRow.effectInstances.isNotEmpty())
+        if (!escapes) return name
+    }
+    return null
+}
+
+private fun findFieldTypeMismatch(
         actual: MezzeType,
         expected: MezzeType,
         path: String = "",
