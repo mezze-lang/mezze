@@ -38,7 +38,9 @@ class UnknownPlaceholderGateTest {
      * that gave up. Absence of a context is now `null`, which is what it is, and
      * each genuine last resort says which position it is.
      *
-     * **It was 17. It is 9, and the 9 are exactly the ones that fire.**
+     * **It was 17. It is 10, and all 10 are ones that fire.** (Nine, until the
+     * unresolved-identifier line was split — see the second table below; the
+     * tenth is a separation of existing traffic, not a new place to give up.)
      *
      * The previous version of this note said "exactly TWO of these fire",
      * measured over one program, and kept the other fifteen on the grounds that
@@ -63,7 +65,8 @@ class UnknownPlaceholderGateTest {
      *
      *                                                          before    after
      *   field read with no solved type and no declared shape    59,971    5,900
-     *   identifier resolved nowhere ...                         31,229   31,229
+     *   identifier resolved nowhere ...                         31,229    1,586
+     *   intrinsic symbol with no type ... (split out)                 -   29,983
      *   let binding with no solved type                            528      528
      *   call with no solved return ...                             124      124
      *   variant construct with no solved or context type            72       77
@@ -84,7 +87,17 @@ class UnknownPlaceholderGateTest {
      * there was none moves some positions rather than removing them, so a drop
      * in the total is not by itself evidence that every position improved.
      *
-     * NINE fire, not two. The other EIGHT minted zero and are gone — each is now
+     * And the same lesson a second time: 95% of "identifier resolved nowhere"
+     * was `__native_*` and `crash` — intrinsics the native registry binds at
+     * codegen, working exactly as `MagicParams` documents. They are split onto
+     * their own line above rather than fixed, because emit genuinely has no type
+     * for one: `NativeSignatures` carries IR slot kinds, not MezzeTypes, and the
+     * interpreter that populates it compiles after the typechecker. Handing them
+     * a plain fresh variable instead was tried and is WORSE — it turns 438 stdlib
+     * native wrappers into `ElaborationInvariants` gaps, since that gate collects
+     * unbound variables by name and exempts this placeholder's reserved `unknown`.
+     *
+     * NINE fired, not two, when this was written. The other EIGHT minted zero and are gone — each is now
      * a loud failure naming its position (`TypedAstBuilder.unreachedPosition`),
      * the same move this file describes three of the original six having already
      * had. An unreached last resort is not a safety net: a placeholder is
@@ -100,6 +113,14 @@ class UnknownPlaceholderGateTest {
         "call with no solved return, no callee arrow and no context",
         "field read with no solved type and no declared shape",
         "identifier resolved nowhere and the position expects nothing",
+        // Split out of the line above, where it was 95% of the traffic. An
+        // intrinsic is not an unresolved name — `MagicParams` types native FFI
+        // symbols as fresh/bottom by contract and the native registry binds them
+        // at codegen — but emit still has no MezzeType for one, so it is still a
+        // give-up and still listed. Separating it makes the line above mean what
+        // it says. See ImplBodyIsElaboratedTest for why relabelling was as far
+        // as this could honestly go.
+        "intrinsic symbol with no type from the native registry",
         "let binding with no solved type",
         "perform op with no solved return, no resolved return and no context",
         "qualified identifier not in imports",

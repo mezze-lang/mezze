@@ -2762,6 +2762,32 @@ class TypedAstBuilder(
             return substitution.apply(it)
         }
 
+        // An intrinsic is not an unresolved name. `MagicParams` states the
+        // contract in its own doc — a native FFI symbol is "given a fresh/bottom
+        // type and treated as an intrinsic (no undefined-variable error)" — and
+        // the symbol is bound by the native registry at codegen, not by any
+        // module's bindings. There is nothing here to resolve and nothing was
+        // given up on.
+        //
+        // MEASURED on :typechecker:test: 29,983 of the 31,569 mints at this
+        // position were `__native_*` or `crash` — 95% — so the entry that reads
+        // "identifier resolved nowhere" was almost entirely symbols working as
+        // designed, and the ~1,600 real failures in it were invisible.
+        //
+        // This SPLITS the position; it does not fix it. An intrinsic still gets
+        // a placeholder, because emit genuinely has no type for one:
+        // `NativeSignatures` carries IR slot kinds rather than MezzeTypes, and
+        // is populated by the interpreter, which the typechecker compiles
+        // before. Giving them a plain fresh variable instead was TRIED and is
+        // worse — `ElaborationInvariants` collects unbound variables by name and
+        // exempts the placeholder's reserved `unknown`, so 438 stdlib native
+        // wrappers (`impl Bool.and`, `impl Float.add`, …) turned into new
+        // elaboration gaps. Real removal needs native signatures carried as
+        // types.
+        if (MagicParams.isIntrinsicSymbol(name)) {
+            return giveUp("intrinsic symbol with no type from the native registry")
+        }
+
         return giveUp("identifier resolved nowhere and the position expects nothing")
     }
 
