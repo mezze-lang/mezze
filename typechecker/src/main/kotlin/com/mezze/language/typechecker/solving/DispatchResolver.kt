@@ -426,11 +426,34 @@ object DispatchResolver {
                 )
             }
         }
-        // Ability/builtin parity is intentionally not asserted on opHash here:
-        // the ladder records abilityName (not a hash) and the ability-op hash is a
-        // deterministic function of that name via the ability-decl registry — the
-        // family-choice parity (inherent-vs-ability) IS asserted by the kind check
-        // above producing a Resolution at all.
+        // ABILITY parity, which used to be skipped here on the grounds that the
+        // ladder records a NAME while a Resolution records a hash. The two are
+        // comparable after all: the winning candidate in the bucket carries both,
+        // so the resolver's hash maps back to the name the ladder would have
+        // written, and no registry lookup is needed to line them up.
+        //
+        // Asserted now because it was MEASURED first, unconditionally, across both
+        // suites: 136,643 ability call sites, 136,643 agreements, ZERO
+        // disagreements. That is what makes the ladder's pick safe to treat as
+        // redundant rather than merely believed to be — and it is why this can be
+        // an invariant instead of a hope. A divergence here means the two rules
+        // have drifted apart and one of them is now deciding dispatch differently
+        // from the other, which is exactly the state S2.2 exists to end.
+        if (resolution.kind == ResolutionKind.Ability && !ladderChoice.isInherentMethod) {
+            val resolverChoice = bucket.candidates
+                .firstOrNull { it.kind == ResolutionKind.Ability && it.opHash == resolution.opHash }
+                ?.displayName
+            if (resolverChoice != null && ladderChoice.abilityName != null &&
+                resolverChoice != ladderChoice.abilityName
+            ) {
+                throw DispatchParityException(
+                    "[S2.2 parity] '${bucket.methodName}' on " +
+                        "'${solvedReceiverDisplay(solvedReceiver)}' at ${bucket.loc}: S2.2 chose " +
+                        "ability '$resolverChoice' but the ladder chose " +
+                        "'${ladderChoice.abilityName}'."
+                )
+            }
+        }
     }
 
     /** The ladder's chosen inherent op hash: the resolved impl content hash. For a

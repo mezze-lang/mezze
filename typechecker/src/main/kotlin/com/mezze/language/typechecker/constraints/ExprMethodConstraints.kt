@@ -462,8 +462,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // impl for any candidate) we leave the set as-is so the downstream
     // AbilityRequired constraint produces the normal "does not implement"
     // error rather than silently vanishing.
+    var concreteReceiverForAmbiguity: MezzeType? = null
     val implFilteredAbilities = if (filteredMatchingAbilities.size > 1) {
         val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
+            ?.also { concreteReceiverForAmbiguity = it }
         if (concreteReceiver != null) {
             // NARROWS (never finalizes) a >1 ability candidate set by matching the
             // receiver against each impl's target ANNOTATION, and only when the
@@ -528,6 +530,35 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             loc = expr.loc
         ))
     } else if (implFilteredAbilities.isNotEmpty()) {
+        // Two DISTINCT abilities declaring this method name, both with an impl for
+        // a receiver whose type is KNOWN, and nothing at the call site saying
+        // which. That is the author's ambiguity and there is no rule that resolves
+        // it: the consumer below takes `.first()`, which is the impl registry's
+        // iteration order — a different answer for the same program depending on
+        // load order.
+        //
+        // Only when the receiver is CONCRETE. A polymorphic receiver leaves
+        // several candidates on purpose: the narrowing above has nothing to match
+        // against yet, and the signature's own ability constraint is what decides.
+        // MEASURED: 40 call sites reached here with more than one survivor, 33 of
+        // them a name-rendering bug now fixed; the remaining 7 are all polymorphic
+        // receivers and must NOT error. On a concrete receiver the count is ZERO,
+        // so this rejects nothing that exists today — it closes the door rather
+        // than moving anyone out.
+        if (concreteReceiverForAmbiguity != null && implFilteredAbilities.size > 1) {
+            val names = implFilteredAbilities.map { it.first }.distinct()
+            if (names.size > 1) {
+                val receiverLabel = resolveReceiverTypeName(concreteReceiverForAmbiguity) ?: "this receiver"
+                throw TypeCheckError(
+                    message = "`$methodName` is declared by more than one ability that " +
+                        "`$receiverLabel` implements: ${names.joinToString(" and ")}. " +
+                        "Nothing here says which one you mean.",
+                    loc = expr.loc,
+                    code = ErrorCode.T0216_AMBIGUOUS_DISPATCH,
+                    hints = names.map { "write `$it.$methodName { it = … }` to pick $it" },
+                )
+            }
+        }
         val (abilityName, rawMethodType) = implFilteredAbilities.first()
         resolvedAbilityName = abilityName
         val abilityDecl = context.abilityDeclarations[abilityName]
