@@ -176,7 +176,26 @@ class ExpressionConstraintGenerator {
         // lambda nested anywhere reaches the top-level decl's ConstraintResult.
         val lambdaParamTypes = mutableMapOf<Loc, Map<String, MezzeType>>()
 
+        /**
+         * Everything every sub-result carried, merged by [ConstraintResult.mergeOf]
+         * — which sets all 26 fields, so it cannot fall behind the data class.
+         *
+         * The named collections below still drive [toResult]; this exists so a field
+         * NOBODY here names still reaches the top. Adding a side table to
+         * ConstraintResult used to mean editing three parallel hand-written lists
+         * (the declarations, this `merge`, and `toResult`) and silently dropping the
+         * value if you missed one. MEASURED: a field-read table recorded 10 entries
+         * and 0 survived aggregation, because it was named in none of them.
+         */
+        private var accumulated: ConstraintResult? = null
+
         fun merge(result: ConstraintResult) {
+            // Constraints are threaded through the named list below, so they are
+            // deliberately not passed here — mergeOf takes them as a parameter and
+            // would otherwise double-count.
+            accumulated = accumulated
+                ?.let { ConstraintResult.mergeOf(result.type, emptyList(), it, result) }
+                ?: result.copy(constraints = emptyList())
             constraints.addAll(result.constraints)
             undefinedVars.addAll(result.undefinedVariables)
             effects.addAll(result.effects)
@@ -200,7 +219,14 @@ class ExpressionConstraintGenerator {
             lambdaParamTypes.putAll(result.lambdaParamTypes)
         }
 
-        fun toResult(type: MezzeType): ConstraintResult = ConstraintResult(
+        /**
+         * The collected result. Starts from [accumulated] — so a field this class
+         * does not name is CARRIED rather than reset to its default — and then
+         * overrides the ones it does track.
+         */
+        fun toResult(type: MezzeType): ConstraintResult = (
+            accumulated ?: ConstraintResult(type = type, constraints = emptyList())
+        ).copy(
             type = type,
             constraints = constraints,
             effects = effects,
