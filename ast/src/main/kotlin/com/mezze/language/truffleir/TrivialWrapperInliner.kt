@@ -428,8 +428,10 @@ object TrivialWrapperInliner {
                         }
                     }
                     if (ok) {
-                        val substituted = substituteParams(
-                            wrapper.body, rewrittenArgs, wrapper.captureSlots.size)
+                        val substituted = untail(
+                            substituteParams(wrapper.body, rewrittenArgs, wrapper.captureSlots.size),
+                            siteIsTail = node.isTailCall,
+                        )
                         stats.sitesInlined++
                         // Collapse CallNativeIR → InlineBinaryOpIR when
                         // the native has an inlineOp equivalent.
@@ -450,6 +452,46 @@ object TrivialWrapperInliner {
             }
         }
         return recurseChildren(node) { rewrite(it, wrappers, stats) }
+    }
+
+    /**
+     * A wrapper body with the tail-call marks in its TAIL POSITIONS dropped,
+     * because the call site it is being substituted into is not itself a tail
+     * call.
+     *
+     * A tail call returns from its enclosing frame. That is correct inside the
+     * wrapper — the body's tail IS the wrapper's return — and wrong the moment
+     * the body moves into a caller where the site is, say, a `let` statement. The
+     * caller then returns that statement's value and never evaluates its own
+     * result. A WRONG ANSWER, silently:
+     *
+     *     let sum_to = {n, acc} -> if n <= 0 then acc else sum_to {n = n-1, acc = acc+n}
+     *     let s = sum_to {n = 5, acc = 0}
+     *     3 + 4                                  -- returned 15, not 7
+     *
+     * When the site IS a tail call the marks stay, and must: the body's tail is
+     * then genuinely the caller's tail, which is what makes inlining a tail call
+     * sound in the first place.
+     *
+     * Only positions the body RETURNS FROM are walked. A `MakeLambdaIR` is not
+     * descended into — a lambda's body tails belong to the lambda and stay
+     * correct wherever the lambda is moved.
+     *
+     * Same rule as `ConstraintResult.operandOf` states on the constraint side:
+     * tail position is syntactic, so MOVING an expression can take it away.
+     */
+    private fun untail(node: NodeIR, siteIsTail: Boolean): NodeIR {
+        if (siteIsTail) return node
+        return when (node) {
+            is CallDirectIR -> if (node.isTailCall) node.copy(isTailCall = false) else node
+            is CallIndirectIR -> if (node.isTailCall) node.copy(isTailCall = false) else node
+            is CallLocalIR -> if (node.isTailCall) node.copy(isTailCall = false) else node
+            is PartialApplyDirectIR -> if (node.isTailCall) node.copy(isTailCall = false) else node
+            is IfIR -> node.copy(thenBr = untail(node.thenBr, false), elseBr = untail(node.elseBr, false))
+            is MatchIR -> node.copy(cases = node.cases.map { it.copy(body = untail(it.body, false)) })
+            is BlockIR -> node.copy(result = untail(node.result, false))
+            else -> node
+        }
     }
 
     /** Collapse a CallNativeIR to InlineBinaryOpIR when the native

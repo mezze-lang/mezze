@@ -34,8 +34,33 @@ data class TypeScheme(
             )
         }
 
-        val substitution = quantifiedVars.associateWith {
+        // A constraint's `having` binding variable is freshened per instantiation
+        // even though generalization does not quantify it.
+        //
+        // Without this, a declaration and every one of its call sites share ONE
+        // variable, so the first call to discharge the obligation pins it for the
+        // rest — and the rejection depends on source order:
+        //
+        //     let ignore = { x } -> 0
+        //     let f = { a, b } -> ignore { x = a + b }
+        //     let i = f { a = 1, b = 2 }        -- pins the shared binding to Int
+        //     let g = f { a = 1.5, b = 2.5 }    -- "expected Float but got Int"
+        //
+        // `'out` there is swallowed by `ignore`'s parameter, so it reaches no
+        // position a caller can see and nothing else separates the two sites.
+        //
+        // Freshening HERE rather than quantifying in `collectFreeTypeVars` is
+        // deliberate and measured: quantifying changes the scheme's shape, which
+        // mono and evidence selection read, and it produced a wrong answer
+        // (`sum_to {n=5, acc=0}` followed by `3 + 4` evaluated to 15). This keeps
+        // the shape identical and only stops the sharing.
+        val havingVars = constraints.flatMap { c ->
+            c.associatedTypeBindings.values.mapNotNull { (it as? MezzeType.VarType)?.variable }
+        }.filterNot { quantifiedVars.contains(it) }.distinct()
+        val substitution: Map<TypeVar, MezzeType.VarType> = quantifiedVars.associateWith {
             MezzeType.VarType(TypeVar.fresh())
+        } + havingVars.associateWith {
+            MezzeType.VarType(TypeVar.freshWithName(it.name))
         }
 
         val instantiatedType = applySubstitutionToType(type, substitution)

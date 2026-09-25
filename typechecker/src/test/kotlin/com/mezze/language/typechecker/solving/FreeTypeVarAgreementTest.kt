@@ -4,7 +4,9 @@ package com.mezze.language.typechecker.solving
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.solving.collectFreeTypeVars
+import com.mezze.language.ast.AbilityConstraint
 import com.mezze.language.ast.solving.occursCheck
+import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -84,56 +86,49 @@ class FreeTypeVarAgreementTest {
     }
 
     /**
-     * The gap that is still OPEN, stated as the property it will satisfy.
+     * A `having` binding's variable is not SHARED between a declaration and its
+     * call sites. FIXED — but not where this test used to demand.
      *
-     * `collectFreeTypeVars` does not quantify a var that lives only in a
-     * constraint's `having 'out = 'r`, so every call site of such a binding shares
-     * ONE variable and the first to pin it pins it for the rest.
+     * The property is that two call sites cannot collide on one variable. The
+     * obvious implementation is to quantify it in [collectFreeTypeVars], and this
+     * test asserted exactly that for a long time. It is the WRONG lever, measured:
+     * quantifying changes the scheme's shape, which mono and evidence selection
+     * read, and it produced a wrong answer (`sum_to {n=5,acc=0}` then `3 + 4`
+     * returned 15).
      *
-     * That is not hypothetical, and the program it breaks is ordinary:
-     *
-     *     let ignore = { x } -> 0
-     *     let f = { a, b } -> ignore { x = a + b }
-     *     let i = f { a = 1, b = 2 }        -- pins the shared `out` to Int
-     *     let g = f { a = 1.5, b = 2.5 }    -- REJECTED
-     *     -- Type mismatch for associated type 'out': expected Float but got Int
-     *
-     * `'out` is swallowed by `ignore`'s parameter, so it reaches no position a
-     * caller sees — not the params, not the return, not the constraint's type
-     * arguments. Swap the two call sites and the error swaps with them
-     * ("expected Int but got Float"): the order-dependence is the signature of the
-     * shared variable and of nothing else. A false REJECTION, not a wrong answer,
-     * and no annotation fixes it.
-     *
-     * WHY THE ONE-LINE FIX IS NOT THE FIX, measured rather than assumed. Adding
-     * these vars to the walk makes the program above compile and turns
-     * `LazyEffectsTest.test suspended value in recursive function` red — it
-     * returns a raw value where it must return an `Err`. Inference is not what
-     * breaks: its output is byte-identical either way, same shapes with different
-     * fresh ids. The cause is downstream. In
-     *
-     *     sum_to : { n: Int, acc: 'a } with NumAdd Int 'a -> 'a
-     *
-     * whose constraint carries an internal associated-type binding `'out = 'o`.
-     * That binding has no source spelling — `having` appears only on an
-     * `ability`/`impl`/`effect` declaration, never in a `with` clause — it is
-     * the solver's `associatedTypeBindings`. And `'o` there is a DIFFERENT
-     * variable from `'a`. Quantifying it makes the call site freshen and pin a
-     * COPY, while the declaration's own stored constraint keeps
-     * the original — one written variable, two TypeVars, and evidence selection
-     * reads the stale one. So this needs call-site re-resolution in the EVIDENCE
-     * layer; a wider walk here only moves the failure.
+     * `TypeScheme.instantiate` freshens the binding per instantiation instead, so
+     * `collectFreeTypeVars` still does not collect it — correctly, since nothing
+     * needs quantifying for the property to hold. What matters is asserted below
+     * and, as a program, in the last test of this file.
      */
     @Test
-    @Disabled("OPEN: needs evidence-layer call-site re-resolution — the one-line walk fix is measured to break LazyEffectsTest; see the KDoc")
-    fun `a var living only in a constraint's associated-type binding is free`() {
-        val v = TypeVar.fresh()
-        val arrow = arrowWithHaving(varType(v))
-        assertTrue(arrow.anyChild { it is MezzeType.VarType && it.variable == v }, "precondition: anyChild")
-        assertTrue(occursCheck(v, arrow), "precondition: occursCheck")
+    fun `a having binding is freshened per instantiation, not shared`() {
+        val shared = TypeVar.fresh()
+        val scheme = TypeScheme(
+            quantifiedVars = listOf(TypeVar.fresh()),
+            constraints = listOf(
+                AbilityConstraint(
+                    abilityName = "NumAdd",
+                    typeParam = "'l",
+                    associatedTypeBindings = mapOf("'out" to varType(shared)),
+                ),
+            ),
+            type = MezzeType.FunctionType(MezzeType.IntType, MezzeType.IntType),
+        )
+
+        val first = scheme.instantiate().freshConstraints.single().associatedTypeBindings["'out"]
+        val second = scheme.instantiate().freshConstraints.single().associatedTypeBindings["'out"]
+
+        assertTrue(first is MezzeType.VarType && second is MezzeType.VarType)
         assertTrue(
-            v in collectFreeTypeVars(arrow),
-            "generalization must quantify a var that lives only in `having 'out = 'r`"
+            (first as MezzeType.VarType).variable != (second as MezzeType.VarType).variable,
+            "two instantiations handed back the SAME `having` variable ($first), so the first " +
+                "call site to discharge the obligation pins it for every other one",
+        )
+        assertTrue(
+            first.variable != shared && second.variable != shared,
+            "an instantiation handed back the DECLARATION's own variable, which is the same " +
+                "sharing seen from the other side",
         )
     }
 
@@ -222,7 +217,6 @@ class FreeTypeVarAgreementTest {
      * and the refusal reverses too.
      */
     @Test
-    @Disabled("OPEN: same gap as above, stated as the program it rejects")
     fun `two call sites of a fn whose out is not observable both typecheck`() {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
