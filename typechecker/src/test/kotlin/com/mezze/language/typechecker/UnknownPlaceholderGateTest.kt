@@ -57,6 +57,33 @@ class UnknownPlaceholderGateTest {
      *         4  qualified identifier not in imports
      *         3  ability op reference with no solved signature
      *
+     * RE-MEASURED on `:typechecker:test` alone (so these are NOT comparable to
+     * the four-module figures above — only to each other), before and after the
+     * method-reference fix in [ImplBodyIsElaboratedTest]:
+     *
+     *                                                          before    after
+     *   field read with no solved type and no declared shape    59,971    5,900
+     *   identifier resolved nowhere ...                         31,229   31,229
+     *   let binding with no solved type                            528      528
+     *   call with no solved return ...                             124      124
+     *   variant construct with no solved or context type            72       77
+     *   perform op with no solved return ...                        27       27
+     *                                                 TOTAL     91,951   37,885
+     *
+     * TWO things in that table matter more than the totals.
+     *
+     * The first: a reason names the CODE PATH that gave up, not the construct
+     * that caused it. The overwhelming majority of "field read" was `x.add {y}`
+     * and `v.decode {..}` — METHOD references on an Int, a Float or a variant,
+     * reaching the member-access arm with no context type. Nobody reading this
+     * list would have guessed that, and the name sent two attempts looking at
+     * records and impl bodies. Measure which programs mint before believing a
+     * label.
+     *
+     * The second: `variant construct` went UP, 72 → 77. Supplying a type where
+     * there was none moves some positions rather than removing them, so a drop
+     * in the total is not by itself evidence that every position improved.
+     *
      * NINE fire, not two. The other EIGHT minted zero and are gone — each is now
      * a loud failure naming its position (`TypedAstBuilder.unreachedPosition`),
      * the same move this file describes three of the original six having already
