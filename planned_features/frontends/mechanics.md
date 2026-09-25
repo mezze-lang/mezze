@@ -447,6 +447,69 @@ automatically produce a better experience; the experience comes from the
 libraries, the error messages, and the IDE. The design here starts ahead. Whether
 it finishes ahead depends on the declarative tier and the diagnostics.
 
+#### Macro diagnostics: three different failures, three different treatments
+
+Macro errors are bad in most languages because three unrelated failures get
+rendered identically. Separating them is most of the work.
+
+**1. The user's input to the macro is wrong.** `sql!("SELECT * FORM users")`.
+
+This is where the *best possible* errors live, because the macro understands the
+domain and the compiler never will. `compile_error` exists in the design and is
+the right tool:
+
+```
+error: SQL syntax error — expected FROM, found FORM
+  --> app.mz:12:18
+   |
+12 |   sql!("SELECT * FORM users")
+   |                  ^^^^ did you mean `FROM`?
+```
+
+The rule: **a macro should reject bad input itself, not let it become a type
+error later.** A `sql` macro that passes `FORM` through and lets the typechecker
+complain about a record field has failed at its job. This is worth making a
+documented expectation of macro authors, not just a possibility.
+
+**2. The macro generated bad code.** Its output does not typecheck.
+
+This is a bug in the *macro*, seen by a user who has never opened that package.
+It needs:
+
+- **Span provenance** — "in this expansion of `sql!` at line 12", showing both
+  the call site and the offending generated code. Without it the user sees a
+  type error in a file they do not know.
+- **Attribution** — the message should say the macro is at fault, not the caller.
+
+**3. The caller misused the result.** `let x: Int = sql!(…)` where it returns a
+query. An ordinary type error at the call site. Already works; needs nothing.
+
+#### What makes this better than Rust rather than merely equal
+
+Three things fall out of macros being ordinary Mezze functions returning
+`[Decl]`, and they are cheap:
+
+- **`mez expand`.** Rust needs `cargo expand`, a third-party tool, because proc
+  macros can only be observed by compiling. Here the macro is a function you can
+  *call*, so showing the expansion is trivial — and being able to read what was
+  generated is the single most effective debugging aid a macro system can offer.
+  It does not appear anywhere in `../macros/`; it should.
+- **Macros are testable without a framework.** Call the macro, inspect the
+  returned `[Decl]`. Rust needs `trybuild` precisely because proc macros cannot
+  be invoked directly. An ordinary unit test asserting on AST is a much shorter
+  feedback loop than compiling a fixture and diffing stderr.
+- **The quality ratchet already exists.** `ParserErrorQualityTest` asserts that a
+  message is non-generic, correctly located, and **mentions the right thing**, so
+  a misdiagnosis fails the test. A macro package should ship the same corpus
+  shape — bad inputs, expected messages — and be held to the same bar. That
+  turns "make the errors great" from an aspiration into a gate.
+
+Typechecking itself needs no special handling, and that is the point: expansion
+is syntactic, the typechecker sees ordinary AST, and generated code is checked by
+exactly the same rules as hand-written code. The hard part was never the
+checking — it is making sure the resulting message points somewhere a human can
+act on.
+
 #### What this opens that expression scope did not
 
 Declaration scope touches the type system, so it inherits questions expression
