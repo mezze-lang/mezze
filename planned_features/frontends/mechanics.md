@@ -556,23 +556,37 @@ output or track its inputs. Mezze can, and the reason is effects.
 So the invariant is preserved by making the compile-time handler **record and
 hash**, not by forbidding IO.
 
-**One real limit, and the policy follows from it.** Recording works for
-*deterministic* reads — a file, an env var — where "what was read" is a value
-that can be hashed. It cannot rescue *nondeterministic* capability: the clock,
-the network, randomness. Hashing those is technically possible and practically
-useless, since every build legitimately differs.
+**Nothing needs forbidding — it is a caching problem.** Separate two things
+that get conflated:
 
-That splits the compile-time handler set cleanly:
+- **Reproducibility** — same source, same output, forever.
+- **Cacheability** — can this expansion be skipped, and when must it be redone?
 
-| capability | at compile time | why |
+A macro that fetches a URL is not reproducible, but it is perfectly cacheable
+with the right key. That is the trade every real build system already makes:
+`build.rs` emits `cargo:rerun-if-changed`, Bazel has repository rules with
+lockfiles, Nix takes an expected hash for fetches.
+
+So the handler records an **invalidation key** alongside the value, and the
+policy is per-capability:
+
+| compile-time capability | cache key | shareable across machines |
 |---|---|---|
-| read a file, read an env var | **permit, record, hash** | deterministic; becomes a build input |
-| clock, network, randomness | **refuse** | cannot be made reproducible by recording |
+| pure | `(macro hash, input hash)` | yes, forever |
+| file / env read | + content hash of what was read | yes — Cargo's `rerun-if-changed` |
+| fetch with a declared expected hash | + that hash | yes — the Nix model |
+| network / clock / random | TTL, or always re-run | no |
 
-And the effect row is how that policy is *expressed and enforced*, rather than a
-convention nobody checks. A macro declaring `<CompileTime, Clock>` fails to
-build with a message naming the capability — which is a better outcome than any
-language that permits it silently.
+**What the effect row buys is the boundary.** It tells you exactly which modules
+have the weaker guarantee, statically, before anything runs. Modules with only
+deterministic compile-time effects stay strictly reproducible and
+cross-machine-cacheable; the rest are a declared, visible, usually small set.
+
+That is a better position than either extreme. Forbidding IO loses real power.
+Permitting it silently — the Rust situation — means nobody knows which builds
+are reproducible. Permitting it *with the capability in the type* means the
+compiler can pick the right cache policy per module automatically, and a human
+can see the reproducibility boundary by reading signatures.
 
 #### Fix 2 — "infinite loops will hang the compiler" is not acceptable
 
