@@ -5,6 +5,8 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.ast.solving.occursCheck
+import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Disabled
@@ -86,18 +88,40 @@ class FreeTypeVarAgreementTest {
      *
      * `collectFreeTypeVars` does not quantify a var that lives only in a
      * constraint's `having 'out = 'r`, so every call site of such a binding shares
-     * one variable. Quantifying it today makes things WORSE, not better:
-     * `TypeScheme.instantiate` freshens the binding into the obligation while
-     * `applySubstitutionToType` clears the constraints off the instantiated type,
-     * so the fresh `'out` reaches the call site with nothing left to re-pin it.
+     * ONE variable and the first to pin it pins it for the rest.
      *
-     * MEASURED, not assumed: adding these vars turns
-     * `LazyEffectsTest.test suspended value in recursive function` red — a solved
-     * `Result` degrades to a bare var. Re-enable together with call-site
-     * re-resolution of a quantified `having` binding.
+     * That is not hypothetical, and the program it breaks is ordinary:
+     *
+     *     let ignore = { x } -> 0
+     *     let f = { a, b } -> ignore { x = a + b }
+     *     let i = f { a = 1, b = 2 }        -- pins the shared `out` to Int
+     *     let g = f { a = 1.5, b = 2.5 }    -- REJECTED
+     *     -- Type mismatch for associated type 'out': expected Float but got Int
+     *
+     * `'out` is swallowed by `ignore`'s parameter, so it reaches no position a
+     * caller sees — not the params, not the return, not the constraint's type
+     * arguments. Swap the two call sites and the error swaps with them
+     * ("expected Int but got Float"): the order-dependence is the signature of the
+     * shared variable and of nothing else. A false REJECTION, not a wrong answer,
+     * and no annotation fixes it.
+     *
+     * WHY THE ONE-LINE FIX IS NOT THE FIX, measured rather than assumed. Adding
+     * these vars to the walk makes the program above compile and turns
+     * `LazyEffectsTest.test suspended value in recursive function` red — it
+     * returns a raw value where it must return an `Err`. Inference is not what
+     * breaks: its output is byte-identical either way, same shapes with different
+     * fresh ids. The cause is downstream. In
+     *
+     *     sum_to : {n: Int, acc: 'a} -> 'a  with NumAdd<Int,'a> having out='o
+     *
+     * `'o` is a DIFFERENT variable from `'a`. Quantifying it makes the call site
+     * freshen and pin a COPY, while the declaration's own stored constraint keeps
+     * the original — one written variable, two TypeVars, and evidence selection
+     * reads the stale one. So this needs call-site re-resolution in the EVIDENCE
+     * layer; a wider walk here only moves the failure.
      */
     @Test
-    @Disabled("OPEN: quantifying `having 'out` vars needs call-site re-resolution first — see the KDoc")
+    @Disabled("OPEN: needs evidence-layer call-site re-resolution — the one-line walk fix is measured to break LazyEffectsTest; see the KDoc")
     fun `a var living only in a constraint's associated-type binding is free`() {
         val v = TypeVar.fresh()
         val arrow = arrowWithHaving(varType(v))
@@ -183,5 +207,33 @@ class FreeTypeVarAgreementTest {
         )
         // Must terminate, and must still see the var (via returnType).
         assertTrue(v in collectFreeTypeVars(selfReferential))
+    }
+
+    /**
+     * The same gap as a PROGRAM, because the walker-level property above does not
+     * say what a user loses.
+     *
+     * Both call sites are ordinary uses of an ordinary polymorphic function. The
+     * first pins the shared `having 'out` and the second is refused. Reverse them
+     * and the refusal reverses too.
+     */
+    @Test
+    @Disabled("OPEN: same gap as above, stated as the program it rejects")
+    fun `two call sites of a fn whose out is not observable both typecheck`() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        val src = """
+            let ignore = { x } -> 0
+            let f = { a, b } -> ignore { x = a + b }
+            let i = f { a = 1, b = 2 }
+            let g = f { a = 1.5, b = 2.5 }
+            i
+        """.trimIndent()
+        // Compiling at all is the assertion: today this throws
+        // "Type mismatch for associated type 'out': expected Float but got Int".
+        TypeChecker().typeCheck(
+            com.mezze.language.parser.MezzeParser().parseParsedModule(src, "having.mz"),
+            java.nio.file.Paths.get("."),
+        )
     }
 }

@@ -655,35 +655,50 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
             // #264 collected the standalone row and missed the arrow-embedded one,
             // which is the ordinary case.
             val effectVars = type.effects?.let { collectFreeTypeVarsInEffectRow(it) } ?: emptySet()
-            // NOT COLLECTED, and this is CORRECT rather than a gap: the ability
-            // constraints' own `associatedTypeBindings` (`having 'out = 'r`).
-            // [occursCheck] and [MezzeType.anyChild] both see those vars, so this
-            // walker is narrower than its two siblings — which reads like the
-            // soundness hole this doc's first line warns about, and is not one.
+            // NOT COLLECTED, and this is a KNOWN GAP rather than a decision:
+            // the ability constraints' own `associatedTypeBindings`
+            // (`having 'out = 'r`). [occursCheck] and [MezzeType.anyChild] both
+            // see those vars, so this walker is narrower than its two siblings —
+            // which is exactly the hole this doc's first line warns about.
             //
-            // The premise was that leaving them unquantified lets every call site
-            // share ONE variable, so the first caller to pin it pins it for the
-            // rest. MEASURED, that cannot happen, because the two cases are
-            // exhaustive and neither is the feared one:
+            // An earlier version of this comment argued the omission was CORRECT,
+            // on an exhaustiveness argument: either `out` occurs elsewhere in the
+            // type and is already collected, or it occurs nowhere else and no
+            // call site can observe it. The second half is FALSE. The obligation
+            // still has to be discharged, and two call sites discharging it at
+            // different types collide on the one shared variable:
             //
-            //   `out` OCCURS elsewhere in the type — `{n, acc} -> acc + n` returns
-            //   it — and is therefore ALREADY collected, through `returnType`.
-            //   Nothing needs adding. `add_up` used at Int and at Float in one
-            //   program gives 3 and 4.0, each call site freshening its own.
+            //     let ignore = { x } -> 0
+            //     let f = { a, b } -> ignore { x = a + b }
+            //     let i = f { a = 1, b = 2 }        -- pins the shared `out` to Int
+            //     let g = f { a = 1.5, b = 2.5 }    -- REJECTED
+            //     -- Type mismatch for associated type 'out': expected Float but got Int
             //
-            //   `out` occurs NOWHERE else — a recursive `sum_to` whose operands
-            //   solve to Int, where the return is the if/else join rather than the
-            //   `+` result. Then no call site can observe it: it is absent from
-            //   the parameters, the return, the constraint's type arguments and
-            //   the effect row, which is everything a caller sees. Sharing an
-            //   unobservable variable is not a wrong answer anyone can obtain.
+            // `f` is ordinary polymorphic code. Swap the two call sites and the
+            // error swaps with them ("expected Int but got Float"), which is the
+            // signature of a shared variable and of nothing else. It is a false
+            // REJECTION, not a wrong answer — but a well-typed program is refused
+            // and no annotation can fix it.
             //
-            // Collecting them anyway was tried and is worse than inert: it mints a
-            // variable no call site can pin, the obligation resolves against
-            // nothing, and a result that was a solved `Result` degrades to a bare
-            // var — `LazyEffectsTest.test suspended value in recursive function`
-            // returns 15 instead of an Err. Pinned by
-            // `HavingBindingInstantiationTest`.
+            // Collecting them is a ONE-LINE change that makes that program
+            // compile, and it is not the fix. MEASURED: inference output is
+            // byte-identical either way (same shapes, different fresh ids) and
+            // `LazyEffectsTest.test suspended value in recursive function` turns
+            // red — it returns a raw value where it must return an `Err`. The
+            // cause is downstream of here. In
+            //
+            //     sum_to : {n: Int, acc: 'a} -> 'a  with NumAdd<Int,'a> having out='o
+            //
+            // `'o` is a DIFFERENT variable from `'a`, so quantifying it makes the
+            // call site freshen and pin a COPY while the declaration's own stored
+            // constraint keeps the original, unpinned — one written variable,
+            // two TypeVars, and evidence selection reads the stale one. Closing
+            // this needs call-site re-resolution in the evidence layer, not a
+            // wider walk here.
+            //
+            // Stated as a property, with the repro, in
+            // `FreeTypeVarAgreementTest`; `HavingBindingInstantiationTest` covers
+            // the half that does work.
             paramVars + returnVars + constraintVars + effectVars
         }
 
