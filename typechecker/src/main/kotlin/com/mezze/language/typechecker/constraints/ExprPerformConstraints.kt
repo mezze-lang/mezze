@@ -108,7 +108,22 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
 
     val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
     val bodyHasNativeCall = bodyContainsNativeCall(expr.body)
-    val shouldValidate = (!isNestedPerform || canValidateNestedPerform) && !hasPolymorphicEffects && !hasUndefinedVariables && !bodyHasNativeCall
+    // #331 BUG C, reaching a second consumer. A pending closure harvest is the
+    // compiler's own note that THIS body's effect row is incomplete: a callback
+    // reached an effectful `<...>` slot through a position that was still a
+    // VarType when `collectClosureArgEffects` ran, so its effects are not in the
+    // row yet and are recovered later, at declaration finalization. This check
+    // runs at generation time and cannot wait for that.
+    //
+    // So a pending harvest belongs beside the other three conditions above: each
+    // of them says "the row in hand is not the whole story", and concluding
+    // "the body performs no effect" from a row known to be incomplete rejects
+    // working programs. It did — `perform TestLogger in do { apply_eff { f = id
+    // { g = leaky } } }` with `leaky` performing MyLog is well-typed, the handler
+    // does fire, and it was refused.
+    val bodyHasUnharvestedCallbackEffects = exprResult.pendingClosureArgEffects.isNotEmpty()
+    val shouldValidate = (!isNestedPerform || canValidateNestedPerform) && !hasPolymorphicEffects &&
+        !hasUndefinedVariables && !bodyHasNativeCall && !bodyHasUnharvestedCallbackEffects
 
     // V0510: installing a handler for an effect the body doesn't perform
     // is a bug. Spawn is now effect-transparent (`<...>` on both sides), so

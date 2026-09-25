@@ -175,13 +175,10 @@ class EffectLaunderPolyIntermediaryTest {
         // harvest through: once the handler covers the effect, re-folding it at
         // decl finalization puts back a row entry the perform just discharged.
         //
-        // DIRECT, not through `id`, and that is forced rather than incidental. A
-        // harvest is only re-read at declaration finalization, so a callback
-        // laundered through the intermediary is still invisible to the perform's
-        // OWN "can this handler ever fire" check, which runs at generation time —
-        // the same gen-time blind spot #331 is about, reaching a second consumer.
-        // Written with `id`, this case fails on that check instead ("the perform
-        // body performs no effect"), which is a real gap but not the one here.
+        // DIRECT, not through `id`: this test is about the harvest being
+        // re-added after discharge, and the direct form isolates that. The
+        // `id` form is the test below, which used to fail on a different
+        // check entirely.
         assertNull(
             err("""
                 $twoEffects
@@ -191,6 +188,49 @@ class EffectLaunderPolyIntermediaryTest {
                     apply_eff { f = leaky }
             """),
             "TestLogger handles MyLog, so `go` really is pure and must be accepted",
+        )
+    }
+
+    @Test @Timeout(60, unit = TimeUnit.SECONDS)
+    fun `a handler IS allowed to fire on an effect that arrives through the intermediary`() {
+        // The false REJECTION. `leaky` performs MyLog, it reaches `apply_eff`
+        // through `id`, and `perform TestLogger` handles MyLog — the program is
+        // well-typed and the handler does fire.
+        //
+        // It was refused with "Handler 'TestLogger' handles 'MyLog', but the
+        // `perform` body performs no effect — so the handler can never fire."
+        // The dead-handler check runs at GENERATION time, while the recovery for
+        // a callback laundered through a polymorphic intermediary (#331 BUG C)
+        // happens at declaration finalization. The check was reading a row it
+        // already knew to be incomplete: the body carries a pending closure
+        // harvest, which is precisely the note that says so.
+        assertNull(
+            err("""
+                $twoEffects
+                let leaky: {} -> {} <MyLog> = {} -> MyLog.info { msg = "x" }
+                let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
+                let id: { g: 'a } -> 'a = { g } -> g
+                let go: {} -> {} = {} -> perform TestLogger in do
+                    apply_eff { f = id { g = leaky } }
+            """),
+            "the handler covers the effect the laundered callback performs, so the perform is valid",
+        )
+    }
+
+    @Test @Timeout(60, unit = TimeUnit.SECONDS)
+    fun `a genuinely dead handler is STILL rejected`() {
+        // The boundary that keeps the fix from disabling the rule. Skipping the
+        // check when a harvest is pending must not skip it when there is none:
+        // `perform TestLogger in 1 + 2` performs nothing, by a row that is
+        // complete, and is still a bug worth naming.
+        val msg = err("""
+            $twoEffects
+            let go: {} -> Int = {} -> perform TestLogger in 1 + 2
+        """)
+        assertNotNull(msg, "a handler over a body that performs nothing must still be rejected")
+        assertTrue(
+            msg!!.contains("TestLogger") || msg.contains("MyLog"),
+            "the rejection should name the dead handler or its effect; got: $msg",
         )
     }
 }
