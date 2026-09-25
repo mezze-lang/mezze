@@ -567,26 +567,28 @@ with the right key. That is the trade every real build system already makes:
 `build.rs` emits `cargo:rerun-if-changed`, Bazel has repository rules with
 lockfiles, Nix takes an expected hash for fetches.
 
-So the handler records an **invalidation key** alongside the value, and the
-policy is per-capability:
+And the rule needs only **one bit: is the macro effectful?**
 
-| compile-time capability | cache key | shareable across machines |
-|---|---|---|
-| pure | `(macro hash, input hash)` | yes, forever |
-| file / env read | + content hash of what was read | yes — Cargo's `rerun-if-changed` |
-| fetch with a declared expected hash | + that hash | yes — the Nix model |
-| network / clock / random | TTL, or always re-run | no |
+| macro | expansion cache |
+|---|---|
+| **pure** | key on `(macro hash, input hash)`; cache forever, share across machines |
+| **effectful** | re-run every build |
 
-**What the effect row buys is the boundary.** It tells you exactly which modules
-have the weaker guarantee, statically, before anything runs. Modules with only
-deterministic compile-time effects stay strictly reproducible and
-cross-machine-cacheable; the rest are a declared, visible, usually small set.
+No per-capability policy, no invalidation keys, no TTLs. It is conservative in
+the safe direction — a pure macro cannot produce a different result, so caching
+it is always sound; anything effectful might, so it re-runs. The cost is that a
+macro reading a config file re-runs each build, which is a file read and a
+function call.
 
-That is a better position than either extreme. Forbidding IO loses real power.
-Permitting it silently — the Rust situation — means nobody knows which builds
-are reproducible. Permitting it *with the capability in the type* means the
-compiler can pick the right cache policy per module automatically, and a human
-can see the reproducibility boundary by reading signatures.
+**What the effect row buys is the boundary**, computed for free: the compiler
+already knows which macros are pure, so it knows what it may cache without
+anyone configuring anything. That is the whole mechanism.
+
+Finer policy stays available later — the effect row records *which* capabilities
+were used, so per-capability caching (`rerun-if-changed` for file reads, Nix-style
+expected hashes for fetches) can be added if re-running ever becomes a real cost.
+It is not needed to start, and building it first would be solving a problem
+nobody has yet.
 
 #### Fix 2 — "infinite loops will hang the compiler" is not acceptable
 
