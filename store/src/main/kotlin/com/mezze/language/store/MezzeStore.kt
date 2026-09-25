@@ -209,7 +209,10 @@ interface MezzeStore : AutoCloseable {
         endLine: Int,
         endCol: Int,
         doc: String? = null,
-        metadata: String? = null
+        metadata: String? = null,
+        signature: String? = null,
+        effects: String? = null,
+        constraints: String? = null,
     )
     fun clearDeclsForModule(modulePath: String)
     fun getDeclsForModule(modulePath: String): List<DeclRow>
@@ -237,6 +240,19 @@ interface MezzeStore : AutoCloseable {
      * be worse than no search.
      */
     fun findDeclsByMetadata(key: String, value: String? = null): List<DeclRow>
+
+    /**
+     * Declarations whose residual effect row contains [effectName].
+     *
+     * The dimension a caller actually asks about — "what can throw?", "what is
+     * safe to run with no handlers?" — and one that was previously unreachable:
+     * `getEffectPerformers` answers "who PERFORMS this effect" and needs a
+     * hash, not a name.
+     *
+     * Membership is tested against the stored JSON array rather than by
+     * substring, because `LIKE '%Log%'` would also match `Logger`.
+     */
+    fun findDeclsByEffect(effectName: String): List<DeclRow>
 
     // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
@@ -363,7 +379,13 @@ data class DeclRow(
     val endLine: Int,
     val endCol: Int,
     val doc: String? = null,
-    val metadata: String? = null
+    val metadata: String? = null,
+    /** Canonical rendering of the decl's type — see SignatureNormalizer. */
+    val signature: String? = null,
+    /** JSON array of concrete effect names on the last arrow, or null. */
+    val effects: String? = null,
+    /** JSON array of ability-constraint names, or null. */
+    val constraints: String? = null,
 )
 
 data class ImportRow(

@@ -118,7 +118,7 @@ class SQLiteMezzeStore private constructor(
         //    now hashes its EFFECTS and ABILITY CONSTRAINTS, which it did not
         //    before — `{x: Int} -> Int` and `{x: Int} -> Int <IO>` used to share
         //    one hash, as did `{x: 'a} -> 'a` and `{x: 'a} -> 'a with Show 'a`.
-        const val SCHEMA_VERSION = 11
+        const val SCHEMA_VERSION = 12
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of
@@ -492,6 +492,9 @@ class SQLiteMezzeStore private constructor(
                     end_col INTEGER NOT NULL,
                     doc TEXT,
                     metadata TEXT,
+                    signature TEXT,
+                    effects TEXT,
+                    constraints TEXT,
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -704,6 +707,16 @@ class SQLiteMezzeStore private constructor(
                     end_col     INTEGER NOT NULL,
                     doc         TEXT,
                     metadata    TEXT,
+                    -- Canonical rendering of the decl's type, plus its effect
+                    -- row and ability constraints as JSON arrays. Written here
+                    -- rather than derived on demand because the alternative is
+                    -- deserializing a whole typed-module blob per candidate,
+                    -- which is not a search. effects/constraints are JSON so
+                    -- membership is a json_each query rather than LIKE over a
+                    -- delimited string, which would match `Log` inside `Logger`.
+                    signature   TEXT,
+                    effects     TEXT,
+                    constraints TEXT,
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -1667,8 +1680,9 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("""
             INSERT OR REPLACE INTO decls
                 (module_path, decl_name, decl_kind, source_hash, hash,
-                 start_line, start_col, end_line, end_col, doc, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 start_line, start_col, end_line, end_col, doc, metadata,
+                 signature, effects, constraints)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent())
     }
 
@@ -1684,7 +1698,10 @@ class SQLiteMezzeStore private constructor(
         endLine: Int,
         endCol: Int,
         doc: String?,
-        metadata: String?
+        metadata: String?,
+        signature: String?,
+        effects: String?,
+        constraints: String?
     ) {
         putDeclStmt.apply {
             setString(1, modulePath)
@@ -1698,6 +1715,9 @@ class SQLiteMezzeStore private constructor(
             setInt(9, endCol)
             setString(10, doc)
             setString(11, metadata)
+            setString(12, signature)
+            setString(13, effects)
+            setString(14, constraints)
             executeUpdate()
         }
     }
@@ -1721,13 +1741,17 @@ class SQLiteMezzeStore private constructor(
         endLine = getInt("end_line"),
         endCol = getInt("end_col"),
         doc = getString("doc"),
-        metadata = getString("metadata")
+        metadata = getString("metadata"),
+        signature = getString("signature"),
+        effects = getString("effects"),
+        constraints = getString("constraints")
     )
 
     private val getDeclsForModuleStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
             FROM <DB>.decls
             WHERE module_path = ?
         """.trimIndent()))
@@ -1744,7 +1768,8 @@ class SQLiteMezzeStore private constructor(
     private val searchDeclsByNameStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
             FROM <DB>.decls
             WHERE decl_name LIKE ? ESCAPE '\'
         """.trimIndent()) + " ORDER BY decl_name LIMIT 200")
@@ -1779,7 +1804,8 @@ class SQLiteMezzeStore private constructor(
     private val findDeclsByMetadataValueStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
             FROM <DB>.decls
             WHERE metadata IS NOT NULL AND json_valid(metadata)
               AND (    metadata ->  ('${'$'}.' || ?) = ?
@@ -1794,7 +1820,8 @@ class SQLiteMezzeStore private constructor(
     private val findDeclsByMetadataKeyStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
             FROM <DB>.decls
             WHERE metadata IS NOT NULL AND json_valid(metadata)
               AND json_type(metadata, '${'$'}.' || ?) IS NOT NULL
@@ -1825,10 +1852,33 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    // Membership in a JSON array, not a substring match: `LIKE '%Log%'` would
+    // also match `Logger`, and an effect search that quietly over-matches is
+    // worse than one that finds nothing.
+    private val findDeclsByEffectStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
+            FROM <DB>.decls
+            WHERE effects IS NOT NULL AND json_valid(effects)
+              AND EXISTS (SELECT 1 FROM json_each(effects) WHERE value = ?)
+        """.trimIndent()) + " ORDER BY module_path, decl_name")
+    }
+
+    @Synchronized
+    override fun findDeclsByEffect(effectName: String): List<DeclRow> {
+        for (db in 0..2) findDeclsByEffectStmt.setString(db + 1, effectName)
+        return findDeclsByEffectStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
     private val getDeclsByKindStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
             FROM <DB>.decls
             WHERE decl_kind = ?
         """.trimIndent()))
@@ -1847,7 +1897,8 @@ class SQLiteMezzeStore private constructor(
         // resolve regardless of which file owns the decl.
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata
+                   start_line, start_col, end_line, end_col, doc, metadata,
+                   signature, effects, constraints
             FROM <DB>.decls
             WHERE hash = ?
         """.trimIndent()) + " LIMIT 1")

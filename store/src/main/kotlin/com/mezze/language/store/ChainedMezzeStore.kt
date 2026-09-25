@@ -209,8 +209,10 @@ class ChainedMezzeStore(
 
     override fun putDecl(
         modulePath: String, declName: String, declKind: DeclKind, sourceHash: String,
-        hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int, doc: String?, metadata: String?
-    ) = primary.putDecl(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol, doc, metadata)
+        hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int, doc: String?, metadata: String?,
+        signature: String?, effects: String?, constraints: String?
+    ) = primary.putDecl(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol,
+        doc, metadata, signature, effects, constraints)
     override fun clearDeclsForModule(modulePath: String) = primary.clearDeclsForModule(modulePath)
     override fun getDeclsForModule(modulePath: String): List<DeclRow> =
         all.flatMap { it.getDeclsForModule(modulePath) }.distinct()
@@ -221,6 +223,8 @@ class ChainedMezzeStore(
     override fun findDeclByHash(hash: Hash): DeclRow? = firstNonNull { it.findDeclByHash(hash) }
     override fun findDeclsByMetadata(key: String, value: String?): List<DeclRow> =
         all.flatMap { it.findDeclsByMetadata(key, value) }.distinct()
+    override fun findDeclsByEffect(effectName: String): List<DeclRow> =
+        all.flatMap { it.findDeclsByEffect(effectName) }.distinct()
 
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) =
         primary.putParsedModule(modulePath, sourceHash, parsedBlob)

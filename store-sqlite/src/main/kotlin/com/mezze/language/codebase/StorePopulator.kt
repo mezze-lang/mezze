@@ -436,7 +436,8 @@ object StorePopulator {
 
         for (decl in module.decls.filterIsInstance<TypedLetDecl>()) {
             val parsed = parsedDeclsByName[decl.name]
-            writeDecl(store, modulePath, decl.name, DeclKind.LET, decl.hash, decl.loc, source, lineStarts, parsed)
+            writeDecl(store, modulePath, decl.name, DeclKind.LET, decl.hash, decl.loc, source, lineStarts, parsed,
+                type = decl.scheme.type)
         }
         for (decl in module.decls.filterIsInstance<TypedTypeDecl>()) {
             val parsed = parsedDeclsByName[decl.name]
@@ -481,6 +482,17 @@ object StorePopulator {
         return result
     }
 
+    /**
+     * A JSON array of names, or null when empty.
+     *
+     * Null rather than `[]` so "has no effects" and "was never indexed" stay
+     * distinguishable — the first is a fact about the function, the second is a
+     * fact about the store.
+     */
+    private fun jsonArray(names: List<String>): String? =
+        if (names.isEmpty()) null
+        else names.joinToString(", ", "[", "]") { "\"${it.replace("\"", "\\\"")}\"" }
+
     private fun serializeMetadata(metadata: com.mezze.language.parsedast.ParsedMetadata?): String? {
         if (metadata == null || metadata.fields.isEmpty()) return null
         // Simple JSON serialization of metadata fields
@@ -509,10 +521,17 @@ object StorePopulator {
         loc: com.mezze.language.parsedast.Loc,
         source: String,
         lineStarts: LineIndex,
-        parsedDecl: com.mezze.language.parsedast.ParsedDecl? = null
+        parsedDecl: com.mezze.language.parsedast.ParsedDecl? = null,
+        // Only a `let` has a type worth indexing; type/ability/effect/performer
+        // decls pass null and their signature columns stay empty rather than
+        // holding something that is not a signature.
+        type: com.mezze.language.ast.MezzeType? = null
     ) {
         val sliced = lineStarts.slice(source, loc)
         val perDeclSourceHash = sha256Hex(sliced)
+        val signature = type?.let { com.mezze.language.ast.SignatureNormalizer.render(it) }
+        val effects = type?.let { jsonArray(com.mezze.language.ast.SignatureNormalizer.effectNames(it)) }
+        val constraints = type?.let { jsonArray(com.mezze.language.ast.SignatureNormalizer.constraintNames(it)) }
         store.putDecl(
             modulePath = modulePath,
             declName = name,
@@ -524,7 +543,10 @@ object StorePopulator {
             endLine = loc.endLine,
             endCol = loc.endCol,
             doc = parsedDecl?.docComment,
-            metadata = serializeMetadata(parsedDecl?.metadata)
+            metadata = serializeMetadata(parsedDecl?.metadata),
+            signature = signature,
+            effects = effects,
+            constraints = constraints,
         )
     }
 

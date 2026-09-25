@@ -208,10 +208,12 @@ class InMemoryMezzeStore : MezzeStore {
     override fun putDecl(
         modulePath: String, declName: String, declKind: DeclKind, sourceHash: String,
         hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int,
-        doc: String?, metadata: String?
+        doc: String?, metadata: String?,
+        signature: String?, effects: String?, constraints: String?
     ) {
         decls.removeAll { it.modulePath == modulePath && it.declKind == declKind && it.declName == declName }
-        decls.add(DeclRow(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol, doc, metadata))
+        decls.add(DeclRow(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol,
+            doc, metadata, signature, effects, constraints))
     }
 
     override fun clearDeclsForModule(modulePath: String) {
@@ -240,6 +242,18 @@ class InMemoryMezzeStore : MezzeStore {
      * JSON form (`true`, `"0.5.0"`) and its unquoted form (`0.5.0`), matching
      * what SQLite's `->` and `->>` return respectively.
      */
+    /** Effect membership, matching the SQL's json_each test. */
+    override fun findDeclsByEffect(effectName: String): List<DeclRow> =
+        decls.filter { row ->
+            val raw = row.effects ?: return@filter false
+            // Stored as a JSON array of bare names; compare element-wise so
+            // `Log` never matches `Logger`.
+            raw.trim().removeSurrounding("[", "]")
+                .split(',')
+                .map { it.trim().removeSurrounding("\"") }
+                .any { it == effectName }
+        }
+
     override fun findDeclsByMetadata(key: String, value: String?): List<DeclRow> =
         decls.filter { row ->
             val raw = row.metadata ?: return@filter false
