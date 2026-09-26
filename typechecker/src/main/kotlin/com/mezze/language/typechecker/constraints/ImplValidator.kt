@@ -224,28 +224,31 @@ internal class ImplValidator(
             param to convertTypeAnnotation(targetType)
         }
 
-        // Coherence: the compiler DERIVES Eq/Inspect for records and variants
-        // (structurally — when every field / constructor has the ability) and it
-        // OWNS that instance. A hand-written impl for such a type is a SECOND
-        // instance for the same type: a duplicate, never an override. Only a
-        // declared nominal receiver is a candidate — builtin shapes (`['a]`, `Bool`)
-        // are not derived this way, and a newtype derives nothing, so its impl is
-        // the type's one legitimate instance. Derivability is decided by the SAME
-        // structural predicate the solver uses, keyed on the ability's hash.
-        // A declared receiver arrives in one of TWO shapes (the two-representations
-        // landmine): alias-expanded `type P = {..}` / `type V = | ..` is a
-        // RecordType / VariantType carrying the declaration's identity, while
-        // `Option 'a` / a newtype is a TypeApplication — read the identity off
-        // whichever shape came, never the constructor name.
+        // Coherence: the compiler DERIVES Eq/Inspect for records and variants, and
+        // Inspect + Hash for EVERY type INCLUDING a newtype — and it OWNS those
+        // instances. A hand-written impl for a derived instance is a SECOND instance
+        // for the same type: a duplicate, never an override. This is NOT special to
+        // records/variants — a newtype derives Inspect (and Hash), so
+        // `impl Inspect for MyNewtype` is just as much a duplicate; the newtype was
+        // WRONGLY exempted here before, which let a value override its own debug
+        // rendering. What a newtype does NOT derive is Eq/Ord, so a hand-written
+        // Eq/Ord/Hash on a newtype is its ONE legitimate instance — and that is
+        // decided uniformly below by `canDeriveAbility` (false for Eq/Ord on a
+        // newtype), not by a blanket exemption. Only a declared nominal receiver (or
+        // a primitive) is a candidate — builtin shapes (`['a]`, `Bool`) aren't
+        // derived this way. Derivability is the SAME structural predicate the solver
+        // uses, keyed on the ability's hash. A declared receiver arrives in one of
+        // TWO shapes (the two-representations landmine): alias-expanded
+        // `type P = {..}` / `type V = | ..` is a RecordType / VariantType carrying
+        // the declaration's identity, while `Option 'a` / a newtype is a
+        // TypeApplication — read the identity off whichever shape came, never the
+        // constructor name.
         run {
             // The compiler-generated derived instance IS the one instance — never a
             // duplicate of itself (DerivedImplGenerator).
             if (impl.derived) return@run
             val receiverAnn = impl.targetTypes.lastOrNull() ?: return@run
             val receiver = convertTypeAnnotation(receiverAnn)
-            if (receiver is com.mezze.language.ast.MezzeType.TypeApplication &&
-                registry.lookupType(receiver.constructor)?.definition is com.mezze.language.parsedast.ParsedNewtypeDef
-            ) return@run
             val abilityHash = registry.resolveAbilityHash(abilityName)
             val displayName = coherenceReceiverName(receiver, abilityHash) ?: return@run
             // `Hash` is derived for EVERY type, so "is it already derived?" is

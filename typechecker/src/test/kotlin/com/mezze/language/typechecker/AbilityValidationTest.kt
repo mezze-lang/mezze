@@ -271,6 +271,28 @@ class AbilityValidationTest {
     }
 
     @Test
+    fun `hand-written impl Inspect for a newtype is rejected - Inspect is compiler-derived`() {
+        // Inspect (and Hash) are auto-derived for EVERY type, newtypes included, and
+        // the compiler owns that instance — a value must not be able to override its
+        // own debug rendering. A newtype used to be wrongly exempted from this
+        // coherence rule, so `impl Inspect for MyNewtype` slipped through; it must now
+        // be a duplicate-instance error, exactly as it already is for records/variants.
+        val source = """
+            newtype Money = Int
+            impl Inspect for Money where {
+              to_dbg = { it } -> "custom"
+            }
+            Money.(5)
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+
+        assertThrows<TypeCheckError>("impl Inspect for a newtype must be rejected: Inspect is derived") {
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        }
+    }
+
+    @Test
     fun `test type variable not specialized should fail`() {
         // With method-call syntax, the ability constraint is inferred on the wrapper.
         // display gets type {value: 'a} with Show 'a -> Str
