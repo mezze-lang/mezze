@@ -4,6 +4,7 @@ import com.mezze.language.store.StoreSerialization
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.store.BlobKind
 import com.mezze.language.codebase.StorePopulator
+import com.mezze.language.store.EdgeKind
 import com.mezze.language.store.Visibility
 import com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX
 import com.mezze.language.typechecker.ModuleResolver
@@ -258,12 +259,16 @@ fun main(args: Array<String>) {
                 }
             }
 
-            // Store dependency graph — computed from post-inline IR above,
-            // not `precompiled.stdlibDependencyGraph` (which is pre-inline).
+            // Store the dependency graph as EDGES — the table that exists for it.
+            // It used to go into `metadata` as `deps:<hash>` = `;`-joined hashes: a
+            // delimited string in a key-value table, duplicating what `edges` is
+            // for, and unqueryable. Meanwhile `edges` held only IMPLEMENTS rows, so
+            // "who calls this" answered "nothing" for all 1,882 stdlib functions.
+            //
+            // Computed from post-inline IR above, not
+            // `precompiled.stdlibDependencyGraph` (which is pre-inline).
             for ((hash, deps) in dependencyGraph) {
-                if (deps.isNotEmpty()) {
-                    store.setMetadata("deps:${hash.hex}", deps.joinToString(";") { it.hex })
-                }
+                for (dep in deps) store.addEdge(hash, dep, EdgeKind.CALLS)
             }
 
             // Store prelude context (types, abilities, effects, bindings)

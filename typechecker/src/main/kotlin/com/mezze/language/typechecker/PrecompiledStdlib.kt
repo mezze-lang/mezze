@@ -368,15 +368,20 @@ object PrecompiledStdlib {
         functions: Map<Hash, FunctionIR>
     ): Map<Hash, Set<Hash>> {
         val graph = mutableMapOf<Hash, Set<Hash>>()
-        val depEntries = s.getMetadataByPrefix("deps:")
-        if (depEntries.isNotEmpty()) {
-            for ((key, value) in depEntries) {
-                if (value.isEmpty()) continue
-                val hash = Hash(key.removePrefix("deps:"))
-                graph[hash] = value.split(";").map { Hash(it) }.toSet()
+
+        // From the EDGES table. This used to read `metadata` keys of the form
+        // `deps:<hash>` whose values were `;`-joined hashes — the call graph as
+        // delimited strings in a key-value table, while the purpose-built `edges`
+        // table held only IMPLEMENTS rows. Same fact, one place now.
+        val callEdges = s.getAllEdges(setOf(com.mezze.language.store.EdgeKind.CALLS))
+        if (callEdges.isNotEmpty()) {
+            for ((from, to) in callEdges.groupBy { it.fromHash }) {
+                graph[from] = to.map { it.toHash }.toSet()
             }
             return graph
         }
+        // No edges recorded — recompute from the IR bodies. A real fallback: a store
+        // written before edges were populated still has to load.
         for ((hash, fn) in functions) {
             val refs = mutableSetOf<Hash>()
             collectHashRefs(fn.body, refs)

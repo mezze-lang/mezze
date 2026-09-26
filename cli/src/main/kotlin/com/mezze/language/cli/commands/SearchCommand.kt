@@ -1,6 +1,7 @@
 package com.mezze.language.cli.commands
 
 import com.mezze.language.codebase.AbilitySearch
+import com.mezze.language.codebase.EffectReach
 import com.mezze.language.codebase.TypeSearch
 import com.mezze.language.store.SignatureIndex
 import com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
@@ -20,7 +21,7 @@ import java.io.File
  */
 class SearchCommand {
 
-    private enum class Mode { TYPE, NAME, IMPLS, IMPLEMENTS }
+    private enum class Mode { TYPE, NAME, IMPLS, IMPLEMENTS, CALLERS, CALLEES, EFFECTS, PERFORMERS, REFS, UNUSED }
 
     private companion object {
         /**
@@ -37,7 +38,7 @@ class SearchCommand {
         val limit = flags.firstOrNull { it.startsWith("--limit=") }
             ?.removePrefix("--limit=")?.toIntOrNull() ?: 25
 
-        if (positional.isEmpty()) {
+        if (positional.isEmpty() && "--unused" !in flags) {
             printUsage()
             kotlin.system.exitProcess(1)
         }
@@ -56,6 +57,12 @@ class SearchCommand {
         val mode = when {
             "--impls" in flags -> Mode.IMPLS
             "--implements" in flags -> Mode.IMPLEMENTS
+            "--callers" in flags -> Mode.CALLERS
+            "--callees" in flags -> Mode.CALLEES
+            "--effects" in flags -> Mode.EFFECTS
+            "--performers" in flags -> Mode.PERFORMERS
+            "--refs" in flags -> Mode.REFS
+            "--unused" in flags -> Mode.UNUSED
             "--type" in flags -> Mode.TYPE
             "--name" in flags -> Mode.NAME
             query.any { it in TYPE_SYNTAX } -> Mode.TYPE
@@ -66,6 +73,28 @@ class SearchCommand {
             println("${Glyphs.ERROR} No Mezze.toml found in ${currentDir.absolutePath}")
             println("   Search reads this project's index; run `mez init` first.")
             kotlin.system.exitProcess(1)
+        }
+
+        // The graph and reference modes all take a NAME and resolve it to a
+        // declaration first, so they share one entry point.
+        if (mode in setOf(Mode.CALLERS, Mode.CALLEES, Mode.EFFECTS, Mode.REFS, Mode.UNUSED, Mode.PERFORMERS)) {
+            ProjectStore.open(currentDir).use { store ->
+                when (mode) {
+                    Mode.UNUSED -> printUnused(store, json)
+                    Mode.PERFORMERS -> printPerformers(store, query, json)
+                    else -> {
+                        val target = resolveDecl(store, query) ?: return
+                        when (mode) {
+                            Mode.CALLERS -> printGraph(store, target, json, callers = true, limit = limit)
+                            Mode.CALLEES -> printGraph(store, target, json, callers = false, limit = limit)
+                            Mode.EFFECTS -> printEffects(store, target, json)
+                            Mode.REFS -> printRefs(store, target, json)
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            return
         }
 
         if (mode == Mode.IMPLS) {
@@ -179,6 +208,264 @@ class SearchCommand {
                 }
             }
         }
+    }
+
+    /**
+     * Resolve a NAME to one declaration, reporting ambiguity rather than picking.
+     *
+     * Two modules may define `sort`; silently taking the first would answer a
+     * question about a declaration the user did not mean.
+     */
+    private fun resolveDecl(
+        store: com.mezze.language.store.MezzeStore,
+        name: String,
+    ): com.mezze.language.store.DeclRow? {
+        // A QUALIFIED name (`std::collections::seq::size`) resolves to exactly one
+        // declaration — which matters because the ambiguity message below tells the
+        // user to qualify, and advice the tool cannot then act on is worse than no
+        // advice.
+        val qualified = name.contains("::")
+        val bare = name.substringAfterLast("::")
+        val modulePrefix = if (qualified) name.substringBeforeLast("::") else null
+        val exact = store.findDeclsByText(bare).filter { row ->
+            row.declName == bare && (modulePrefix == null || row.modulePath == modulePrefix)
+        }
+        when {
+            exact.isEmpty() -> {
+                println("No declaration named `$name` is indexed")
+                val all = com.mezze.language.store.DeclKind.entries
+                    .flatMap { store.getDeclsByKind(it) }.map { it.declName }.distinct()
+                LevenshteinSuggest.closest(bare, all)?.let {
+                    println()
+                    println("${Glyphs.TIP} Did you mean `$it`?")
+                }
+                return null
+            }
+            exact.size > 1 -> {
+                println("`$name` is ambiguous — ${exact.size} declarations share it:")
+                println()
+                for (d in exact.sortedBy { it.modulePath }) println("  ${d.modulePath}::${d.declName}")
+                println()
+                println("${Glyphs.TIP} Qualify it: mez search --callers '${exact.first().modulePath}::$name'")
+                return null
+            }
+            else -> return exact.single()
+        }
+    }
+
+    private fun printGraph(
+        store: com.mezze.language.store.MezzeStore,
+        target: com.mezze.language.store.DeclRow,
+        json: Boolean,
+        callers: Boolean,
+        limit: Int,
+    ) {
+        val reached =
+            if (callers) store.transitiveEdgesTo(target.hash)
+            else store.transitiveEdgesFrom(target.hash)
+        val rows = reached.mapNotNull { r -> store.findDeclByHash(r.hash)?.let { it to r.depth } }
+
+        if (json) {
+            printRowsJson(
+                if (callers) "callers" else "callees",
+                "${target.modulePath}::${target.declName}",
+                rows.map { (d, depth) -> d to mapOf("depth" to depth.toString()) },
+                store,
+            )
+            return
+        }
+        if (rows.isEmpty()) {
+            println(
+                if (callers) "Nothing calls ${target.declName} — changing it breaks nothing indexed"
+                else "${target.declName} calls nothing indexed"
+            )
+            // The graph is built from LOWERED code, so a function that gets inlined
+            // has no call site to point at. Saying nothing here would let "nothing
+            // calls this" read as "this is dead".
+            println()
+            println("${Glyphs.TIP} The call graph is built after inlining, so a small " +
+                "function inlined into its callers legitimately has no callers here.")
+            return
+        }
+        println(
+            if (callers) "${rows.size} declaration${if (rows.size == 1) "" else "s"} reach ${target.declName}"
+            else "${target.declName} reaches ${rows.size} declaration${if (rows.size == 1) "" else "s"}"
+        )
+        println()
+        // Grouped by distance: the direct callers are what you look at first, and a
+        // flat list hides which those are.
+        for ((depth, group) in rows.take(limit).groupBy { it.second }.toSortedMap()) {
+            println("  ${if (depth == 1) "direct" else "$depth hops"}")
+            for ((d, _) in group.sortedBy { it.first.declName }) {
+                println("    ${d.modulePath}::${d.declName}")
+            }
+        }
+        if (rows.size > limit) println()
+        if (rows.size > limit) println("  … ${rows.size - limit} more (raise --limit=N to see them)")
+    }
+
+    private fun printEffects(
+        store: com.mezze.language.store.MezzeStore,
+        target: com.mezze.language.store.DeclRow,
+        json: Boolean,
+    ) {
+        val reached = EffectReach.of(store, target.hash)
+        val own = store.getResidualEffectsFor(listOf(target.hash))[target.hash].orEmpty()
+
+        if (json) {
+            println("{")
+            println("  \"decl\": \"${target.modulePath}::${target.declName}\",")
+            println("  \"declared\": [${own.sorted().joinToString(", ") { "\"$it\"" }}],")
+            println("  \"reached\": [")
+            reached.forEachIndexed { i, a ->
+                val comma = if (i == reached.lastIndex) "" else ","
+                val src = a.source?.let { "\"${it.modulePath}::${it.declName}\"" } ?: "null"
+                println("    {\"effect\": \"${a.effect}\", \"depth\": ${a.depth}, \"via\": $src}$comma")
+            }
+            println("  ]")
+            println("}")
+            return
+        }
+
+        if (reached.isEmpty()) {
+            println("${target.declName} performs no effects, transitively")
+            return
+        }
+        println("${target.declName} reaches ${reached.size} effect${if (reached.size == 1) "" else "s"}")
+        println()
+        val width = reached.maxOf { it.effect.length }
+        for (a in reached) {
+            val src = a.source
+            val where = when {
+                a.depth == 0 -> "declared here"
+                src == null -> "${a.depth} hops away"
+                else -> "via ${src.modulePath}::${src.declName} (${a.depth} hop${if (a.depth == 1) "" else "s"})"
+            }
+            println("  ${a.effect.padEnd(width)}   $where")
+        }
+        val undeclared = reached.filter { it.effect !in own }
+        if (undeclared.isNotEmpty()) {
+            println()
+            println("${Glyphs.TIP} ${undeclared.size} not in its own signature: " +
+                undeclared.joinToString(", ") { it.effect } +
+                ". That is not necessarily a leak — an effect handled in between is " +
+                "marked `*` on the row that handles it.")
+        }
+    }
+
+    private fun printRefs(
+        store: com.mezze.language.store.MezzeStore,
+        target: com.mezze.language.store.DeclRow,
+        json: Boolean,
+    ) {
+        val usages = store.getUsages(target.hash)
+        if (json) {
+            println("{")
+            println("  \"decl\": \"${target.modulePath}::${target.declName}\",")
+            println("  \"references\": [")
+            usages.forEachIndexed { i, u ->
+                val comma = if (i == usages.lastIndex) "" else ","
+                println("    {\"file\": \"${u.filePath}\", \"line\": ${u.startLine}, " +
+                    "\"column\": ${u.startCol}}$comma")
+            }
+            println("  ]")
+            println("}")
+            return
+        }
+        if (usages.isEmpty()) {
+            println("No indexed reference to ${target.declName}")
+            return
+        }
+        println("${usages.size} reference${if (usages.size == 1) "" else "s"} to ${target.declName}")
+        println()
+        for (u in usages.sortedWith(compareBy({ it.filePath }, { it.startLine }))) {
+            println("  ${u.filePath}:${u.startLine}:${u.startCol}")
+        }
+    }
+
+    private fun printPerformers(
+        store: com.mezze.language.store.MezzeStore,
+        effectName: String,
+        json: Boolean,
+    ) {
+        val performers = store.findEffectPerformersByName(effectName)
+        if (json) {
+            println("{")
+            println("  \"effect\": \"$effectName\",")
+            println("  \"performers\": [")
+            performers.forEachIndexed { i, p ->
+                val comma = if (i == performers.lastIndex) "" else ","
+                println("    {\"name\": \"${p.performerName}\", \"module\": " +
+                    "${p.module?.let { "\"$it\"" } ?: "null"}}$comma")
+            }
+            println("  ]")
+            println("}")
+            return
+        }
+        if (performers.isEmpty()) {
+            println("No performer of `$effectName` is indexed")
+            val effects = store.getDeclsByKind(com.mezze.language.store.DeclKind.EFFECT).map { it.declName }
+            if (effectName !in effects) {
+                LevenshteinSuggest.closest(effectName, effects.distinct())?.let {
+                    println()
+                    println("${Glyphs.TIP} No effect named `$effectName`. Did you mean `$it`?")
+                }
+            }
+            return
+        }
+        println("${performers.size} performer${if (performers.size == 1) "" else "s"} of $effectName")
+        println()
+        val width = performers.maxOf { it.performerName.length }
+        for (p in performers.sortedBy { it.performerName }) {
+            println("  ${p.performerName.padEnd(width)}   ${p.module ?: ""}")
+        }
+    }
+
+    private fun printUnused(store: com.mezze.language.store.MezzeStore, json: Boolean) {
+        val dead = store.findUnreferencedDecls()
+        if (json) {
+            printRowsJson("unused", null, dead.map { it to emptyMap<String, String>() }, store)
+            return
+        }
+        if (dead.isEmpty()) {
+            println("Nothing indexed is both private and unreferenced")
+            return
+        }
+        println("${dead.size} private declaration${if (dead.size == 1) "" else "s"} nothing references")
+        println()
+        for (d in dead) println("  ${d.modulePath}::${d.declName}")
+        println()
+        // Say what this does NOT claim. A report that overstates its own reach gets
+        // ignored the first time it is wrong.
+        println("${Glyphs.TIP} Private, with no SOURCE reference outside its own body. " +
+            "A public declaration nobody imports is not listed, nor is a private cluster " +
+            "whose members only reference each other.")
+    }
+
+    /** Shared JSON shape for "a list of declarations, each with extra fields". */
+    private fun printRowsJson(
+        kind: String,
+        subject: String?,
+        rows: List<Pair<com.mezze.language.store.DeclRow, Map<String, String>>>,
+        store: com.mezze.language.store.MezzeStore,
+    ) {
+        fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+        val files = rows.map { it.first.modulePath }.distinct()
+            .associateWith { store.getModule(it)?.filePath }
+        println("{")
+        println("  \"kind\": \"$kind\",")
+        if (subject != null) println("  \"subject\": \"${esc(subject)}\",")
+        println("  \"results\": [")
+        rows.forEachIndexed { i, (d, extra) ->
+            val comma = if (i == rows.lastIndex) "" else ","
+            val extras = extra.entries.joinToString("") { (k, v) -> ", \"$k\": $v" }
+            println("    {\"module\": \"${esc(d.modulePath)}\", \"name\": \"${esc(d.declName)}\", " +
+                "\"hash\": \"${d.hash.hex}\", \"file\": " +
+                "${files[d.modulePath]?.let { "\"${esc(it)}\"" } ?: "null"}, " +
+                "\"line\": ${d.startLine}$extras}$comma")
+        }
+        println("  ]")
+        println("}")
     }
 
     private fun printImpls(store: com.mezze.language.store.MezzeStore, abilityName: String) {

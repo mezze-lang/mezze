@@ -96,6 +96,25 @@ class ChainedMezzeStore(
     override fun getEdgesFrom(hash: Hash): List<EdgeRow> =
         all.flatMap { it.getEdgesFrom(hash) }.distinct()
 
+    // Reachability spans the chain: a project function calling into the stdlib is
+    // one edge, and stopping at the tier boundary would report a closure that is
+    // simply wrong. Shallowest depth wins when tiers disagree.
+    override fun transitiveEdgesFrom(hash: Hash, kinds: Set<EdgeKind>, maxDepth: Int?): List<ReachableRow> =
+        all.flatMap { it.transitiveEdgesFrom(hash, kinds, maxDepth) }
+            .groupBy { it.hash }.map { (h, rows) -> ReachableRow(h, rows.minOf { it.depth }) }
+            .sortedBy { it.depth }
+
+    override fun transitiveEdgesTo(hash: Hash, kinds: Set<EdgeKind>, maxDepth: Int?): List<ReachableRow> =
+        all.flatMap { it.transitiveEdgesTo(hash, kinds, maxDepth) }
+            .groupBy { it.hash }.map { (h, rows) -> ReachableRow(h, rows.minOf { it.depth }) }
+            .sortedBy { it.depth }
+
+    override fun findUnreferencedDecls(modulePath: String?): List<DeclRow> =
+        all.flatMap { it.findUnreferencedDecls(modulePath) }.distinct()
+
+    override fun getAllEdges(kinds: Set<EdgeKind>): List<EdgeRow> =
+        all.flatMap { it.getAllEdges(kinds) }.distinct()
+
     override fun getEdgesTo(hash: Hash): List<EdgeRow> =
         all.flatMap { it.getEdgesTo(hash) }.distinct()
 
@@ -138,6 +157,9 @@ class ChainedMezzeStore(
     override fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?) {
         primary.putEffectPerformer(hash, effectHash, performerName, module)
     }
+
+    override fun findEffectPerformersByName(effectName: String): List<EffectPerformerRow> =
+        all.flatMap { it.findEffectPerformersByName(effectName) }.distinct()
 
     override fun getEffectPerformers(effectHash: Hash): List<EffectPerformerRow> =
         all.flatMap { it.getEffectPerformers(effectHash) }.distinct()
@@ -232,6 +254,14 @@ class ChainedMezzeStore(
         all.flatMap { it.findDeclsByEffect(effectName) }.distinct()
     override fun findDeclsByText(text: String): List<DeclRow> =
         all.flatMap { it.findDeclsByText(text) }.distinct()
+    override fun getResidualEffectsFor(hashes: Collection<Hash>): Map<Hash, Set<String>> =
+        // Merged across tiers, unioning rather than first-wins: the same hash resolving
+        // in two tiers is the same declaration, and dropping one tier's row would
+        // under-report effects — the direction that makes a program look safe.
+        all.flatMap { it.getResidualEffectsFor(hashes).entries }
+            .groupBy { it.key }
+            .mapValues { (_, entries) -> entries.flatMap { it.value }.toSet() }
+
     override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
         all.flatMap { it.findDeclsByConstraint(abilityName) }.distinct()
     override fun findDeclsMentioningType(typeHash: Hash): List<DeclRow> =

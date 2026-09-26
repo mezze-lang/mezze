@@ -99,7 +99,56 @@ class InMemoryMezzeStore : MezzeStore {
     }
 
     override fun getEdgesFrom(hash: Hash): List<EdgeRow> = edges.filter { it.fromHash == hash }
+    /**
+     * Breadth-first, so the depth recorded is the SHORTEST one — matching the SQL
+     * store, where a recursive CTE with UNION does the same. A visited set is what
+     * makes mutual recursion terminate here, exactly as dedup does there.
+     */
+    private fun reachable(
+        start: Hash,
+        kinds: Set<EdgeKind>,
+        maxDepth: Int?,
+        step: (Hash) -> List<Hash>,
+    ): List<ReachableRow> {
+        val seen: MutableMap<Hash, Int> = mutableMapOf(start to 0)
+        var frontier = listOf(start)
+        var depth = 0
+        while (frontier.isNotEmpty() && (maxDepth == null || depth < maxDepth)) {
+            depth++
+            val next = mutableListOf<Hash>()
+            for (h in frontier) for (n in step(h)) if (seen.putIfAbsent(n, depth) == null) next.add(n)
+            frontier = next
+        }
+        // The start is excluded even when a cycle makes it reachable from itself.
+        return seen.filterKeys { it != start }.map { (h, d) -> ReachableRow(h, d) }.sortedBy { it.depth }
+    }
+
+    override fun transitiveEdgesFrom(hash: Hash, kinds: Set<EdgeKind>, maxDepth: Int?): List<ReachableRow> =
+        reachable(hash, kinds, maxDepth) { h ->
+            edges.filter { it.fromHash == h && it.kind in kinds }.map { it.toHash }
+        }
+
+    override fun transitiveEdgesTo(hash: Hash, kinds: Set<EdgeKind>, maxDepth: Int?): List<ReachableRow> =
+        reachable(hash, kinds, maxDepth) { h ->
+            edges.filter { it.toHash == h && it.kind in kinds }.map { it.fromHash }
+        }
+
+    // SOURCE usages, not lowered edges — an inlined helper has no call edge but is
+    // plainly referenced. Self-references (inside the decl's own span) do not count.
+    override fun findUnreferencedDecls(modulePath: String?): List<DeclRow> =
+        decls.filter { row ->
+            val ownFile = modules[row.modulePath]?.filePath
+            (modulePath == null || row.modulePath == modulePath) &&
+                blobs[row.hash.hex]?.visibility != Visibility.PUBLIC &&
+                usages.none { u ->
+                    u.targetHash == row.hash &&
+                        !(u.filePath == ownFile && u.startLine in row.startLine..row.endLine)
+                }
+        }
+
     override fun getEdgesTo(hash: Hash): List<EdgeRow> = edges.filter { it.toHash == hash }
+
+    override fun getAllEdges(kinds: Set<EdgeKind>): List<EdgeRow> = edges.filter { it.kind in kinds }
 
     override fun getTransitiveClosure(entryHash: Hash): Set<Hash> {
         val visited = mutableSetOf<Hash>()
@@ -147,6 +196,11 @@ class InMemoryMezzeStore : MezzeStore {
         effectPerformers.removeAll { it.hash == hash }
         effectPerformers.add(EffectPerformerRow(hash, effectHash, performerName, module))
     }
+
+    override fun findEffectPerformersByName(effectName: String): List<EffectPerformerRow> =
+        decls.filter { it.declKind == DeclKind.EFFECT && it.declName == effectName }
+            .flatMap { getEffectPerformers(it.hash) }
+            .distinct()
 
     override fun getEffectPerformers(effectHash: Hash): List<EffectPerformerRow> =
         effectPerformers.filter { it.effectHash == effectHash }
@@ -292,6 +346,13 @@ class InMemoryMezzeStore : MezzeStore {
             row.declName.contains(text, ignoreCase = true) ||
                 row.doc?.contains(text, ignoreCase = true) == true
         }
+
+    override fun getResidualEffectsFor(hashes: Collection<Hash>): Map<Hash, Set<String>> =
+        hashes.mapNotNull { h ->
+            val rows = signatures[h] ?: return@mapNotNull null
+            val residual = rows.nodes.filter { it.isResidual }.map { it.nodeId }.toSet()
+            h to rows.effects.filter { it.nodeId in residual }.map { it.effectName }.toSet()
+        }.toMap()
 
     override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
         decls.filter { row ->

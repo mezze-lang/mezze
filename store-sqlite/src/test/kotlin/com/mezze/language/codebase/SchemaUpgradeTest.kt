@@ -167,6 +167,58 @@ class SchemaUpgradeTest {
             }
         }
 
+    /**
+     * Every cross-database query must RESOLVE against a freshly attached database.
+     *
+     * Store queries union `main`, `stdlib` and `deps`, so a table the attach template
+     * forgot fails with `no such table: deps.usages` — at runtime, and only for the
+     * cross-database queries, which is the hardest place to notice. Four tables had
+     * drifted out of the template that way, and the first query to union `usages`
+     * discovered it.
+     *
+     * Behavioural rather than a schema diff: the file-backed databases get their
+     * schema from their own creation path, so only the in-memory attach exercises the
+     * template — which is exactly the configuration every test uses.
+     */
+    @Test
+    fun `every cross-database query resolves against attached databases`() {
+        SQLiteMezzeStore.inMemory().use { store ->
+            val hash = com.mezze.language.typedast.Hash("a".repeat(64))
+            // Each of these unions all three databases. Throwing is the failure; an
+            // empty result is a perfectly good answer.
+            store.getUsages(hash)
+            store.getEdgesFrom(hash)
+            store.getEdgesTo(hash)
+            store.getAllEdges()
+            store.transitiveEdgesFrom(hash)
+            store.transitiveEdgesTo(hash)
+            store.findUnreferencedDecls()
+            store.getDeclsForModule("nope")
+            store.searchDeclsByName("x")
+            store.getDeclsByKind(com.mezze.language.store.DeclKind.LET)
+            store.findDeclByHash(hash)
+            store.findDeclsByMetadata("k")
+            store.findDeclsByEffect("Log")
+            store.findDeclsByConstraint("Ord")
+            store.findDeclsByText("abc")
+            store.findDeclsByText("x")           // the short-query LIKE path
+            store.getSignature(hash)
+            store.getResidualEffectsFor(listOf(hash))
+            store.getImplTargets(hash)
+            store.findAbilityImplsByName("Ord")
+            store.findEffectPerformersByName("Log")
+            store.getAbilityImpls(hash)
+            store.getAbilityImplForType(hash, hash)
+            store.getEffectPerformers(hash)
+            store.getImportsForModule("nope")
+            store.getImportersOf("nope", "x")
+            store.getModuleExports("nope")
+            store.searchExportsByName("x")
+            store.getNamesForHash(hash)
+            store.getApp("nope")
+        }
+    }
+
     @Test
     fun `the signature tables exist after a rebuild`(@TempDir tempDir: Path) {
         val root = tempDir.toFile()

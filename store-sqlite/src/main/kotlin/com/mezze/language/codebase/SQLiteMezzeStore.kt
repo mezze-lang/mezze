@@ -533,6 +533,50 @@ class SQLiteMezzeStore private constructor(
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
+            // usages / apps / app_* completed the template: these four tables existed
+            // in the primary schema and NOT here, so any query unioning one across
+            // the three databases died with `no such table: deps.usages`. The point
+            // of applying the schema to an attached database is that a UNION ALL
+            // always resolves even when that database is empty — a table missing
+            // from the template silently breaks that, and only for cross-database
+            // queries, which is the hardest place to notice.
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.usages (
+                    target_hash TEXT NOT NULL,
+                    file_path   TEXT NOT NULL,
+                    start_line  INTEGER NOT NULL,
+                    start_col   INTEGER NOT NULL,
+                    end_line    INTEGER NOT NULL,
+                    end_col     INTEGER NOT NULL
+                )
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.apps (
+                    name         TEXT PRIMARY KEY,
+                    entry_hash   TEXT NOT NULL,
+                    entry_name   TEXT,
+                    entry_module TEXT NOT NULL,
+                    source_file  TEXT
+                )
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.app_functions (
+                    app_name TEXT NOT NULL,
+                    hash     TEXT NOT NULL,
+                    ord      INTEGER NOT NULL,
+                    PRIMARY KEY (app_name, hash)
+                )
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.app_performers (
+                    app_name   TEXT NOT NULL,
+                    record_idx INTEGER NOT NULL,
+                    position   INTEGER NOT NULL,
+                    hash       TEXT NOT NULL,
+                    PRIMARY KEY (app_name, record_idx, position)
+                )
+            """.trimIndent())
+
             // Full-text index over names and doc comments. Mirrors the primary
             // schema below.
             s.executeUpdate("""
@@ -1454,6 +1498,133 @@ class SQLiteMezzeStore private constructor(
         return getEdgesToStmt.executeQuery().use { rs -> rs.collectEdgeRows() }
     }
 
+    /**
+     * Transitive reachability, as a breadth-first expansion — one indexed query per
+     * LEVEL, not one per node and not one recursive query.
+     *
+     * A `WITH RECURSIVE … UNION` CTE is the obvious way to write this and it HANGS.
+     * `UNION` dedups whole rows, so carrying a `depth` column makes `(a,0)`,
+     * `(a,1)`, `(a,2)` … all distinct and a cycle generates rows forever: on a
+     * direct self-call (`a` calls `a`) the query never returns. An earlier probe of
+     * mine appeared to prove cycles were safe only because it carried a
+     * `depth < 20` guard, and removing that guard removed the termination. A
+     * store query must never hang, the same invariant the parser holds.
+     *
+     * Dropping `depth` would make the CTE terminate, but depth is what lets a caller
+     * say "direct callers first" or bound a neighbourhood. BFS keeps it and cannot
+     * loop: the visited set only grows, and the graph is finite.
+     *
+     * Levels are usually few — a call graph's diameter, not its size.
+     */
+    private fun traverse(
+        hash: Hash,
+        kinds: Set<EdgeKind>,
+        maxDepth: Int?,
+        followTo: Boolean,
+    ): List<ReachableRow> {
+        if (kinds.isEmpty()) return emptyList()
+        val fromCol = if (followTo) "from_hash" else "to_hash"
+        val toCol = if (followTo) "to_hash" else "from_hash"
+        val kindList = kinds.joinToString(", ") { "'${it.name}'" }
+
+        val seen = mutableMapOf(hash.hex to 0)
+        var frontier = listOf(hash.hex)
+        var depth = 0
+        while (frontier.isNotEmpty() && (maxDepth == null || depth < maxDepth)) {
+            depth++
+            val placeholders = frontier.joinToString(", ") { "?" }
+            // Every attached database, because a project function calling into the
+            // stdlib is one edge and stopping at the tier boundary would report a
+            // closure that is simply wrong.
+            val sql = """
+                SELECT DISTINCT $toCol AS next FROM main.edges
+                    WHERE $fromCol IN ($placeholders) AND kind IN ($kindList)
+                UNION
+                SELECT DISTINCT $toCol AS next FROM stdlib.edges
+                    WHERE $fromCol IN ($placeholders) AND kind IN ($kindList)
+                UNION
+                SELECT DISTINCT $toCol AS next FROM deps.edges
+                    WHERE $fromCol IN ($placeholders) AND kind IN ($kindList)
+            """.trimIndent()
+            val next = conn.prepareStatement(sql).use { stmt ->
+                for (db in 0..2) frontier.forEachIndexed { i, h ->
+                    stmt.setString(db * frontier.size + i + 1, h)
+                }
+                stmt.executeQuery().use { rs ->
+                    buildList { while (rs.next()) add(rs.getString("next")) }
+                }
+            }
+            frontier = next.filter { seen.putIfAbsent(it, depth) == null }
+        }
+        // The start is excluded even when a cycle makes it reachable from itself.
+        return seen.filterKeys { it != hash.hex }
+            .map { (h, d) -> ReachableRow(Hash(h), d) }
+            .sortedWith(compareBy({ it.depth }, { it.hash.hex }))
+    }
+
+    @Synchronized
+    override fun transitiveEdgesFrom(hash: Hash, kinds: Set<EdgeKind>, maxDepth: Int?): List<ReachableRow> =
+        traverse(hash, kinds, maxDepth, followTo = true)
+
+    @Synchronized
+    override fun transitiveEdgesTo(hash: Hash, kinds: Set<EdgeKind>, maxDepth: Int?): List<ReachableRow> =
+        traverse(hash, kinds, maxDepth, followTo = false)
+
+    /**
+     * Private, and referenced from nowhere OUTSIDE its own body.
+     *
+     * Based on `usages` — SOURCE references — and deliberately NOT on `edges`. The
+     * edge graph is built from LOWERED code, so a small helper inlined into its
+     * callers has no inbound call edge while being plainly referenced in the source.
+     * Using edges made this report wrong rather than conservative: it named
+     * `json_to_bytes`, which has eight source references two lines below its own
+     * definition, along with 17 others.
+     *
+     * Self-references do not count. A private function that only calls itself is
+     * unreachable, so a usage located inside the declaration's own line span is
+     * excluded — otherwise every recursive helper would look used.
+     */
+    @Synchronized
+    override fun findUnreferencedDecls(modulePath: String?): List<DeclRow> {
+        val moduleFilter = if (modulePath == null) "" else "AND d.module_path = ?"
+        val sql = "SELECT * FROM (" + unionAll("""
+            SELECT $DECL_QUALIFIED_COLUMNS
+            FROM <DB>.decls d
+            JOIN <DB>.blobs b ON b.hash = d.hash AND b.visibility <> 'PUBLIC'
+            LEFT JOIN <DB>.modules m ON m.path = d.module_path
+            WHERE NOT EXISTS (
+                SELECT 1 FROM main.usages u
+                WHERE u.target_hash = d.hash
+                  AND NOT (u.file_path = m.file_path
+                           AND u.start_line BETWEEN d.start_line AND d.end_line)
+                UNION ALL
+                SELECT 1 FROM stdlib.usages u
+                WHERE u.target_hash = d.hash
+                  AND NOT (u.file_path = m.file_path
+                           AND u.start_line BETWEEN d.start_line AND d.end_line)
+                UNION ALL
+                SELECT 1 FROM deps.usages u
+                WHERE u.target_hash = d.hash
+                  AND NOT (u.file_path = m.file_path
+                           AND u.start_line BETWEEN d.start_line AND d.end_line)
+            )
+            $moduleFilter
+        """.trimIndent()) + ") ORDER BY module_path, decl_name"
+        return conn.prepareStatement(sql).use { stmt ->
+            if (modulePath != null) for (db in 0..2) stmt.setString(db + 1, modulePath)
+            stmt.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.toDeclRow()) } }
+        }
+    }
+
+    @Synchronized
+    override fun getAllEdges(kinds: Set<EdgeKind>): List<EdgeRow> {
+        if (kinds.isEmpty()) return emptyList()
+        val kindList = kinds.joinToString(", ") { "'${it.name}'" }
+        return conn.prepareStatement(
+            unionAll("SELECT from_hash, to_hash, kind FROM <DB>.edges WHERE kind IN ($kindList)")
+        ).use { stmt -> stmt.executeQuery().use { rs -> rs.collectEdgeRows() } }
+    }
+
     @Synchronized
     override fun getTransitiveClosure(entryHash: Hash): Set<Hash> {
         val visited = mutableSetOf<Hash>()
@@ -1657,13 +1828,20 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    // Spans every attached database, like every other lookup. It used to read `main`
+    // only, so "find all references" reported NOTHING for any stdlib declaration —
+    // 2,429 of the stdlib's 2,539 usage rows were unreachable, and the answer came
+    // back as a confident zero.
     private val getUsagesStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT target_hash, file_path, start_line, start_col, end_line, end_col FROM usages WHERE target_hash = ?")
+        conn.prepareStatement(unionAll(
+            "SELECT target_hash, file_path, start_line, start_col, end_line, end_col " +
+                "FROM <DB>.usages WHERE target_hash = ?"
+        ))
     }
 
     @Synchronized
     override fun getUsages(targetHash: Hash): List<UsageRow> {
-        getUsagesStmt.setString(1, targetHash.hex)
+        for (db in 0..2) getUsagesStmt.setString(db + 1, targetHash.hex)
         return getUsagesStmt.executeQuery().use { rs ->
             val list = mutableListOf<UsageRow>()
             while (rs.next()) {
@@ -2478,6 +2656,83 @@ class SQLiteMezzeStore private constructor(
             }
         }
         return SignatureRows(nodes, effects, constraints)
+    }
+
+    /**
+     * One query for many hashes, chunked so a large call-graph closure cannot exceed
+     * SQLite's parameter limit.
+     *
+     * `is_residual` picks the arrow a caller is actually left holding: for
+     * `{a} -> {b} -> Int <Log>` the effects are on the INNER arrow, so reading the
+     * root would report the declaration as pure.
+     */
+    @Synchronized
+    override fun getResidualEffectsFor(hashes: Collection<Hash>): Map<Hash, Set<String>> {
+        if (hashes.isEmpty()) return emptyMap()
+        val result = mutableMapOf<Hash, MutableSet<String>>()
+        for (chunk in hashes.map { it.hex }.distinct().chunked(400)) {
+            val placeholders = chunk.joinToString(", ") { "?" }
+            val sql = unionAll("""
+                SELECT n.owner_hash AS owner, e.effect_name AS effect
+                FROM <DB>.type_nodes n
+                JOIN <DB>.type_node_effects e
+                  ON e.owner_hash = n.owner_hash AND e.node_id = n.node_id
+                WHERE n.is_residual = 1 AND n.owner_hash IN ($placeholders)
+            """.trimIndent())
+            conn.prepareStatement(sql).use { stmt ->
+                for (db in 0..2) chunk.forEachIndexed { i, h ->
+                    stmt.setString(db * chunk.size + i + 1, h)
+                }
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        result.getOrPut(Hash(rs.getString("owner"))) { mutableSetOf() }
+                            .add(rs.getString("effect"))
+                    }
+                }
+            }
+            // A hash WITH a signature but no effects must appear as an empty set —
+            // "pure" is an answer, and absence would be read as "unknown".
+            val withSignature = conn.prepareStatement(
+                unionAll("SELECT DISTINCT owner_hash FROM <DB>.type_nodes WHERE owner_hash IN ($placeholders)")
+            ).use { stmt ->
+                for (db in 0..2) chunk.forEachIndexed { i, h ->
+                    stmt.setString(db * chunk.size + i + 1, h)
+                }
+                stmt.executeQuery().use { rs ->
+                    buildList { while (rs.next()) add(rs.getString("owner_hash")) }
+                }
+            }
+            for (h in withSignature) result.getOrPut(Hash(h)) { mutableSetOf() }
+        }
+        return result
+    }
+
+    // Name -> DECLARATION -> performers, mirroring findAbilityImplsByName. Keying on
+    // the name alone would merge two modules' same-named effects.
+    private val findEffectPerformersByNameStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT p.hash, p.effect_hash, p.performer_name, p.module
+            FROM <DB>.decls d
+            JOIN <DB>.effect_performers p ON p.effect_hash = d.hash
+            WHERE d.decl_kind = 'effect' AND d.decl_name = ?
+        """.trimIndent()))
+    }
+
+    @Synchronized
+    override fun findEffectPerformersByName(effectName: String): List<EffectPerformerRow> {
+        for (db in 0..2) findEffectPerformersByNameStmt.setString(db + 1, effectName)
+        return findEffectPerformersByNameStmt.executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(
+                    EffectPerformerRow(
+                        hash = Hash(rs.getString("hash")),
+                        effectHash = Hash(rs.getString("effect_hash")),
+                        performerName = rs.getString("performer_name"),
+                        module = rs.getString("module"),
+                    )
+                )
+            }
+        }.distinct()
     }
 
     private val getDeclsByKindStmt: PreparedStatement by lazy {

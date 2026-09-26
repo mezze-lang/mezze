@@ -95,6 +95,57 @@ interface MezzeStore : AutoCloseable {
     /** Get all hashes that depend on `hash` (incoming edges). */
     fun getEdgesTo(hash: Hash): List<EdgeRow>
 
+    /**
+     * Every edge of the given [kinds], across every attached database.
+     *
+     * For whole-graph consumers — the runtime dependency graph, a visualiser —
+     * which need the graph once rather than a hash at a time.
+     */
+    fun getAllEdges(kinds: Set<EdgeKind> = EdgeKind.entries.toSet()): List<EdgeRow>
+
+    /**
+     * Everything reachable FROM [hash] by [kinds] edges, transitively, with the
+     * shortest distance to each.
+     *
+     * "What does this depend on" — one hop was already answerable; the question
+     * people ask is the closure. Cycles terminate: the traversal dedups, so mutual
+     * recursion converges instead of running forever, and [hash] itself is excluded
+     * even when a cycle makes it reachable from itself.
+     *
+     * [maxDepth] bounds the search when a neighbourhood is wanted rather than the
+     * whole closure; null means the whole closure, which is finite.
+     */
+    fun transitiveEdgesFrom(
+        hash: Hash,
+        kinds: Set<EdgeKind> = setOf(EdgeKind.CALLS, EdgeKind.REFERENCES),
+        maxDepth: Int? = null,
+    ): List<ReachableRow>
+
+    /**
+     * Everything that reaches [hash], transitively — the BLAST RADIUS of changing
+     * it.
+     *
+     * The question to ask before an edit, and the one a single hop cannot answer:
+     * the caller of the caller breaks just as surely as the direct caller.
+     */
+    fun transitiveEdgesTo(
+        hash: Hash,
+        kinds: Set<EdgeKind> = setOf(EdgeKind.CALLS, EdgeKind.REFERENCES),
+        maxDepth: Int? = null,
+    ): List<ReachableRow>
+
+    /**
+     * Declarations that NOTHING references and that nothing outside could reach:
+     * private, and with no inbound edge.
+     *
+     * Deliberately conservative. It does not claim to find all dead code — a public
+     * declaration no one imports is invisible here, and so is a private cluster that
+     * only references itself. It claims the opposite: everything it returns really
+     * is unreferenced, because a false accusation of deadness is the failure that
+     * makes such a report useless.
+     */
+    fun findUnreferencedDecls(modulePath: String? = null): List<DeclRow>
+
     /** Compute transitive closure: all hashes reachable from entryHash via edges. */
     fun getTransitiveClosure(entryHash: Hash): Set<Hash>
 
@@ -151,6 +202,16 @@ interface MezzeStore : AutoCloseable {
 
     /** Find all performers for an effect. */
     fun getEffectPerformers(effectHash: Hash): List<EffectPerformerRow>
+
+    /**
+     * Performers of the effect DECLARED as [effectName], across every attached
+     * database.
+     *
+     * The name-entered form of [getEffectPerformers], which needs a hash the caller
+     * does not have. Resolved through the declaration, so two modules each declaring
+     * `Log` stay separate — the same reason ability impls resolve that way.
+     */
+    fun findEffectPerformersByName(effectName: String): List<EffectPerformerRow>
 
     // ====================================================================
     // USAGES — LSP cross-file find-references index
@@ -296,6 +357,18 @@ interface MezzeStore : AutoCloseable {
      * question an agent or doc browser asks when looking for what it can satisfy.
      */
     fun findDeclsByConstraint(abilityName: String): List<DeclRow>
+
+    /**
+     * The RESIDUAL effect names declared by each of [hashes] — what a caller is left
+     * holding once every argument is applied.
+     *
+     * Batched deliberately. The caller is walking a call graph, so it has tens or
+     * hundreds of hashes at once, and asking per hash would turn one question into
+     * hundreds of round trips. A hash with no indexed signature is absent from the
+     * result rather than present-and-empty: "no signature" and "no effects" are
+     * different facts.
+     */
+    fun getResidualEffectsFor(hashes: Collection<Hash>): Map<Hash, Set<String>>
 
     /**
      * Declarations whose NAME or doc comment contains [text], as a substring.
@@ -462,6 +535,9 @@ data class ModuleRow(
     val sourceHash: String,
 )
 data class EdgeRow(val fromHash: Hash, val toHash: Hash, val kind: EdgeKind)
+
+/** A hash reached by a transitive traversal, with the SHORTEST distance to it. */
+data class ReachableRow(val hash: Hash, val depth: Int)
 /**
  * One `impl A for T` row. Its target types live in the `ability_impl_targets`
  * junction — see [MezzeStore.getImplTargets] — not on this row: an impl may have

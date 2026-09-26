@@ -35,15 +35,6 @@ data class PopulateDelta(
 object StorePopulator {
 
     /**
-     * #280/F11: a stable, collision-free key for an ability impl's target
-     * type(s), used as the `ability_impls.target_type` index cell. Each target
-     * type is content-hashed (via MezzeTypeHasher, which #278 wired to fold a
-     * NewtypeType/TypeApplication's declaration hash in), and ALL targets are
-     * joined so multi-param impls keep distinct identity. Replaces the old
-     * lossy `targetTypes.firstOrNull().toString()` that collided distinct types
-     * and dropped extra params.
-     */
-    /**
      * The structural hash of a type — its identity, independent of any name.
      *
      * This is the key an impl target is stored and looked up under, and the key its
@@ -686,18 +677,31 @@ object StorePopulator {
         for (fn in functions) {
             // Read current blob — covers both cases:
             //   (a) blob written by scatterTypedModule moments ago (typed set, ir=null)
-            //   (b) blob existed before this run (skip if ir already set)
+            //   (b) blob existed before this run (nothing to write)
             val row = store.getBlob(fn.hash)
-            if (row?.ir != null) continue  // already complete
+            if (row?.ir == null) {
+                val irBytes = StoreSerialization.serializeFunctionIR(fn)
+                store.putBlob(
+                    fn.hash,
+                    row?.kind ?: BlobKind.FUNCTION,
+                    row?.visibility ?: Visibility.PRIVATE,
+                    row?.typed,
+                    irBytes
+                )
+            }
 
-            val irBytes = StoreSerialization.serializeFunctionIR(fn)
-            store.putBlob(
-                fn.hash,
-                row?.kind ?: BlobKind.FUNCTION,
-                row?.visibility ?: Visibility.PRIVATE,
-                row?.typed,
-                irBytes
-            )
+            // Edges UNCONDITIONALLY, and after the blob exists — `edges.from_hash`
+            // has a foreign key to `blobs`, so this ordering is required.
+            //
+            // It used to sit behind a `continue` that skipped the whole iteration when
+            // the blob already carried IR. Edges are a SEPARATE fact, and "the blob is
+            // already there" says nothing about whether they were recorded — so a
+            // store whose blobs came from an earlier pass, which is exactly how the
+            // stdlib is precompiled, ended up with IR for 1,882 functions and ZERO
+            // call edges. Not an error: `--callers` answered "nothing calls this" for
+            // the entire stdlib, and a dead-code report named every private helper.
+            //
+            // Safe to repeat: an edge is a set member, so re-recording is a no-op.
             recordEdges(store, fn)
         }
     }
@@ -712,11 +716,17 @@ object StorePopulator {
     private fun recordEdges(store: MezzeStore, fn: FunctionIR) {
         val fromHash = fn.hash
         collectEdgesFromNode(fn.body) { toHex, kind ->
-            try {
-                store.addEdge(fromHash, Hash(toHex), kind)
-            } catch (_: Exception) {
-                // Skip invalid hashes (e.g., native function names that aren't hex)
+            // Only a non-hex TARGET is skipped — `Hash`'s init rejects one, and a
+            // native function's name is not a hash. The insert itself is deliberately
+            // NOT guarded: wrapping it swallowed a foreign-key violation and turned
+            // "every edge was dropped" into silence, which is how the empty call
+            // graph went unnoticed.
+            val to = try {
+                Hash(toHex)
+            } catch (_: IllegalArgumentException) {
+                null
             }
+            if (to != null) store.addEdge(fromHash, to, kind)
         }
     }
 
