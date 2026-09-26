@@ -77,7 +77,7 @@ let show_read: { label: Str, r: Result Bytes InteropError } -> {} <Log>
 ## Body of the demo, factored out so `main`'s outer `do` block ends
 ## with a clean expression. Takes the loaded module and drives every
 ## exercise: arithmetic exports, composed calculation, linear memory.
-let run_demo: { mod: WasmForeign } -> {} <Log>
+let run_demo: { mod: WasmForeign } -> {} <Log, *>
   = { mod } -> do
     # ---- Numeric exports ----
     println { msg = "Arithmetic functions:" }
@@ -122,12 +122,11 @@ let run_demo: { mod: WasmForeign } -> {} <Log>
       Ok { val = mem } -> run_memory_demo { mem = mem }
 
 ## Byte-oriented memory round-trip: write ASCII bytes, read them back.
-let run_memory_demo: { mem: WasmForeign } -> {} <Log>
+let run_memory_demo: { mem: WasmForeign } -> {} <Log, *>
   = { mem } -> do
-    let _ = show_int {
-      label = "memory_size",
-      r = mem.memory_size{},
-    }
+    let _ = match mem.memory_size{} is
+      Ok  { val = n }   -> println { msg = "  memory_size = $(int::to_str { n = n })" }
+      Err { error = _ } -> println { msg = "  memory_size: failed" }
     let payload = bytes::from_seq { arr = [72, 105, 44, 32, 87, 65, 83, 77, 33] }
     let _ = show_write {
       label = "write \"Hi, WASM!\" at offset 0",

@@ -193,28 +193,33 @@ impl Result JvmForeign InteropError where {
 ## it appears) — a caller writes `from_int { val = 5 }`, never a `lang` string.
 ## For containers and records, prefer the codec (`x.to_jvm {}`) over building
 ## lists by hand.
+## These box a pure Mezze value into a Foreign — no guest interaction, so they
+## call the box native directly (JVM is first-party stdlib) and stay PURE, usable
+## at module top level. A third-party provider, barred from natives, routes the
+## same boxing through `Polyglot.box_*` under `perform Runtime` instead (which
+## makes its constructors carry the `<*>` performed-marker).
 pub let from_int:   { val: Int   } -> JvmForeign = { val } ->
-  perform Runtime in Polyglot.box_int   { val = val, lang = "jvm" }
+  __native_polyglot_box_int   { val = val, lang = "jvm" }
 pub let from_float: { val: Float } -> JvmForeign = { val } ->
-  perform Runtime in Polyglot.box_float { val = val, lang = "jvm" }
+  __native_polyglot_box_float { val = val, lang = "jvm" }
 pub let from_str:   { val: Str   } -> JvmForeign = { val } ->
-  perform Runtime in Polyglot.box_str   { val = val, lang = "jvm" }
+  __native_polyglot_box_str   { val = val, lang = "jvm" }
 pub let from_bool:  { val: Bool  } -> JvmForeign = { val } ->
-  perform Runtime in Polyglot.box_bool  { val = val, lang = "jvm" }
+  __native_polyglot_box_bool  { val = val, lang = "jvm" }
 pub let null_val:   {}            -> JvmForeign = {} ->
-  perform Runtime in Polyglot.box_null  { lang = "jvm" }
+  __native_polyglot_box_null  { lang = "jvm" }
 
 ## Build a Java-visible list from already-wrapped Foreign elements — an interop
 ## view over the elements, not a copy into `java.util.List`. Backs a codec's
 ## `encode_list`; pass it anywhere a Java method takes an array or Iterable.
 pub let jvm_list: { elems: [JvmForeign] } -> JvmForeign = { elems } ->
-  perform Runtime in Polyglot.box_list { elems = elems, lang = "jvm" }
+  __native_polyglot_box_list { elems = elems, lang = "jvm" }
 
 ## Build a Java-visible mapping from parallel key and value sequences. Companion
 ## to `jvm_list`, backing a codec's `encode_map` / `encode_record`. Keys keep the
 ## order they were given in.
 pub let jvm_dict: { keys: [JvmForeign], vals: [JvmForeign] } -> JvmForeign = { keys, vals } ->
-  perform Runtime in Polyglot.box_dict { keys = keys, vals = vals, lang = "jvm" }
+  __native_polyglot_box_dict { keys = keys, vals = vals, lang = "jvm" }
 
 ## Convenience: look up a host class outside a `perform Jvm` scope — uses the
 ## enclosing Env's host-lookup permissions directly.

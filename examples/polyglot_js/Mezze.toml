@@ -13,7 +13,7 @@ entry = "main"
 #     and `polyglot-js-natives` — put on the wire child's classpath by
 #     `mez sync` so `[polyglot.js]` boots successfully.
 [dependencies]
-mezze-js = "github:mezze-lang/mezze-js@0.1.0"
+mezze-js = "github:mezze-lang/mezze-js@0.5.1"
 
 # `[polyglot.js]` opts this project in to the GraalJS Truffle language.
 # GraalJS ships with no external prerequisites — pure ECMAScript is

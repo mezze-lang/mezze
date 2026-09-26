@@ -13,7 +13,7 @@ entry = "main"
 #     classpath by `mez sync` so `[polyglot.wasm]` boots. The provider ships no
 #     natives — all interop rides the first-party `Polyglot` effect.
 [dependencies]
-mezze-wasm = "github:mezze-lang/mezze-wasm@0.3.0"
+mezze-wasm = "github:mezze-lang/mezze-wasm@0.3.1"
 
 # `[polyglot.wasm]` opts this project in to the GraalWasm Truffle
 # language. GraalWasm ships with no external prerequisites — a raw
