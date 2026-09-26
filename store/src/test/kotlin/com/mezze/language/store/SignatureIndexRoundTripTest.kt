@@ -147,6 +147,56 @@ class SignatureIndexRoundTripTest {
     }
 
     @Test
+    fun `a BUILTIN type keeps its identity, which has no hash`() {
+        // Three identities exist, not two: a declaration has a content hash, a
+        // builtin (`Bool`, `Seq`, `Map`) has only a reserved name and nothing to
+        // hash, and anything else is anonymous. Reading only the hash collapsed the
+        // first two, so `Bool` — which IS a variant, `|True, False|` — came back
+        // anonymous and rendered as `?variant` in every signature mentioning it.
+        val bool = com.mezze.language.ast.PrimitiveTypes.BOOL_TYPE
+        val rebuilt = roundTrip(bool)
+
+        assertEquals("Bool", (rebuilt as MezzeType.VariantType).identity.displayNameOrNull(),
+            "a builtin's name is the only identity signal it has")
+        assertEquals("Bool", SignatureNormalizer.render(rebuilt),
+            "and it must render as `Bool`, not as its arms or a marker")
+    }
+
+    @Test
+    fun `an ANONYMOUS variant renders its arms rather than a marker`() {
+        // The fallback for a variant with no name at all: showing `?variant` lost
+        // the type, and made two different anonymous variants render identically.
+        val v = MezzeType.VariantType(linkedMapOf("Red" to null, "Green" to null))
+        assertEquals("|Green, Red|", SignatureNormalizer.render(roundTrip(v)),
+            "sorted, because an arm set is a set")
+    }
+
+    @Test
+    fun `an effect-polymorphic signature does not render as pure`() {
+        // `allEffectNames` excludes the open tail by design, so rendering only those
+        // names turned `-> Int <...>` into `-> Int` — a different signature making
+        // the opposite claim.
+        val type = MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(emptyMap()),
+            returnType = MezzeType.IntType,
+            effects = MezzeType.EffectRow.simple(emptySet(), rowVar = RowVar.userOpen()),
+        )
+        assertEquals("{} -> Int <...>", SignatureNormalizer.render(roundTrip(type)))
+    }
+
+    @Test
+    fun `the performed marker renders`() {
+        val type = MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(emptyMap()),
+            returnType = MezzeType.IntType,
+            effects = MezzeType.EffectRow.simple(setOf("Log"), performed = true),
+        )
+        assertEquals("{} -> Int <Log, *>", SignatureNormalizer.render(roundTrip(type)),
+            "`*` says the effect is handled HERE; dropping it changes what the " +
+                "signature promises a caller")
+    }
+
+    @Test
     fun `a newtype round-trips with its wrapped type`() {
         val type = MezzeType.NewtypeType(
             name = "UserId", constructor = "UserId", wrappedType = MezzeType.IntType

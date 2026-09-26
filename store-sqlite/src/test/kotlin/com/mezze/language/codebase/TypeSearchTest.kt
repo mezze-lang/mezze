@@ -160,6 +160,52 @@ class TypeSearchTest {
             "a function that WRAPS its argument does not answer a query for one that returns it")
     }
 
+    // ---- partial search, via an open record --------------------------------
+
+    @Test
+    fun `an open record query matches a candidate with EXTRA fields`() {
+        // This is what "partial search" means in Mezze: parameters are records, so
+        // "takes a sequence and returns an Int, I do not care what else it takes"
+        // is spelled `{ xs: ['a], ... } -> Int`. The row variable is the mechanism
+        // the language already has for "and possibly more".
+        decl("count", run {
+            val a = MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName("'a"))
+            MezzeType.FunctionType(
+                paramType = MezzeType.RecordType(linkedMapOf(
+                    "xs" to MezzeType.TypeApplication("Seq", listOf(a)),
+                    "p" to MezzeType.FunctionType(
+                        paramType = MezzeType.RecordType(linkedMapOf("x" to a)),
+                        returnType = MezzeType.TypeApplication("Bool", emptyList()),
+                    ),
+                )),
+                returnType = MezzeType.IntType,
+            )
+        })
+
+        assertTrue("count" in found("{ xs: ['a], ... } -> Int"),
+            "an open record must absorb the fields the query did not mention")
+    }
+
+    @Test
+    fun `a CLOSED record query does not match a candidate with extra fields`() {
+        // The boundary. `{ xs: ['a] } -> Int` asks for a function of exactly one
+        // field, and answering it with a two-field function would be wrong — which
+        // is why partial search has to be asked for rather than assumed.
+        decl("count", run {
+            val a = MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName("'a"))
+            MezzeType.FunctionType(
+                paramType = MezzeType.RecordType(linkedMapOf(
+                    "xs" to MezzeType.TypeApplication("Seq", listOf(a)),
+                    "p" to MezzeType.IntType,
+                )),
+                returnType = MezzeType.IntType,
+            )
+        })
+
+        assertTrue(found("{ xs: ['a] } -> Int").isEmpty(),
+            "a closed query means exactly these fields")
+    }
+
     // ---- the unsound pre-filters, stated as tests ---------------------------
 
     @Test

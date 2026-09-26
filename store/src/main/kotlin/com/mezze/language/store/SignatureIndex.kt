@@ -454,10 +454,29 @@ object SignatureIndex {
     fun render(rows: SignatureRows): String? =
         if (rows.isEmpty) null else SignatureNormalizer.render(rebuild(rows))
 
-    private fun identityOf(row: TypeNodeRow): TypeIdentity =
-        row.typeHash?.let { TypeIdentity.Declared(it, row.label ?: "") } ?: TypeIdentity.Anonymous
+    /**
+     * Rebuild a node's identity through THE canonical factory.
+     *
+     * There are three identities, not two: a declaration has a content hash, a
+     * BUILTIN (`Bool`, `Seq`, `Map` — nothing to hash) has only a reserved name,
+     * and anything else is anonymous. Reading only the hash collapsed the first two
+     * together, so `Bool` — a builtin VARIANT — came back anonymous and rendered as
+     * `?variant` in every signature that mentioned it.
+     *
+     * `derive` is where that decision already lives, so this asks it rather than
+     * re-deciding and getting a different answer.
+     */
+    private fun identityOf(row: TypeNodeRow): TypeIdentity {
+        val name = row.label ?: return TypeIdentity.Anonymous
+        return TypeIdentity.derive(name, row.typeHash, allowBuiltin = true)
+    }
 
     private fun TypeIdentity.hashOrNull(): Hash? = (this as? TypeIdentity.Declared)?.hash
-    /** Display metadata only — [TypeIdentity.Declared.hash] is the identity. */
-    private fun TypeIdentity.nameOrNull(): String? = (this as? TypeIdentity.Declared)?.displayName
+
+    /**
+     * The identity's NAME — display metadata, never an identity input (the hash is).
+     * Covers Builtin as well as Declared: a builtin's name is the only signal it
+     * has, so dropping it loses the type.
+     */
+    private fun TypeIdentity.nameOrNull(): String? = displayNameOrNull()
 }

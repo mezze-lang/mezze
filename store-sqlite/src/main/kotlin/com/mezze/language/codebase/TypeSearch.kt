@@ -1,6 +1,7 @@
 package com.mezze.language.codebase
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.RowVar
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.store.DeclKind
 import com.mezze.language.store.DeclRow
@@ -96,6 +97,44 @@ object TypeSearch {
         return TypeAnnotationConverter.convert(annotation)
     }
 
+    /**
+     * Give every arrow in a QUERY an open effect row.
+     *
+     * An effect row in a query means "at least these", not "exactly these", for two
+     * reasons. A query silent about effects is silent, not a demand for purity: a
+     * person searching `{ msg: Str } -> {}` wants to see `println`, and making them
+     * write `<...>` to find anything effectful is a papercut with no upside. And a
+     * query naming `<Log>` means "logs", so a function that also touches the
+     * filesystem still answers it.
+     *
+     * Without this the two halves of the search disagreed: the SQL filter tested
+     * "candidate performs at least the named effects" while unification demanded an
+     * exact row, so a query could pass the filter and then be rejected.
+     *
+     * The cost, stated plainly: you cannot currently ask for "pure only". That
+     * needs a flag rather than a spelling, since omitting the row is how you say
+     * "do not care".
+     */
+    private fun effectPolymorphic(type: MezzeType): MezzeType = when (type) {
+        is MezzeType.FunctionType -> type.copy(
+            paramType = effectPolymorphic(type.paramType),
+            returnType = effectPolymorphic(type.returnType),
+            effects = (type.effects ?: MezzeType.EffectRow.simple(emptySet()))
+                .let { row -> if (row.rowVar != null) row else row.copy(rowVar = RowVar.userOpen()) },
+        )
+        is MezzeType.RecordType -> type.copy(
+            fields = type.fields.mapValues { (_, v) -> effectPolymorphic(v) }
+        )
+        is MezzeType.VariantType -> type.copy(
+            constructors = type.constructors.mapValues { (_, v) -> v?.let { effectPolymorphic(it) } }
+        )
+        is MezzeType.TypeApplication -> type.copy(args = type.args.map { effectPolymorphic(it) })
+        is MezzeType.NewtypeType -> type.copy(wrappedType = effectPolymorphic(type.wrappedType))
+        is MezzeType.VarType, is MezzeType.EffectRow,
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+        is MezzeType.CharType, is MezzeType.FracType, is MezzeType.BytesType -> type
+    }
+
     fun search(store: MezzeStore, query: MezzeType, limit: Int = 25): List<Hit> {
         val required = requirements(query)
 
@@ -112,7 +151,7 @@ object TypeSearch {
         }
 
         return candidates.asSequence()
-            .mapNotNull { decl -> judge(store, decl, query) }
+            .mapNotNull { decl -> judge(store, decl, effectPolymorphic(query)) }
             .sortedWith(compareBy({ it.quality.ordinal }, { it.bindings }, { it.decl.declName }))
             .take(limit)
             .toList()
@@ -145,7 +184,17 @@ object TypeSearch {
         if (rows.isEmpty) return null
         val candidate = SignatureIndex.rebuild(rows)
 
-        val result = unify(query, candidate)
+        // ORDER MATTERS, and it is not symmetry. `unify(a, b)` follows the
+        // call-argument convention: `a` is the VALUE being offered and `b` is the
+        // DEMAND it must satisfy, and `directionalParamFieldCheck` enforces that
+        // every field the DEMAND declares is present in the VALUE (#11).
+        //
+        // So the candidate goes first: it is what is on offer, and the query is the
+        // demand it has to meet. Written the other way round — which is how this
+        // started — the QUERY had to supply every field the candidate declares, and
+        // `{ xs: ['a], ... } -> Int` could never match `{ xs, p } -> Int`. That is
+        // exactly partial search, and it was impossible rather than merely missing.
+        val result = unify(candidate, query)
         if (result !is UnificationResult.Success) return null
 
         // WHICH side had to be instantiated is the ranking. A binding whose target

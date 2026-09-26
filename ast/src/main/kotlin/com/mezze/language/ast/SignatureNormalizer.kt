@@ -75,7 +75,16 @@ object SignatureNormalizer {
                 }
             }
 
-            is MezzeType.VariantType -> type.identity.displayNameOrNull() ?: "?variant"
+            is MezzeType.VariantType ->
+                // A named variant shows its name; an ANONYMOUS one has no name to
+                // show, so it shows its arms — which is what it is. Rendering a
+                // marker instead lost the type entirely: `{ p: {x: 'a} -> ?variant }`
+                // tells a reader nothing, and two different anonymous variants
+                // rendered identically.
+                type.identity.displayNameOrNull() ?: run {
+                    val arms = type.constructors.keys.sorted().joinToString(", ")
+                    if (type.isOpen) "|$arms, ...|" else "|$arms|"
+                }
 
             is MezzeType.NewtypeType -> type.identity.displayNameOrNull() ?: "?newtype"
 
@@ -98,8 +107,18 @@ object SignatureNormalizer {
                     .sorted()
                     .joinToString(", ")
                 val withClause = if (constraints.isEmpty()) "" else " with $constraints"
-                val effects = type.effects?.allEffectNames?.sorted().orEmpty()
-                val effectClause = if (effects.isEmpty()) "" else " <${effects.joinToString(", ")}>"
+                // `allEffectNames` deliberately excludes the open-row tail and the
+                // `*` performed marker, so rendering only those names showed an
+                // effect-POLYMORPHIC function as pure: `-> Int <...>` displayed as
+                // `-> Int`, which is a different signature and the opposite claim.
+                val row = type.effects
+                val names = row?.allEffectNames?.sorted().orEmpty()
+                val parts = buildList {
+                    addAll(names)
+                    if (row?.rowVar != null) add("...")
+                    if (row?.performed == true) add("*")
+                }
+                val effectClause = if (parts.isEmpty()) "" else " <${parts.joinToString(", ")}>"
                 "$params$withClause -> $returns$effectClause"
             }
 
