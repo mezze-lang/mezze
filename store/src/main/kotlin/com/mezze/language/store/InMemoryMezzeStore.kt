@@ -270,6 +270,14 @@ class InMemoryMezzeStore : MezzeStore {
             } == true
         }
 
+    // Substring over name and doc, matching the SQL store's SEMANTICS. The index
+    // is what differs (trigram FTS5 there, a scan here); the answer must not.
+    override fun findDeclsByText(text: String): List<DeclRow> =
+        decls.filter { row ->
+            row.declName.contains(text, ignoreCase = true) ||
+                row.doc?.contains(text, ignoreCase = true) == true
+        }
+
     override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
         decls.filter { row ->
             val residual = residualNodeIds(row.hash)

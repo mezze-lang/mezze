@@ -110,6 +110,63 @@ class SchemaUpgradeTest {
         )
     }
 
+    /**
+     * The ATTACHED databases are version-checked too.
+     *
+     * `ensureStdlibFile` used to be `if (exists()) return`, despite its own doc
+     * promising "if missing or version-mismatched". So a `stdlib.sqlite` written by
+     * an older schema survived every upgrade — and silently: the attach path creates
+     * a missing table EMPTY, so a newly added index returned nothing for the entire
+     * stdlib with no error to notice. The project's own store was checked and
+     * rebuilt; the two databases a user cannot rebuild themselves were not.
+     */
+    @Test
+    fun `a stale attached stdlib is replaced, not accepted`(@TempDir tempDir: Path) {
+        val root = tempDir.toFile()
+        File(root, "Mezze.toml").writeText("[package]\nname = \"t\"\n")
+
+        SQLiteMezzeStore.openProject(root).use { }
+        val stdlib = File(root, ".mez/store/stdlib.sqlite")
+        assertTrue(stdlib.exists(), "openProject must materialise a stdlib database")
+
+        stampVersion(stdlib, SQLiteMezzeStore.SCHEMA_VERSION - 1)
+        assertEquals(
+            (SQLiteMezzeStore.SCHEMA_VERSION - 1).toString(),
+            readVersion(stdlib),
+            "the stamp must have taken, or the rest of this test proves nothing",
+        )
+
+        SQLiteMezzeStore.openProject(root).use { }
+
+        assertEquals(
+            SQLiteMezzeStore.SCHEMA_VERSION.toString(),
+            readVersion(stdlib),
+            "reopening must replace a stdlib database from an older schema",
+        )
+    }
+
+    @Test
+    fun `an unreadable attached stdlib is replaced rather than crashing`(@TempDir tempDir: Path) {
+        val root = tempDir.toFile()
+        File(root, "Mezze.toml").writeText("[package]\nname = \"t\"\n")
+        SQLiteMezzeStore.openProject(root).use { }
+
+        val stdlib = File(root, ".mez/store/stdlib.sqlite")
+        stdlib.writeText("this is not a database")
+
+        SQLiteMezzeStore.openProject(root).use { }
+        assertEquals(SQLiteMezzeStore.SCHEMA_VERSION.toString(), readVersion(stdlib),
+            "a corrupt file is not a usable store of any version")
+    }
+
+    private fun readVersion(db: File): String? =
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}").use { conn ->
+            conn.createStatement().use { s ->
+                s.executeQuery("SELECT value FROM metadata WHERE key = 'schema_version'")
+                    .use { rs -> if (rs.next()) rs.getString(1) else null }
+            }
+        }
+
     @Test
     fun `the signature tables exist after a rebuild`(@TempDir tempDir: Path) {
         val root = tempDir.toFile()

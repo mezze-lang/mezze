@@ -224,6 +224,8 @@ class ChainedMezzeStore(
         all.flatMap { it.findDeclsByMetadata(key, value) }.distinct()
     override fun findDeclsByEffect(effectName: String): List<DeclRow> =
         all.flatMap { it.findDeclsByEffect(effectName) }.distinct()
+    override fun findDeclsByText(text: String): List<DeclRow> =
+        all.flatMap { it.findDeclsByText(text) }.distinct()
     override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
         all.flatMap { it.findDeclsByConstraint(abilityName) }.distinct()
     override fun findDeclsMentioningType(typeHash: Hash): List<DeclRow> =

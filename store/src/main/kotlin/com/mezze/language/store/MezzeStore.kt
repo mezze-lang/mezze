@@ -263,6 +263,19 @@ interface MezzeStore : AutoCloseable {
     fun findDeclsByConstraint(abilityName: String): List<DeclRow>
 
     /**
+     * Declarations whose NAME or doc comment contains [text], as a substring.
+     *
+     * Spans every declaration kind, not just `let`: an ability, an effect or a type
+     * is a thing you look for by name too.
+     *
+     * Substring, not prefix. `searchDeclsByName` answers "starts with", which only
+     * helps when you remember how a name BEGINS — and half-remembering the middle
+     * (`sea` for `binary_search_insert_point`) is the more common case. Backed by a
+     * trigram index, so it is not a table scan.
+     */
+    fun findDeclsByText(text: String): List<DeclRow>
+
+    /**
      * Declarations whose signature mentions the type whose declaration hashes to
      * [typeHash], anywhere — parameter, return, nested inside a container.
      *

@@ -118,7 +118,7 @@ class SQLiteMezzeStore private constructor(
         //    now hashes its EFFECTS and ABILITY CONSTRAINTS, which it did not
         //    before — `{x: Int} -> Int` and `{x: Int} -> Int <IO>` used to share
         //    one hash, as did `{x: 'a} -> 'a` and `{x: 'a} -> 'a with Show 'a`.
-        const val SCHEMA_VERSION = 13
+        const val SCHEMA_VERSION = 14
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of
@@ -254,7 +254,17 @@ class SQLiteMezzeStore private constructor(
          * same blobs, same metadata.
          */
         private fun ensureStdlibFile(stdlibFile: File) {
-            if (stdlibFile.exists()) return
+            // The version check the doc above has always claimed. It used to be
+            // `if (exists()) return`, so a stdlib.sqlite written by an OLDER schema
+            // survived every upgrade — and the failure was silent: the attach path
+            // creates missing tables EMPTY, so a new index (signatures, text) simply
+            // returned nothing for the entire stdlib, with no error to notice. The
+            // project's own store is version-checked and rebuilt; the two databases
+            // a user CANNOT rebuild themselves were the ones going unchecked.
+            if (stdlibFile.exists()) {
+                if (schemaVersionOf(stdlibFile) == SCHEMA_VERSION) return
+                stdlibFile.delete()
+            }
             stdlibFile.parentFile?.mkdirs()
             val stream = SQLiteMezzeStore::class.java.classLoader
                 .getResourceAsStream(STDLIB_FILE)
@@ -267,7 +277,35 @@ class SQLiteMezzeStore private constructor(
                 return
             }
             stream.use { it.copyTo(stdlibFile.outputStream()) }
+
+            // If the BUNDLED copy is also behind, nothing here can fix it — the file
+            // ships with the binary. Say so rather than letting every stdlib query
+            // quietly answer "nothing found": a wrong answer that looks like a
+            // correct one is the worst outcome available.
+            val materialised = schemaVersionOf(stdlibFile)
+            if (materialised != SCHEMA_VERSION) {
+                System.err.println(
+                    "[mezze] WARNING: the bundled stdlib index is schema $materialised, " +
+                        "but this build expects $SCHEMA_VERSION. Stdlib results will be " +
+                        "incomplete until the stdlib is recompiled."
+                )
+            }
         }
+
+        /** The schema version recorded in [file], or 0 if it has none / cannot be read. */
+        private fun schemaVersionOf(file: File): Int =
+            try {
+                DriverManager.getConnection("jdbc:sqlite:file:${file.absolutePath}?mode=ro").use { conn ->
+                    conn.createStatement().use { s ->
+                        s.executeQuery("SELECT value FROM metadata WHERE key = 'schema_version'")
+                            .use { rs -> if (rs.next()) rs.getString(1)?.toIntOrNull() ?: 0 else 0 }
+                    }
+                }
+            } catch (_: Exception) {
+                // Unreadable or table-less means "not a usable store of this version",
+                // which is exactly what 0 says. The caller replaces it either way.
+                0
+            }
 
         /**
          * Ensure `deps.sqlite` exists so ATTACH and UNION ALL queries
@@ -495,6 +533,21 @@ class SQLiteMezzeStore private constructor(
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
+            // Full-text index over names and doc comments. Mirrors the primary
+            // schema below.
+            s.executeUpdate("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS $alias.decl_text USING fts5(
+                    module_path UNINDEXED,
+                    decl_kind   UNINDEXED,
+                    decl_name,
+                    doc,
+                    tokenize='trigram'
+                )
+            """.trimIndent())
+            s.executeUpdate(
+                "INSERT INTO $alias.decl_text(decl_text, rank) " +
+                    "VALUES('rank', 'bm25(0.0, 0.0, 10.0, 1.0)')"
+            )
             // Signatures: the decl's type as a tree, one row per node, plus the
             // effect and constraint junctions. Mirrors the primary schema below;
             // see there for what each column means.
@@ -637,19 +690,31 @@ class SQLiteMezzeStore private constructor(
         //
         // `metadata` is kept: the schema_version write follows this. `sqlite_%`
         // tables belong to SQLite itself and are not ours to drop.
-        val tables = conn.createStatement().use { s ->
+        fun tablesWhere(predicate: String) = conn.createStatement().use { s ->
             s.executeQuery(
                 """
                 SELECT name FROM sqlite_master
                 WHERE type = 'table'
                   AND name <> 'metadata'
                   AND name NOT LIKE 'sqlite_%'
+                  AND $predicate
                 """.trimIndent()
             ).use { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }
         }
+
         conn.createStatement().use { s ->
             s.executeUpdate("PRAGMA foreign_keys=OFF")
-            for (table in tables) s.executeUpdate("DROP TABLE IF EXISTS \"$table\"")
+            // VIRTUAL tables first. An FTS5 table owns a family of shadow tables
+            // (`_data`, `_idx`, `_content`, `_docsize`, `_config`) which are real
+            // rows in sqlite_master but CANNOT be dropped directly — SQLite raises
+            // "may not be dropped" — and which disappear with their parent. Dropping
+            // the virtual table first makes them gone before the second pass looks.
+            for (table in tablesWhere("sql LIKE 'CREATE VIRTUAL TABLE%'")) {
+                s.executeUpdate("DROP TABLE IF EXISTS \"$table\"")
+            }
+            for (table in tablesWhere("sql NOT LIKE 'CREATE VIRTUAL TABLE%'")) {
+                s.executeUpdate("DROP TABLE IF EXISTS \"$table\"")
+            }
             s.executeUpdate("PRAGMA foreign_keys=ON")
         }
     }
@@ -821,6 +886,43 @@ class SQLiteMezzeStore private constructor(
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_type_node_constraints_name ON type_node_constraints(ability_name)")
+
+            // ----------------------------------------------------------------
+            // TEXT
+            //
+            // Names and doc comments, searchable by SUBSTRING. `decls` already
+            // holds both, but only exactly: finding `binary_search_insert_point`
+            // meant knowing how it starts, because a prefix `LIKE` is all a plain
+            // column supports and `LIKE '%sea%'` cannot use an index at all.
+            //
+            // tokenize='trigram' is the point. The default tokenizer matches whole
+            // words, so `sea` finds nothing in `binary_search_insert_point`;
+            // trigram indexing makes any three-or-more-character infix findable,
+            // which is what someone half-remembering a name actually types.
+            // SqliteCapabilitiesTest pins that the bundled driver has it.
+            //
+            // The identifying columns are UNINDEXED: they are how a hit joins back
+            // to `decls`, not something to search.
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                CREATE VIRTUAL TABLE decl_text USING fts5(
+                    module_path UNINDEXED,
+                    decl_kind   UNINDEXED,
+                    decl_name,
+                    doc,
+                    tokenize='trigram'
+                )
+            """.trimIndent())
+            // Rank weights live ON THE TABLE, not in the query. `bm25(...)` can only
+            // be called with an UNQUALIFIED, unaliased table reference — probed
+            // directly — and every decl query here is qualified (`stdlib.decls`)
+            // because three databases are attached. Persisting the weights lets the
+            // query order by the bare `rank` column, which does accept a qualified
+            // FROM. One weight per column, unindexed ones included positionally:
+            // a name hit outranks a doc-comment hit 10:1.
+            s.executeUpdate(
+                "INSERT INTO decl_text(decl_text, rank) VALUES('rank', 'bm25(0.0, 0.0, 10.0, 1.0)')"
+            )
 
             // ----------------------------------------------------------------
             // LOOKUPS & CROSS-REFS
@@ -1823,6 +1925,115 @@ class SQLiteMezzeStore private constructor(
             setString(10, doc)
             setString(11, metadata)
             executeUpdate()
+        }
+        // The text row is written HERE rather than by the caller, so the two cannot
+        // drift: a decl that exists but is unsearchable, or a text hit pointing at a
+        // decl that no longer exists, are both worse than either table alone.
+        // DELETE first because FTS5 has no UPSERT — re-indexing a renamed or
+        // re-documented decl would otherwise accumulate a row per version.
+        deleteDeclTextStmt.apply {
+            setString(1, modulePath)
+            setString(2, declKind.dbValue)
+            setString(3, declName)
+            executeUpdate()
+        }
+        putDeclTextStmt.apply {
+            setString(1, modulePath)
+            setString(2, declKind.dbValue)
+            setString(3, declName)
+            setString(4, doc ?: "")
+            executeUpdate()
+        }
+    }
+
+    private val putDeclTextStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            "INSERT INTO decl_text (module_path, decl_kind, decl_name, doc) VALUES (?, ?, ?, ?)"
+        )
+    }
+
+    private val deleteDeclTextStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            "DELETE FROM decl_text WHERE module_path = ? AND decl_kind = ? AND decl_name = ?"
+        )
+    }
+
+    // Joined back to `decls` on the three identifying columns rather than on a
+    // hash: content-addressing means two modules sharing identical content share a
+    // hash, and a text hit is about one declaration in one place.
+    //
+    // `ORDER BY rank` is FTS5's bm25 relevance. A name hit should outrank a
+    // doc-comment hit, which is what weighting the columns does — a name is what
+    // you are looking for, a doc comment is where it happened to be mentioned.
+    private val findDeclsByTextStmt: PreparedStatement by lazy {
+        // Relevance is SELECTED per branch and sorted once, after the union:
+        // `ORDER BY` inside a UNION ALL branch is a SQLite syntax error. The score
+        // comes from the bare `rank` column rather than a `bm25(...)` call, because
+        // bm25 rejects a qualified or aliased table and every query here is
+        // qualified across three attached databases. The weights are persisted on
+        // the table (see the schema) so `rank` already means "name beats doc".
+        // Negative is better, so a plain ascending sort is right.
+        // No alias on the FTS table, and MATCH names it bare. Both are forced, and
+        // both were probed against SQLite rather than guessed: `t MATCH ?` and
+        // `t.decl_text MATCH ?` are errors, and a qualified `<DB>.decl_text MATCH`
+        // is too — the table must be referenced by its bare name in MATCH and in
+        // column positions, even though FROM qualifies it.
+        //
+        // The union is WRAPPED in an outer select because ORDER BY across a compound
+        // SELECT cannot resolve these column names.
+        conn.prepareStatement(
+            "SELECT * FROM (" + unionAll("""
+                SELECT $DECL_QUALIFIED_COLUMNS, decl_text.rank AS relevance
+                FROM <DB>.decl_text
+                JOIN <DB>.decls d
+                  ON d.module_path = decl_text.module_path
+                 AND d.decl_kind   = decl_text.decl_kind
+                 AND d.decl_name   = decl_text.decl_name
+                WHERE decl_text MATCH ?
+            """.trimIndent()) + ") ORDER BY relevance, module_path, decl_name"
+        )
+    }
+
+    // A trigram index cannot answer a query shorter than a trigram, so a one- or
+    // two-character term goes through LIKE instead. This is not a fallback for
+    // failure: it is the only index that can serve that input, and the alternative
+    // is a search that silently finds NOTHING for `x` — which reads as "no such
+    // declaration" rather than "ask differently". Unindexed and therefore a scan,
+    // which is acceptable for a term this short precisely because nobody types one
+    // expecting a small result set.
+    private val findDeclsByShortTextStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            "SELECT * FROM (" + unionAll("""
+                SELECT $DECL_QUALIFIED_COLUMNS
+                FROM <DB>.decls d
+                WHERE d.decl_name LIKE ? ESCAPE '\'
+                   OR d.doc LIKE ? ESCAPE '\'
+            """.trimIndent()) + ") ORDER BY module_path, decl_name"
+        )
+    }
+
+    @Synchronized
+    override fun findDeclsByText(text: String): List<DeclRow> {
+        if (text.isEmpty()) return emptyList()
+
+        if (text.length < 3) {
+            val pattern = "%${escapeLikePattern(text)}%"
+            for (db in 0..2) {
+                findDeclsByShortTextStmt.setString(db * 2 + 1, pattern)
+                findDeclsByShortTextStmt.setString(db * 2 + 2, pattern)
+            }
+            return findDeclsByShortTextStmt.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(rs.toDeclRow()) }
+            }
+        }
+
+        // FTS5 treats bare punctuation and bare words like OR/NOT as QUERY SYNTAX. A
+        // user searching `sort_by` or `a OR b` means those characters, so the term is
+        // quoted — otherwise the search is a syntax error rather than a search.
+        val quoted = "\"" + text.replace("\"", "\"\"") + "\""
+        for (db in 0..2) findDeclsByTextStmt.setString(db + 1, quoted)
+        return findDeclsByTextStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
         }
     }
 
