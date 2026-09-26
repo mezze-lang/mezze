@@ -82,6 +82,77 @@ class SqliteCapabilitiesTest {
         }
     }
 
+    // ---- what is NOT available, and the escape hatch that is ----------------
+    //
+    // These record the SEARCH-extension landscape of the bundled driver, measured
+    // rather than assumed. They assert ABSENCE on purpose: if one starts failing, a
+    // driver upgrade has opened an option that is currently closed, and that is
+    // worth noticing rather than discovering by accident.
+
+    @Test
+    fun `spellfix1 is NOT bundled, so did-you-mean cannot be done in SQL`() {
+        // SQLite's own fuzzy-matching extension (spellfix1, and its `editdist3`
+        // function) lives in ext/misc and is not compiled into this build. The
+        // consequence is not "no fuzzy matching" — it is that fuzzy matching happens
+        // in Kotlin (`LevenshteinSuggest`, which the compiler's diagnostics already
+        // use) instead of in a query.
+        withDb { conn ->
+            for (sql in listOf(
+                "CREATE VIRTUAL TABLE probe USING spellfix1",
+                "SELECT editdist3('kitten', 'sitting')",
+            )) {
+                val failed = try {
+                    conn.createStatement().use { it.execute(sql) }; false
+                } catch (_: Exception) { true }
+                assertTrue(failed, "spellfix1 appears to be available now: $sql")
+            }
+        }
+    }
+
+    @Test
+    fun `REGEXP is not provided by SQLite itself`() {
+        // SQLite defines the REGEXP operator's SYNTAX but ships no implementation —
+        // it is a hook for the host program. So a regex search over names needs a
+        // registered function, not an extension.
+        withDb { conn ->
+            val failed = try {
+                conn.createStatement().use { it.executeQuery("SELECT 'abc' REGEXP 'b'") }; false
+            } catch (_: Exception) { true }
+            assertTrue(failed, "REGEXP is implemented now — a regex name search became possible")
+        }
+    }
+
+    @Test
+    fun `loadable extensions are compiled in but NOT authorized`() {
+        // ENABLE_LOAD_EXTENSION is in the compile options, yet `load_extension()`
+        // returns "not authorized": the JDBC driver blocks it at the authorizer
+        // unless explicitly enabled. So a third-party search extension
+        // (sqlite-vec for vector search, say) is not simply a dependency — it needs
+        // enabling AND a platform-specific binary shipped beside a native image.
+        withDb { conn ->
+            val failed = try {
+                conn.createStatement().use { it.executeQuery("SELECT load_extension('probe')") }; false
+            } catch (_: Exception) { true }
+            assertTrue(failed, "extension loading is permitted now")
+        }
+    }
+
+    @Test
+    fun `a custom function CAN be registered, which is the way round every gap above`() {
+        // The escape hatch, verified: anything SQLite lacks (edit distance, regexp,
+        // a domain-specific ranker) can be a Kotlin function registered on the
+        // connection. No .so, no per-platform artifact.
+        withDb { conn ->
+            org.sqlite.Function.create(conn, "mezze_capability_probe", object : org.sqlite.Function() {
+                override fun xFunc() { result("ok") }
+            })
+            val v = conn.createStatement().use { s ->
+                s.executeQuery("SELECT mezze_capability_probe()").use { rs -> rs.next(); rs.getString(1) }
+            }
+            assertEquals("ok", v)
+        }
+    }
+
     @Test
     fun `json1 is available, which the metadata queries already rely on`() {
         // P-2's metadata search is built on this. Pinned alongside the others so the

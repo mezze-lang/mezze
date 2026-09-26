@@ -2,6 +2,7 @@ package com.mezze.language.cli.commands
 
 import com.mezze.language.codebase.TypeSearch
 import com.mezze.language.store.SignatureIndex
+import com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
 import com.mezze.language.parser.ParseException
 import java.io.File
 
@@ -113,8 +114,29 @@ class SearchCommand {
                     println("${Glyphs.TIP} Nothing is indexed yet — run `mez check` or `mez index` first.")
                 } else if (mode == Mode.NAME) {
                     println()
-                    println("${Glyphs.TIP} $indexed declarations searched. Names and doc comments are " +
-                        "matched by substring, so try a shorter fragment.")
+                    // Did-you-mean, from the compiler's own suggester — the same one
+                    // behind "Did you mean `x`?" in a type error, so a near miss
+                    // reads the same way here as it does there.
+                    //
+                    // Computed in Kotlin, not in SQL: SQLite's fuzzy extension
+                    // (spellfix1/editdist3) is not in the bundled build, and over a
+                    // codebase-sized name list the difference does not matter.
+                    // EVERY declaration name, across every kind. Using
+                    // `searchDeclsByName("")` for this silently considered only the
+                    // first 200 alphabetically — that query is capped — so a
+                    // suggestion for `identiti` never saw `identity` and the hint
+                    // just never appeared.
+                    val names = com.mezze.language.store.DeclKind.entries
+                        .flatMap { kind -> store.getDeclsByKind(kind) }
+                        .map { it.declName }
+                        .distinct()
+                    val suggestion = LevenshteinSuggest.closest(query, names)
+                    if (suggestion != null) {
+                        println("${Glyphs.TIP} Did you mean `$suggestion`?")
+                    } else {
+                        println("${Glyphs.TIP} $indexed declarations searched. Names and doc comments are " +
+                            "matched by substring, so try a shorter fragment.")
+                    }
                 } else {
                     println()
                     println("${Glyphs.TIP} $indexed declarations searched. Put a type variable where you " +

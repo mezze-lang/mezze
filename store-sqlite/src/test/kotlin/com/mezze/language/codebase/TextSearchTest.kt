@@ -208,6 +208,33 @@ class TextSearchTest {
         assertTrue(found("%").isEmpty(), "`%` must not match every declaration")
     }
 
+    // ---- the version-shift wipe must not CORRUPT the index ------------------
+
+    @Test
+    fun `wiping the typecheck caches leaves a usable text index`() {
+        // `wipeTypecheckCaches` runs on every `mez` version shift — the ordinary
+        // path after an upgrade. It enumerated sqlite_master and deleted from each
+        // table, which for FTS5 includes the SHADOW tables (`_data`, `_idx`,
+        // `_content`, `_docsize`, `_config`). Deleting from one directly destroys
+        // the structure record, and the next search fails with
+        //
+        //     invalid fts5 file format (found 0, expected 4 or 5) - run 'rebuild'
+        //
+        // i.e. a CORRUPT index rather than an empty one — found by upgrading the
+        // binary and running a search, not by the suite.
+        decl("before_wipe", doc = "will be removed")
+        assertEquals(listOf("before_wipe"), found("before_wipe"))
+
+        store.wipeTypecheckCaches()
+
+        // Readable and empty, not broken.
+        assertTrue(found("before_wipe").isEmpty(), "the wipe must clear the text index")
+        // And still writable afterwards, which a corrupt index is not.
+        store.putModule("app", "app.mz", "srchash")
+        decl("after_wipe")
+        assertEquals(listOf("after_wipe"), found("after_wipe"))
+    }
+
     // ---- the schema survives a rebuild (FTS5 shadow tables) -----------------
 
     @Test

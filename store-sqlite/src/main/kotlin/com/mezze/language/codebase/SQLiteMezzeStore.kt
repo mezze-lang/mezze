@@ -2633,15 +2633,41 @@ class SQLiteMezzeStore private constructor(
     override fun wipeTypecheckCaches() {
         val preserved = setOf("modules", "parsed_modules", "metadata", "schema_version", "sqlite_sequence")
         transaction {
-            val tables = mutableListOf<String>()
+            // Virtual tables and their SHADOW tables have to be told apart here.
+            //
+            // An FTS5 table owns `<name>_data`, `_idx`, `_content`, `_docsize` and
+            // `_config`, all of which are ordinary rows in sqlite_master. Deleting
+            // from one directly destroys the index's structure record, and the next
+            // MATCH fails with "invalid fts5 file format (found 0, expected 4 or 5)"
+            // — a CORRUPT table, not an empty one. The virtual table must be emptied
+            // through itself, which makes SQLite update the shadows correctly.
+            //
+            // This wipe predates any virtual table in the schema, so it deleted from
+            // whatever sqlite_master listed. Adding the text index made that a
+            // data-corruption bug, reached by the ordinary path of upgrading `mez`
+            // and running a query.
+            val virtualTables = mutableListOf<String>()
+            val plainTables = mutableListOf<String>()
             conn.createStatement().use { s ->
-                s.executeQuery("SELECT name FROM main.sqlite_master WHERE type='table'").use { rs ->
-                    while (rs.next()) tables.add(rs.getString(1))
+                s.executeQuery(
+                    "SELECT name, COALESCE(sql, '') FROM main.sqlite_master WHERE type='table'"
+                ).use { rs ->
+                    while (rs.next()) {
+                        val name = rs.getString(1)
+                        if (rs.getString(2).startsWith("CREATE VIRTUAL TABLE")) virtualTables.add(name)
+                        else plainTables.add(name)
+                    }
                 }
             }
+            val shadows = plainTables.filter { t -> virtualTables.any { t.startsWith("${it}_") } }.toSet()
+
             conn.createStatement().use { s ->
-                for (t in tables) {
+                for (t in virtualTables) {
                     if (t in preserved) continue
+                    s.executeUpdate("DELETE FROM main.\"$t\"")
+                }
+                for (t in plainTables) {
+                    if (t in preserved || t in shadows) continue
                     s.executeUpdate("DELETE FROM main.\"$t\"")
                 }
             }
