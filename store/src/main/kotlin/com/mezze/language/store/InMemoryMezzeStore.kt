@@ -208,12 +208,11 @@ class InMemoryMezzeStore : MezzeStore {
     override fun putDecl(
         modulePath: String, declName: String, declKind: DeclKind, sourceHash: String,
         hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int,
-        doc: String?, metadata: String?,
-        signature: String?, effects: String?, constraints: String?
+        doc: String?, metadata: String?
     ) {
         decls.removeAll { it.modulePath == modulePath && it.declKind == declKind && it.declName == declName }
         decls.add(DeclRow(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol,
-            doc, metadata, signature, effects, constraints))
+            doc, metadata))
     }
 
     override fun clearDeclsForModule(modulePath: String) {
@@ -243,15 +242,45 @@ class InMemoryMezzeStore : MezzeStore {
      * what SQLite's `->` and `->>` return respectively.
      */
     /** Effect membership, matching the SQL's json_each test. */
+    // ── SIGNATURES ──
+    //
+    // The equivalent of the SQL store's three tables: the rows as stored, keyed
+    // by decl hash. The effect search was previously a hand-written JSON-array
+    // split here, which is what storing a signature as text forces on every
+    // reader; with rows there is nothing to parse.
+    private val signatures = mutableMapOf<Hash, SignatureRows>()
+
+    override fun putSignature(rows: SignatureRows) {
+        val declHash = rows.nodes.firstOrNull()?.declHash ?: return
+        signatures[declHash] = rows
+    }
+
+    override fun getSignature(declHash: Hash): SignatureRows =
+        signatures[declHash] ?: SignatureRows.EMPTY
+
+    /** The node ids of [declHash]'s residual arrow — see [TypeNodeRow.isResidual]. */
+    private fun residualNodeIds(declHash: Hash): Set<Int> =
+        signatures[declHash]?.nodes?.filter { it.isResidual }?.map { it.nodeId }?.toSet().orEmpty()
+
     override fun findDeclsByEffect(effectName: String): List<DeclRow> =
         decls.filter { row ->
-            val raw = row.effects ?: return@filter false
-            // Stored as a JSON array of bare names; compare element-wise so
-            // `Log` never matches `Logger`.
-            raw.trim().removeSurrounding("[", "]")
-                .split(',')
-                .map { it.trim().removeSurrounding("\"") }
-                .any { it == effectName }
+            val residual = residualNodeIds(row.hash)
+            signatures[row.hash]?.effects?.any {
+                it.nodeId in residual && it.effectName == effectName
+            } == true
+        }
+
+    override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
+        decls.filter { row ->
+            val residual = residualNodeIds(row.hash)
+            signatures[row.hash]?.constraints?.any {
+                it.nodeId in residual && it.abilityName == abilityName
+            } == true
+        }
+
+    override fun findDeclsMentioningType(typeHash: Hash): List<DeclRow> =
+        decls.filter { row ->
+            signatures[row.hash]?.nodes?.any { it.typeHash == typeHash } == true
         }
 
     override fun findDeclsByMetadata(key: String, value: String?): List<DeclRow> =

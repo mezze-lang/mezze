@@ -118,7 +118,7 @@ class SQLiteMezzeStore private constructor(
         //    now hashes its EFFECTS and ABILITY CONSTRAINTS, which it did not
         //    before — `{x: Int} -> Int` and `{x: Int} -> Int <IO>` used to share
         //    one hash, as did `{x: 'a} -> 'a` and `{x: 'a} -> 'a with Show 'a`.
-        const val SCHEMA_VERSION = 12
+        const val SCHEMA_VERSION = 13
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of
@@ -492,10 +492,46 @@ class SQLiteMezzeStore private constructor(
                     end_col INTEGER NOT NULL,
                     doc TEXT,
                     metadata TEXT,
-                    signature TEXT,
-                    effects TEXT,
-                    constraints TEXT,
                     PRIMARY KEY (module_path, decl_kind, decl_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Signatures: the decl's type as a tree, one row per node, plus the
+            // effect and constraint junctions. Mirrors the primary schema below;
+            // see there for what each column means.
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.type_nodes (
+                    decl_hash   TEXT NOT NULL,
+                    node_id     INTEGER NOT NULL,
+                    parent_id   INTEGER,
+                    slot        TEXT NOT NULL,
+                    ordinal     INTEGER NOT NULL,
+                    slot_label  TEXT,
+                    kind        TEXT NOT NULL,
+                    label       TEXT,
+                    type_hash   TEXT,
+                    is_open     INTEGER NOT NULL DEFAULT 0,
+                    performed   INTEGER NOT NULL DEFAULT 0,
+                    is_residual INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (decl_hash, node_id)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.type_node_effects (
+                    decl_hash   TEXT NOT NULL,
+                    node_id     INTEGER NOT NULL,
+                    effect_name TEXT NOT NULL,
+                    effect_hash TEXT,
+                    PRIMARY KEY (decl_hash, node_id, effect_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.type_node_constraints (
+                    decl_hash    TEXT NOT NULL,
+                    node_id      INTEGER NOT NULL,
+                    ability_name TEXT NOT NULL,
+                    ability_hash TEXT,
+                    ordinal      INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (decl_hash, node_id, ability_name)
                 ) WITHOUT ROWID
             """.trimIndent())
             // Imports
@@ -592,20 +628,28 @@ class SQLiteMezzeStore private constructor(
      * — older legacy names included so v6/v7 caches both go away.
      */
     private fun dropAllTables() {
+        // Enumerated from the database, not from a hand-written list. A list has to
+        // be edited every time a table is added, and the failure when someone
+        // forgets is not a missing drop — it is the NEXT version failing to open an
+        // existing cache at all, because the surviving table collides with its own
+        // CREATE. Asking sqlite_master cannot fall behind, and it also clears the
+        // legacy names the list was carrying for v6/v7 caches.
+        //
+        // `metadata` is kept: the schema_version write follows this. `sqlite_%`
+        // tables belong to SQLite itself and are not ours to drop.
+        val tables = conn.createStatement().use { s ->
+            s.executeQuery(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                  AND name <> 'metadata'
+                  AND name NOT LIKE 'sqlite_%'
+                """.trimIndent()
+            ).use { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }
+        }
         conn.createStatement().use { s ->
             s.executeUpdate("PRAGMA foreign_keys=OFF")
-            for (table in listOf(
-                "app_performers", "app_functions", "apps",
-                "mono_specializations",
-                "usages", "references_",
-                "imports", "decls", "edges", "names",
-                "effect_performers", "ability_impls",
-                "parsed_modules", "typed_modules",
-                "modules", "blobs"
-                // metadata kept — schema_version write follows.
-            )) {
-                s.executeUpdate("DROP TABLE IF EXISTS $table")
-            }
+            for (table in tables) s.executeUpdate("DROP TABLE IF EXISTS \"$table\"")
             s.executeUpdate("PRAGMA foreign_keys=ON")
         }
     }
@@ -707,22 +751,76 @@ class SQLiteMezzeStore private constructor(
                     end_col     INTEGER NOT NULL,
                     doc         TEXT,
                     metadata    TEXT,
-                    -- Canonical rendering of the decl's type, plus its effect
-                    -- row and ability constraints as JSON arrays. Written here
-                    -- rather than derived on demand because the alternative is
-                    -- deserializing a whole typed-module blob per candidate,
-                    -- which is not a search. effects/constraints are JSON so
-                    -- membership is a json_each query rather than LIKE over a
-                    -- delimited string, which would match `Log` inside `Logger`.
-                    signature   TEXT,
-                    effects     TEXT,
-                    constraints TEXT,
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_decls_source_hash ON decls(source_hash)")
             s.executeUpdate("CREATE INDEX idx_decls_hash ON decls(hash)")
             s.executeUpdate("CREATE INDEX idx_decls_kind_name ON decls(decl_kind, decl_name)")
+
+            // ----------------------------------------------------------------
+            // SIGNATURES
+            //
+            // A decl's type, stored as the tree it is. The previous shape was
+            // three TEXT columns on `decls` -- the signature rendered to a
+            // string, its effects and its constraints as JSON arrays -- which
+            // made every question string surgery and made the central one
+            // impossible: a rendered signature cannot be turned back into a type
+            // to unify against, so it could only be displayed or substring
+            // matched. Rows can be joined, and SignatureIndex.rebuild turns them
+            // back into a MezzeType.
+            //
+            // decl_hash is not FK'd to decls: a signature may be written in the
+            // same transaction as its decl and FK enforcement runs per-statement,
+            // the same reason `names.hash` is not FK'd.
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                CREATE TABLE type_nodes (
+                    decl_hash   TEXT NOT NULL,
+                    -- Pre-order, root = 0. Stable for a given type, so a node's
+                    -- id means the same thing on every re-index of that type.
+                    node_id     INTEGER NOT NULL,
+                    parent_id   INTEGER,           -- NULL for the root only
+                    slot        TEXT NOT NULL,     -- root|param|return|field|ctor|arg|wrapped
+                    ordinal     INTEGER NOT NULL,  -- position within a repeating slot
+                    slot_label  TEXT,              -- field / constructor name under the parent
+                    kind        TEXT NOT NULL,     -- fn|record|variant|app|var|newtype|int|...
+                    label       TEXT,              -- the node's OWN name
+                    type_hash   TEXT,              -- nominal identity, by hash not name
+                    is_open     INTEGER NOT NULL DEFAULT 0,
+                    performed   INTEGER NOT NULL DEFAULT 0,
+                    is_residual INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (decl_hash, node_id)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Answers "which decls mention THIS type", which is the query a doc
+            // browser and an agent both want, and which no rendered string could
+            // serve without matching names instead of declarations.
+            s.executeUpdate("CREATE INDEX idx_type_nodes_type_hash ON type_nodes(type_hash)")
+            s.executeUpdate("CREATE INDEX idx_type_nodes_residual ON type_nodes(decl_hash, is_residual)")
+
+            s.executeUpdate("""
+                CREATE TABLE type_node_effects (
+                    decl_hash   TEXT NOT NULL,
+                    node_id     INTEGER NOT NULL,
+                    effect_name TEXT NOT NULL,
+                    effect_hash TEXT,
+                    PRIMARY KEY (decl_hash, node_id, effect_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_type_node_effects_name ON type_node_effects(effect_name)")
+
+            s.executeUpdate("""
+                CREATE TABLE type_node_constraints (
+                    decl_hash    TEXT NOT NULL,
+                    node_id      INTEGER NOT NULL,
+                    ability_name TEXT NOT NULL,
+                    ability_hash TEXT,
+                    ordinal      INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (decl_hash, node_id, ability_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_type_node_constraints_name ON type_node_constraints(ability_name)")
 
             // ----------------------------------------------------------------
             // LOOKUPS & CROSS-REFS
@@ -1676,13 +1774,25 @@ class SQLiteMezzeStore private constructor(
     // DECLS
     // ====================================================================
 
+    /**
+     * The columns of a [DeclRow], in [ResultSet.toDeclRow] order.
+     *
+     * Named once because eight queries select exactly this list, and a
+     * per-query copy is how three of them came to still name columns that had
+     * been dropped.
+     */
+    private val DECL_COLUMNS = "module_path, decl_name, decl_kind, source_hash, hash, " +
+        "start_line, start_col, end_line, end_col, doc, metadata"
+
+    /** The same list qualified for the queries that join `decls d` to a signature table. */
+    private val DECL_QUALIFIED_COLUMNS =
+        DECL_COLUMNS.split(", ").joinToString(", ") { "d.$it" }
+
     private val putDeclStmt: PreparedStatement by lazy {
         conn.prepareStatement("""
             INSERT OR REPLACE INTO decls
-                (module_path, decl_name, decl_kind, source_hash, hash,
-                 start_line, start_col, end_line, end_col, doc, metadata,
-                 signature, effects, constraints)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ($DECL_COLUMNS)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent())
     }
 
@@ -1698,10 +1808,7 @@ class SQLiteMezzeStore private constructor(
         endLine: Int,
         endCol: Int,
         doc: String?,
-        metadata: String?,
-        signature: String?,
-        effects: String?,
-        constraints: String?
+        metadata: String?
     ) {
         putDeclStmt.apply {
             setString(1, modulePath)
@@ -1715,9 +1822,6 @@ class SQLiteMezzeStore private constructor(
             setInt(9, endCol)
             setString(10, doc)
             setString(11, metadata)
-            setString(12, signature)
-            setString(13, effects)
-            setString(14, constraints)
             executeUpdate()
         }
     }
@@ -1741,17 +1845,12 @@ class SQLiteMezzeStore private constructor(
         endLine = getInt("end_line"),
         endCol = getInt("end_col"),
         doc = getString("doc"),
-        metadata = getString("metadata"),
-        signature = getString("signature"),
-        effects = getString("effects"),
-        constraints = getString("constraints")
+        metadata = getString("metadata")
     )
 
     private val getDeclsForModuleStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
+            SELECT $DECL_COLUMNS
             FROM <DB>.decls
             WHERE module_path = ?
         """.trimIndent()))
@@ -1767,9 +1866,7 @@ class SQLiteMezzeStore private constructor(
 
     private val searchDeclsByNameStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
+            SELECT $DECL_COLUMNS
             FROM <DB>.decls
             WHERE decl_name LIKE ? ESCAPE '\'
         """.trimIndent()) + " ORDER BY decl_name LIMIT 200")
@@ -1803,9 +1900,7 @@ class SQLiteMezzeStore private constructor(
     // query for every other declaration.
     private val findDeclsByMetadataValueStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
+            SELECT $DECL_COLUMNS
             FROM <DB>.decls
             WHERE metadata IS NOT NULL AND json_valid(metadata)
               AND (    metadata ->  ('${'$'}.' || ?) = ?
@@ -1819,9 +1914,7 @@ class SQLiteMezzeStore private constructor(
     // miss a key whose value is JSON null.
     private val findDeclsByMetadataKeyStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
+            SELECT $DECL_COLUMNS
             FROM <DB>.decls
             WHERE metadata IS NOT NULL AND json_valid(metadata)
               AND json_type(metadata, '${'$'}.' || ?) IS NOT NULL
@@ -1852,17 +1945,23 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
-    // Membership in a JSON array, not a substring match: `LIKE '%Log%'` would
-    // also match `Logger`, and an effect search that quietly over-matches is
-    // worse than one that finds nothing.
+    // An equality join, which is why there is nothing here about `LIKE '%Log%'`
+    // also matching `Logger`: the previous form stored effects as a JSON array and
+    // tested membership with json_each to avoid exactly that. Joining on a column
+    // cannot over-match.
+    //
+    // is_residual picks the arrow a caller is left holding once every argument is
+    // applied. For `{a} -> {b} -> Int <Log>` that is the INNER arrow, so reading
+    // the root's row would report the decl as pure.
     private val findDeclsByEffectStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
-            FROM <DB>.decls
-            WHERE effects IS NOT NULL AND json_valid(effects)
-              AND EXISTS (SELECT 1 FROM json_each(effects) WHERE value = ?)
+            SELECT $DECL_QUALIFIED_COLUMNS
+            FROM <DB>.decls d
+            JOIN <DB>.type_nodes n
+              ON n.decl_hash = d.hash AND n.is_residual = 1
+            JOIN <DB>.type_node_effects e
+              ON e.decl_hash = n.decl_hash AND e.node_id = n.node_id
+            WHERE e.effect_name = ?
         """.trimIndent()) + " ORDER BY module_path, decl_name")
     }
 
@@ -1874,11 +1973,209 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    private val findDeclsByConstraintStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT $DECL_QUALIFIED_COLUMNS
+            FROM <DB>.decls d
+            JOIN <DB>.type_nodes n
+              ON n.decl_hash = d.hash AND n.is_residual = 1
+            JOIN <DB>.type_node_constraints c
+              ON c.decl_hash = n.decl_hash AND c.node_id = n.node_id
+            WHERE c.ability_name = ?
+        """.trimIndent()) + " ORDER BY module_path, decl_name")
+    }
+
+    @Synchronized
+    override fun findDeclsByConstraint(abilityName: String): List<DeclRow> {
+        for (db in 0..2) findDeclsByConstraintStmt.setString(db + 1, abilityName)
+        return findDeclsByConstraintStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
+    // DISTINCT because a signature may mention the same type in several
+    // positions, and `Map Color Color` should return its decl once.
+    private val findDeclsMentioningTypeStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT DISTINCT $DECL_QUALIFIED_COLUMNS
+            FROM <DB>.decls d
+            JOIN <DB>.type_nodes n ON n.decl_hash = d.hash
+            WHERE n.type_hash = ?
+        """.trimIndent()) + " ORDER BY module_path, decl_name")
+    }
+
+    @Synchronized
+    override fun findDeclsMentioningType(typeHash: Hash): List<DeclRow> {
+        for (db in 0..2) findDeclsMentioningTypeStmt.setString(db + 1, typeHash.hex)
+        return findDeclsMentioningTypeStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
+    // ====================================================================
+    // SIGNATURES
+    // ====================================================================
+
+    private val putTypeNodeStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO type_nodes
+                (decl_hash, node_id, parent_id, slot, ordinal, slot_label,
+                 kind, label, type_hash, is_open, performed, is_residual)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    private val putTypeNodeEffectStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO type_node_effects
+                (decl_hash, node_id, effect_name, effect_hash)
+            VALUES (?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    private val putTypeNodeConstraintStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO type_node_constraints
+                (decl_hash, node_id, ability_name, ability_hash, ordinal)
+            VALUES (?, ?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    @Synchronized
+    override fun putSignature(rows: SignatureRows) {
+        val declHash = rows.nodes.firstOrNull()?.declHash ?: return
+
+        // DELETE first, not INSERT OR REPLACE alone: a re-indexed decl whose type
+        // grew simpler has FEWER nodes, and replacing row-by-row would leave the
+        // old tail behind. A signature is one value, so it is written as one.
+        for (table in listOf("type_nodes", "type_node_effects", "type_node_constraints")) {
+            conn.prepareStatement("DELETE FROM $table WHERE decl_hash = ?").use { st ->
+                st.setString(1, declHash.hex)
+                st.executeUpdate()
+            }
+        }
+
+        for (n in rows.nodes) putTypeNodeStmt.apply {
+            setString(1, n.declHash.hex)
+            setInt(2, n.nodeId)
+            val parent = n.parentId
+            if (parent == null) setNull(3, java.sql.Types.INTEGER) else setInt(3, parent)
+            setString(4, n.slot.dbValue)
+            setInt(5, n.ordinal)
+            setString(6, n.slotLabel)
+            setString(7, n.kind.dbValue)
+            setString(8, n.label)
+            setString(9, n.typeHash?.hex)
+            setInt(10, if (n.isOpen) 1 else 0)
+            setInt(11, if (n.performed) 1 else 0)
+            setInt(12, if (n.isResidual) 1 else 0)
+            executeUpdate()
+        }
+        for (e in rows.effects) putTypeNodeEffectStmt.apply {
+            setString(1, e.declHash.hex)
+            setInt(2, e.nodeId)
+            setString(3, e.effectName)
+            setString(4, e.effectHash?.hex)
+            executeUpdate()
+        }
+        for (c in rows.constraints) putTypeNodeConstraintStmt.apply {
+            setString(1, c.declHash.hex)
+            setInt(2, c.nodeId)
+            setString(3, c.abilityName)
+            setString(4, c.abilityHash?.hex)
+            setInt(5, c.ordinal)
+            executeUpdate()
+        }
+    }
+
+    private val getTypeNodesStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT decl_hash, node_id, parent_id, slot, ordinal, slot_label,
+                   kind, label, type_hash, is_open, performed, is_residual
+            FROM <DB>.type_nodes
+            WHERE decl_hash = ?
+        """.trimIndent()) + " ORDER BY node_id")
+    }
+
+    private val getTypeNodeEffectsStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT decl_hash, node_id, effect_name, effect_hash
+            FROM <DB>.type_node_effects
+            WHERE decl_hash = ?
+        """.trimIndent()) + " ORDER BY node_id, effect_name")
+    }
+
+    private val getTypeNodeConstraintsStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT decl_hash, node_id, ability_name, ability_hash, ordinal
+            FROM <DB>.type_node_constraints
+            WHERE decl_hash = ?
+        """.trimIndent()) + " ORDER BY node_id, ordinal")
+    }
+
+    @Synchronized
+    override fun getSignature(declHash: Hash): SignatureRows {
+        fun bind(stmt: PreparedStatement): PreparedStatement {
+            for (db in 0..2) stmt.setString(db + 1, declHash.hex)
+            return stmt
+        }
+
+        val nodes = bind(getTypeNodesStmt).executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(
+                    TypeNodeRow(
+                        declHash = Hash(rs.getString("decl_hash")),
+                        nodeId = rs.getInt("node_id"),
+                        // getInt yields 0 for SQL NULL, and 0 is the ROOT's id —
+                        // so the null must be read explicitly or every root
+                        // would come back parented to itself.
+                        parentId = rs.getInt("parent_id").takeIf { !rs.wasNull() },
+                        slot = TypeSlot.fromDb(rs.getString("slot")),
+                        ordinal = rs.getInt("ordinal"),
+                        slotLabel = rs.getString("slot_label"),
+                        kind = TypeNodeKind.fromDb(rs.getString("kind")),
+                        label = rs.getString("label"),
+                        typeHash = rs.getString("type_hash")?.let { Hash(it) },
+                        isOpen = rs.getInt("is_open") != 0,
+                        performed = rs.getInt("performed") != 0,
+                        isResidual = rs.getInt("is_residual") != 0,
+                    )
+                )
+            }
+        }
+        if (nodes.isEmpty()) return SignatureRows.EMPTY
+
+        val effects = bind(getTypeNodeEffectsStmt).executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(
+                    TypeNodeEffectRow(
+                        declHash = Hash(rs.getString("decl_hash")),
+                        nodeId = rs.getInt("node_id"),
+                        effectName = rs.getString("effect_name"),
+                        effectHash = rs.getString("effect_hash")?.let { Hash(it) },
+                    )
+                )
+            }
+        }
+        val constraints = bind(getTypeNodeConstraintsStmt).executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(
+                    TypeNodeConstraintRow(
+                        declHash = Hash(rs.getString("decl_hash")),
+                        nodeId = rs.getInt("node_id"),
+                        abilityName = rs.getString("ability_name"),
+                        abilityHash = rs.getString("ability_hash")?.let { Hash(it) },
+                        ordinal = rs.getInt("ordinal"),
+                    )
+                )
+            }
+        }
+        return SignatureRows(nodes, effects, constraints)
+    }
+
     private val getDeclsByKindStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
+            SELECT $DECL_COLUMNS
             FROM <DB>.decls
             WHERE decl_kind = ?
         """.trimIndent()))
@@ -1896,9 +2193,7 @@ class SQLiteMezzeStore private constructor(
         // Hits idx_decls_hash. UNION ALL across all three so hashes
         // resolve regardless of which file owns the decl.
         conn.prepareStatement(unionAll("""
-            SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col, doc, metadata,
-                   signature, effects, constraints
+            SELECT $DECL_COLUMNS
             FROM <DB>.decls
             WHERE hash = ?
         """.trimIndent()) + " LIMIT 1")

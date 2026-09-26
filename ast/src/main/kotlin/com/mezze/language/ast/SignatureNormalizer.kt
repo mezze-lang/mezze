@@ -1,13 +1,16 @@
 package com.mezze.language.ast
 
 /**
- * A type rendered into a canonical string, for indexing and searching.
+ * A type rendered into a canonical string, for DISPLAY.
  *
- * Search by signature is impossible while types live only inside a serialized
- * typed-module blob, so something has to write them somewhere queryable. The
- * hard part is not the writing — it is making two types that *mean* the same
- * thing produce the same string, because otherwise an index lookup misses the
- * answer it is holding.
+ * This was once the signature index itself: the rendering was stored on `decls`
+ * and searched as text. That was the defect — a rendered signature cannot be read
+ * back as a type, so it could only be displayed or substring-matched, and
+ * `LIKE '%Log%'` also finds `Logger`. The index is now the `type_nodes` tables
+ * (see `SignatureIndex`), and this renders what those rows rebuild.
+ *
+ * Canonical still matters for display, because the same signature shown two ways
+ * reads as two signatures.
  *
  * Three things are canonicalised, each because it would otherwise split one
  * signature into many:
@@ -36,25 +39,10 @@ object SignatureNormalizer {
     /** The canonical rendering of [type], with type variables renamed. */
     fun render(type: MezzeType): String = Renamer().render(type)
 
-    /**
-     * The concrete effect names on the last arrow of a function, sorted.
-     *
-     * Empty for a pure function and for anything that is not a function. The
-     * `*` performed-marker and an open row tail are excluded, because
-     * `allEffectNames` excludes them — they are not effects a caller must
-     * discharge, which is the same reason [MezzeType.FunctionType.residualEffects]
-     * exists.
-     */
-    fun effectNames(type: MezzeType): List<String> {
-        if (type !is MezzeType.FunctionType) return emptyList()
-        return type.residualEffects?.allEffectNames?.sorted().orEmpty()
-    }
-
-    /** Ability constraint names on a function (`with Ord 'a`), sorted, deduped. */
-    fun constraintNames(type: MezzeType): List<String> {
-        if (type !is MezzeType.FunctionType) return emptyList()
-        return type.abilityConstraints.map { it.abilityName }.distinct().sorted()
-    }
+    // `effectNames` and `constraintNames` lived here to fill the two JSON-array
+    // columns. Those are junction tables now, written from the same walk that
+    // writes the nodes, so re-deriving the names off a type at read time would be
+    // a second source for one fact — delete it rather than keep it in step.
 
     /**
      * Renaming is stateful across one rendering — the same variable must get

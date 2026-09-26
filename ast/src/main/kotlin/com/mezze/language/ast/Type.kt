@@ -373,11 +373,22 @@ sealed interface MezzeType {
          * the `*` performed-marker and an open row-var tail — neither is a
          * concrete effect, so `{} -> {} <*>` is runnable.
          */
-        val residualEffects: EffectRow? get() {
+        val residualEffects: EffectRow? get() = residualArrow.effects
+
+        /**
+         * The LAST arrow of a (possibly curried) function — `this` when there is
+         * only one.
+         *
+         * [residualEffects] is a view of this, and the signature index marks this
+         * arrow's row as the decl's residual one. Both used to walk the return
+         * chain themselves; one walk with two readers cannot disagree about which
+         * arrow is last.
+         */
+        val residualArrow: FunctionType get() {
             var cursor = this
             var inner: MezzeType = cursor.returnType
             while (inner is FunctionType) { cursor = inner; inner = cursor.returnType }
-            return cursor.effects
+            return cursor
         }
 
         override fun toString(): String = safeToString(

@@ -482,17 +482,6 @@ object StorePopulator {
         return result
     }
 
-    /**
-     * A JSON array of names, or null when empty.
-     *
-     * Null rather than `[]` so "has no effects" and "was never indexed" stay
-     * distinguishable — the first is a fact about the function, the second is a
-     * fact about the store.
-     */
-    private fun jsonArray(names: List<String>): String? =
-        if (names.isEmpty()) null
-        else names.joinToString(", ", "[", "]") { "\"${it.replace("\"", "\\\"")}\"" }
-
     private fun serializeMetadata(metadata: com.mezze.language.parsedast.ParsedMetadata?): String? {
         if (metadata == null || metadata.fields.isEmpty()) return null
         // Simple JSON serialization of metadata fields
@@ -529,9 +518,6 @@ object StorePopulator {
     ) {
         val sliced = lineStarts.slice(source, loc)
         val perDeclSourceHash = sha256Hex(sliced)
-        val signature = type?.let { com.mezze.language.ast.SignatureNormalizer.render(it) }
-        val effects = type?.let { jsonArray(com.mezze.language.ast.SignatureNormalizer.effectNames(it)) }
-        val constraints = type?.let { jsonArray(com.mezze.language.ast.SignatureNormalizer.constraintNames(it)) }
         store.putDecl(
             modulePath = modulePath,
             declName = name,
@@ -544,10 +530,15 @@ object StorePopulator {
             endCol = loc.endCol,
             doc = parsedDecl?.docComment,
             metadata = serializeMetadata(parsedDecl?.metadata),
-            signature = signature,
-            effects = effects,
-            constraints = constraints,
         )
+        // The signature is a separate value with its own tables, written after
+        // the decl so both land in one transaction. A decl with no type indexes
+        // no signature at all, which is distinguishable from indexing an empty
+        // one: a `type`/`ability`/`effect` declaration has no signature, and
+        // saying so is different from claiming it has a trivial one.
+        if (type != null) {
+            store.putSignature(com.mezze.language.store.SignatureIndex.flatten(hash, type))
+        }
     }
 
     /**

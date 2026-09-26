@@ -99,7 +99,7 @@ class SignatureNormalizerTest {
     // ---- effects and constraints are part of the signature ------------------
 
     @Test
-    fun `effects appear in the rendering and in effectNames`() {
+    fun `effects appear in the rendering`() {
         val src = """
             use std::effects::log::{ println, Console }
 
@@ -115,14 +115,11 @@ class SignatureNormalizerTest {
         val sig = sigOf("let add: { x: Int, y: Int } -> Int = { x, y } -> x + y", "add")
         assertTrue(!sig.contains("<"), "pure functions carry no effect clause: $sig")
     }
-
-    @Test
-    fun `effectNames is empty for a pure function and populated for an effectful one`() {
-        val parsedPure = MezzeParser().parseParsedModule(
-            "let add: { x: Int, y: Int } -> Int = { x, y } -> x + y", "t.mz")
-        val pure = (TypeChecker().checkParsedModule(parsedPure, Paths.get("."), currentModulePath = null)
-            as TypeChecker.TypeCheckResult.Success).typedModule!!
-            .decls.filterIsInstance<TypedLetDecl>().first()
-        assertEquals(emptyList<String>(), SignatureNormalizer.effectNames(pure.scheme.type))
-    }
 }
+
+// `effectNames` had a test here too. The function is gone: the effect names of a
+// signature are junction ROWS now, written by the same walk that writes the
+// nodes, and re-deriving them off a type at read time would be a second source
+// for one fact. What it asserted is covered where the fact lives —
+// SignatureIndexTest's `pure declarations are never returned by an effect search`
+// and `finds declarations by effect`.

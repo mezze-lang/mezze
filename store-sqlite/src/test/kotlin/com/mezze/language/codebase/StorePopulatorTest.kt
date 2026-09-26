@@ -300,11 +300,14 @@ class StorePopulatorTest {
         assertEquals(DeclKind.LET, add.declKind)
 
         // The signature index is populated HERE, from the let's scheme, not by
-        // whoever calls putDecl later. A type decl has no signature to index,
-        // so its column stays null rather than holding something that is not a
-        // signature.
-        assertEquals("Int", add.signature)
-        assertNull(rows["Point"]?.signature, "a type declaration has no signature")
+        // whoever calls putDecl later. A type decl has no signature to index, so
+        // it gets no rows at all rather than rows describing something that is
+        // not a signature.
+        assertEquals(
+            com.mezze.language.ast.MezzeType.IntType,
+            com.mezze.language.store.SignatureIndex.rebuild(store.getSignature(add.hash)),
+        )
+        assertTrue(store.getSignature(typeHash).isEmpty, "a type declaration has no signature")
         assertEquals(letHash, add.hash)
         assertEquals(1, add.startLine)
         assertEquals(25, add.endCol)

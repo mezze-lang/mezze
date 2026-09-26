@@ -210,9 +210,6 @@ interface MezzeStore : AutoCloseable {
         endCol: Int,
         doc: String? = null,
         metadata: String? = null,
-        signature: String? = null,
-        effects: String? = null,
-        constraints: String? = null,
     )
     fun clearDeclsForModule(modulePath: String)
     fun getDeclsForModule(modulePath: String): List<DeclRow>
@@ -249,10 +246,53 @@ interface MezzeStore : AutoCloseable {
      * `getEffectPerformers` answers "who PERFORMS this effect" and needs a
      * hash, not a name.
      *
-     * Membership is tested against the stored JSON array rather than by
-     * substring, because `LIKE '%Log%'` would also match `Logger`.
+     * An equality join against the effect rows of the decl's RESIDUAL arrow —
+     * what a caller is left holding once every argument is applied. Exact by
+     * construction: the previous form tested membership in a JSON array to avoid
+     * `LIKE '%Log%'` also matching `Logger`, and a join needs no such care.
      */
     fun findDeclsByEffect(effectName: String): List<DeclRow>
+
+    /**
+     * Declarations whose residual arrow requires the ability [abilityName]
+     * (`with Ord 'a`).
+     *
+     * The other half of "what does calling this oblige me to provide", and the
+     * question an agent or doc browser asks when looking for what it can satisfy.
+     */
+    fun findDeclsByConstraint(abilityName: String): List<DeclRow>
+
+    /**
+     * Declarations whose signature mentions the type whose declaration hashes to
+     * [typeHash], anywhere — parameter, return, nested inside a container.
+     *
+     * Keyed on the HASH, not the name, so it answers "who uses THIS `Color`"
+     * rather than "who uses something spelled Color". Two same-named types from
+     * different modules are different types, and this query treats them so.
+     */
+    fun findDeclsMentioningType(typeHash: Hash): List<DeclRow>
+
+    // ====================================================================
+    // SIGNATURES — the decl's type, as a queryable tree
+    // ====================================================================
+
+    /**
+     * Store [rows] as the signature of the declaration they name.
+     *
+     * Replaces any signature already recorded for that declaration, so
+     * re-indexing a changed decl cannot leave half of the old tree behind.
+     */
+    fun putSignature(rows: SignatureRows)
+
+    /**
+     * The signature rows for [declHash], or [SignatureRows.EMPTY] if the
+     * declaration has no indexed signature — a type, ability or effect
+     * declaration has no signature to index, which is different from having an
+     * empty one.
+     *
+     * Use [SignatureIndex.rebuild] to turn the rows back into a `MezzeType`.
+     */
+    fun getSignature(declHash: Hash): SignatureRows
 
     // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
@@ -380,12 +420,6 @@ data class DeclRow(
     val endCol: Int,
     val doc: String? = null,
     val metadata: String? = null,
-    /** Canonical rendering of the decl's type — see SignatureNormalizer. */
-    val signature: String? = null,
-    /** JSON array of concrete effect names on the last arrow, or null. */
-    val effects: String? = null,
-    /** JSON array of ability-constraint names, or null. */
-    val constraints: String? = null,
 )
 
 data class ImportRow(

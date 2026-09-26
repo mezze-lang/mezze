@@ -209,10 +209,9 @@ class ChainedMezzeStore(
 
     override fun putDecl(
         modulePath: String, declName: String, declKind: DeclKind, sourceHash: String,
-        hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int, doc: String?, metadata: String?,
-        signature: String?, effects: String?, constraints: String?
+        hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int, doc: String?, metadata: String?
     ) = primary.putDecl(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol,
-        doc, metadata, signature, effects, constraints)
+        doc, metadata)
     override fun clearDeclsForModule(modulePath: String) = primary.clearDeclsForModule(modulePath)
     override fun getDeclsForModule(modulePath: String): List<DeclRow> =
         all.flatMap { it.getDeclsForModule(modulePath) }.distinct()
@@ -225,6 +224,17 @@ class ChainedMezzeStore(
         all.flatMap { it.findDeclsByMetadata(key, value) }.distinct()
     override fun findDeclsByEffect(effectName: String): List<DeclRow> =
         all.flatMap { it.findDeclsByEffect(effectName) }.distinct()
+    override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
+        all.flatMap { it.findDeclsByConstraint(abilityName) }.distinct()
+    override fun findDeclsMentioningType(typeHash: Hash): List<DeclRow> =
+        all.flatMap { it.findDeclsMentioningType(typeHash) }.distinct()
+
+    // Writes go to the primary; reads span the chain, so a signature indexed in
+    // the stdlib tier is visible to a query made from a project store.
+    override fun putSignature(rows: SignatureRows) = primary.putSignature(rows)
+    override fun getSignature(declHash: Hash): SignatureRows =
+        all.asSequence().map { it.getSignature(declHash) }.firstOrNull { !it.isEmpty }
+            ?: SignatureRows.EMPTY
 
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) =
         primary.putParsedModule(modulePath, sourceHash, parsedBlob)
