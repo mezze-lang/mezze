@@ -140,6 +140,31 @@ class FracModuleTest {
     }
 
     @Test
+    fun `test frac from_float round-trips a nice fraction`() {
+        val source = """
+            use std::frac
+            let a = frac::make { numerator = 3, denominator = 4 }
+            match frac::from_float { f = frac::to_float { n = a } } is
+              Some { val = back } -> frac::to_str { n = back }
+              None -> "none"
+        """.trimIndent()
+
+        assertEquals("3/4", eval(source))
+    }
+
+    @Test
+    fun `test frac from_float is None for a non-finite float`() {
+        val source = """
+            use std::frac
+            match frac::from_float { f = 0.0 / 0.0 } is
+              Some { val = _ } -> "some"
+              None -> "none"
+        """.trimIndent()
+
+        assertEquals("none", eval(source))
+    }
+
+    @Test
     fun `test frac to_str`() {
         val source = """
             use std::frac

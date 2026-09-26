@@ -8,10 +8,11 @@ plugins {
     id("com.gradleup.shadow") version "9.4.1"
 }
 // GraalPy Gradle plugin (`org.graalvm.python`) intentionally NOT applied.
-// GraalPy no longer ships in bare `mez` — it arrives through the
-// `mezze-python` provider package, whose `[jars]` table lists the
-// concrete graalpy jars and whose `polyglot-python-natives.jar`
-// registers the `__native_python_*` handlers on top of this kernel.
+// GraalPy no longer ships in bare `mez` — it arrives through the `mezze-python`
+// provider package, whose `[maven]` table lists the concrete graalpy jars. That
+// package ships NO Java: since the two-layer polyglot redesign it drives interop
+// entirely through the first-party `Polyglot` effect (`std::polyglot::core`),
+// handled by `Runtime`, the sole caller of the `__native_polyglot_*` kernel here.
 
 // Pure Java module for Truffle DSL nodes
 // The converter will be in a separate Kotlin module or in the interpreter module

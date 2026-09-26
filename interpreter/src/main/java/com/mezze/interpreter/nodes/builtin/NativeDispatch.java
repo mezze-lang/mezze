@@ -2082,6 +2082,8 @@ public final class NativeDispatch extends MezzeNode {
             FracNatives.greaterThan(getRecord(r, "l"), getRecord(r, "r")));
         HANDLERS.put("__native_frac_to_float", (r, c) ->
             FracNatives.toFloat(getRecord(r, "n")));
+        HANDLERS.put("__native_float_to_frac", (r, c) ->
+            FracNatives.fromFloat(getDouble(r, "f")));
         HANDLERS.put("__native_frac_to_str", (r, c) ->
             FracNatives.fracToString(getRecord(r, "n")));
     }
@@ -4408,6 +4410,17 @@ public final class NativeDispatch extends MezzeNode {
         // Results, while handing a seq the other way is already O(1) via a view.
         HANDLERS.put("__native_polyglot_array_to_seq",
             (r, c) -> PolyglotNatives.arrayToSeq(r));
+        // The complete-surface additions: write side of a hash (mirror of
+        // read_hash), a `size` that unifies array/hash length into one `len`-like
+        // verb, and a `to_seq` that drains ANY iterable (a generator / range /
+        // custom __iter__), not just an array-shaped Foreign — with the iterator
+        // cursor kept inside the native so pure code never sees it.
+        HANDLERS.put("__native_polyglot_write_hash",
+            (r, c) -> PolyglotNatives.writeHash(r));
+        HANDLERS.put("__native_polyglot_size",
+            (r, c) -> PolyglotNatives.size(r));
+        HANDLERS.put("__native_polyglot_to_seq",
+            (r, c) -> PolyglotNatives.toSeq(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",
@@ -4423,32 +4436,51 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_polyglot_type_name",
             (r, c) -> PolyglotNatives.typeName(r));
 
-        // JVM host access + language-tagged constructors
+        // Generic guest entry — the ONE eval native, language chosen at runtime
+        // via the `lang` field. Backs the `Polyglot.eval_raw` effect op, so a
+        // provider performs it through the `Runtime` handler instead of shipping
+        // its own `__native_<lang>_eval`. Works for any language the Context has
+        // enabled (Ruby, R, …), which is what lets a third party add a language
+        // in pure Mezze with no Java at all.
+        HANDLERS.put("__native_polyglot_eval",
+            (r, c) -> PolyglotNatives.evalRaw(r, c));
+
+        // Generic language-tagged constructors: the `lang` is a field, so a
+        // provider performs `Polyglot.box_int { val, lang = "python" }` through
+        // the `Runtime` handler rather than shipping a `__native_python_from_int`
+        // of its own. They delegate to the same PolyglotNatives constructors the
+        // in-tree `__native_<lang>_*` handlers use.
+        HANDLERS.put("__native_polyglot_box_int",
+            (r, c) -> PolyglotNatives.fromInt(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_float",
+            (r, c) -> PolyglotNatives.fromFloat(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_str",
+            (r, c) -> PolyglotNatives.fromStr(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_bool",
+            (r, c) -> PolyglotNatives.fromBool(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_null",
+            (r, c) -> PolyglotNatives.nullVal(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_list",
+            (r, c) -> PolyglotNatives.makeList(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_dict",
+            (r, c) -> PolyglotNatives.makeDict(r, PolyglotNatives.getString(r, "lang")));
+
+        // JVM host access. Host class lookup is the JVM's one language-specific
+        // native (its guest entry point, the analogue of `eval_raw`); it cannot be
+        // a generic Polyglot op because it uses the Env's host-symbol lookup. Every
+        // other JVM op — the value verbs AND the constructors — routes through the
+        // `Polyglot` effect now (jvm.mz mints foreigns via `Polyglot.box_*`), so the
+        // old `__native_jvm_from_*` / `_make_*` / `_null_val` handlers are gone.
         HANDLERS.put("__native_jvm_class",
             (r, c) -> JvmNatives.lookupClass(r, c));
-        HANDLERS.put("__native_jvm_from_int",
-            (r, c) -> PolyglotNatives.fromInt(r, "jvm"));
-        HANDLERS.put("__native_jvm_from_float",
-            (r, c) -> PolyglotNatives.fromFloat(r, "jvm"));
-        HANDLERS.put("__native_jvm_from_str",
-            (r, c) -> PolyglotNatives.fromStr(r, "jvm"));
-        HANDLERS.put("__native_jvm_from_bool",
-            (r, c) -> PolyglotNatives.fromBool(r, "jvm"));
-        HANDLERS.put("__native_jvm_make_list",
-            (r, c) -> PolyglotNatives.makeList(r, "jvm"));
-        HANDLERS.put("__native_jvm_make_dict",
-            (r, c) -> PolyglotNatives.makeDict(r, "jvm"));
-        HANDLERS.put("__native_jvm_null_val",
-            (r, c) -> PolyglotNatives.nullVal(r, "jvm"));
 
-        // Per-language value constructors used by each provider's `to_py {}` /
-        // `to_js {}` codec (`mezze_python::codec` etc.). The provider .mz emits a
-        // language-namespaced `__native_<lang>_from_int` so the resulting Foreign
-        // is tagged with the guest language; they all delegate to the generic
-        // PolyglotNatives constructor. Registered in-tree (not left to the
-        // provider plugin, which only overrides eval/import) so a codec `.to_py {}`
-        // works without a no-handler crash.
-        for (String lang : new String[] { "python", "js", "wasm" }) {
+        // Per-language value constructors for the WASM provider's codec. Python and
+        // JS providers no longer use these: as of the two-layer redesign they mint
+        // foreigns through the `Polyglot.box_*` effect ops (the generic
+        // `__native_polyglot_box_*` handlers above), so nothing outside this repo
+        // writes a `__native_<lang>_*`. WASM stays because its guest entry is
+        // binary (`evalBytes`), which the generic `eval_raw` does not cover.
+        for (String lang : new String[] { "wasm" }) {
             final String l = lang;
             HANDLERS.put("__native_" + l + "_from_int",   (r, c) -> PolyglotNatives.fromInt(r, l));
             HANDLERS.put("__native_" + l + "_from_float", (r, c) -> PolyglotNatives.fromFloat(r, l));

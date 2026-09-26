@@ -31,14 +31,14 @@ let show_js_str : { label: Str, r: Result JsForeign InteropError } -> {} <Log>
 
 let show_jvm_str : { label: Str, r: Result JvmForeign InteropError } -> {} <Log>
   = { label, r } -> match r is
-    Ok  { val = f } -> match f.as_str {} is
+    Ok  { val = f } -> match f.str {} is
       Ok  { val = s } -> println { msg = "  $(label) = $(s)" }
       Err { error = _ } -> println { msg = "  $(label): could not coerce" }
     Err { error = _ } -> println { msg = "  $(label): guest error" }
 
 let show_jvm_int : { label: Str, r: Result JvmForeign InteropError } -> {} <Log>
   = { label, r } -> match r is
-    Ok  { val = f } -> match f.as_int {} is
+    Ok  { val = f } -> match f.int {} is
       Ok  { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
       Err { error = _ } -> println { msg = "  $(label): could not coerce" }
     Err { error = _ } -> println { msg = "  $(label): guest error" }
@@ -59,7 +59,7 @@ let main = {} -> perform Console, JvmHost, GraalPy, GraalJs in do
   # JVM: Math.multiplyExact(10, 11) = 110 — different math, same idea (host arithmetic)
   let jvm_math = Jvm.class { name = "java.lang.Math" }
   let jvm_prod = match jvm_math is
-    Ok  { val = c } -> c.static { name = "multiplyExact", args = [jvm_from_int { val = 10 }, jvm_from_int { val = 11 }] }
+    Ok  { val = c } -> c.method { name = "multiplyExact", args = [jvm_from_int { val = 10 }, jvm_from_int { val = 11 }] }
     Err { error }   -> Err { error = error }
   let _ = show_jvm_int { label = "JVM  10*11      ", r = jvm_prod }
 
@@ -69,11 +69,11 @@ let main = {} -> perform Console, JvmHost, GraalPy, GraalJs in do
   # JVM: UUID.randomUUID().toString()
   let uuid_class = Jvm.class { name = "java.util.UUID" }
   let uuid_val = match uuid_class is
-    Ok  { val = c } -> c.static { name = "randomUUID", args = [] }
+    Ok  { val = c } -> c.method { name = "randomUUID", args = [] }
     Err { error }   -> Err { error = error }
   # UUID.toString: expect static dispatch off u : JvmForeign
   let uuid_str = match uuid_val is
-    Ok  { val = u } -> u.invoke_member { method = "toString", args = [] }
+    Ok  { val = u } -> u.method { name = "toString", args = [] }
     Err { error }   -> Err { error = error }
   let _ = show_jvm_str { label = "JVM  UUID       ", r = uuid_str }
 

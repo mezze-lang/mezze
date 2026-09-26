@@ -358,7 +358,7 @@ class HttpChainTest {
     // Inline effect-op chain on `Result <T> <Err>` — static dispatch
     // ===============================================================
     //
-    // Regression for the polyglot `Python.eval{...}.as_str{}` shape,
+    // Regression for the polyglot `Python.eval{...}.str{}` shape,
     // exercised against the stdlib http module because its
     // `impl Response` and `impl Result Response HttpError` share method
     // names (`.text`, `.json`, `.from_json`) — the same "parallel per-

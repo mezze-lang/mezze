@@ -51,7 +51,7 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [1, 2, 3].to_jvm {}
-            f.array_size {}
+            f.len {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -65,8 +65,8 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [10, 20, 30].to_jvm {}
-            match f.array_at { index = 1 } is
-              Ok { val = e } -> e.as_int {}
+            match f.at { index = 1 } is
+              Ok { val = e } -> e.int {}
               Err { error = e } -> Err { error = e }
             """.trimIndent()
         )
@@ -100,8 +100,8 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [[1, 2], [3, 4, 5]].to_jvm {}
-            match f.array_at { index = 1 } is
-              Ok { val = inner } -> inner.array_size {}
+            match f.at { index = 1 } is
+              Ok { val = inner } -> inner.len {}
               Err { error = e } -> Err { error = e }
             """.trimIndent()
         )
@@ -118,8 +118,8 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = { count = 42, label = "hi" }.to_jvm {}
-            match f.hash_at { key = "count" } is
-              Ok { val = c } -> c.as_int {}
+            match f.key { of = "count" } is
+              Ok { val = c } -> c.int {}
               Err { error = e } -> Err { error = e }
             """.trimIndent()
         )
@@ -156,7 +156,7 @@ class JvmCodecContainerTest {
             use std::collections::map
             let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
             let f = m.to_jvm {}
-            f.hash_size {}
+            f.len {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -172,8 +172,8 @@ class JvmCodecContainerTest {
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "a", v = 7 }
             let f = m.to_jvm {}
-            match f.hash_at { key = "a" } is
-              Ok { val = v } -> v.as_int {}
+            match f.key { of = "a" } is
+              Ok { val = v } -> v.int {}
               Err { error = e } -> Err { error = e }
             """.trimIndent()
         )
@@ -386,7 +386,7 @@ class JvmCodecContainerTest {
             """
             use std::polyglot::jvm::{ jvm_list, from_int, null_val }
             let l = jvm_list { elems = [from_int { val = 1 }, null_val {}] }
-            match l.array_at { index = 1 } is
+            match l.at { index = 1 } is
               Ok { val = e } -> Ok { val = e.is_null {} }
               Err { error = er } -> Err { error = er }
             """.trimIndent()

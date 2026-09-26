@@ -56,7 +56,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_int }
             let f = from_int { val = 42 }
-            f.as_int{}
+            f.int{}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -69,7 +69,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_float }
             let f = from_float { val = 3.14 }
-            f.as_float{}
+            f.float{}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -82,7 +82,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_str }
             let f = from_str { val = "hello" }
-            f.as_str{}
+            f.str{}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -95,7 +95,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_bool }
             let f = from_bool { val = True }
-            f.as_bool{}
+            f.bool{}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -134,7 +134,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_str }
             let f = from_str { val = "not-a-number" }
-            f.as_int{}
+            f.int{}
             """.trimIndent()
         )
         assertErr(result)
@@ -146,7 +146,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_int }
             let f = from_int { val = 5 }
-            f.field { name = "does_not_exist" }
+            f.get { name = "does_not_exist" }
             """.trimIndent()
         )
         assertErr(result)
@@ -256,7 +256,7 @@ class PolyglotCoreTest {
               .method { name = "append", args = [from_str { val = "b" }] }
               .method { name = "append", args = [from_str { val = "c" }] }
               .method { name = "toString", args = [] }
-              .as_str {}
+              .str {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -272,7 +272,7 @@ class PolyglotCoreTest {
             jvm::class { name = "java.util.ArrayList" }
               .new { args = [] }
               .method { name = "size", args = [] }
-              .as_int {}
+              .int {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -290,7 +290,7 @@ class PolyglotCoreTest {
                 match klass.new { args = [] } is
                   Ok { val = list } ->
                     match list.method { name = "add", args = [from_int { val = 42 }] } is
-                      Ok { val = _ } -> list.array_at { index = 0 }
+                      Ok { val = _ } -> list.at { index = 0 }
                       Err { error } -> Err { error = error }
                   Err { error } -> Err { error = error }
               Err { error } -> Err { error = error }
@@ -310,7 +310,7 @@ class PolyglotCoreTest {
             match jvm::class { name = "java.util.ArrayList" } is
               Ok { val = klass } ->
                 match klass.new { args = [] } is
-                  Ok { val = list } -> list.array_size{}
+                  Ok { val = list } -> list.len{}
                   Err { error } -> Err { error = error }
               Err { error } -> Err { error = error }
             """.trimIndent()
@@ -365,7 +365,7 @@ class PolyglotCoreTest {
             match jvm::class { name = "java.util.ArrayList" } is
               Ok { val = klass } ->
                 match klass.new { args = [] } is
-                  Ok { val = list } -> list.has_member { name = "size" }
+                  Ok { val = list } -> list.has { name = "size" }
                   Err { error = _ } -> False
               Err { error = _ } -> False
             """.trimIndent()
@@ -414,7 +414,7 @@ class PolyglotCoreTest {
             match jvm::class { name = "java.util.ArrayList" } is
               Ok { val = klass } ->
                 match klass.new { args = [] } is
-                  Ok { val = list } -> list.class_of{}
+                  Ok { val = list } -> list.method { name = "getClass", args = [] }
                   Err { error } -> Err { error = error }
               Err { error } -> Err { error = error }
             """.trimIndent()
@@ -485,10 +485,10 @@ class PolyglotCoreTest {
             use std::polyglot::core::{ InteropError }
             let uuid_class = jvm::class { name = "java.util.UUID" }
             let uuid_val = match uuid_class is
-              Ok  { val = c } -> c.static { name = "randomUUID", args = [] }
+              Ok  { val = c } -> c.method { name = "randomUUID", args = [] }
               Err { error }   -> Err { error = error }
             match uuid_val is
-              Ok  { val = u } -> u.invoke_member { method = "toString", args = [] }
+              Ok  { val = u } -> u.method { name = "toString", args = [] }
               Err { error }   -> Err { error = error }
             """.trimIndent()
         )
@@ -514,7 +514,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_int, jvm_list }
             let xs = jvm_list { elems = [from_int { val = 7 }, from_int { val = 9 }] }
-            xs.array_size {}
+            xs.len {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -527,8 +527,8 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_int, jvm_list }
             let xs = jvm_list { elems = [from_int { val = 7 }, from_int { val = 9 }] }
-            match xs.array_at { index = 1 } is
-              Ok { val = e } -> e.as_int {}
+            match xs.at { index = 1 } is
+              Ok { val = e } -> e.int {}
               Err { error = _ } -> Err { error = UnsupportedMessage }
             """.trimIndent()
         )
@@ -542,7 +542,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ jvm_list }
             let xs = jvm_list { elems = [] }
-            xs.array_size {}
+            xs.len {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -555,7 +555,7 @@ class PolyglotCoreTest {
             """
             use std::polyglot::jvm::{ from_int, jvm_list }
             let xs = jvm_list { elems = [from_int { val = 7 }] }
-            xs.array_at { index = 5 }
+            xs.at { index = 5 }
             """.trimIndent()
         )
         assertErr(result)
@@ -572,8 +572,8 @@ class PolyglotCoreTest {
             let main = {} -> perform JvmHost in do
               let xs = jvm_list { elems = [from_str { val = "a" }, from_str { val = "b" }] }
               match Jvm.class { name = "java.util.Arrays" } is
-                Ok { val = arrays } -> match arrays.static { name = "asList", args = [xs] } is
-                  Ok { val = lst } -> lst.method { name = "size", args = [] }.as_int {}
+                Ok { val = arrays } -> match arrays.method { name = "asList", args = [xs] } is
+                  Ok { val = lst } -> lst.method { name = "size", args = [] }.int {}
                   Err { error = e } -> Err { error = e }
                 Err { error = e } -> Err { error = e }
             main {}
@@ -596,5 +596,108 @@ class PolyglotCoreTest {
             """.trimIndent()
         )
         assertNotNull(result)
+    }
+
+    // ==================== complete-set additions ====================
+
+    @Test
+    fun `size unifies array length`() {
+        // The unified `size` verb on an array-shaped Foreign (getArraySize branch).
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            use std::polyglot::jvm::{ from_int }
+            let list = jvm::class { name = "java.util.ArrayList" }.new { args = [] }
+            let _ = list.method { name = "add", args = [from_int { val = 7 }] }
+            let _ = list.method { name = "add", args = [from_int { val = 8 }] }
+            list.len {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(2L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `size unifies hash length`() {
+        // The SAME `size` verb on a hash-shaped Foreign (getHashSize branch) — one
+        // `len`-like verb over both shapes.
+        val result = eval(
+            """
+            use std::polyglot::jvm::{ from_str, from_int, jvm_dict }
+            jvm_dict {
+              keys = [from_str { val = "a" }, from_str { val = "b" }, from_str { val = "c" }],
+              vals = [from_int { val = 1 }, from_int { val = 2 }, from_int { val = 3 }],
+            }.len {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(3L, v.getPayloadFieldByName("val"))
+    }
+
+    @Test
+    fun `to_seq drains a non-array iterable through the iterator protocol`() {
+        // A HashSet is Iterable but NOT array-shaped, so `to_seq` cannot index it —
+        // it must drain the guest iterator. Proves the iterator branch (the array
+        // branch is already exercised by the codec's decode_list).
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            use std::polyglot::jvm::{ from_int }
+            use std::collections::seq
+            let set = jvm::class { name = "java.util.HashSet" }.new { args = [] }
+            let _ = set.method { name = "add", args = [from_int { val = 10 }] }
+            let _ = set.method { name = "add", args = [from_int { val = 20 }] }
+            let _ = set.method { name = "add", args = [from_int { val = 30 }] }
+            match set.to_seq {} is
+              Ok  { val = xs }  -> seq::size { xs = xs }
+              Err { error = _ } -> -1
+            """.trimIndent()
+        )
+        assertEquals(3L, result)
+    }
+
+    @Test
+    fun `language-effect entry pattern - handler buries Runtime around eval_raw, errors gracefully`() {
+        // The EXACT shape every out-of-tree provider uses for its entry: a
+        // per-language effect whose handler buries `perform Runtime in
+        // Polyglot.eval_raw { lang = "…", source }` with the guest id baked in.
+        // The user performs only the language handler; Runtime stays buried. With
+        // no such guest language installed on the test classpath, the native
+        // surfaces the failure as an Err (GuestError), not a crash — proving the
+        // whole entry path (effect -> Runtime -> eval native) is wired and that a
+        // missing guest degrades gracefully.
+        val result = eval(
+            """
+            use std::polyglot::core::{ Polyglot, Runtime, InteropError, Foreign }
+            newtype XForeign = Foreign
+            effect X where { run: { source: Str } -> Result XForeign InteropError <X> }
+            pub type XHost = {}
+            impl X for XHost where {
+              run = { source } ->
+                perform Runtime in Polyglot.eval_raw { lang = "nonexistent_lang_xyz", source = source }
+            }
+            perform XHost in X.run { source = "1 + 1" }
+            """.trimIndent()
+        )
+        assertErr(result)
+    }
+
+    @Test
+    fun `verbs route through the Polyglot effect with NO enclosing perform`() {
+        // The two-layer design's headline property: each JvmForeign verb buries its
+        // own `perform Runtime in Polyglot.<op>`, so a whole chain runs with no
+        // enclosing perform at all. `Math.PI` read via `.get{}` then coerced via
+        // `.float{}` — both verbs delegate to the raw Polyglot effect internally,
+        // and the user writes neither `Polyglot.*` nor a `lang` string.
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            jvm::class { name = "java.lang.Math" }
+              .get { name = "PI" }
+              .float {}
+            """.trimIndent()
+        )
+        val v = assertOk(result)
+        assertEquals(Math.PI, v.getPayloadFieldByName("val"))
     }
 }

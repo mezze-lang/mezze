@@ -2,6 +2,7 @@ use std::abilities::numeric::{ NumAdd, NumSub, NumMul, NumDiv, NumZero, NumOne }
 use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::convert::{ Into }
 use std::abilities::default::{ Default }
+use std::float
 
 impl NumAdd Frac for Frac having 'out = Frac where {
   add = { it, r } -> __native_frac_add { l = it, r = r }
@@ -80,6 +81,16 @@ pub let greater_than: { l: Frac, r: Frac } -> Bool = { l, r } ->
 
 ## Convert a fraction to a Float.
 pub let to_float: { n: Frac } -> Float = { n } -> __native_frac_to_float { n = n }
+
+## Convert a Float to a reduced Frac — the inverse of `to_float`, using the
+## continued-fraction convergents so a `Frac -> Float -> Frac` round trip recovers
+## the original nice fraction. NOT total: NaN and ±infinity have no rational value,
+## so the result is `Option Frac` (`None` for a non-finite input) rather than a
+## `Frac` that hides the failure. The native only ever sees a finite value.
+pub let from_float: { f: Float } -> Option Frac = { f } ->
+  match float::is_finite { n = f } is
+    True  -> Some { val = __native_float_to_frac { f = f } }
+    False -> None
 
 ## Convert a fraction to its string representation (e.g. "3/4").
 pub let to_str: { n: Frac } -> Str = { n } -> __native_frac_to_str { n = n }

@@ -165,6 +165,43 @@ public final class FracNatives {
         return (double) numerator(frac) / (double) denominator(frac);
     }
 
+    /**
+     * A Float as a reduced Frac — the inverse of {@link #toFloat}.
+     *
+     * Uses the continued-fraction convergents (the Stern–Brocot walk) to find the
+     * best rational approximation whose denominator stays within a bound, so a
+     * `Frac -> Float -> Frac` round trip recovers the "nice" fractions a codec
+     * cares about (3/4, 1/3, 22/7) instead of the raw binary ratio of the double.
+     * NaN / infinity have no rational value and raise, matching how the other
+     * frac natives surface a domain error.
+     */
+    @TruffleBoundary
+    public static MezzeRecord fromFloat(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            throw new ArithmeticException("Cannot convert " + value + " to a fraction");
+        }
+        boolean negative = value < 0;
+        double x = Math.abs(value);
+        final long MAX_DEN = 1_000_000_000L;
+        long h0 = 0, h1 = 1;  // numerator convergents (h1 = current)
+        long k0 = 1, k1 = 0;  // denominator convergents (k1 = current)
+        double frac = x;
+        for (int i = 0; i < 64; i++) {
+            long a = (long) Math.floor(frac);
+            long h2 = a * h1 + h0;
+            long k2 = a * k1 + k0;
+            if (k2 > MAX_DEN || k2 < 0 || h2 < 0) break;
+            h0 = h1; h1 = h2;
+            k0 = k1; k1 = k2;
+            double rem = frac - a;
+            if (rem < 1e-12) break;
+            frac = 1.0 / rem;
+        }
+        long num = negative ? -h1 : h1;
+        long den = k1 == 0 ? 1 : k1;
+        return make(num, den);
+    }
+
     @TruffleBoundary
     public static String fracToString(MezzeRecord frac) {
         long n = numerator(frac);

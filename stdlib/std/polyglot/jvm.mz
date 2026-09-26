@@ -1,216 +1,222 @@
 # JVM host-language access.
 #
-# `JvmForeign` wraps a Java host object (class, instance, array,
-# Iterable, executable). All JVM interop routes through this type:
-# `perform JvmHost in do ... let cls = Jvm.class { name = ... }`
-# yields a `Result JvmForeign InteropError` — an idiomatic method
-# call then reads `.new{}` / `.method{}` / `.field{}` on the class.
+# `JvmForeign` wraps a Java host object (class, instance, array, Iterable,
+# executable, mapping). All JVM interop routes through this type:
+# `perform JvmHost in do ... let cls = Jvm.class { name = ... }` yields a
+# `Result JvmForeign InteropError` — an idiomatic call then reads `.new{}` /
+# `.method{}` / `.get{}` on the class.
 #
-# Requires the enclosing polyglot Context to allow host class lookup
-# — `allowAllAccess(true)` in test / dev, or explicit
-# `allowHostClassLookup` in production.
-use std::polyglot::core::{ InteropError }
+# This is the CANONICAL surface, and the in-tree REFERENCE for the two-layer
+# polyglot design that out-of-tree providers (`mezze-python`, `mezze-js`, …)
+# follow: the user-facing verbs are the smallest set that is still COMPLETE
+# against the guest object model, and each one delegates DOWN to the raw
+# `Polyglot` effect via `perform Runtime in Polyglot.<op> …`. No verb calls a
+# `__native_polyglot_*` directly, and the guest-language id `"jvm"` is baked into
+# the constructors exactly once — a user never writes `Polyglot.*` or a `lang`
+# string. The one JVM-specific native is host class lookup (`__native_jvm_class`),
+# the JVM's entry point, legitimate because this module is first-party stdlib.
+#
+# Requires the enclosing polyglot Context to allow host class lookup —
+# `allowAllAccess(true)` in test / dev, or explicit `allowHostClassLookup`.
+use std::polyglot::core::{ InteropError, Polyglot, Runtime, Foreign }
 
-## Opaque handle to a JVM host object. Runtime: same `MezzeForeign`
-## Java class every language uses; the newtype gives Mezze-level type
+## Opaque handle to a JVM host object. Wraps the public `Foreign` handle (never
+## the internal `__NativeForeign` primitive); the newtype gives Mezze-level type
 ## safety against mixing JVM and non-JVM Foreigns.
-pub newtype JvmForeign = __NativeForeign
+pub newtype JvmForeign = Foreign
 
-## JVM host effect. `class` performs a fully-qualified host class
-## lookup — the returned Foreign is a Java `Class` interop object,
-## instantiable (`.new{}`) and member-invocable (`.static{}`).
+## JVM host effect. `class` performs a fully-qualified host class lookup — the
+## returned Foreign is a Java `Class` interop object, instantiable (`.new{}`) and
+## member-invocable (`.method{}`). This is the JVM's entry point (the analogue of
+## `eval` for a guest language): it mints the first `JvmForeign`.
 effect Jvm where {
   class: { name: Str } -> Result JvmForeign InteropError <Jvm>
 }
 
-## Default JVM host — delegates to whatever host class lookup is
-## permitted by the surrounding polyglot Context. Zero configuration:
-## host access is a Context-level policy decision, not a handler knob.
+## Default JVM host — delegates to whatever host class lookup the surrounding
+## polyglot Context permits. Zero configuration: host access is a Context-level
+## policy decision, not a handler knob. Host class lookup is JVM-specific, so it
+## calls the one JVM native directly rather than a generic `Polyglot` op.
 pub type JvmHost = {}
 
 impl Jvm for JvmHost where {
   class = { name } -> __native_jvm_class { name = name }
 }
 
-## Inherent methods on JvmForeign — Java-idiomatic vocabulary AND
-## the universal InteropLibrary primitives. Every op routes through
-## the same `__native_polyglot_*` natives.
+## The complete verb set on a JvmForeign. Every verb delegates to the raw
+## `Polyglot` effect and buries its own `perform Runtime`, so a chain like
+## `klass.new{}.method{}.len{}.int{}` runs with NO enclosing perform — each verb
+## is self-contained. Grouped by InteropLibrary message family; every verb is ONE
+## interop message. Fallible verbs return `Result JvmForeign InteropError` (or a
+## coerced scalar) — chain them directly on the Result via the mirror impl below.
 impl JvmForeign where {
-  ## ---- Java-idiomatic vocabulary ----
+  ## ---- object protocol ----
 
-  ## Invoke an instance method by name.
-  method     = { it, name, args } ->
-    __native_polyglot_invoke_member { val = it, name = name, args = args },
-  ## Instantiate a class Foreign.
-  new        = { it, args } ->
-    __native_polyglot_instantiate { val = it, args = args },
-  ## Invoke a static method — same as `method` at the interop level;
-  ## separately named for the Java-side reader.
-  static     = { it, name, args } ->
-    __native_polyglot_invoke_member { val = it, name = name, args = args },
-  ## Read the `INSTANCE` singleton member (Kotlin `object` / Java
-  ## enum-style singleton).
-  instance   = { it } ->
-    __native_polyglot_read_member { val = it, name = "INSTANCE" },
-  ## Read a field / static field by name.
-  field      = { it, name } ->
-    __native_polyglot_read_member { val = it, name = name },
-  ## Read a named enum constant off an enum class Foreign.
-  enum_value = { it, name } ->
-    __native_polyglot_read_member { val = it, name = name },
-  ## Look up the runtime `Class` of this Foreign via `getClass()`.
-  class_of   = { it } ->
-    __native_polyglot_invoke_member { val = it, name = "getClass", args = [] },
-  ## Java `cls.isInstance(it)` — cls must be a `Class` Foreign.
-  instanceof = { it, cls } ->
-    match __native_polyglot_invoke_member { val = cls, name = "isInstance", args = [it] } is
-      Ok { val = f } -> match __native_polyglot_as_boolean { val = f } is
-        Ok { val = b } -> b
-        Err { error = _ } -> False
-      Err { error = _ } -> False,
+  ## Read a member (Java field, static, enum constant, `INSTANCE` singleton).
+  get    = { it, name } ->
+    perform Runtime in Polyglot.read_member { on = it, name = name },
+  ## Write a member.
+  set    = { it, name, val } ->
+    perform Runtime in Polyglot.write_member { on = it, name = name, val = val },
+  ## Call a callable Foreign (a function / lambda / bound method).
+  call   = { it, args } ->
+    perform Runtime in Polyglot.execute { on = it, args = args },
+  ## Read a member and call it — the everyday `obj.name(args)`. Distinct from
+  ## `get` + `call`: a Java instance method is invocable but not readable, so
+  ## this reaches members `get` cannot.
+  method = { it, name, args } ->
+    perform Runtime in Polyglot.invoke_member { on = it, name = name, args = args },
+  ## True iff a member of this name is readable — `hasattr`, without triggering a
+  ## read. Returns a bare Bool (this one cannot fail).
+  has    = { it, name } ->
+    perform Runtime in Polyglot.has_member { on = it, name = name },
+  ## Instantiate a class Foreign — `new Klass(args)`.
+  new    = { it, args } ->
+    perform Runtime in Polyglot.instantiate { on = it, args = args },
 
-  ## ---- Universal InteropLibrary vocabulary ----
+  ## ---- containers ----
 
-  ## Invoke a message-named member with args.
-  invoke_member = { it, method, args } ->
-    __native_polyglot_invoke_member { val = it, name = method, args = args },
-  ## Read a named member.
-  get_member    = { it, name } ->
-    __native_polyglot_read_member    { val = it, name = name },
-  ## Membership predicate.
-  has_member    = { it, name } ->
-    __native_polyglot_has_member     { val = it, name = name },
-  ## Execute a callable Foreign.
-  execute       = { it, args } ->
-    __native_polyglot_execute        { val = it, args = args },
-  ## Instantiate a constructable Foreign.
-  instantiate   = { it, args } ->
-    __native_polyglot_instantiate    { val = it, args = args },
   ## Read an array element by index.
-  array_at      = { it, index } ->
-    __native_polyglot_read_array     { val = it, index = index },
-  ## Number of elements in an array-shaped Foreign.
-  array_size    = { it } ->
-    __native_polyglot_array_size     { val = it },
-  ## Every element of an array-shaped Foreign, as a Mezze seq of Foreigns, in
-  ## ONE crossing. `array_at` in a loop costs one native call and one Result per
-  ## element; this costs one of each for the whole array, and handing a seq the
-  ## other way is already O(1) through `jvm_list`.
-  array_to_seq  = { it } ->
-    __native_polyglot_array_to_seq   { val = it },
-  ## True iff this Foreign is hash-shaped (a dict / mapping). Interop models
-  ## hashes and members separately, so a mapping is NOT readable through
-  ## `get_member` — it is reached through the three methods below.
-  has_hash      = { it } ->
-    __native_polyglot_has_hash_entries { val = it },
-  ## Number of entries in a hash-shaped Foreign.
-  hash_size     = { it } ->
-    __native_polyglot_hash_size      { val = it },
-  ## Read one entry by key. The key may be a Foreign or a bare Mezze value.
-  hash_at       = { it, key } ->
-    __native_polyglot_read_hash      { val = it, key = key },
-  ## Every entry, as an array-shaped Foreign whose elements are two-element
-  ## `[key, value]` Foreigns — the shape a codec's `decode_map` walks.
-  hash_entries  = { it } ->
-    __native_polyglot_hash_entries   { val = it },
+  at      = { it, index } ->
+    perform Runtime in Polyglot.read_array { on = it, index = index },
+  ## Write an array element by index.
+  set_at  = { it, index, val } ->
+    perform Runtime in Polyglot.write_array { on = it, index = index, val = val },
+  ## Read a mapping entry by key. The key may be a Foreign or a bare Mezze value.
+  key     = { it, of } ->
+    perform Runtime in Polyglot.read_hash { on = it, key = of },
+  ## Write a mapping entry.
+  set_key = { it, of, val } ->
+    perform Runtime in Polyglot.write_hash { on = it, key = of, val = val },
+  ## Length — array elements or mapping entries (the guest's `len`).
+  len    = { it } ->
+    perform Runtime in Polyglot.size { on = it },
+  ## Drain any iterable — an array, or a Java `Iterator`/`Iterable`/stream — into
+  ## a Mezze seq of Foreigns in ONE crossing. The cursor stays inside the runtime,
+  ## so no mutable iterator ever reaches pure code.
+  to_seq  = { it } ->
+    perform Runtime in Polyglot.to_seq { on = it },
+  ## Every mapping entry as a seq of two-element `[key, value]` Foreigns — the
+  ## shape a codec's `decode_map` walks.
+  entries = { it } ->
+    perform Runtime in Polyglot.hash_entries { on = it },
+
+  ## ---- value coercions (out) ----
+
   ## Coerce a numeric Foreign to Int.
-  as_int        = { it } -> __native_polyglot_as_long    { val = it },
-  ## Coerce a string Foreign to Str.
-  as_str        = { it } -> __native_polyglot_as_string  { val = it },
+  int       = { it } -> perform Runtime in Polyglot.as_int    { on = it },
   ## Coerce a numeric Foreign to Float.
-  as_float      = { it } -> __native_polyglot_as_double  { val = it },
+  float     = { it } -> perform Runtime in Polyglot.as_float  { on = it },
+  ## Coerce a string Foreign to Str.
+  str       = { it } -> perform Runtime in Polyglot.as_str    { on = it },
   ## Coerce a boolean Foreign to Bool.
-  as_bool       = { it } -> __native_polyglot_as_boolean { val = it },
+  bool      = { it } -> perform Runtime in Polyglot.as_bool   { on = it },
   ## True iff this Foreign is the guest-language null.
-  is_null       = { it } -> __native_polyglot_is_null    { val = it },
-  ## Debug name of the underlying guest-language type.
-  type_name     = { it } -> __native_polyglot_type_name  { val = it },
+  is_null   = { it } -> perform Runtime in Polyglot.is_null   { on = it },
+  ## Meta name of the underlying guest type (`type(x).__name__`).
+  type_name = { it } -> perform Runtime in Polyglot.type_name { on = it },
 }
 
-## Chainable inherent methods on `Result JvmForeign InteropError` — the
-## exact return type of every fallible operation above. Mirrors every
-## member-access method on `impl JvmForeign` so a host-interop pipeline
-## reads as a flat chain
+## The SAME verbs on `Result JvmForeign InteropError` — the return type of every
+## fallible op above — so a pipeline reads as a flat chain
 ##
 ##     klass.new { args = [] }
 ##       .method { name = "add", args = [x] }
-##       .method { name = "size", args = [] }
-##       .as_int {}
+##       .len {}
+##       .int {}
 ##
-## instead of a `match` between every step. Each method threads through
-## the Result: on `Ok` it delegates to the underlying `JvmForeign`
-## method; on `Err` it propagates the error unchanged. NO return-type
-## annotations — the return type infers from the delegated call.
+## with no `match` between steps. Each verb threads the Result: on `Ok` it
+## delegates to the underlying `JvmForeign`; on `Err` it propagates the error.
 impl Result JvmForeign InteropError where {
+  get = { it, name } -> match it is
+    Ok  { val = f } -> f.get { name = name }
+    Err { error }   -> Err { error = error },
+  set = { it, name, val } -> match it is
+    Ok  { val = f } -> f.set { name = name, val = val }
+    Err { error }   -> Err { error = error },
+  call = { it, args } -> match it is
+    Ok  { val = f } -> f.call { args = args }
+    Err { error }   -> Err { error = error },
   method = { it, name, args } -> match it is
     Ok  { val = f } -> f.method { name = name, args = args }
+    Err { error }   -> Err { error = error },
+  has = { it, name } -> match it is
+    Ok  { val = f } -> Ok { val = f.has { name = name } }
     Err { error }   -> Err { error = error },
   new = { it, args } -> match it is
     Ok  { val = f } -> f.new { args = args }
     Err { error }   -> Err { error = error },
-  static = { it, name, args } -> match it is
-    Ok  { val = f } -> f.static { name = name, args = args }
+  at = { it, index } -> match it is
+    Ok  { val = f } -> f.at { index = index }
     Err { error }   -> Err { error = error },
-  field = { it, name } -> match it is
-    Ok  { val = f } -> f.field { name = name }
+  set_at = { it, index, val } -> match it is
+    Ok  { val = f } -> f.set_at { index = index, val = val }
     Err { error }   -> Err { error = error },
-  invoke_member = { it, method, args } -> match it is
-    Ok  { val = f } -> f.invoke_member { method = method, args = args }
+  key = { it, of } -> match it is
+    Ok  { val = f } -> f.key { of = of }
     Err { error }   -> Err { error = error },
-  get_member = { it, name } -> match it is
-    Ok  { val = f } -> f.get_member { name = name }
+  set_key = { it, of, val } -> match it is
+    Ok  { val = f } -> f.set_key { of = of, val = val }
     Err { error }   -> Err { error = error },
-  execute = { it, args } -> match it is
-    Ok  { val = f } -> f.execute { args = args }
-    Err { error }   -> Err { error = error },
-  instantiate = { it, args } -> match it is
-    Ok  { val = f } -> f.instantiate { args = args }
-    Err { error }   -> Err { error = error },
-  array_at = { it, index } -> match it is
-    Ok  { val = f } -> f.array_at { index = index }
-    Err { error }   -> Err { error = error },
-  array_size = { it } -> match it is
-    Ok  { val = f } -> f.array_size {}
+  len = { it } -> match it is
+    Ok  { val = f } -> f.len {}
     Err { error }  -> Err { error = error },
-  as_int = { it } -> match it is
-    Ok  { val = f } -> f.as_int {}
+  to_seq = { it } -> match it is
+    Ok  { val = f } -> f.to_seq {}
     Err { error }  -> Err { error = error },
-  as_str = { it } -> match it is
-    Ok  { val = f } -> f.as_str {}
+  entries = { it } -> match it is
+    Ok  { val = f } -> f.entries {}
     Err { error }  -> Err { error = error },
-  as_float = { it } -> match it is
-    Ok  { val = f } -> f.as_float {}
+  int = { it } -> match it is
+    Ok  { val = f } -> f.int {}
     Err { error }  -> Err { error = error },
-  as_bool = { it } -> match it is
-    Ok  { val = f } -> f.as_bool {}
+  float = { it } -> match it is
+    Ok  { val = f } -> f.float {}
+    Err { error }  -> Err { error = error },
+  str = { it } -> match it is
+    Ok  { val = f } -> f.str {}
+    Err { error }  -> Err { error = error },
+  bool = { it } -> match it is
+    Ok  { val = f } -> f.bool {}
+    Err { error }  -> Err { error = error },
+  is_null = { it } -> match it is
+    Ok  { val = f } -> Ok { val = f.is_null {} }
+    Err { error }  -> Err { error = error },
+  type_name = { it } -> match it is
+    Ok  { val = f } -> Ok { val = f.type_name {} }
     Err { error }  -> Err { error = error },
 }
 
-## Constructors — lift a Mezze primitive into a JvmForeign so it
-## can be passed as an argument to `.method{}` / `.new{}` etc.
-pub let from_int:   { val: Int   } -> JvmForeign = { val } -> __native_jvm_from_int   { val = val }
-pub let from_float: { val: Float } -> JvmForeign = { val } -> __native_jvm_from_float { val = val }
-pub let from_str:   { val: Str   } -> JvmForeign = { val } -> __native_jvm_from_str   { val = val }
-pub let from_bool:  { val: Bool  } -> JvmForeign = { val } -> __native_jvm_from_bool  { val = val }
-pub let null_val:   {}            -> JvmForeign = {}     -> __native_jvm_null_val    {}
+## Constructors — lift a Mezze primitive into a JvmForeign so it can be passed as
+## an argument to `.method{}` / `.new{}` / `.call{}`. Each mints a foreign through
+## the `Polyglot` effect with the guest id `"jvm"` baked in here (the ONLY place
+## it appears) — a caller writes `from_int { val = 5 }`, never a `lang` string.
+## For containers and records, prefer the codec (`x.to_jvm {}`) over building
+## lists by hand.
+pub let from_int:   { val: Int   } -> JvmForeign = { val } ->
+  perform Runtime in Polyglot.box_int   { val = val, lang = "jvm" }
+pub let from_float: { val: Float } -> JvmForeign = { val } ->
+  perform Runtime in Polyglot.box_float { val = val, lang = "jvm" }
+pub let from_str:   { val: Str   } -> JvmForeign = { val } ->
+  perform Runtime in Polyglot.box_str   { val = val, lang = "jvm" }
+pub let from_bool:  { val: Bool  } -> JvmForeign = { val } ->
+  perform Runtime in Polyglot.box_bool  { val = val, lang = "jvm" }
+pub let null_val:   {}            -> JvmForeign = {} ->
+  perform Runtime in Polyglot.box_null  { lang = "jvm" }
 
-## Build a Java-visible list from already-wrapped Foreign elements.
-##
-## The interop surface could always READ an array (`array_at`, `array_size`)
-## but never build one, so there was no way to hand a guest a sequence of
-## values — which is exactly what a codec's `encode_list` has to do. The result
-## is an interop view over the elements, not a copy into a `java.util.List`:
-## pass it anywhere a Java method takes an array or an Iterable.
+## Build a Java-visible list from already-wrapped Foreign elements — an interop
+## view over the elements, not a copy into `java.util.List`. Backs a codec's
+## `encode_list`; pass it anywhere a Java method takes an array or Iterable.
 pub let jvm_list: { elems: [JvmForeign] } -> JvmForeign = { elems } ->
-  __native_jvm_make_list { elems = elems }
+  perform Runtime in Polyglot.box_list { elems = elems, lang = "jvm" }
 
-## Build a Java-visible mapping from parallel key and value sequences.
-## Companion to `jvm_list`, backing a codec's `encode_map` / `encode_record`.
-## Keys keep the order they were given in.
+## Build a Java-visible mapping from parallel key and value sequences. Companion
+## to `jvm_list`, backing a codec's `encode_map` / `encode_record`. Keys keep the
+## order they were given in.
 pub let jvm_dict: { keys: [JvmForeign], vals: [JvmForeign] } -> JvmForeign = { keys, vals } ->
-  __native_jvm_make_dict { keys = keys, vals = vals }
+  perform Runtime in Polyglot.box_dict { keys = keys, vals = vals, lang = "jvm" }
 
-## Convenience: look up a host class outside a `perform Jvm` scope
-## — uses the enclosing Env's host-lookup permissions directly.
+## Convenience: look up a host class outside a `perform Jvm` scope — uses the
+## enclosing Env's host-lookup permissions directly.
 pub let class: { name: Str } -> Result JvmForeign InteropError = { name } ->
   __native_jvm_class { name = name }

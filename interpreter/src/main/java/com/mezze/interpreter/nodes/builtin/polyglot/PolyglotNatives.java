@@ -1,12 +1,15 @@
 package com.mezze.interpreter.nodes.builtin.polyglot;
 
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.interpreter.runtime.MezzeContext;
+import com.mezze.interpreter.runtime.MezzePolyglotSupport;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.interpreter.values.MezzeForeign;
 import com.mezze.interpreter.values.MezzeNull;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.interop.ArityException;
 import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.InvalidArrayIndexException;
@@ -116,6 +119,36 @@ public final class PolyglotNatives {
             if (sb.length() > 4096) break;  // keep it bounded
         }
         return sb.toString();
+    }
+
+    // ==================== Guest evaluation ====================
+
+    /**
+     * Evaluate {@code source} in guest language {@code lang} against the ambient
+     * Truffle Context, tagging the resulting Foreign with {@code lang}.
+     *
+     * This is the ONE guest-entry native, generic over the language id. It
+     * replaces the per-provider {@code __native_python_eval} /
+     * {@code __native_js_eval} handlers the plugin jars used to install: a
+     * provider package now performs {@code Polyglot.eval_raw { lang, source }}
+     * through the {@code Runtime} handler instead of shipping its own native, so
+     * a third-party language (Ruby, R, …) needs no Java at all — only that the
+     * launcher's Context has that language enabled. All import/require sugar is
+     * built on top of this in the provider's own Mezze (it constructs the guest
+     * expression and calls {@code eval_raw}).
+     */
+    @TruffleBoundary
+    public static MezzeVariant evalRaw(MezzeRecord args, Node currentNode) {
+        String lang = getString(args, "lang");
+        String source = getString(args, "source");
+        try {
+            MezzePolyglotSupport support =
+                MezzeContext.get(currentNode).getPolyglotSupport();
+            Object result = support.eval(lang, source);
+            return MezzeVariant.ok(new MezzeForeign(result, lang));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
     }
 
     // ==================== Foreign helpers ====================
@@ -595,6 +628,97 @@ public final class PolyglotNatives {
                     interop.readArrayElement(f.getDelegate(), i), f.getSourceLanguage());
             }
             return MezzeVariant.ok(MezzeSeq.fromArray(elements));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Write one entry into a hash-shaped Foreign — the mirror of {@link #readHash}
+     * and the write side {@code hash_entries}/{@code read_hash} never had. Both key
+     * and value are unwrapped like call arguments: a Foreign passes its delegate, a
+     * bare Mezze value passes through as-is.
+     */
+    @TruffleBoundary
+    public static MezzeVariant writeHash(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        Object key = getField(args, "key");
+        Object newVal = getField(args, "new_val");
+        Object rawKey = key instanceof MezzeForeign mf ? mf.getDelegate() : key;
+        Object rawVal = newVal instanceof MezzeForeign mv ? mv.getDelegate() : newVal;
+        try {
+            InteropLibrary.getUncached().writeHashEntry(f.getDelegate(), rawKey, rawVal);
+            return MezzeVariant.ok(MezzeRecord.empty());
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Number of elements in an array-shaped Foreign OR entries in a hash-shaped one
+     * — the guest's {@code len()}. Unifies {@code array_size}/{@code hash_size} into
+     * one verb so the surface has a single `size`, matching how a guest exposes one
+     * `len`. Array is checked first (the common case); a mapping falls through to
+     * its hash size; anything else is Unsupported.
+     */
+    @TruffleBoundary
+    public static MezzeVariant size(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        InteropLibrary interop = InteropLibrary.getUncached();
+        Object recv = f.getDelegate();
+        try {
+            if (interop.hasArrayElements(recv)) {
+                return MezzeVariant.ok(interop.getArraySize(recv));
+            }
+            if (interop.hasHashEntries(recv)) {
+                return MezzeVariant.ok(interop.getHashSize(recv));
+            }
+            return MezzeVariant.err(errorUnsupported());
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * A whole iterable Foreign as a Mezze seq of Foreigns, in ONE crossing —
+     * generalizing {@link #arrayToSeq} to anything the guest can iterate: a Python
+     * generator / range / map object, a JS iterator, a custom {@code __iter__}.
+     *
+     * An array-shaped Foreign is drained by INDEX (fast path, no iterator). Anything
+     * else that {@code hasIterator} is drained through the iterator protocol —
+     * getIterator then hasIteratorNextElement/getIteratorNextElement — with the
+     * cursor kept entirely inside this native, so no mutable iterator ever reaches
+     * pure Mezze code (the same reason {@code hash_entries} drains here rather than
+     * exposing {@code iter}/{@code next}).
+     */
+    @TruffleBoundary
+    public static MezzeVariant toSeq(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        InteropLibrary interop = InteropLibrary.getUncached();
+        Object recv = f.getDelegate();
+        String lang = f.getSourceLanguage();
+        try {
+            if (interop.hasArrayElements(recv)) {
+                long size = interop.getArraySize(recv);
+                if (size > Integer.MAX_VALUE) {
+                    throw new NativeTypeMismatchException(
+                        "Guest array of " + size + " elements is too large to read into a seq");
+                }
+                Object[] elements = new Object[(int) size];
+                for (int i = 0; i < elements.length; i++) {
+                    elements[i] = new MezzeForeign(interop.readArrayElement(recv, i), lang);
+                }
+                return MezzeVariant.ok(MezzeSeq.fromArray(elements));
+            }
+            if (interop.hasIterator(recv)) {
+                Object iterator = interop.getIterator(recv);
+                java.util.ArrayList<Object> elems = new java.util.ArrayList<>();
+                while (interop.hasIteratorNextElement(iterator)) {
+                    elems.add(new MezzeForeign(interop.getIteratorNextElement(iterator), lang));
+                }
+                return MezzeVariant.ok(MezzeSeq.fromArray(elems.toArray()));
+            }
+            return MezzeVariant.err(errorUnsupported());
         } catch (Throwable t) {
             return MezzeVariant.err(translateException(t));
         }

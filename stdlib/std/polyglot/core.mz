@@ -1,29 +1,38 @@
 # Polyglot interop — shared kernel.
 #
-# The polyglot layer bridges Mezze values to guest-language objects via
-# the Truffle InteropLibrary. JVM interop lives alongside this kernel in
-# `std::polyglot::jvm` — Mezze always runs on the JVM, so `JvmForeign`
-# ships built-in. Every additional guest language (Python, JS, Wasm, …)
-# arrives via an installable provider package (`mezze-python`,
-# `mezze-js`, `mezze-wasm`) declared in the project's `Mezze.toml`;
-# each package defines its own opaque `<Lang>Foreign` newtype so the
-# compiler prevents accidental cross-language mixing. All wrappers
-# share the runtime implementation `MezzeForeign`, so per-type tagging
-# is zero-cost at runtime.
+# The polyglot layer bridges Mezze values to guest-language objects via the
+# Truffle InteropLibrary. It is split into two layers:
 #
-# Each `<Lang>Foreign` type ships an inherent impl block exposing BOTH
-# the language's idiomatic vocabulary AND the universal InteropLibrary
-# vocabulary (`invoke_member`, `get_member`, `execute`, `instantiate`,
-# `array_at`, `array_size`, `as_int`, `as_str`, `as_float`, `as_bool`,
-# `is_null`, `type_name`). Every op routes through the same underlying
-# `__native_polyglot_*` primitives — the language-agnostic kernel this
-# module registers.
+#   1. `Polyglot` (this module) — the raw, language-agnostic capability. Its
+#      ops are the interop primitives (member read/write, call/invoke/construct,
+#      array/hash access, the coercions, guest `eval`, value boxing), and its
+#      SOLE handler `Runtime` is the ONLY thing in the whole system that calls a
+#      `__native_*`. `Polyglot` is a *gated* capability: an op is reachable only
+#      where `Runtime` is performed, so raw interop is never ambient authority.
+#      This layer is first-party (stdlib) only.
 #
-# The polyglot Context is managed inside the runtime by the effect
-# handler machinery — user code just writes
-#   `perform JvmHost in do … let c = Jvm.class { name = "java.util.UUID" } …`
-# and never sees the underlying Truffle Context.
+#   2. A per-language effect (`Jvm`, and out-of-tree `Py`/`Js`/… providers) —
+#      the idiomatic, typed surface a user actually calls. Each language handler
+#      delegates DOWN to `Polyglot` via `perform Runtime in Polyglot.<op> …`, so
+#      the language layer writes NO natives and the user performs only the
+#      language handler (`Runtime` stays buried inside it).
+#
+# This is what lets a third party add any GraalVM language (Ruby, R, …) in pure
+# Mezze, in their own repo, with no Java: they define a `<Lang>Foreign` newtype
+# (type-safe against mixing foreigns) and a small effect whose handler performs
+# `Polyglot` ops. Only this repo ever writes `__native_*`.
+#
+# The polyglot Context is managed inside the runtime by the effect handler
+# machinery — user code never sees the underlying Truffle Context.
 use std::result
+
+## The opaque guest-object handle every language's foreign wraps. This is the
+## PUBLIC face of the runtime's native foreign primitive — the one name a provider
+## may newtype over (`pub newtype PyForeign = Foreign`), so the internal
+## `__NativeForeign` primitive stays sealed inside this module exactly like the
+## `__native_*` calls do. All `<Lang>Foreign` newtypes share this representation,
+## so per-language tagging is a compile-time distinction with zero runtime cost.
+pub type Foreign = __NativeForeign
 
 ## Errors returned by every fallible interop operation.
 ##
@@ -41,3 +50,88 @@ pub type InteropError = |
   ArityMismatch { expected: Int, actual: Int },
   UnsupportedMessage,
 |
+
+## The low-level polyglot capability effect. For polyglot LIBRARY implementers
+## only — end users go through a per-language effect (`Jvm`, `Py`, `Js`, …) whose
+## handler delegates here. The foreign type is the associated type `'f` (like
+## `Exception having 'error`), so a per-language newtype (`JvmForeign`,
+## `PyForeign`, …) threads through unchanged and stays type-safe. Only `Runtime`
+## (below) calls the natives — nothing else in the system does.
+##
+## Ops split into two families:
+##   - value ops take an existing foreign `on: 'f` and are language-agnostic
+##     (the foreign already carries its own guest identity);
+##   - producers (`eval_raw`, `box_*`) take a `lang` and MINT a foreign — the
+##     only ops that must name the language.
+effect Polyglot having 'f where {
+  ## ---- value ops: operate on an existing foreign ----
+  read_member:   { on: 'f, name: Str }              -> Result 'f InteropError <Polyglot>,
+  write_member:  { on: 'f, name: Str, val: 'f }     -> Result 'f InteropError <Polyglot>,
+  has_member:    { on: 'f, name: Str }              -> Bool <Polyglot>,
+  invoke_member: { on: 'f, name: Str, args: ['f] }  -> Result 'f InteropError <Polyglot>,
+  execute:       { on: 'f, args: ['f] }             -> Result 'f InteropError <Polyglot>,
+  instantiate:   { on: 'f, args: ['f] }             -> Result 'f InteropError <Polyglot>,
+  read_array:    { on: 'f, index: Int }             -> Result 'f InteropError <Polyglot>,
+  write_array:   { on: 'f, index: Int, val: 'f }    -> Result 'f InteropError <Polyglot>,
+  # hash `key` is a per-op free var `'k`, not `'f` — a mapping key may be a Foreign
+  # OR a bare Mezze value (a codec passes a Str field name); the native unwraps a
+  # Foreign and passes a bare value through unchanged.
+  read_hash:     { on: 'f, key: 'k }                -> Result 'f InteropError <Polyglot>,
+  write_hash:    { on: 'f, key: 'k, val: 'f }       -> Result 'f InteropError <Polyglot>,
+  hash_entries:  { on: 'f }                         -> Result 'f InteropError <Polyglot>,
+  size:          { on: 'f }                         -> Result Int InteropError <Polyglot>,
+  to_seq:        { on: 'f }                         -> Result ['f] InteropError <Polyglot>,
+  as_int:        { on: 'f }                         -> Result Int InteropError <Polyglot>,
+  as_float:      { on: 'f }                         -> Result Float InteropError <Polyglot>,
+  as_str:        { on: 'f }                         -> Result Str InteropError <Polyglot>,
+  as_bool:       { on: 'f }                         -> Result Bool InteropError <Polyglot>,
+  is_null:       { on: 'f }                         -> Bool <Polyglot>,
+  type_name:     { on: 'f }                         -> Str <Polyglot>,
+
+  ## ---- producers: mint a foreign in language `lang` ----
+  eval_raw:      { lang: Str, source: Str }         -> Result 'f InteropError <Polyglot>,
+  box_int:       { val: Int, lang: Str }            -> 'f <Polyglot>,
+  box_float:     { val: Float, lang: Str }          -> 'f <Polyglot>,
+  box_str:       { val: Str, lang: Str }            -> 'f <Polyglot>,
+  box_bool:      { val: Bool, lang: Str }           -> 'f <Polyglot>,
+  box_null:      { lang: Str }                      -> 'f <Polyglot>,
+  box_list:      { elems: ['f], lang: Str }         -> 'f <Polyglot>,
+  box_dict:      { keys: ['f], vals: ['f], lang: Str } -> 'f <Polyglot>,
+}
+
+## The sole handler of `Polyglot`, and the sole caller of `__native_*`. Binds the
+## associated foreign type to a fresh var — generic over any foreign, exactly as
+## `impl Exception for … having 'error = 'e`. A language provider never writes any
+## of these lines; it performs the ops above through this handler.
+pub type Runtime = {}
+
+impl Polyglot for Runtime having 'f = 'g where {
+  read_member   = { on, name }       -> __native_polyglot_read_member   { val = on, name = name },
+  write_member  = { on, name, val }  -> __native_polyglot_write_member  { val = on, name = name, new_val = val },
+  has_member    = { on, name }       -> __native_polyglot_has_member    { val = on, name = name },
+  invoke_member = { on, name, args } -> __native_polyglot_invoke_member { val = on, name = name, args = args },
+  execute       = { on, args }       -> __native_polyglot_execute       { val = on, args = args },
+  instantiate   = { on, args }       -> __native_polyglot_instantiate   { val = on, args = args },
+  read_array    = { on, index }      -> __native_polyglot_read_array    { val = on, index = index },
+  write_array   = { on, index, val } -> __native_polyglot_write_array   { val = on, index = index, new_val = val },
+  read_hash     = { on, key }        -> __native_polyglot_read_hash     { val = on, key = key },
+  write_hash    = { on, key, val }   -> __native_polyglot_write_hash    { val = on, key = key, new_val = val },
+  hash_entries  = { on }             -> __native_polyglot_hash_entries  { val = on },
+  size          = { on }             -> __native_polyglot_size          { val = on },
+  to_seq        = { on }             -> __native_polyglot_to_seq        { val = on },
+  as_int        = { on }             -> __native_polyglot_as_long       { val = on },
+  as_float      = { on }             -> __native_polyglot_as_double     { val = on },
+  as_str        = { on }             -> __native_polyglot_as_string     { val = on },
+  as_bool       = { on }             -> __native_polyglot_as_boolean    { val = on },
+  is_null       = { on }             -> __native_polyglot_is_null       { val = on },
+  type_name     = { on }             -> __native_polyglot_type_name     { val = on },
+
+  eval_raw      = { lang, source }   -> __native_polyglot_eval          { lang = lang, source = source },
+  box_int       = { val, lang }      -> __native_polyglot_box_int       { val = val, lang = lang },
+  box_float     = { val, lang }      -> __native_polyglot_box_float     { val = val, lang = lang },
+  box_str       = { val, lang }      -> __native_polyglot_box_str       { val = val, lang = lang },
+  box_bool      = { val, lang }      -> __native_polyglot_box_bool      { val = val, lang = lang },
+  box_null      = { lang }           -> __native_polyglot_box_null      { lang = lang },
+  box_list      = { elems, lang }    -> __native_polyglot_box_list      { elems = elems, lang = lang },
+  box_dict      = { keys, vals, lang } -> __native_polyglot_box_dict    { keys = keys, vals = vals, lang = lang },
+}
