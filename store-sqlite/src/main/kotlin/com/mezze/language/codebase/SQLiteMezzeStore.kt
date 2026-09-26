@@ -118,7 +118,7 @@ class SQLiteMezzeStore private constructor(
         //    now hashes its EFFECTS and ABILITY CONSTRAINTS, which it did not
         //    before — `{x: Int} -> Int` and `{x: Int} -> Int <IO>` used to share
         //    one hash, as did `{x: 'a} -> 'a` and `{x: 'a} -> 'a with Show 'a`.
-        const val SCHEMA_VERSION = 14
+        const val SCHEMA_VERSION = 15
 
         // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
         // SQLiteMezzeStore exposes only thin pass-throughs so the rest of
@@ -553,7 +553,7 @@ class SQLiteMezzeStore private constructor(
             // see there for what each column means.
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS $alias.type_nodes (
-                    decl_hash   TEXT NOT NULL,
+                    owner_hash  TEXT NOT NULL,
                     node_id     INTEGER NOT NULL,
                     parent_id   INTEGER,
                     slot        TEXT NOT NULL,
@@ -565,26 +565,26 @@ class SQLiteMezzeStore private constructor(
                     is_open     INTEGER NOT NULL DEFAULT 0,
                     performed   INTEGER NOT NULL DEFAULT 0,
                     is_residual INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (decl_hash, node_id)
+                    PRIMARY KEY (owner_hash, node_id)
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS $alias.type_node_effects (
-                    decl_hash   TEXT NOT NULL,
+                    owner_hash   TEXT NOT NULL,
                     node_id     INTEGER NOT NULL,
                     effect_name TEXT NOT NULL,
                     effect_hash TEXT,
-                    PRIMARY KEY (decl_hash, node_id, effect_name)
+                    PRIMARY KEY (owner_hash, node_id, effect_name)
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS $alias.type_node_constraints (
-                    decl_hash    TEXT NOT NULL,
+                    owner_hash    TEXT NOT NULL,
                     node_id      INTEGER NOT NULL,
                     ability_name TEXT NOT NULL,
                     ability_hash TEXT,
                     ordinal      INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (decl_hash, node_id, ability_name)
+                    PRIMARY KEY (owner_hash, node_id, ability_name)
                 ) WITHOUT ROWID
             """.trimIndent())
             // Imports
@@ -634,8 +634,15 @@ class SQLiteMezzeStore private constructor(
                 CREATE TABLE IF NOT EXISTS $alias.ability_impls (
                     hash TEXT PRIMARY KEY,
                     ability_hash TEXT NOT NULL,
-                    target_type TEXT NOT NULL,
                     module TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.ability_impl_targets (
+                    impl_hash TEXT NOT NULL,
+                    ordinal   INTEGER NOT NULL,
+                    type_hash TEXT NOT NULL,
+                    PRIMARY KEY (impl_hash, ordinal)
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("""
@@ -835,13 +842,19 @@ class SQLiteMezzeStore private constructor(
             // matched. Rows can be joined, and SignatureIndex.rebuild turns them
             // back into a MezzeType.
             //
-            // decl_hash is not FK'd to decls: a signature may be written in the
+            // owner_hash is not FK'd to decls: it is not always a decl hash, and a
+            // signature may be written in the
             // same transaction as its decl and FK enforcement runs per-statement,
             // the same reason `names.hash` is not FK'd.
             // ----------------------------------------------------------------
             s.executeUpdate("""
                 CREATE TABLE type_nodes (
-                    decl_hash   TEXT NOT NULL,
+                    -- WHOSE type this is: a declaration's hash for a signature, or a
+                    -- TYPE's own structural hash for a standalone type (an ability
+                    -- impl's target). Named owner_hash, not decl_hash, because
+                    -- reading it as a decl hash sends a query joining to `decls` and
+                    -- finding nothing.
+                    owner_hash  TEXT NOT NULL,
                     -- Pre-order, root = 0. Stable for a given type, so a node's
                     -- id means the same thing on every re-index of that type.
                     node_id     INTEGER NOT NULL,
@@ -855,34 +868,34 @@ class SQLiteMezzeStore private constructor(
                     is_open     INTEGER NOT NULL DEFAULT 0,
                     performed   INTEGER NOT NULL DEFAULT 0,
                     is_residual INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (decl_hash, node_id)
+                    PRIMARY KEY (owner_hash, node_id)
                 ) WITHOUT ROWID
             """.trimIndent())
             // Answers "which decls mention THIS type", which is the query a doc
             // browser and an agent both want, and which no rendered string could
             // serve without matching names instead of declarations.
             s.executeUpdate("CREATE INDEX idx_type_nodes_type_hash ON type_nodes(type_hash)")
-            s.executeUpdate("CREATE INDEX idx_type_nodes_residual ON type_nodes(decl_hash, is_residual)")
+            s.executeUpdate("CREATE INDEX idx_type_nodes_residual ON type_nodes(owner_hash, is_residual)")
 
             s.executeUpdate("""
                 CREATE TABLE type_node_effects (
-                    decl_hash   TEXT NOT NULL,
+                    owner_hash   TEXT NOT NULL,
                     node_id     INTEGER NOT NULL,
                     effect_name TEXT NOT NULL,
                     effect_hash TEXT,
-                    PRIMARY KEY (decl_hash, node_id, effect_name)
+                    PRIMARY KEY (owner_hash, node_id, effect_name)
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_type_node_effects_name ON type_node_effects(effect_name)")
 
             s.executeUpdate("""
                 CREATE TABLE type_node_constraints (
-                    decl_hash    TEXT NOT NULL,
+                    owner_hash    TEXT NOT NULL,
                     node_id      INTEGER NOT NULL,
                     ability_name TEXT NOT NULL,
                     ability_hash TEXT,
                     ordinal      INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (decl_hash, node_id, ability_name)
+                    PRIMARY KEY (owner_hash, node_id, ability_name)
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_type_node_constraints_name ON type_node_constraints(ability_name)")
@@ -1008,12 +1021,31 @@ class SQLiteMezzeStore private constructor(
                 CREATE TABLE ability_impls (
                     hash         TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
                     ability_hash TEXT NOT NULL,
-                    target_type  TEXT NOT NULL,
                     module       TEXT
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_ability_impls_ability ON ability_impls(ability_hash)")
-            s.executeUpdate("CREATE INDEX idx_ability_impls_type ON ability_impls(target_type)")
+
+            s.executeUpdate("""
+                -- ability_impl_targets: which types an impl is FOR, one row each.
+                --
+                -- This was a single `target_type` column on ability_impls holding the
+                -- targets comma-joined, because an impl can have several: 80 of the
+                -- stdlib's 310 do (class-param abilities like `NumAdd 'r for 'l`).
+                -- Every reader therefore had to split a string, and none could join.
+                --
+                -- type_hash is the target type's STRUCTURAL hash, which is also the
+                -- key its type tree is stored under in type_nodes — so a target can
+                -- be rendered and unified against, not merely counted. It is
+                -- deliberately NOT a decl hash: `Int` has no declaration.
+                CREATE TABLE ability_impl_targets (
+                    impl_hash TEXT NOT NULL REFERENCES ability_impls(hash) ON DELETE CASCADE,
+                    ordinal   INTEGER NOT NULL,
+                    type_hash TEXT NOT NULL,
+                    PRIMARY KEY (impl_hash, ordinal)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_impl_targets_type ON ability_impl_targets(type_hash)")
 
             s.executeUpdate("""
                 -- effect_performers: performer registry per effect.
@@ -1445,54 +1477,118 @@ class SQLiteMezzeStore private constructor(
     // ====================================================================
 
     private val putAbilityImplStmt: PreparedStatement by lazy {
-        conn.prepareStatement("INSERT OR REPLACE INTO ability_impls (hash, ability_hash, target_type, module) VALUES (?, ?, ?, ?)")
+        conn.prepareStatement("INSERT OR REPLACE INTO ability_impls (hash, ability_hash, module) VALUES (?, ?, ?)")
+    }
+
+    private val putImplTargetStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            "INSERT OR REPLACE INTO ability_impl_targets (impl_hash, ordinal, type_hash) VALUES (?, ?, ?)"
+        )
+    }
+
+    private val deleteImplTargetsStmt: PreparedStatement by lazy {
+        conn.prepareStatement("DELETE FROM ability_impl_targets WHERE impl_hash = ?")
     }
 
     @Synchronized
-    override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetType: String, module: String?) {
+    override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetTypeHashes: List<Hash>, module: String?) {
         putAbilityImplStmt.apply {
             setString(1, hash.hex)
             setString(2, abilityHash.hex)
-            setString(3, targetType)
-            setString(4, module)
+            setString(3, module)
             executeUpdate()
+        }
+        // The targets are one VALUE — replace them wholesale, or an impl re-indexed
+        // with fewer targets keeps the old tail, the same trap as a signature.
+        deleteImplTargetsStmt.apply { setString(1, hash.hex); executeUpdate() }
+        targetTypeHashes.forEachIndexed { i, target ->
+            putImplTargetStmt.apply {
+                setString(1, hash.hex)
+                setInt(2, i)
+                setString(3, target.hex)
+                executeUpdate()
+            }
         }
     }
 
     private val getAbilityImplsStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll(
-            "SELECT hash, ability_hash, target_type, module FROM <DB>.ability_impls WHERE ability_hash = ?"
+            "SELECT hash, ability_hash, module FROM <DB>.ability_impls WHERE ability_hash = ?"
         ))
     }
+
+    private fun ResultSet.toAbilityImplRow() = AbilityImplRow(
+        hash = Hash(getString("hash")),
+        abilityHash = Hash(getString("ability_hash")),
+        module = getString("module"),
+    )
 
     @Synchronized
     override fun getAbilityImpls(abilityHash: Hash): List<AbilityImplRow> {
         for (i in 0..2) getAbilityImplsStmt.setString(i + 1, abilityHash.hex)
         return getAbilityImplsStmt.executeQuery().use { rs ->
-            val list = mutableListOf<AbilityImplRow>()
-            while (rs.next()) {
-                list.add(AbilityImplRow(
-                    hash = Hash(rs.getString("hash")),
-                    abilityHash = Hash(rs.getString("ability_hash")),
-                    targetType = rs.getString("target_type"),
-                    module = rs.getString("module")
-                ))
-            }
-            list
+            buildList { while (rs.next()) add(rs.toAbilityImplRow()) }
         }
     }
 
-    private val getAbilityImplForTypeStmt: PreparedStatement by lazy {
+    private val getImplTargetsStmt: PreparedStatement by lazy {
         conn.prepareStatement(
-            unionAll("SELECT hash FROM <DB>.ability_impls WHERE ability_hash = ? AND target_type = ?") + " LIMIT 1"
+            "SELECT * FROM (" + unionAll(
+                "SELECT ordinal, type_hash FROM <DB>.ability_impl_targets WHERE impl_hash = ?"
+            ) + ") ORDER BY ordinal"
         )
     }
 
     @Synchronized
-    override fun getAbilityImplForType(abilityHash: Hash, targetType: String): Hash? {
+    override fun getImplTargets(implHash: Hash): List<Hash> {
+        for (i in 0..2) getImplTargetsStmt.setString(i + 1, implHash.hex)
+        return getImplTargetsStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(Hash(rs.getString("type_hash"))) }
+        }
+    }
+
+    // Name -> DECLARATION -> impls, in one query. Resolving through the decl is the
+    // point: two modules may each declare `Ord`, and impls of one say nothing about
+    // the other. A query keyed on the name alone would merge them.
+    private val findAbilityImplsByNameStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT i.hash, i.ability_hash, i.module
+            FROM <DB>.decls d
+            JOIN <DB>.ability_impls i ON i.ability_hash = d.hash
+            WHERE d.decl_kind = 'ability' AND d.decl_name = ?
+        """.trimIndent()))
+    }
+
+    @Synchronized
+    override fun findAbilityImplsByName(abilityName: String): List<AbilityImplRow> {
+        for (i in 0..2) findAbilityImplsByNameStmt.setString(i + 1, abilityName)
+        return findAbilityImplsByNameStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toAbilityImplRow()) }
+        }.distinct()
+    }
+
+    private val getAbilityImplForTypeStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            unionAll(
+                // The RECEIVER, which is the LAST target: an ability writes class
+                // parameters before `for` and the receiver after
+                // (`impl FromJson 'a for Json`). Keying on ordinal 0 would match the
+                // class parameter — usually a bare type variable, so it would match
+                // every impl of the ability.
+                "SELECT i.hash FROM <DB>.ability_impls i " +
+                    "JOIN <DB>.ability_impl_targets t ON t.impl_hash = i.hash " +
+                    "AND t.ordinal = (SELECT MAX(ordinal) FROM <DB>.ability_impl_targets " +
+                    "                 WHERE impl_hash = i.hash) " +
+                    "WHERE i.ability_hash = ? AND t.type_hash = ?"
+            ) + " LIMIT 1"
+        )
+    }
+
+    @Synchronized
+    override fun getAbilityImplForType(abilityHash: Hash, targetTypeHash: Hash): Hash? {
         for (i in 0..2) {
             getAbilityImplForTypeStmt.setString(i * 2 + 1, abilityHash.hex)
-            getAbilityImplForTypeStmt.setString(i * 2 + 2, targetType)
+            getAbilityImplForTypeStmt.setString(i * 2 + 2, targetTypeHash.hex)
         }
         return getAbilityImplForTypeStmt.executeQuery().use { rs ->
             if (rs.next()) Hash(rs.getString("hash")) else null
@@ -2169,9 +2265,9 @@ class SQLiteMezzeStore private constructor(
             SELECT $DECL_QUALIFIED_COLUMNS
             FROM <DB>.decls d
             JOIN <DB>.type_nodes n
-              ON n.decl_hash = d.hash AND n.is_residual = 1
+              ON n.owner_hash = d.hash AND n.is_residual = 1
             JOIN <DB>.type_node_effects e
-              ON e.decl_hash = n.decl_hash AND e.node_id = n.node_id
+              ON e.owner_hash = n.owner_hash AND e.node_id = n.node_id
             WHERE e.effect_name = ?
         """.trimIndent()) + " ORDER BY module_path, decl_name")
     }
@@ -2189,9 +2285,9 @@ class SQLiteMezzeStore private constructor(
             SELECT $DECL_QUALIFIED_COLUMNS
             FROM <DB>.decls d
             JOIN <DB>.type_nodes n
-              ON n.decl_hash = d.hash AND n.is_residual = 1
+              ON n.owner_hash = d.hash AND n.is_residual = 1
             JOIN <DB>.type_node_constraints c
-              ON c.decl_hash = n.decl_hash AND c.node_id = n.node_id
+              ON c.owner_hash = n.owner_hash AND c.node_id = n.node_id
             WHERE c.ability_name = ?
         """.trimIndent()) + " ORDER BY module_path, decl_name")
     }
@@ -2210,7 +2306,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement(unionAll("""
             SELECT DISTINCT $DECL_QUALIFIED_COLUMNS
             FROM <DB>.decls d
-            JOIN <DB>.type_nodes n ON n.decl_hash = d.hash
+            JOIN <DB>.type_nodes n ON n.owner_hash = d.hash
             WHERE n.type_hash = ?
         """.trimIndent()) + " ORDER BY module_path, decl_name")
     }
@@ -2230,7 +2326,7 @@ class SQLiteMezzeStore private constructor(
     private val putTypeNodeStmt: PreparedStatement by lazy {
         conn.prepareStatement("""
             INSERT OR REPLACE INTO type_nodes
-                (decl_hash, node_id, parent_id, slot, ordinal, slot_label,
+                (owner_hash, node_id, parent_id, slot, ordinal, slot_label,
                  kind, label, type_hash, is_open, performed, is_residual)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent())
@@ -2239,7 +2335,7 @@ class SQLiteMezzeStore private constructor(
     private val putTypeNodeEffectStmt: PreparedStatement by lazy {
         conn.prepareStatement("""
             INSERT OR REPLACE INTO type_node_effects
-                (decl_hash, node_id, effect_name, effect_hash)
+                (owner_hash, node_id, effect_name, effect_hash)
             VALUES (?, ?, ?, ?)
         """.trimIndent())
     }
@@ -2247,27 +2343,27 @@ class SQLiteMezzeStore private constructor(
     private val putTypeNodeConstraintStmt: PreparedStatement by lazy {
         conn.prepareStatement("""
             INSERT OR REPLACE INTO type_node_constraints
-                (decl_hash, node_id, ability_name, ability_hash, ordinal)
+                (owner_hash, node_id, ability_name, ability_hash, ordinal)
             VALUES (?, ?, ?, ?, ?)
         """.trimIndent())
     }
 
     @Synchronized
     override fun putSignature(rows: SignatureRows) {
-        val declHash = rows.nodes.firstOrNull()?.declHash ?: return
+        val ownerHash = rows.nodes.firstOrNull()?.ownerHash ?: return
 
         // DELETE first, not INSERT OR REPLACE alone: a re-indexed decl whose type
         // grew simpler has FEWER nodes, and replacing row-by-row would leave the
         // old tail behind. A signature is one value, so it is written as one.
         for (table in listOf("type_nodes", "type_node_effects", "type_node_constraints")) {
-            conn.prepareStatement("DELETE FROM $table WHERE decl_hash = ?").use { st ->
-                st.setString(1, declHash.hex)
+            conn.prepareStatement("DELETE FROM $table WHERE owner_hash = ?").use { st ->
+                st.setString(1, ownerHash.hex)
                 st.executeUpdate()
             }
         }
 
         for (n in rows.nodes) putTypeNodeStmt.apply {
-            setString(1, n.declHash.hex)
+            setString(1, n.ownerHash.hex)
             setInt(2, n.nodeId)
             val parent = n.parentId
             if (parent == null) setNull(3, java.sql.Types.INTEGER) else setInt(3, parent)
@@ -2283,14 +2379,14 @@ class SQLiteMezzeStore private constructor(
             executeUpdate()
         }
         for (e in rows.effects) putTypeNodeEffectStmt.apply {
-            setString(1, e.declHash.hex)
+            setString(1, e.ownerHash.hex)
             setInt(2, e.nodeId)
             setString(3, e.effectName)
             setString(4, e.effectHash?.hex)
             executeUpdate()
         }
         for (c in rows.constraints) putTypeNodeConstraintStmt.apply {
-            setString(1, c.declHash.hex)
+            setString(1, c.ownerHash.hex)
             setInt(2, c.nodeId)
             setString(3, c.abilityName)
             setString(4, c.abilityHash?.hex)
@@ -2301,33 +2397,33 @@ class SQLiteMezzeStore private constructor(
 
     private val getTypeNodesStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT decl_hash, node_id, parent_id, slot, ordinal, slot_label,
+            SELECT owner_hash, node_id, parent_id, slot, ordinal, slot_label,
                    kind, label, type_hash, is_open, performed, is_residual
             FROM <DB>.type_nodes
-            WHERE decl_hash = ?
+            WHERE owner_hash = ?
         """.trimIndent()) + " ORDER BY node_id")
     }
 
     private val getTypeNodeEffectsStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT decl_hash, node_id, effect_name, effect_hash
+            SELECT owner_hash, node_id, effect_name, effect_hash
             FROM <DB>.type_node_effects
-            WHERE decl_hash = ?
+            WHERE owner_hash = ?
         """.trimIndent()) + " ORDER BY node_id, effect_name")
     }
 
     private val getTypeNodeConstraintsStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
-            SELECT decl_hash, node_id, ability_name, ability_hash, ordinal
+            SELECT owner_hash, node_id, ability_name, ability_hash, ordinal
             FROM <DB>.type_node_constraints
-            WHERE decl_hash = ?
+            WHERE owner_hash = ?
         """.trimIndent()) + " ORDER BY node_id, ordinal")
     }
 
     @Synchronized
-    override fun getSignature(declHash: Hash): SignatureRows {
+    override fun getSignature(ownerHash: Hash): SignatureRows {
         fun bind(stmt: PreparedStatement): PreparedStatement {
-            for (db in 0..2) stmt.setString(db + 1, declHash.hex)
+            for (db in 0..2) stmt.setString(db + 1, ownerHash.hex)
             return stmt
         }
 
@@ -2335,7 +2431,7 @@ class SQLiteMezzeStore private constructor(
             buildList {
                 while (rs.next()) add(
                     TypeNodeRow(
-                        declHash = Hash(rs.getString("decl_hash")),
+                        ownerHash = Hash(rs.getString("owner_hash")),
                         nodeId = rs.getInt("node_id"),
                         // getInt yields 0 for SQL NULL, and 0 is the ROOT's id —
                         // so the null must be read explicitly or every root
@@ -2360,7 +2456,7 @@ class SQLiteMezzeStore private constructor(
             buildList {
                 while (rs.next()) add(
                     TypeNodeEffectRow(
-                        declHash = Hash(rs.getString("decl_hash")),
+                        ownerHash = Hash(rs.getString("owner_hash")),
                         nodeId = rs.getInt("node_id"),
                         effectName = rs.getString("effect_name"),
                         effectHash = rs.getString("effect_hash")?.let { Hash(it) },
@@ -2372,7 +2468,7 @@ class SQLiteMezzeStore private constructor(
             buildList {
                 while (rs.next()) add(
                     TypeNodeConstraintRow(
-                        declHash = Hash(rs.getString("decl_hash")),
+                        ownerHash = Hash(rs.getString("owner_hash")),
                         nodeId = rs.getInt("node_id"),
                         abilityName = rs.getString("ability_name"),
                         abilityHash = rs.getString("ability_hash")?.let { Hash(it) },

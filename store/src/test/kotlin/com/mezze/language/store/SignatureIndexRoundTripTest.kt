@@ -352,7 +352,7 @@ class SignatureIndexRoundTripTest {
         val good = SignatureIndex.flatten(hash, MezzeType.FunctionType(MezzeType.IntType, MezzeType.IntType))
         val withOrphan = good.copy(
             nodes = good.nodes + TypeNodeRow(
-                declHash = hash, nodeId = 99, parentId = 42,
+                ownerHash = hash, nodeId = 99, parentId = 42,
                 slot = TypeSlot.ARG, ordinal = 0, kind = TypeNodeKind.INT,
             )
         )

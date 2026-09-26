@@ -3,6 +3,8 @@ package com.mezze.language.cli.commands
 import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
 import com.mezze.language.codebase.SQLiteMezzeStore
+import com.mezze.language.langservice.printing.ErrorFormatter
+import com.mezze.language.langservice.printing.ParseErrorFormatter
 import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
@@ -77,6 +79,11 @@ class IndexCommand {
                 if (parseResult.errors.isNotEmpty()) {
                     println("  ${entry.path}: ${parseResult.errors.size} parse error(s)")
                     totalErrors += parseResult.errors.size
+                    // SHOW them. Counting an error without printing it tells the user
+                    // something is wrong and withholds the only thing that would let
+                    // them fix it — I hit this myself and had to re-run `mez check`
+                    // on the file to find out what the two errors were.
+                    println(ParseErrorFormatter.formatAll(parseResult.errors))
                 }
 
                 val typeChecker = TypeChecker()
@@ -86,6 +93,12 @@ class IndexCommand {
                     is TypeChecker.TypeCheckResult.Failure -> {
                         println("  ${entry.path}: ${rawResult.errors.size} type error(s)")
                         totalErrors += rawResult.errors.size
+                        // Same formatter `mez check` uses, so an error reads
+                        // identically whichever command surfaced it.
+                        for ((idx, err) in rawResult.errors.withIndex()) {
+                            if (idx > 0) println()
+                            println(ErrorFormatter.format(err, source))
+                        }
                     }
                     is TypeChecker.TypeCheckResult.Success -> {
                         val success = rawResult

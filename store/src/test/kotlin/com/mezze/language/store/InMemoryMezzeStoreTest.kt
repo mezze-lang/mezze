@@ -105,14 +105,14 @@ class InMemoryMezzeStoreTest {
         val implHash = hash()
         val abilityHash = hash()
 
-        store.putAbilityImpl(implHash, abilityHash, "Int", "std::int")
+        store.putAbilityImpl(implHash, abilityHash, listOf(Hash("1".repeat(64))), "std::int")
 
         val impls = store.getAbilityImpls(abilityHash)
         assertEquals(1, impls.size)
-        assertEquals("Int", impls[0].targetType)
+        assertEquals(listOf(Hash("1".repeat(64))), store.getImplTargets(implHash))
 
-        assertEquals(implHash, store.getAbilityImplForType(abilityHash, "Int"))
-        assertNull(store.getAbilityImplForType(abilityHash, "Str"))
+        assertEquals(implHash, store.getAbilityImplForType(abilityHash, Hash("1".repeat(64))))
+        assertNull(store.getAbilityImplForType(abilityHash, Hash("2".repeat(64))))
     }
 
     @Test

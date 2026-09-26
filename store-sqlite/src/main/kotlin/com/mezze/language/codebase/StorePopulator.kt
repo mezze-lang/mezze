@@ -43,13 +43,16 @@ object StorePopulator {
      * lossy `targetTypes.firstOrNull().toString()` that collided distinct types
      * and dropped extra params.
      */
-    private fun abilityImplTargetKey(targetTypes: List<com.mezze.language.ast.MezzeType>): String {
-        if (targetTypes.isEmpty()) return "unknown"
-        return targetTypes.joinToString(",") { t ->
-            val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
-            com.mezze.language.ast.hashing.appendType(b, t)
-            b.buildHash().hex
-        }
+    /**
+     * The structural hash of a type — its identity, independent of any name.
+     *
+     * This is the key an impl target is stored and looked up under, and the key its
+     * type tree is indexed under, so the two always agree.
+     */
+    private fun typeStructureHash(type: com.mezze.language.ast.MezzeType): Hash {
+        val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
+        com.mezze.language.ast.hashing.appendType(b, type)
+        return b.buildHash()
     }
 
     /**
@@ -624,8 +627,26 @@ object StorePopulator {
             // content hash is stable and collision-free; joining ALL target hashes
             // preserves multi-param identity. Column stays a String, now holding a
             // hash-hex key (like the ability_hash/hash columns beside it).
-            val targetType = abilityImplTargetKey(impl.targetTypes)
-            store.putAbilityImpl(impl.hash, impl.abilityHash, targetType, modulePath)
+            // One row per target, keyed by the target's structural hash — no longer
+            // one comma-joined string. 80 of the stdlib's 310 impls have more than
+            // one target, so joining them meant every reader had to split, and none
+            // could join.
+            val targetHashes = impl.targetTypes.map { typeStructureHash(it) }
+            store.putAbilityImpl(impl.hash, impl.abilityHash, targetHashes, modulePath)
+
+            // And index each target's STRUCTURE under that same hash. Without this an
+            // impl can be counted but not described: `ability_impls` alone could say
+            // "Ord has 16 impls" and name none of them, because a structural type
+            // hash joins to no declaration — `Int` has no decl at all.
+            //
+            // Structure rather than a rendered name, so "does `Deque 'a` implement
+            // Ord?" is answered by UNIFICATION. A generic impl (`impl Ord for
+            // Deque 'a`) cannot be matched by name comparison.
+            impl.targetTypes.forEachIndexed { i, target ->
+                store.putSignature(
+                    com.mezze.language.store.SignatureIndex.flatten(targetHashes[i], target)
+                )
+            }
         }
 
         for (decl in module.effectDecls) {

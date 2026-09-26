@@ -119,15 +119,21 @@ class ChainedMezzeStore(
 
     // ── Ability impls / Performers ────────────────────────────────────────
 
-    override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetType: String, module: String?) {
-        primary.putAbilityImpl(hash, abilityHash, targetType, module)
+    override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetTypeHashes: List<Hash>, module: String?) {
+        primary.putAbilityImpl(hash, abilityHash, targetTypeHashes, module)
     }
 
     override fun getAbilityImpls(abilityHash: Hash): List<AbilityImplRow> =
         all.flatMap { it.getAbilityImpls(abilityHash) }.distinct()
 
-    override fun getAbilityImplForType(abilityHash: Hash, targetType: String): Hash? =
-        firstNonNull { it.getAbilityImplForType(abilityHash, targetType) }
+    override fun getImplTargets(implHash: Hash): List<Hash> =
+        all.asSequence().map { it.getImplTargets(implHash) }.firstOrNull { it.isNotEmpty() }.orEmpty()
+
+    override fun findAbilityImplsByName(abilityName: String): List<AbilityImplRow> =
+        all.flatMap { it.findAbilityImplsByName(abilityName) }.distinct()
+
+    override fun getAbilityImplForType(abilityHash: Hash, targetTypeHash: Hash): Hash? =
+        firstNonNull { it.getAbilityImplForType(abilityHash, targetTypeHash) }
 
     override fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?) {
         primary.putEffectPerformer(hash, effectHash, performerName, module)
@@ -234,8 +240,8 @@ class ChainedMezzeStore(
     // Writes go to the primary; reads span the chain, so a signature indexed in
     // the stdlib tier is visible to a query made from a project store.
     override fun putSignature(rows: SignatureRows) = primary.putSignature(rows)
-    override fun getSignature(declHash: Hash): SignatureRows =
-        all.asSequence().map { it.getSignature(declHash) }.firstOrNull { !it.isEmpty }
+    override fun getSignature(ownerHash: Hash): SignatureRows =
+        all.asSequence().map { it.getSignature(ownerHash) }.firstOrNull { !it.isEmpty }
             ?: SignatureRows.EMPTY
 
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) =

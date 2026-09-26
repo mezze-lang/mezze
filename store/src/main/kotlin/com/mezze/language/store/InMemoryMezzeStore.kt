@@ -117,16 +117,31 @@ class InMemoryMezzeStore : MezzeStore {
 
     // ── ABILITY / EFFECT INDEX ──
 
-    override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetType: String, module: String?) {
+    /** Impl target hashes, in written order, keyed by impl hash. */
+    private val implTargets = mutableMapOf<Hash, List<Hash>>()
+
+    override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetTypeHashes: List<Hash>, module: String?) {
         abilityImpls.removeAll { it.hash == hash }
-        abilityImpls.add(AbilityImplRow(hash, abilityHash, targetType, module))
+        abilityImpls.add(AbilityImplRow(hash, abilityHash, module))
+        implTargets[hash] = targetTypeHashes
     }
 
     override fun getAbilityImpls(abilityHash: Hash): List<AbilityImplRow> =
         abilityImpls.filter { it.abilityHash == abilityHash }
 
-    override fun getAbilityImplForType(abilityHash: Hash, targetType: String): Hash? =
-        abilityImpls.find { it.abilityHash == abilityHash && it.targetType == targetType }?.hash
+    override fun getImplTargets(implHash: Hash): List<Hash> = implTargets[implHash].orEmpty()
+
+    override fun getAbilityImplForType(abilityHash: Hash, targetTypeHash: Hash): Hash? =
+        abilityImpls.find { row ->
+            row.abilityHash == abilityHash && implTargets[row.hash]?.lastOrNull() == targetTypeHash
+        }?.hash
+
+    override fun findAbilityImplsByName(abilityName: String): List<AbilityImplRow> =
+        // Name -> DECLARATION -> impls. Two modules may each declare `Ord`; this
+        // answers for the one actually declared, not for the spelling.
+        decls.filter { it.declKind == DeclKind.ABILITY && it.declName == abilityName }
+            .flatMap { getAbilityImpls(it.hash) }
+            .distinct()
 
     override fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?) {
         effectPerformers.removeAll { it.hash == hash }
@@ -251,16 +266,16 @@ class InMemoryMezzeStore : MezzeStore {
     private val signatures = mutableMapOf<Hash, SignatureRows>()
 
     override fun putSignature(rows: SignatureRows) {
-        val declHash = rows.nodes.firstOrNull()?.declHash ?: return
-        signatures[declHash] = rows
+        val ownerHash = rows.nodes.firstOrNull()?.ownerHash ?: return
+        signatures[ownerHash] = rows
     }
 
-    override fun getSignature(declHash: Hash): SignatureRows =
-        signatures[declHash] ?: SignatureRows.EMPTY
+    override fun getSignature(ownerHash: Hash): SignatureRows =
+        signatures[ownerHash] ?: SignatureRows.EMPTY
 
-    /** The node ids of [declHash]'s residual arrow — see [TypeNodeRow.isResidual]. */
-    private fun residualNodeIds(declHash: Hash): Set<Int> =
-        signatures[declHash]?.nodes?.filter { it.isResidual }?.map { it.nodeId }?.toSet().orEmpty()
+    /** The node ids of [ownerHash]'s residual arrow — see [TypeNodeRow.isResidual]. */
+    private fun residualNodeIds(ownerHash: Hash): Set<Int> =
+        signatures[ownerHash]?.nodes?.filter { it.isResidual }?.map { it.nodeId }?.toSet().orEmpty()
 
     override fun findDeclsByEffect(effectName: String): List<DeclRow> =
         decls.filter { row ->

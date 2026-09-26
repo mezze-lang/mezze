@@ -99,7 +99,16 @@ enum class TypeNodeKind(val dbValue: String) {
  * for a given type and the tree can be rebuilt by grouping on [parentId].
  */
 data class TypeNodeRow(
-    val declHash: Hash,
+    /**
+     * WHOSE type this is. A declaration's content hash when the tree is that
+     * declaration's signature; a TYPE's own structural hash when the tree is a
+     * standalone type — an ability impl's target, say.
+     *
+     * Named `ownerHash` rather than `declHash` because it is not always a decl:
+     * reading it as one would send a query joining to `decls` and finding nothing,
+     * which is exactly the dead end `ability_impls.target_type` already was.
+     */
+    val ownerHash: Hash,
     val nodeId: Int,
     /** Null for the root only. */
     val parentId: Int?,
@@ -144,7 +153,7 @@ data class TypeNodeRow(
 
 /** One effect on one arrow's effect row. */
 data class TypeNodeEffectRow(
-    val declHash: Hash,
+    val ownerHash: Hash,
     val nodeId: Int,
     val effectName: String,
     /** The effect declaration's content hash, when known. */
@@ -153,7 +162,7 @@ data class TypeNodeEffectRow(
 
 /** One ability constraint on one arrow (`with Ord 'a`). */
 data class TypeNodeConstraintRow(
-    val declHash: Hash,
+    val ownerHash: Hash,
     val nodeId: Int,
     val abilityName: String,
     val abilityHash: Hash? = null,
@@ -177,12 +186,12 @@ data class SignatureRows(
 object SignatureIndex {
 
     /**
-     * Flatten [type] into rows for [declHash].
+     * Flatten [type] into rows owned by [ownerHash].
      *
      * One walker, because six copies of a type walk is how this codebase's
      * annotation conversion went wrong — see the T-1 consolidation.
      */
-    fun flatten(declHash: Hash, type: MezzeType): SignatureRows {
+    fun flatten(ownerHash: Hash, type: MezzeType): SignatureRows {
         val nodes = mutableListOf<TypeNodeRow>()
         val effects = mutableListOf<TypeNodeEffectRow>()
         val constraints = mutableListOf<TypeNodeConstraintRow>()
@@ -205,7 +214,7 @@ object SignatureIndex {
             ) {
                 nodes.add(
                     TypeNodeRow(
-                        declHash = declHash, nodeId = id, parentId = parentId, slot = slot,
+                        ownerHash = ownerHash, nodeId = id, parentId = parentId, slot = slot,
                         ordinal = ordinal, slotLabel = slotLabel, kind = kind, label = nodeLabel,
                         typeHash = typeHash, isOpen = isOpen, performed = performed,
                         isResidual = isResidual,
@@ -227,12 +236,12 @@ object SignatureIndex {
                         // with instanced ones and excludes the open-row tail, which
                         // is a variable rather than an effect.
                         for (name in r.allEffectNames) {
-                            effects.add(TypeNodeEffectRow(declHash, id, name, r.effectHashes[name]))
+                            effects.add(TypeNodeEffectRow(ownerHash, id, name, r.effectHashes[name]))
                         }
                     }
                     node.abilityConstraints.forEachIndexed { i, c ->
                         constraints.add(
-                            TypeNodeConstraintRow(declHash, id, c.abilityName, c.abilityHash, i)
+                            TypeNodeConstraintRow(ownerHash, id, c.abilityName, c.abilityHash, i)
                         )
                     }
                     emit(node.paramType, id, TypeSlot.PARAM, 0, null)
@@ -257,7 +266,7 @@ object SignatureIndex {
                         if (payload == null) {
                             nodes.add(
                                 TypeNodeRow(
-                                    declHash = declHash, nodeId = nodes.size, parentId = id,
+                                    ownerHash = ownerHash, nodeId = nodes.size, parentId = id,
                                     slot = TypeSlot.CTOR, ordinal = i, slotLabel = ctorName,
                                     kind = TypeNodeKind.VARIANT,
                                 )
@@ -325,7 +334,7 @@ object SignatureIndex {
         val root = rows.nodes.singleOrNull { it.parentId == null }
             ?: error(
                 "a signature must have exactly one root node, found " +
-                    "${rows.nodes.count { it.parentId == null }} for ${rows.nodes.first().declHash.hex}"
+                    "${rows.nodes.count { it.parentId == null }} for ${rows.nodes.first().ownerHash.hex}"
             )
 
         fun kidsOf(id: Int) = children[id].orEmpty().sortedBy { it.ordinal }
@@ -437,7 +446,7 @@ object SignatureIndex {
         val orphans = byId.keys - reachable
         require(orphans.isEmpty()) {
             "type-node rows ${orphans.sorted()} are unreachable from the root for " +
-                "${root.declHash.hex}; the tree is not a tree"
+                "${root.ownerHash.hex}; the tree is not a tree"
         }
 
         return build(root)

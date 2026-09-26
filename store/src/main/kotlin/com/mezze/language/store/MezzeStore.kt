@@ -103,13 +103,48 @@ interface MezzeStore : AutoCloseable {
     // ====================================================================
 
     /** Register an ability implementation. */
-    fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetType: String, module: String?)
+    /**
+     * Record an impl and its target types.
+     *
+     * [targetTypeHashes] are the structural hashes of the targets, in written
+     * order. Each one should also have its type tree indexed (see
+     * [putSignature]/[getTypeRows]) so the target can be rendered and unified
+     * against, rather than only counted.
+     */
+    fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetTypeHashes: List<Hash>, module: String?)
 
     /** Find all impls of an ability. */
     fun getAbilityImpls(abilityHash: Hash): List<AbilityImplRow>
 
+    /**
+     * The target types of one impl, in written order, as the structural hashes
+     * their type trees are stored under.
+     *
+     * A junction, because an impl can have SEVERAL targets: 80 of the stdlib's 310
+     * impls do (a class-param ability like `NumAdd 'r for 'l`). They used to be one
+     * comma-joined string in `ability_impls.target_type`, which meant every reader
+     * had to split it and could not join to anything.
+     */
+    fun getImplTargets(implHash: Hash): List<Hash>
+
+    /**
+     * Impls of the ability DECLARED as [abilityName], across every attached
+     * database.
+     *
+     * Resolves the name to its declaration first, so this answers "impls of the
+     * `Ord` declared here" rather than "impls of anything spelled Ord" — two
+     * modules may each declare one.
+     */
+    fun findAbilityImplsByName(abilityName: String): List<AbilityImplRow>
+
     /** Find the impl of a specific ability for a specific type. */
-    fun getAbilityImplForType(abilityHash: Hash, targetType: String): Hash?
+    /**
+     * The impl of [abilityHash] whose RECEIVER is [targetTypeHash], if any.
+     *
+     * The receiver is the type after `for` — the LAST target, since class parameters
+     * are written before it (`impl FromJson 'a for Json`).
+     */
+    fun getAbilityImplForType(abilityHash: Hash, targetTypeHash: Hash): Hash?
 
     /** Register an effect performer. */
     fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?)
@@ -298,6 +333,16 @@ interface MezzeStore : AutoCloseable {
     fun putSignature(rows: SignatureRows)
 
     /**
+     * The type rows owned by [ownerHash] — a declaration's signature, or a
+     * standalone type indexed under its own structural hash.
+     *
+     * Same table either way: a type tree is a type tree, and an ability impl's
+     * target needs exactly what a signature needs (rendering, and unification
+     * against a query).
+     */
+    fun getTypeRows(ownerHash: Hash): SignatureRows = getSignature(ownerHash)
+
+    /**
      * The signature rows for [declHash], or [SignatureRows.EMPTY] if the
      * declaration has no indexed signature — a type, ability or effect
      * declaration has no signature to index, which is different from having an
@@ -417,7 +462,12 @@ data class ModuleRow(
     val sourceHash: String,
 )
 data class EdgeRow(val fromHash: Hash, val toHash: Hash, val kind: EdgeKind)
-data class AbilityImplRow(val hash: Hash, val abilityHash: Hash, val targetType: String, val module: String?)
+/**
+ * One `impl A for T` row. Its target types live in the `ability_impl_targets`
+ * junction — see [MezzeStore.getImplTargets] — not on this row: an impl may have
+ * several, and a single column could only hold them joined into a string.
+ */
+data class AbilityImplRow(val hash: Hash, val abilityHash: Hash, val module: String?)
 data class EffectPerformerRow(val hash: Hash, val effectHash: Hash, val performerName: String, val module: String?)
 data class UsageRow(val targetHash: Hash, val filePath: String, val startLine: Int, val startCol: Int, val endLine: Int, val endCol: Int)
 

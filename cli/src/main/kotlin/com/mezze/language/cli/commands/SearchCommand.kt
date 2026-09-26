@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.codebase.AbilitySearch
 import com.mezze.language.codebase.TypeSearch
 import com.mezze.language.store.SignatureIndex
 import com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
@@ -19,7 +20,7 @@ import java.io.File
  */
 class SearchCommand {
 
-    private enum class Mode { TYPE, NAME }
+    private enum class Mode { TYPE, NAME, IMPLS, IMPLEMENTS }
 
     private companion object {
         /**
@@ -53,6 +54,8 @@ class SearchCommand {
         // is a name. `--type` and `--name` override it, because a heuristic that
         // cannot be overridden is a trap.
         val mode = when {
+            "--impls" in flags -> Mode.IMPLS
+            "--implements" in flags -> Mode.IMPLEMENTS
             "--type" in flags -> Mode.TYPE
             "--name" in flags -> Mode.NAME
             query.any { it in TYPE_SYNTAX } -> Mode.TYPE
@@ -63,6 +66,23 @@ class SearchCommand {
             println("${Glyphs.ERROR} No Mezze.toml found in ${currentDir.absolutePath}")
             println("   Search reads this project's index; run `mez init` first.")
             kotlin.system.exitProcess(1)
+        }
+
+        if (mode == Mode.IMPLS) {
+            ProjectStore.open(currentDir).use { store -> printImpls(store, query) }
+            return
+        }
+        if (mode == Mode.IMPLEMENTS) {
+            val type = try {
+                TypeSearch.parseQuery(query)
+            } catch (e: ParseException) {
+                println("${Glyphs.ERROR} `$query` is not a type")
+                println()
+                println(e.message)
+                kotlin.system.exitProcess(1)
+            }
+            ProjectStore.open(currentDir).use { store -> printAbilitiesOf(store, query, type) }
+            return
         }
 
         // Parse before opening the store: a typo in the query should not depend on
@@ -161,6 +181,52 @@ class SearchCommand {
         }
     }
 
+    private fun printImpls(store: com.mezze.language.store.MezzeStore, abilityName: String) {
+        val impls = AbilitySearch.implsOf(store, abilityName)
+        if (impls.isEmpty()) {
+            println("No impl of `$abilityName` is indexed")
+            val abilities = store.getDeclsByKind(com.mezze.language.store.DeclKind.ABILITY)
+            if (abilities.none { it.declName == abilityName }) {
+                println()
+                val suggestion = LevenshteinSuggest.closest(abilityName, abilities.map { it.declName }.distinct())
+                if (suggestion != null) println("${Glyphs.TIP} No ability named `$abilityName`. Did you mean `$suggestion`?")
+                else println("${Glyphs.TIP} No ability named `$abilityName` is indexed — run `mez index` first.")
+            }
+            return
+        }
+        println("${impls.size} impl${if (impls.size == 1) "" else "s"} of $abilityName")
+        println()
+        val width = impls.maxOf { it.rendered.ifEmpty { "?" }.length }
+        for (impl in impls) {
+            // An impl whose targets are not indexed is still listed: it exists, and
+            // saying so beats dropping it or miscounting.
+            val target = impl.rendered.ifEmpty { "<target not indexed>" }
+            println("  ${target.padEnd(width)}   ${impl.module ?: ""}")
+        }
+    }
+
+    private fun printAbilitiesOf(
+        store: com.mezze.language.store.MezzeStore,
+        rendered: String,
+        type: com.mezze.language.ast.MezzeType,
+    ) {
+        val found = AbilitySearch.abilitiesOf(store, type)
+        if (found.isEmpty()) {
+            println("Nothing indexed implements any ability for $rendered")
+            println()
+            println("${Glyphs.TIP} Targets are matched by unification, so `Deque Int` " +
+                "matches an `impl … for Deque 'a`. Check the type is spelled as the impl " +
+                "declares it, and that `mez index` has run.")
+            return
+        }
+        println("$rendered implements ${found.size} abilit${if (found.size == 1) "y" else "ies"}")
+        println()
+        val width = found.maxOf { it.first.length }
+        for ((ability, impl) in found) {
+            println("  ${ability.padEnd(width)}   ${impl.module ?: ""}   (for ${impl.rendered})")
+        }
+    }
+
     /** Why a hit is not an exact match — stated, because the user asked for a type. */
     private fun describe(quality: TypeSearch.Quality): String = when (quality) {
         TypeSearch.Quality.EXACT -> ""
@@ -203,7 +269,7 @@ class SearchCommand {
     }
 
     private fun printUsage() {
-        println("Usage: mez search <query> [--name|--type] [--limit=N] [--json]")
+        println("Usage: mez search <query> [--name|--type|--impls|--implements] [--limit=N] [--json]")
         println()
         println("Find declarations by TYPE or by NAME. A query containing type syntax")
         println("is a type search; anything else is a name search.")
@@ -214,6 +280,10 @@ class SearchCommand {
         println("  mez search '{ xs: [\'a], ... } -> Int'      a sequence in, an Int out,")
         println("                                            and any other arguments")
         println("  mez search '{ msg: Str } -> {} <Log>'      something that logs")
+        println()
+        println("By ability:")
+        println("  mez search --impls Ord                    which types implement Ord")
+        println("  mez search --implements 'Deque Int'       which abilities Deque Int has")
         println()
         println("By name or doc comment:")
         println("  mez search sort                           name or doc contains `sort`")

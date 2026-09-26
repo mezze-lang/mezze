@@ -384,12 +384,15 @@ class SQLiteMezzeStoreTest {
     fun `putAbilityImpl and getAbilityImpls`() {
         val implHash = stubBlob(Hash("a".repeat(64)), BlobKind.ABILITY_IMPL)
         val abilityHash = stubBlob(Hash("b".repeat(64)), BlobKind.ABILITY)
-        store.putAbilityImpl(implHash, abilityHash, "Int", null)
+        // Targets are HASHES in a junction now, not a name in a column: an impl can
+        // have several, and the hash is the target type's structural identity.
+        val intTypeHash = Hash("1".repeat(64))
+        store.putAbilityImpl(implHash, abilityHash, listOf(intTypeHash), null)
 
         val impls = store.getAbilityImpls(abilityHash)
         assertEquals(1, impls.size)
         assertEquals(implHash, impls[0].hash)
-        assertEquals("Int", impls[0].targetType)
+        assertEquals(listOf(intTypeHash), store.getImplTargets(implHash))
     }
 
     @Test
@@ -397,12 +400,15 @@ class SQLiteMezzeStoreTest {
         val implInt = stubBlob(Hash("a".repeat(64)), BlobKind.ABILITY_IMPL)
         val implStr = stubBlob(Hash("b".repeat(64)), BlobKind.ABILITY_IMPL)
         val abilityHash = stubBlob(Hash("c".repeat(64)), BlobKind.ABILITY)
-        store.putAbilityImpl(implInt, abilityHash, "Int", null)
-        store.putAbilityImpl(implStr, abilityHash, "Str", null)
+        val intType = Hash("1".repeat(64))
+        val strType = Hash("2".repeat(64))
+        val boolType = Hash("3".repeat(64))
+        store.putAbilityImpl(implInt, abilityHash, listOf(intType), null)
+        store.putAbilityImpl(implStr, abilityHash, listOf(strType), null)
 
-        assertEquals(implInt, store.getAbilityImplForType(abilityHash, "Int"))
-        assertEquals(implStr, store.getAbilityImplForType(abilityHash, "Str"))
-        assertNull(store.getAbilityImplForType(abilityHash, "Bool"))
+        assertEquals(implInt, store.getAbilityImplForType(abilityHash, intType))
+        assertEquals(implStr, store.getAbilityImplForType(abilityHash, strType))
+        assertNull(store.getAbilityImplForType(abilityHash, boolType))
     }
 
     @Test
