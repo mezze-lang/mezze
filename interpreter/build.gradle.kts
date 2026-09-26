@@ -98,14 +98,14 @@ dependencies {
     // JVM interop; every other guest language arrives via a user-installed
     // provider package (`mezze-python`, `mezze-js`, `mezze-wasm`, …). The
     // provider package declares the concrete `graal-<lang>-language` jars
-    // it needs under `[jars]` — `mez sync` fetches those into the store
-    // and puts them on the wire child's classpath at boot. The provider
-    // also ships a `polyglot-<lang>-natives.jar` (a ServiceLoader
-    // `NativePlugin`) whose static registration installs the
-    // `__native_<lang>_*` handlers on top of this kernel. Result: bare
-    // `mez` has NO python/js/wasm engine on its classpath and refuses
-    // to enable those languages on the Context — exactly the shape a
-    // hostable runtime should have.
+    // it needs under `[maven]` — `mez sync` fetches those into the store
+    // and puts them on the wire child's classpath at boot. Providers ship
+    // NO Java: since the two-layer polyglot redesign every guest op rides
+    // the first-party `Polyglot` effect (`std::polyglot::core`, handled by
+    // `Runtime` — the sole `__native_*` caller), so a provider is pure
+    // Mezze. Result: bare `mez` has NO python/js/wasm engine on its
+    // classpath and refuses to enable those languages on the Context —
+    // exactly the shape a hostable runtime should have.
 
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")

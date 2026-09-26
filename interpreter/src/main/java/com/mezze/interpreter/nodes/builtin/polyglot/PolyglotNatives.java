@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.polyglot;
 
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.interpreter.nodes.builtin.io.BytesNatives;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzePolyglotSupport;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
@@ -149,6 +150,112 @@ public final class PolyglotNatives {
         } catch (Throwable t) {
             return MezzeVariant.err(translateException(t));
         }
+    }
+
+    /**
+     * Compile a guest module from a raw byte buffer (a wasm binary, …) against
+     * the ambient Context, tagging the result with {@code lang}. The binary
+     * counterpart of {@link #evalRaw}: a source-string {@code eval} cannot express
+     * a wasm module, so a provider performs {@code Polyglot.eval_bytes} and then
+     * composes {@code instantiate} / {@code read_member "exports"} in pure Mezze.
+     */
+    @TruffleBoundary
+    public static MezzeVariant evalBytes(MezzeRecord args, Node currentNode) {
+        String lang = getString(args, "lang");
+        String name = getString(args, "name");
+        byte[] data = getBytes(args, "bytes");
+        try {
+            MezzePolyglotSupport support =
+                MezzeContext.get(currentNode).getPolyglotSupport();
+            Object result = support.evalBytes(lang, data, name);
+            return MezzeVariant.ok(new MezzeForeign(result, lang));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Read {@code length} bytes from a guest byte-buffer Foreign (a wasm linear
+     * memory, …) starting at {@code offset}, in ONE crossing → Mezze Bytes. Bulk,
+     * generic over any array-shaped Foreign whose elements coerce to bytes — the
+     * per-byte loop stays inside this native rather than costing a Mezze-level
+     * `read_array` per byte.
+     */
+    @TruffleBoundary
+    public static MezzeVariant readBytes(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        long offset = getLong(args, "offset");
+        long length = getLong(args, "length");
+        if (offset < 0 || length < 0) {
+            return MezzeVariant.err(errorTypeError(
+                "read_bytes: negative offset or length (offset=" + offset
+                    + ", length=" + length + ")"));
+        }
+        try {
+            InteropLibrary lib = InteropLibrary.getUncached(f.getDelegate());
+            long size = lib.getArraySize(f.getDelegate());
+            if (offset + length > size) {
+                return MezzeVariant.err(errorTypeError(
+                    "read_bytes: out of range (offset=" + offset + ", length="
+                        + length + ", size=" + size + ")"));
+            }
+            byte[] out = new byte[(int) length];
+            for (int i = 0; i < length; i++) {
+                Object byteVal = lib.readArrayElement(f.getDelegate(), offset + i);
+                out[i] = (byte) InteropLibrary.getUncached(byteVal).asInt(byteVal);
+            }
+            return MezzeVariant.ok(new BytesNatives.MezzeBytes(out));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Write a Mezze Bytes buffer into a guest byte-buffer Foreign at {@code offset},
+     * in ONE crossing. Mirror of {@link #readBytes}; Ok is the empty record.
+     */
+    @TruffleBoundary
+    public static MezzeVariant writeBytes(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        long offset = getLong(args, "offset");
+        byte[] data = getBytes(args, "bytes");
+        if (offset < 0) {
+            return MezzeVariant.err(errorTypeError(
+                "write_bytes: negative offset (offset=" + offset + ")"));
+        }
+        try {
+            InteropLibrary lib = InteropLibrary.getUncached(f.getDelegate());
+            long size = lib.getArraySize(f.getDelegate());
+            if (offset + data.length > size) {
+                return MezzeVariant.err(errorTypeError(
+                    "write_bytes: out of range (offset=" + offset + ", length="
+                        + data.length + ", size=" + size + ")"));
+            }
+            for (int i = 0; i < data.length; i++) {
+                lib.writeArrayElement(f.getDelegate(), offset + i, (int) (data[i] & 0xFF));
+            }
+            return MezzeVariant.ok(MezzeRecord.empty());
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Lift a Mezze Int into a 32-bit-typed (i32) Foreign — stored as a Java
+     * {@code Integer} so it is directly acceptable to an i32-typed wasm export
+     * (a Java {@code Long} would raise UnsupportedTypeException). The i64 form is
+     * the generic {@link #fromInt}. Kept generic (a `lang` tag) so any guest with a
+     * 32-bit numeric ABI can use it.
+     */
+    @TruffleBoundary
+    public static MezzeForeign boxI32(MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(Integer.valueOf((int) getLong(args, "val")), sourceLanguage);
+    }
+
+    private static byte[] getBytes(MezzeRecord r, String name) {
+        Object v = getField(r, name);
+        if (v instanceof BytesNatives.MezzeBytes b) return b.getData();
+        throw new NativeTypeMismatchException("Expected Bytes for field '" + name + "'");
     }
 
     // ==================== Foreign helpers ====================

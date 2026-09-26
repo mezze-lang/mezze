@@ -4465,6 +4465,19 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_polyglot_box_dict",
             (r, c) -> PolyglotNatives.makeDict(r, PolyglotNatives.getString(r, "lang")));
 
+        // Binary guest entry + bulk byte-buffer access + narrow-int boxing — the
+        // generic ops a wasm-style provider needs (binary module eval, linear
+        // memory copy, i32 args). All generic (a `lang` field / any array-shaped
+        // Foreign), so the wasm provider ships no natives either.
+        HANDLERS.put("__native_polyglot_eval_bytes",
+            (r, c) -> PolyglotNatives.evalBytes(r, c));
+        HANDLERS.put("__native_polyglot_read_bytes",
+            (r, c) -> PolyglotNatives.readBytes(r));
+        HANDLERS.put("__native_polyglot_write_bytes",
+            (r, c) -> PolyglotNatives.writeBytes(r));
+        HANDLERS.put("__native_polyglot_box_i32",
+            (r, c) -> PolyglotNatives.boxI32(r, PolyglotNatives.getString(r, "lang")));
+
         // JVM host access. Host class lookup is the JVM's one language-specific
         // native (its guest entry point, the analogue of `eval_raw`); it cannot be
         // a generic Polyglot op because it uses the Env's host-symbol lookup. Every
@@ -4474,39 +4487,13 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_jvm_class",
             (r, c) -> JvmNatives.lookupClass(r, c));
 
-        // Per-language value constructors for the WASM provider's codec. Python and
-        // JS providers no longer use these: as of the two-layer redesign they mint
-        // foreigns through the `Polyglot.box_*` effect ops (the generic
-        // `__native_polyglot_box_*` handlers above), so nothing outside this repo
-        // writes a `__native_<lang>_*`. WASM stays because its guest entry is
-        // binary (`evalBytes`), which the generic `eval_raw` does not cover.
-        for (String lang : new String[] { "wasm" }) {
-            final String l = lang;
-            HANDLERS.put("__native_" + l + "_from_int",   (r, c) -> PolyglotNatives.fromInt(r, l));
-            HANDLERS.put("__native_" + l + "_from_float", (r, c) -> PolyglotNatives.fromFloat(r, l));
-            HANDLERS.put("__native_" + l + "_from_str",   (r, c) -> PolyglotNatives.fromStr(r, l));
-            HANDLERS.put("__native_" + l + "_from_bool",  (r, c) -> PolyglotNatives.fromBool(r, l));
-            HANDLERS.put("__native_" + l + "_null_val",   (r, c) -> PolyglotNatives.nullVal(r, l));
-            // BUG 2: the container constructors a provider's `encode_list` /
-            // `encode_map` needs, tagged with the guest language like the
-            // scalar constructors above.
-            HANDLERS.put("__native_" + l + "_make_list",  (r, c) -> PolyglotNatives.makeList(r, l));
-            HANDLERS.put("__native_" + l + "_make_dict",  (r, c) -> PolyglotNatives.makeDict(r, l));
-        }
-
-        // Python / JavaScript / WebAssembly and any other non-JVM guest
-        // language arrive via user-installed polyglot provider packages
-        // (`mezze-python`, `mezze-js`, `mezze-wasm`, …). Each package
-        // ships a `polyglot-<lang>-natives.jar` on the wire child's
-        // classpath and a `META-INF/services/com.mezze.interpreter.spi
-        // .NativePlugin` entry pointing at its `Polyglot<Lang>Plugin`.
-        // Plugin discovery happens once at class-load time of this file
-        // (see the ServiceLoader hookup near the top of registerAll),
-        // and each plugin calls `overrideHandler` to install its own
-        // `__native_<lang>_*` handlers on top of the language-agnostic
-        // kernel above. Bare `mez` — with no provider jars on the
-        // classpath — leaves those names unbound, and any Mezze source
-        // that tries to call one gets a normal "unknown native" error.
+        // No per-language `__native_<lang>_*` handlers remain: every guest
+        // provider (Python, JS, WASM) now drives interop through the generic
+        // `Polyglot` effect ops above (value verbs, `eval_raw`/`eval_bytes`,
+        // `box_*`), handled by `Runtime`. A third-party language provider ships
+        // pure Mezze and no Java at all — the ServiceLoader NativePlugin SPI
+        // stays available for genuinely new native capabilities, but the polyglot
+        // providers no longer need it.
     }
 
     @TruffleBoundary

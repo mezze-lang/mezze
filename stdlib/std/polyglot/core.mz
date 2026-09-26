@@ -25,6 +25,7 @@
 # The polyglot Context is managed inside the runtime by the effect handler
 # machinery — user code never sees the underlying Truffle Context.
 use std::result
+use std::collections::bytes
 
 ## The opaque guest-object handle every language's foreign wraps. This is the
 ## PUBLIC face of the runtime's native foreign primitive — the one name a provider
@@ -90,6 +91,13 @@ effect Polyglot having 'f where {
 
   ## ---- producers: mint a foreign in language `lang` ----
   eval_raw:      { lang: Str, source: Str }         -> Result 'f InteropError <Polyglot>,
+  ## Binary module eval (wasm, …) — a source string cannot express a wasm module.
+  eval_bytes:    { lang: Str, bytes: Bytes, name: Str } -> Result 'f InteropError <Polyglot>,
+  ## Bulk linear-memory access on a guest byte-buffer Foreign, one crossing each.
+  read_bytes:    { on: 'f, offset: Int, length: Int } -> Result Bytes InteropError <Polyglot>,
+  write_bytes:   { on: 'f, offset: Int, bytes: Bytes } -> Result {} InteropError <Polyglot>,
+  ## 32-bit-typed int (wasm i32 ABI); the generic i64 form is `box_int`.
+  box_i32:       { val: Int, lang: Str }            -> 'f <Polyglot>,
   box_int:       { val: Int, lang: Str }            -> 'f <Polyglot>,
   box_float:     { val: Float, lang: Str }          -> 'f <Polyglot>,
   box_str:       { val: Str, lang: Str }            -> 'f <Polyglot>,
@@ -127,6 +135,10 @@ impl Polyglot for Runtime having 'f = 'g where {
   type_name     = { on }             -> __native_polyglot_type_name     { val = on },
 
   eval_raw      = { lang, source }   -> __native_polyglot_eval          { lang = lang, source = source },
+  eval_bytes    = { lang, bytes, name } -> __native_polyglot_eval_bytes { lang = lang, bytes = bytes, name = name },
+  read_bytes    = { on, offset, length } -> __native_polyglot_read_bytes { val = on, offset = offset, length = length },
+  write_bytes   = { on, offset, bytes } -> __native_polyglot_write_bytes { val = on, offset = offset, bytes = bytes },
+  box_i32       = { val, lang }      -> __native_polyglot_box_i32       { val = val, lang = lang },
   box_int       = { val, lang }      -> __native_polyglot_box_int       { val = val, lang = lang },
   box_float     = { val, lang }      -> __native_polyglot_box_float     { val = val, lang = lang },
   box_str       = { val, lang }      -> __native_polyglot_box_str       { val = val, lang = lang },

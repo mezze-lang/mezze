@@ -9,11 +9,11 @@ entry = "main"
 
 # `mezze-wasm` supplies:
 #   - `.mz` source files: `use mezze_wasm::wasm::{ Wasm, GraalWasm, WasmForeign, ... }`
-#   - `[maven]` block: the GraalWasm jars (wasm-language) and
-#     `polyglot-wasm-natives` — put on the wire child's classpath by
-#     `mez sync` so `[polyglot.wasm]` boots successfully.
+#   - `[maven]` block: the GraalWasm jar (wasm-language), put on the wire child's
+#     classpath by `mez sync` so `[polyglot.wasm]` boots. The provider ships no
+#     natives — all interop rides the first-party `Polyglot` effect.
 [dependencies]
-mezze-wasm = "github:mezze-lang/mezze-wasm@0.1.0"
+mezze-wasm = "github:mezze-lang/mezze-wasm@0.3.0"
 
 # `[polyglot.wasm]` opts this project in to the GraalWasm Truffle
 # language. GraalWasm ships with no external prerequisites — a raw
