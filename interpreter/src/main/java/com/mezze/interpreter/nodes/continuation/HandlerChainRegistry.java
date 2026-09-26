@@ -154,7 +154,7 @@ public final class HandlerChainRegistry {
     // ----------------------------------------------------------------
     // Handler-chain-stable assumptions.
     //
-    // Two levels:
+    // Three levels:
     //   1. Per-effect CyclicAssumption — keyed by effect hash. Invalidated
     //      only when a handler for THAT specific effect is pushed/popped.
     //      Used by PerformD and PerformMutMutateAct so that pushing a
@@ -162,6 +162,9 @@ public final class HandlerChainRegistry {
     //   2. Global CyclicAssumption — invalidated on ANY handler push/pop.
     //      Used by EffectBinding (resume/abort singletons depend on the
     //      entire chain being empty, not just one effect's handler).
+    //   3. Single-threaded-effects Assumption — see below. Neither (1) nor
+    //      (2) says anything about WHICH thread a handler belongs to, and
+    //      the caches they guard live on shared nodes.
     // ----------------------------------------------------------------
 
     private static final CyclicAssumption HANDLER_CHAIN_STABLE =
@@ -170,6 +173,79 @@ public final class HandlerChainRegistry {
     private static final java.util.concurrent.ConcurrentHashMap<
             com.mezze.language.typedast.Hash, CyclicAssumption> EFFECT_ASSUMPTIONS =
         new java.util.concurrent.ConcurrentHashMap<>();
+
+    // ----------------------------------------------------------------
+    // Single-threaded effects.
+    //
+    // The handler chain is per-thread ({@link #STATE} is a ThreadLocal),
+    // but the dispatch caches that read it hang off Truffle nodes, which
+    // are SHARED between threads. So `@Cached("peekHandlerForEffect(h)")`
+    // stores ONE thread's handler where every thread will read it, and the
+    // assumptions above cannot notice: they are keyed by effect, not by
+    // thread, so a push on thread B both invalidates A's cache and lets B
+    // re-specialize the shared node with B's handler. A then performs
+    // through B's handler with no assumption violated — a silently wrong
+    // value, reachable only when two threads handle the same effect.
+    //
+    // Checking the thread's own chain on every perform fixes that but
+    // pays a ThreadLocal probe per operation, which is exactly the cost
+    // the cache exists to remove. So instead: this assumption holds while
+    // only ONE thread has ever touched handler state, which is the whole
+    // of every single-threaded program. While it holds, the cached handler
+    // provably belongs to the only thread that can read it and needs no
+    // check; once a second thread appears it is invalidated FOREVER (a
+    // plain Assumption, not a CyclicAssumption — there is no going back),
+    // and dispatch moves to a specialization that verifies the handler.
+    //
+    // Set once, invalidated at most once, read only off the hot path.
+    // ----------------------------------------------------------------
+
+    private static final Assumption SINGLE_THREADED_EFFECTS =
+        com.oracle.truffle.api.Truffle.getRuntime()
+            .createAssumption("single-threaded-effects");
+
+    private static final java.util.concurrent.atomic.AtomicReference<Thread>
+        EFFECT_STATE_THREAD = new java.util.concurrent.atomic.AtomicReference<>();
+
+    /**
+     * Valid while every push, pop, inherited install and cached dispatch of
+     * handler state has come from a single thread. Guards the
+     * handler-identity-free fast paths in {@code PerformD} and
+     * {@code PerformMutMutateAct}.
+     *
+     * <p>Callers that are about to CACHE something derived from this thread's
+     * chain must call {@link #noteEffectStateThread()} first — a thread that
+     * only performs, never handles, is otherwise invisible here, and reading a
+     * cache built by another thread is exactly the bug this guards. Both
+     * dispatch nodes do so in their assumption initializer, which the Truffle
+     * DSL evaluates at specialization time, not per call.
+     */
+    @TruffleBoundary
+    public static Assumption getSingleThreadedEffectsAssumption() {
+        return SINGLE_THREADED_EFFECTS;
+    }
+
+    /**
+     * Record that the current thread is touching handler state, and drop the
+     * single-threaded assumption the first time that is a second thread.
+     * Called from every path that changes a thread's chain — including
+     * {@link #installHandlerChainEntries}, which deliberately skips the
+     * per-effect invalidation but is precisely how a spawned thread acquires
+     * handlers — and from the dispatch nodes when they specialize.
+     */
+    @TruffleBoundary
+    public static void noteEffectStateThread() {
+        Thread current = Thread.currentThread();
+        Thread known = EFFECT_STATE_THREAD.get();
+        if (known == current) return;
+        if (known == null && EFFECT_STATE_THREAD.compareAndSet(null, current)) return;
+        // Either another thread won the race or one was already recorded.
+        // Re-read rather than trusting `known`: with three threads starting
+        // at once, the CAS can fail against a thread that IS us.
+        if (EFFECT_STATE_THREAD.get() != current && SINGLE_THREADED_EFFECTS.isValid()) {
+            SINGLE_THREADED_EFFECTS.invalidate();
+        }
+    }
 
     /**
      * Global assumption: valid as long as NO handler push/pop has happened.
@@ -202,6 +278,7 @@ public final class HandlerChainRegistry {
 
     /** Invalidate both per-effect and global assumptions. */
     private static void invalidateAssumptions(com.mezze.language.typedast.Hash effectHash) {
+        noteEffectStateThread();
         HANDLER_CHAIN_STABLE.invalidate();
         if (effectHash != null) {
             CyclicAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
@@ -566,17 +643,28 @@ public final class HandlerChainRegistry {
     @TruffleBoundary
     public static void installHandlerChainEntries(HandlerChainEntry[] chain) {
         if (chain.length == 0) return;
+        // A spawned thread acquiring handlers is the one event the per-effect
+        // assumptions cannot see (below: they are deliberately not
+        // invalidated here) and the exact event that makes a shared node's
+        // cached handler ambiguous. Note it before installing.
+        noteEffectStateThread();
         EffectState s = STATE.get();
         // Ensure capacity for all entries at once.
         while (s.depth + chain.length > s.handlers.length) s.grow();
         // Bulk install: outermost first (chain is innermost-first, iterate
         // backwards). Inlined from pushChainOnly to avoid per-entry
         // generation++ and invalidateAssumptions — these are inherited
-        // chain entries from the parent thread, NOT new handler registrations.
-        // Installing them on a spawned thread does not change what handlers
-        // are available on any existing thread; existing compiled dispatch
-        // on other threads remains valid. No bdslHandleDepth increment
-        // since there is no BDSL Handle catch boundary on this call path.
+        // chain entries from the parent thread, NOT new handler registrations,
+        // so they change no OTHER thread's chain and the per-effect
+        // assumptions need not fall. No bdslHandleDepth increment since there
+        // is no BDSL Handle catch boundary on this call path.
+        //
+        // What this used to claim — that compiled dispatch on other threads
+        // therefore stays valid — was false, and was the bug: dispatch caches
+        // live on nodes SHARED between threads, so a second thread acquiring
+        // handlers here is exactly what makes a cached handler ambiguous.
+        // Hence the noteEffectStateThread() above; the per-effect assumptions
+        // still legitimately survive.
         for (int i = chain.length - 1; i >= 0; i--) {
             int d = s.depth;
             s.handlers[d] = chain[i].handler();

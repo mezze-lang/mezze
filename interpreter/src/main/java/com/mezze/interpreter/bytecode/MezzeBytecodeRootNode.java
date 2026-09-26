@@ -4041,29 +4041,55 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // specialization deactivates. The DSL re-instantiates it on the
         // next call with a fresh assumption from the CyclicAssumption,
         // re-resolving the handler.
-        // The identity guard is load-bearing, not belt-and-braces. This node is
-        // SHARED by every thread, the handler chain it caches from is THREAD-LOCAL,
-        // and `effectStable` is process-global — so without re-checking that the
-        // cached handler is still this thread's innermost one, whichever thread
-        // re-specialized last wins for all of them. Two tasks performing the same
-        // op under different handlers then silently read each other's handler: a
-        // wrong VALUE, never an exception, and only after the uncached→cached
-        // transition. See ConcurrentHandlerIsolationTest.
+        // This node is SHARED by every thread, the handler chain it caches from
+        // is THREAD-LOCAL, and `effectStable` is process-global — so a cached
+        // handler is one thread's, readable by all, with no assumption able to
+        // notice. Two tasks performing the same op under different handlers
+        // silently read each other's handler: a wrong VALUE, never an
+        // exception, and only after the uncached→cached transition. See
+        // ConcurrentHandlerIsolationTest.
         //
-        // A stopgap: it re-resolves on every call, which is exactly the
-        // ThreadLocal probe the cache exists to avoid. The real fix is to key the
-        // specialization on the thread's chain rather than guard against it.
+        // Hence two cached paths, differing only in how they establish that the
+        // cached handler is THIS thread's:
+        //
+        //   - `doCachedSingleThreaded` establishes it from the assumption that
+        //     only one thread has ever touched handler state, so it performs no
+        //     check at all. This is every single-threaded program, and it is
+        //     the path that must stay free: the check it skips is the
+        //     ThreadLocal probe the cache exists to remove.
+        //   - `doCachedShared` re-resolves and compares. Reached only once a
+        //     second thread installs handlers, and only for as long as the
+        //     process lives — the assumption never comes back.
+        @Specialization(assumptions = {"effectStable", "singleThreaded"},
+                        guards = {"cachedHandler != null", "cachedTarget != null"},
+                        excludeForUncached = true)
+        public static Object doCachedSingleThreaded(Hash effectHash, String opName, Object arg,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
+                @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
+                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
+                @Cached("getSingleThreadedAssumption()") com.oracle.truffle.api.Assumption singleThreaded,
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
+            return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
+        }
+
         @Specialization(assumptions = "effectStable",
                         guards = {"cachedHandler != null", "cachedTarget != null",
                                   "resolveHandler(effectHash) == cachedHandler"},
                         excludeForUncached = true)
-        public static Object doCached(Hash effectHash, String opName, Object arg,
+        public static Object doCachedShared(Hash effectHash, String opName, Object arg,
                 @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
                 @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
                 @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
+            return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
+        }
+
+        private static Object invokeHandlerOp(Hash effectHash, String opName, Object arg,
+                Object[] cachedCV, DirectCallNode callNode) {
             // Zero-cost effect dispatch: no dispatch fiber, no
             // @TruffleBoundary crossings on the normal path. When the
             // handler chain is stable (assumption holds), the handler,
@@ -4125,6 +4151,21 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         static com.oracle.truffle.api.Assumption getEffectStableAssumption(Hash effectHash) {
             return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .getEffectStableAssumption(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getSingleThreadedAssumption() {
+            // Runs at specialization time, not per call: this is where the
+            // thread that is about to READ a cached handler declares itself. A
+            // thread that only performs and never installs a handler is
+            // invisible to the registry's push paths, and it is the one that
+            // would otherwise inherit another thread's cache — including the
+            // case where it has no handler at all and the right answer is
+            // "unhandled".
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .noteEffectStateThread();
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getSingleThreadedEffectsAssumption();
         }
 
         static int resolveFieldIndex(MezzeRecord handler, String opName) {
@@ -6074,7 +6115,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // internal `act {}` IndirectCallNode is megamorphic across all Mut
         // call sites and can never be inlined — the root cause of the
         // 500× overhead on Mut-heavy workloads.
-        @Specialization(assumptions = "effectStable",
+        //
+        // Two variants, as in PerformD: the cached handler belongs to whichever
+        // thread specialized this SHARED node, so the bypass decision
+        // (`isLocalMutPassthrough`) is only sound for the thread that made it.
+        // A second thread handling Mut with a real state handler would
+        // otherwise bypass it and mutate through LocalMut semantics instead —
+        // a wrong value, silently. `singleThreaded` establishes that there is
+        // no second thread; `doDirectBypassShared` checks instead.
+        @Specialization(assumptions = {"effectStable", "singleThreaded"},
                         guards = {"cachedHandler != null", "cachedHandlerTarget != null",
                                   "isLocalMutPassthrough(cachedHandlerTarget)",
                                   "cachedActTarget != null",
@@ -6085,8 +6134,31 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedHandlerTarget,
                 @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
+                @Cached("getSingleThreadedAssumption()") com.oracle.truffle.api.Assumption singleThreaded,
                 @Cached("resolveActCallTarget(actFn)") CallTarget cachedActTarget,
                 @Cached("createInlined(cachedActTarget)") DirectCallNode actCallNode) {
+            return invokeBypass(effectHash, actFn, actCallNode);
+        }
+
+        @Specialization(assumptions = "effectStable",
+                        guards = {"cachedHandler != null", "cachedHandlerTarget != null",
+                                  "isLocalMutPassthrough(cachedHandlerTarget)",
+                                  "resolveHandler(effectHash) == cachedHandler",
+                                  "cachedActTarget != null",
+                                  "actTargetMatches(actFn, cachedActTarget)"},
+                        excludeForUncached = true)
+        public static Object doDirectBypassShared(Hash effectHash, Object actFn,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedHandlerTarget,
+                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
+                @Cached("resolveActCallTarget(actFn)") CallTarget cachedActTarget,
+                @Cached("createInlined(cachedActTarget)") DirectCallNode actCallNode) {
+            return invokeBypass(effectHash, actFn, actCallNode);
+        }
+
+        private static Object invokeBypass(Hash effectHash, Object actFn,
+                DirectCallNode actCallNode) {
             MezzeFunction fn = (MezzeFunction) actFn;
             Object[] cv = fn.getClosureValues();
             Object unit = MezzeRecord.empty();
@@ -6117,8 +6189,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         // Cached handler-dispatch path — still needed for DebugLocalMut
-        // and as fallback when the bypass can't fire.
-        @Specialization(assumptions = "effectStable",
+        // and as fallback when the bypass can't fire. Same two variants.
+        @Specialization(assumptions = {"effectStable", "singleThreaded"},
                         guards = {"cachedHandler != null", "cachedTarget != null"},
                         excludeForUncached = true)
         public static Object doCached(Hash effectHash, Object actFn,
@@ -6127,8 +6199,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
                 @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
+                @Cached("getSingleThreadedAssumption()") com.oracle.truffle.api.Assumption singleThreaded,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
                 @Cached("resolveActWrapperShape()") MezzeRecord.Shape actShape) {
+            return invokeMutateOp(effectHash, actFn, cachedCV, callNode, actShape);
+        }
+
+        @Specialization(assumptions = "effectStable",
+                        guards = {"cachedHandler != null", "cachedTarget != null",
+                                  "resolveHandler(effectHash) == cachedHandler"},
+                        excludeForUncached = true)
+        public static Object doCachedShared(Hash effectHash, Object actFn,
+                @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
+                @Cached("resolveMutateIndex(cachedHandler)") int cachedFieldIndex,
+                @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
+                @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
+                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
+                @Cached("createInlined(cachedTarget)") DirectCallNode callNode,
+                @Cached("resolveActWrapperShape()") MezzeRecord.Shape actShape) {
+            return invokeMutateOp(effectHash, actFn, cachedCV, callNode, actShape);
+        }
+
+        private static Object invokeMutateOp(Hash effectHash, Object actFn,
+                Object[] cachedCV, DirectCallNode callNode, MezzeRecord.Shape actShape) {
             MezzeRecord wrapper = MezzeRecord.withAllObjects(actShape, new Object[] { actFn });
             Object[] opArgs = new Object[cachedCV.length + 1];
             System.arraycopy(cachedCV, 0, opArgs, 0, cachedCV.length);
@@ -6169,6 +6262,21 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         static com.oracle.truffle.api.Assumption getEffectStableAssumption(Hash effectHash) {
             return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .getEffectStableAssumption(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getSingleThreadedAssumption() {
+            // Runs at specialization time, not per call: this is where the
+            // thread that is about to READ a cached handler declares itself. A
+            // thread that only performs and never installs a handler is
+            // invisible to the registry's push paths, and it is the one that
+            // would otherwise inherit another thread's cache — including the
+            // case where it has no handler at all and the right answer is
+            // "unhandled".
+            com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .noteEffectStateThread();
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getSingleThreadedEffectsAssumption();
         }
 
         static int resolveMutateIndex(MezzeRecord handler) {
