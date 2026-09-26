@@ -543,4 +543,35 @@ sealed interface SinkIR {
  *  Can't be CallDirect because the performer isn't known at compile time
  *  (different perform blocks can use different performers).
  */
-@Serializable data class PerformOpIR(val effectHash: Hash, val operationName: String, val arg: NodeIR, override val src: SourceInfo) : NodeIR
+@Serializable data class PerformOpIR(
+    val effectHash: Hash,
+    val operationName: String,
+    val arg: NodeIR,
+    override val src: SourceInfo,
+    /**
+     * Whether this is a `Comptime.comptime` perform.
+     *
+     * Separate from [comptimeShape] because a site must be recognisable even when
+     * no shape could be computed. A thunk whose body always raises — say it calls
+     * `compile_error` — has an unconstrained result type and therefore no shape,
+     * yet it is exactly the case that MUST still be evaluated at build, since the
+     * failure is the point. Keying recognition on the shape made such a site
+     * invisible to the reduction pass and to the did-everything-fold check alike.
+     */
+    val isComptime: Boolean = false,
+    /**
+     * Non-null iff a static result shape could be computed: what the result must
+     * be rebuilt against, from the solved, PRE-ERASURE type.
+     *
+     * Only the shape needs carrying — `effectHash` already identifies the site,
+     * so unlike a plain call there is nothing to stamp for recognition. The shape
+     * itself cannot be recomputed downstream: after emit nothing can tell `Nat`
+     * from `Int`, or say which newtype a value came from.
+     *
+     * On the node rather than in a side table because the reduction pass runs in
+     * the RUNTIME, which for `mez dev` / `exec` is a different process that
+     * receives nothing but serialized IR. A span-keyed table works in-process and
+     * silently does nothing across that boundary.
+     */
+    val comptimeShape: PrintType? = null,
+) : NodeIR

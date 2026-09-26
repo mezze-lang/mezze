@@ -54,6 +54,15 @@ interface ComptimeEvaluator {
          * "Handler not found" — the stdlib's own performers included.
          */
         performers: List<Array<String>>,
+        /**
+         * Where this block was written, as `file:line:col`, for diagnostics.
+         *
+         * The evaluator cannot derive it: it is handed a thunk hash, and a hash
+         * says nothing about where the call sits. The reduction pass knows both
+         * the enclosing function's source file and the call node's span, so it
+         * passes them down rather than making this guess.
+         */
+        origin: String,
     ): ComptimeOutcome
 }
 

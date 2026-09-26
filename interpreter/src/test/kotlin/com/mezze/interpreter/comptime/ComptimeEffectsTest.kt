@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Timeout
  */
 class ComptimeEffectsTest {
 
-    private val use = "use std::comptime::{ comptime }"
+    private val use = "use std::comptime::{ Comptime, ComptimeEval }"
 
     private fun run(src: String): Any = MezzeTestHelper.run("$use\n${src.trimIndent()}")
 
@@ -38,12 +38,12 @@ class ComptimeEffectsTest {
     fun `a discharged Mut body folds`() {
         assertEquals(12L, run("""
             use std::effects::mutation::{ Mut, LocalMut, MutInt, int_to_mut, read_int, incr1 }
-            comptime { eval = {} ->
+            (perform ComptimeEval in Comptime.comptime { eval = {} ->
                 perform LocalMut in do
                     let c = int_to_mut { n = 11 }
                     let _ = incr1 { n = c }
                     read_int { n = c }
-            }
+            })
         """))
     }
 
@@ -53,7 +53,7 @@ class ComptimeEffectsTest {
         assertEquals(99L, run("""
             effect Config where { port: {} -> Int <Config> }
             impl Config for FixedConfig where { port = {} -> resume { val = 99 } }
-            comptime { eval = {} -> perform FixedConfig in Config.port {} }
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> perform FixedConfig in Config.port {} })
         """))
     }
 
@@ -67,7 +67,7 @@ class ComptimeEffectsTest {
             effect Config where { port: {} -> Int <Config> }
             impl Config for Dev where { port = {} -> resume { val = 1 } }
             impl Config for Prod where { port = {} -> resume { val = 2 } }
-            comptime { eval = {} -> perform $performer in Config.port {} }
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> perform $performer in Config.port {} })
             """
         }
         assertEquals(1L, run(src("Dev")))
@@ -85,7 +85,7 @@ class ComptimeEffectsTest {
     fun `a thunk that performs nothing is rejected`() {
         // The message shows `<*>` on the expected side and its absence on the
         // actual, which is what tells the author what to change.
-        rejected("""comptime { eval = {} -> 2 + 2 }""", because = "<*>")
+        rejected("""(perform ComptimeEval in Comptime.comptime { eval = {} -> 2 + 2 })""", because = "<*>")
     }
 
     /** …and `noop` is how a computation that needs no effects says so. The
@@ -96,10 +96,10 @@ class ComptimeEffectsTest {
     fun `discharging NoOp satisfies the slot`() {
         assertEquals(4L, run("""
             use std::effects::noop::{ noop }
-            comptime { eval = {} -> do
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 2 + 2
-            }
+            })
         """))
     }
 
@@ -109,10 +109,10 @@ class ComptimeEffectsTest {
         rejected(
             """
             use std::effects::mutation::{ Mut, MutInt, int_to_mut, read_int }
-            comptime { eval = {} -> do
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 let c = int_to_mut { n = 1 }
                 read_int { n = c }
-            }
+            })
             """,
             because = "Mut",
         )
@@ -126,10 +126,10 @@ class ComptimeEffectsTest {
             use std::effects::mutation::{ Mut, MutInt, int_to_mut, read_int }
             effect Config where { port: {} -> Int <Config> }
             impl Config for Dev where { port = {} -> resume { val = 1 } }
-            comptime { eval = {} -> perform Dev in do
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> perform Dev in do
                 let c = int_to_mut { n = 1 }
                 read_int { n = c } + Config.port {}
-            }
+            })
             """,
             because = "Mut",
         )

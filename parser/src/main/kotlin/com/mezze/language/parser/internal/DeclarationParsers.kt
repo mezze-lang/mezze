@@ -405,6 +405,7 @@ internal val MezzeParser.effectOperationParser: Parser<ParsedEffectOp> get() = {
                                             funcType.paramType,
                                             funcType.returnType,
                                             effectList,
+                                            funcType.abilityConstraints,
                                             null,
                                             loc
                                         ),

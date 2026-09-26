@@ -51,6 +51,7 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
      */
     fun thunkHashOf(call: NodeIR?): Hash? {
         val arg = when (call) {
+            is PerformOpIR -> call.arg
             is CallIndirectIR -> call.arg
             is CallDirectIR -> call.args.firstOrNull()
             is CallIndirectScalarIR -> call.args.firstOrNull()
@@ -81,8 +82,32 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
     /** A call is a comptime site iff it carries the shape the type checker
      *  stamped on it. Self-identifying, so a runtime that never saw the type
      *  checker can still find every site. */
-    fun isStampedSite(node: NodeIR): Boolean =
-        node is CallDirectIR && node.comptimeShape != null && thunkHashOf(node) != null
+    fun isStampedSite(node: NodeIR): Boolean = when (node) {
+        // Recognised by being a comptime perform, NOT by carrying a shape — a
+        // shapeless site still has to be evaluated. See PerformOpIR.isComptime.
+        is PerformOpIR -> node.isComptime && thunkHashOf(node) != null
+        is CallDirectIR -> node.comptimeShape != null && thunkHashOf(node) != null
+        else -> false
+    }
+
+    /** The shape a stamped site carries, or null if it is not one. */
+    fun shapeOf(node: NodeIR): PrintType? = when (node) {
+        is PerformOpIR -> node.comptimeShape
+        is CallDirectIR -> node.comptimeShape
+        else -> null
+    }
+
+    /** The spans of every stamped comptime site still present in [body].
+     *  Used after reduction to prove none survived. */
+    fun remainingSites(body: NodeIR): List<SourceInfo?> {
+        val out = mutableListOf<SourceInfo?>()
+        fun walk(node: NodeIR) {
+            if (isStampedSite(node)) out.add(node.src)
+            mapChildren(node) { child -> walk(child); child }
+        }
+        walk(body)
+        return out
+    }
 
     /** Whether [body] contains any stamped comptime site. */
     fun hasSite(body: NodeIR): Boolean {
@@ -203,7 +228,7 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
     }
 
     /** Structural copy of [node] with each child replaced by [f] of it. */
-    private fun mapChildren(node: NodeIR, f: (NodeIR) -> NodeIR): NodeIR = when (node) {
+    fun mapChildren(node: NodeIR, f: (NodeIR) -> NodeIR): NodeIR = when (node) {
         is BlockIR -> node.copy(
             stmts = node.stmts.map {
                 when (it) {
@@ -252,6 +277,16 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
             },
         )
         is PerformOpIR -> node.copy(arg = f(node.arg))
+        // A comptime block written directly under its own handler —
+        // `perform ComptimeEval in Comptime.comptime { … }` — lives inside a
+        // HandleIR. Without this arm the traversal stops at the handler and the
+        // site is invisible: it type-checks, gets stamped, and then silently
+        // never folds, falling back to run time. The handler's own parameter
+        // expressions are walked too; a comptime can appear in one.
+        is HandleIR -> node.copy(
+            body = f(node.body),
+            handlers = node.handlers.map { h -> h.copy(params = h.params?.let(f)) },
+        )
         is InspectIR -> node.copy(value = f(node.value))
         is InterpolatedStringIR -> node.copy(
             parts = node.parts.map {
@@ -259,6 +294,46 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
             },
         )
         is SpecializedCallIR -> node.copy(args = node.args.map(f))
-        else -> node
+
+        // A canonicalized iter/seq chain. `ChainCanonicalizer` rewrites a seq
+        // pipeline into this AFTER lowering, so a comptime feeding a chain ends
+        // up buried in `source` — and with no arm here the traversal walked
+        // straight past it. The site was stamped, invisible, and silently never
+        // folded; a test literally named "a seq result folds" passed anyway,
+        // because the run-time fallback computes the same answer.
+        is FusedChainIR -> node.copy(
+            source = when (val sr = node.source) {
+                is SourceIR.RangeSeq -> sr.copy(start = f(sr.start), end = f(sr.end))
+                is SourceIR.RangeStepSeq ->
+                    sr.copy(start = f(sr.start), end = f(sr.end), step = f(sr.step))
+                is SourceIR.RawSeq -> sr.copy(xs = f(sr.xs))
+                is SourceIR.RawList -> sr.copy(xs = f(sr.xs))
+                is SourceIR.Opaque -> sr.copy(expr = f(sr.expr))
+                else -> sr
+            },
+            stages = node.stages.map { st ->
+                when (st) {
+                    is StageIR.Take -> st.copy(n = f(st.n))
+                    is StageIR.Drop -> st.copy(n = f(st.n))
+                    else -> st
+                }
+            },
+            sink = when (val sk = node.sink) {
+                is SinkIR.Fold -> sk.copy(init = f(sk.init))
+                else -> sk
+            },
+            fallback = node.fallback?.let(f),
+        )
+
+        // Leaves: nothing of ours can be nested inside them. Listed rather than
+        // swept up by an `else`, so that a new NodeIR variant is a COMPILE ERROR
+        // here instead of another silently-skipped site. Two have already been
+        // found the hard way — `HandleIR` and `FusedChainIR` — and both looked
+        // exactly like this feature working.
+        is BoolLitIR, is CharLitIR, is DoubleLitIR, is FracLitIR, is LongLitIR,
+        is StringLitIR, is UnitLitIR,
+        is ReadArgIR, is ReadCaptureIR, is ReadLocalIR,
+        is EffectBindingIR, is MakeLambdaIR,
+        is ReadGlobalByHashIR, is ReadGlobalFnByHashIR -> node
     }
 }

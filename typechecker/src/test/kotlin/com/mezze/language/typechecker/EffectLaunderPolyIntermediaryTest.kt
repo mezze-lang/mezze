@@ -184,10 +184,10 @@ class EffectLaunderPolyIntermediaryTest {
                 $twoEffects
                 let leaky: {} -> {} <MyLog> = {} -> MyLog.info { msg = "x" }
                 let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
-                let go: {} -> {} = {} -> perform TestLogger in do
+                let go: {} -> {} <*> = {} -> perform TestLogger in do
                     apply_eff { f = leaky }
             """),
-            "TestLogger handles MyLog, so `go` really is pure and must be accepted",
+            "TestLogger handles MyLog, so `go` leaks nothing and must be accepted — it\n                    carries `<*>` because it handled an effect, not because one escaped",
         )
     }
 
@@ -210,7 +210,7 @@ class EffectLaunderPolyIntermediaryTest {
                 let leaky: {} -> {} <MyLog> = {} -> MyLog.info { msg = "x" }
                 let apply_eff: { f: {} -> {} <...> } -> {} <...> = { f } -> f {}
                 let id: { g: 'a } -> 'a = { g } -> g
-                let go: {} -> {} = {} -> perform TestLogger in do
+                let go: {} -> {} <*> = {} -> perform TestLogger in do
                     apply_eff { f = id { g = leaky } }
             """),
             "the handler covers the effect the laundered callback performs, so the perform is valid",

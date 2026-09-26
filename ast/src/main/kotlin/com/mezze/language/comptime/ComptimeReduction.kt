@@ -107,9 +107,31 @@ object ComptimeReduction {
         val cache = mutableMapOf<Hash, NodeIR>()
         val reduced = functions.map { fn ->
             val body = ir.rewrite(fn.body) { call ->
-                reduceOne(ir, call, functions, performers, evaluator, failures, cache)
+                reduceOne(ir, call, functions, performers, evaluator, failures, cache, fn.sourceFile)
             }
             if (body === fn.body) fn else fn.copy(body = body)
+        }
+
+        // Every site must be gone. Folding at build IS the feature, so a site
+        // that survives is a compiler failure, and it belongs HERE — at build,
+        // with a location — not as a program that crashes when someone runs it.
+        //
+        // This is the check that should have existed from the start. Its absence
+        // is why a silent non-fold was indistinguishable from success: the value
+        // still came out right, because a site left alone was simply computed at
+        // run time instead.
+        for (fn in reduced) {
+            for (leftover in ir.remainingSites(fn.body)) {
+                failures += Failure(
+                    leftover,
+                    "a comptime block was not evaluated during the build, at " +
+                        "${fn.sourceFile}:${leftover?.startLine}:${leftover?.startCol}. " +
+                        "Folding at build time is what `comptime` means, so this is a " +
+                        "compiler failure rather than an error in your program — please " +
+                        "report it.",
+                    emptyList(),
+                )
+            }
         }
         return Result(reduced, failures)
     }
@@ -122,9 +144,14 @@ object ComptimeReduction {
         evaluator: ComptimeEvaluator,
         failures: MutableList<Failure>,
         cache: MutableMap<Hash, NodeIR>,
+        sourceFile: String,
     ): NodeIR? {
         val thunk = ir.thunkHashOf(call) ?: return null
-        val shape = (call as? CallDirectIR)?.comptimeShape ?: return null
+        // No shape is not a reason to skip: evaluate anyway. A thunk that raises
+        // never reaches reification, and that raise is the author's build error.
+        // If a VALUE does come back with no shape to write it against, the
+        // reifier says so and the build fails — loudly, and at build.
+        val shape = ir.shapeOf(call) ?: PrintType.Dynamic
 
         // Two comptime blocks with identical bodies are the SAME thunk — the hash
         // is over content — so one written twice is evaluated once.
@@ -136,7 +163,8 @@ object ComptimeReduction {
         // and not persisted.
         cache[thunk]?.let { return it }
 
-        return when (val outcome = evaluator.evaluate(functions, thunk, shape, performers)) {
+        val origin = "$sourceFile:${call.src.startLine}:${call.src.startCol}"
+        return when (val outcome = evaluator.evaluate(functions, thunk, shape, performers, origin)) {
             is ComptimeOutcome.Reified -> outcome.node.also { cache[thunk] = it }
             is ComptimeOutcome.Failed -> {
                 failures += Failure(call.src, outcome.message, outcome.guestFrames)

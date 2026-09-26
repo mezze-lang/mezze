@@ -132,30 +132,6 @@ object DuplicateDeclarationValidator {
         ScopedEffectConstants.SCOPE
     )
 
-    /**
-     * `comptime` is a reserved name: a compiler phase recognises calls to it and
-     * replaces them with the value they compute, so a second thing answering to
-     * the name could only be a source of confusion.
-     *
-     * Gated on the CONTENT HASH, not the spelling — which is what lets stdlib
-     * declare the real one in `std/comptime.mz` without exempting a file path.
-     * A declaration whose hash is `FUNCTION_COMPTIME` *is* the sanctioned one;
-     * anything else answering to the name is not.
-     */
-    private fun rejectRedeclaringComptime(name: String, decl: ParsedLetDecl) {
-        if (name != "comptime") return
-        if (ParsedDeclHasher.hashLetDecl(decl) ==
-            com.mezze.language.typechecker.WellKnownHashConstants.FUNCTION_COMPTIME
-        ) return
-        throw TypeCheckError(
-            "'comptime' is a reserved name — it is the compile-time evaluation " +
-                "primitive from `std::comptime`, and the compiler recognises calls " +
-                "to it in order to replace them with the value they compute. " +
-                "Choose another name for this binding.",
-            decl.value.loc,
-            code = ErrorCode.V0801_COMPTIME_MISUSE,
-        )
-    }
 
     private fun rejectReservedName(name: String, loc: Loc) {
         if (name in RUNTIME_RESERVED_NAMES) {
@@ -794,7 +770,6 @@ object DuplicateDeclarationValidator {
 
             for (name in boundNames) {
                 rejectReservedName(name, item.value.loc)
-                rejectRedeclaringComptime(name, item)
                 if (name in declaredVariables) {
                     throw TypeCheckError(
                         "Duplicate variable declaration: '$name' is already defined in this scope",

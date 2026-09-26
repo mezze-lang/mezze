@@ -5,9 +5,11 @@ use std::abilities::embed::{ Embeddable }
 ## Evaluate `eval` while the program is being compiled, and replace this call
 ## site with the result.
 ##
-##     use std::comptime::{ comptime }
+##     use std::comptime::{ Comptime, ComptimeEval }
 ##
-##     let table = comptime { eval = {} -> build_lookup_table {} }
+##     let table = {} -> Comptime.comptime { eval = {} -> build_lookup_table {} }
+##
+##     let main = {} -> perform ComptimeEval in ... table {} ...
 ##
 ## `table` costs nothing at run time: by the time the program runs, the call is
 ## gone and the value is a literal in the compiled output.
@@ -76,7 +78,24 @@ use std::abilities::embed::{ Embeddable }
 ## visible to whoever imports you — `*` cannot be annotated away, so a library
 ## that runs a `comptime` block carries the mark into its own signature and a
 ## consumer can tell it apart from one that does not.
-pub let comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <*> = { eval } -> eval {}
+effect Comptime where {
+  comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <Comptime>
+}
+
+## The handler, and the consent.
+##
+## `<Comptime>` propagates like any other effect, so a function that folds at
+## compile time says so in its signature, and so does everything that calls it,
+## all the way out to `main` — where this must be installed or the program does
+## not type-check. That is the disclosure: nobody's build-time code runs without
+## the person building having written the line that permits it.
+##
+## The body is the run-time fallback. It only fires for a site the reduction pass
+## left alone, and it computes the same value — just at run time instead of for
+## free.
+impl Comptime for ComptimeEval where {
+  comptime = { eval } -> resume { val = __native_comptime_eval { eval = eval } }
+}
 
 ## Fail the build, from inside a `comptime` block.
 ##

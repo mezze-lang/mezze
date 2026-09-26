@@ -2839,10 +2839,36 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== Environment ====================
 
     private static void registerEnvironmentHandlers() {
-        // `compile_error` — deliberately fails the build from inside a comptime
-        // block. A raise rather than a special compile-time form, so it behaves
-        // the same wherever it is written; the comptime driver turns the raise
-        // into V0804 at the call site.
+        // The whole body of `impl Comptime for ComptimeEval`. That handler exists
+        // only to satisfy the effect system — nobody writes one, and by the time a
+        // program runs the site should already be a literal — so the single
+        // decision it makes lives here rather than as branching in stdlib Mezze.
+        //
+        // Two cases, and only two:
+        //
+        //   - Inside another comptime's evaluation, reduction is deliberately
+        //     suppressed (otherwise the pass re-evaluates the call it is inside,
+        //     forever). A comptime met there legitimately runs now.
+        //   - Anywhere else, arriving here means reduction failed to replace the
+        //     site, which is a compiler bug. Saying so IS the point: this used to
+        //     silently recompute the thunk instead, which is why every silent
+        //     non-fold still produced the right answer and passed its test. Four
+        //     separate bugs hid behind that one line.
+        HANDLERS.put("__native_comptime_eval", (r, c) -> {
+            if (!com.mezze.language.comptime.Comptime.isEvaluating()) {
+                throw new com.mezze.interpreter.values.MezzeGuestException(
+                    "a comptime block reached run time: it should have been replaced by "
+                    + "its value during the build. This is a compiler bug, not an error "
+                    + "in your program — please report it.");
+            }
+            MezzeFunction thunk = getFunction(r, "eval");
+            Object[] closures = thunk.getClosureValues();
+            Object[] args = new Object[closures.length + 1];
+            System.arraycopy(closures, 0, args, 0, closures.length);
+            args[closures.length] = MezzeRecord.empty();
+            return c.call(thunk.getCallTarget(), args);
+        });
+
         HANDLERS.put("__native_comptime_compile_error", (r, c) -> {
             Object msg = r.getField(r.getFieldIndex("msg"));
             throw new com.mezze.interpreter.values.MezzeGuestException(

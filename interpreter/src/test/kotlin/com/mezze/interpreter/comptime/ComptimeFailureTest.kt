@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Timeout
 class ComptimeFailureTest {
 
     private val use =
-        "use std::comptime::{ comptime, compile_error }\nuse std::effects::noop::{ noop }"
+        "use std::comptime::{ Comptime, ComptimeEval, compile_error }\nuse std::effects::noop::{ noop }"
 
     private fun failureMessage(src: String): String =
         try {
@@ -33,20 +33,20 @@ class ComptimeFailureTest {
     @Test
     @Timeout(120)
     fun `compile_error stops the build with its own message`() {
-        val m = failureMessage("""comptime { eval = {} -> do
+        val m = failureMessage("""(perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 compile_error { msg = "schema is stale" }
-            }""")
+            })""")
         assertTrue(m.contains("schema is stale"), "message not surfaced, got:\n$m")
     }
 
     @Test
     @Timeout(120)
     fun `a crash inside the body stops the build`() {
-        val m = failureMessage("""comptime { eval = {} -> do
+        val m = failureMessage("""(perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 1 / 0
-            }""")
+            })""")
         assertTrue(
             m.contains("comptime", ignoreCase = true) || m.contains("zero", ignoreCase = true),
             "expected a comptime/divide-by-zero failure, got:\n$m",
@@ -61,10 +61,15 @@ class ComptimeFailureTest {
         val r = MezzeTestHelper.run(
             """
             $use
-            match comptime { eval = {} -> do
+            # In a function, not the trailing bare expression: a variant
+            # constructor there is typed only by context, and the top-level-
+            # expression path this harness allows -- real mez rejects it with
+            # V0710 -- never solves it.
+            let outcome = {} -> Comptime.comptime { eval = {} -> do
                 noop {}
                 Err { error = "nope" }
-            } is
+            }
+            match (perform ComptimeEval in outcome {}) is
                 Ok { val } -> "ok"
                 Err { error } -> error
             """.trimIndent()

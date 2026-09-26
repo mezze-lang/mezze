@@ -116,12 +116,12 @@ fun main(args: Array<String>) {
         // comptime: gates what a comptime block may return (marker ability)
         "Embeddable",
     )
-    val keptEffects = setOf("Mut")
+    val keptEffects = setOf("Mut", "Comptime")
     // Functions the compiler recognises STRUCTURALLY at a call site, by hash
     // rather than by name (see `no_name_string_dispatch_ever`). `comptime` is
     // recognised so its call site can be reduced away and replaced by the
     // evaluated result.
-    val keptFunctions = setOf("comptime")
+    val keptFunctions = setOf<String>()
 
     sb.appendLine("object WellKnownHashConstants {")
     sb.appendLine()
@@ -162,10 +162,11 @@ fun main(args: Array<String>) {
     }
     sb.appendLine("    )")
     sb.appendLine()
-    sb.appendLine("    /** True for a call whose callee is stdlib `comptime`. Structural — the")
-    sb.appendLine("     *  content hash, never the spelling, so a re-export or a local alias still")
-    sb.appendLine("     *  resolves and a same-named user function never does. */")
-    sb.appendLine("    fun isComptime(hash: Hash?): Boolean = hash != null && hash == FUNCTION_COMPTIME")
+    sb.appendLine("    /** True for a perform of stdlib `Comptime.comptime`. Structural — the")
+    sb.appendLine("     *  effect's content hash, never the spelling, so a re-export or a local")
+    sb.appendLine("     *  alias still resolves and a same-named user effect never does. */")
+    sb.appendLine("    fun isComptime(effectHash: Hash?, operationName: String): Boolean =")
+    sb.appendLine("        effectHash != null && effectHash == EFFECT_COMPTIME && operationName == \"comptime\"")
     sb.appendLine()
     sb.appendLine("    fun resolveAbilityHash(name: String): Hash? = abilityHashes[name]")
     sb.appendLine("    fun resolveEffectHash(name: String): Hash? = effectHashes[name]")

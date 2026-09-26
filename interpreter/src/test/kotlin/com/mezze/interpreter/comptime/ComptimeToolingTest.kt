@@ -37,20 +37,20 @@ class ComptimeToolingTest {
         val before = evaluations()
         MezzeTestHelper.typeCheck(
             """
-            use std::comptime::{ comptime }
+            use std::comptime::{ Comptime, ComptimeEval }
             use std::effects::noop::{ noop }
-            let a = comptime { eval = {} -> do
+            let a = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 1 + 1
-            }
-            let b = comptime { eval = {} -> do
+            })
+            let b = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 "x"
-            }
-            let c = comptime { eval = {} -> do
+            })
+            let c = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 { k = 3 }
-            }
+            })
             """.trimIndent()
         )
         assertEquals(before, evaluations(), "type checking executed user code")
@@ -67,12 +67,12 @@ class ComptimeToolingTest {
         val before = evaluations()
         val result = MezzeTestHelper.typeCheck(
             """
-            use std::comptime::{ comptime }
+            use std::comptime::{ Comptime, ComptimeEval }
             use std::effects::noop::{ noop }
-            let answer = comptime { eval = {} -> do
+            let answer = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 6 * 7
-            }
+            })
             """.trimIndent()
         )
         assertNotNull(result.getVariableType("answer"), "no type for a comptime binding")
@@ -92,12 +92,12 @@ class ComptimeToolingTest {
     @Timeout(120)
     fun `a crashing comptime passes check and fails build`() {
         val src = """
-            use std::comptime::{ comptime }
+            use std::comptime::{ Comptime, ComptimeEval }
             use std::effects::noop::{ noop }
-            let boom = comptime { eval = {} -> do
+            let boom = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 1 / 0
-            }
+            })
         """.trimIndent()
 
         // check: clean.

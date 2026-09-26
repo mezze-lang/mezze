@@ -86,7 +86,7 @@ class TypeValidator(
             when (decl) {
                 is ParsedLetDecl -> {
                     errors.addAll(validateParsedAnnotation(decl, substitution, constraintResults))
-                    errors.addAll(validateParsedTopLevelEffects(decl, substitution, constraintResults, typedModule))
+                    errors.addAll(validateParsedTopLevelEffects(decl, substitution, constraintResults))
                     errors.addAll(validateHermeticInferredEffects(decl, substitution, constraintResults))
                     val scrutineeType = if (decl.isSimpleBinding) {
                         constraintResults[decl.variableName]?.type?.let { substitution.apply(it) }
@@ -452,28 +452,10 @@ class TypeValidator(
         return emptyList()
     }
 
-    /**
-     * Whether this binding's whole value is a `comptime` call.
-     *
-     * Keyed on the RESOLVED CALLEE HASH off the typed module, never on the name
-     * `comptime` — a name is not an identity, and a local binding could shadow
-     * it. See ComptimeRules.isComptime.
-     */
-    private fun isComptimeBinding(name: String, typedModule: TypedModule?): Boolean {
-        val decl = typedModule?.decls
-            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-            ?.firstOrNull { it.name == name } ?: return false
-        val call = decl.value as? com.mezze.language.typedast.TypedCall ?: return false
-        val callee = (call.function as? com.mezze.language.typedast.TypedVar)?.binding
-        val hash = (callee as? com.mezze.language.typedast.BindingRef.ByHash)?.hash ?: return false
-        return com.mezze.language.typechecker.comptime.ComptimeRules.isComptime(hash)
-    }
-
     private fun validateParsedTopLevelEffects(
         decl: ParsedLetDecl,
         substitution: Substitution,
         constraintResults: Map<String, ConstraintResult>,
-        typedModule: TypedModule? = null,
     ): List<ValidationError> {
         if (!decl.isSimpleBinding) return emptyList()
         val result = constraintResults[decl.variableName] ?: return emptyList()
@@ -495,19 +477,6 @@ class TypeValidator(
         val incursEffect = hasNamedEffect || result.performed
         if (!incursEffect) return emptyList()
         val performedAndEmpty = result.performed && !hasNamedEffect
-
-        // A `comptime` binding is the one top-level value that genuinely does NOT
-        // run at module load: the call is replaced by the literal it computes
-        // before the program starts, so after reduction this binding IS a
-        // constant. The rule's premise — "the module top level runs no handler"
-        // — is about run time, and there is no run time here to speak of.
-        //
-        // Narrow on purpose: only the performed-only row is exempt. A comptime
-        // whose row still names an escaping effect is a real stranded effect and
-        // is still rejected.
-        if (performedAndEmpty && isComptimeBinding(decl.variableName, typedModule)) {
-            return emptyList()
-        }
 
         val shouldReject = if (strictTopLevel) true else performedAndEmpty
         if (shouldReject) {

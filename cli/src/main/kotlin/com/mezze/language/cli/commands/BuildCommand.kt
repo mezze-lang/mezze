@@ -222,7 +222,9 @@ class BuildCommand {
             // Reduction rewrites bodies but keeps each function's hash, the same
             // convention MutEraser and TrivialWrapperInliner follow, so
             // everything already persisted by hash stays valid.
-            val loweredFunctions = reduceComptime(compiledFunctions, performerRecords)
+            // NOTE: comptime is folded LATER, over the reachable closure — see the
+            // `reduceComptime` call below. Folding here would cover user code only.
+            val loweredFunctions = compiledFunctions
 
             // Front-door name→hash resolution: the user names their entry in
             // Mezze.toml; we resolve it to a content hash ONCE here and carry
@@ -286,7 +288,10 @@ class BuildCommand {
             // 5b. Compute the FunctionIR closure the runtime will need
             //     (user code + reachable stdlib). Same logic the native
             //     build uses — single source of truth.
-            val closure = NativeBuildPath.computeReachableClosure(loweredFunctions)
+            // Reachable IR, comptime folded, chains canonicalized — see
+            // NativeBuildPath.finalizeClosure for why the fold belongs here and
+            // not earlier.
+            val closure = NativeBuildPath.finalizeClosure(loweredFunctions, performerRecords)
             if (timing) System.err.println("[${ms()}ms] runtime closure (${closure.size} fns)")
 
             // 6. Create runnable JAR — clones mezze-runtime.jar (slim
@@ -476,28 +481,6 @@ class BuildCommand {
         // re-typecheck, so there's nothing new to report).
         val warningCount: Int = 0,
     )
-
-    /**
-     * Run every `comptime` block and splice its value in.
-     *
-     * A no-op for a program with none, and a no-op again when the runtime jar
-     * is not on the class path — `mez check` and the LSP get the IR back
-     * untouched, which is the point: neither may execute user code.
-     *
-     * A failing block is the author's error, reported like any other build
-     * error. The message already carries the guest frames; the host stack
-     * belongs behind `--verbose` and helps nobody reading their own comptime.
-     */
-    private fun reduceComptime(
-        functions: List<FunctionIR>,
-        performers: List<Array<String>>,
-    ): List<FunctionIR> =
-        try {
-            ComptimeHost.reduce(functions, performers)
-        } catch (e: com.mezze.language.comptime.ComptimeReduction.ComptimeFailure) {
-            println(e.message)
-            kotlin.system.exitProcess(4)
-        }
 
     /**
      * Full parse + typecheck + lower path. Writes the result back to the

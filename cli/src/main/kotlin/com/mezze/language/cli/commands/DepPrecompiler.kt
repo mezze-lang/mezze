@@ -96,6 +96,31 @@ object DepPrecompiler {
             val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer
                 .canonicalize(lowered.associateBy { it.hash })
 
+            // What actually gets stored: the dep's own declarations PLUS
+            // everything they reach inside this lowering.
+            //
+            // `ownHashes` is decl hashes and ability-op hashes. A lambda lifted
+            // out of a decl body gets its OWN FunctionIR whose hash is neither,
+            // so storing `ownHashes` alone drops it — and a consumer resolving
+            // this dep then hits a hash nothing can serve, which
+            // `computeReachableClosure` silently skips. A comptime thunk is
+            // exactly such a lambda, which is how a library's comptime produced
+            // an artifact that built clean and died on every run.
+            //
+            // Bounded to hashes this lowering produced: stdlib is served from
+            // PrecompiledStdlib and must not be copied into every dep's store.
+            val storedHashes = LinkedHashSet<Hash>()
+            val pending = ArrayDeque(ownHashes)
+            while (pending.isNotEmpty()) {
+                val h = pending.removeFirst()
+                if (!storedHashes.add(h)) continue
+                val fn = canonicalized[h] ?: continue
+                for (ref in com.mezze.language.stdlib.FunctionIRReachability
+                    .collectReferencedHashes(listOf(fn))) {
+                    if (ref !in storedHashes && canonicalized.containsKey(ref)) pending.add(ref)
+                }
+            }
+
             val tmp = File(out.parentFile, ".tmp-${out.name}").also { it.delete() }
             val store = SQLiteMezzeStore.forFile(tmp)
             try {
@@ -109,7 +134,7 @@ object DepPrecompiler {
                         entrySource = source,
                         parsedModule = parsed.module,
                     )
-                    for (hash in ownHashes) {
+                    for (hash in storedHashes) {
                         val fn = canonicalized[hash] ?: continue
                         val existing = store.getBlob(hash)
                         store.putBlob(

@@ -52,8 +52,9 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
         entry: Hash,
         resultShape: PrintType,
         performers: List<Array<String>>,
+        origin: String,
     ): ComptimeOutcome = synchronized(LOCK) {
-        Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers) }
+        Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers, origin) }
     }
 
     /** The body of [evaluate]; split out only so the re-entrancy guard wraps it
@@ -63,6 +64,7 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
         entry: Hash,
         resultShape: PrintType,
         performers: List<Array<String>>,
+        origin: String,
     ): ComptimeOutcome {
         evaluations.incrementAndGet()
         val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
@@ -105,7 +107,16 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
             MezzeLanguage.setFunctionsForDirectExecution(
                 forEval, performers, projectRoot, null,
             )
-            context.eval(Source.newBuilder(MezzeLanguage.ID, "", "<comptime>").buildLiteral())
+            // Bracketed as tightly as the block itself: not engine construction,
+            // not reification, and certainly not the parse/typecheck around it —
+            // only the guest code the author wrote, actually running.
+            val ranFrom = System.nanoTime()
+            val watch = startSlowWatch(origin)
+            try {
+                context.eval(Source.newBuilder(MezzeLanguage.ID, "", "<comptime>").buildLiteral())
+            } finally {
+                watch.stopAndReport(System.nanoTime() - ranFrom, origin)
+            }
 
             val value = MezzeLanguage.getLastExecutionResult()
             ComptimeOutcome.Reified(ComptimeReifier.reify(value, resultShape, SYNTHETIC))
@@ -119,6 +130,63 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
             try { context.close(true) } catch (ignored: Exception) { }
             try { engine.close() } catch (ignored: Exception) { }
             MezzeLanguage.setLastExecutionResultForNestedEval(enclosingResult)
+        }
+    }
+
+    /**
+     * Report a long-running block WHILE it runs — at 30s, then every 30s.
+     *
+     * A warning printed after the fact is useless for the case that matters
+     * most: a block that loops forever never finishes, so a post-hoc message
+     * never prints, and the build simply appears to hang. Reporting as it goes
+     * is the whole point — a stalled build otherwise looks identical to a slow
+     * one, and the person waiting has no way to tell which block is responsible.
+     *
+     * Still never a kill. An infinite comptime hangs the build the way any
+     * infinite loop does, and that is the author's code doing what it says; not
+     * ours to cut short. What we owe them is to stop being silent about it.
+     *
+     * Daemon thread, so it can never hold the JVM open, and interrupted the
+     * moment the guest run returns.
+     */
+    private fun startSlowWatch(origin: String): SlowWatch {
+        val reports = java.util.concurrent.atomic.AtomicInteger(0)
+        val thread = Thread({
+            try {
+                while (true) {
+                    Thread.sleep(SLOW_EVALUATION_MS)
+                    val elapsed = reports.incrementAndGet() * SLOW_EVALUATION_MS / 1000
+                    System.err.println(
+                        "  warning: the comptime block at $origin is still evaluating " +
+                            "after ${elapsed}s. It runs on every build, and on every " +
+                            "machine that builds this package.",
+                    )
+                }
+            } catch (stopped: InterruptedException) {
+                // The block finished. SlowWatch.stopAndReport says the rest.
+            }
+        }, "mezze-comptime-watch")
+        thread.isDaemon = true
+        thread.start()
+        return SlowWatch(thread, reports)
+    }
+
+    private class SlowWatch(
+        private val thread: Thread,
+        private val reports: java.util.concurrent.atomic.AtomicInteger,
+    ) {
+        /** Stop watching, and give a closing total — but only for a block we
+         *  already complained about, so a fast one stays completely silent. */
+        fun stopAndReport(elapsedNanos: Long, origin: String) {
+            thread.interrupt()
+            if (reports.get() == 0) return
+            System.err.println(
+                java.lang.String.format(
+                    java.util.Locale.ROOT,
+                    "  warning: the comptime block at %s finished after %.1fs.",
+                    origin, elapsedNanos / 1_000_000_000.0,
+                )
+            )
         }
     }
 
@@ -197,6 +265,11 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
                 Engine.newBuilder().allowExperimentalOptions(true).build()
             }
         }
+
+        /** First report at this mark, then one every interval after.
+         *  High on purpose: comptime is meant to do real work at build time, so
+         *  the bar is "you would notice this waiting", not "this was measurable". */
+        private const val SLOW_EVALUATION_MS = 30_000L
 
         private const val WARN_INTERPRETER_ONLY = "polyglot.engine.WarnInterpreterOnly"
 

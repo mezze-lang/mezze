@@ -330,6 +330,15 @@ data class ParsedEffectOp(
     val paramType: ParsedTypeAnnotation,
     val returnType: ParsedTypeAnnotation,
     val effects: List<String> = emptyList(),
+    /**
+     * The op's `with` clause, as on [ParsedAbilityOp] and an ordinary function.
+     *
+     * It used to be dropped here: the parser reads the whole signature as a
+     * `ParsedFunctionType` and then cherry-picked param / return / effects, so
+     * `ct: {..} with Embeddable 'a -> 'a <Ct>` parsed clean and the constraint
+     * was never enforced at any call site.
+     */
+    val abilityConstraints: List<ParsedFnAbilityConstraint> = emptyList(),
     val doc: String? = null,
     val loc: Loc
 )

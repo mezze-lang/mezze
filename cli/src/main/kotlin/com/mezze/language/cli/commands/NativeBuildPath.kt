@@ -106,10 +106,7 @@ object NativeBuildPath {
         }
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
-        val rawClosure = computeReachableClosure(loweredFunctions)
-        val closureMap = rawClosure.associateBy { it.hash }
-        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
-        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
+        val closure = finalizeClosure(loweredFunctions, performerRecords)
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
         shell.copyTo(outBinary, overwrite = true)
         outBinary.setExecutable(true, false)
@@ -233,10 +230,7 @@ object NativeBuildPath {
         // then pass them to packEmbeddedAppJar which would otherwise
         // recompute them. Hashing the jar bytes directly is non-determ
         // because JarEntry stamps with current time.
-        val rawClosure = computeReachableClosure(loweredFunctions)
-        val closureMap = rawClosure.associateBy { it.hash }
-        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
-        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
+        val closure = finalizeClosure(loweredFunctions, performerRecords)
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
 
@@ -547,10 +541,7 @@ object NativeBuildPath {
         timing: Boolean,
         relativeTime: () -> Long,
     ): File {
-        val rawClosure = computeReachableClosure(loweredFunctions)
-        val closureMap = rawClosure.associateBy { it.hash }
-        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
-        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
+        val closure = finalizeClosure(loweredFunctions, performerRecords)
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
 
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
@@ -617,6 +608,39 @@ object NativeBuildPath {
      * [fromStore] is null by default, so with no cached deps this is exactly the
      * previous behavior (only lowered + stdlib) — a no-op until deps are cached.
      */
+    /**
+     * The closure a runtime is handed: reachable IR, comptime folded, chains
+     * canonicalized.
+     *
+     * One helper because the three native packers and the jar packer all need
+     * the same thing, and because the comptime fold has to happen HERE. A
+     * dependency's comptime lives in its own module, so its call site — and,
+     * critically, the thunk's own `FunctionIR` — appear only once the closure is
+     * walked: user code does not contain them, and `DepPrecompiler` stores a dep
+     * lowered but unreduced. Folding earlier left the site in the artifact with
+     * its thunk nowhere the evaluator could reach, so `mez build` exited 0 and
+     * every run died with "comptime thunk ... is not among the compiled
+     * functions".
+     *
+     * Reduction rewrites bodies and preserves hashes, so an entry hash resolved
+     * before this stays valid.
+     */
+    fun finalizeClosure(
+        loweredFunctions: List<FunctionIR>,
+        performerRecords: List<Array<String>>,
+    ): List<FunctionIR> {
+        val rawClosure = computeReachableClosure(loweredFunctions)
+        val folded = try {
+            ComptimeHost.reduce(rawClosure, performerRecords)
+        } catch (e: com.mezze.language.comptime.ComptimeReduction.ComptimeFailure) {
+            println(e.message)
+            kotlin.system.exitProcess(4)
+        }
+        val closureMap = folded.associateBy { it.hash }
+        val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
+        return folded.map { canonicalized[it.hash] ?: it }
+    }
+
     fun computeReachableClosure(
         loweredFunctions: List<FunctionIR>,
         fromStore: ((com.mezze.language.typedast.Hash) -> FunctionIR?)? = null,

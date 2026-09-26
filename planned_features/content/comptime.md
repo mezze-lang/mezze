@@ -12,39 +12,57 @@ on branch `comptime-impl`, not what is planned.
 ## 1. What it is
 
 ```mezze
-use std::comptime::{ comptime }
-
+use std::comptime::{ Comptime, ComptimeEval }
 use std::effects::noop::{ noop }
 
-let config = comptime { eval = {} ->
-    perform RealFileSystem in read_file { path = "app.config" }
+let config = {} -> Comptime.comptime { eval = {} ->
+    perform LocalDisk in read_text_or { path = "app.config", def = "{}" }
 }
 
 # A computation that needs no effects still says so — `<*>` has a lower bound.
-let table = comptime { eval = {} -> do
+let table = {} -> Comptime.comptime { eval = {} -> do
     noop {}
     build_lookup_table {}
 }
+
+let main = {} -> perform ComptimeEval in ... table {} ...
 ```
 
 The thunk runs while the program is being compiled; the call site is replaced by
 the value it produced. `table` costs nothing at run time.
 
-`comptime` is a **declaration**, not a keyword:
+`comptime` is an **effect operation**, not a keyword and not a function:
 
 ```mezze
-pub let comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a = { eval } -> eval {}
+effect Comptime where {
+  comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <Comptime>
+}
+impl Comptime for ComptimeEval where {
+  comptime = { eval } -> resume { val = __native_comptime_eval { eval = eval } }
+}
 ```
 
-That matters for two reasons. The `with Embeddable 'a` constraint is only
-expressible on a signature — a keyword would have to hardcode it in the
-typechecker and would lose the ability system's error messages. And the body
-`eval {}` is a **run-time fallback with the same meaning**: a call that is not
-reduced still computes the right answer, just not for free. That is what makes
-every part of this feature safe to degrade.
+Three consequences, each load-bearing:
 
-The compiler recognises it by **content hash** (`FUNCTION_COMPTIME`), never by
-name — the `to_dbg`→`InspectIR` pattern.
+**`<Comptime>` propagates.** A function that folds at compile time says so in its
+signature, and so does everything that calls it, out to `main` — where the
+handler must be installed or the program does not type-check. That is the
+disclosure (§12): nobody's build-time code runs without the person building
+having written the line that permits it.
+
+**It must be an operation rather than a thin wrapper function.** The result shape
+is stamped per CALL SITE, and a wrapper would have one shared node for every
+caller.
+
+**It must live inside a function.** `let table = Comptime.comptime {…}` is
+rejected by V0502 — the top level is for definitions — so the row always has an
+arrow to sit on.
+
+The handler is compiler plumbing, not something anyone writes. Reaching it at run
+time means reduction failed, and it says so rather than quietly recomputing (§9).
+
+Recognised **structurally**: the effect's content hash plus the operation name
+(`EFFECT_COMPTIME`), never a spelling — the `to_dbg`→`InspectIR` pattern.
 
 ---
 
@@ -55,6 +73,16 @@ name — the `to_dbg`→`InspectIR` pattern.
 | the result is embeddable data | `Embeddable 'a` obligation | ordinary `V04xx`, with field paths |
 | nothing escapes the thunk | unification on the residual row | ordinary `V05xx` |
 | something was performed | the `<*>` check in `unifyFunctions` | effect-row mismatch showing `<*>` on the expected side |
+
+The first of those needed a fix before it worked at all. A `with` clause on an
+effect OPERATION was silently discarded — `effectOperationParser` reads the whole
+signature as a `ParsedFunctionType`, which does carry `abilityConstraints`, then
+cherry-picked param/return/effects and dropped the rest, and `ParsedEffectOp` had
+no field to hold them. So `Embeddable` parsed and ceased to exist, and a function
+result type-checked clean. Ability METHODS had always done this correctly; the two
+forms simply disagreed. Nothing in the constraint checker needed changing: a call
+site emits `AbilityRequired` from the callee type's constraints, and an empty list
+there just means no demand.
 
 `<*>` is **required**, and it has a lower bound as well as an upper one:
 
@@ -98,7 +126,7 @@ crashes and non-termination only.
 Rule 2 is the likely mistake:
 
 ```mezze
-let scale = { n } -> comptime { eval = {} -> n * 2 }   # rejected: `n` is run-time
+let scale = { n } -> Comptime.comptime { eval = {} -> n * 2 }   # rejected: `n` is run-time
 ```
 
 It is structural, not a scope analysis — `TypedLambda` already records what it
@@ -113,7 +141,7 @@ application consumes that read as a call's callee.
 
 **`V0803` is reserved and unused.** It first rejected a comptime whose result
 type was still open, which turned working programs into compile errors:
-`comptime { eval = {} -> Some { val = 7 } }` has a variant type that stays open
+`Comptime.comptime { eval = {} -> Some { val = 7 } }` has a variant type that stays open
 until a later `match` closes it. An unresolved shape means *cannot fold*, not
 *wrong* — the call stays and evaluates at run time. It was then re-taken for the
 `<*>` lower bound, and released again when that check moved into unification and
@@ -156,25 +184,30 @@ type check ───────────────────────
 lower to FunctionIR                     ── the shape is serializable, so it
    ▼                                       travels with the program
 ComptimeReduction.reduceOrThrow  ◄── evaluator SPI ──► :interpreter (Truffle)
-   │  a call carrying a shape IS a site → evaluate thunk
+   │  a PerformOpIR flagged isComptime IS a site → evaluate thunk
    │  → reify(value, PrintType) → splice
+   │  then: any site still present is a BUILD ERROR
    ▼
 emit
 ```
 
-**The shape rides on the call node, not in a side table.** That is what makes
-the feature work anywhere but in-process. A span-keyed map is compile-local: it
-works for a test that type-checks and runs in one JVM, and silently does nothing
-the moment the IR crosses a process boundary — which is every path a user
-actually builds with. `CallDirectIR.comptimeShape` is `@Serializable`, so it
-survives the wire, the jar and the image heap, and a site identifies itself
-without needing `comptime`'s hash.
+**Both flags ride on the node, not in a side table.** `PerformOpIR` carries
+`isComptime` and `comptimeShape`, and `FunctionIR` is `@Serializable`, so they
+survive the wire, the jar and the image heap. A span-keyed map was tried and is
+the wrong answer: it works for a test that type-checks and runs in one JVM, and
+silently does nothing the moment IR crosses a process boundary — which is every
+path a user actually builds with.
 
-The call is also emitted straight at the site rather than falling through the
-normal call-lowering path. Everything downstream is otherwise entitled to
-rewrite it — monomorphization redirects it to a specialized hash, and the
-caller-side inliner splices `eval {}` in and deletes the site outright — and a
-rewritten site is one the reduction pass can no longer see.
+**Recognition is `isComptime`, NOT "carries a shape".** A thunk whose body always
+raises — `compile_error` — has an unconstrained result type and therefore no
+shape, and it is exactly the case that MUST still be evaluated, since the failure
+is the output. Keying recognition on the shape made it invisible to the reduction
+pass and to the did-everything-fold check alike.
+
+**Nothing survives the pass.** `reduce` scans afterwards for remaining sites and
+reports each with `file:line:col`. Folding at build IS the feature, so a surviving
+site is a compiler failure — and it belongs at build, with a location, not as a
+program that crashes when someone runs it.
 
 **Evaluation belongs to code generation, not to type checking.** Type checking
 needs the block's TYPE, never its VALUE. So an editor never executes user code,
@@ -184,6 +217,13 @@ real const evaluation to rustc.
 
 The cost, accepted: **`check` is strictly weaker than `build`.** A comptime that
 crashes or never terminates passes the first and fails the second.
+
+**There is no termination budget, by decision.** An infinite comptime hangs the
+build exactly as any infinite loop does; that is the author's code doing what it
+says, and not ours to cut short. What would be wrong is the silence, since a
+stalled build looks identical to a slow one — so a block still running after 30s
+reports itself by `file:line:col`, and again every 30s, while it runs. Reporting
+only on completion would never fire for the case that matters most.
 
 **No fixpoint.** The value spliced in is a literal whose type the solver already
 assigned, so nothing new enters the program and nothing needs re-checking.
@@ -258,7 +298,7 @@ Handlers at compile time are the **ordinary** handlers. There is no
 compile-time handler set, because the evaluator *is* the interpreter.
 
 ```mezze
-comptime { eval = {} -> perform RealFileSystem in read_file { path = "app.config" } }
+Comptime.comptime { eval = {} -> perform LocalDisk in read_text_or { path = "app.config", def = "{}" } }
 ```
 
 Which handler you perform is part of the block's content hash, so determinism is
@@ -297,7 +337,7 @@ to record what the handlers actually touched and key on
 
 ---
 
-## 9. Eight things that were wrong, each found by running it
+## 9. Twelve things that were wrong, each found by running it
 
 Every one produced a **wrong answer**, not a failure. Worth keeping because each
 is a trap the next person can fall into.
@@ -305,10 +345,12 @@ is a trap the next person can fall into.
 1. **The call was inlined away.** `{ eval } -> eval {}` is a textbook trivial
    wrapper, so `TrivialWrapperInliner` deleted it. Nothing failed — every
    program still gave the right answer — comptime just silently stopped
-   happening. `inline()` now takes a `doNotInline` set.
+   happening. `inline()` grew a `doNotInline` set for it — since removed, because
+   a perform is not wrapper-shaped and the hazard no longer exists.
 2. **The callee's hash is not `comptime`'s.** Monomorphization redirects a
-   specialized call, so hash-matching finds nothing in lowered IR. The call is
-   now emitted stamped, at the site, before any rewrite can reach it.
+   specialized call, so hash-matching found nothing in lowered IR. Also moot in
+   the effect form: `PerformOpIR` carries the effect hash, and mono redirects
+   callees rather than performs.
 3. **Scalar ABI passes the thunk positionally.** One parameter means no record
    is built, so looking for an `eval` field found nothing.
 4. **The entry path ran the enclosing module.** Passing `(functions, entryHash)`
@@ -334,18 +376,47 @@ is a trap the next person can fall into.
    nested "comptime evaluation failed" messages. `Comptime.isEvaluating()` is
    the guard; skipping reduction in the throwaway nested run costs nothing.
 
-Plus two smaller: the evaluator must save/restore `MezzeLanguage`'s **static**
+9. **The handler quietly recomputed at run time.** `resume { val = eval {} }`
+   meant "did not fold at build" was indistinguishable from "did": the answer was
+   still right and every test passed. That one line hid the next three. Replaced
+   with a native that raises, except while another comptime is being evaluated —
+   reduction is suppressed there on purpose, so the fallback is legitimate in that
+   one place. Turning it loud exposed 10 broken sites at once.
+10. **The IR traversal had holes.** `mapChildren` was a `when` with `else -> node`,
+   so any NodeIR variant lacking an arm silently hid sites inside it. Two were
+   hiding real ones: `HandleIR` (a comptime under its own handler) and
+   `FusedChainIR` (a comptime feeding a seq chain, which `ChainCanonicalizer`
+   creates after lowering). The `else` is gone and all 54 variants are named, so a
+   new node type is a COMPILE ERROR here rather than another invisible site.
+11. **`Err` could not fold.** `Result` has two parameters, so `Err { error = … }`
+   leaves the `Ok` arm's type unknown — and the groundness check demanded EVERY
+   arm be ground, rejecting the shape over an arm that value never uses. Variants
+   are now checked per-arm, which is safe because an insufficient shape is a loud
+   build failure.
+12. **A thunk that always raises could never run.** `compile_error` leaves the
+   result type unconstrained, so there is no shape — and recognition was keyed on
+   having one, making exactly the case that most needs evaluating invisible. Hence
+   `isComptime` as a separate flag.
+
+Plus three smaller: the evaluator must save/restore `MezzeLanguage`'s **static**
 last-result store, since this evaluation is nested inside the compilation that
-reads it; and three unrelated classes in this repo are called `MezzeBytes`, of
-which the `bytes::*` natives build the one nested inside `BytesNatives` — not
-the `datastructures` one the name suggests.
+reads it; three unrelated classes in this repo are called `MezzeBytes`, of which
+the `bytes::*` natives build the one nested inside `BytesNatives` — not the
+`datastructures` one the name suggests; and a comptime in a TOP-LEVEL BARE
+EXPRESSION never solves its type, a shape real `mez` rejects anyway (V0710) but
+which `MezzeTestHelper.run` allows, so three tests were exercising a path no
+program can reach.
 
 ---
 
 ## 10. How the suite guards
 
-**MEASURED: 70 tests across 9 suites**, all green, plus the full `:interpreter`
-(6359) and `:typechecker` suites.
+**MEASURED: 71 tests across 9 suites**, all green, plus the full `:parser`,
+`:ast`, `:typechecker`, `:cli` and `:interpreter` suites.
+
+And they are now real evidence: with the run-time fallback gone, a test that
+passes is a block that actually folded. Before, a silently-unfolded site still
+produced the right answer, which is how four of the twelve bugs above survived.
 
 The one that matters most is `ComptimeActuallyFoldsTest`. Every other test
 asserts the program's *answer* — and a folded program and an unfolded one give
@@ -380,8 +451,8 @@ devenv shell -- just test-one interpreter
 | declaration | `stdlib/std/comptime.mz` |
 | ability | `stdlib/std/abilities/embed.mz` |
 | derivation rule | `typechecker/.../derive/DerivabilityRules.kt` |
-| rules | `typechecker/.../comptime/ComptimeRules.kt`, `TypedASTCompiler.checkComptimeCallSite` |
-| reserved name | `typechecker/.../validation/DuplicateDeclarationValidator.kt` |
+| rules | `typechecker/.../comptime/ComptimeRules.kt`, `TypedASTCompiler.checkComptimeSite` |
+| handler body | `NativeDispatch.__native_comptime_eval` — the one decision, in one place |
 | IR traversal | `ast/.../comptime/ComptimeIr.kt` |
 | reduction | `ast/.../comptime/ComptimeReduction.kt` |
 | SPI | `ast/.../comptime/ComptimeEvaluator.kt` |
@@ -389,62 +460,65 @@ devenv shell -- just test-one interpreter
 | reifier | `interpreter/.../comptime/ComptimeReifier.kt` |
 | hashes | `parser/.../WellKnownHashGenerator.kt` |
 
-`ComptimeIr` is deliberately the **one** traversal for finding comptime in IR —
-rule 1 and the reduction pass share it rather than drifting apart, which is a
-failure mode this codebase has several instances of, including one that
-corrupted a wire format.
+`ComptimeIr` is deliberately the **one** traversal for finding comptime in IR,
+and its `when` over `NodeIR` is **exhaustive on purpose** — no `else`. Two node
+types silently hid sites before that (§9.10), and a missing arm is now a compile
+error rather than a feature that quietly stops happening.
 
 ---
 
-## 12. Disclosure: `<*>` on the result
+## 12. Disclosure: `<Comptime>` in the row
 
-`comptime` returns `'a <*>`, and that is not decoration — calling `eval`
-propagates its `performed` marker, so it is the row the body actually has.
+A dependency can run code during your build, and until this existed you could not
+tell. Demonstrated, not theorised: a library-shaped comptime read a canary file
+and POSTed it to a listener during `mez build` — exit 0, no warning, and the
+consumer's type was a plain `Str`. That is `build.rs`, arrived at by the same
+route.
 
-It matters because `*` **cannot be annotated away**. The marker is a flag beside
-the effects set, so the name-based annotation checks compared both sides as the
-empty set and agreed; `{} -> Int` over a body that discharged an effect passed
-silently. It is now T0210. So:
+`Comptime.comptime` carries `<Comptime>`, so:
 
-- a library that runs a comptime block carries `<*>` into its own signature,
-  visibly, in the type a consumer reads
-- a library that *handles* it still shows `<*>` — discharging cannot launder it
-- a library that does neither is genuinely pure
+- a function that folds at compile time says so in its signature
+- so does everything that calls it, out to `main`
+- `main` must install `ComptimeEval` or the program does not type-check
 
-That is the same mechanism the language already uses at run time (effects
-propagate in the row, handlers are the capability grant), applied to compile-time
-work. No lockfile scanning, no denied-native list, no publish step, no
-capability tiering, and no positional "libraries may not use comptime" rule.
+The consent is therefore checked at **type-check time, which completes before
+reduction runs** — so nobody's build-time code executes without the person
+building having written the line that permits it. And the disclosure lands at the
+USE site, not only in `main`: reach for `lib::make_table {}` and its type says
+`<Comptime>`.
 
-`*` is a row MEMBER and composes: `<Log, *>` reads "Log escapes, and something
-else was handled in here".
+This is the mechanism the language already uses at run time — effects propagate in
+the row, the handler is the capability grant — applied to compile-time work. No
+lockfile scanning, no denied-native list, no publish step, no capability tiering,
+and no "libraries may not use comptime" rule. Libraries stay plain source.
 
-Two consequences worth knowing:
+### What it does not say
 
-- **A top-level `let x = comptime {…}` is exempt from V0502.** The rule rejects a
-  top-level binding whose RHS performs, because the module top level runs no
-  handler — but a comptime binding is replaced by a literal *before* module load,
-  so the premise is false. The exemption keys on the resolved callee hash, and
-  only the performed-only row qualifies.
-- **A top-level binding calling any other `<*>` function is now rejected**, and
-  correctly: it really does run handled effects at module load. That was
-  previously invisible.
+That compile-time code runs here, not *what it did*. Reading your disk and
+computing a lookup table both show `<Comptime>`. It converts silent to visible —
+the npm-install-scripts lesson — and is not a capability system.
 
-What `<*>` does NOT say is *what* was handled — reading a file and using a
-mutable accumulator both show `*`. It converts silent to visible, which is the
-npm-install-scripts lesson; it is not a capability system.
+### The related `*` marker
+
+Separate and worth not confusing with the above. `*` means "some effect was
+performed and handled in here"; it is a row MEMBER and composes, so `<Log, *>`
+reads "Log escapes, and something else was handled inside". It also cannot be
+annotated away (T0210) — that was a laundering hole, since the name-based
+annotation checks compare effect SETS and both sides read empty, so `{} -> Int`
+over a body that discharged an effect used to pass silently. An operator dropped
+it too, because `+` is an ability op and the merge there unioned names while
+forgetting the flag.
+
+`*` is NOT a comptime marker and should not be sold as one: it fires for a
+mutable accumulator just as readily.
 
 ---
 
 ## 13. Known holes
 
-- **A library's comptime produces a BROKEN ARTIFACT.** `mez build` succeeds with
-  no warning and every run of the jar dies with *"comptime thunk … is not among
-  the compiled functions"*. Three seams each look fine locally: `DepPrecompiler`
-  lowers and canonicalizes a dep but never reduces; `BuildCommand` reduces over
-  `loweredFunctions`, which is user code only; the runtime then tries to fold a
-  site whose thunk `FunctionIR` was never handed to it. Reproduced with a
-  `path-dependencies` library — see the worklist task.
+- **No cross-build cache.** A thunk's hash covers its code, not the world it
+  read, so results cannot be reused between builds. Pure thunks could be
+  persisted today — the same pure/effectful line as everywhere else.
 - **No cross-build cache** (§8). Needs observed-dependency tracking.
 - **Evaluation is single-threaded**, pending task #1 — it installs handlers on
   the running thread, and three of four assumption-guarded handler caches still
@@ -457,7 +531,7 @@ npm-install-scripts lesson; it is not a capability system.
 - **Debugger/coverage**: a breakpoint inside a comptime thunk can never hit and
   should report as unbound; comptime bodies show 0% coverage forever. Neither is
   wired up.
-- **The `<*>` rejection message is the generic argument mismatch.** It does show
+- **The `<*>`-slot rejection message is the generic argument mismatch.** It shows
   `<*>` on the expected side and its absence on the actual, so it is legible —
   *expected `{ eval: {} -> 'a <*> } -> 'a` but got `{ eval: {} -> 'b } -> 'c`* —
   but it does not say "discharge `NoOp`". A targeted branch in

@@ -26,13 +26,13 @@ import com.mezze.language.typedast.Hash
 object ComptimeRules {
 
     /** True when [hash] is stdlib `comptime`. */
-    fun isComptime(hash: Hash?): Boolean = WellKnownHashConstants.isComptime(hash)
+    fun isComptime(effectHash: Hash?, operationName: String): Boolean =
+        WellKnownHashConstants.isComptime(effectHash, operationName)
 
-    /** The shared IR traversal, bound to the comptime hash. The reduction pass
-     *  builds its own with the same hash threaded in — `:interpreter` cannot see
-     *  the generated constant, so the hash travels rather than the lookup. */
+    /** The shared IR traversal. Needs no hash threaded in: a comptime site is a
+     *  `PerformOpIR` carrying a result shape, which identifies itself. */
     val ir: com.mezze.language.comptime.ComptimeIr by lazy {
-        com.mezze.language.comptime.ComptimeIr(WellKnownHashConstants.FUNCTION_COMPTIME)
+        com.mezze.language.comptime.ComptimeIr()
     }
 
     /**

@@ -531,10 +531,10 @@ class TypedASTCompiler(
         // pass picks up user-side calls into stdlib wrappers. Disable
         // with MEZZE_INLINE_WRAPPERS=0. See TrivialWrapperInliner.
         val inlinedMap = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") erasedMap
-            else com.mezze.language.truffleir.TrivialWrapperInliner.inline(
-                erasedMap,
-                doNotInline = setOf(com.mezze.language.typechecker.WellKnownHashConstants.FUNCTION_COMPTIME),
-            )
+            // No `doNotInline` any more: that existed to stop the inliner deleting
+            // `comptime`'s `{ eval } -> eval {}` body, which is a textbook trivial
+            // wrapper. As an effect operation there is no wrapper to delete.
+            else com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
         // go through; stdlib was already canonicalized at precompile time
@@ -1004,7 +1004,20 @@ class TypedASTCompiler(
                     staticallyFullyDischarges = expr.fullyDischarges
                 )
             }
-            is TypedPerformOp -> PerformOpIR(expr.effectHash, expr.operationName, compileExpr(expr.arg), src)
+            is TypedPerformOp -> {
+                // `Comptime.comptime` is the one op whose result shape has to
+                // travel with the node: `effectHash` already identifies the site,
+                // but the shape is computed from the SOLVED, pre-erasure type and
+                // cannot be recovered downstream.
+                val isCt = com.mezze.language.typechecker.WellKnownHashConstants
+                    .isComptime(expr.effectHash, expr.operationName)
+                val shape = if (isCt) checkComptimeSite(expr.arg, expr.type, expr.loc) else null
+                PerformOpIR(
+                    expr.effectHash, expr.operationName, compileExpr(expr.arg), src,
+                    isComptime = isCt,
+                    comptimeShape = shape,
+                )
+            }
 
             // Pipe (should be desugared, but handle gracefully)
             is TypedPipe -> {
@@ -1042,21 +1055,23 @@ class TypedASTCompiler(
      * it closes over, so "closed" is `captures.isEmpty()` rather than a scope
      * analysis, and the result type is the one the solver assigned to this call.
      */
-    private fun checkComptimeCallSite(expr: TypedCall): com.mezze.language.truffleir.PrintType? {
-        val evalThunk = (expr.arg as? TypedRecord)
+    private fun checkComptimeSite(
+        arg: TypedExpr,
+        exprType: MezzeType,
+        loc: Loc,
+    ): com.mezze.language.truffleir.PrintType? {
+        val evalThunk = (arg as? TypedRecord)
             ?.entries
             ?.filterIsInstance<TypedRecordEntry.Field>()
             ?.firstOrNull { it.name == "eval" }
             ?.value
 
-        // `comptime {}` is not a call the reduction pass can do anything with: row
-        // polymorphism reads the missing field as a PARTIAL APPLICATION and hands
-        // back a function still awaiting `eval`. There is no site to replace, and
-        // left alone it reaches the runtime and dies inside a dispatch node instead
-        // of being explained. Rule 1 covers it — the thing being produced here is a
-        // `comptime` value.
+        // Without `eval` there is no site to replace: row polymorphism reads the
+        // missing field as a PARTIAL APPLICATION and hands back something still
+        // awaiting it. Left alone it reaches the runtime and dies inside a dispatch
+        // node instead of being explained.
         if (evalThunk == null) {
-            ComptimeRules.rejectNonCallReference(expr.loc)
+            ComptimeRules.rejectNonCallReference(loc)
         }
 
         if (evalThunk is TypedLambda) {
@@ -1066,12 +1081,27 @@ class TypedASTCompiler(
         // substitution can leave a call's own type open where the enclosing
         // context is what pins it — the same gap #160 documents for
         // inherent-method receivers — so the thunk's body type is consulted too.
-        val resultType = listOfNotNull(
-            substitution.apply(expr.type),
+        // Several places may know the result type, and they are not equally well
+        // solved: the flat substitution can leave the call's own type open where
+        // the enclosing context is what pins it (the gap #160 documents for
+        // inherent-method receivers), while the thunk's body type is already
+        // concrete. Taking the first non-VarType therefore picked a type that
+        // LOOKED usable and built a shape with a `Dynamic` hole in it — and a
+        // partial shape is no shape, so the site went unstamped and never folded.
+        //
+        // Choose by the answer instead: the first candidate whose shape is ground
+        // all the way down.
+        val candidates = listOfNotNull(
+            substitution.apply(exprType),
             (evalThunk as? TypedLambda)?.body?.type?.let { substitution.apply(it) },
             (evalThunk?.type as? FunctionType)?.returnType?.let { substitution.apply(it) },
-            expr.instantiation?.typeArgs?.firstOrNull()?.let { substitution.apply(it) },
-        ).firstOrNull { it !is VarType }
+        ).filter { it !is VarType }
+
+        for (candidate in candidates) {
+            val built = PrintTypeBuilder(printTypeDefs).build(candidate)
+            if (isGround(built)) return built
+        }
+        val resultType: MezzeType? = null
 
         // No shape means this call CANNOT be folded — reification builds a value
         // against its static shape and there is none. That is a limitation, not a
@@ -1105,8 +1135,17 @@ class TypedASTCompiler(
             is com.mezze.language.truffleir.PrintType.Newtype -> isGround(shape.inner)
             is com.mezze.language.truffleir.PrintType.Record ->
                 shape.fields.all { isGround(it.type) }
-            is com.mezze.language.truffleir.PrintType.Variant ->
-                shape.arms.all { arm -> arm.payload?.let { isGround(it) } ?: true }
+            // A variant is usable even when some ARM is not ground: the value picks
+            // exactly one arm, and the others are irrelevant to writing it down.
+            // `Err { error = "nope" }` has type `Result 'ok Str` — `'ok` is never
+            // determined and never needs to be, yet demanding every arm be ground
+            // rejected the whole shape and the block silently never folded.
+            //
+            // Safe to relax because a shape that turns out to be insufficient for
+            // the actual value is now a BUILD failure from the reifier, not a
+            // silent fallback — so the conservative check has nothing left to
+            // protect against.
+            is com.mezze.language.truffleir.PrintType.Variant -> true
             is com.mezze.language.truffleir.PrintType.MzList -> isGround(shape.inner)
             is com.mezze.language.truffleir.PrintType.MzSeq -> isGround(shape.inner)
             is com.mezze.language.truffleir.PrintType.MzSet -> isGround(shape.inner)
@@ -1784,28 +1823,6 @@ class TypedASTCompiler(
                 }
                 is BindingRef.ByHash -> {
                     val calleeHash = binding.hash
-
-                    // A legitimate comptime call site. Check the two things the
-                    // signature cannot say — the thunk is closed, and the result type
-                    // is ground — then fall through and lower the call normally. The
-                    // reduction pass replaces it later, in the build path only; a
-                    // `mez check` stops here, which is why neither of these may be
-                    // deferred to evaluation time.
-                    if (ComptimeRules.isComptime(calleeHash)) {
-                        val shape = checkComptimeCallSite(expr)
-                        // Emitted here and returned, rather than falling through:
-                        // every path below rewrites the callee (mono redirects to a
-                        // specialized hash, inlining splices the body in and the site
-                        // stops existing at all), and a rewritten site is one the
-                        // reduction pass can no longer see. Neither rewrite buys
-                        // anything on a call that is about to be replaced by a
-                        // constant, and `Embeddable` is method-less so there is no
-                        // dictionary to inject.
-                        return CallDirectIR(
-                            calleeHash, listOf(argIR), isTailCall = false, src,
-                            comptimeShape = shape,
-                        )
-                    }
 
                     // Mono Phase 1 hybrid: if the monomorphizer specialized
                     // this call site, redirect to the specialized hash. The

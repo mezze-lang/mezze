@@ -36,7 +36,7 @@ import java.nio.file.Paths
 class ComptimeDeploymentPathTest {
 
     private val prelude = """
-        use std::comptime::{ comptime }
+        use std::comptime::{ Comptime, ComptimeEval }
         use std::effects::noop::{ noop }
 
         let factorial = { n } -> if n <= 1 then 1 else n * factorial { n = n - 1 }
@@ -52,18 +52,18 @@ class ComptimeDeploymentPathTest {
      * counter to detect.
      */
     private val inLambda = "$prelude\n" + """
-        let main = {} -> comptime { eval = {} -> do
+        let main = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
             noop {}
             factorial { n = 5 }
-        }
+        })
     """.trimIndent()
 
     /** At the top level, where the binding itself is the comptime block. */
     private val topLevel = "$prelude\n" + """
-        let answer = comptime { eval = {} -> do
+        let answer = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
             noop {}
             factorial { n = 5 }
-        }
+        })
 
         let main = {} -> answer
     """.trimIndent()
@@ -127,7 +127,7 @@ class ComptimeDeploymentPathTest {
             val checked = TypeChecker().typeCheck(parsed, Paths.get("."), true, null)
 
             val ir = com.mezze.language.comptime.ComptimeIr()
-            // At least one: a top-level `let x = comptime {…}` puts the same call
+            // At least one: a top-level `let x = {} -> (perform ComptimeEval in Comptime.comptime {…})` puts the same call
             // in both its own thunk and the module entry. The reduction memo keys
             // on the thunk hash, so duplicates are evaluated once regardless.
             val stamped = checked.loweredFunctions.count { ir.hasSite(it.body) }

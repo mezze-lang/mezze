@@ -27,16 +27,57 @@ class ComptimeActuallyFoldsTest {
         val before = evaluations()
         val r = MezzeTestHelper.run(
             """
-            use std::comptime::{ comptime }
+            use std::comptime::{ Comptime, ComptimeEval }
             use std::effects::noop::{ noop }
-            comptime { eval = {} -> do
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 6 * 7
-            }
+            })
             """.trimIndent()
         )
         assertEquals(42L, r)
         assertTrue(evaluations() > before, "the thunk was never evaluated at compile time")
+    }
+
+    /**
+     * A comptime inside a comptime thunk. Both fold, independently.
+     *
+     * Not "the outer folds and carries the inner with it", which is the natural
+     * guess and is wrong: a thunk is lowered to its OWN `FunctionIR`, and the
+     * reduction pass iterates functions. So the inner block is a top-level
+     * stamped site in the thunk's function and is reduced on its own terms —
+     * nesting in the source does not nest the reduction. Hence two evaluations,
+     * not one, and the count is asserted exactly so that a change here is
+     * noticed rather than absorbed.
+     *
+     * `Comptime.isEvaluating()` is a different mechanism and still required: it
+     * stops the nested RUNTIME re-entry — evaluating a thunk re-enters the
+     * runtime with a program that still contains the call being evaluated — from
+     * reducing again, which otherwise recurses without end.
+     */
+    @Test
+    @Timeout(120)
+    fun `a nested comptime folds at both sites, independently`() {
+        val before = evaluations()
+        val r = MezzeTestHelper.run(
+            """
+            use std::comptime::{ Comptime, ComptimeEval }
+            use std::effects::noop::{ noop }
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> do
+                noop {}
+                3 * (perform ComptimeEval in Comptime.comptime { eval = {} -> do
+                    noop {}
+                    5 + 9
+                })
+            })
+            """.trimIndent()
+        )
+        assertEquals(42L, r, "the nested block must still compute the right answer")
+        assertEquals(
+            2L, evaluations() - before,
+            "expected both sites to be evaluated: each thunk is its own FunctionIR and " +
+                "the pass iterates functions, so the inner block is a site in its own right",
+        )
     }
 
     @Test
@@ -61,17 +102,17 @@ class ComptimeActuallyFoldsTest {
         val before = evaluations()
         val r = MezzeTestHelper.run(
             """
-            use std::comptime::{ comptime }
+            use std::comptime::{ Comptime, ComptimeEval }
             use std::effects::noop::{ noop }
-            let a = comptime { eval = {} -> do
+            let a = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 6 * 7
-            }
-            let b = comptime { eval = {} -> do
+            })
+            let b = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 6 * 7
-            }
-            a + b
+            })
+            a {} + b {}
             """.trimIndent()
         )
         assertEquals(84L, r)
@@ -91,12 +132,12 @@ class ComptimeActuallyFoldsTest {
         val before = evaluations()
         MezzeTestHelper.typeCheck(
             """
-            use std::comptime::{ comptime }
+            use std::comptime::{ Comptime, ComptimeEval }
             use std::effects::noop::{ noop }
-            let answer = comptime { eval = {} -> do
+            let answer = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 6 * 7
-            }
+            })
             """.trimIndent()
         )
         assertEquals(before, evaluations(), "mez check / the LSP executed user code")

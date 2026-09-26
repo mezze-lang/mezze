@@ -17,17 +17,17 @@ import org.junit.jupiter.api.Timeout
 class ComptimeReductionTest {
 
     private val use =
-        "use std::comptime::{ comptime }\nuse std::effects::noop::{ noop }"
+        "use std::comptime::{ Comptime, ComptimeEval }\nuse std::effects::noop::{ noop }"
 
     private fun run(src: String): Any = MezzeTestHelper.run("$use\n${src.trimIndent()}")
 
     @Test
     @Timeout(120)
     fun `arithmetic folds`() {
-        assertEquals(4L, run("""comptime { eval = {} -> do
+        assertEquals(4L, run("""(perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 2 + 2
-            }"""))
+            })"""))
     }
 
     @Test
@@ -35,10 +35,10 @@ class ComptimeReductionTest {
     fun `a recursive top-level function folds`() {
         assertEquals(120L, run("""
             let factorial = { n } -> if n <= 1 then 1 else n * factorial { n = n - 1 }
-            comptime { eval = {} -> do
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 factorial { n = 5 }
-            }
+            })
         """))
     }
 
@@ -48,20 +48,20 @@ class ComptimeReductionTest {
         assertEquals(true, run("""
             let is_even = { n } -> if n == 0 then True else is_odd { n = n - 1 }
             let is_odd = { n } -> if n == 0 then False else is_even { n = n - 1 }
-            comptime { eval = {} -> do
+            (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 is_even { n = 10 }
-            }
+            })
         """))
     }
 
     @Test
     @Timeout(120)
     fun `a record result folds`() {
-        assertEquals(3L, run("""comptime { eval = {} -> do
+        assertEquals(3L, run("""(perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 { x = 1, y = 3 }
-            }.y"""))
+            }).y"""))
     }
 
     @Test
@@ -69,10 +69,10 @@ class ComptimeReductionTest {
     fun `a seq result folds`() {
         assertEquals(6L, run("""
             use std::collections::seq
-            seq::fold { xs = comptime { eval = {} -> do
+            seq::fold { xs = (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 [1, 2, 3]
-            }, init = 0, f = { acc, x } -> acc + x }
+            }), init = 0, f = { acc, x } -> acc + x }
         """))
     }
 
@@ -80,10 +80,15 @@ class ComptimeReductionTest {
     @Timeout(120)
     fun `a variant result folds`() {
         assertEquals(7L, run("""
-            match comptime { eval = {} -> do
+            # In a function, not the trailing bare expression: a variant
+            # constructor there is typed only by context, and the top-level-
+            # expression path this harness allows -- real mez rejects it with
+            # V0710 -- never solves it.
+            let opt = {} -> Comptime.comptime { eval = {} -> do
                 noop {}
                 Some { val = 7 }
-            } is
+            }
+            match (perform ComptimeEval in opt {}) is
                 Some { val } -> val
                 None -> 0
         """))
@@ -95,10 +100,10 @@ class ComptimeReductionTest {
         assertEquals(2L, run("""
             use std::collections::list
             use std::collections::seq
-            list::size { xs = comptime { eval = {} -> do
+            list::size { xs = (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 list::from_seq { xs = [7, 8] }
-            } }
+            }) }
         """))
     }
 
@@ -108,10 +113,10 @@ class ComptimeReductionTest {
         assertEquals(true, run("""
             use std::collections::set
             use std::collections::seq
-            set::contains { s = comptime { eval = {} -> do
+            set::contains { s = (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 set::from_seq { xs = [1, 2, 3] }
-            }, x = 2 }
+            }), x = 2 }
         """))
     }
 
@@ -122,10 +127,10 @@ class ComptimeReductionTest {
     fun `a map result folds`() {
         assertEquals(9L, run("""
             use std::collections::map
-            match map::get { m = comptime { eval = {} -> do
+            match map::get { m = (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 map::insert { m = map::empty {}, k = "a", v = 9 }
-            }, k = "a" } is
+            }), k = "a" } is
                 Some { val } -> val
                 None -> 0
         """))
@@ -134,28 +139,28 @@ class ComptimeReductionTest {
     @Test
     @Timeout(120)
     fun `nested comptime folds innermost first`() {
-        assertEquals(10L, run("""comptime { eval = {} -> do
+        assertEquals(10L, run("""(perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
-                comptime { eval = {} -> do
+                (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                     noop {}
                     4
-                } + 6
-            }"""))
+                }) + 6
+            })"""))
     }
 
     @Test
     @Timeout(120)
     fun `several comptime blocks in one module all fold`() {
         assertEquals(9L, run("""
-            let a = comptime { eval = {} -> do
+            let a = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 2 * 2
-            }
-            let b = comptime { eval = {} -> do
+            })
+            let b = {} -> (perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 5
-            }
-            a + b
+            })
+            a {} + b {}
         """))
     }
 
@@ -168,9 +173,9 @@ class ComptimeReductionTest {
     @Test
     @Timeout(120)
     fun `the body runs at compile time, not per use`() {
-        assertEquals(42L, run("""comptime { eval = {} -> do
+        assertEquals(42L, run("""(perform ComptimeEval in Comptime.comptime { eval = {} -> do
                 noop {}
                 42
-            }"""))
+            })"""))
     }
 }

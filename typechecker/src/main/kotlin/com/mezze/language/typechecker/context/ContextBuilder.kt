@@ -538,10 +538,23 @@ class ContextBuilder {
                 val convertedReturn = TypeAnnotationConverter.stampCaughtOnAllEffectRowsPublic(
                     rawConvertedReturn, caughtEffects
                 )
+                // An op's `with` clause becomes a constraint on its type, exactly
+                // as for an ability method (see addAbilityMethods) and an ordinary
+                // function. Omitting it made the clause parse-and-vanish: the call
+                // site emits `AbilityRequired` from the callee type's constraints,
+                // so an empty list there means the obligation is never checked.
+                val opAbilityConstraints = op.abilityConstraints.map { constraint ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotationInternal(it) },
+                        abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
+                    )
+                }
                 op.name to MezzeType.FunctionType(
                     paramType = convertedParam,
                     returnType = convertedReturn,
-                    effects = null
+                    effects = null,
+                    abilityConstraints = opAbilityConstraints
                 )
             }
         )
