@@ -835,7 +835,7 @@ class ModuleResolver(
 
                     val fromContext = typeContext?.get(name)
                     val fromAnnotation = decl.typeAnnotation
-                        ?.let { TypeAnnotationConverter.convert(it, faithful = false) }
+                        ?.let { TypeAnnotationConverter.convert(it) }
                     // #213: the solver-inferred `fromContext` type does NOT carry the
                     // written `with Ord 'a` ability constraints, so exporting it drops
                     // them — importers then see a constraint-free scheme and accept

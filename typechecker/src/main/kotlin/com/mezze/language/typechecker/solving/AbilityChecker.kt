@@ -375,56 +375,25 @@ class AbilityChecker internal constructor(
         annotation: ParsedTypeAnnotation,
         implTypeVarBindings: Map<String, MezzeType>,
     ): MezzeType {
-        // Look up a bound type var by name, tolerating the leading-`'` ambiguity
-        // (assoc names are stored with `'` in decls but constraint keys are bare).
-        fun boundFor(name: String): MezzeType? =
-            implTypeVarBindings[name]
-                ?: implTypeVarBindings["'$name"]
-                ?: if (name.startsWith("'")) implTypeVarBindings[name.removePrefix("'")] else null
-
-        return when (annotation) {
-            is ParsedNamedType ->
-                boundFor(annotation.name) ?: (PrimitiveTypes.fromName(annotation.name)
-                    // #312: an UNBOUND type-var name (`'a`) is a free type variable —
-                    // model it as VarType, NOT a bogus TypeApplication(constructor="'a")
-                    // whose name lives only in `constructor`. (Closes producer #1: the
-                    // #269 doc above describes exactly this leak.)
-                    ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-                       else WellKnownTypeApp.of(annotation.name, emptyList()))
-            is ParsedTypeApp -> {
-                // A constructor position can itself be a bound type var (higher-kinded
-                // binding); otherwise recurse into the args so nested `'a` is substituted.
-                val bound = boundFor(annotation.constructor)
-                if (bound != null && annotation.args.isEmpty()) bound
-                // #312: an unbound nullary type-var constructor is a free type variable.
-                else if (annotation.args.isEmpty() && annotation.constructor.isTypeVarName())
-                    MezzeType.VarType(TypeVar.freshWithName(annotation.constructor))
-                else WellKnownTypeApp.of(
-                    annotation.constructor,
-                    annotation.args.map { substituteAnnotationWithImplBindings(it, implTypeVarBindings) },
-                )
-            }
-            is ParsedSeqType ->
-                com.mezze.language.ast.BuiltinTypes.seqApp(substituteAnnotationWithImplBindings(annotation.elementType, implTypeVarBindings))
-            is ParsedRecordType ->
-                MezzeType.RecordType(fields = annotation.entries.associate {
-                    it.name to substituteAnnotationWithImplBindings(it.type, implTypeVarBindings)
-                })
-            is ParsedFunctionType ->
-                MezzeType.FunctionType(
-                    paramType = substituteAnnotationWithImplBindings(annotation.paramType, implTypeVarBindings),
-                    returnType = substituteAnnotationWithImplBindings(annotation.returnType, implTypeVarBindings),
-                )
-            is ParsedVariantType ->
-                MezzeType.VariantType(constructors = annotation.constructors.associate {
-                    it.name to it.dataType?.let { dt -> substituteAnnotationWithImplBindings(dt, implTypeVarBindings) }
-                })
-            is ParsedQualifiedType ->
-                WellKnownTypeApp.of(
-                    (annotation.modulePath + annotation.typeName).joinToString("::"),
-                    annotation.args.map { substituteAnnotationWithImplBindings(it, implTypeVarBindings) },
-                )
-        }
+        // This WAS a fifth copy of the annotation walk, whose only distinctive
+        // behaviour — look a name up in `implTypeVarBindings` before treating it as
+        // a free variable — is precisely `typeParamSubst`, which the shared
+        // converter already consults by bare AND ticked name (the `'`-ambiguity
+        // this function used to handle itself: assoc names are stored with `'` in
+        // decls, constraint keys without).
+        //
+        // Registering both spellings of every key preserves the old `boundFor`
+        // tolerance exactly, and going through the shared walker means this path
+        // now also keeps record/variant openness, effect rows and ability
+        // constraints, all three of which the copy dropped.
+        val bindings = implTypeVarBindings.flatMap { (k, v) ->
+            listOf(k to v, k.removePrefix("'") to v, "'" + k.removePrefix("'") to v)
+        }.toMap()
+        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+            annotation,
+            config = com.mezze.language.typechecker.util.TypeAnnotationConverter
+                .registryConfig(registry, typeParamSubst = bindings),
+        )
     }
 
     // B1 containment (case B): can ANY impl of [abilityName] produce a `having 'out`
@@ -554,24 +523,22 @@ class AbilityChecker internal constructor(
      * this stays, because a converter that is lossy in a KNOWN way beats one that
      * is faithful in an unvalidated one.
      */
-    private fun typeAnnotationToMezzeType(annotation: ParsedTypeAnnotation): MezzeType {
-        return when (annotation) {
-            // #312, same rule as [convertAnnotationToType] below: an unbound
-            // type-var name IS a free type variable, not a nominal type that
-            // happens to be spelled `'a`. Writing it as a TypeApplication gives it
-            // a rigid identity that then refuses to unify with the caller's
-            // concrete type.
-            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
-                ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-                   else WellKnownTypeApp.of(annotation.name, emptyList())
-            is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
-            is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(typeAnnotationToMezzeType(annotation.elementType))
-            is ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
-            is ParsedFunctionType -> MezzeType.FunctionType(paramType = typeAnnotationToMezzeType(annotation.paramType), returnType = typeAnnotationToMezzeType(annotation.returnType))
-            is ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
-            is ParsedQualifiedType -> WellKnownTypeApp.of((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
-        }
-    }
+    /**
+     * Delegates to the one converter, with FRESH type variables.
+     *
+     * Fresh is deliberate and load-bearing (#312): this converts an ability
+     * signature for use against a particular call site, so a written `'a` must
+     * become a variable that unifies with whatever the caller has. A shared or
+     * rigid variable would clash with the caller's concrete type.
+     */
+    private fun typeAnnotationToMezzeType(annotation: ParsedTypeAnnotation): MezzeType =
+        com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+            annotation,
+            config = com.mezze.language.typechecker.util.TypeAnnotationConverter.registryConfig(registry),
+            // A FRESH cache per call: this instantiates a signature for ONE use,
+            // so its variables must unify with the caller's types rather than
+            // persisting across unrelated conversions.
+        )
 
     /**
      * Ability-impl lookup, hash-aware. Returns the UNION of the ability's
@@ -1481,32 +1448,25 @@ class AbilityChecker internal constructor(
         }
     }
 
-    private fun convertAnnotationToType(annotation: ParsedTypeAnnotation): MezzeType? {
-        return when (annotation) {
-            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name)
-                // #312: an UNBOUND type-var name (`'a`) is a free type variable —
-                // model it as VarType, NOT a bogus TypeApplication(constructor="'a")
-                // whose name lives only in `constructor`. This is the sibling
-                // producer to substituteAnnotationWithImplBindings (same #312 leak):
-                // a generic impl's target slot (`impl FromJson 'a for Str`) is a
-                // bare type-var, so binding a call-site var to it must yield a fresh
-                // free var, not a rigid TypeApplication that then clashes with the
-                // caller's concrete target type.
-                ?: if (annotation.name.isTypeVarName()) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-                   else WellKnownTypeApp.of(annotation.name, emptyList())
-            is ParsedTypeApp ->
-                // A nullary type-var constructor (`'a` with no args) is likewise a
-                // free type variable, never a TypeApplication.
-                if (annotation.args.isEmpty() && annotation.constructor.isTypeVarName())
-                    MezzeType.VarType(TypeVar.freshWithName(annotation.constructor))
-                else { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else WellKnownTypeApp.of(annotation.constructor, args) }
-            is ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { com.mezze.language.ast.BuiltinTypes.seqApp(it) }
-            is ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
-            is ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })
-            is ParsedFunctionType -> { val p = convertAnnotationToType(annotation.paramType) ?: return null; val r = convertAnnotationToType(annotation.returnType) ?: return null; MezzeType.FunctionType(p, r) }
-            is ParsedQualifiedType -> null
-        }
-    }
+    /**
+     * The nullable form, for callers that treat an unconvertible annotation as
+     * "no answer" rather than an error.
+     *
+     * Previously this returned null for a qualified type (`a::b::T`) and for any
+     * annotation containing one. The shared converter handles qualified types, so
+     * those now convert rather than silently yielding null — a case that used to
+     * abandon ability resolution. Kept nullable because the callers still branch
+     * on it, and because a future unconvertible shape should not become an
+     * exception at these sites.
+     */
+    private fun convertAnnotationToType(annotation: ParsedTypeAnnotation): MezzeType? =
+        com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+            annotation,
+            config = com.mezze.language.typechecker.util.TypeAnnotationConverter.registryConfig(registry),
+            // A FRESH cache per call: this instantiates a signature for ONE use,
+            // so its variables must unify with the caller's types rather than
+            // persisting across unrelated conversions.
+        )
 
     private fun typeMatchesMezzeType(expected: MezzeType, actual: MezzeType): Boolean {
         if (expected == actual) return true

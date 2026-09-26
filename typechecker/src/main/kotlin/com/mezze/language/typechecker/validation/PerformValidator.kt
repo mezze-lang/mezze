@@ -428,24 +428,49 @@ class PerformValidator(
         }
     }
 
+    /**
+     * Convert an annotation, expanding a NAME that refers to a local type
+     * declaration into that declaration's structure.
+     *
+     * Distinct from plain conversion, which labels `Color` as an applied type and
+     * leaves it labelled: comparing a thrown type against a handler's declared one
+     * needs the shape. The shared converter's `resolveTypeAlias` only inlines
+     * transparent `type X = …` aliases by design, so the record/variant/newtype
+     * expansion here stays — but everything BELOW the expansion goes through the
+     * one converter.
+     *
+     * Each declaration is converted in ONE variable scope. Per-field conversion
+     * gave every occurrence of a name its own variable, so
+     * `type Pair 'a = { l: 'a, r: 'a }` expanded to `{ l: 'b, r: 'c }` and stopped
+     * requiring the two halves to agree — the same defect [TypeAnnotationConverter.convertSignature]
+     * exists to prevent, which is why it is used here rather than re-derived.
+     */
     private fun expandParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                val typeDecl = typeDeclarations[annotation.name]
-                if (typeDecl != null) when (val def = typeDecl.definition) {
-                    is ParsedVariantDef -> MezzeType.VariantType(
-                        constructors = def.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt) } },
-                        rowVar = if (def.isOpen) RowVar.fresh() else null)
-                    is ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to TypeAnnotationConverter.convert(it.type) })
-                    is ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
-                    is ParsedTypeAliasDef -> TypeAnnotationConverter.convert(def.aliasedType)
-                } else MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-            }
-            is ParsedTypeApp -> {
-                TypeAnnotationConverter.convert(annotation)
-            }
-            else -> TypeAnnotationConverter.convert(annotation)
+        if (annotation !is ParsedNamedType) return TypeAnnotationConverter.convert(annotation)
+
+        PrimitiveTypes.fromName(annotation.name)?.let { return it }
+        val def = typeDeclarations[annotation.name]?.definition
+            ?: return MezzeType.VarType(TypeVar.freshWithName(annotation.name))
+
+        return when (def) {
+            is ParsedVariantDef -> MezzeType.VariantType(
+                constructors = TypeAnnotationConverter.convertSignature(
+                    def.constructors.mapNotNull { ctor -> ctor.dataType?.let { ctor.name to it } },
+                    TypeAnnotationConverter.ConversionConfig(honorOpenRowVars = true),
+                ).toMap().let { converted ->
+                    // Payload-less constructors carry null, and must still appear.
+                    def.constructors.associate { it.name to converted[it.name] }
+                },
+                rowVar = if (def.isOpen) RowVar.fresh() else null,
+            )
+            is ParsedRecordDef -> MezzeType.RecordType(
+                fields = TypeAnnotationConverter.convertSignature(
+                    def.fields.map { it.name to it.type },
+                    TypeAnnotationConverter.ConversionConfig(honorOpenRowVars = true),
+                ).toMap(),
+            )
+            is ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
+            is ParsedTypeAliasDef -> TypeAnnotationConverter.convert(def.aliasedType)
         }
     }
 

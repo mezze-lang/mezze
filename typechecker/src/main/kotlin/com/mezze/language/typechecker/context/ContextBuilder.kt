@@ -998,7 +998,6 @@ class ContextBuilder {
                 currentEffectDecls[name]?.contentHash?.let { name to it }
             }.toMap()
         },
-        resolveCollectionTypes = true,
         honorOpenRowVars = true,
         stripTickFromTypeVars = true,
         resolveTypeAlias = { name ->

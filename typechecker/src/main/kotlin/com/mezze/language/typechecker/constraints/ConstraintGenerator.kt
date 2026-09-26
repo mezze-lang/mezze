@@ -71,7 +71,6 @@ class ConstraintGenerator(
                 registry.effectDeclarations[name]?.contentHash?.let { name to it }
             }.toMap()
         },
-        resolveCollectionTypes = false,
         honorOpenRowVars = true,
         inlineVariantNaming = true,
         convertEffectAnnotations = true,

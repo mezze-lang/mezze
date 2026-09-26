@@ -888,8 +888,7 @@ internal class VariantSolver(
             validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
             honorOpenRowVars = true,
             typeParamSubst = typeParamSubst,
-            resolveCollectionTypes = false,
-        )
+            )
         return TypeAnnotationConverter.convertWith(annotation, config)
     }
 

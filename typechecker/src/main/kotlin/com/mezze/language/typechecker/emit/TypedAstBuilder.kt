@@ -1901,83 +1901,18 @@ class TypedAstBuilder(
         }
     }
 
-    internal fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-
-                if (annotation.name.isTypeVarName()) {
-                    val typeVar = typeVarCache.getOrPut(annotation.name) {
-                        TypeVar.freshWithName(annotation.name)
-                    }
-                    MezzeType.VarType(typeVar)
-                } else {
-                    // Stamp the declared type's content hash (registry has the decl,
-                    // hash is always computable) so the emitted TypeApplication carries
-                    // real nominal identity (Declared), never Named. Mirrors the
-                    // ability-hash resolution below.
-                    WellKnownTypeApp.of(
-                        annotation.name, emptyList(),
-                        typeHash = registry.lookupType(annotation.name)?.let { d ->
-                            d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d)
-                        }
-                    )
-                }
-            }
-            is ParsedFunctionType -> {
-                val abilityConstraints = annotation.abilityConstraints.map { constraint ->
-                    MezzeType.FunctionAbilityConstraint(
-                        abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotation(it) },
-                        associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, ta) ->
-                            convertParsedTypeAnnotation(ta)
-                        },
-                        abilityHash = registry.lookupAbility(constraint.abilityName)?.contentHash
-                            ?: registry.resolveAbilityHash(constraint.abilityName)
-                    )
-                }
-                MezzeType.FunctionType(
-                    paramType = convertParsedTypeAnnotation(annotation.paramType),
-                    returnType = convertParsedTypeAnnotation(annotation.returnType),
-                    abilityConstraints = abilityConstraints
-                )
-            }
-            is ParsedRecordType -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { entry ->
-                        entry.name to convertParsedTypeAnnotation(entry.type)
-                    },
-                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-                )
-            }
-            is ParsedVariantType -> {
-                MezzeType.VariantType(
-                    constructors = annotation.constructors.associate { ctor ->
-                        ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
-                    },
-                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-                )
-            }
-            is ParsedTypeApp -> {
-                WellKnownTypeApp.of(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { convertParsedTypeAnnotation(it) },
-                    typeHash = registry.lookupType(annotation.constructor)?.let { d ->
-                        d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d)
-                    }
-                )
-            }
-            is ParsedSeqType -> {
-                BuiltinTypes.seqApp(convertParsedTypeAnnotation(annotation.elementType))
-            }
-            is ParsedQualifiedType -> {
-                WellKnownTypeApp.of(
-                    constructor = annotation.modulePath.joinToString("::") + "::" + annotation.typeName,
-                    args = annotation.args.map { convertParsedTypeAnnotation(it) }
-                )
-            }
-        }
-    }
+    /**
+     * Delegates to the one converter. The shared [typeVarCache] is what makes a
+     * declaration's own `'a` one variable rather than two — see
+     * [TypeAnnotationConverter.VarPolicy.Shared].
+     */
+    internal fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType =
+        com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+            annotation,
+            config = com.mezze.language.typechecker.util.TypeAnnotationConverter.registryConfig(registry),
+            // SHARED across this declaration: `{x: 'a} -> 'a` must be ONE variable.
+            typeVarCache = typeVarCache,
+        )
 
     private fun buildImports(file: String): List<TypedImport> {
         val ctx = importContext ?: return emptyList()

@@ -701,7 +701,6 @@ class ExpressionConstraintGenerator {
         resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
         resolveAbilityHash = { registry?.resolveAbilityHash(it) },
         validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
-        resolveCollectionTypes = true,
         honorOpenRowVars = true,
         inlineVariantNaming = true,
         resolveTypeAlias = { name ->

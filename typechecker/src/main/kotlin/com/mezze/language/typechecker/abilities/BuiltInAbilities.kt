@@ -7,7 +7,7 @@ import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.ModuleResolver
-import com.mezze.language.typechecker.util.WellKnownTypeApp
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 
 object BuiltInAbilities {
     private val boolType = PrimitiveTypes.BOOL_TYPE
@@ -118,33 +118,33 @@ object BuiltInAbilities {
         return if (file.exists()) file.readText() else null
     }
 
+        /**
+         * Delegates to the one converter with every type variable pinned to
+         * [typeVar] — a built-in ability's operations are written against the
+         * ability's own self type, so `'a` here means "the type this ability is
+         * implemented for".
+         *
+         * The copy this replaced handled only named types, records and function
+         * types, with `else -> typeVar` swallowing everything else: a sequence,
+         * a variant or a type application in a built-in operation's signature
+         * silently became the bare self type. Now they convert.
+         */
         private fun convertAnnotationToType(annotation: ParsedTypeAnnotation, typeVar: MezzeType.VarType): MezzeType {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)
-                    ?: if (annotation.name.isTypeVarName()) {
-                        typeVar
-                    } else {
-                        WellKnownTypeApp.of(annotation.name, emptyList())
-                    }
-            }
-            is ParsedRecordType -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { entry ->
-                        entry.name to convertAnnotationToType(entry.type, typeVar)
-                    },
-                    rowVar = null
-                )
-            }
-            is ParsedFunctionType -> {
-                MezzeType.FunctionType(
-                    paramType = convertAnnotationToType(annotation.paramType, typeVar),
-                    returnType = convertAnnotationToType(annotation.returnType, typeVar)
-                )
-            }
-            else -> typeVar
+            // Every type-variable NAME here means the same thing — the type the
+            // ability is implemented for — so pin them all to [typeVar] through the
+            // substitution knob the converter already has, rather than by being a
+            // separate walker that hard-codes it. Both spellings are registered
+            // because the substitution is consulted by bare and ticked name.
+            val pinned: Map<String, MezzeType> = annotation.selfAndDescendants()
+                .mapNotNull { (it as? ParsedNamedType)?.name?.takeIf { n -> n.isTypeVarName() } }
+                .flatMap { sequenceOf(it, it.removePrefix("'")) }
+                .distinct()
+                .associateWith { typeVar }
+            return TypeAnnotationConverter.convertWith(
+                annotation,
+                config = TypeAnnotationConverter.ConversionConfig(typeParamSubst = pinned),
+            )
         }
-    }
 
         fun getAbilityMethodType(
         abilityName: String,

@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.PrecompiledStdlib
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.context.ContextBuilder
+import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typedast.Hash
 
 object TypeAnnotationConverter {
@@ -19,7 +20,6 @@ object TypeAnnotationConverter {
         val resolveAbilityHash: (String) -> Hash? = { null },
         val validateEffects: ((ParsedEffectRow) -> Unit)? = null,
         val resolveEffectHashes: (Set<String>) -> Map<String, Hash> = { emptyMap() },
-        val resolveCollectionTypes: Boolean = true,
         val honorOpenRowVars: Boolean = false,
         val inlineVariantNaming: Boolean = false,
         val typeParamSubst: Map<String, MezzeType>? = null,
@@ -60,6 +60,58 @@ object TypeAnnotationConverter {
     ): MezzeType {
         return convertInternal(annotation, config, typeVarCache, sharedRowVar, mutableSetOf())
     }
+
+    /**
+     * The config for any caller holding a [DeclarationRegistry] — which is what
+     * "convert this annotation, resolving names against the module I am checking"
+     * means.
+     *
+     * Six call sites had hand-written the same `resolveTypeHash` lambda, and they
+     * had drifted: some resolved via `typeDeclarations`, some via `lookupType`,
+     * some only consulted the precomputed table, and the ones that forgot
+     * `?: ParsedDeclHasher.hashTypeDecl(d)` silently produced a NULL hash — which
+     * is not a missing optimisation but weaker type identity, the exact failure
+     * where two same-named types from different modules stop being distinguishable.
+     *
+     * Both hash lookups below are kept because each covers a case the other
+     * misses, not as a fallback for failure: `lookupType` sees the decl (and can
+     * hash it on demand) for a type declared in this module, while
+     * `typeHashFor`'s table also carries types known only by hash. A name that is
+     * neither is a builtin or a primitive, which legitimately has no decl hash.
+     */
+    fun registryConfig(
+        registry: DeclarationRegistry,
+        typeParamSubst: Map<String, MezzeType>? = null,
+        stripTickFromTypeVars: Boolean = false,
+    ): ConversionConfig = ConversionConfig(
+        resolveTypeHash = { name ->
+            registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) }
+                ?: registry.typeHashFor(name)
+        },
+        resolveAbilityHash = { name ->
+            registry.lookupAbility(name)?.contentHash ?: registry.resolveAbilityHash(name)
+        },
+        resolveEffectHashes = { names ->
+            names.mapNotNull { name -> registry.resolveEffectHash(name)?.let { name to it } }.toMap()
+        },
+        // Both ON, because both were being dropped. An open record is a DIFFERENT
+        // type from a closed one, and a `having` clause is part of what an effect
+        // row says — converting neither is what let them go missing silently.
+        honorOpenRowVars = true,
+        convertEffectAnnotations = true,
+        typeParamSubst = typeParamSubst,
+        stripTickFromTypeVars = stripTickFromTypeVars,
+        // Deliberately NO `resolveTypeAlias`. Inlining a transparent alias is for
+        // the paths that want `MyInt` and `Int` to UNIFY; an impl is attached to a
+        // declared type, so the ability and emit paths must see the type as
+        // written or the impl stops being findable. Enabling it here selected the
+        // wrong impl for container types — `boxEq`/`pairEq` compared unequal,
+        // a decode returned a default instead of its value, and a map decode
+        // crashed on the wrong callee. A caller that wants inlining passes its own.
+        associatedTypesForEffect = { name ->
+            registry.lookupEffect(name)?.associatedTypes ?: emptyList()
+        },
+    )
 
     /**
      * Convert the annotations that make up ONE signature, sharing a single
@@ -257,16 +309,24 @@ object TypeAnnotationConverter {
                         } finally { recursionGuard.remove(annotation.constructor) }
                     }
                 }
-                val args = annotation.args.map { recurse(it) }
-                if (config.resolveCollectionTypes) {
-                    resolveWellKnownTypeApp(annotation.constructor, args, config.resolveTypeHash(annotation.constructor))
-                } else {
-                    WellKnownTypeApp.of(
-                        constructor = annotation.constructor,
-                        args = args,
-                        typeHash = config.resolveTypeHash(annotation.constructor)
-                    )
-                }
+                // B.1 — every builtin container converts to the SAME form as every
+                // other applied type, through THE canonical factory. Each used to
+                // convert to a dedicated MezzeType node as well, so a producer
+                // picked one form and a pass handed the other silently did nothing
+                // — measured three times independently (containerElementType,
+                // harvestVarBindings, mono's elementVarName, the last of which is
+                // why `List P == List P` compared structurally while `[P] == [P]`
+                // did not).
+                //
+                // A `resolveCollectionTypes` flag used to select between two
+                // branches here. After that unification the branches were
+                // identical, so the flag read as a decision while changing
+                // nothing; one caller set it false believing it did.
+                WellKnownTypeApp.of(
+                    constructor = annotation.constructor,
+                    args = annotation.args.map { recurse(it) },
+                    typeHash = config.resolveTypeHash(annotation.constructor),
+                )
             }
 
             is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(recurse(annotation.elementType))
@@ -282,144 +342,52 @@ object TypeAnnotationConverter {
         }
     }
 
-        fun convert(
+    /**
+     * The convenience form: convert one annotation, resolving names with the
+     * lambdas the caller has to hand.
+     *
+     * This WAS a second full walker living beside [convertInternal] in this same
+     * object, and the two had diverged in ways that made the choice between them
+     * matter without saying so:
+     *
+     *  - `ParsedQualifiedType` — `a::b::T` — became `VarType(fresh())`. A module-
+     *    qualified type converted to a variable that unifies with ANYTHING, so
+     *    every check reading it was vacuous.
+     *  - Records were always CLOSED and variants always `rowVar = null`,
+     *    discarding author-written `...`; [convertInternal] honours it.
+     *  - Effect rows were built with a new row var each, rather than the ONE
+     *    shared row var a signature's rows must share.
+     *  - `faithful = false` additionally turned variants and applied types into
+     *    fresh variables. One caller used it — the module EXPORT path, whose
+     *    whole job is telling other modules what a signature is.
+     *  - A null `typeVarCache` (the default, so 25 of 31 call sites) made every
+     *    OCCURRENCE of a name its own variable, so `{x: 'a} -> 'a` converted to
+     *    `{x: 'b} -> 'c` and stopped constraining anything. That is this
+     *    codebase's most-repeated bug, found five times before this one.
+     *
+     * None of that was a decision anyone made; it was a copy that fell behind.
+     * There is now ONE walker, and this is a thin adapter onto it.
+     */
+    fun convert(
         annotation: ParsedTypeAnnotation,
-        faithful: Boolean = true,
-        includeAbilityConstraints: Boolean = true,
+        // Pass a cache to SHARE variables across several annotations of one
+        // signature; the default shares within this call, which is the minimum
+        // required for a single annotation to mean what it says.
         typeVarCache: MutableMap<String, TypeVar>? = null,
         resolveTypeAlias: (String) -> Pair<ParsedTypeAnnotation, List<String>>? = { null },
-        recursionGuard: MutableSet<String> = mutableSetOf(),
-        // Resolve a declared type's content hash so faithful TypeApplications carry
-        // real nominal identity (Declared), never Named.
-        resolveTypeHash: (String) -> com.mezze.language.typedast.Hash? = { null },
-        // WHICH ability a `with <Name> 'a` names, in the MODULE being converted.
-        //
-        // The default is the generated stdlib table, which maps a NAME to a fixed
-        // hash and cannot see a local declaration. A module that declares its own
-        // `ability Ord` therefore had its annotation stamped with the STDLIB's Ord
-        // while the inferred side carried the local one — one ability, two
-        // identities, in a single comparison. A caller holding a registry should
-        // pass it, so the local declaration shadows the prelude as it does
-        // everywhere else.
-        resolveAbilityHash: (String) -> com.mezze.language.typedast.Hash? =
-            { WellKnownHashConstants.resolveAbilityHash(it) },
-    ): MezzeType {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                if (annotation.name !in recursionGuard) {
-                    resolveTypeAlias(annotation.name)?.let { (aliased, _) ->
-                        recursionGuard.add(annotation.name)
-                        try {
-                            return convert(aliased, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash)
-                        } finally { recursionGuard.remove(annotation.name) }
-                    }
-                }
-                // A name that is NOT a type variable is a nominal type, and must
-                // convert to one — the same split `convertWith` makes via
-                // `isTypeVarName`. Rendering `Json` as a VarType makes it unify
-                // with anything, so every check reading it is vacuous.
-                if (!annotation.name.isTypeVarName()) {
-                    return WellKnownTypeApp.of(annotation.name, emptyList(), resolveTypeHash(annotation.name))
-                }
-                if (faithful) {
-                    MezzeType.VarType(
-                        if (typeVarCache != null) {
-                            typeVarCache.getOrPut(annotation.name) { TypeVar.freshWithName(annotation.name) }
-                        } else {
-                            TypeVar.freshWithName(annotation.name)
-                        }
-                    )
-                } else {
-                    MezzeType.VarType(TypeVar.fresh())
-                }
-            }
-            is ParsedFunctionType -> {
-                val effectRow = annotation.effects?.let { row ->
-                    val rowVar = if (row.isPolymorphic) RowVar.userOpen() else null
-                    MezzeType.EffectRow.simple(row.effects.toSet(), rowVar, row.isPerformed)
-                }
-                val abilityConstraints = if (includeAbilityConstraints) {
-                    annotation.abilityConstraints.map { c ->
-                        MezzeType.FunctionAbilityConstraint(
-                            abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash) },
-                            abilityHash = resolveAbilityHash(c.abilityName)
-                        )
-                    }
-                } else {
-                    emptyList()
-                }
-                MezzeType.FunctionType(
-                    paramType = convert(annotation.paramType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash),
-                    returnType = convert(annotation.returnType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash),
-                    effects = effectRow,
-                    abilityConstraints = abilityConstraints
-                )
-            }
-            is ParsedRecordType -> {
-                MezzeType.RecordType(annotation.entries.associate { e ->
-                    e.name to convert(e.type, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
-                })
-            }
-            is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(convert(annotation.elementType, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash))
-            is ParsedVariantType -> {
-                if (faithful) {
-                    MezzeType.VariantType(
-                        constructors = annotation.constructors.associate {
-                            it.name to it.dataType?.let { dt -> convert(dt, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash) }
-                        },
-                        rowVar = null
-                    )
-                } else {
-                    MezzeType.VarType(TypeVar.fresh())
-                }
-            }
-            is ParsedTypeApp -> {
-                // Parametric transparent alias with cycle-guard.
-                if (annotation.constructor !in recursionGuard) {
-                    resolveTypeAlias(annotation.constructor)?.let { (aliased, paramNames) ->
-                        val subst = paramNames.zip(annotation.args).toMap()
-                        val rewritten = substituteTypeVarsInAnnotation(aliased, subst)
-                        recursionGuard.add(annotation.constructor)
-                        try {
-                            return convert(rewritten, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash)
-                        } finally { recursionGuard.remove(annotation.constructor) }
-                    }
-                }
-                if (faithful) {
-                    val ctorHash = resolveTypeHash(annotation.constructor)
-                    // S3.1: identity via THE canonical factory. A name that resolves to
-                    // no declaration/builtin becomes Anonymous — valid code never reaches
-                    // that (unknown-type validation rejects it upstream).
-                    val ctorIdentity = TypeIdentity.derive(annotation.constructor, ctorHash, allowBuiltin = true)
-                    MezzeType.TypeApplication(
-                        annotation.constructor,
-                        annotation.args.map { convert(it, faithful, includeAbilityConstraints, typeVarCache, resolveTypeAlias, recursionGuard, resolveTypeHash, resolveAbilityHash) },
-                        identity = ctorIdentity
-                    )
-                } else {
-                    MezzeType.VarType(TypeVar.fresh())
-                }
-            }
-            is ParsedQualifiedType -> {
-                MezzeType.VarType(TypeVar.fresh())
-            }
-        }
-    }
-
-    private fun resolveWellKnownTypeApp(constructor: String, args: List<MezzeType>, typeHash: Hash? = null): MezzeType {
-        // B.1 — every builtin container converts to the SAME form as every other
-        // applied type. It used to convert to a dedicated MezzeType node instead,
-        // which is how each of these came to exist twice: once as its own node and
-        // once as a TypeApplication carrying the same name. Consumers are
-        // two-sided, but a PRODUCER picks one, and a pass handed the other
-        // silently does nothing — measured three times independently
-        // (containerElementType, harvestVarBindings, mono's elementVarName, the
-        // last of which is why `List P == List P` compared structurally while
-        // `[P] == [P]` did not).
-        return WellKnownTypeApp.of(constructor, args, typeHash)
-    }
+        resolveTypeHash: (String) -> Hash? = { null },
+        resolveAbilityHash: (String) -> Hash? = { WellKnownHashConstants.resolveAbilityHash(it) },
+    ): MezzeType = convertWith(
+        annotation,
+        ConversionConfig(
+            resolveTypeHash = resolveTypeHash,
+            resolveAbilityHash = resolveAbilityHash,
+            resolveTypeAlias = resolveTypeAlias,
+            honorOpenRowVars = true,
+            convertEffectAnnotations = true,
+        ),
+        typeVarCache = typeVarCache ?: mutableMapOf(),
+    )
 
     class SharedRowVar {
         private var rowVar: RowVar? = null

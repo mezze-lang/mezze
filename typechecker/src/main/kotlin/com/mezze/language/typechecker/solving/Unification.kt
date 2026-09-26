@@ -1616,7 +1616,6 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     // map and would leave the inner reference hashless.
     val expandConfig = TypeAnnotationConverter.ConversionConfig(
         resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
-        resolveCollectionTypes = true,
     )
     val constructors = variantDef.constructors.associate { constructor ->
         val dataType = constructor.dataType?.let { annotation ->
