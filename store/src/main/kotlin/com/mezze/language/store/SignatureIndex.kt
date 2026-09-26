@@ -314,6 +314,14 @@ object SignatureIndex {
         val effectsByNode = rows.effects.groupBy { it.nodeId }
         val constraintsByNode = rows.constraints.groupBy { it.nodeId }
 
+        // ONE TypeVar per variable NAME, for this whole signature. `TypeVar`
+        // carries an id, so minting per occurrence makes `{x: 'a} -> 'a` rebuild
+        // as two unrelated variables — it stops being the identity function and
+        // starts unifying with things it must not: `{x: 'a} -> Deque 'a` matched a
+        // search for `{x: 'a} -> 'a`, which the occurs check exists to reject.
+        // Instance seven of this codebase's most-repeated defect, introduced here.
+        val vars = mutableMapOf<String, TypeVar>()
+
         val root = rows.nodes.singleOrNull { it.parentId == null }
             ?: error(
                 "a signature must have exactly one root node, found " +
@@ -402,8 +410,11 @@ object SignatureIndex {
                 )
             }
 
+            // An unnamed variable stays distinct per occurrence: there is no name
+            // to share by, and inventing sharing would be the opposite error.
             TypeNodeKind.VAR -> MezzeType.VarType(
-                row.label?.let { TypeVar.freshWithName(it) } ?: TypeVar.fresh()
+                row.label?.let { name -> vars.getOrPut(name) { TypeVar.freshWithName(name) } }
+                    ?: TypeVar.fresh()
             )
 
             TypeNodeKind.INT -> MezzeType.IntType

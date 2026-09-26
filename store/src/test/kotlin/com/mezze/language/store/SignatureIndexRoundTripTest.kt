@@ -88,10 +88,15 @@ class SignatureIndexRoundTripTest {
         ) as MezzeType.FunctionType
 
         val param = (rebuilt.paramType as MezzeType.RecordType).fields.getValue("x")
+        // The TypeVar ITSELF, not its name. `TypeVar` carries an `id`, so two
+        // `freshWithName("'a")` calls are two different variables that merely
+        // print alike — comparing names made this assertion vacuous and let the
+        // bug through (the rebuilt `{x: 'a} -> Deque 'a` then unified with
+        // `{x: 'a} -> 'a`, which the occurs check should reject).
         assertEquals(
-            (param as MezzeType.VarType).variable.name,
-            (rebuilt.returnType as MezzeType.VarType).variable.name,
-            "both occurrences were written `'a` and must rebuild as one variable",
+            (param as MezzeType.VarType).variable,
+            (rebuilt.returnType as MezzeType.VarType).variable,
+            "both occurrences were written `'a` and must rebuild as ONE variable",
         )
     }
 

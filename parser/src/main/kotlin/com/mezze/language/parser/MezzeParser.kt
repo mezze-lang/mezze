@@ -103,6 +103,83 @@ class MezzeParser {
         return parseParsedModuleImpl(source, file)
     }
 
+    /**
+     * Parse a standalone type, e.g. `{ xs: [Int] } -> Int <Log>`.
+     *
+     * The parser could already parse a type — every annotation goes through
+     * `typeAnnotationParser` — but only ever as part of a declaration, so a caller
+     * holding just a type had no way in. Type-directed search is one (the user
+     * types a type and gets matching functions back); a REPL `:type` and a
+     * doc-browser query are the same need.
+     *
+     * The alternative was to wrap the input in a synthetic declaration and dig the
+     * annotation back out. That reads as a trick and it inherits the wrapper's own
+     * syntax: an error in the type would be reported at a line and column that do
+     * not exist in what the user typed.
+     *
+     * The whole input must be consumed. `Int -> Int junk` is a mistake, and
+     * parsing the prefix would answer a question nobody asked.
+     */
+    fun parseTypeAnnotation(source: String, file: String = "<type>"): ParsedTypeAnnotation {
+        currentSource = source
+        currentFile = file
+        SyntaxMetadata.clear()
+        try {
+            val tokens = Lexer(source).tokenize()
+            initParseBudget(tokens.size)
+
+            tokens.find { it.type == TokenType.ERROR }?.let { bad ->
+                throw ParseException(
+                    if (bad.text.length == 1) "Unexpected character '${bad.text}'" else bad.text,
+                    bad.position, bad.line, bad.column, source, file,
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0002_UNEXPECTED_CHARACTER,
+                )
+            }
+
+            return when (val result = typeAnnotationParser(TokenStream(tokens))) {
+                is ParseResult.Success -> {
+                    val rest = result.remaining.peek()
+                    if (rest != null && rest.type != TokenType.EOF) {
+                        throw ParseException(
+                            "Unexpected `${rest.text}` after the type",
+                            rest.position, rest.line, rest.column, source, file,
+                            hints = listOf("a type query is one type, with nothing following it"),
+                        )
+                    }
+                    result.value
+                }
+                is ParseResult.Failure -> {
+                    // A failure that consumed NOTHING means the input does not begin
+                    // a type at all. The alternation's own message names whichever
+                    // branch it happened to try last — `Expected '[' but got 'let'`
+                    // for the input `let x = 1` — which tells the reader nothing
+                    // true: `[` is one of several ways a type can start, not the
+                    // expected one. Say what is actually wrong and keep the
+                    // parser's detail as a hint rather than hiding it.
+                    val first = tokens.firstOrNull()
+                    val startedNothing = result.position == 0 && first != null &&
+                        first.type != TokenType.EOF
+                    throw ParseException(
+                        if (startedNothing) "`${first!!.text}` cannot start a type" else result.message,
+                        result.position, result.line, result.column, source, file,
+                        code = result.code,
+                        hints = if (startedNothing) {
+                            listOf(
+                                "a type is a name (`Int`), a variable (`'a`), a record " +
+                                    "(`{ x: Int }`), a sequence (`[Int]`), a variant " +
+                                    "(`|A, B|`) or an arrow between them",
+                                result.message,
+                            )
+                        } else result.hints,
+                    )
+                }
+            }
+        } finally {
+            currentSource = null
+            currentFile = null
+        }
+    }
+
     private fun parseParsedModuleImpl(source: String, file: String): ParsedModule {
         currentSource = source
         currentFile = file

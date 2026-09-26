@@ -166,6 +166,7 @@ fun main(rawArgs: Array<String>) {
             "build" -> handleBuildCommand(remainingArgs)
             "init" -> handleInitCommand(remainingArgs)
             "index" -> handleIndexCommand(remainingArgs)
+            "search" -> handleSearchCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
@@ -273,7 +274,7 @@ private fun showUsage() {
     println()
     println("COMMANDS:")
     println("  Project:  init, dev, exec, build, check")
-    println("  Tools:    fmt, lsp, index")
+    println("  Tools:    fmt, lsp, index, search")
     println("  Env:      doctor, toolchain")
     println()
     println("For command-specific help: mez <command> --help")
@@ -284,6 +285,27 @@ private fun showUsage() {
  */
 private fun showCommandHelp(command: String) {
     when (command) {
+        "search" -> {
+            println("USAGE: mez search '<type>' [--limit=N] [--json]")
+            println()
+            println("Find declarations by TYPE rather than by name — useful when you know")
+            println("the shape of what you want but not what this codebase called it.")
+            println()
+            println("EXAMPLES:")
+            println("  mez search '{ x: Int, y: Int } -> Int'    an exact shape")
+            println("  mez search '{ x: \'a } -> \'a'             anything shaped like identity")
+            println("  mez search '{ xs: [\'a] } -> Int'          a sequence in, a count out")
+            println("  mez search '{ msg: Str } -> {} <Log>'     something that logs")
+            println()
+            println("OPTIONS:")
+            println("  --limit=N    Maximum matches to show (default 25)")
+            println("  --json       Machine-readable output, with file and line per match")
+            println()
+            println("A type variable means \"I do not care what this is\". Matches are ranked:")
+            println("exact first, then signatures more general than the query.")
+            println()
+            println("Reads the index — run `mez check` or `mez index` first.")
+        }
         "check" -> {
             println("USAGE: mezze check [options] [file]")
             println()
@@ -501,6 +523,10 @@ private fun handleCheckCommand(args: List<String>) {
 
 private fun handleIndexCommand(args: List<String>) {
     com.mezze.language.cli.commands.IndexCommand().execute(args)
+}
+
+private fun handleSearchCommand(args: List<String>) {
+    com.mezze.language.cli.commands.SearchCommand().execute(args)
 }
 
 private fun handleToolchainCommand(args: List<String>) {
