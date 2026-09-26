@@ -302,6 +302,11 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
         // folded; a test literally named "a seq result folds" passed anyway,
         // because the run-time fallback computes the same answer.
         is FusedChainIR -> node.copy(
+            // Exhaustive here too, for the same reason as the outer `when`: an
+            // `else` hid `SinkIR.Scan`, whose `init` is a NodeIR, so a comptime in
+            // a scan's seed was invisible. A stage or sink holding only a
+            // `MakeLambdaIR` is a leaf — the lambda's body is its own FunctionIR
+            // and is walked as a function, not as a child node.
             source = when (val sr = node.source) {
                 is SourceIR.RangeSeq -> sr.copy(start = f(sr.start), end = f(sr.end))
                 is SourceIR.RangeStepSeq ->
@@ -309,18 +314,25 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
                 is SourceIR.RawSeq -> sr.copy(xs = f(sr.xs))
                 is SourceIR.RawList -> sr.copy(xs = f(sr.xs))
                 is SourceIR.Opaque -> sr.copy(expr = f(sr.expr))
-                else -> sr
             },
             stages = node.stages.map { st ->
                 when (st) {
                     is StageIR.Take -> st.copy(n = f(st.n))
                     is StageIR.Drop -> st.copy(n = f(st.n))
-                    else -> st
+                    is StageIR.Map, is StageIR.Filter,
+                    is StageIR.TakeWhile, is StageIR.DropWhile -> st
                 }
             },
             sink = when (val sk = node.sink) {
                 is SinkIR.Fold -> sk.copy(init = f(sk.init))
-                else -> sk
+                is SinkIR.Scan -> sk.copy(init = f(sk.init))
+                is SinkIR.ForEach, is SinkIR.Reduce, is SinkIR.Any, is SinkIR.All,
+                is SinkIR.Find, is SinkIR.FindIndex, is SinkIR.None,
+                is SinkIR.MinBy, is SinkIR.MaxBy, is SinkIR.Partition,
+                is SinkIR.Sum, is SinkIR.SumFloat, is SinkIR.Product,
+                is SinkIR.ProductFloat, is SinkIR.Count, is SinkIR.ToSeq,
+                is SinkIR.ToList, is SinkIR.First, is SinkIR.Last,
+                is SinkIR.Min, is SinkIR.Max -> sk
             },
             fallback = node.fallback?.let(f),
         )

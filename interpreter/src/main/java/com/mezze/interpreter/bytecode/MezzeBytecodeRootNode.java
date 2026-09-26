@@ -4041,8 +4041,21 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // specialization deactivates. The DSL re-instantiates it on the
         // next call with a fresh assumption from the CyclicAssumption,
         // re-resolving the handler.
+        // The identity guard is load-bearing, not belt-and-braces. This node is
+        // SHARED by every thread, the handler chain it caches from is THREAD-LOCAL,
+        // and `effectStable` is process-global — so without re-checking that the
+        // cached handler is still this thread's innermost one, whichever thread
+        // re-specialized last wins for all of them. Two tasks performing the same
+        // op under different handlers then silently read each other's handler: a
+        // wrong VALUE, never an exception, and only after the uncached→cached
+        // transition. See ConcurrentHandlerIsolationTest.
+        //
+        // A stopgap: it re-resolves on every call, which is exactly the
+        // ThreadLocal probe the cache exists to avoid. The real fix is to key the
+        // specialization on the thread's chain rather than guard against it.
         @Specialization(assumptions = "effectStable",
-                        guards = {"cachedHandler != null", "cachedTarget != null"},
+                        guards = {"cachedHandler != null", "cachedTarget != null",
+                                  "resolveHandler(effectHash) == cachedHandler"},
                         excludeForUncached = true)
         public static Object doCached(Hash effectHash, String opName, Object arg,
                 @Cached("resolveHandler(effectHash)") MezzeRecord cachedHandler,
