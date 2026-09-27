@@ -127,8 +127,10 @@ class TypeCheckerBenchmarkTest {
 
     @Test
     fun `benchmark stdlib fixture if available`() {
-        val projectRoot = System.getProperty("mezze.project.root") ?: return
-        val stdlibDir = Paths.get(projectRoot, "stdlib", "std")
+        // Was `System.getProperty("mezze.project.root") ?: return`, which silently
+        // skipped whenever another test had overwritten that mutable property — a
+        // benchmark that measures nothing while still reporting as passed.
+        val stdlibDir = RepoRoot.file("stdlib/std").toPath()
         if (!Files.isDirectory(stdlibDir)) return
 
         val mzFiles = Files.walk(stdlibDir)
@@ -153,7 +155,7 @@ class TypeCheckerBenchmarkTest {
                 typeChecker = TypeChecker()
                 val elapsed = measureTimeMillis {
                     val parsed = parser.parseParsedModule(source, file.fileName.toString())
-                    typeChecker.typeCheck(parsed, Paths.get(projectRoot), modulePath = modulePath)
+                    typeChecker.typeCheck(parsed, RepoRoot.find().toPath(), modulePath = modulePath)
                 }
                 totalMs += elapsed
                 fileCount++

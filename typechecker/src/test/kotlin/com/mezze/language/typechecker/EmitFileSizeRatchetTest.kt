@@ -26,9 +26,10 @@ import kotlin.test.assertTrue
 class EmitFileSizeRatchetTest {
 
     private fun lines(relative: String): Int {
-        val root = System.getProperty("mezze.project.root")
-            ?: error("mezze.project.root is not set; the build sets it for the test task")
-        val f = File(root, relative)
+        // RepoRoot, not the mutable `mezze.project.root` system property — see its
+        // doc: other tests in this JVM overwrite that, which made this ratchet
+        // order-dependent and, for one sibling, silently skip.
+        val f = RepoRoot.file(relative)
         assertTrue(f.exists(), "expected $relative at ${f.absolutePath}")
         return f.readLines().size
     }

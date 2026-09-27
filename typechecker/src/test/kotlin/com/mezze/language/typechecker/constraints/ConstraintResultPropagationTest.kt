@@ -71,10 +71,9 @@ class ConstraintResultPropagationTest {
     }
 
     private fun locateConstraintSource(): String {
-        val root = System.getProperty("mezze.project.root")
-            ?: error("mezze.project.root is not set; the build sets it for the test task")
-        val file = java.io.File(
-            root,
+        // RepoRoot, not the mutable `mezze.project.root` property: other tests in
+        // this JVM overwrite it, so reading it makes this test order-dependent.
+        val file = com.mezze.language.typechecker.RepoRoot.file(
             "typechecker/src/main/kotlin/com/mezze/language/typechecker/constraints/Constraint.kt",
         )
         assertTrue(file.exists(), "expected Constraint.kt at ${file.absolutePath}")
