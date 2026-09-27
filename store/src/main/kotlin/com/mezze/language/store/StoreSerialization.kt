@@ -99,7 +99,25 @@ object StoreSerialization {
         // List<List<String>> instead of List<Array<String>> because kotlinx
         // serializes arrays awkwardly; the standalone code converts back
         // to Array<String> after deserialization.
-        val performerRecords: List<List<String>>
+        val performerRecords: List<List<String>>,
+        /**
+         * Static shape of the entry's RESULT, for an EVAL closure.
+         *
+         * Null for an ordinary app, whose entry's result is a program's exit
+         * value and is never rendered. Set when this closure is one expression
+         * the client wants a VALUE back from: rendering needs the static shape,
+         * because a runtime value alone cannot tell `Nat` from `Int` (both are
+         * `Long`), cannot see a newtype (erased to its payload), and cannot tell
+         * a one-character `Str` from a `Char`.
+         *
+         * It travels HERE rather than in the `Eval` wire message on purpose.
+         * This sidecar is already the channel for compiler-computed facts about
+         * a closure — `entryHash` and `performerRecords` are the same kind of
+         * thing — and `PrintType` is a compiler-internal type, so putting it in
+         * the protocol would freeze it as a published schema and make every
+         * compiler refactor a protocol break.
+         */
+        val resultPrintType: com.mezze.language.truffleir.PrintType? = null,
     )
 
     fun serializeEmbeddedAppMeta(meta: EmbeddedAppMeta): ByteArray =
@@ -117,7 +135,8 @@ object StoreSerialization {
             appName = raw.appName,
             entryHash = raw.entryHash,
             entryName = raw.entryName,
-            performerRecords = raw.performerRecords.map { it.toTypedArray() }
+            performerRecords = raw.performerRecords.map { it.toTypedArray() },
+            resultPrintType = raw.resultPrintType,
         )
     }
 
@@ -127,7 +146,9 @@ object StoreSerialization {
         val entryHash: String,
         /** Display-only entry name; NEVER a selection key. */
         val entryName: String?,
-        val performerRecords: List<Array<String>>
+        val performerRecords: List<Array<String>>,
+        /** See [EmbeddedAppMeta.resultPrintType]. Null for an ordinary app. */
+        val resultPrintType: com.mezze.language.truffleir.PrintType? = null,
     )
 
     fun serializeTypedLetDecl(decl: com.mezze.language.typedast.TypedLetDecl): ByteArray {

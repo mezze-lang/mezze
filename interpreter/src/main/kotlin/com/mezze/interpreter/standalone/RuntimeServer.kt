@@ -3,10 +3,16 @@ package com.mezze.interpreter.standalone
 import com.mezze.interpreter.runtime.MezzeExitException
 import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.wire.Bye
+import com.mezze.wire.Cancel
 import com.mezze.wire.Config
 import com.mezze.wire.ConfigAck
+import com.mezze.wire.Eval
+import com.mezze.wire.EvalError
+import com.mezze.wire.EvalResult
 import com.mezze.wire.Evict
 import com.mezze.wire.ExitDetail
+import com.mezze.wire.Expand
+import com.mezze.wire.ExpandResult
 import com.mezze.wire.Exited
 import com.mezze.wire.Hello
 import com.mezze.wire.Interrupt
@@ -90,6 +96,11 @@ object RuntimeServer {
         WireProtocol.Capability.STRUCTURED_ERRORS,
         WireProtocol.Capability.STDIN,
         WireProtocol.Capability.STDERR_FRAMES,
+        // EVAL / EXPAND / CANCEL. Advertised only now that all three are served
+        // — a capability is a promise, and advertising EVAL while EXPAND still
+        // answered "unsupported" would make a conforming client fail on the
+        // first elided value.
+        WireProtocol.Capability.EVAL,
     )
 
     @JvmStatic
@@ -629,6 +640,19 @@ object RuntimeServer {
                         // (including STDIN_DATA, INTERRUPT) concurrently.
                         evalWorker.submit { handleLoad(load, runId, state, send) }
                     }
+                    MessageType.EVAL -> {
+                        // Onto the same single-thread worker LOAD uses, so the
+                        // dispatch loop stays free to read CANCEL while an
+                        // expression runs — a cancel that queued behind the eval
+                        // it was meant to stop could never arrive in time.
+                        val eval = frame.decode<Eval>()
+                        evalWorker.submit { handleEval(eval, state, send) }
+                    }
+                    // Not submitted to the worker: an EXPAND walks a value that is
+                    // already computed, so it needs no context and must not queue
+                    // behind a running expression.
+                    MessageType.EXPAND -> handleExpand(frame.decode(), send)
+                    MessageType.CANCEL -> handleCancel(frame.decode(), state, diag)
                     MessageType.PING -> send(WireFrame.of(MessageType.PONG, Pong()))
                     MessageType.STATUS -> send(WireFrame.of(MessageType.STATUS_REPLY, state.snapshotStatus()))
                     MessageType.INTERRUPT -> handleInterrupt(frame.decode(), state, diag)
@@ -926,6 +950,319 @@ object RuntimeServer {
         // frame to keep the state machine clean, reject every key.
         val rejected = c.keys.mapValues { "capability not advertised by this server (v1)" }
         send(WireFrame.of(MessageType.CONFIG_ACK, ConfigAck(accepted = emptyList(), rejected = rejected)))
+    }
+
+    // ─── Expression evaluation ───────────────────────────────────────
+    //
+    // EVAL is LOAD's sibling: the same compiled-IR closure, run the same way,
+    // but the answer is the entry's RESULT as a value tree rather than console
+    // bytes and an exit code.
+    //
+    // Two pieces already existed and are what make this small. `MezzeLanguage`
+    // wraps every top-level body in a ResultCapturingNode, which stores the raw
+    // guest result (forcing a MezzeSuspend on the way) — so the value is
+    // reachable without unwrapping a polyglot Value, which cannot be done for a
+    // guest object. And the static shape the renderer needs rides in the meta
+    // sidecar as `resultPrintType`, the same channel `entryHash` uses.
+
+    /** Where an [Expand] resolves from: the last result, kept with its shape. */
+    private class PinnedResult(
+        val requestId: Long,
+        val value: Any?,
+        val printType: com.mezze.language.truffleir.PrintType,
+    )
+
+    /**
+     * One pinned result, so an [Expand] has something to descend.
+     *
+     * ONE, not a cache keyed by request: a pin holds a whole live value tree
+     * alive, and an unbounded map of them is a leak that looks like a feature.
+     * Re-deriving instead of pinning would be free for a pure expression and
+     * impossible for an effectful one — the effect row says which, statically —
+     * so choosing per-expression is the eventual answer, and needs the effect
+     * row on the wire first. Until then: the most recent result expands, and an
+     * older one answers EXPIRED rather than silently resolving against the wrong
+     * value.
+     */
+    @Volatile
+    private var pinned: PinnedResult? = null
+
+    /** Requests cancelled before or during their run. */
+    private val cancelledRequests = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
+
+    /** The request the eval worker is running, for [handleCancel]. */
+    @Volatile
+    private var activeEvalRequest: Long? = null
+
+    private fun evalFailed(requestId: Long, kind: String, message: String): WireFrame =
+        WireFrame.of(MessageType.EVAL_RESULT, EvalResult(
+            requestId = requestId,
+            error = EvalError(kind = kind, detail = ExitDetail(message = message)),
+        ))
+
+    /** Everything [handleEval] needs before it may touch the Context, or why not. */
+    internal sealed interface EvalPrep {
+        data class Ready(
+            val functions: List<FunctionIR>,
+            val meta: StoreSerialization.DeserializedEmbeddedAppMeta,
+            val printType: com.mezze.language.truffleir.PrintType,
+        ) : EvalPrep
+
+        data class Refused(val kind: String, val message: String) : EvalPrep
+    }
+
+    /**
+     * Read and check an [Eval] request without running anything.
+     *
+     * Split out because every refusal here is decided from the request and two
+     * files alone — no Context, no guest thread, nothing to warm up — so keeping
+     * it separate is what makes those paths testable. It also puts the whole
+     * "which error is this" decision in one place instead of interleaved with the
+     * evaluation.
+     */
+    internal fun prepareEval(eval: Eval): EvalPrep {
+        val fnsFile = File(eval.fnsCborPath)
+        val metaFile = File(eval.metaCborPath)
+        if (!fnsFile.exists() || !metaFile.exists()) {
+            val missing = if (!fnsFile.exists()) fnsFile else metaFile
+            return EvalPrep.Refused(EvalError.Kind.NOT_FOUND, "not found: ${missing.absolutePath}")
+        }
+
+        val functions: List<FunctionIR>
+        val meta: StoreSerialization.DeserializedEmbeddedAppMeta
+        try {
+            functions = StoreSerialization.deserializeFunctionIRList(fnsFile.readBytes())
+            meta = StoreSerialization.deserializeEmbeddedAppMeta(metaFile.readBytes())
+        } catch (e: Exception) {
+            return EvalPrep.Refused(
+                EvalError.Kind.DECODE_FAILED,
+                "${e.javaClass.simpleName}: ${e.message ?: "no message"}",
+            )
+        }
+
+        if (functions.isEmpty() || meta.entryHash.isEmpty()) {
+            return EvalPrep.Refused(
+                EvalError.Kind.NO_ENTRY,
+                "the closure names no entry, so there is no expression to evaluate",
+            )
+        }
+
+        // No shape means no rendering. Refused rather than guessed: rendering from
+        // the runtime value alone silently loses exactly the distinctions the shape
+        // exists to carry — a Nat printed as an Int, a newtype printed as its
+        // payload — and the caller would have no way to tell it happened.
+        val printType = meta.resultPrintType
+            ?: return EvalPrep.Refused(
+                EvalError.Kind.UNRENDERABLE,
+                "the metadata carried no result shape, so the value cannot be rendered; " +
+                    "an EVAL closure must set resultPrintType",
+            )
+
+        return EvalPrep.Ready(functions, meta, printType)
+    }
+
+    /**
+     * The reply for a value that evaluated successfully.
+     *
+     * Separate from [handleEval] so the frame a caller actually receives can be
+     * asserted without standing up a Context.
+     */
+    internal fun evalResultFrame(
+        requestId: Long,
+        result: Any?,
+        printType: com.mezze.language.truffleir.PrintType,
+        maxDepth: Int,
+        maxItems: Int,
+        elapsedMicros: Long,
+    ): WireFrame = WireFrame.of(MessageType.EVAL_RESULT, EvalResult(
+        requestId = requestId,
+        value = com.mezze.interpreter.nodes.builtin.effects.InspectTree.build(
+            result, printType, dbgStyle = true, maxDepth = maxDepth, maxItems = maxItems,
+        ),
+        elapsedMicros = elapsedMicros,
+    ))
+
+    private fun handleEval(eval: Eval, state: ServerState, send: (WireFrame) -> Unit) {
+        val started = System.nanoTime()
+
+        // A cancel that arrived while this sat in the worker queue. Checked
+        // before any work, so a client that cancels immediately pays nothing.
+        if (cancelledRequests.remove(eval.requestId)) {
+            send(evalFailed(eval.requestId, EvalError.Kind.CANCELLED, "cancelled before it started"))
+            return
+        }
+
+        val prep = prepareEval(eval)
+        if (prep is EvalPrep.Refused) {
+            send(evalFailed(eval.requestId, prep.kind, prep.message))
+            return
+        }
+        val (functions, meta, printType) = prep as EvalPrep.Ready
+
+        try {
+            MezzeLanguage.setFunctionsForDirectExecution(
+                functions, meta.performerRecords, state.projectRoot(), meta.entryHash,
+            )
+        } catch (e: Exception) {
+            send(evalFailed(
+                eval.requestId, EvalError.Kind.DECODE_FAILED,
+                "register failed: ${e.javaClass.simpleName}: ${e.message ?: "no message"}",
+            ))
+            return
+        }
+
+        try {
+            MezzeLanguage.setFunctionsForDirectExecution(
+                functions, meta.performerRecords, state.projectRoot(), meta.entryHash,
+            )
+        } catch (e: Exception) {
+            send(evalFailed(
+                eval.requestId, EvalError.Kind.DECODE_FAILED,
+                "register failed: ${e.javaClass.simpleName}: ${e.message ?: "no message"}",
+            ))
+            return
+        }
+
+        val source = Source.newBuilder(
+            MezzeLanguage.ID,
+            "# RuntimeServer eval ${eval.requestId}",
+            "__runtime_server_eval_${eval.requestId}__.mz",
+        ).buildLiteral()
+
+        // Cleared first: a stale result from an earlier run would otherwise be
+        // indistinguishable from this expression returning that same value.
+        MezzeLanguage.clearLastResult()
+        activeEvalRequest = eval.requestId
+        val timeoutWatchdog = armEvalTimeout(eval, state)
+        try {
+            state.context.eval(source)
+            val result = MezzeLanguage.getLastExecutionResult()
+            val frame = evalResultFrame(
+                requestId = eval.requestId,
+                result = result,
+                printType = printType,
+                maxDepth = eval.maxDepth,
+                maxItems = eval.maxItems,
+                elapsedMicros = (System.nanoTime() - started) / 1_000,
+            )
+            // Pinned only after the tree built: a value whose shape does not
+            // describe it must not become the thing an EXPAND descends.
+            pinned = PinnedResult(eval.requestId, result, printType)
+            send(frame)
+        } catch (e: PolyglotException) {
+            // A cancel and a timeout both arrive here as an interrupted
+            // PolyglotException, so which one it was is decided by what we
+            // recorded, not by the exception.
+            val kind = when {
+                cancelledRequests.remove(eval.requestId) -> EvalError.Kind.CANCELLED
+                (e.isCancelled || e.isInterrupted) && timeoutWatchdog.fired -> EvalError.Kind.TIMEOUT
+                e.isCancelled || e.isInterrupted -> EvalError.Kind.CANCELLED
+                else -> EvalError.Kind.FAILED
+            }
+            send(WireFrame.of(MessageType.EVAL_RESULT, EvalResult(
+                requestId = eval.requestId,
+                error = EvalError(kind, exitDetailFor(e)),
+                elapsedMicros = (System.nanoTime() - started) / 1_000,
+            )))
+        } catch (e: com.mezze.interpreter.nodes.builtin.effects.InspectTree.ShapeMismatchException) {
+            // The shape does not describe the value — a compiler bug, not the
+            // expression failing. Reported as its own kind so it is not mistaken
+            // for one.
+            send(evalFailed(eval.requestId, EvalError.Kind.UNRENDERABLE, e.message ?: "unrenderable"))
+        } catch (e: Exception) {
+            send(evalFailed(
+                eval.requestId, EvalError.Kind.FAILED,
+                "${e.javaClass.simpleName}: ${e.message ?: "no message"}",
+            ))
+        } finally {
+            timeoutWatchdog.disarm()
+            activeEvalRequest = null
+            cancelledRequests.remove(eval.requestId)
+        }
+    }
+
+    private class EvalTimeout(private val timer: java.util.Timer?) {
+        @Volatile var fired: Boolean = false
+        fun disarm() = timer?.cancel()
+        fun markFired() { fired = true }
+    }
+
+    /**
+     * Interrupt the context when `timeout_ms` elapses.
+     *
+     * Context-wide, because that is the only interrupt Truffle offers — which is
+     * also why the worker runs one expression at a time. Serving several
+     * concurrently needs a context per request, i.e. the world/context refactor.
+     */
+    private fun armEvalTimeout(eval: Eval, state: ServerState): EvalTimeout {
+        if (eval.timeoutMs <= 0) return EvalTimeout(null)
+        val timer = java.util.Timer("mez-eval-timeout-${eval.requestId}", true)
+        val handle = EvalTimeout(timer)
+        timer.schedule(object : java.util.TimerTask() {
+            override fun run() {
+                handle.markFired()
+                try {
+                    state.context.interrupt(java.time.Duration.ofSeconds(5))
+                } catch (_: Exception) {
+                    // The expression finished between the deadline and here.
+                }
+            }
+        }, eval.timeoutMs)
+        return handle
+    }
+
+    private fun handleExpand(expand: Expand, send: (WireFrame) -> Unit) {
+        fun fail(kind: String, message: String) = send(
+            WireFrame.of(MessageType.EXPAND_RESULT, ExpandResult(
+                requestId = expand.requestId,
+                path = expand.path,
+                error = EvalError(kind, ExitDetail(message = message)),
+            ))
+        )
+
+        val held = pinned
+        if (held == null || held.requestId != expand.fromRequest) {
+            fail(
+                EvalError.Kind.EXPIRED,
+                "request ${expand.fromRequest} is no longer held; only the most recent " +
+                    "result can be expanded",
+            )
+            return
+        }
+        try {
+            val tree = com.mezze.interpreter.nodes.builtin.effects.InspectTree.expand(
+                held.value, held.printType, expand.path,
+                dbgStyle = true, maxDepth = expand.maxDepth, maxItems = expand.maxItems,
+            )
+            send(WireFrame.of(MessageType.EXPAND_RESULT, ExpandResult(
+                requestId = expand.requestId, path = expand.path, value = tree,
+            )))
+        } catch (e: com.mezze.interpreter.nodes.builtin.effects.InspectTree.NoSuchPathException) {
+            fail(EvalError.Kind.NO_SUCH_PATH, e.message ?: "no such path")
+        } catch (e: Exception) {
+            fail(EvalError.Kind.UNRENDERABLE, "${e.javaClass.simpleName}: ${e.message ?: "no message"}")
+        }
+    }
+
+    /**
+     * Drop one in-flight or queued request.
+     *
+     * Recorded rather than acted on directly when the request is not the running
+     * one: interrupting the context would kill whatever IS running. A cancel for
+     * an unknown or already-finished request is not an error — the reply may
+     * already be on the wire — so it is recorded and consumed by whichever path
+     * sees it first.
+     */
+    private fun handleCancel(cancel: Cancel, state: ServerState, diag: PrintStream) {
+        cancelledRequests.add(cancel.requestId)
+        if (activeEvalRequest == cancel.requestId) {
+            diag.println("[RuntimeServer] CANCEL eval request ${cancel.requestId}")
+            try {
+                state.context.interrupt(java.time.Duration.ofSeconds(5))
+            } catch (e: Exception) {
+                diag.println("[RuntimeServer] cancel interrupt failed: ${e.message}")
+            }
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────

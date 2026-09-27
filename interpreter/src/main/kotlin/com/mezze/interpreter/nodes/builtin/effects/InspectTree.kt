@@ -74,7 +74,7 @@ object InspectTree {
             }
             if (printType is PrintType.Ref) {
                 val target = defs[printType.name]
-                    ?: throw IllegalStateException(
+                    ?: throw ShapeMismatchException(
                         "PrintType.Ref('${printType.name}') with no definition in scope — " +
                             "the builder emitted a back-reference without its table."
                     )
@@ -251,7 +251,17 @@ object InspectTree {
         }
     }
 
-    private fun mismatch(expected: String, value: Any?): Nothing = throw IllegalStateException(
+    /**
+     * A value did not fit the shape it was walked against.
+     *
+     * Its own type, not a bare [IllegalStateException], so a caller can tell this
+     * apart from the expression failing: a mismatch here means the compiler
+     * handed over a shape that does not describe the value, which is a compiler
+     * bug and should be reported as one rather than as "your code threw".
+     */
+    class ShapeMismatchException(message: String) : RuntimeException(message)
+
+    private fun mismatch(expected: String, value: Any?): Nothing = throw ShapeMismatchException(
         "Inspect: expected a $expected runtime value, got " + (value?.javaClass?.name ?: "null")
     )
 
@@ -272,5 +282,179 @@ object InspectTree {
         is PrintType.Newtype -> "newtype"
         is PrintType.MzMap, is PrintType.MzSortedMap -> "map"
         else -> "seq"
+    }
+
+    /**
+     * Build the subtree at [path], for expanding one [WireValue.Elided] node.
+     *
+     * Descends `(value, printType)` in lockstep along the path's steps, then
+     * builds from there with fresh limits. Descending BOTH is the point: the
+     * value alone would not carry the shape the node below needs, which is the
+     * same reason the whole walk exists.
+     *
+     * Throws [NoSuchPathException] when a step does not fit the shape it lands
+     * on — a path from a different result, or a malformed one. It does not
+     * silently return the root or the nearest node: an expand that quietly
+     * answers about the wrong node is worse than one that refuses, because the
+     * caller displays the answer either way.
+     */
+    fun expand(
+        value: Any?,
+        printType: PrintType,
+        path: String,
+        dbgStyle: Boolean,
+        maxDepth: Int,
+        maxItems: Int,
+    ): WireValue {
+        var v = value
+        var t = printType
+        var defs: Map<String, PrintType> = emptyMap()
+
+        for (step in path.split('/').filter { it.isNotEmpty() }) {
+            // Resolve type-level indirection before interpreting the step: a
+            // Ref/Recursive is not a node a path ever names.
+            while (true) {
+                val current = t
+                if (current is PrintType.Recursive) {
+                    defs = current.defs
+                    t = current.root
+                } else if (current is PrintType.Ref) {
+                    t = defs[current.name] ?: throw NoSuchPathException(
+                        path, "PrintType.Ref('${current.name}') with no definition in scope"
+                    )
+                } else {
+                    break
+                }
+            }
+
+            val arg = step.substringAfter(':', "")
+            when {
+                step.startsWith("f:") -> {
+                    val shape = t as? PrintType.Record
+                        ?: throw NoSuchPathException(path, "'$step' expects a record, found ${kindOf(t)}")
+                    val field = shape.fields.firstOrNull { it.name == arg }
+                        ?: throw NoSuchPathException(path, "no field '$arg' in this record")
+                    val rec = v as? MezzeRecord
+                        ?: throw NoSuchPathException(path, "'$step' expects a record value")
+                    v = rec.getField(rec.getFieldIndex(arg))
+                    t = field.type
+                }
+
+                step == "p" -> {
+                    val shape = t as? PrintType.Variant
+                        ?: throw NoSuchPathException(path, "'p' expects a variant, found ${kindOf(t)}")
+                    val variant = v as? MezzeVariant
+                        ?: throw NoSuchPathException(path, "'p' expects a variant value")
+                    if (!variant.hasPayload()) throw NoSuchPathException(path, "this constructor has no payload")
+                    val arm = shape.arms.firstOrNull { it.constructor == variant.constructorName }
+                    t = arm?.payload
+                        ?: throw NoSuchPathException(
+                            path, "constructor '${variant.constructorName}' carries no payload in this shape"
+                        )
+                    v = variant.payloadValue
+                }
+
+                step == "n" -> {
+                    val shape = t as? PrintType.Newtype
+                        ?: throw NoSuchPathException(path, "'n' expects a newtype, found ${kindOf(t)}")
+                    // Erased at runtime: the value does not change, only the shape.
+                    t = shape.inner
+                }
+
+                step.startsWith("i:") -> {
+                    val i = arg.toIntOrNull()
+                        ?: throw NoSuchPathException(path, "'$step' has no index")
+                    val inner = elementType(t)
+                        ?: throw NoSuchPathException(path, "'$step' expects a collection, found ${kindOf(t)}")
+                    v = elementAt(InspectNatives.iterableOf(v), i)
+                        ?: throw NoSuchPathException(path, "index $i is past the end of this collection")
+                    t = inner
+                }
+
+                step.startsWith("k:") || step.startsWith("v:") -> {
+                    val i = arg.toIntOrNull()
+                        ?: throw NoSuchPathException(path, "'$step' has no index")
+                    val wantKey = step.startsWith("k:")
+                    val (keyType, valType) = when (val current = t) {
+                        is PrintType.MzMap -> current.key to current.value
+                        is PrintType.MzSortedMap -> current.key to current.value
+                        else -> throw NoSuchPathException(path, "'$step' expects a map, found ${kindOf(current)}")
+                    }
+                    val entry = mapEntryAt(v, i)
+                        ?: throw NoSuchPathException(path, "entry $i is past the end of this map")
+                    v = if (wantKey) entry.first else entry.second
+                    t = if (wantKey) keyType else valType
+                }
+
+                else -> throw NoSuchPathException(path, "'$step' is not a path step")
+            }
+        }
+
+        // Re-wrap in the defs table if one was in scope, so a Ref below the
+        // expansion point still resolves.
+        val rooted = if (defs.isEmpty()) t else PrintType.Recursive(defs, t)
+        return build(v, rooted, dbgStyle, maxDepth, maxItems)
+    }
+
+    /** A path that does not address a node in this value. */
+    class NoSuchPathException(val path: String, val detail: String) :
+        RuntimeException("'$path' does not address a node here: $detail")
+
+    private fun elementType(t: PrintType): PrintType? = when (t) {
+        is PrintType.MzList -> t.inner
+        is PrintType.MzSeq -> t.inner
+        is PrintType.MzSet -> t.inner
+        is PrintType.MzSortedSet -> t.inner
+        is PrintType.MzDeque -> t.inner
+        is PrintType.MzNonEmptyList -> t.inner
+        else -> null
+    }
+
+    /**
+     * The [i]th element, or null if the collection is shorter.
+     *
+     * By iteration rather than random access because a set and a deque have no
+     * index — and the build walked them in this same order, so the nth element
+     * here is the one that got `i:n`.
+     */
+    private fun elementAt(elements: Iterable<*>, i: Int): Any? {
+        if (i < 0) return null
+        var n = 0
+        for (e in elements) {
+            if (n == i) return e
+            n++
+        }
+        return null
+    }
+
+    private fun mapEntryAt(value: Any?, i: Int): Pair<Any?, Any?>? {
+        if (i < 0) return null
+        var n = 0
+        when (value) {
+            is MezzeMap<*, *> -> for (e in value) {
+                if (n == i) return e.key to e.value
+                n++
+            }
+            is MezzeSortedMap<*, *> -> for (e in value.rawEntries()) {
+                if (n == i) return e.key() to e.value()
+                n++
+            }
+            else -> return null
+        }
+        return null
+    }
+
+    /** A shape's name, for an error that has to say what was found instead. */
+    private fun kindOf(t: PrintType): String = when (t) {
+        is PrintType.Scalar -> "a ${scalarKindName(t.kind)}"
+        PrintType.Frac -> "a frac"
+        PrintType.Function -> "a function"
+        PrintType.Dynamic -> "an untyped value"
+        is PrintType.Record -> "a record"
+        is PrintType.Variant -> "a variant"
+        is PrintType.Newtype -> "newtype ${t.name}"
+        is PrintType.MzMap, is PrintType.MzSortedMap -> "a map"
+        is PrintType.Ref, is PrintType.Recursive -> "a type reference"
+        else -> "a collection"
     }
 }
