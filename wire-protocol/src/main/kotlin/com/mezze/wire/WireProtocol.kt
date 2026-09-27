@@ -181,6 +181,20 @@ data class Hello(
     @SerialName("term_rows") val termRows: Int = 0,
     @SerialName("term_cols") val termCols: Int = 0,
     @SerialName("term") val term: String = "",
+    /**
+     * Shared secret, required ONLY when the runtime is listening on a socket.
+     *
+     * A spawned child inherits its parent's pipes, and the OS decides who may
+     * write to them — so the stdio transport needs no secret. A listening socket
+     * has no such guarantee: any local process could connect, and this protocol can
+     * LOAD and RUN code. The token is what keeps "reachable on loopback" from
+     * meaning "anyone on this machine can execute code in your project".
+     *
+     * Null on the stdio transport, where it is neither sent nor checked. Optional
+     * and default-null, so an older peer that never heard of it still handshakes
+     * (the codec sets `ignoreUnknownKeys` and `encodeDefaults = false`).
+     */
+    @SerialName("token") val token: String? = null,
 )
 
 @Serializable
@@ -214,6 +228,20 @@ data class RuntimeInfo(
     @SerialName("term_rows") val termRows: Int = 0,
     @SerialName("term_cols") val termCols: Int = 0,
     @SerialName("term") val term: String = "",
+    /**
+     * Shared secret, required ONLY when the runtime is listening on a socket.
+     *
+     * A spawned child inherits its parent's pipes, and the OS decides who may
+     * write to them — so the stdio transport needs no secret. A listening socket
+     * has no such guarantee: any local process could connect, and this protocol can
+     * LOAD and RUN code. The token is what keeps "reachable on loopback" from
+     * meaning "anyone on this machine can execute code in your project".
+     *
+     * Null on the stdio transport, where it is neither sent nor checked. Optional
+     * and default-null, so an older peer that never heard of it still handshakes
+     * (the codec sets `ignoreUnknownKeys` and `encodeDefaults = false`).
+     */
+    @SerialName("token") val token: String? = null,
 )
 
 @Serializable

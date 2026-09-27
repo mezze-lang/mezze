@@ -106,8 +106,46 @@ object RuntimeServer {
         // Save the real stdout BEFORE redirecting — control frames go here.
         // Anything written to System.out after we redirect gets wrapped in
         // STDOUT_DATA and routed back to the parent.
-        val controlOut: OutputStream = BufferedOutputStream(java.io.FileOutputStream(java.io.FileDescriptor.out))
-        val controlIn = BufferedInputStream(System.`in`)
+        // TRANSPORT. `--listen[=<session-file>]` serves one client over a loopback
+        // socket instead of the inherited pipes, so a tool that did NOT spawn this
+        // process — an editor, a REPL, an agent — can attach to an already warm
+        // runtime rather than starting its own and paying the whole startup cost.
+        //
+        // Default stays stdio: a spawned child's pipes are the OS's business and
+        // need no secret. A socket does, and `WireListener` carries one; the
+        // handshake below refuses a client that cannot present it.
+        val listenArg = args.firstOrNull { it == "--listen" || it.startsWith("--listen=") }
+        val listener = if (listenArg == null) null else {
+            val sessionPath = listenArg.substringAfter("--listen", "").removePrefix("=")
+            com.mezze.wire.WireListener.bind(
+                sessionFile = sessionPath.takeIf { it.isNotEmpty() }?.let { java.io.File(it) }
+            )
+        }
+        // Printed on the ORIGINAL stderr, before any redirection: a client that was
+        // given no session file still needs the port, and stdout is about to become
+        // a frame stream.
+        if (listener != null) {
+            System.err.println("[mezze] listening on 127.0.0.1:${listener.port}")
+            if (listenArg!!.startsWith("--listen=")) {
+                System.err.println("[mezze] session file: ${listenArg.substringAfter("=")}")
+            } else {
+                System.err.println("[mezze] token: ${listener.token}")
+            }
+        }
+        val accepted = listener?.accept()
+
+        val controlOut: OutputStream = if (accepted != null) {
+            BufferedOutputStream(accepted.getOutputStream())
+        } else {
+            BufferedOutputStream(java.io.FileOutputStream(java.io.FileDescriptor.out))
+        }
+        val controlIn = if (accepted != null) {
+            BufferedInputStream(accepted.getInputStream())
+        } else {
+            BufferedInputStream(System.`in`)
+        }
+        // Null on stdio, where there is nothing to prove.
+        val requiredToken = listener?.token
 
         // Run all I/O on this lock — single writer to controlOut, no
         // interleaving between (e.g.) a STDOUT_DATA frame from user code
@@ -446,7 +484,7 @@ object RuntimeServer {
         }
 
         try {
-            handshake(controlIn, ::send, diag)
+            handshake(controlIn, ::send, diag, requiredToken)
             // Redirect System.out / System.err to the wire so all user
             // output arrives at the parent as STDOUT_DATA / STDERR_DATA
             // frames. Done late — after engine/context init and after
@@ -484,6 +522,13 @@ object RuntimeServer {
         input: java.io.InputStream,
         send: (WireFrame) -> Unit,
         diag: PrintStream,
+        /**
+         * The secret a client must present, when the transport is a socket.
+         *
+         * Null on stdio: those pipes were inherited from the process that forked
+         * this one, so the OS already decided who may write to them.
+         */
+        requiredToken: String? = null,
     ) {
         val first = WireFrameCodec.read(input)
             ?: throw WireProtocolException("PROTO_DECODE", "EOF before HELLO")
@@ -491,6 +536,22 @@ object RuntimeServer {
             throw WireProtocolException("PROTO_STATE_INVALID", "expected HELLO first, got ${first.type}")
         }
         val hello = first.decode<Hello>()
+
+        // AUTH FIRST — before the terminal snapshot, before version negotiation,
+        // before anything this frame says is allowed to affect the runtime. An
+        // unauthenticated client must not be able to reach any behaviour at all,
+        // and this protocol can LOAD and RUN code.
+        if (requiredToken != null &&
+            !com.mezze.wire.WireListener.tokenMatches(requiredToken, hello.token)
+        ) {
+            send(WireFrame.of(MessageType.REJECT, com.mezze.wire.Reject(
+                reason = "unauthorized",
+                // Deliberately says nothing about the expected value, its length, or
+                // whether a token was supplied at all.
+                detail = "this runtime is listening on a socket and requires the session token",
+            )))
+            throw WireProtocolException("PROTO_UNAUTHORIZED", "client presented no valid session token")
+        }
         // Capture parent's TTY/terminal snapshot so the child's
         // `is_tty` etc. natives can serve it without OS access. The
         // child's fd 0 is the wire, not a real TTY, so without this
