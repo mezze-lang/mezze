@@ -777,9 +777,9 @@ class TypeChecker(
                 // invariant), never silent.
                 emitResult.typedModule?.let { InvariantChecker.checkEffectConservation(it) }
 
-                val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution, emitResult.typedModule)
-                val v2Warnings = mutableListOf<TypeCheckWarning>()
-                collectValidationResult(v2ValidationResult, collectedErrors, v2Warnings)
+                val validationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution, emitResult.typedModule)
+                val validationWarnings = mutableListOf<TypeCheckWarning>()
+                collectValidationResult(validationResult, collectedErrors, validationWarnings)
 
                 val typeContext = globallyResolvedConstraintResults.mapValues { (_, cr) ->
                     substitution.apply(cr.type)
@@ -810,7 +810,7 @@ class TypeChecker(
                 emitResult.internalFailure?.let { throw it }
                 return TypeCheckResult.Success(
                     substitution = substitution, importContext = importContext,
-                    warnings = warnings + v2Warnings,
+                    warnings = warnings + validationWarnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
                     typedModule = emitResult.typedModule,
@@ -1198,7 +1198,7 @@ class TypeChecker(
             is TypeCheckResult.Success -> {
                 val typedModule = result.typedModule
                     ?: throw TypeCheckError(
-                        "V2 pipeline did not emit a TypedModule",
+                        "the typecheck pipeline did not emit a TypedModule",
                         code = ErrorCode.I0002_PIPELINE_NO_TYPED_MODULE,
                     )
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
@@ -1273,9 +1273,11 @@ class TypeChecker(
         }
 
         @JvmStatic
-        @Deprecated("Use ModuleResolver.getFromCache(modulePath)?.parsedModule instead")
+        @Deprecated("Use ModuleResolver.getFromCache(world, modulePath)?.parsedModule instead")
         fun getTypedModule(modulePath: String): ParsedModule? {
-            return ModuleResolver.getFromCache(modulePath)?.parsedModule
+            // Reads the DEFAULT world: this signature has nowhere to name another,
+            // which is part of why it is deprecated.
+            return ModuleResolver.getFromCache(World.DEFAULT, modulePath)?.parsedModule
         }
     }
 }

@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.module
 import com.mezze.language.ast.BindingKey
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.World
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.ast.MezzeType
@@ -17,19 +18,78 @@ class ModuleTypeChecker(
     private val baseContext: TypingContext = TypingContext.empty,
     private val moduleResolver: ModuleResolver? = null,
     private val strictTopLevel: Boolean = false,
+    /**
+     * Which view of the codebase this checker reads and writes.
+     *
+     * Defaults to [World.DEFAULT] so a caller with no opinion keeps the
+     * single-world behaviour the caches had before they were separable.
+     */
+    private val world: World = World.DEFAULT,
 ) {
+    init {
+        // A checker in one world holding a resolver in another would split its
+        // caches: typed modules land in `world` while the parsed modules they were
+        // built from land somewhere else. Nothing would fail — the two halves would
+        // just disagree about what the codebase contains, which is the kind of bug
+        // that surfaces as an inexplicable stale result much later.
+        val resolverWorld = moduleResolver?.world
+        require(resolverWorld == null || resolverWorld == world) {
+            "ModuleTypeChecker is in $world but its ModuleResolver is in $resolverWorld — " +
+                "both halves of the cache must share one world"
+        }
+    }
+
     companion object {
-        private val typeCheckingStack = mutableSetOf<String>()
-        private val stackLock = Any()
+        /**
+         * One world's caches. Keyed by module path WITHIN a world, which together
+         * make the `(world, module)` key that replaced the bare path.
+         */
+        private class Caches {
+            val modules = mutableMapOf<String, TypedModuleResult>()
+            val modulesLock = Any()
 
-        private val globalCache = mutableMapOf<String, TypedModuleResult>()
-        private val globalCacheLock = Any()
+            /**
+             * Modules currently being checked in THIS world, for cycle detection.
+             *
+             * Per-world is the whole point: shared, it meant two concurrent checks
+             * that both reach a module report each other as an import cycle.
+             */
+            val checking = mutableSetOf<String>()
+            val checkingLock = Any()
+        }
 
+        private val worlds = java.util.concurrent.ConcurrentHashMap<World, Caches>()
+
+        private fun caches(world: World): Caches = worlds.computeIfAbsent(world) { Caches() }
+
+        /**
+         * Modules shared by every world: the precompiled standard library.
+         *
+         * Separate from the per-world caches deliberately. Stdlib typed modules are
+         * immutable and identical in every world, and there are a great many of
+         * them — a copy per world would multiply the largest thing in memory by the
+         * number of worlds for no gain, and would make creating a world expensive
+         * enough to discourage using one.
+         *
+         * Only ever written by [preloadIntoGlobalCache], and never invalidated:
+         * nothing a world does can change the stdlib.
+         */
+        private val sharedBase = mutableMapOf<String, TypedModuleResult>()
+        private val sharedBaseLock = Any()
+
+        /**
+         * Forget everything [world] has checked.
+         *
+         * The shared base is left alone — it holds the stdlib, which a clear was
+         * never meant to discard. Before worlds existed this method cleared the one
+         * cache and then re-preloaded the stdlib into it, so the observable
+         * behaviour is unchanged; the re-preload is now just unnecessary.
+         */
         @JvmStatic
-        fun clearCache() {
-            synchronized(globalCacheLock) {
-                globalCache.clear()
-            }
+        @JvmOverloads
+        fun clearCache(world: World = World.DEFAULT) {
+            val c = caches(world)
+            synchronized(c.modulesLock) { c.modules.clear() }
             // The catch here read "PrecompiledStdlib not initialized yet". It is an
             // object: touching it initialises it. Swallowing the failure left the
             // global cache empty after a clear, so the next check re-typechecked the
@@ -40,90 +100,129 @@ class ModuleTypeChecker(
             }
         }
 
-        private fun getFromGlobalCache(modulePath: String): TypedModuleResult? {
-            synchronized(globalCacheLock) {
-                return globalCache[modulePath]
-            }
-        }
-
-        private fun putInGlobalCache(modulePath: String, module: TypedModuleResult) {
-            synchronized(globalCacheLock) {
-                globalCache[modulePath] = module
-            }
-        }
-
+        /** Drop [world]'s caches entirely, so nothing is retained for it. */
         @JvmStatic
-        fun getAllCachedModules(): Map<String, TypedModuleResult> {
-            synchronized(globalCacheLock) {
-                return globalCache.toMap()
+        fun forgetWorld(world: World) {
+            require(world != World.DEFAULT) {
+                "the default world cannot be forgotten — use clearCache() to empty it"
             }
+            worlds.remove(world)
         }
 
+        /**
+         * A module as [world] sees it: its own first, then the shared base.
+         *
+         * The order is what makes a world an OVERLAY — a world that has checked its
+         * own `std::…` variant sees that, and one that has not falls through to the
+         * shared stdlib.
+         */
+        private fun getFromGlobalCache(world: World, modulePath: String): TypedModuleResult? {
+            val c = caches(world)
+            synchronized(c.modulesLock) { c.modules[modulePath] }?.let { return it }
+            synchronized(sharedBaseLock) { return sharedBase[modulePath] }
+        }
+
+        private fun putInGlobalCache(world: World, modulePath: String, module: TypedModuleResult) {
+            val c = caches(world)
+            synchronized(c.modulesLock) { c.modules[modulePath] = module }
+        }
+
+        /** Everything [world] can see, with its own entries shadowing the base. */
+        @JvmStatic
+        @JvmOverloads
+        fun getAllCachedModules(world: World = World.DEFAULT): Map<String, TypedModuleResult> {
+            val c = caches(world)
+            val base = synchronized(sharedBaseLock) { sharedBase.toMap() }
+            val own = synchronized(c.modulesLock) { c.modules.toMap() }
+            return base + own
+        }
+
+        /**
+         * Install a WORLD-INDEPENDENT precompiled module into the shared base.
+         *
+         * For artifacts that are the same in every world — the standard library.
+         * Project code belongs in a world; use [hydrateFromV2Module], which takes
+         * one.
+         */
         @JvmStatic
         fun preloadIntoGlobalCache(modulePath: String, module: TypedModuleResult) {
-            putInGlobalCache(modulePath, module)
+            synchronized(sharedBaseLock) { sharedBase[modulePath] = module }
         }
 
+/**
+         * Install an already-typed module into [world]'s cache.
+         *
+         * World-local, unlike [preloadIntoGlobalCache]: this is PROJECT code read
+         * back from the store, and a speculative world wants its own version of it.
+         */
         @JvmStatic
-        fun hydrateFromV2Module(
+        @JvmOverloads
+        fun cacheTypedModule(
             modulePath: String,
-            v2Module: TypedModule
+            typedModule: TypedModule,
+            world: World = World.DEFAULT,
         ) {
             val typeContext = mutableMapOf<String, MezzeType>()
-            for ((name, export) in v2Module.exports) {
+            for ((name, export) in typedModule.exports) {
                 typeContext[name] = export.type
             }
             val wrapper = TypedModuleResult(
                 modulePath = modulePath,
-                exports = emptyMap(),  // checker-side ExportedItem; not the same shape as v2 ExportEntry
+                // The checker-side ExportedItem is a different shape from the typed
+                // AST's ExportEntry, so exports cannot be carried across here.
+                exports = emptyMap(),
                 context = TypingContext.empty,
                 substitution = Substitution.empty,
-                typedModule = v2Module,
+                typedModule = typedModule,
                 parsedModule = null,
                 typeContext = typeContext
             )
-            putInGlobalCache(modulePath, wrapper)
+            putInGlobalCache(world, modulePath, wrapper)
         }
 
         @JvmStatic
-        fun clearTypeCheckingStack() {
-            synchronized(stackLock) {
-                typeCheckingStack.clear()
-            }
+        @JvmOverloads
+        fun clearTypeCheckingStack(world: World = World.DEFAULT) {
+            val c = caches(world)
+            synchronized(c.checkingLock) { c.checking.clear() }
         }
 
+        /**
+         * Forget [modulePaths] in [world].
+         *
+         * The shared base is untouched: it holds the stdlib, and a file-watcher
+         * event about project code has no business evicting it.
+         */
         @JvmStatic
-        fun invalidateModulePaths(modulePaths: Collection<String>) {
-            synchronized(globalCacheLock) {
-                for (path in modulePaths) globalCache.remove(path)
+        @JvmOverloads
+        fun invalidateModulePaths(modulePaths: Collection<String>, world: World = World.DEFAULT) {
+            val c = caches(world)
+            synchronized(c.modulesLock) {
+                for (path in modulePaths) c.modules.remove(path)
             }
-            synchronized(stackLock) {
-                for (path in modulePaths) typeCheckingStack.remove(path)
-            }
-        }
-
-        private fun isTypeChecking(modulePath: String): Boolean {
-            synchronized(stackLock) {
-                return modulePath in typeCheckingStack
+            synchronized(c.checkingLock) {
+                for (path in modulePaths) c.checking.remove(path)
             }
         }
 
-        private fun startTypeChecking(modulePath: String) {
-            synchronized(stackLock) {
-                typeCheckingStack.add(modulePath)
-            }
+        private fun isTypeChecking(world: World, modulePath: String): Boolean {
+            val c = caches(world)
+            synchronized(c.checkingLock) { return modulePath in c.checking }
         }
 
-        private fun finishTypeChecking(modulePath: String) {
-            synchronized(stackLock) {
-                typeCheckingStack.remove(modulePath)
-            }
+        private fun startTypeChecking(world: World, modulePath: String) {
+            val c = caches(world)
+            synchronized(c.checkingLock) { c.checking.add(modulePath) }
         }
 
-        private fun getTypeCheckingStack(): List<String> {
-            synchronized(stackLock) {
-                return typeCheckingStack.toList()
-            }
+        private fun finishTypeChecking(world: World, modulePath: String) {
+            val c = caches(world)
+            synchronized(c.checkingLock) { c.checking.remove(modulePath) }
+        }
+
+        private fun getTypeCheckingStack(world: World): List<String> {
+            val c = caches(world)
+            synchronized(c.checkingLock) { return c.checking.toList() }
         }
 
         fun create() = ModuleTypeChecker()
@@ -136,23 +235,23 @@ class ModuleTypeChecker(
         module: LoadedModule,
         importContext: ModuleImportContext = ModuleImportContext.empty()
     ): ModuleTypeCheckResult {
-        getFromGlobalCache(module.modulePath)?.let { cached ->
+        getFromGlobalCache(world, module.modulePath)?.let { cached ->
             val typeContext = cached.typeContext
             val cachedParsedModule = cached.parsedModule ?: module.parsedModule
             if (cachedParsedModule != null) {
-                moduleResolver?.updateModuleExportsV2(
+                moduleResolver?.updateModuleExports(
                     cached.modulePath, cachedParsedModule, typeContext
                 )
             }
             return ModuleTypeCheckResult.Success(cached)
         }
 
-        if (isTypeChecking(module.modulePath)) {
-            val cycle = getTypeCheckingStack() + module.modulePath
+        if (isTypeChecking(world, module.modulePath)) {
+            val cycle = getTypeCheckingStack(world) + module.modulePath
             throw ModuleError.CircularDependency(cycle)
         }
 
-        startTypeChecking(module.modulePath)
+        startTypeChecking(world, module.modulePath)
 
         try {
             val moduleContext = buildModuleContext(importContext)
@@ -187,9 +286,9 @@ class ModuleTypeChecker(
                         sourceHash = module.sourceHash,
                     )
 
-                    putInGlobalCache(module.modulePath, typedModule)
+                    putInGlobalCache(world, module.modulePath, typedModule)
 
-                    moduleResolver?.updateModuleExportsV2(module.modulePath, resolvedModule, typeContext)
+                    moduleResolver?.updateModuleExports(module.modulePath, resolvedModule, typeContext)
 
                     ModuleTypeCheckResult.Success(typedModule)
                 }
@@ -206,7 +305,7 @@ class ModuleTypeChecker(
                 }
             }
         } finally {
-            finishTypeChecking(module.modulePath)
+            finishTypeChecking(world, module.modulePath)
         }
     }
 

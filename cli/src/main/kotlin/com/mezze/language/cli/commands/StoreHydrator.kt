@@ -28,9 +28,9 @@ object StoreHydrator {
     fun hydrate(store: SQLiteMezzeStore, entryModulePath: String, timing: Boolean = false) {
         val stdlibStart = System.nanoTime()
         var stdlibHydrated = 0
-        for (v2Module in com.mezze.language.typechecker.PrecompiledStdlib.stdlibTypedModules.values) {
+        for (typedModule in com.mezze.language.typechecker.PrecompiledStdlib.stdlibTypedModules.values) {
             com.mezze.language.typechecker.module.ModuleTypeChecker
-                .hydrateFromV2Module(v2Module.path, v2Module)
+                .cacheTypedModule(typedModule.path, typedModule)
             stdlibHydrated++
         }
         val stdlibMs = (System.nanoTime() - stdlibStart) / 1_000_000
@@ -41,9 +41,9 @@ object StoreHydrator {
             store,
             hydrate = { modulePath, blob ->
                 try {
-                    val v2Module = StoreSerialization.deserializeTypedModule(blob)
+                    val typedModule = StoreSerialization.deserializeTypedModule(blob)
                     com.mezze.language.typechecker.module.ModuleTypeChecker
-                        .hydrateFromV2Module(modulePath, v2Module)
+                        .cacheTypedModule(modulePath, typedModule)
                     true
                 } catch (_: Exception) {
                     false

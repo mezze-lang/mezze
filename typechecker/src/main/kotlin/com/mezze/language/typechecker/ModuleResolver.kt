@@ -291,15 +291,38 @@ private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
 }
 
 class ModuleResolver(
-    currentPath: Path = Paths.get(".")
+    currentPath: Path = Paths.get("."),
+    /**
+     * Which view of the codebase this resolver reads and writes.
+     *
+     * Defaults to [World.DEFAULT] so a caller with no opinion keeps the
+     * single-world behaviour the caches had before they were separable.
+     *
+     * Readable so a collaborator can verify it shares this resolver's world —
+     * see ModuleTypeChecker's init block.
+     */
+    internal val world: World = World.DEFAULT,
 ) {
     private val projectRoot: Path = findProjectRoot(currentPath)
 
     companion object {
-        private val moduleCache = mutableMapOf<String, Module>()
-        private val contentHashCache = mutableMapOf<Hash, Module>()
-        private val cacheLock = Any()
-        private val moduleLoadingLocks = mutableMapOf<String, Any>()
+        /**
+         * One world's caches — the `(world, module)` key that replaced a bare path.
+         *
+         * Separable, not merely thread-safe: the maps were already synchronised, but
+         * two views of a codebase that both contain `app::handler` collided on one
+         * entry, so a speculative version had nowhere to live.
+         */
+        private class Caches {
+            val modules = mutableMapOf<String, Module>()
+            val byContentHash = mutableMapOf<Hash, Module>()
+            val loadingLocks = mutableMapOf<String, Any>()
+            val lock = Any()
+        }
+
+        private val worlds = java.util.concurrent.ConcurrentHashMap<World, Caches>()
+
+        private fun caches(world: World): Caches = worlds.computeIfAbsent(world) { Caches() }
 
                 @Volatile
         private var store: MezzeStore? = null
@@ -360,76 +383,94 @@ class ModuleResolver(
         }
 
                 @JvmStatic
-        fun clearCache() {
-            synchronized(cacheLock) {
-                moduleCache.clear()
-                contentHashCache.clear()
-                moduleLoadingLocks.clear()
+        @JvmOverloads
+        fun clearCache(world: World = World.DEFAULT) {
+            val c = caches(world)
+            synchronized(c.lock) {
+                c.modules.clear()
+                c.byContentHash.clear()
+                c.loadingLocks.clear()
             }
         }
 
+        /** Drop [world]'s caches entirely, so nothing is retained for it. */
+        @JvmStatic
+        fun forgetWorld(world: World) {
+            require(world != World.DEFAULT) {
+                "the default world cannot be forgotten — use clearCache() to empty it"
+            }
+            worlds.remove(world)
+        }
+
                 @JvmStatic
-        fun invalidateModulePaths(modulePaths: Collection<String>) {
-            synchronized(cacheLock) {
+        @JvmOverloads
+        fun invalidateModulePaths(modulePaths: Collection<String>, world: World = World.DEFAULT) {
+            val c = caches(world)
+            synchronized(c.lock) {
                 for (path in modulePaths) {
-                    val mod = moduleCache.remove(path)
-                    mod?.sourceHash?.let { contentHashCache.remove(it) }
-                    moduleLoadingLocks.remove(path)
+                    val mod = c.modules.remove(path)
+                    mod?.sourceHash?.let { c.byContentHash.remove(it) }
+                    c.loadingLocks.remove(path)
                 }
             }
         }
 
-                private fun getModuleLock(modulePath: String): Any {
-            synchronized(cacheLock) {
-                return moduleLoadingLocks.getOrPut(modulePath) { Any() }
-            }
+                private fun getModuleLock(world: World, modulePath: String): Any {
+            val c = caches(world)
+            synchronized(c.lock) { return c.loadingLocks.getOrPut(modulePath) { Any() } }
         }
 
-                internal fun getFromCache(modulePath: String): Module? {
-            synchronized(cacheLock) {
-                return moduleCache[modulePath]
-            }
+                internal fun getFromCache(world: World, modulePath: String): Module? {
+            val c = caches(world)
+            synchronized(c.lock) { return c.modules[modulePath] }
         }
 
                 @JvmStatic
-        fun snapshot(): Map<String, Module> = synchronized(cacheLock) { moduleCache.toMap() }
-
-                internal fun getFromCacheByContentHash(contentHash: Hash): Module? {
-            synchronized(cacheLock) {
-                return contentHashCache[contentHash]
-            }
+        @JvmOverloads
+        fun snapshot(world: World = World.DEFAULT): Map<String, Module> {
+            val c = caches(world)
+            return synchronized(c.lock) { c.modules.toMap() }
         }
 
-                internal fun putInCache(modulePath: String, module: Module) {
-            synchronized(cacheLock) {
-                moduleCache[modulePath] = module
-                module.sourceHash?.let { hash ->
-                    contentHashCache[hash] = module
-                }
+                internal fun getFromCacheByContentHash(world: World, contentHash: Hash): Module? {
+            val c = caches(world)
+            synchronized(c.lock) { return c.byContentHash[contentHash] }
+        }
+
+                internal fun putInCache(world: World, modulePath: String, module: Module) {
+            val c = caches(world)
+            synchronized(c.lock) {
+                c.modules[modulePath] = module
+                module.sourceHash?.let { hash -> c.byContentHash[hash] = module }
             }
         }
 
                         @JvmStatic
-        fun getAllParsedModules(): Map<String, ParsedModule> {
-            synchronized(cacheLock) {
-                return moduleCache.mapNotNull { (key, module) ->
+        @JvmOverloads
+        fun getAllParsedModules(world: World = World.DEFAULT): Map<String, ParsedModule> {
+            val c = caches(world)
+            synchronized(c.lock) {
+                return c.modules.mapNotNull { (key, module) ->
                     module.parsedModule?.let { key to it }
                 }.toMap()
             }
         }
 
                 @JvmStatic
-        fun isModuleStale(modulePath: String, sourceContent: String): Boolean {
-            val cachedModule = getFromCache(modulePath) ?: return true  // Not cached = stale
+        @JvmOverloads
+        fun isModuleStale(modulePath: String, sourceContent: String, world: World = World.DEFAULT): Boolean {
+            val cachedModule = getFromCache(world, modulePath) ?: return true  // Not cached = stale
             val cachedHash = cachedModule.sourceHash ?: return true     // No hash = stale
             val currentHash = Hash(sha256Hex(sourceContent))
             return cachedHash != currentHash
         }
 
                         @JvmStatic
-        fun lookupTypeDeclaration(typeName: String): ParsedTypeDecl? {
-            synchronized(cacheLock) {
-                for ((_, module) in moduleCache) {
+        @JvmOverloads
+        fun lookupTypeDeclaration(typeName: String, world: World = World.DEFAULT): ParsedTypeDecl? {
+            val c = caches(world)
+            synchronized(c.lock) {
+                for ((_, module) in c.modules) {
                     val typeDecl = module.index.typeDeclarations[typeName]
                     if (typeDecl != null) {
                         return typeDecl
@@ -502,7 +543,7 @@ class ModuleResolver(
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
         }
 
-        val moduleLock = getModuleLock(modulePath)
+        val moduleLock = getModuleLock(world, modulePath)
         synchronized(moduleLock) {
             checkForDeprecatedCoreModule(modulePath)
 
@@ -520,15 +561,15 @@ class ModuleResolver(
             val source = Files.readString(filePath)
             val sourceHash = Hash(sha256Hex(source))
 
-            getFromCacheByContentHash(sourceHash)?.let { cachedModule ->
+            getFromCacheByContentHash(world, sourceHash)?.let { cachedModule ->
                 DebugLogger.debug(Category.ModuleResolver) {
                     "Found module with same content hash at different path: $modulePath (reusing ${cachedModule.name})"
                 }
-                putInCache(modulePath, cachedModule)
+                putInCache(world, modulePath, cachedModule)
                 return cachedModule
             }
 
-            getFromCache(modulePath)?.let { cachedModule ->
+            getFromCache(world, modulePath)?.let { cachedModule ->
                 if (cachedModule.sourceHash == sourceHash) {
                     DebugLogger.debug(Category.ModuleResolver) {
                         "Found cached module with matching content hash: $modulePath"
@@ -565,7 +606,7 @@ class ModuleResolver(
                     parsedModule = parsedModule
                 )
 
-                putInCache(modulePath, module)
+                putInCache(world, modulePath, module)
                 return module
 
             } catch (e: ParseException) {
@@ -1057,17 +1098,17 @@ class ModuleResolver(
         return fromSegments.take(parentSegments.size) == parentSegments
     }
     
-        fun updateModuleExportsV2(
+        fun updateModuleExports(
         modulePath: String,
         parsedModule: ParsedModule,
         typeContext: Map<String, MezzeType>? = null
     ) {
         if (parsedModule.decls.isEmpty()) return
         DebugLogger.debug(Category.ModuleResolver) {
-            "updateModuleExportsV2: modulePath=$modulePath, ${parsedModule.decls.size} decls"
+            "updateModuleExports: modulePath=$modulePath, ${parsedModule.decls.size} decls"
         }
 
-        val module = getFromCache(modulePath)
+        val module = getFromCache(world, modulePath)
 
         if (module != null) {
             val updatedExports = if (typeContext != null && typeContext.isNotEmpty()) {
@@ -1086,10 +1127,10 @@ class ModuleResolver(
                 parsedModule = parsedModule,
                 index = updatedIndex
             )
-            putInCache(modulePath, updatedModule)
+            putInCache(world, modulePath, updatedModule)
 
             DebugLogger.debug(Category.ModuleResolver) {
-                "Cached module (v2, updated types+index) with ${updatedModule.exports.size} exports"
+                "Cached module (updated types+index) with ${updatedModule.exports.size} exports"
             }
         } else {
             val updatedExports = extractExportsFromParsedModule(parsedModule, modulePath, typeContext)
@@ -1104,10 +1145,10 @@ class ModuleResolver(
                 index = updatedIndex,
                 parsedModule = parsedModule
             )
-            putInCache(modulePath, newModule)
+            putInCache(world, modulePath, newModule)
 
             DebugLogger.debug(Category.ModuleResolver) {
-                "Cached module (v2, new) with ${newModule.exports.size} exports"
+                "Cached module (new) with ${newModule.exports.size} exports"
             }
         }
     }

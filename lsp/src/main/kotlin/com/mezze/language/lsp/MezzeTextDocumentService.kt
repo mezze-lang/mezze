@@ -274,7 +274,7 @@ class MezzeTextDocumentService(
 
             // Stdlib hydration removed (#233): the previous code populated
             // ModuleTypeChecker.globalCache from cache.sqlite for every
-            // `std::*` module — but used `hydrateFromV2Module` which sets
+            // `std::*` module — but used `cacheTypedModule` which sets
             // `parsedModule = null` on the wrapper. Downstream code in
             // `TypeChecker.checkParsedModule` walks
             // `getAllCachedModules().parsedModule.decls` to harvest
@@ -581,7 +581,7 @@ class MezzeTextDocumentService(
         // If there are parse errors, still try to type check the partial AST
         // This allows showing both parse errors and any type errors in successfully parsed code
 
-        // Step 2: Type check using v2 pipeline
+        // Step 2: Type check
         try {
             val workspaceRoot = server.getWorkspaceRoot()
             val projectRoot = if (workspaceRoot != null) {
@@ -1559,7 +1559,7 @@ class MezzeTextDocumentService(
         val cached = com.mezze.language.typechecker.module.ModuleTypeChecker
             .getAllCachedModules()[modulePath] ?: return null
         // Prefer the parsed module's locs (full source spans) when available.
-        // Fall back to v2 typed decls' locs when parsedModule is null
+        // Fall back to the typed decls' locs when parsedModule is null
         // (hydrated-from-cache path skips parsing).
         val uri = resolveModulePathToUri(modulePath) ?: return null
         val parsed = cached.parsedModule
@@ -1580,9 +1580,9 @@ class MezzeTextDocumentService(
                 }
             }
         }
-        // Hydrated-cache fallback: walk the v2 TypedModule's decls.
-        val v2 = cached.typedModule ?: return null
-        for (decl in v2.decls) {
+        // Hydrated-cache fallback: walk the TypedModule's decls.
+        val typed = cached.typedModule ?: return null
+        for (decl in typed.decls) {
             val (name, loc) = when (decl) {
                 is com.mezze.language.typedast.TypedLetDecl -> Pair(decl.name, decl.loc)
                 is com.mezze.language.typedast.TypedTypeDecl -> Pair(decl.name, decl.loc)
@@ -4129,7 +4129,7 @@ class MezzeTextDocumentService(
      * Build the "Extract to let" refactoring action.
      *
      * Fires when the user has a non-empty selection that doesn't span line
-     * boundaries (multi-line extractions are punted to V2). The selected
+     * boundaries (multi-line extractions are not handled yet). The selected
      * text becomes `let extracted = <slice>`; the slice is replaced with
      * `extracted`. Cursor lands on `extracted` so the user can rename.
      */
