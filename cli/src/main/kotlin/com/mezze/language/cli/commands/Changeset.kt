@@ -141,6 +141,12 @@ object ChangesetApply {
                 val file = changeset.fileFor(projectRoot, modulePath)
                 file.parentFile?.mkdirs()
                 file.writeText(source)
+                // Recorded BEFORE the watcher can see the write, so the event this
+                // very line produces is recognised as ours and dropped. Without it
+                // the watcher re-runs the whole cycle for a change the system just
+                // made — the duplicated work a declared changeset exists to remove,
+                // arriving by another route.
+                SelfWrites.record(file, source)
                 file
             }
 

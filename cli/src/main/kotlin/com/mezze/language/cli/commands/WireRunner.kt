@@ -390,10 +390,21 @@ object WireRunner {
         Thread {
             while (true) {
                 val key = try { watcher.take() } catch (_: InterruptedException) { return@Thread }
+                // The watched directory. Previously discarded — only basenames were
+                // kept — but resolving the full path is what lets a write this
+                // process made be recognised by CONTENT and dropped.
+                val dir = key.watchable() as? java.nio.file.Path
                 val files = mutableSetOf<String>()
                 for (event in key.pollEvents()) {
                     val filename = event.context()?.toString() ?: continue
-                    if (filename.endsWith(".mz")) files.add(filename)
+                    if (!filename.endsWith(".mz")) continue
+                    val changed = dir?.resolve(filename)?.toFile()
+                    if (changed != null && SelfWrites.wasSelfWritten(changed)) {
+                        // Our own write, byte for byte. A real edit changes the hash
+                        // and passes through, so this can never swallow a change.
+                        continue
+                    }
+                    files.add(filename)
                 }
                 key.reset()
                 if (files.isNotEmpty()) events.add(DevEvent.FilesChanged(files))
