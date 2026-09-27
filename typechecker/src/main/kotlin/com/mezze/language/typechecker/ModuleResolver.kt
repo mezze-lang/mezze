@@ -318,6 +318,16 @@ class ModuleResolver(
             val byContentHash = mutableMapOf<Hash, Module>()
             val loadingLocks = mutableMapOf<String, Any>()
             val lock = Any()
+
+            /**
+             * Module source this world should read INSTEAD of the file on disk.
+             *
+             * The overlay that makes a speculative change possible: a world holding
+             * `app::handler` here type-checks against that text while the file on
+             * disk is untouched, and a world without it reads the file as always.
+             * Entries may name a module with NO file yet — a changeset that adds one.
+             */
+            val sourceOverlay = mutableMapOf<String, String>()
         }
 
         private val worlds = java.util.concurrent.ConcurrentHashMap<World, Caches>()
@@ -391,6 +401,50 @@ class ModuleResolver(
                 c.byContentHash.clear()
                 c.loadingLocks.clear()
             }
+        }
+
+        /**
+         * Make [world] read [source] for [modulePath] instead of the file on disk.
+         *
+         * Invalidates any cached module for that path in this world, because the
+         * cache was built from different text. The default world accepts an overlay
+         * too — nothing prevents it — but a caller wanting a change it can throw
+         * away should use `World.fresh(...)`, which is the whole point.
+         */
+        @JvmStatic
+        fun overlaySource(world: World, modulePath: String, source: String) {
+            val c = caches(world)
+            synchronized(c.lock) {
+                c.sourceOverlay[modulePath] = source
+                val stale = c.modules.remove(modulePath)
+                stale?.sourceHash?.let { c.byContentHash.remove(it) }
+            }
+        }
+
+        /** What [world] reads for [modulePath], or null to read the file. */
+        private fun overlayFor(world: World, modulePath: String): String? {
+            val c = caches(world)
+            synchronized(c.lock) { return c.sourceOverlay[modulePath] }
+        }
+
+        /** Remove every overlay in [world], so it reads the files again. */
+        @JvmStatic
+        fun clearOverlay(world: World) {
+            val c = caches(world)
+            synchronized(c.lock) {
+                for (path in c.sourceOverlay.keys) {
+                    val stale = c.modules.remove(path)
+                    stale?.sourceHash?.let { c.byContentHash.remove(it) }
+                }
+                c.sourceOverlay.clear()
+            }
+        }
+
+        /** The module paths [world] currently overlays. */
+        @JvmStatic
+        fun overlaidPaths(world: World): Set<String> {
+            val c = caches(world)
+            synchronized(c.lock) { return c.sourceOverlay.keys.toSet() }
         }
 
         /** Drop [world]'s caches entirely, so nothing is retained for it. */
@@ -551,14 +605,25 @@ class ModuleResolver(
                 throw ModuleError.CircularDependency(loadingStack.toList() + modulePath)
             }
 
-            val filePath = resolveModuleFile(modulePath)
-                ?: throw ModuleError.ModuleNotFound(
+            // The overlay is consulted BEFORE the file is resolved, not after it is
+            // read: a changeset that ADDS a module has no file to find, so resolving
+            // first would throw ModuleNotFound on source we already hold.
+            val overlaid = overlayFor(world, modulePath)
+            val resolvedFile = resolveModuleFile(modulePath)
+            if (resolvedFile == null && overlaid == null) {
+                throw ModuleError.ModuleNotFound(
                     modulePath,
                     getSearchPaths(modulePath),
                     suggestion = suggestModulePath(modulePath),
                 )
+            }
+            // An overlaid module with no file still needs a path: it names where the
+            // module WOULD live, so diagnostics and FunctionIR.sourceFile point
+            // somewhere a reader recognises rather than at a synthetic blank.
+            val filePath = resolvedFile
+                ?: Paths.get(projectRoot.toString(), "src", modulePath.replace("::", "/") + ".mz")
 
-            val source = Files.readString(filePath)
+            val source = overlaid ?: Files.readString(filePath)
             val sourceHash = Hash(sha256Hex(source))
 
             getFromCacheByContentHash(world, sourceHash)?.let { cachedModule ->
