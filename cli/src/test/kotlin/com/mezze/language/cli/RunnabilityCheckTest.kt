@@ -100,10 +100,14 @@ class RunnabilityCheckTest {
 
     @Test
     fun `a function that discharges its own effects is runnable`() {
+        // `<*>` is required, not decoration: the body performs an effect and
+        // handles it itself, and an annotation that hides that would leave a caller
+        // unable to tell it apart from a body that handled nothing (T0210). The
+        // fixture predated that rule.
         val src = """
             use std::effects::log::{ println, Console }
 
-            let greet: { name: Str } -> {} = { name } ->
+            let greet: { name: Str } -> {} <*> = { name } ->
               perform Console in println { msg = name }
         """.trimIndent()
         val result = check(src, "greet")
