@@ -129,7 +129,13 @@ public final class InspectNatives {
             "Inspect: unhandled PrintType " + printType);
     }
 
-    private static String renderScalar(Object value, PrintType.ScalarKind kind, boolean dbgStyle) {
+    // renderScalar / renderFrac / renderFunction / iterableOf are the shared
+    // LEAF-FORMATTING vocabulary, and are public rather than private because
+    // InspectTree (which builds the same walk into a WireValue tree instead of a
+    // String) calls them. Two walks that each formatted their own leaves would
+    // drift — a Nat printed `7n` by `to_str` and `7` in a REPL — and the drift
+    // would be invisible until someone compared the two by hand.
+    public static String renderScalar(Object value, PrintType.ScalarKind kind, boolean dbgStyle) {
         switch (kind) {
             case Int:
                 return ((Long) value).toString();
@@ -159,7 +165,7 @@ public final class InspectNatives {
         throw new NativeTypeMismatchException("Inspect: unhandled scalar kind " + kind);
     }
 
-    private static String renderFrac(Object value) {
+    public static String renderFrac(Object value) {
         MezzeRecord rec = (MezzeRecord) value;
         Object num = rec.getField(rec.getFieldIndex("numerator"));
         Object den = rec.getField(rec.getFieldIndex("denominator"));
@@ -249,7 +255,7 @@ public final class InspectNatives {
                 + (value == null ? "null" : value.getClass().getName()));
     }
 
-    private static String renderFunction(Object value) {
+    public static String renderFunction(Object value) {
         if (value instanceof MezzeFunction func) {
             String name = func.getName();
             return name != null ? "<function:" + name + ">" : "<function>";
@@ -260,7 +266,7 @@ public final class InspectNatives {
     }
 
     /** Element view for the ordered collection runtime types. */
-    private static Iterable<?> iterableOf(Object value) {
+    public static Iterable<?> iterableOf(Object value) {
         if (value instanceof MezzeList list) {
             java.util.ArrayList<Object> out = new java.util.ArrayList<>(list.size());
             for (int i = 0; i < list.size(); i++) out.add(list.get(i));

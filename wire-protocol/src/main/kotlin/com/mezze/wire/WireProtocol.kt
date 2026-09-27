@@ -31,10 +31,30 @@ import kotlinx.serialization.serializer
 object WireProtocol {
 
     const val PROTOCOL_VERSION_MAJOR: Int = 1
-    const val PROTOCOL_VERSION_MINOR: Int = 0
+
+    /**
+     * 1 — added the expression-evaluation messages (0x70–0x7F) and the `eval`
+     * capability. Minor, not major: every added message is optional and gated on
+     * a negotiated capability, so a peer that never heard of them is unaffected.
+     */
+    const val PROTOCOL_VERSION_MINOR: Int = 1
 
     /** Maximum payload size (bytes). Tripwire for runaway frames. */
     const val MAX_FRAME_PAYLOAD_BYTES: Int = 16 * 1024 * 1024  // 16 MiB
+
+    /**
+     * Depth at which [Eval] stops walking a value and emits [WireValue.Elided].
+     *
+     * A bound is not an optimisation, it is a requirement: a value tree is walked
+     * from a live runtime value, and a deep or wide structure would otherwise
+     * serialise megabytes into a frame to answer "what is x" — or not terminate at
+     * all on a cyclic structure. Callers that want more ask for it, or expand a
+     * specific [WireValue.Elided] path.
+     */
+    const val DEFAULT_EVAL_MAX_DEPTH: Int = 6
+
+    /** Elements/entries per collection before the rest become an omitted count. */
+    const val DEFAULT_EVAL_MAX_ITEMS: Int = 100
 
     /** Configured by [WireProtocol] for CBOR encode/decode. */
     val cbor: Cbor = Cbor {
@@ -78,6 +98,9 @@ object WireProtocol {
         const val ALLOCATIONS = "allocations"
         const val INSIGHT = "insight"
         const val TRACE_JIT = "trace_jit"
+
+        /** EVAL / EVAL_RESULT / EXPAND / EXPAND_RESULT / CANCEL flow. */
+        const val EVAL = "eval"
     }
 }
 
@@ -90,9 +113,9 @@ object WireProtocol {
 //   0x40–0x4F  configuration
 //   0x50–0x5F  user I/O (STDOUT_DATA, STDIN_DATA)
 //   0x60–0x6F  diagnostics (LOG, PING, ERROR)
-// Ranges 0x20–0x2F and 0x70–0x7F are intentionally unused — reserved
-// for if/when multi-client attach or a REPL evaluation channel ever
-// gets a real design driver.
+//   0x70–0x7F  expression evaluation (EVAL, EXPAND, CANCEL)
+// Range 0x20–0x2F is still intentionally unused — reserved for if/when
+// multi-client attach gets a real design driver.
 //
 // Gaps in numbering are intentional — leaves room within each range to
 // add related messages without renumbering. Once published, type bytes
@@ -142,6 +165,13 @@ enum class MessageType(val tag: Byte) {
     PING(0x61),
     PONG(0x62),
     ERROR(0x63),
+
+    // Expression evaluation (0x70–0x7F)
+    EVAL(0x70),
+    EVAL_RESULT(0x71),
+    EXPAND(0x72),
+    EXPAND_RESULT(0x73),
+    CANCEL(0x74),
     ;
 
     constructor(tag: Int) : this(tag.toByte())
@@ -228,20 +258,13 @@ data class RuntimeInfo(
     @SerialName("term_rows") val termRows: Int = 0,
     @SerialName("term_cols") val termCols: Int = 0,
     @SerialName("term") val term: String = "",
-    /**
-     * Shared secret, required ONLY when the runtime is listening on a socket.
-     *
-     * A spawned child inherits its parent's pipes, and the OS decides who may
-     * write to them — so the stdio transport needs no secret. A listening socket
-     * has no such guarantee: any local process could connect, and this protocol can
-     * LOAD and RUN code. The token is what keeps "reachable on loopback" from
-     * meaning "anyone on this machine can execute code in your project".
-     *
-     * Null on the stdio transport, where it is neither sent nor checked. Optional
-     * and default-null, so an older peer that never heard of it still handshakes
-     * (the codec sets `ignoreUnknownKeys` and `encodeDefaults = false`).
-     */
-    @SerialName("token") val token: String? = null,
+    // NOTE: deliberately NO `token` field here. The session secret travels
+    // client → server in [Hello] and never comes back: this class is part of
+    // [Welcome], and WELCOME is the frame most likely to be logged or traced
+    // when someone debugs a handshake, since it carries the versions and
+    // capabilities. A secret that rides along in it ends up in log files. The
+    // client already knows the token — it just sent it — so echoing it is pure
+    // exposure with no use.
 )
 
 @Serializable
@@ -482,6 +505,153 @@ data class ProtocolError(
     /** Optional: the tag byte of the message we're complaining about. */
     @SerialName("in_reply_to") val inReplyTo: Byte? = null,
 )
+
+// ─── Expression evaluation ────────────────────────────────────────────
+//
+// LOAD/EVICT are module-granularity — "here is a program, run it" — and the
+// answer comes back as console bytes and an exit code. "Evaluate this
+// expression and give me the VALUE" is a different interaction: request /
+// response over values, many of them possibly in flight at once, from
+// different callers (an editor's inline hints, a REPL, a doc browser).
+//
+// WHY NO SOURCE TEXT IN [Eval]: the runtime cannot compile. `:interpreter`
+// depends on `:parser` and `:typechecker` only as TEST dependencies — at
+// runtime it has neither, and that is deliberate, because the runtime is what
+// ships as the slim jar and the native image. So the split is the one LOAD
+// already embodies: the client compiles, the runtime executes IR. An
+// expression's type errors are therefore diagnosed on the CLIENT side of the
+// wire and never travel as a protocol message at all.
+//
+// WHY NO SHAPE FIELD EITHER: rendering a value needs its static shape (Nat vs
+// Int are both Long, a newtype is erased to its payload, a one-char Str is not
+// a Char). That shape does not need a wire field — the compiler already bakes a
+// PrintType into the IR as a constant for `to_dbg`/`to_str`, and the same
+// mechanism carries it here. Keeping it out of the protocol also keeps the
+// published contract independent of a compiler-internal type.
+//
+// WHY NO `module_hash` STALENESS GUARD: it would check nothing. The IR closure
+// LOAD/EVAL ships is self-contained ("all modules are already included in the
+// FunctionIR list"), and every cache inside the runtime is keyed by content
+// hash — so cached code for hash X *is* X. The staleness that does exist is
+// between an editor's unsaved buffer and the store, which is decided before
+// compilation and therefore before this protocol is involved. A field that
+// cannot detect the failure it names is worse than no field.
+
+/**
+ * Client → runtime: run this compiled expression and reply with its value.
+ *
+ * [requestId] is the client's own counter and is echoed in [EvalResult]. It is
+ * NOT a `run_id`: run ids identify programs, of which the runtime models one at
+ * a time (`StatusReply.activeRunId` is singular), whereas eval requests are
+ * many and concurrent. That is also why cancellation gets its own [Cancel]
+ * message rather than reusing INTERRUPT — INTERRUPT means "stop the running
+ * program", and there is no way to say with it "drop the doc browser's request
+ * but keep the editor's".
+ */
+@Serializable
+data class Eval(
+    @SerialName("request_id") val requestId: Long,
+    /** Compiled IR closure for the expression, as for [Load]. */
+    @SerialName("fns_cbor_path") val fnsCborPath: String,
+    /** Metadata sidecar, as for [Load]; its `entryHash` names the expression. */
+    @SerialName("meta_cbor_path") val metaCborPath: String,
+    @SerialName("max_depth") val maxDepth: Int = WireProtocol.DEFAULT_EVAL_MAX_DEPTH,
+    @SerialName("max_items") val maxItems: Int = WireProtocol.DEFAULT_EVAL_MAX_ITEMS,
+    /** Wall-clock budget for the expression. 0 = no limit. */
+    @SerialName("timeout_ms") val timeoutMs: Long = 0,
+)
+
+/**
+ * Runtime → client: the value, or why there isn't one.
+ *
+ * Exactly one of [value] / [error] is set. There is deliberately no "was it
+ * truncated" flag — [WireValue.Elided] nodes in the tree say so precisely, and
+ * a derived boolean alongside them is one more thing that can disagree.
+ */
+@Serializable
+data class EvalResult(
+    @SerialName("request_id") val requestId: Long,
+    val value: WireValue? = null,
+    val error: EvalError? = null,
+    @SerialName("elapsed_micros") val elapsedMicros: Long = 0,
+)
+
+/**
+ * Why an evaluation produced no value.
+ *
+ * [detail] is the same [ExitDetail] a program failure carries, reused rather
+ * than re-declared: a client that already renders a Mezze stack trace for a
+ * crashed program renders one for a failed expression with the same code.
+ */
+@Serializable
+data class EvalError(
+    /**
+     * One of [Kind]. A string rather than an enum, matching `Exited.reason` and
+     * `Log.level`: an unknown enum value is a hard decode failure, so a client
+     * built today would refuse a frame naming a kind added tomorrow.
+     */
+    val kind: String,
+    val detail: ExitDetail,
+) {
+    object Kind {
+        /** A path in [Eval] does not exist. */
+        const val NOT_FOUND = "not_found"
+        /** The IR or metadata sidecar would not decode. */
+        const val DECODE_FAILED = "decode_failed"
+        /** The metadata named no entry, so there is no expression to run. */
+        const val NO_ENTRY = "no_entry"
+        /** The expression ran and failed. [EvalError.detail] carries the stack. */
+        const val FAILED = "failed"
+        /** [Cancel] arrived for this request. */
+        const val CANCELLED = "cancelled"
+        /** `timeout_ms` elapsed. */
+        const val TIMEOUT = "timeout"
+        /** The value could not be walked — a shape/value mismatch, i.e. a compiler bug. */
+        const val UNRENDERABLE = "unrenderable"
+        /** An [Expand] path does not address a node in that result. */
+        const val NO_SUCH_PATH = "no_such_path"
+        /** The referenced result is no longer held, so the path cannot be resolved. */
+        const val EXPIRED = "expired"
+    }
+}
+
+/**
+ * Client → runtime: expand one [WireValue.Elided] node from an earlier result.
+ *
+ * This is the laziness half of the value tree: a first reply is bounded, and a
+ * client that wants to look inside an elided branch asks for exactly that
+ * branch rather than re-requesting the whole value at a larger depth.
+ */
+@Serializable
+data class Expand(
+    @SerialName("request_id") val requestId: Long,
+    /** The [EvalResult.requestId] whose tree [path] came from. */
+    @SerialName("from_request") val fromRequest: Long,
+    /** The [WireValue.Elided.path] to expand. */
+    val path: String,
+    @SerialName("max_depth") val maxDepth: Int = WireProtocol.DEFAULT_EVAL_MAX_DEPTH,
+    @SerialName("max_items") val maxItems: Int = WireProtocol.DEFAULT_EVAL_MAX_ITEMS,
+)
+
+/** Runtime → client: the subtree at [path], or why it could not be produced. */
+@Serializable
+data class ExpandResult(
+    @SerialName("request_id") val requestId: Long,
+    val path: String,
+    val value: WireValue? = null,
+    val error: EvalError? = null,
+)
+
+/**
+ * Client → runtime: abandon one in-flight [Eval] or [Expand].
+ *
+ * Answered with an [EvalError.Kind.CANCELLED] result for that request, so a
+ * client always gets exactly one reply per request and never has to time out
+ * waiting to learn a cancel landed. Cancelling an unknown or finished request
+ * is not an error — the reply may already have been sent.
+ */
+@Serializable
+data class Cancel(@SerialName("request_id") val requestId: Long)
 
 // ─── Frame: type + payload pair ───────────────────────────────────────
 
