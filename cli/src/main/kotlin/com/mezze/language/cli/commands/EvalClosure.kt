@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.parsedast.diagnostics.display
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.store.StoreSerialization
 import com.mezze.language.truffleir.FunctionIR
@@ -31,10 +32,18 @@ import java.io.File
  *
  * ## How the module's scope is obtained
  *
- * By appending `let <binding> = <expr>` to the module's own source and compiling
- * the result. That is not a shortcut — it is what makes the expression's scope
- * exactly the module's scope, with every import and every top-level declaration
- * visible, without this file having to model scope at all.
+ * By appending `let <binding> = {} -> <expr>` to the module's own source and
+ * compiling the result. That is not a shortcut — it is what makes the expression's
+ * scope exactly the module's scope, with every import and every top-level
+ * declaration visible, without this file having to model scope at all.
+ *
+ * A THUNK rather than a bare binding, and that detail is load-bearing. The top
+ * level is for definitions, so a top-level binding whose value comes from an
+ * effectful call is rejected (V0502) even when that call handles its own effects —
+ * it would run at module-load time. Wrapping in `{} -> …` makes the top level a
+ * definition, and the runtime CALLS the entry with an empty record, exactly as it
+ * runs `main`. Without the thunk, `mez eval 'main {}'` is impossible; with it, the
+ * expression is evaluated in a function position where effects are allowed.
  *
  * It is also cheap on a warm runtime, and for a reason worth stating: FunctionIRs
  * are content-addressed, so appending a declaration leaves the code the USER wrote
@@ -87,10 +96,17 @@ object EvalClosure {
             return Result.Failed("cannot read ${moduleFile.path}: ${e.message}")
         }
 
-        // A newline before the binding in case the file has no trailing one —
-        // otherwise the binding joins the last line and the parse error points at
-        // source the user did write.
-        val source = moduleSource.trimEnd() + "\n\nlet $BINDING = $expression\n"
+        // A THUNK, not a bare binding, and this is load-bearing. The top level is
+        // for definitions: a top-level binding whose value comes from an effectful
+        // call is rejected (V0502) even when that call handles its own effects,
+        // because it would run at module-load time. Binding `{} -> <expr>` instead
+        // makes the top level a definition, and the runtime CALLS the entry with an
+        // empty record — exactly how it runs `main` — so the expression is evaluated
+        // in a function position where effects are allowed.
+        //
+        // A newline before it in case the file has no trailing one; otherwise the
+        // binding joins the last line and an error points at source the user wrote.
+        val source = moduleSource.trimEnd() + "\n\nlet $BINDING = {} -> $expression\n"
 
         val parser = MezzeParser()
         val parsed = parser.parseWithRecovery(source, file = moduleFile.name)
@@ -111,7 +127,7 @@ object EvalClosure {
             )
         }
         if (raw is TypeChecker.TypeCheckResult.Failure) {
-            return Result.Failed(TypeCheckRunner.formatErrors(raw, source))
+            return Result.Failed(formatAgainstExpression(raw, expression, moduleSource))
         }
         val result = TypeCheckRunner.wrapSuccess(raw as TypeChecker.TypeCheckResult.Success)
 
@@ -122,12 +138,53 @@ object EvalClosure {
                     "not a problem with the expression"
             )
 
-        // The shape the runtime renders against. Local declarations first so one
-        // shadows an imported type of the same name, matching lowering.
+        // Refuse an expression whose effects nothing handles, BEFORE running it.
+        // Mezze is lazy-until-discharged: calling an effectful function with no
+        // enclosing handler does not fail, it returns a MezzeSuspend — so the value
+        // would come back as an unevaluated thunk that renders as something
+        // plausible. For a command whose whole job is showing what an expression
+        // evaluates to, that is the worst failure: it looks like it worked.
+        when (val runnable = RunnabilityCheck.check(entry)) {
+            is RunnabilityCheck.Result.Runnable -> Unit
+
+            is RunnabilityCheck.Result.NeedsHandlers -> return Result.Failed(
+                buildString {
+                    append("this expression performs ")
+                    append(runnable.effects.joinToString(", "))
+                    append(", and nothing here handles ")
+                    append(if (runnable.effects.size == 1) "it" else "them")
+                    append(".\n")
+                    append("  Evaluating it would return an unevaluated computation rather than a ")
+                    append("value.\n")
+                    append("  Handle the effect inside the expression — ")
+                    append("`perform <Handler> in <expr>` — or evaluate something that does not ")
+                    append("perform.")
+                }
+            )
+
+            // The expression was wrapped in a thunk above, so the binding is always
+            // a function. Reaching here means the wrapping stopped working.
+            is RunnabilityCheck.Result.NotAFunction -> return Result.Failed(
+                "the eval binding is not a function (${runnable.actualType}) — this is a " +
+                    "compiler bug, not a problem with the expression"
+            )
+        }
+
+        // The shape describes the value the runtime gets back, which is the thunk's
+        // RETURN type — the thunk itself is scaffolding and is never rendered.
+        val resultType = (entry.scheme.type as? com.mezze.language.ast.MezzeType.FunctionType)
+            ?.returnType
+            ?: return Result.Failed(
+                "the eval binding lost its function type — this is a compiler bug, " +
+                    "not a problem with the expression"
+            )
+
+        // Local declarations first so one shadows an imported type of the same
+        // name, matching lowering.
         val modules = listOfNotNull(result.typedModule) + result.loadedModules.values
         val printTypes = PrintTypeDefs.collect(modules)
         val resultPrintType = try {
-            PrintTypeBuilder(printTypes.defs).build(entry.scheme.type)
+            PrintTypeBuilder(printTypes.defs).build(resultType)
         } catch (e: PrintTypeBuilder.NotAConcreteValueType) {
             // A value whose type is still a variable has no printable shape. It is
             // refused here rather than rendered from the runtime value alone,
@@ -160,8 +217,66 @@ object EvalClosure {
             fnsBytes = fnBytes,
             metaBytes = metaBytes,
             resultPrintType = resultPrintType,
-            resultType = entry.scheme.type.toString(),
+            // prettyPrintType, never `toString()`: MezzeType's toString is a debug
+            // rendering that leaks Kotlin class names and identity hashes —
+            // `TypeApplication(Seq …MezzeType$IntType@66c61024)` — which is not
+            // something to show a user.
+            resultType = com.mezze.language.ast.prettyPrintType(resultType),
         )
+    }
+
+    /** Column the expression starts at on the synthesized line, 1-indexed. */
+    private val EXPR_COLUMN = "let $BINDING = {} -> ".length + 1
+
+    /**
+     * Report a typecheck failure against the EXPRESSION, not against the source
+     * that was synthesized to compile it.
+     *
+     * The ordinary formatter renders a source frame, which here would cite a line
+     * number past the end of the file and print `let __mez_eval__ = {} -> …` — a
+     * generated identifier, on a line the user never wrote, in a file that does not
+     * contain it. The message and the span are right; only the frame is wrong. So
+     * the frame is rebuilt from the expression, which also makes the caret land on
+     * the part of what the USER typed that is actually at fault.
+     *
+     * Errors in the module itself keep their real location: they belong to the
+     * file, and re-pointing them at the expression would blame the wrong code.
+     */
+    private fun formatAgainstExpression(
+        failure: TypeChecker.TypeCheckResult.Failure,
+        expression: String,
+        moduleSource: String,
+    ): String {
+        val syntheticLine = moduleSource.trimEnd().lines().size + 2
+        return buildString {
+            for ((i, err) in failure.errors.withIndex()) {
+                if (i > 0) append("\n\n")
+                val code = err.code.display()
+                append(if (code.isNotEmpty()) "error[$code]: " else "error: ").append(err.message)
+
+                val loc = err.loc
+                if (loc != null && loc.startLine == syntheticLine) {
+                    append("\n  in: ").append(expression)
+                    val from = loc.startCol - EXPR_COLUMN
+                    val to = if (loc.endLine == syntheticLine) loc.endCol - EXPR_COLUMN else expression.length
+                    if (from in 0..expression.length && to >= from) {
+                        append("\n      ").append(" ".repeat(from))
+                        append("^".repeat((to - from + 1).coerceAtLeast(1).coerceAtMost(expression.length - from)))
+                    }
+                } else if (loc != null) {
+                    // Belongs to the module, not the expression: re-pointing it at
+                    // the expression would blame the wrong code.
+                    append("\n  --> ").append(loc.file).append(':')
+                        .append(loc.startLine).append(':').append(loc.startCol)
+                }
+                for (hint in err.hints) append("\n  = hint: ").append(hint)
+            }
+            val explainable = failure.errors.map { it.code }.firstOrNull { ExplainDocs.hasDoc(it) }
+            if (explainable != null) {
+                append("\n\nFor more information, try `mez --explain ")
+                append(explainable.display()).append("`.")
+            }
+        }
     }
 
     /** Write a compiled closure where an [com.mezze.wire.Eval] request can name it. */

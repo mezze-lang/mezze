@@ -202,6 +202,106 @@ class EvalClosureTest {
     }
 
     @Test
+    fun `a diagnostic is framed against the expression, not the synthesized source`(@TempDir dir: Path) {
+        // The ordinary formatter would cite a line past the end of the file and
+        // print `let __mez_eval__ = {} -> …` — a generated name, on a line the user
+        // never wrote, in a file that does not contain it.
+        val failed = compile(dir, emptyModule, "1 + \"not a number\"")
+            as? EvalClosure.Result.Failed ?: error("expected a refusal")
+
+        assertTrue(
+            EvalClosure.BINDING !in failed.message,
+            "the diagnostic leaks the synthesized binding:\n${failed.message}",
+        )
+        assertTrue(
+            "in: 1 + \"not a number\"" in failed.message,
+            "the diagnostic should quote what the user typed:\n${failed.message}",
+        )
+    }
+
+    @Test
+    fun `the caret lands on the offending part of the expression`(@TempDir dir: Path) {
+        val failed = compile(dir, emptyModule, "nope { x = 1 }")
+            as? EvalClosure.Result.Failed ?: error("expected a refusal")
+
+        // `nope` is 4 characters at the start, so 4 carets at offset 0.
+        val caretLine = failed.message.lines().firstOrNull { it.trim().startsWith("^") }
+            ?: error("no caret line in:\n${failed.message}")
+        assertEquals("^^^^", caretLine.trim())
+    }
+
+    @Test
+    fun `an error in the MODULE keeps its own location`(@TempDir dir: Path) {
+        // It belongs to the file; re-pointing it at the expression would blame code
+        // the user did not type.
+        val module = """
+            let broken: { x: Int } -> Int = { x } -> x + "no"
+        """.trimIndent()
+        val failed = compile(dir, module, "1") as? EvalClosure.Result.Failed
+            ?: error("expected a refusal")
+        assertTrue(
+            "-->" in failed.message,
+            "a module error should cite its file location:\n${failed.message}",
+        )
+    }
+
+    // ---- the thunk, and what it makes possible ------------------------------
+
+    @Test
+    fun `an expression calling a function that handles its own effects compiles`(@TempDir dir: Path) {
+        // This is what the thunk buys. A top-level binding whose value comes from an
+        // effectful call is rejected (V0502) even when the call handles its own
+        // effects — it would run at module-load time. Wrapping in `{} -> …` puts the
+        // expression in a function position, where the runtime calls it exactly as
+        // it calls `main`.
+        val module = """
+            use std::effects::log::{ println, Console }
+
+            let greet = {} -> perform Console in do
+              println { msg = "hi" }
+        """.trimIndent()
+        val r = compile(dir, module, "greet {}")
+        assertTrue(
+            r is EvalClosure.Result.Compiled,
+            "an effect-handling call should be evaluable: ${(r as? EvalClosure.Result.Failed)?.message}",
+        )
+    }
+
+    @Test
+    fun `an expression with UNHANDLED effects is refused before it can run`(@TempDir dir: Path) {
+        // Mezze is lazy-until-discharged: calling an effectful function with no
+        // enclosing handler returns a MezzeSuspend rather than failing. Evaluating
+        // it would hand back an unevaluated computation that renders as something
+        // plausible — the "it looks like it worked" failure.
+        val module = """
+            use std::effects::log::{ println, Console }
+
+            let main: { x: Int } -> Int = { x } -> x
+        """.trimIndent()
+        val failed = compile(dir, module, "println { msg = \"hi\" }")
+            as? EvalClosure.Result.Failed ?: error("an unhandled effect must be refused")
+
+        assertTrue("performs" in failed.message, failed.message)
+        assertTrue(
+            "Log" in failed.message,
+            "the refusal should name the effect that is unhandled:\n${failed.message}",
+        )
+        assertTrue(
+            "perform" in failed.message,
+            "the refusal should say how to fix it:\n${failed.message}",
+        )
+    }
+
+    @Test
+    fun `the reported type is the expression's, not the thunk's`(@TempDir dir: Path) {
+        // The thunk is scaffolding. Reporting `{} -> Int` would describe the
+        // wrapper rather than the value the caller receives.
+        val c = compiled(dir, emptyModule, "1 + 2")
+        assertEquals("Int", c.resultType)
+        assertEquals(PrintType.Scalar(PrintType.ScalarKind.Int), meta(c).resultPrintType)
+    }
+
+    @Test
     fun `an unparseable expression is refused`(@TempDir dir: Path) {
         val r = compile(dir, emptyModule, "1 +")
         assertTrue(r is EvalClosure.Result.Failed, "expected a refusal, got $r")

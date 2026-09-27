@@ -65,6 +65,11 @@ object WireRunner {
         WireProtocol.Capability.STRUCTURED_ERRORS,
         WireProtocol.Capability.STDIN,
         WireProtocol.Capability.STDERR_FRAMES,
+        // Claimed by every session, not only `mez eval`: capabilities are
+        // negotiated once at handshake, and the agreed set is the intersection —
+        // so a client that does not claim it cannot use EVAL later even though
+        // the server serves it.
+        WireProtocol.Capability.EVAL,
     )
 
     /** Per-compile output we need to ship to RuntimeServer. */
@@ -491,7 +496,7 @@ object WireRunner {
  * Ctrl-C wiring and the I/O streams; per-run reporting goes through
  * [runOnce] which sends EVICT/LOAD and consumes frames until EXITED.
  */
-private class WireSession private constructor(
+internal class WireSession private constructor(
     private val process: Process,
     private val toChild: OutputStream,
     private val fromChild: InputStream,
@@ -636,10 +641,64 @@ private class WireSession private constructor(
             cwd = cwd,
             env = env,
         )))
-        return drainUntilExited()
+        return when (val drained = drain()) {
+            is Drained.Run -> drained.outcome
+            is Drained.Eval -> {
+                // An EVAL_RESULT during a LOAD run means the two flows are
+                // interleaved on one session, which this client never does.
+                System.err.println("Protocol error: EVAL_RESULT arrived during a run")
+                RunOutcome(exitCode = 1, reason = "protocol_error")
+            }
+        }
     }
 
-    private fun drainUntilExited(): RunOutcome {
+    /**
+     * Evaluate one compiled expression and return its reply.
+     *
+     * Shares [drain] with [runOnce] rather than having a loop of its own: that
+     * loop is where framing-error recovery, EOF and child-crash handling live, and
+     * a second copy would be a second place for those to be subtly wrong. The two
+     * flows differ only in which frame ends them.
+     */
+    fun evalOnce(
+        fnsFile: File,
+        metaFile: File,
+        requestId: Long,
+        maxDepth: Int,
+        maxItems: Int,
+        timeoutMs: Long,
+    ): com.mezze.wire.EvalResult? {
+        send(WireFrame.of(MessageType.EVAL, com.mezze.wire.Eval(
+            requestId = requestId,
+            fnsCborPath = fnsFile.absolutePath,
+            metaCborPath = metaFile.absolutePath,
+            maxDepth = maxDepth,
+            maxItems = maxItems,
+            timeoutMs = timeoutMs,
+        )))
+        return when (val drained = drain()) {
+            is Drained.Eval -> drained.result
+            // The runtime died, or answered a run that was never started. Either
+            // way there is no value; drain already reported why.
+            is Drained.Run -> null
+        }
+    }
+
+    /** Whichever terminal frame [drain] saw first. */
+    private sealed interface Drained {
+        data class Run(val outcome: RunOutcome) : Drained
+        data class Eval(val result: com.mezze.wire.EvalResult) : Drained
+    }
+
+    /**
+     * Read frames, passing through output and answering requests, until a terminal
+     * frame arrives.
+     *
+     * Terminal means EXITED (a program finished) or EVAL_RESULT (an expression
+     * produced a value or a reason it did not). A child crash or an unrecoverable
+     * stream is reported here and surfaced as a crashed [RunOutcome].
+     */
+    private fun drain(): Drained {
         // Consecutive framing-error counter. PROTO_UNKNOWN_TYPE is fully
         // recoverable (length+payload were read correctly, we just don't
         // recognize the tag), and many PROTO_DECODE errors are also
@@ -667,7 +726,7 @@ private class WireSession private constructor(
                 // trying to skip; the next bytes are mid-payload junk.
                 if (e.code == "PROTO_TOO_LARGE") {
                     System.err.println("Error: wire decode failed: ${e.code} ${e.message} — stream unrecoverable")
-                    return RunOutcome(exitCode = 1, reason = "wire_error")
+                    return Drained.Run(RunOutcome(exitCode = 1, reason = "wire_error"))
                 }
                 consecutiveFraming++
                 System.err.println(
@@ -679,7 +738,7 @@ private class WireSession private constructor(
                         "Error: $maxConsecutive framing errors in a row, " +
                         "giving up on this run"
                     )
-                    return RunOutcome(exitCode = 1, reason = "wire_error")
+                    return Drained.Run(RunOutcome(exitCode = 1, reason = "wire_error"))
                 }
                 continue
             } ?: return run {
@@ -703,11 +762,11 @@ private class WireSession private constructor(
                     }
                     System.err.println(msg)
                     reportChildStderr()
-                    RunOutcome(exitCode = ec, reason = "crashed")
+                    Drained.Run(RunOutcome(exitCode = ec, reason = "crashed"))
                 } else {
                     System.err.println("${Glyphs.CROSS} the runtime exited unexpectedly")
                     reportChildStderr()
-                    RunOutcome(exitCode = 1, reason = "crashed")
+                    Drained.Run(RunOutcome(exitCode = 1, reason = "crashed"))
                 }
             }
             when (frame.type) {
@@ -735,12 +794,12 @@ private class WireSession private constructor(
                     if (e.reason == "error" && detail != null && detail.message.isNotEmpty()) {
                         System.err.println(detail.message)
                     }
-                    return RunOutcome(exitCode = e.code, reason = e.reason)
+                    return Drained.Run(RunOutcome(exitCode = e.code, reason = e.reason))
                 }
                 MessageType.ERROR -> {
                     val pe = frame.decode<ProtocolError>()
                     System.err.println("Protocol error: ${pe.code} ${pe.message}")
-                    return RunOutcome(exitCode = 1, reason = "protocol_error")
+                    return Drained.Run(RunOutcome(exitCode = 1, reason = "protocol_error"))
                 }
                 MessageType.LOG -> {
                     // Surface child-runtime logs to stderr.
@@ -761,6 +820,12 @@ private class WireSession private constructor(
                 }
                 MessageType.RAW_MODE_SET -> rawModeManager.enter()
                 MessageType.RAW_MODE_UNSET -> rawModeManager.leave()
+                MessageType.EVAL_RESULT -> {
+                    // Terminal for an expression, as EXITED is for a program.
+                    // Output frames for a `perform Console` inside the expression
+                    // already went through above, so ordering is preserved.
+                    return Drained.Eval(frame.decode())
+                }
                 else -> {
                     System.err.println("[wire] unexpected frame: ${frame.type}")
                 }

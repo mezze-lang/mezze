@@ -168,6 +168,7 @@ fun main(rawArgs: Array<String>) {
             "index" -> handleIndexCommand(remainingArgs)
             "search" -> handleSearchCommand(remainingArgs)
             "doc" -> handleDocCommand(remainingArgs)
+            "eval" -> handleEvalCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
@@ -219,6 +220,7 @@ private fun showHelp() {
     println("  dev       Run app — watches files and hot-reloads (--no-watch to run once)")
     println("  build     Build app to a standalone JAR")
     println("  check     Type check the project")
+    println("  eval      Evaluate one expression in the app module's scope")
     println()
     println("EDITOR / FORMATTING:")
     println("  fmt       Format Mezze source code")
@@ -275,7 +277,7 @@ private fun showUsage() {
     println()
     println("COMMANDS:")
     println("  Project:  init, dev, exec, build, check")
-    println("  Tools:    fmt, lsp, index, search, doc")
+    println("  Tools:    fmt, lsp, index, search, doc, eval")
     println("  Env:      doctor, toolchain")
     println()
     println("For command-specific help: mez <command> --help")
@@ -286,6 +288,23 @@ private fun showUsage() {
  */
 private fun showCommandHelp(command: String) {
     when (command) {
+        "eval" -> {
+            println("USAGE: mez eval '<expression>' [--type] [--json] [--depth=N] [--items=N] [--timeout=SECONDS]")
+            println()
+            println("Evaluate one expression in your app module's scope and print its VALUE.")
+            println("Unlike `mez exec`, which runs a program and gives you its console output,")
+            println("this gives you the result. Every import and top-level declaration in the")
+            println("app module is in scope.")
+            println()
+            println("EXAMPLES:")
+            println("  mez eval '1 + 2'")
+            println("  mez eval 'greet { name = \"world\" }'   call your own function")
+            println("  mez eval '[1, 2, 3]' --type            show the type too")
+            println("  mez eval 'big_value' --depth=2         stop descending at depth 2")
+            println("  mez eval 'config' --json               the value as a structured tree")
+            println()
+            println("Evaluates the code as SAVED on disk. Definitions do not accumulate between runs.")
+        }
         "doc" -> {
             println("USAGE: mez doc <name> [--json]")
             println()
@@ -543,6 +562,10 @@ private fun handleIndexCommand(args: List<String>) {
 
 private fun handleSearchCommand(args: List<String>) {
     com.mezze.language.cli.commands.SearchCommand().execute(args)
+}
+
+private fun handleEvalCommand(args: List<String>) {
+    com.mezze.language.cli.commands.EvalCommand().execute(args)
 }
 
 private fun handleDocCommand(args: List<String>) {
