@@ -16,6 +16,7 @@ import com.mezze.language.parsedast.Loc
 import com.mezze.language.truffleir.*
 import com.mezze.language.ast.ScopedEffectConstants
 import com.mezze.language.typechecker.comptime.ComptimeRules
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typedast.*
 
@@ -4105,9 +4106,7 @@ class TypedASTCompiler(
         if (!isInlinable(callee.body, callee.paramSlots.size)) return null
         if (countNodes(callee.body, max = inlineNodeBudget + 1) > inlineNodeBudget) return null
 
-        if (System.getenv("MEZZE_DEBUG_INLINE") == "true") {
-            System.err.println("[inline] HIT depth=$depth: ${callee.name} (hash=${targetHash.hex.take(8)}) args=${args.size}")
-        }
+        DebugLogger.debug(DebugLogger.Category.Compiler) { "[inline] HIT depth=$depth: ${callee.name} (hash=${targetHash.hex.take(8)}) args=${args.size}" }
         val substituted = substituteArgs(callee.body, args, depth)
         return maybeCollapseInlineOp(substituted)
     }

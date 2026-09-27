@@ -15,7 +15,8 @@ object DebugLogger {
         ModuleResolver,
         TypeValidator,
         Unification,
-        Monomorphization
+        Monomorphization,
+        Compiler
     }
 
     @Volatile
