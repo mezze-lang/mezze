@@ -517,6 +517,13 @@ internal class ImplValidator(
 
         val constraintContext = ConstraintContext(
             bodyContext,
+            // Stays null, and S-1b is the reason to leave it that way rather than an
+            // oversight. Pushing `expectedReturnType` down here as the body's
+            // expected type LOOKS like the fix for a return-type-dispatched op and
+            // is not: measured, it changes nothing that the return-type equality in
+            // the body solve (below) does not already achieve. It was tried, it made
+            // the variant case pass on its own, and once the equality was added
+            // every case passed without it. One change, one reason.
             expectedType = null,
             performerToEffect = performerToEffect,
             performerAddedEffects = performerAddedEffects,
@@ -564,9 +571,24 @@ internal class ImplValidator(
         // genuinely-absent impl (`NumAdd Str`) still fails, leaving `'out`
         // unresolved so the return check rejects — which is exactly the soundness
         // guarantee we want.
+        // S-1b: the declared return type is a constraint on THIS solve, not only a
+        // check after it.
+        //
+        // It was used solely in the separate `unificationSolver` below, which runs
+        // after ability resolution has already had to commit. For an op that
+        // dispatches on its RETURN type (`make: {} -> 'a`, `arbitrary: {} -> 'a`)
+        // that is too late: the body's fresh ability var had nothing tying it to a
+        // concrete type, so `impl Maker for Point where { make = {} -> { x =
+        // Maker.make {}, … } }` was rejected as undeterminable — while the identical
+        // `let p: Point = { x = Maker.make {} }` checked fine, because a `let`'s
+        // annotation equality lands in the SAME solve as its body.
+        //
+        // Additive: the post-hoc check below is untouched and still the backstop
+        // that catches a lying body.
         val solver = ConstraintSolver(bodyContext, registry, deferExistingAbilityImpls = true)
         val solveResult = solver.solve(
-            bodyResult.constraints + bodyResult.abilityConstraints + bodyResult.associatedTypeConstraints
+            bodyResult.constraints + bodyResult.abilityConstraints + bodyResult.associatedTypeConstraints +
+                Constraint.Equality(bodyResult.type, expectedReturnType, validationReason, loc = opLoc)
         )
 
         when (solveResult) {
