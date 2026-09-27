@@ -303,6 +303,76 @@ class ChangesetApplyTest {
         }
     }
 
+    // ---- the store ----------------------------------------------------------
+
+    @Test
+    fun `a committed batch reaches the store in one pass`() {
+        val w = world("store-commit")
+        try {
+            com.mezze.language.cli.commands.ProjectStore.open(root()).use { store ->
+                val result = ChangesetApply.apply(
+                    root(),
+                    Changeset(mapOf("helper" to goodHelper, "main" to userOf(1))),
+                    dryRun = false,
+                    world = w,
+                    store = store,
+                )
+                assertTrue(result.ok, "${result.diagnostics}")
+                assertTrue(store.getModule("helper") != null, "helper never reached the store")
+                assertTrue(store.getModule("main") != null, "main never reached the store")
+            }
+        } finally {
+            cleanUp()
+        }
+    }
+
+    @Test
+    fun `a failed batch writes NOTHING to the store`() {
+        // The store half of all-or-nothing. Persisting the good module would leave the
+        // index describing a project state that was never written to disk.
+        val w = world("store-fail")
+        try {
+            com.mezze.language.cli.commands.ProjectStore.open(root()).use { store ->
+                val result = ChangesetApply.apply(
+                    root(),
+                    Changeset(mapOf("helper" to goodHelper, "broken" to "let a: Int = True")),
+                    dryRun = false,
+                    world = w,
+                    store = store,
+                )
+                assertFalse(result.ok)
+                assertTrue(
+                    store.getModule("helper") == null,
+                    "the good module was persisted even though the batch failed",
+                )
+            }
+        } finally {
+            cleanUp()
+        }
+    }
+
+    @Test
+    fun `a dry run never touches the store`() {
+        val w = world("store-dry")
+        try {
+            com.mezze.language.cli.commands.ProjectStore.open(root()).use { store ->
+                ChangesetApply.apply(
+                    root(),
+                    Changeset(mapOf("helper" to goodHelper)),
+                    dryRun = true,
+                    world = w,
+                    store = store,
+                )
+                assertTrue(
+                    store.getModule("helper") == null,
+                    "a dry run persisted to the store",
+                )
+            }
+        } finally {
+            cleanUp()
+        }
+    }
+
     @Test
     fun `an empty changeset is refused`() {
         // Nothing to apply is a caller mistake, not a no-op to absorb silently.

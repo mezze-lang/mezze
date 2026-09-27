@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.parsedast.diagnostics.display
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.ModuleResolver
@@ -79,6 +80,17 @@ data class ChangesetResult(
  */
 object ChangesetApply {
 
+    /**
+     * SHA-256 hex, matching what the store uses for `source_hash`.
+     *
+     * The same scheme ModuleResolver computes with. A second convention here would
+     * write rows no lookup could ever find — the #317 failure.
+     */
+    private fun sha256Hex(source: String): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        return md.digest(source.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
     fun apply(
         projectRoot: File,
         changeset: Changeset,
@@ -88,6 +100,16 @@ object ChangesetApply {
          * speculative case — and to the project's own world for a real apply.
          */
         world: World? = null,
+        /**
+         * Where to persist the batch once it commits. Null skips persistence, which
+         * is what a dry run wants and what a caller with no project store has.
+         *
+         * A parameter rather than something opened here: opening a store is the
+         * caller's decision — `WireRunner` and the LSP each already have one — and
+         * this must stay callable without one so the check-and-write path is
+         * testable on its own.
+         */
+        store: com.mezze.language.store.MezzeStore? = null,
     ): ChangesetResult {
         val target = world ?: if (dryRun) World.fresh("changeset") else World.DEFAULT
         val ownsWorld = world == null && dryRun
@@ -104,10 +126,11 @@ object ChangesetApply {
             // text, so it cannot be reused.
             ModuleTypeChecker.invalidateModulePaths(changeset.modules.keys, target)
 
-            val diagnostics = LinkedHashMap<String, List<String>>()
+            val checked = LinkedHashMap<String, Checked>()
             for ((modulePath, source) in changeset.modules) {
-                diagnostics[modulePath] = check(projectRoot, target, modulePath, source)
+                checked[modulePath] = check(projectRoot, target, modulePath, source)
             }
+            val diagnostics = checked.mapValues { (_, c) -> c.diagnostics }
 
             val ok = diagnostics.values.all { it.isEmpty() }
             if (!ok || dryRun) {
@@ -119,6 +142,27 @@ object ChangesetApply {
                 file.parentFile?.mkdirs()
                 file.writeText(source)
                 file
+            }
+
+            // The store, in ONE pass over the batch, using the results the check
+            // phase already produced. Persisting per module as each was checked
+            // would put the store through N rounds for one logical change — the
+            // thing this task exists to stop — and would leave earlier modules
+            // persisted if a later one failed.
+            if (store != null) {
+                for ((modulePath, c) in checked) {
+                    val result = c.result ?: continue
+                    val source = changeset.modules.getValue(modulePath)
+                    StorePopulator.populate(
+                        store,
+                        result,
+                        modulePath = modulePath,
+                        filePath = changeset.fileFor(projectRoot, modulePath).absolutePath,
+                        sourceHash = sha256Hex(source),
+                        entrySource = source,
+                        parsedModule = c.parsed,
+                    )
+                }
             }
             // The files now match the overlay, so the overlay has nothing left to
             // say. Leaving it would make this world permanently prefer text that is
@@ -135,20 +179,34 @@ object ChangesetApply {
         }
     }
 
-    /** Parse and type-check one module of the batch, returning its diagnostics. */
+    /**
+     * One module's outcome: its diagnostics, and — when it passed — the checked
+     * result and parsed module, which is what the store needs.
+     *
+     * Kept rather than re-derived: persisting otherwise means type-checking the
+     * batch a SECOND time, which is exactly the duplicated work this exists to
+     * remove.
+     */
+    private data class Checked(
+        val diagnostics: List<String>,
+        val result: com.mezze.language.typechecker.TypeCheckResult? = null,
+        val parsed: com.mezze.language.parsedast.ParsedModule? = null,
+    )
+
+    /** Parse and type-check one module of the batch. */
     private fun check(
         projectRoot: File,
         world: World,
         modulePath: String,
         source: String,
-    ): List<String> {
+    ): Checked {
         val fileName = modulePath.substringAfterLast("::") + ".mz"
         val parsed = MezzeParser().parseWithRecovery(source, file = fileName)
         if (parsed.errors.isNotEmpty()) {
             // A module that does not parse is reported and NOT type-checked: every
             // type error after a parse failure is downstream of it, and reporting
             // both buries the one the reader can act on.
-            return parsed.errors.map { "${it.code.display()}: ${it.errorMessage}" }
+            return Checked(parsed.errors.map { "${it.code.display()}: ${it.errorMessage}" })
         }
 
         return try {
@@ -157,22 +215,23 @@ object ChangesetApply {
             )
             when (result) {
                 is TypeChecker.TypeCheckResult.Failure ->
-                    result.errors.map { "${it.code.display()}: ${it.message}" }
-                is TypeChecker.TypeCheckResult.Success -> emptyList()
+                    Checked(result.errors.map { "${it.code.display()}: ${it.message}" })
+                is TypeChecker.TypeCheckResult.Success ->
+                    Checked(emptyList(), TypeCheckRunner.wrapSuccess(result), parsed.module)
             }
         } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-            listOf("${e.code.display()}: ${e.message}")
+            Checked(listOf("${e.code.display()}: ${e.message}"))
         } catch (e: com.mezze.language.typechecker.ModuleError) {
             // An unresolvable import is a diagnostic about this changeset, not a
             // crash: it usually means the batch is missing a module it refers to.
-            listOf(e.message ?: "module error")
+            Checked(listOf(e.message ?: "module error"))
         } catch (e: com.mezze.language.typechecker.module.ModuleError) {
             // The SECOND ModuleError. There are two — the resolver's
             // (`typechecker.ModuleError`) and the module layer's
             // (`typechecker.module.ModuleError`) — and ModuleLoader converts one into
             // the other, so which one escapes depends on how far the failure got.
             // Catching only the resolver's let a missing import escape as a crash.
-            listOf(e.message ?: "module error")
+            Checked(listOf(e.message ?: "module error"))
         }
     }
 }
