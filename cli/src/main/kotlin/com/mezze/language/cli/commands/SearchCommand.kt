@@ -210,48 +210,12 @@ class SearchCommand {
         }
     }
 
-    /**
-     * Resolve a NAME to one declaration, reporting ambiguity rather than picking.
-     *
-     * Two modules may define `sort`; silently taking the first would answer a
-     * question about a declaration the user did not mean.
-     */
+    /** Shared with `mez doc` — see [DeclResolver], which explains a miss identically. */
     private fun resolveDecl(
         store: com.mezze.language.store.MezzeStore,
         name: String,
-    ): com.mezze.language.store.DeclRow? {
-        // A QUALIFIED name (`std::collections::seq::size`) resolves to exactly one
-        // declaration — which matters because the ambiguity message below tells the
-        // user to qualify, and advice the tool cannot then act on is worse than no
-        // advice.
-        val qualified = name.contains("::")
-        val bare = name.substringAfterLast("::")
-        val modulePrefix = if (qualified) name.substringBeforeLast("::") else null
-        val exact = store.findDeclsByText(bare).filter { row ->
-            row.declName == bare && (modulePrefix == null || row.modulePath == modulePrefix)
-        }
-        when {
-            exact.isEmpty() -> {
-                println("No declaration named `$name` is indexed")
-                val all = com.mezze.language.store.DeclKind.entries
-                    .flatMap { store.getDeclsByKind(it) }.map { it.declName }.distinct()
-                LevenshteinSuggest.closest(bare, all)?.let {
-                    println()
-                    println("${Glyphs.TIP} Did you mean `$it`?")
-                }
-                return null
-            }
-            exact.size > 1 -> {
-                println("`$name` is ambiguous — ${exact.size} declarations share it:")
-                println()
-                for (d in exact.sortedBy { it.modulePath }) println("  ${d.modulePath}::${d.declName}")
-                println()
-                println("${Glyphs.TIP} Qualify it: mez search --callers '${exact.first().modulePath}::$name'")
-                return null
-            }
-            else -> return exact.single()
-        }
-    }
+    ): com.mezze.language.store.DeclRow? =
+        DeclResolver.resolveOrExplain(store, name, command = "mez search --callers")
 
     private fun printGraph(
         store: com.mezze.language.store.MezzeStore,

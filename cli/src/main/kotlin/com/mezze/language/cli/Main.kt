@@ -167,6 +167,7 @@ fun main(rawArgs: Array<String>) {
             "init" -> handleInitCommand(remainingArgs)
             "index" -> handleIndexCommand(remainingArgs)
             "search" -> handleSearchCommand(remainingArgs)
+            "doc" -> handleDocCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
@@ -274,7 +275,7 @@ private fun showUsage() {
     println()
     println("COMMANDS:")
     println("  Project:  init, dev, exec, build, check")
-    println("  Tools:    fmt, lsp, index, search")
+    println("  Tools:    fmt, lsp, index, search, doc")
     println("  Env:      doctor, toolchain")
     println()
     println("For command-specific help: mez <command> --help")
@@ -285,6 +286,21 @@ private fun showUsage() {
  */
 private fun showCommandHelp(command: String) {
     when (command) {
+        "doc" -> {
+            println("USAGE: mez doc <name> [--json]")
+            println()
+            println("Everything the index knows about one declaration: signature, doc comment,")
+            println("metadata, effects (declared AND transitively reached), ability impls,")
+            println("callers, callees and references.")
+            println()
+            println("EXAMPLES:")
+            println("  mez doc fold")
+            println("  mez doc 'std::collections::seq::size'   qualify an ambiguous name")
+            println("  mez doc Ord                             an ability, with its impls")
+            println("  mez doc Log --json                      machine-readable")
+            println()
+            println("Reads the index — run `mez check` or `mez index` first.")
+        }
         "search" -> {
             println("USAGE: mez search '<type>' [--limit=N] [--json]")
             println()
@@ -527,6 +543,10 @@ private fun handleIndexCommand(args: List<String>) {
 
 private fun handleSearchCommand(args: List<String>) {
     com.mezze.language.cli.commands.SearchCommand().execute(args)
+}
+
+private fun handleDocCommand(args: List<String>) {
+    com.mezze.language.cli.commands.DocCommand().execute(args)
 }
 
 private fun handleToolchainCommand(args: List<String>) {
