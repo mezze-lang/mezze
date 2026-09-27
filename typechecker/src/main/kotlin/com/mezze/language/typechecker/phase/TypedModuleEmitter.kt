@@ -389,39 +389,12 @@ private fun compileModule(
     // PrintType builder can render a nominal `TypeApplication(name)` receiver
     // (newtypes/records/variants/aliases). Collected from the un-wrapped
     // modules (wrapTopLevel strips TypedTypeDecls from `wrapped`).
-    val printTypeDefs = HashMap<String, com.mezze.language.ast.MezzeType>()
-    val typeDeclParams = HashMap<String, List<String>>()
-    for (m in (listOf(typedModule) + importedModules + stdlibModulesForMono)) {
-        for (d in m.decls) {
-            if (d is com.mezze.language.typedast.TypedTypeDecl) {
-                typeDeclParams.putIfAbsent(d.name, d.typeParams.map { it.name })
-                val resolved: com.mezze.language.ast.MezzeType? = when (val def = d.definition) {
-                    is com.mezze.language.typedast.TypedNewtypeDef ->
-                        com.mezze.language.ast.MezzeType.NewtypeType(
-                            d.name, def.constructor, def.wrappedType,
-                            // #400: nominal Declared identity (module-distinct), mirroring
-                            // the record/variant siblings below — never Anonymous.
-                            identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
-                        )
-                    is com.mezze.language.typedast.TypedRecordDef ->
-                        com.mezze.language.ast.MezzeType.RecordType(
-                            def.fields,
-                            rowVar = if (def.isOpen) com.mezze.language.ast.RowVar.fresh() else null,
-                            identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
-                        )
-                    is com.mezze.language.typedast.TypedVariantDef ->
-                        com.mezze.language.ast.MezzeType.VariantType(
-                            def.constructors,
-                            rowVar = if (def.isOpen) com.mezze.language.ast.RowVar.fresh() else null,
-                            identity = com.mezze.language.ast.TypeIdentity.declared(d.name, d.hash)
-                        )
-                    is com.mezze.language.typedast.TypedAliasDef -> def.aliasedType
-                }
-                if (resolved != null) printTypeDefs.putIfAbsent(d.name, resolved)
-            }
-        }
-    }
-    compiler.setPrintTypeDefs(printTypeDefs, typeDeclParams)
+    // Local declarations first, so one shadows an imported type of the same name
+    // rather than the reverse.
+    val printTypes = com.mezze.language.typechecker.compiler.PrintTypeDefs.collect(
+        listOf(typedModule) + importedModules + stdlibModulesForMono
+    )
+    compiler.setPrintTypeDefs(printTypes.defs, printTypes.params)
 
     val result = compiler.compile(
         module = wrapped,

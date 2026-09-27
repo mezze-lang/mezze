@@ -572,6 +572,14 @@ object NativeBuildPath {
         /** Display-only entry name; NEVER a selection key. */
         entryName: String?,
         performerRecords: List<Array<String>>,
+        /**
+         * Static shape of the entry's result, for an EVAL closure only.
+         *
+         * Null for an app: a program's result is its exit value and is never
+         * rendered. Set when the closure is one expression a caller wants a VALUE
+         * back from — see `StoreSerialization.EmbeddedAppMeta.resultPrintType`.
+         */
+        resultPrintType: com.mezze.language.truffleir.PrintType? = null,
     ): Pair<ByteArray, ByteArray> {
         val fnBytes = StoreSerialization.serializeFunctionIRList(closure)
         val metaBytes = StoreSerialization.serializeEmbeddedAppMeta(
@@ -580,6 +588,7 @@ object NativeBuildPath {
                 entryHash = entryHash,
                 entryName = entryName,
                 performerRecords = performerRecords.map { it.toList() },
+                resultPrintType = resultPrintType,
             )
         )
         return fnBytes to metaBytes
