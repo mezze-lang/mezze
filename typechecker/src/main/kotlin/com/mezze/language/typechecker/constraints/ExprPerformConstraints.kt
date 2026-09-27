@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 
 internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, context: ConstraintContext): ConstraintResult {
     val contextWithPerform = context.copy(performContext = expr)
@@ -506,6 +507,10 @@ internal fun ExpressionConstraintGenerator.generateEffectCall(expr: ParsedEffect
             loc = expr.loc,
             errorType = ErrorType.MISSING_FIELD,
             code = ErrorCode.T0206_METHOD_NOT_FOUND,
+            // The candidate existed only inside the prose. Exposing it as a fix is
+            // what lets an editor offer the rename and `--json` consumers act on it
+            // without parsing English out of `message`.
+            fixHints = suggestion?.let { listOf(FixHint.Rename(expr.loc, listOf(it))) }.orEmpty(),
         )
     }
 

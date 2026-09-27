@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 internal fun ExpressionConstraintGenerator.tryGenerateEffectOperationCall(
@@ -41,6 +42,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateEffectOperationCall(
             loc = expr.loc,
             errorType = ErrorType.MISSING_FIELD,
             code = ErrorCode.T0206_METHOD_NOT_FOUND,
+            // The candidate was computed for the prose and then dropped, so an editor
+            // could not offer the one-click rename and `--json` consumers saw a
+            // suggestion only as English inside `message`.
+            fixHints = suggestion?.let { listOf(FixHint.Rename(expr.loc, listOf(it))) }.orEmpty(),
         )
     }
 

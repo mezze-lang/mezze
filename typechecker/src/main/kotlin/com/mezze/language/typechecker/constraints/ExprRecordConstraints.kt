@@ -369,6 +369,8 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
                     loc = expr.loc,
                     errorType = ErrorType.MISSING_FIELD,
                     code = ErrorCode.T0206_METHOD_NOT_FOUND,
+                    // As above: computed for the sentence, dropped for every tool.
+                    fixHints = suggestion?.let { listOf(FixHint.Rename(expr.loc, listOf(it))) }.orEmpty(),
                 )
             }
         }
@@ -413,6 +415,9 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
                 val builtInAbilities = BuiltInAbilities.getAllAbilityNames()
                 val similarBuiltIn = findClosestMatch(receiverName, builtInAbilities)
 
+                // The candidate NAME, kept apart from the sentence about it — the
+                // sentence is for a reader and the name is what a tool applies.
+                val candidate = similarAbility ?: similarEffect ?: similarBuiltIn
                 val suggestion = when {
                     similarAbility != null -> " Did you mean ability '$similarAbility'?"
                     similarEffect != null -> " Did you mean effect '$similarEffect'?"
@@ -425,6 +430,12 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
                     loc = expr.loc,
                     errorType = ErrorType.UNDEFINED_VARIABLE,
                     code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                    // The RECEIVER's span, not the whole expression's: the name to
+                    // replace is `Foo` in `Foo.bar`, and a fix spanning the entire
+                    // member access would delete the method call along with it.
+                    fixHints = candidate?.let {
+                        listOf(FixHint.Rename(expr.receiver.loc, listOf(it)))
+                    }.orEmpty(),
                 )
             }
         }

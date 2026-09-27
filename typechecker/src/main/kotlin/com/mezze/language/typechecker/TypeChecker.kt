@@ -176,7 +176,31 @@ class TypeChecker(
          * the informative one instead.
          */
         val subjectTypeUnknown: Boolean = false,
-    )
+    ) {
+        /**
+         * The same diagnostic as the exception the compiler throws.
+         *
+         * ONE place that enumerates the fields. The hand-written copy this replaced
+         * omitted `fixHints`, and it sat at `typeCheck`'s only failure exit — so
+         * every structured fix the checker computed was discarded before any caller
+         * could see it. The LSP's quick-fixes and `mez check --json`'s `fixHints`
+         * array were always empty on that path while the machinery producing them
+         * worked correctly one call inside.
+         *
+         * A field added to either type now has exactly one conversion to update,
+         * rather than a copy that silently drops whatever it has not heard of.
+         */
+        fun toException(): com.mezze.language.typechecker.TypeCheckError =
+            com.mezze.language.typechecker.TypeCheckError(
+                message = message,
+                loc = loc,
+                errorType = errorType,
+                metadata = metadata,
+                code = code,
+                hints = hints,
+                fixHints = fixHints,
+            )
+    }
 
         data class TypeCheckWarning(
         val message: String,
@@ -1136,10 +1160,17 @@ class TypeChecker(
                         "Type checking failed with unknown error",
                         code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
                     )
-                throw TypeCheckError(
-                    error.message, error.loc, error.errorType, error.metadata,
-                    code = error.code, hints = error.hints,
-                )
+                // EVERY field, `fixHints` above all. This conversion dropped them,
+                // and it is `typeCheck`'s only failure exit — so every structured fix
+                // the checker computed died here, at the public boundary. The LSP's
+                // quick-fixes and `mez check --json`'s `fixHints` array were
+                // therefore always empty on this path, while the machinery that
+                // produced them worked perfectly one call inside.
+                //
+                // A copy that enumerates fields silently loses whatever is added
+                // later; `toException()` keeps the enumeration in ONE place so the
+                // next field cannot go missing the same way.
+                throw error.toException()
             }
         }
     }
@@ -1178,10 +1209,17 @@ class TypeChecker(
                         "Type checking failed with unknown error",
                         code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
                     )
-                throw TypeCheckError(
-                    error.message, error.loc, error.errorType, error.metadata,
-                    code = error.code, hints = error.hints,
-                )
+                // EVERY field, `fixHints` above all. This conversion dropped them,
+                // and it is `typeCheck`'s only failure exit — so every structured fix
+                // the checker computed died here, at the public boundary. The LSP's
+                // quick-fixes and `mez check --json`'s `fixHints` array were
+                // therefore always empty on this path, while the machinery that
+                // produced them worked perfectly one call inside.
+                //
+                // A copy that enumerates fields silently loses whatever is added
+                // later; `toException()` keeps the enumeration in ONE place so the
+                // next field cannot go missing the same way.
+                throw error.toException()
             }
         }
     }
