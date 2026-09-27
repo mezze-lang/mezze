@@ -477,12 +477,12 @@ class TypedASTCompiler(
         // same function, just compiled more than once.
         functions.addAll(extractedFunctions)
 
-        if (System.getenv("MEZZE_DISPATCH_CENSUS") != null && census.total() > 0) {
-            val total = census.total()
-            val monoOwned = census.inlineOp + census.methodConcrete + census.methodSingleVar +
+        DebugLogger.debug(DebugLogger.Category.Compiler) {
+            val t = census.total()
+            val mono = census.inlineOp + census.methodConcrete + census.methodSingleVar +
                 census.byHashMono + census.byHashPlain + census.native + census.globalThunk
-            val dictOwned = census.methodDictCallee + census.byHashDictInject
-            fun pct(n: Int) = if (total == 0) 0.0 else 100.0 * n / total
+            val dict = census.methodDictCallee + census.byHashDictInject
+            "[dispatch-census] total=$t mono-owned=$mono dict-owned=$dict indirect=${census.indirect}"
         }
 
         // Per-hash dedupe. The compiler's three append phases (decls,

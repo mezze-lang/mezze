@@ -4,6 +4,7 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.isTypeVarName
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.util.WellKnownTypeApp
@@ -70,9 +71,7 @@ object BuiltInAbilities {
                     "${e.javaClass.simpleName}: ${e.message}. " +
                     "Affected abilities will appear missing to user code."
                 )
-                if (System.getenv("MEZZE_DEBUG") != null) {
-                    e.printStackTrace(System.err)
-                }
+                DebugLogger.debug(DebugLogger.Category.TypeChecker) { e.stackTraceToString() }
             }
         }
     }

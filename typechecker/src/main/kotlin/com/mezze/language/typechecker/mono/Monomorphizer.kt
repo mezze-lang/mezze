@@ -7,6 +7,7 @@ import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.collectTypeVarsInOrder
 import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.hashing.MezzeHashBuilder
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typedast.AbilityImplRef
 import com.mezze.language.typedast.BindingRef
 import com.mezze.language.typedast.Hash
@@ -248,10 +249,10 @@ class Monomorphizer(
                 closureArgs = req.closureArgs,
                 closureBodies = req.closureBodies,
             )
-            if (System.getenv("MEZZE_MONO_TRACE") != null) {
-                System.err.println("[mono-trace] emit spec name=${decl.name} specHash=${specHash.hex.take(8)} " +
+            DebugLogger.debug(DebugLogger.Category.Monomorphization) {
+                "[mono-trace] emit spec name=${decl.name} specHash=${specHash.hex.take(8)} " +
                     "typeArgs=${req.typeArgs.map { MonoDriver.detailedPublic(it) }} " +
-                    "closureArgs=${req.closureArgs.keys}")
+                    "closureArgs=${req.closureArgs.keys}"
             }
 
             // Scan the substituted body for further generic call sites and
@@ -270,18 +271,20 @@ class Monomorphizer(
             TypeSubstitution.collectByHashRefsWithSite(specializedNewBody) { ref, inst, siteType, call ->
                 refs.add(RefSite(ref, inst, siteType, call))
             }
-            if (System.getenv("MEZZE_MONO_TRACE") != null) {
-                System.err.println("[mono-trace] transitive refs from ${decl.name} (spec=${specHash.hex.take(8)}, closureArgs=${req.closureArgs.keys}): total=${refs.size}")
-                for (r in refs) {
-                    val target = resolveDecl(r.ref.hash)
-                    val siteDetail = when (val s = r.siteType) {
-                        is MezzeType.FunctionType -> "FunctionType(param=${MonoDriver.detailedPublic(s.paramType)}, ret=${MonoDriver.detailedPublic(s.returnType)})"
-                        null -> "null"
-                        else -> MonoDriver.detailedPublic(s)
+            DebugLogger.debug(DebugLogger.Category.Monomorphization) {
+                buildString {
+                    append("[mono-trace] transitive refs from ${decl.name} (spec=${specHash.hex.take(8)}, closureArgs=${req.closureArgs.keys}): total=${refs.size}")
+                    for (r in refs) {
+                        val target = resolveDecl(r.ref.hash)
+                        val siteDetail = when (val s = r.siteType) {
+                            is MezzeType.FunctionType -> "FunctionType(param=${MonoDriver.detailedPublic(s.paramType)}, ret=${MonoDriver.detailedPublic(s.returnType)})"
+                            null -> "null"
+                            else -> MonoDriver.detailedPublic(s)
+                        }
+                        append("\n[mono-trace]   ref=${r.ref.hash.hex.take(8)} target=${target?.name ?: "?"} ")
+                        append("typeParams=${target?.typeParams?.map { it.name } ?: emptyList<String>()} ")
+                        append("inst=${r.inst?.typeArgs?.map { MonoDriver.detailedPublic(it) }} siteType=$siteDetail")
                     }
-                    System.err.println("[mono-trace]   ref=${r.ref.hash.hex.take(8)} target=${target?.name ?: "?"} " +
-                        "typeParams=${target?.typeParams?.map { it.name } ?: emptyList<String>()} " +
-                        "inst=${r.inst?.typeArgs?.map { MonoDriver.detailedPublic(it) }} siteType=$siteDetail")
                 }
             }
             // #409: for each transitive ref, derive typeArgs by unifying
@@ -395,9 +398,9 @@ class Monomorphizer(
                 }
                 // Strip closure fields at every call to a stripped spec.
                 newBody = stripCallArgFields(newBody, stripMap)
-                if (System.getenv("MEZZE_MONO_DUMP") != null) {
+                DebugLogger.debug(DebugLogger.Category.Monomorphization) {
                     val name = resolveDecl(spec.genericHash)?.name ?: "?"
-                    System.err.println("[mono-dump] ${name}#${sh.hex.take(8)} stripped=${myStrip ?: "<none>"}")
+                    "[mono-dump] ${name}#${sh.hex.take(8)} stripped=${myStrip ?: "<none>"}"
                 }
                 rewritten[sh] = spec.copy(
                     specializedBody = newBody,

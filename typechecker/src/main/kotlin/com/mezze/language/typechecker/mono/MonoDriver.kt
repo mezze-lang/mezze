@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.mono
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.Loc
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typedast.AbilityImplRef
 import com.mezze.language.typedast.BindingRef
 import com.mezze.language.typedast.Hash
@@ -278,7 +279,7 @@ object MonoDriver {
                 if (keys.isNotEmpty()) stripBySiteLoc[seedLocs[i]] = keys
             }
         }
-        if (System.getenv("MEZZE_MONO_STATS") != null) {
+        if (DebugLogger.isCategoryEnabled(DebugLogger.Category.Monomorphization)) {
             val concreteDecls = (listOf(entry) + imported).sumOf {
                 it.decls.count { d -> d is TypedLetDecl && d.typeParams.isEmpty() }
             }
@@ -289,24 +290,24 @@ object MonoDriver {
             val genericSeeds = seeds.count { req ->
                 declIndex[req.genericHash]?.typeParams?.isNotEmpty() == true
             }
-            System.err.println(
+            DebugLogger.debug(DebugLogger.Category.Monomorphization) {
                 "[mono] entry=${entry.path} userMods=${1 + imported.size} stdlibMods=${resolutionOnly.size} " +
                 "impls=${abilityImpls.size}(generic=$genericImpls) concreteDecls=$concreteDecls genericDecls=$genericDecls " +
                 "seeds=${seeds.size}(generic=$genericSeeds) specs=${result.specializations.size} fallbacks=${result.fallbacks.size} " +
                 "siteHits=${bySiteLoc.size}"
-            )
+            }
             // Per-call-shape miss breakdown — surfaces opportunities to
             // tighten coverage. Only print when something interesting
             // happened (any visit > 0).
             if (counters.byHashGenericVisited + counters.methodGenericVisited > 0) {
-                System.err.println(
+                DebugLogger.debug(DebugLogger.Category.Monomorphization) {
                     "[mono]   byHash visited=${counters.byHashGenericVisited} seeded=${counters.byHashSeeded} " +
                     "(fnType=${counters.byHashFnTypeOk} argType=${counters.byHashArgTypeOk} fail=${counters.byHashUnifyFail})"
-                )
-                System.err.println(
+                }
+                DebugLogger.debug(DebugLogger.Category.Monomorphization) {
                     "[mono]   method visited=${counters.methodGenericVisited} seeded=${counters.methodSeeded} " +
                     "(rcvVarType=${counters.methodReceiverNotConcrete} noImpl=${counters.methodNoMatchingImpl} unifyFail=${counters.methodUnifyFail})"
-                )
+                }
             }
         }
         return Result(mono = result, bySiteLoc = bySiteLoc, stripBySiteLoc = stripBySiteLoc)
@@ -315,8 +316,8 @@ object MonoDriver {
     private data class AbilityOpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
 
     /** Coverage counters accumulated by the seed walker. Reported via
-     *  `MEZZE_MONO_STATS` so we can tell at a glance how much of the
-     *  generic-call surface mono actually reaches. */
+     *  `DebugLogger.Category.Monomorphization` so we can tell at a glance how
+     *  much of the generic-call surface mono actually reaches. */
     private class Counters {
         // ByHash direct generic calls (TypedCall(TypedVar(ByHash, …))):
         var byHashGenericVisited = 0   // calls to a generic decl
@@ -416,12 +417,12 @@ object MonoDriver {
                         counters.byHashSeeded++
                     } else {
                         counters.byHashUnifyFail++
-                        if (System.getenv("MEZZE_MONO_TRACE") != null) {
-                            System.err.println("[mono-trace] byHash-fail callee=${callee.name} " +
+                        DebugLogger.debug(DebugLogger.Category.Monomorphization) {
+                            "[mono-trace] byHash-fail callee=${callee.name} " +
                                 "typeParams=${callee.typeParams.map { it.name }} " +
                                 "scheme=${detailed(callee.scheme.type)} " +
                                 "fn.type=${detailed(fn.type)} " +
-                                "arg.type=${detailed(expr.arg.type)}")
+                                "arg.type=${detailed(expr.arg.type)}"
                         }
                     }
                 }
@@ -723,7 +724,7 @@ object MonoDriver {
     /** Public alias for `detailed` — external tracing (Monomorphizer) uses this. */
     fun detailedPublic(t: MezzeType?): String = detailed(t)
 
-    /** Verbose type printer for `MEZZE_MONO_TRACE` — MezzeType.toString() is
+    /** Verbose type printer for mono tracing — MezzeType.toString() is
      *  depth-truncated, which hides the exact TypeVar names / element types
      *  we need when diagnosing unify failures. */
     private fun detailed(t: MezzeType?): String {

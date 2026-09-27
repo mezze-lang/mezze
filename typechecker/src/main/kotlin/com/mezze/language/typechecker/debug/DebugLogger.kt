@@ -16,7 +16,8 @@ object DebugLogger {
         TypeValidator,
         Unification,
         Monomorphization,
-        Compiler
+        Compiler,
+        Stdlib
     }
 
     @Volatile

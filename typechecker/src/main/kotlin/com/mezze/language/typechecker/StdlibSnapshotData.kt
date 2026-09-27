@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedAbilityImpl
@@ -33,11 +34,9 @@ object StdlibSnapshotData {
             System.err.println(
                 "[mezze] stdlib snapshot decode failed (${e.javaClass.simpleName}): " +
                 "${e.message ?: "<no message>"} — falling back to source/SQLite compile " +
-                "(slower boot). Set MEZZE_DEBUG=1 for full stacktrace."
+                "(slower boot). Set MEZZE_TYPECHECK_DEBUG=true for full stacktrace."
             )
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                e.printStackTrace(System.err)
-            }
+            DebugLogger.debug(DebugLogger.Category.Stdlib) { e.stackTraceToString() }
             null
         }
 

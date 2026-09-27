@@ -2,14 +2,12 @@ package com.mezze.language.typechecker.compiler
 
 /**
  * Static call-site census — populated as [TypedASTCompiler.compileCall]
- * emits IR. Dumped at the end of `compile()` when
- * `MEZZE_DISPATCH_CENSUS` is set. Mono "owns"
+ * emits IR. Dumped at the end of `compile()` through
+ * `DebugLogger.Category.Compiler`. Mono "owns"
  * `inlineOp`/`methodConcrete`/`methodSingleVar`/`byHashMono`/`native`;
  * dict shows up in `methodDictCallee`/`byHashDictInject`.
  *
- * Diagnostic-only — never read by emitted IR. Use a dedicated env var
- * instead of `MEZZE_MONO_STATS` so per-module census output doesn't
- * conflate with mono driver tracing during normal stats runs.
+ * Diagnostic-only — never read by emitted IR.
  */
 internal class CallSiteCensus {
     var inlineOp = 0          // Int.+, Str.size, etc. — inlined at compile time

@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.ast.ModulePath
 import com.mezze.language.ast.ModulePathConventions
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.stdlib.StdlibRuntimeData
 import com.mezze.language.store.MezzeStore
 import com.mezze.language.store.MezzeStoreOpener
@@ -176,9 +177,9 @@ object PrecompiledStdlib {
             val mtc = ModuleTypeChecker.withContextAndResolver(tc.parentContext, moduleLoader.getResolver())
             importResolver = ImportResolver(moduleLoader, mtc)
 
-            if (System.getenv("MEZZE_DEBUG") != null) {
+            DebugLogger.debug(DebugLogger.Category.Stdlib) {
                 val ms = (System.nanoTime() - initStart) / 1_000_000
-                System.err.println("[PrecompiledStdlib] Loaded from stdlib.sqlite: ${fullCache.functions.size} functions, ${fullCache.abilityImpls.size} ability impls (${ms}ms)")
+                "[PrecompiledStdlib] Loaded from stdlib.sqlite: ${fullCache.functions.size} functions, ${fullCache.abilityImpls.size} ability impls (${ms}ms)"
             }
         } else {
             val tc = TypeChecker()
@@ -282,9 +283,9 @@ object PrecompiledStdlib {
             // on the v1 wrapper). Runtime memory cost is bounded by stdlib
             // size (~8 MB); cheaper than re-parsing + re-typechecking.
 
-            if (System.getenv("MEZZE_DEBUG") != null) {
+            DebugLogger.debug(DebugLogger.Category.Stdlib) {
                 val ms = (System.nanoTime() - initStart) / 1_000_000
-                System.err.println("[PrecompiledStdlib] Compiled from source: ${preloweredFunctions.size} functions (${ms}ms)")
+                "[PrecompiledStdlib] Compiled from source: ${preloweredFunctions.size} functions (${ms}ms)"
             }
         }
 
@@ -354,11 +355,9 @@ object PrecompiledStdlib {
             // under MEZZE_DEBUG to expedite diagnosis. Falling through to
             // slow path is the right runtime behavior; the warning is
             // forensic. (#308)
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[PrecompiledStdlib] $STDLIB_MODULES_RESOURCE present but failed to deserialize: " +
-                    "${e.javaClass.simpleName}: ${e.message}. Falling back to slow path."
-                )
+            DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] $STDLIB_MODULES_RESOURCE present but failed to deserialize: " +
+                "${e.javaClass.simpleName}: ${e.message}. Falling back to slow path."
             }
             null
         }
@@ -389,12 +388,10 @@ object PrecompiledStdlib {
         private fun tryLoadFromSnapshot(): FullCacheData? {
         if (!StdlibSnapshotData.present) return null
         val ic = StdlibSnapshotData.importContext ?: return null
-        if (System.getenv("MEZZE_DEBUG") != null) {
-            System.err.println(
-                "[PrecompiledStdlib] Loaded from StdlibSnapshotData (image heap): " +
-                "${StdlibSnapshotData.functions.size} functions, " +
-                "${StdlibSnapshotData.abilityImpls.size} impls"
-            )
+        DebugLogger.debug(DebugLogger.Category.Stdlib) {
+            "[PrecompiledStdlib] Loaded from StdlibSnapshotData (image heap): " +
+            "${StdlibSnapshotData.functions.size} functions, " +
+            "${StdlibSnapshotData.abilityImpls.size} impls"
         }
         return FullCacheData(
             importContext = ic,
@@ -446,12 +443,10 @@ object PrecompiledStdlib {
                 }
             }
 
-            if (decodeFailures.isNotEmpty() && System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[PrecompiledStdlib] ${decodeFailures.size} FunctionIR blob(s) failed to decode " +
-                    "from stdlib store. Examples: " +
-                    decodeFailures.take(3).joinToString(", ") { (h, msg) -> "${h.hex.take(8)} ($msg)" }
-                )
+            if (decodeFailures.isNotEmpty()) DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] ${decodeFailures.size} FunctionIR blob(s) failed to decode " +
+                "from stdlib store. Examples: " +
+                decodeFailures.take(3).joinToString(", ") { (h, msg) -> "${h.hex.take(8)} ($msg)" }
             }
 
             val performerStr = s.getMetadata("performer_records") ?: ""
@@ -480,19 +475,17 @@ object PrecompiledStdlib {
                     typedModLastError = "${mod.path}: ${e.javaClass.simpleName}"
                 }
             }
-            if (typedModDecodeFailures > 0 && System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[PrecompiledStdlib] tryLoadFullFromStore: $typedModDecodeFailures typed module(s) " +
-                    "failed to decode. Last: $typedModLastError"
-                )
+            if (typedModDecodeFailures > 0) DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] tryLoadFullFromStore: $typedModDecodeFailures typed module(s) " +
+                "failed to decode. Last: $typedModLastError"
             }
 
             if (functions.isNotEmpty()) {
                 FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes, typedModules)
             } else null
         } catch (e: Exception) {
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println("[PrecompiledStdlib] Failed to load from store: ${e.message}")
+            DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] Failed to load from store: ${e.message}"
             }
             null
         }
@@ -529,13 +522,10 @@ object PrecompiledStdlib {
                 }
             }
 
-            if ((modDecodeFailures > 0 || irDecodeFailures > 0) &&
-                System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[PrecompiledStdlib] tryLoadPreloweredFromStore: " +
-                    "$modDecodeFailures module(s) and $irDecodeFailures IR(s) failed to decode. " +
-                    "Last: $lastError"
-                )
+            if (modDecodeFailures > 0 || irDecodeFailures > 0) DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] tryLoadPreloweredFromStore: " +
+                "$modDecodeFailures module(s) and $irDecodeFailures IR(s) failed to decode. " +
+                "Last: $lastError"
             }
 
             val performerStr = s.getMetadata("performer_records") ?: ""
@@ -547,11 +537,9 @@ object PrecompiledStdlib {
 
             if (functions.isNotEmpty()) PreloweredData(functions, performers, depGraph) else null
         } catch (e: Exception) {
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[PrecompiledStdlib] tryLoadPreloweredFromStore failed: " +
-                    "${e.javaClass.simpleName}: ${e.message}"
-                )
+            DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] tryLoadPreloweredFromStore failed: " +
+                "${e.javaClass.simpleName}: ${e.message}"
             }
             null
         }
@@ -568,11 +556,9 @@ object PrecompiledStdlib {
             tempFile.writeBytes(stream.readAllBytes())
             opener.openReadOnly(tempFile)
         } catch (e: Exception) {
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[PrecompiledStdlib] Failed to open stdlib.sqlite resource as store: " +
-                    "${e.javaClass.simpleName}: ${e.message}"
-                )
+            DebugLogger.debug(DebugLogger.Category.Stdlib) {
+                "[PrecompiledStdlib] Failed to open stdlib.sqlite resource as store: " +
+                "${e.javaClass.simpleName}: ${e.message}"
             }
             null
         }

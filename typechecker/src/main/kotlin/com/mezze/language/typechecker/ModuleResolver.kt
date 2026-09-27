@@ -335,11 +335,9 @@ class ModuleResolver(
                 // serialized-shape mismatch (older cache from a different
                 // build). Surface under MEZZE_DEBUG; falling through to a
                 // fresh parse is the right runtime behavior. (#308)
-                if (System.getenv("MEZZE_DEBUG") != null) {
-                    System.err.println(
-                        "[ModuleResolver] failed to deserialize parsed module $modulePath@${sourceHash.hex.take(8)}: " +
-                        "${e.javaClass.simpleName}: ${e.message}. Re-parsing."
-                    )
+                DebugLogger.debug(DebugLogger.Category.ModuleResolver) {
+                    "[ModuleResolver] failed to deserialize parsed module $modulePath@${sourceHash.hex.take(8)}: " +
+                    "${e.javaClass.simpleName}: ${e.message}. Re-parsing."
                 }
                 null
             }
@@ -353,11 +351,9 @@ class ModuleResolver(
             } catch (e: Exception) {
                 // IOException reading from JAR resource — extremely rare, but
                 // worth noting. Caller has fallback paths so don't throw. (#308)
-                if (System.getenv("MEZZE_DEBUG") != null) {
-                    System.err.println(
-                        "[ModuleResolver] readStdlibFile($path) failed: " +
-                        "${e.javaClass.simpleName}: ${e.message}"
-                    )
+                DebugLogger.debug(DebugLogger.Category.ModuleResolver) {
+                    "[ModuleResolver] readStdlibFile($path) failed: " +
+                    "${e.javaClass.simpleName}: ${e.message}"
                 }
                 null
             }

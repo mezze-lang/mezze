@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.phase
 
 import com.mezze.language.parsedast.ParsedModule
 import com.mezze.language.typechecker.constraints.ConstraintResult
+import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
@@ -94,9 +95,8 @@ internal fun buildPartialTypedModule(
         )
         builder.build(parsedModule)
     } catch (e: Exception) {
-        if (System.getenv("MEZZE_DEBUG") != null) {
-            System.err.println("[partial-builder] ${e.javaClass.simpleName}: ${e.message}")
-            e.printStackTrace(System.err)
+        DebugLogger.debug(DebugLogger.Category.TypeChecker) {
+            "[partial-builder] ${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString()}"
         }
         null
     }
