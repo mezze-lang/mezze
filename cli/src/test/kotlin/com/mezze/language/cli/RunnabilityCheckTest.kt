@@ -67,7 +67,7 @@ class RunnabilityCheckTest {
     }
 
     @Test
-    fun `the refusal names the effect and shows the perform form`() {
+    fun `the refusal names the effect and offers no way to force it`() {
         val src = """
             use std::effects::log::{ println, Console }
 
@@ -75,11 +75,19 @@ class RunnabilityCheckTest {
         """.trimIndent()
         val message = RunnabilityCheck.refusal(check(src, "greet"), "m::greet")
         assertNotNull(message, "an effectful function must be refused")
-        // The point of the message is that it tells you what to do next.
-        assertTrue(message!!.contains("mez sample perform"),
-            "refusal must show the perform form, got:\n$message")
-        assertTrue(message.contains("in m::greet"),
+        assertTrue(message!!.contains("Log"),
+            "refusal must name the effect that is unhandled, got:\n$message")
+        assertTrue(message.contains("m::greet"),
             "refusal must echo the reference the user typed, got:\n$message")
+
+        // Sample takes a function reference and NOTHING else. An earlier version
+        // suggested `mez sample perform <LogHandler> in ref` — a form that does not
+        // and will not exist, so the message must not resurrect it. A sample you had
+        // to configure would show a run you set up rather than what the function does.
+        assertTrue(!message.contains("mez sample perform"),
+            "refusal advertises a handler-supply form that does not exist, got:\n$message")
+        assertTrue(!message.contains("Handler>"),
+            "refusal names handlers to nominate, got:\n$message")
     }
 
     @Test

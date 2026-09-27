@@ -87,7 +87,23 @@ object EvalClosure {
      *
      * [projectRoot] is where imports resolve from, as for an ordinary build.
      */
-    fun compile(projectRoot: File, moduleFile: File, expression: String): Result {
+    fun compile(
+        projectRoot: File,
+        moduleFile: File,
+        expression: String,
+        /**
+         * Imports the expression needs that the module does not already have.
+         *
+         * `mez sample` generates arguments, and a generated `List`/`Set`/`Map` is built
+         * by a stdlib constructor the module may never import. The generator reports
+         * what it used; this puts it in scope.
+         *
+         * PREPENDED, not appended: `use` belongs at the top, and the module's own
+         * imports follow. A duplicate import of something the module already has is
+         * harmless, so nothing has to diff them.
+         */
+        extraImports: Set<String> = emptySet(),
+    ): Result {
         if (expression.isBlank()) return Result.Failed("nothing to evaluate")
 
         val moduleSource = try {
@@ -106,7 +122,8 @@ object EvalClosure {
         //
         // A newline before it in case the file has no trailing one; otherwise the
         // binding joins the last line and an error points at source the user wrote.
-        val source = moduleSource.trimEnd() + "\n\nlet $BINDING = {} -> $expression\n"
+        val prelude = if (extraImports.isEmpty()) "" else extraImports.joinToString("\n", postfix = "\n\n")
+        val source = prelude + moduleSource.trimEnd() + "\n\nlet $BINDING = {} -> $expression\n"
 
         val parser = MezzeParser()
         val parsed = parser.parseWithRecovery(source, file = moduleFile.name)
@@ -127,7 +144,7 @@ object EvalClosure {
             )
         }
         if (raw is TypeChecker.TypeCheckResult.Failure) {
-            return Result.Failed(formatAgainstExpression(raw, expression, moduleSource))
+            return Result.Failed(formatAgainstExpression(raw, expression, source))
         }
         val result = TypeCheckRunner.wrapSuccess(raw as TypeChecker.TypeCheckResult.Success)
 
@@ -245,9 +262,13 @@ object EvalClosure {
     private fun formatAgainstExpression(
         failure: TypeChecker.TypeCheckResult.Failure,
         expression: String,
-        moduleSource: String,
+        /** The source that was COMPILED, including any prepended imports. */
+        source: String,
     ): String {
-        val syntheticLine = moduleSource.trimEnd().lines().size + 2
+        // Counted from the source ACTUALLY compiled, not the module alone: prepended
+        // imports shift every line, and a frame that pointed one line off would put
+        // the caret under the wrong text.
+        val syntheticLine = source.trimEnd().lines().size
         return buildString {
             for ((i, err) in failure.errors.withIndex()) {
                 if (i > 0) append("\n\n")

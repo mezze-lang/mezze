@@ -1,0 +1,130 @@
+# Sampling — where generated values come from.
+
+use std::effects::random::{ Random, SeededRandom, random_int, random_float, random_nat }
+use std::nat::{ Nat }
+
+## Draw the raw material a generated value is built from.
+##
+## `Arbitrary` says how a value of a given type is ASSEMBLED — that part is
+## structure, so the compiler derives it. This effect is where the numbers come
+## from, which is not part of any type, so it is ambient instead.
+##
+## A derived `Arbitrary` impl performs only `<Sample>`. It never mentions
+## `Random`, and that is the point: the performer decides where entropy comes
+## from, so an impl does not have to be written twice for the seeded and
+## unseeded cases.
+##
+## ## `size` and why it is scoped
+##
+## Generation of a recursive type has to stop. `size` is the budget, and
+## `resize` lowers it for a nested draw — a derived impl wraps the children of a
+## recursive constructor in it, and at zero a variant is forced to pick a
+## constructor that does not mention its own type. Without that,
+## `type Tree = | Node { l: Tree, r: Tree }, Leaf Int |` generates forever.
+##
+## It is a scoped OPERATION rather than a parameter on `arbitrary` so that
+## `arbitrary` takes no arguments at all. That matters because the impls are
+## generated mechanically: threading a size through every field of every derived
+## record is machinery, and lowering it at the two places that actually recurse
+## is not.
+effect Sample where {
+  ## The current budget for recursion depth and collection length.
+  size: {} -> Nat <Sample>,
+  ## Run `call` with the budget lowered to `n`.
+  resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample>,
+  ## An Int in [min, max]. The workhorse: variant arms, lengths, Int values.
+  int: { min: Int, max: Int } -> Int <Sample>,
+  ## A Nat in [0, max]. Separate from `int` because Nat is a newtype, so there is
+  ## no total conversion from an Int to lean on.
+  nat: { max: Nat } -> Nat <Sample>,
+  ## A Float in [0, 1).
+  float: {} -> Float <Sample>
+}
+
+## The default budget.
+##
+## Small on purpose. A sample exists to be READ, and a 40-element list nested
+## four deep is not read, it is scrolled past. Property testing will want to vary
+## this, which is what `DefaultSampleWith` is for.
+pub let default_size: Nat = 5n
+
+## Entropy from whatever `Random` handler the caller installed.
+##
+## `Random` is RAISED OUT, not handled — so the caller chooses: a seeded stream
+## for a reproducible run, real entropy, or a recorded one for a CI that has to
+## match byte for byte. That choice is the whole reason this performer exists
+## separately from `RandomSampler`, which makes it for you.
+impl Sample for DefaultSample where {
+  size = {} -> default_size,
+  resize = { n, call } -> perform DefaultSampleWith { size = n } in call {},
+  int = { min, max } -> random_int { min = min, max = max },
+  nat = { max } -> random_nat { max = max },
+  float = {} -> random_float {},
+}
+
+## `DefaultSample` with a budget you choose.
+##
+## Note `resize` installs THIS performer rather than recursing into itself, which
+## is what lets a nested draw inherit a lowered budget without touching the
+## `Random` handler above it. Re-installing entropy per level would reset the
+## stream and every subtree would come out identical.
+impl Sample for DefaultSampleWith { size: Nat } where {
+  size = {} -> size,
+  resize = { n, call } -> perform DefaultSampleWith { size = n } in call {},
+  int = { min, max } -> random_int { min = min, max = max },
+  nat = { max } -> random_nat { max = max },
+  float = {} -> random_float {},
+}
+
+## Run a generation under some sampling strategy.
+##
+## Late-bound on purpose: library code performs `Sampler` and the application
+## decides which one is installed, the same way a workflow does not choose its
+## own runner. A property-test harness and `mez sample` want different strategies
+## over identical generators.
+##
+## `call`'s row is `<Sample, ...>` and the result's is not, so the performer
+## discharges `Sample` — the shape `Workflow.step` already uses.
+effect Sampler where {
+  run: { call: {} -> 'a <Sample, ...> } -> 'a <Sampler>
+}
+
+## Seeded and self-contained: the same seed gives the same values.
+##
+## `SeededRandom` is installed ONCE, around the whole generation. That is why
+## this is a scoped operation and not something a `Sample` performer could do
+## per-draw: `SeededRandom` resets its stream at scope entry, so installing it
+## per operation would hand back the same number every time — a generator that
+## looks like it works and produces constants.
+impl Sampler for RandomSampler { seed: Int } where {
+  run = { call } ->
+    perform SeededRandom { seed = seed } in perform DefaultSample in call {}
+}
+
+## Seeded, with a budget you choose.
+impl Sampler for RandomSamplerWith { seed: Int, size: Nat } where {
+  run = { call } ->
+    perform SeededRandom { seed = seed } in
+      perform DefaultSampleWith { size = size } in call {}
+}
+
+## The current size budget.
+pub let size: {} -> Nat <Sample> = {} -> Sample.size {}
+
+## Lower the budget for a nested draw.
+pub let resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample> = { n, call } ->
+  Sample.resize { n = n, call = call }
+
+## An Int in [min, max].
+pub let int: { min: Int, max: Int } -> Int <Sample> = { min, max } ->
+  Sample.int { min = min, max = max }
+
+## A Nat in [0, max].
+pub let nat: { max: Nat } -> Nat <Sample> = { max } -> Sample.nat { max = max }
+
+## A Float in [0, 1).
+pub let float: {} -> Float <Sample> = {} -> Sample.float {}
+
+## Run a generation under the installed sampler.
+pub let run: { call: {} -> 'a <Sample, ...> } -> 'a <Sampler> = { call } ->
+  Sampler.run { call = call }

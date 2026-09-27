@@ -1,0 +1,99 @@
+# Arbitrary — how a value of a type is assembled.
+
+use std::effects::sample::{ Sample }
+use std::nat::{ Nat }
+# The arithmetic below needs the Int and Float numeric impls in scope; without
+# these, `0 - 100` reports no `NumSub` for Int because only Nat's were imported.
+use std::int
+use std::float
+
+## A type that can be generated.
+##
+## The ability says HOW a value is assembled, which is structure — so the
+## compiler derives it for records, variants and containers the same way it
+## derives `Eq`. Where the numbers come from is not part of any type, so that
+## lives in the `Sample` effect instead, and a derived impl performs only
+## `<Sample>`: it never mentions `Random`, and the sampler decides whether
+## entropy is seeded or live.
+##
+## ## What this makes possible
+##
+## A Mezze function takes a single RECORD. So "generate arguments for `f`" is not
+## a special mechanism — it is `arbitrary` at `f`'s parameter type, which is an
+## ordinary record and derives like any other. That is why `mez sample` needs no
+## type-directed code of its own, and why a field whose type has no impl produces
+## an ordinary missing-impl diagnostic naming that type rather than a hand-written
+## list of what the tool cannot handle.
+##
+## Property testing is the other consumer, and wants the same generators.
+##
+## ## Dispatch is on the RETURN type
+##
+## `arbitrary` takes no arguments, so there is nothing to dispatch on but the type
+## being produced. Like a `decode`-style operation, the call site's expected type
+## is what selects the impl — which means `arbitrary {}` needs its target pinned,
+## and an unannotated `let x = arbitrary {}` is ambiguous rather than wrong.
+##
+## ## Newtypes must opt in
+##
+## As with `Embeddable`, and for the same reason plus a stronger one. A newtype is
+## opaque, so deriving would pierce that wall — but generation also has a domain
+## question the representation cannot answer: `newtype Email = Str` does not want
+## arbitrary strings and `newtype Age = Int` does not want negative ones. The
+## author opting in is where they say what a valid value IS.
+ability Arbitrary for 'a where {
+  arbitrary: {} -> 'a <Sample>
+}
+
+## NO convenience wrapper, and the reason is worth recording.
+##
+## `pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}`
+## is rejected with "Annotation declares effects Sample which are not used in the
+## implementation". At the wrapper's definition site `'a` is not pinned, so no impl
+## is selected, so the checker sees no effect to propagate — dispatch here is on the
+## RETURN type, and there is nothing to dispatch on yet.
+##
+## Call `Arbitrary.arbitrary {}` directly, where the expected type pins `'a` and the
+## op's own declared row applies.
+
+## Spread across zero so a sample shows sign handling, not just positives.
+impl Arbitrary for Int where {
+  arbitrary = {} -> Sample.int { min = 0 - 100, max = 100 }
+}
+
+## Scaled off [0, 1) and shifted, for the same reason.
+impl Arbitrary for Float where {
+  arbitrary = {} -> (Sample.float {} * 200.0) - 100.0
+}
+
+impl Arbitrary for Bool where {
+  arbitrary = {} -> Sample.int { min = 0, max = 1 } == 1
+}
+
+## NO `Arbitrary for Char` yet, and the reason is a language fact worth recording.
+##
+## Mezze has no character literal: `'a` is a TYPE VARIABLE, so `'a'` does not
+## parse. Every route to a `Char` — `char::from_int`, `char::from_str` — returns an
+## `Option`, so a total impl would need a `Char` to fall back to when the option is
+## empty, and there is no way to write one. The fallback is circular.
+##
+## Leaving it out means a record with a `Char` field reports a missing impl, which
+## is accurate. Inventing an answer here would be guessing at a language decision.
+
+## The empty string is in the set on purpose: it is the case that breaks parsers,
+## and a generator that never produces it is not testing anything.
+impl Arbitrary for Str where {
+  arbitrary = {} -> do
+    let n = Sample.int { min = 0, max = 3 }
+    if n == 0 then "" else if n == 1 then "a" else if n == 2 then "sample" else "mezze"
+}
+
+## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
+## exactly as it does for `Embeddable`.
+##
+## `nat::from_int` is partial, and here the `None` arm is unreachable because the
+## range starts at zero. Rather than write a branch that cannot happen, the value
+## is built from a non-negative Int through the one conversion that cannot fail.
+impl Arbitrary for Nat where {
+  arbitrary = {} -> Sample.nat { max = 100n }
+}

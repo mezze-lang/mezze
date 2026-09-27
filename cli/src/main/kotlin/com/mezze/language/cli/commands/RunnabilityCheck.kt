@@ -20,9 +20,19 @@ import com.mezze.language.typedast.TypedLetDecl
  *
  * [EntryPointCheck] applies the same rule to the app entry point, where the
  * consequence is identical. The shared structural part lives on
- * `MezzeType.FunctionType.residualEffects`; what differs is the remedy offered,
- * because an entry point is fixed by editing its body while a sampled function
- * is fixed by supplying handlers on the command line.
+ * `MezzeType.FunctionType.residualEffects`.
+ *
+ * ## There is no way to supply handlers
+ *
+ * Sample takes a function reference and nothing else. A sample you had to
+ * configure — nominating a handler per effect — would be showing a run you set
+ * up rather than what the function does, so an undischarged effect means the
+ * function is simply not sampleable. Both remedies are edits to the code: handle
+ * the effect inside the function, or sample one that already does.
+ *
+ * This is why [refusal] explains rather than instructs. An earlier version
+ * suggested `mez sample perform <XHandler> in ref`, a form that does not and will
+ * not exist.
  */
 object RunnabilityCheck {
 
@@ -82,18 +92,22 @@ object RunnabilityCheck {
 
         is Result.NeedsHandlers -> buildString {
             val list = result.effects.joinToString(", ")
-            append("`$reference` performs $list, so it cannot be run without handlers.\n\n")
+            append("`$reference` performs $list, which nothing here handles, so it cannot be ")
+            append("sampled.\n\n")
             append("Running it unhandled would not fail — Mezze defers undischarged effects, so ")
-            append("every result would be a suspended computation rather than a value. ")
-            append("Supply handlers explicitly:\n\n")
-            append("    mez sample perform ")
-            append(result.effects.joinToString(", ") { "<${it}Handler>" })
-            append(" in $reference\n")
+            append("the result would be a suspended computation rather than a value, and it would ")
+            append("render as something plausible.\n\n")
+            append("Sample is offered only for a function whose effects are already discharged: ")
+            append("an empty row, or `<*>` where the body handles what it performs. There is ")
+            append("deliberately no way to nominate handlers for it — a sample you had to ")
+            append("configure would be showing a run you set up rather than what the function ")
+            append("does. Handle the effect inside the function, or sample one that already ")
+            append("does.\n")
 
-            // An associated type is part of the contract a handler must satisfy,
-            // not decoration — `Exception having 'error = Str` and
-            // `Exception having 'error = IoError` need different handlers, and
-            // naming only the effect leaves the user to guess which.
+            // An associated type is part of the contract, not decoration —
+            // `Exception having 'error = Str` and `Exception having 'error = IoError`
+            // are different obligations, and naming only the effect leaves the reader
+            // to guess which one this is.
             if (result.instances.isNotEmpty()) {
                 append("\n")
                 for (instance in result.instances) {
@@ -101,7 +115,7 @@ object RunnabilityCheck {
                         .sortedBy { it.key }
                         .joinToString(", ") { (name, type) -> "'$name = $type" }
                     if (bindings.isNotEmpty()) {
-                        append("`${instance.name}` carries $bindings — the handler must match it.\n")
+                        append("`${instance.name}` carries $bindings — a handler would have to match it.\n")
                     }
                 }
             }
