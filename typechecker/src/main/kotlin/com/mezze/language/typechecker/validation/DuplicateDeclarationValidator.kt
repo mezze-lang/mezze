@@ -153,6 +153,13 @@ object DuplicateDeclarationValidator {
 
         private fun validateDuplicateConstructors(module: ParsedModule) {
         val constructorToTypeMap = mutableMapOf<String, String>()
+        // Every locally-declared type/newtype name. A variant constructor may
+        // share its OWN type's name (the single-constructor idiom
+        // `type Point = | Point {…} |`), but reusing a DIFFERENT type's name is a
+        // collision — a bare `Red` would be ambiguous between the constructor and
+        // `type Red`. (constructor-vs-constructor and constructor-vs-effect are
+        // already checked below / elsewhere; this closes the type axis.)
+        val declaredTypeNames = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
         // Structural shape → first alias name, for CLOSED record aliases. Because
         // records are structural, two closed aliases with an identical
         // field-name+type set are the SAME type wearing two names (no added
@@ -183,6 +190,15 @@ object DuplicateDeclarationValidator {
                             throw TypeCheckError(
                                 "Duplicate constructor name: constructor '$constructorName' is already defined " +
                                 "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
+                                typeDecl.loc,
+                                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                            )
+                        }
+                        if (constructorName != typeDecl.name && constructorName in declaredTypeNames) {
+                            throw TypeCheckError(
+                                "Constructor '$constructorName' in type '${typeDecl.name}' conflicts with type " +
+                                "'$constructorName'. A constructor may share its own type's name, but not a " +
+                                "different type's name — choose a distinct constructor name.",
                                 typeDecl.loc,
                                 code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                             )

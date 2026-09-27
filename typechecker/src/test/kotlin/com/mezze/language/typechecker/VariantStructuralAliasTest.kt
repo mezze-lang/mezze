@@ -90,6 +90,32 @@ class VariantStructuralAliasTest {
         assertTrue(r.exceptionOrNull()?.message?.contains("Duplicate constructor name") == true)
     }
 
+    @Test
+    fun `a constructor colliding with a different type's name is rejected`() {
+        val main = """
+            pub type Color = | Red, Green |
+            pub type Red = { shade: Int }
+            Red { shade = 1 }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) { "constructor Red vs type Red should conflict" }
+        assertTrue(r.exceptionOrNull()?.message?.contains("conflicts with type 'Red'") == true) {
+            "got: ${r.exceptionOrNull()?.message}"
+        }
+    }
+
+    @Test
+    fun `a single constructor sharing its own type's name is allowed`() {
+        // The `type Point = | Point {…} |` idiom must keep working — the collision
+        // rule exempts a constructor that matches ITS OWN type.
+        val main = """
+            pub type Point = | Point { x: Int, y: Int } |
+            Point { x = 1, y = 2 }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isSuccess) { "own-type-named constructor should be allowed; got: ${r.exceptionOrNull()?.message}" }
+    }
+
     // ====================================================================
     // RULE 3a: match with arms = SUPERSET of in-scope alias → reject the
     // extras. Two flavors: alias declared in same module, alias imported.
