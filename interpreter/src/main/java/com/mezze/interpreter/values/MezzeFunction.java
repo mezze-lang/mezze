@@ -14,7 +14,7 @@ import com.oracle.truffle.api.library.ExportMessage;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 
 /**
- * Function value in Mezze v2 - OPTIMIZED.
+ * Function value — optimized representation.
  *
  * Contains:
  * - callTarget: The compiled Truffle CallTarget

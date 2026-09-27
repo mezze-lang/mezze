@@ -10,7 +10,6 @@ import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typedast.*
-import com.mezze.language.typedast.TypeScheme as V2TypeScheme
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo
 import com.mezze.language.typechecker.context.TypingContext

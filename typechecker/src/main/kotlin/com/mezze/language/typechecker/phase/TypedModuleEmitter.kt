@@ -267,8 +267,8 @@ private fun compileModule(
     val allAbilityImpls = mutableListOf<TypedAbilityImpl>()
     allAbilityImpls.addAll(wrapped.abilityImpls)
     allAbilityImpls.addAll(PrecompiledStdlib.stdlibAbilityImpls)
-    for ((_, v1Module) in loadedModules) {
-        val stdlibModule = v1Module.typedModule ?: continue
+    for ((_, loaded) in loadedModules) {
+        val stdlibModule = loaded.typedModule ?: continue
         allAbilityImpls.addAll(stdlibModule.abilityImpls)
     }
     for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
@@ -307,8 +307,8 @@ private fun compileModule(
     val importedModules = mutableListOf<TypedModule>()
     val importedPerformers = mutableListOf<TypedPerformerDecl>()
     val seenHashes = mutableSetOf<Hash>()
-    for ((_, v1Module) in loadedModules) {
-        val stdlibModule = v1Module.typedModule ?: continue
+    for ((_, loaded) in loadedModules) {
+        val stdlibModule = loaded.typedModule ?: continue
         if (stdlibModule.hash in preludeModuleHashes) continue
         if (stdlibModule.hash in seenHashes) continue
         seenHashes.add(stdlibModule.hash)

@@ -100,7 +100,7 @@ class CheckCommand {
             when (result) {
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
                     val typedModule = result.typedModule
-                        ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
+                        ?: throw TypeCheckError("the typecheck pipeline did not emit a TypedModule")
                     if (jsonMode) {
                         if (parseResult.errors.isNotEmpty()) {
                             jsonExitWith(absPath, null,

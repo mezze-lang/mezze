@@ -8,7 +8,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native NonEmptyList operations - ULTRA PERFORMANT.
  *
- * NonEmptyList in V2 is represented as Object[] with guaranteed length >= 1.
+ * NonEmptyList is represented as Object[] with guaranteed length >= 1.
  * All operations are designed for JIT compilation.
  */
 public final class NonEmptyListNatives {

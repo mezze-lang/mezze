@@ -17,7 +17,7 @@ import java.util.Arrays;
 /**
  * Native Seq operations - backed by optimized MezzeSeq.
  *
- * Seq in V2 is represented as MezzeSeq (from datastructures module).
+ * Seq is represented as MezzeSeq (from the datastructures module).
  * All operations are designed for JIT compilation:
  * - Primitive operations are inline-able
  * - Complex operations use @TruffleBoundary

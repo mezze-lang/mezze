@@ -561,7 +561,7 @@ class ContextBuilder {
         return ctx.extendWithEffectOperationType(effectDecl.name, effectRecordType, effectDecl.contentHash)
     }
 
-    private fun extractSuspensionTypeV2(
+    private fun extractSuspensionType(
         implDecl: ParsedPerformerDecl,
         associatedTypes: Map<String, MezzeType>
     ): MezzeType? {
@@ -730,7 +730,7 @@ class ContextBuilder {
         } else null
 
         val associatedTypesMap = if (hasAssocTypes) performerType.fields else emptyMap()
-        val suspensionType = extractSuspensionTypeV2(implDecl, associatedTypesMap)
+        val suspensionType = extractSuspensionType(implDecl, associatedTypesMap)
 
         val performerInfo = TypingContext.PerformerTypeInfo(
             performerName = implDecl.performerName,

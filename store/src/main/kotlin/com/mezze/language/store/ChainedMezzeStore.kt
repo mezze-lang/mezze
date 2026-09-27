@@ -22,7 +22,6 @@ import com.mezze.language.typedast.Hash
  * typechecker / runtime calling `store.getIR(hash)` doesn't care which
  * tier answered.
  *
- * Per docs/architecture-v2/15-codebase-refactor.md.
  */
 class ChainedMezzeStore(
     val primary: MezzeStore,

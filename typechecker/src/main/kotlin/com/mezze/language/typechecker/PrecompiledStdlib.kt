@@ -194,7 +194,7 @@ object PrecompiledStdlib {
             loadedModules = tc.getCachedPreludeLoadedModules() ?: emptyMap()
             compiledPrelude = CompiledModuleInterface.fromImportContext(preludeImportContext)
 
-            val cached = tryLoadV2ModulesFromResource()
+            val cached = tryLoadTypedModulesFromResource()
             if (cached != null) {
                 stdlibTypedModules = cached
             } else {
@@ -277,7 +277,7 @@ object PrecompiledStdlib {
             stdlibDeclHashes = declHashes
             stdlibModuleHashes = stdlibTypedModules.keys.toSet()
 
-            // Keep loadedModules (v1) and stdlibTypedModules (v2) around so
+            // Keep BOTH shapes around so
             // build-time tooling (StdlibPrecompiler / slice C seeding) can
             // walk decls and emit proper v7 rows (filePath + sourceHash live
             // on the v1 wrapper). Runtime memory cost is bounded by stdlib
@@ -341,7 +341,7 @@ object PrecompiledStdlib {
     }
 
         @OptIn(ExperimentalSerializationApi::class)
-    private fun tryLoadV2ModulesFromResource(): Map<Hash, TypedAstModule>? {
+    private fun tryLoadTypedModulesFromResource(): Map<Hash, TypedAstModule>? {
         return try {
             val stream = PrecompiledStdlib::class.java.classLoader
                 .getResourceAsStream(STDLIB_MODULES_RESOURCE) ?: return null

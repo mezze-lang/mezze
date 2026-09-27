@@ -127,30 +127,33 @@ class ImportResolver(
                 )
 
                 // `xs.length {}` render as `'a`. (See issue #213.)
-                val v2Module = typedModule?.typedModule
-                if (v2Module != null) {
-                    val opTypes = harvestInherentImplOpReturnTypes(v2Module, exportsToUse)
+                // Named `typedAst` rather than `module`: a LoadedModule called
+                // `module` is already in scope here, and the two are different
+                // things — the loaded module and the typed AST inside its result.
+                val typedAst = typedModule?.typedModule
+                if (typedAst != null) {
+                    val opTypes = harvestInherentImplOpReturnTypes(typedAst, exportsToUse)
                     if (opTypes.isNotEmpty()) {
                         context = context.copy(inherentImplOpReturnTypes = opTypes)
                     }
                     // Same harvest, but for param-record types (#230). Without
                     // this, `nums.all { p = 5 }` typechecks because `p` was
                     // registered as a free TypeVar — anything unifies.
-                    val opParamTypes = harvestInherentImplOpParamTypes(v2Module, exportsToUse)
+                    val opParamTypes = harvestInherentImplOpParamTypes(typedAst, exportsToUse)
                     if (opParamTypes.isNotEmpty()) {
                         context = context.copy(inherentImplOpParamTypes = opParamTypes)
                     }
                     // #181: harvest effect rows so impl methods whose
                     // bodies perform effects keep that effect-row across
                     // the module boundary.
-                    val opEffects = harvestInherentImplOpEffects(v2Module)
+                    val opEffects = harvestInherentImplOpEffects(typedAst)
                     if (opEffects.isNotEmpty()) {
                         context = context.copy(inherentImplOpEffects = opEffects)
                     }
                     // Harvest inferred ability constraints (`with FromJson 'a Str`,
                     // etc.) so a `.decode {}`-style target-directed op re-surfaces
                     // them at the call site (else the decode target never pins).
-                    val opConstraints = harvestInherentImplOpConstraints(v2Module)
+                    val opConstraints = harvestInherentImplOpConstraints(typedAst)
                     if (opConstraints.isNotEmpty()) {
                         context = context.copy(inherentImplOpConstraints = opConstraints)
                     }
@@ -215,22 +218,22 @@ class ImportResolver(
 
                 // dispatch produces a bare TypeVar. (Same fix as #213, extended
                 // to selective imports for #175.)
-                val v2ModuleSel = typedModule?.typedModule
-                if (v2ModuleSel != null) {
-                    val opTypes = harvestInherentImplOpReturnTypes(v2ModuleSel, exportsToUse)
+                val typedAst = typedModule?.typedModule
+                if (typedAst != null) {
+                    val opTypes = harvestInherentImplOpReturnTypes(typedAst, exportsToUse)
                     if (opTypes.isNotEmpty()) {
                         context = context.copy(inherentImplOpReturnTypes = opTypes)
                     }
-                    val opParamTypes = harvestInherentImplOpParamTypes(v2ModuleSel, exportsToUse)
+                    val opParamTypes = harvestInherentImplOpParamTypes(typedAst, exportsToUse)
                     if (opParamTypes.isNotEmpty()) {
                         context = context.copy(inherentImplOpParamTypes = opParamTypes)
                     }
                     // #181: harvest effect rows (selective-import path).
-                    val opEffects = harvestInherentImplOpEffects(v2ModuleSel)
+                    val opEffects = harvestInherentImplOpEffects(typedAst)
                     if (opEffects.isNotEmpty()) {
                         context = context.copy(inherentImplOpEffects = opEffects)
                     }
-                    val opConstraints = harvestInherentImplOpConstraints(v2ModuleSel)
+                    val opConstraints = harvestInherentImplOpConstraints(typedAst)
                     if (opConstraints.isNotEmpty()) {
                         context = context.copy(inherentImplOpConstraints = opConstraints)
                     }
@@ -932,11 +935,11 @@ class ImportResolver(
     }
 
     private fun harvestInherentImplOpReturnTypes(
-        v2Module: TypedAstModule,
+        module: TypedAstModule,
         exports: Map<String, ExportedItem>
     ): Map<Hash, Map<String, MezzeType>> {
         val result = mutableMapOf<Hash, Map<String, MezzeType>>()
-        for (impl in v2Module.abilityImpls) {
+        for (impl in module.abilityImpls) {
             if (impl.abilityHash != Hash.ZERO) continue
             val opMap = mutableMapOf<String, MezzeType>()
             for ((opName, opExpr) in impl.operations) {
@@ -1047,10 +1050,10 @@ class ImportResolver(
      * impl's own TypedLambda.
      */
     private fun harvestInherentImplOpEffects(
-        v2Module: TypedAstModule
+        module: TypedAstModule
     ): Map<Hash, Map<String, MezzeType.EffectRow>> {
         val result = mutableMapOf<Hash, Map<String, MezzeType.EffectRow>>()
-        for (impl in v2Module.abilityImpls) {
+        for (impl in module.abilityImpls) {
             if (impl.abilityHash != Hash.ZERO) continue
             val opMap = mutableMapOf<String, MezzeType.EffectRow>()
             for ((opName, opExpr) in impl.operations) {
@@ -1078,10 +1081,10 @@ class ImportResolver(
      * (abilityHash == ZERO) are inherent methods.
      */
     private fun harvestInherentImplOpConstraints(
-        v2Module: TypedAstModule
+        module: TypedAstModule
     ): Map<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>> {
         val result = mutableMapOf<Hash, Map<String, List<MezzeType.FunctionAbilityConstraint>>>()
-        for (impl in v2Module.abilityImpls) {
+        for (impl in module.abilityImpls) {
             if (impl.abilityHash != Hash.ZERO) continue
             val opMap = mutableMapOf<String, List<MezzeType.FunctionAbilityConstraint>>()
             for ((opName, opExpr) in impl.operations) {
@@ -1108,11 +1111,11 @@ class ImportResolver(
      * the body's stored type).
      */
     private fun harvestInherentImplOpParamTypes(
-        v2Module: TypedAstModule,
+        module: TypedAstModule,
         exports: Map<String, ExportedItem>
     ): Map<Hash, Map<String, MezzeType>> {
         val result = mutableMapOf<Hash, Map<String, MezzeType>>()
-        for (impl in v2Module.abilityImpls) {
+        for (impl in module.abilityImpls) {
             if (impl.abilityHash != Hash.ZERO) continue
             val opMap = mutableMapOf<String, MezzeType>()
             for ((opName, opExpr) in impl.operations) {

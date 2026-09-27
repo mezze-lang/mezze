@@ -15,7 +15,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 
 /**
- * Optimized record representation for Mezze v2.
+ * Optimized record representation.
  *
  * Records use array-based storage with compile-time field indices:
  * - longFields: long[] for Int fields (unboxed)

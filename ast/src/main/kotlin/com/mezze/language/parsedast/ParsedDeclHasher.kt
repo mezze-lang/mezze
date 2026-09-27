@@ -47,7 +47,7 @@ import com.mezze.language.typedast.Hash
  * - Source locations EXCLUDED (the one thing that is not content)
  * - Each node variant has a unique tag byte
  *
- * Replaces ParsedASTHasher which converted v2→v1→ASTHasher.
+ * Replaces ParsedASTHasher, which round-tripped through two AST shapes to reach ASTHasher.
  */
 object ParsedDeclHasher {
 

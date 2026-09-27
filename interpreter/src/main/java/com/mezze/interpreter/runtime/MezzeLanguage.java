@@ -22,14 +22,14 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Mezze language registration for Truffle - V2 OPTIMIZED.
+ * Mezze language registration for Truffle.
  *
  * Fully functional language implementation with:
  * - Source code parsing via MezzeParser
  * - Type checking via TypeChecker
  * - TruffleIR compilation via PipelineRunner/TruffleCompiler
  *
- * Uses "mezze" as the language ID - V2 is the default interpreter.
+ * Uses "mezze" as the language ID.
  */
 @TruffleLanguage.Registration(
     id = MezzeLanguage.ID,

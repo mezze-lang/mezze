@@ -6,7 +6,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native Char operations - ULTRA PERFORMANT.
  *
- * Char in V2 is represented as a single-character String.
+ * Char is represented as a single-character String.
  * All operations are designed for JIT compilation.
  */
 public final class CharNatives {

@@ -13,7 +13,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 import java.util.Map;
 
 /**
- * V2 Module Loader — registers pre-compiled functions by content hash.
+ * Module loader — registers pre-compiled functions by content hash.
  *
  * At compile time, all dependency modules are compiled to CallTargets.
  * This node registers them in the global context on first execution,

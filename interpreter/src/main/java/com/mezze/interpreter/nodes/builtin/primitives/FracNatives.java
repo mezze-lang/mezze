@@ -6,7 +6,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native Frac (Fraction) operations - ULTRA PERFORMANT.
  *
- * Frac in V2 is represented as a MezzeRecord with {numerator: Int, denominator: Int}.
+ * Frac is represented as a MezzeRecord with {numerator: Int, denominator: Int}.
  * All operations maintain reduced form.
  */
 public final class FracNatives {

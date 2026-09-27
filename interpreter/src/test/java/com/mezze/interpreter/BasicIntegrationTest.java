@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Basic integration tests for V2 interpreter end-to-end execution.
  *
  * These tests verify that the full pipeline works:
- * Parser → TypeChecker → ASTToTruffleConverterV2 → Execution
+ * Parser → TypeChecker → BDSL compiler → Execution
  *
  * Run with: ./gradlew :interpreterv2:test --tests "*BasicIntegrationTest*"
  */

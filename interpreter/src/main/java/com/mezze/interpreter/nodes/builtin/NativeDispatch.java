@@ -39,7 +39,7 @@ import java.util.Map;
  * This dispatcher handles ALL native functions by delegating to specialized
  * native modules.
  */
-@NodeInfo(shortName = "native-dispatch-v2")
+@NodeInfo(shortName = "native-dispatch")
 public final class NativeDispatch extends MezzeNode {
 
     @CompilationFinal

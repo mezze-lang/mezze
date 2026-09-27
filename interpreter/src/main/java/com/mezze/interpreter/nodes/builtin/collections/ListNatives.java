@@ -15,7 +15,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native List operations - ULTRA PERFORMANT.
  *
- * List in V2 uses persistent linked list semantics (MezzeList).
+ * List uses persistent linked list semantics (MezzeList).
  * All operations are designed for JIT compilation.
  */
 public final class ListNatives {

@@ -10,7 +10,7 @@ import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typedast.*
-import com.mezze.language.typedast.TypeScheme as V2TypeScheme
+import com.mezze.language.typedast.TypeScheme
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo
 import com.mezze.language.typechecker.context.TypingContext
@@ -342,7 +342,7 @@ class TypedAstBuilder(
             val value = buildExpr(decl.value, file, type)
 
             val destrHash = ParsedDeclHasher.hashLetDecl(decl)
-            val scheme = V2TypeScheme(emptyList(), emptyList(), type)
+            val scheme = TypeScheme(emptyList(), emptyList(), type)
             decls.add(TypedLetDecl(destrHash, destrName, emptyList(), value, scheme, false, loc))
 
             val isPublic = decl.visibility == ParsedVisibility.PUBLIC
@@ -391,7 +391,7 @@ class TypedAstBuilder(
                     com.mezze.language.typedast.TypedAbilityConstraint(abilityHash = h, typeArgs = c.typeArgs)
                 }
             } ?: emptyList()
-        val scheme = V2TypeScheme(freeVars, schemeConstraints, type)
+        val scheme = TypeScheme(freeVars, schemeConstraints, type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
 
         decls.add(TypedLetDecl(
@@ -876,7 +876,7 @@ class TypedAstBuilder(
             name = "__toplevel_expr_${decls.size}",
             typeParams = emptyList(),
             value = value,
-            scheme = V2TypeScheme(emptyList(), emptyList(), type),
+            scheme = TypeScheme(emptyList(), emptyList(), type),
             isPublic = false,
             loc = loc
         ))
@@ -1971,7 +1971,7 @@ class TypedAstBuilder(
     ) {
         walkRecordDestructure(entries, parentVarName, parentType, loc,
             emitBinding = { name, hash, type, access, bindingLoc ->
-                val scheme = V2TypeScheme(emptyList(), emptyList(), type)
+                val scheme = TypeScheme(emptyList(), emptyList(), type)
                 // Field's own token loc (see emitRecordDestructureFields) so hover
                 // resolves to this binding, not the synthetic scrutinee decl.
                 decls.add(TypedLetDecl(hash, name, emptyList(), access, scheme, isPublic, bindingLoc))
@@ -1983,7 +1983,7 @@ class TypedAstBuilder(
                 // #316 (Leak A): source field path, not decls.size (see emitRecordDestructureFields).
                 val nestedVarName = "__destructured_${parentVarName}_${fieldName}"
                 val nestedHash = fieldHash(parentVarName, nestedVarName)
-                val nestedScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
+                val nestedScheme = TypeScheme(emptyList(), emptyList(), fieldType)
                 decls.add(TypedLetDecl(nestedHash, nestedVarName, emptyList(), fieldAccess, nestedScheme, false, loc))
                 emitRecordDestructureDeclFields(nestedEntries, nestedVarName, fieldType, loc, isPublic, decls, exports)
             }

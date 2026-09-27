@@ -9,7 +9,7 @@ import com.mezze.language.parsedast.ParsedUsePath
 /**
  * Converts a parsed-AST [ParsedUsePath] into the core [UsePath] the module
  * resolver operates on. Previously duplicated verbatim as a private
- * `parsedUsePathToV1` in both ModuleResolver and ImportResolver.
+ * a duplicated conversion in both ModuleResolver and ImportResolver.
  */
 fun parsedUsePathToCore(path: ParsedUsePath): UsePath = when (path) {
     is ParsedUsePath.Module -> ModulePath(path.path.segments)

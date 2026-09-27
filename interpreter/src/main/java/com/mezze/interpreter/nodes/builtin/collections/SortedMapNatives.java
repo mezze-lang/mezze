@@ -10,7 +10,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native SortedMap operations - ULTRA PERFORMANT.
  *
- * SortedMap in V2 is represented as MezzeSortedMap from datastructures module.
+ * SortedMap is represented as MezzeSortedMap from the datastructures module.
  * Uses sorted array backing for O(log n) lookups and O(1) min/max.
  * Uses persistent semantics (returns new maps on mutation).
  */

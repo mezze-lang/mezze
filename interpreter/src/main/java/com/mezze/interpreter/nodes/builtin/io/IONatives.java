@@ -255,7 +255,7 @@ public final class IONatives {
         MezzeBuffer buf = getBuffer(args, "buf");
         Object bytesValue = getField(args, "bytes");
 
-        // Handle both BytesNatives.MezzeBytes (V2 native) and MezzeBytes (value wrapper)
+        // Handle both BytesNatives.MezzeBytes (the native) and MezzeBytes (value wrapper)
         if (bytesValue instanceof BytesNatives.MezzeBytes mb) {
             buf.writeBytes(mb.getData());
         } else if (bytesValue instanceof MezzeBytes mb) {

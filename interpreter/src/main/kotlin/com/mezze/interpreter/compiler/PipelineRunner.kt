@@ -14,7 +14,7 @@ import com.mezze.language.truffleir.SlotKind
 import java.nio.file.Path
 
 /**
- * V2 Pipeline Runner — compiles Mezze source through the full v2 pipeline.
+ * Pipeline runner — compiles Mezze source through the full pipeline.
  *
  * Parse → Typecheck → Wrap top-level → Monomorphize → Resolve → Lower → TruffleCompiler
  */
@@ -361,10 +361,10 @@ object PipelineRunner {
         hashToName.putAll(language.stdlibHashToName)
         allPerformerRecords.addAll(language.stdlibPerformerRecords)
 
-        // HashModuleLoaderNode registers v2-compiled functions by hash AND name
+        // HashModuleLoaderNode registers compiled functions by hash AND name
         val performerInfos = allPerformerRecords.toTypedArray()
-        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName, performerInfos)
-        val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
+        val withFunctions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName, performerInfos)
+        val wrapped = MezzeLanguage.createResultCapturingNode(withFunctions)
 
         val fdBuilder = FrameDescriptor.newBuilder()
         for (i in mainFn.paramSlots.indices) {

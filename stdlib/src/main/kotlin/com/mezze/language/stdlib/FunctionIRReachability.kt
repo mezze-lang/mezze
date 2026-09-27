@@ -98,7 +98,7 @@ object FunctionIRReachability {
     /**
      * Walk a single [NodeIR] tree, adding every hash referenced by any
      * sub-node to [queue]. Used both internally by
-     * [collectReferencedHashes] and by external callers (e.g. v2
+     * [collectReferencedHashes] and by external callers (e.g. the
      * pipeline glue) that need the same traversal.
      */
     @JvmStatic

@@ -9,7 +9,7 @@ import java.util.Base64;
 /**
  * Native Bytes operations - ULTRA PERFORMANT.
  *
- * Bytes in V2 is represented as byte[] wrapped in MezzeBytes.
+ * Bytes is represented as byte[] wrapped in MezzeBytes.
  * All operations are immutable (return new byte arrays).
  */
 public final class BytesNatives {

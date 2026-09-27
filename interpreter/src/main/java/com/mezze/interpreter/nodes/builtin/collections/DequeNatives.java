@@ -13,7 +13,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native Deque operations - ULTRA PERFORMANT.
  *
- * Deque in V2 uses MezzeDeque from values package with persistent semantics.
+ * Deque uses MezzeDeque with persistent semantics.
  * Backed by datastructures module ring buffer with O(1) operations on both ends.
  * All operations are immutable (return new deques).
  */

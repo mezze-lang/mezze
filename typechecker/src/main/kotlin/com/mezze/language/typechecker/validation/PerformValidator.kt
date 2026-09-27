@@ -212,7 +212,7 @@ class PerformValidator(
 
                     val effectDecl = effectDeclarations[effectName]
                     if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty()) {
-                        extractAssociatedTypeValuesV2(effectDecl, operationName, e.arguments)?.let { typeMap ->
+                        extractAssociatedTypeValues(effectDecl, operationName, e.arguments)?.let { typeMap ->
                             val effectMap = result.getOrPut(effectName) { mutableMapOf() }
                             for ((assocTypeName, extractedType) in typeMap) {
                                 unifyThrownType(effectMap, assocTypeName, extractedType)
@@ -235,7 +235,7 @@ class PerformValidator(
                         if (effectName != null) {
                             val effectDecl = effectDeclarations[effectName]
                             if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty()) {
-                                extractAssociatedTypeValuesV2(effectDecl, operationName, e.arguments)?.let { typeMap ->
+                                extractAssociatedTypeValues(effectDecl, operationName, e.arguments)?.let { typeMap ->
                                     val effectMap = result.getOrPut(effectName) { mutableMapOf() }
                                     for ((assocTypeName, extractedType) in typeMap) {
                                         unifyThrownType(effectMap, assocTypeName, extractedType)
@@ -337,7 +337,7 @@ class PerformValidator(
         return result
     }
 
-    private fun findAssociatedTypeFieldsV2(
+    private fun findAssociatedTypeFields(
         typeAnnotation: ParsedTypeAnnotation,
         associatedTypeNames: Set<String>
     ): Map<String, String> {
@@ -353,7 +353,7 @@ class PerformValidator(
         return result
     }
 
-    private fun extractAssociatedTypeValuesV2(
+    private fun extractAssociatedTypeValues(
         effectDecl: ParsedEffectDecl,
         operationName: String,
         args: ParsedExpr
@@ -361,7 +361,7 @@ class PerformValidator(
         val operation = effectDecl.operations.find { it.name == operationName } ?: return null
         val paramTypeAnnotation = operation.paramType
         val associatedTypeNames = effectDecl.associatedTypes.toSet()
-        val fieldToAssocType = findAssociatedTypeFieldsV2(paramTypeAnnotation, associatedTypeNames)
+        val fieldToAssocType = findAssociatedTypeFields(paramTypeAnnotation, associatedTypeNames)
 
         if (fieldToAssocType.isEmpty()) return null
 

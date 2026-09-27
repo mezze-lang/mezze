@@ -25,7 +25,7 @@ import com.mezze.language.ast.hashing.MezzeHashBuilder
 object TypedASTHasher {
 
     /**
-     * Hash a TypedExpr to a v2 Hash.
+     * Hash a TypedExpr.
      * This is the primary entry point for content-addressing expressions.
      */
     fun hashExpr(expr: TypedExpr): Hash {

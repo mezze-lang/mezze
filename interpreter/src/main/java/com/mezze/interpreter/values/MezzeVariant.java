@@ -9,7 +9,7 @@ import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
 
 /**
- * Optimized variant representation for Mezze v2.
+ * Optimized variant representation for Mezze variants.
  *
  * Uses integer tags instead of string constructor names:
  * - tag: int identifying the constructor (0, 1, 2, ...)
