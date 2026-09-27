@@ -42,6 +42,15 @@ import com.mezze.language.typechecker.TypeCheckWarning as OutputTypeCheckWarning
 class TypeChecker(
     internal val parentContext: TypingContext = createInitialContext(),
     internal val strictTopLevel: Boolean = false,
+    /**
+     * Which view of the codebase this check reads and writes.
+     *
+     * Two checks in DIFFERENT worlds can run concurrently; two in the same world
+     * cannot, because they would share a cycle-detection set and report each other
+     * as an import cycle. Defaults to [World.DEFAULT], so every existing caller
+     * keeps the single-world behaviour it had.
+     */
+    internal val world: World = World.DEFAULT,
 ) {
     /**
      * Java/WASM-friendly constructor: default context, explicit program-mode flag.
@@ -50,6 +59,18 @@ class TypeChecker(
      * e.g. rejecting a bare top-level expression (V0710).
      */
     constructor(strictTopLevel: Boolean) : this(createInitialContext(), strictTopLevel)
+
+    /**
+     * Explicit no-arg constructor, for Java callers.
+     *
+     * Kotlin normally synthesises one when every parameter has a default — which is
+     * how `new TypeChecker()` worked before. Adding [world] removed it, because
+     * `World` is a VALUE class and a value-class parameter suppresses that synthetic
+     * constructor. Nothing in the Kotlin modules noticed; the interpreter's Java
+     * tests stopped compiling. Written out so the interop does not depend on a
+     * subtlety of how the primary constructor's types happen to be declared.
+     */
+    constructor() : this(createInitialContext(), false, World.DEFAULT)
 
     internal fun loadPreludeModulesPublic(importResolver: ImportResolver): ModuleImportContext {
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
@@ -280,10 +301,11 @@ class TypeChecker(
             // project → spurious "module not found". Rooting at `currentPath`
             // unconditionally is correct for the top project AND for a dependency
             // module (…/.deps/mezze/<pkg>/…), which must resolve its own `.deps`.
-            val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
+            val moduleLoader = ModuleLoader.fromPath(currentPath.toString(), world)
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
                 parentContext,
-                moduleLoader.getResolver()
+                moduleLoader.getResolver(),
+                world,
             )
             val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 

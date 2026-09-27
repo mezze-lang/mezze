@@ -56,6 +56,20 @@ class ModuleTypeChecker(
              */
             val checking = mutableSetOf<String>()
             val checkingLock = Any()
+
+            /**
+             * The thread currently checking in this world, and how deeply nested it
+             * is.
+             *
+             * A world serves ONE check at a time. Two threads checking the same
+             * world share [checking], so each makes the other look like an import
+             * cycle — a reported error about the user's code, for a mistake in the
+             * caller's threading. Recording the owner turns that into an accurate
+             * complaint. Nesting is counted because one check re-enters this class
+             * once per imported module, on the same thread.
+             */
+            var owner: Thread? = null
+            var depth: Int = 0
         }
 
         private val worlds = java.util.concurrent.ConcurrentHashMap<World, Caches>()
@@ -184,7 +198,13 @@ class ModuleTypeChecker(
         @JvmOverloads
         fun clearTypeCheckingStack(world: World = World.DEFAULT) {
             val c = caches(world)
-            synchronized(c.checkingLock) { c.checking.clear() }
+            synchronized(c.checkingLock) {
+                c.checking.clear()
+                // Ownership goes with the stack: a world cleared mid-check must not
+                // stay owned by a thread that has moved on, or it is unusable.
+                c.owner = null
+                c.depth = 0
+            }
         }
 
         /**
@@ -210,6 +230,46 @@ class ModuleTypeChecker(
             synchronized(c.checkingLock) { return modulePath in c.checking }
         }
 
+        /**
+         * Claim [world] for this thread, or refuse.
+         *
+         * MUST run before the cycle test, and that ordering is the whole point. The
+         * cycle test asks "is this module already being checked in this world?" — a
+         * question that only means "import cycle" when the answer comes from THIS
+         * check. Asked across two threads sharing a world it reports
+         * `CircularDependency(cycle=[helper, helper])`: an error about the user's
+         * program caused by a bug in the caller's threading. Claiming first turns
+         * that into an accurate complaint.
+         *
+         * Re-entrant by depth, because one check enters this class once per imported
+         * module on the same thread.
+         */
+        private fun claimWorld(world: World) {
+            val c = caches(world)
+            val self = Thread.currentThread()
+            synchronized(c.checkingLock) {
+                val holder = c.owner
+                require(holder == null || holder === self) {
+                    "$world is already being type-checked by ${holder?.name} — a world " +
+                        "serves one check at a time. Two checks sharing a world report " +
+                        "each other as an import cycle; give each its own World.fresh(...)."
+                }
+                c.owner = self
+                c.depth++
+            }
+        }
+
+        /** Release one level of [claimWorld]; the last one hands the world back. */
+        private fun releaseWorld(world: World) {
+            val c = caches(world)
+            synchronized(c.checkingLock) {
+                if (--c.depth <= 0) {
+                    c.depth = 0
+                    c.owner = null
+                }
+            }
+        }
+
         private fun startTypeChecking(world: World, modulePath: String) {
             val c = caches(world)
             synchronized(c.checkingLock) { c.checking.add(modulePath) }
@@ -228,7 +288,12 @@ class ModuleTypeChecker(
         fun create() = ModuleTypeChecker()
         fun withContext(context: TypingContext) = ModuleTypeChecker(context)
         fun withResolver(resolver: ModuleResolver) = ModuleTypeChecker(moduleResolver = resolver)
-        fun withContextAndResolver(context: TypingContext, resolver: ModuleResolver) = ModuleTypeChecker(context, resolver)
+        @JvmOverloads
+        fun withContextAndResolver(
+            context: TypingContext,
+            resolver: ModuleResolver,
+            world: World = World.DEFAULT,
+        ) = ModuleTypeChecker(context, resolver, world = world)
     }
 
     fun typeCheckModule(
@@ -246,6 +311,7 @@ class ModuleTypeChecker(
             return ModuleTypeCheckResult.Success(cached)
         }
 
+        claimWorld(world)
         if (isTypeChecking(world, module.modulePath)) {
             val cycle = getTypeCheckingStack(world) + module.modulePath
             throw ModuleError.CircularDependency(cycle)
@@ -306,6 +372,7 @@ class ModuleTypeChecker(
             }
         } finally {
             finishTypeChecking(world, module.modulePath)
+            releaseWorld(world)
         }
     }
 

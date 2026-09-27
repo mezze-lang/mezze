@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.module
 
 import com.mezze.language.ast.ModulePath
 import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.World
 import com.mezze.language.typechecker.Module as ResolverModule
 import com.mezze.language.typechecker.ModuleError as ResolverModuleError
 import java.nio.file.Paths
@@ -121,7 +122,19 @@ class ModuleLoader(
     }
 
     companion object {
-        fun create() = ModuleLoader(ModuleResolver(Paths.get(".")))
-        fun fromPath(path: String) = ModuleLoader(ModuleResolver(Paths.get(path)))
+        @JvmOverloads
+        fun create(world: World = World.DEFAULT) =
+            ModuleLoader(ModuleResolver(Paths.get("."), world))
+
+        /**
+         * A loader whose resolver reads and writes [world].
+         *
+         * The world has to enter here rather than at the checker: the resolver is
+         * built at this point, and a resolver in one world under a checker in
+         * another splits the caches — ModuleTypeChecker's init refuses that pairing.
+         */
+        @JvmOverloads
+        fun fromPath(path: String, world: World = World.DEFAULT) =
+            ModuleLoader(ModuleResolver(Paths.get(path), world))
     }
 }
