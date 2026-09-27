@@ -45,16 +45,13 @@ ability Arbitrary for 'a where {
   arbitrary: {} -> 'a <Sample>
 }
 
-## NO convenience wrapper, and the reason is worth recording.
+## The ability operation under a plain name, so callers write `arbitrary {}`.
 ##
-## `pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}`
-## is rejected with "Annotation declares effects Sample which are not used in the
-## implementation". At the wrapper's definition site `'a` is not pinned, so no impl
-## is selected, so the checker sees no effect to propagate — dispatch here is on the
-## RETURN type, and there is nothing to dispatch on yet.
-##
-## Call `Arbitrary.arbitrary {}` directly, where the expected type pins `'a` and the
-## op's own declared row applies.
+## This was rejected before S-1 with "Annotation declares effects Sample which are
+## not used in the implementation" — the op's declared `<Sample>` never reached the
+## call site, so the body looked pure and contradicted the annotation. The
+## constraint is what carries `'a` out to the caller, whose expected type pins it.
+pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}
 
 ## Spread across zero so a sample shows sign handling, not just positives.
 impl Arbitrary for Int where {

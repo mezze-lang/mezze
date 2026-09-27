@@ -104,14 +104,38 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         typeArgs = listOf(abilityVar),
     )
 
-    return ConstraintResult.operandOf(argumentResult).copy(
-        type = opType.returnType,
+    // S-1: the operation's DECLARED effect row, harvested exactly as the
+    // receiver-taking path does — same three helpers, same order.
+    //
+    // This path generated the call and dropped `opType.effects` on the floor, so
+    // `arbitrary: {} -> 'a <Sample>` produced a call site that performed NOTHING.
+    // The failure was invisible against a closed expected row, because an empty
+    // row is absorbed into one — so `{ call: {} -> 'a <Tick> }` accepted the pure
+    // thunk and the sole symptom was against an OPEN row, where the tail has
+    // nothing to unify with: "expected `{} -> 'a <Tick, ...>` but got `{} -> Int`".
+    // That is `Sampler.run`'s shape, which is why sampling was where it surfaced.
+    val (resultType, declaredEffects, declaredEffectInstances) =
+        wrapCallResultWithEffects(opType.returnType, opType.effects)
+    val caughtByOp = collectCaughtByAncestor(opType.paramType)
+    val harvestedEffects = harvestCallbackEffects(opType.paramType, argumentResult.type)
+
+    // Base + mine, never a fresh union: `operandOf` is the propagating merge, and
+    // rebuilding these fields from scratch is how the other generators dropped six
+    // of them ten thousand times. The argument's own ability and associated-type
+    // constraints were being discarded here too — `Maker.make { x = Foo.bar {} }`
+    // lost `Foo`'s obligation entirely.
+    val base = ConstraintResult.operandOf(argumentResult)
+    return base.copy(
+        type = resultType,
         constraints = constraints,
-        abilityConstraints = listOf(abilityConstraint),
-        associatedTypeConstraints = emptyList(),
-        methodCallResolutions = argumentResult.methodCallResolutions +
+        effects = (base.effects + declaredEffects + harvestedEffects) - caughtByOp,
+        effectInstances = base.effectInstances + declaredEffectInstances,
+        effectRowVars = base.effectRowVars + setOfNotNull(opType.effects?.rowVar),
+        performed = base.performed || (opType.effects?.performed ?: false),
+        abilityConstraints = base.abilityConstraints + abilityConstraint,
+        methodCallResolutions = base.methodCallResolutions +
             mapOf((expr.loc to methodName) to methodCallInfo),
-        callReturnTypes = argumentResult.callReturnTypes + (expr.loc to opType.returnType),
+        callReturnTypes = base.callReturnTypes + (expr.loc to resultType),
     )
 }
 
