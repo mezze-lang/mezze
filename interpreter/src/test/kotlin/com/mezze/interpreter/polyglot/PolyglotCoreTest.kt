@@ -552,7 +552,6 @@ class PolyglotCoreTest {
             use std::polyglot::core::{ Polyglot, Runtime, Foreign }
             newtype XForeign = Foreign
             effect X where { run: { source: Str } -> XForeign <X> }
-            pub type XHost = {}
             impl X for XHost where {
               run = { source } ->
                 perform Runtime in Polyglot.eval_raw { lang = "nonexistent_lang_xyz", source = source }

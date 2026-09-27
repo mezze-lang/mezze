@@ -105,6 +105,20 @@ class VariantStructuralAliasTest {
     }
 
     @Test
+    fun `an empty-record type used as a local effect handler is rejected`() {
+        val main = """
+            effect Greet where { hi: {} -> {} <Greet> }
+            type Host = {}
+            impl Greet for Host where { hi = {} -> {} }
+        """
+        val r = checkMain(main)
+        assertTrue(r.isFailure) { "redundant handler `type Host = {}` should be rejected" }
+        assertTrue(r.exceptionOrNull()?.message?.contains("Redundant handler type") == true) {
+            "got: ${r.exceptionOrNull()?.message}"
+        }
+    }
+
+    @Test
     fun `a single constructor sharing its own type's name is allowed`() {
         // The `type Point = | Point {…} |` idiom must keep working — the collision
         // rule exempts a constructor that matches ITS OWN type.

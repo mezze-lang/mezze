@@ -120,9 +120,8 @@ effect Polyglot having 'f where {
 ## The sole handler of `Polyglot`, and the sole caller of `__native_*`. Binds the
 ## associated foreign type to a fresh var — generic over any foreign, exactly as
 ## `impl Exception for … having 'error = 'e`. A language provider never writes any
-## of these lines; it performs the ops above through this handler.
-pub type Runtime = {}
-
+## of these lines; it performs the ops above through this handler. The handler
+## type is introduced by the impl itself — no separate `type` declaration.
 impl Polyglot for Runtime having 'f = 'g where {
   read_member   = { on, name }       -> __native_polyglot_read_member   { val = on, name = name },
   write_member  = { on, name, val }  -> __native_polyglot_write_member  { val = on, name = name, new_val = val },

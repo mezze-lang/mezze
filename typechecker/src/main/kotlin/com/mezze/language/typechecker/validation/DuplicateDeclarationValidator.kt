@@ -20,6 +20,41 @@ object DuplicateDeclarationValidator {
         validateDuplicateAbilityImpls(module)
         validateDuplicateInherentMethods(module)
         validateDuplicateVariables(module)
+        validateHandlerTypeNotDeclared(module)
+    }
+
+    /**
+     * An EFFECT handler type is introduced by its `impl … for X` line — the stdlib
+     * idiom (`impl Log for Console`, `impl Time for SystemTime`) never writes a
+     * separate `type`. Declaring an empty-record `type X = {}` that is also the
+     * target of an effect impl is redundant and blurs whether `X` is data or a
+     * handler. Reject it: remove the `type X = {}` and let the impl introduce it
+     * (declare handler state, if any, inline in the impl head — `impl E for XWith { … }`).
+     *
+     * An empty-record type is a legitimate unit implementer of an ABILITY
+     * (`type MyFmt = {}` + `impl Fmt for MyFmt`); those are `ParsedImplAbilityDecl`,
+     * a different decl kind, so they are naturally left alone.
+     */
+    private fun validateHandlerTypeNotDeclared(module: ParsedModule) {
+        val emptyRecordTypes = module.decls.filterIsInstance<ParsedTypeDecl>()
+            .filter { val d = it.definition; d is ParsedRecordDef && d.fields.isEmpty() && !d.isOpen }
+            .associateBy { it.name }
+        if (emptyRecordTypes.isEmpty()) return
+        // Effect handlers are ParsedPerformerDecl (`impl <Effect> for <Handler>`),
+        // where the handler type is `performerName` — introduced by the performer.
+        val performerNames = module.decls.filterIsInstance<ParsedPerformerDecl>()
+            .map { it.performerName }.toSet()
+        for ((name, decl) in emptyRecordTypes) {
+            if (name in performerNames) {
+                throw TypeCheckError(
+                    "Redundant handler type: `type $name = {}` is unnecessary — `impl … for $name` " +
+                    "already introduces the handler type. Remove the `type $name = {}` declaration; " +
+                    "declare handler state (if any) inline in the impl head (`impl E for ${name}With { … }`).",
+                    decl.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                )
+            }
+        }
     }
 
         fun validateDecls(decls: List<ParsedDecl>) {
