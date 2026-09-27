@@ -3,7 +3,6 @@ package com.mezze.interpreter.nodes.builtin.polyglot;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeForeign;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.nodes.Node;
@@ -29,23 +28,23 @@ public final class JvmNatives {
     private JvmNatives() {}
 
     @TruffleBoundary
-    public static MezzeVariant lookupClass(MezzeRecord args, Node currentNode) {
+    public static MezzeForeign lookupClass(MezzeRecord args, Node currentNode) {
         String name = PolyglotNatives.getString(args, "name");
         try {
             Env env = MezzeContext.get(currentNode).getEnv();
             if (!env.isHostLookupAllowed()) {
-                return MezzeVariant.err(PolyglotNatives.errorTypeError(
+                return MezzeForeign.errored(PolyglotNatives.errorTypeError(
                     "JVM host class lookup is not allowed in this context. " +
                     "Rebuild the polyglot Context with allowHostClassLookup or " +
-                    "allowAllAccess."));
+                    "allowAllAccess."), "jvm");
             }
             Object hostSym = env.lookupHostSymbol(name);
             if (hostSym == null) {
-                return MezzeVariant.err(PolyglotNatives.errorNotFound(name));
+                return MezzeForeign.errored(PolyglotNatives.errorNotFound(name), "jvm");
             }
-            return MezzeVariant.ok(new MezzeForeign(hostSym, "jvm"));
+            return new MezzeForeign(hostSym, "jvm");
         } catch (Throwable t) {
-            return MezzeVariant.err(PolyglotNatives.translateException(t));
+            return MezzeForeign.errored(PolyglotNatives.translateException(t), "jvm");
         }
     }
 }

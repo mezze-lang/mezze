@@ -4435,6 +4435,8 @@ public final class NativeDispatch extends MezzeNode {
         // Meta
         HANDLERS.put("__native_polyglot_type_name",
             (r, c) -> PolyglotNatives.typeName(r));
+        HANDLERS.put("__native_polyglot_check",
+            (r, c) -> PolyglotNatives.checkOk(r));
 
         // Generic guest entry — the ONE eval native, language chosen at runtime
         // via the `lang` field. Backs the `Polyglot.eval_raw` effect op, so a

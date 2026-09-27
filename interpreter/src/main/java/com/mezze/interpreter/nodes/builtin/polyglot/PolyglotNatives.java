@@ -139,16 +139,16 @@ public final class PolyglotNatives {
      * expression and calls {@code eval_raw}).
      */
     @TruffleBoundary
-    public static MezzeVariant evalRaw(MezzeRecord args, Node currentNode) {
+    public static MezzeForeign evalRaw(MezzeRecord args, Node currentNode) {
         String lang = getString(args, "lang");
         String source = getString(args, "source");
         try {
             MezzePolyglotSupport support =
                 MezzeContext.get(currentNode).getPolyglotSupport();
             Object result = support.eval(lang, source);
-            return MezzeVariant.ok(new MezzeForeign(result, lang));
+            return new MezzeForeign(result, lang);
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), lang);
         }
     }
 
@@ -160,7 +160,7 @@ public final class PolyglotNatives {
      * composes {@code instantiate} / {@code read_member "exports"} in pure Mezze.
      */
     @TruffleBoundary
-    public static MezzeVariant evalBytes(MezzeRecord args, Node currentNode) {
+    public static MezzeForeign evalBytes(MezzeRecord args, Node currentNode) {
         String lang = getString(args, "lang");
         String name = getString(args, "name");
         byte[] data = getBytes(args, "bytes");
@@ -168,9 +168,9 @@ public final class PolyglotNatives {
             MezzePolyglotSupport support =
                 MezzeContext.get(currentNode).getPolyglotSupport();
             Object result = support.evalBytes(lang, data, name);
-            return MezzeVariant.ok(new MezzeForeign(result, lang));
+            return new MezzeForeign(result, lang);
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), lang);
         }
     }
 
@@ -184,6 +184,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant readBytes(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         long offset = getLong(args, "offset");
         long length = getLong(args, "length");
         if (offset < 0 || length < 0) {
@@ -215,28 +216,29 @@ public final class PolyglotNatives {
      * in ONE crossing. Mirror of {@link #readBytes}; Ok is the empty record.
      */
     @TruffleBoundary
-    public static MezzeVariant writeBytes(MezzeRecord args) {
+    public static MezzeForeign writeBytes(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
         long offset = getLong(args, "offset");
         byte[] data = getBytes(args, "bytes");
         if (offset < 0) {
-            return MezzeVariant.err(errorTypeError(
-                "write_bytes: negative offset (offset=" + offset + ")"));
+            return MezzeForeign.errored(errorTypeError(
+                "write_bytes: negative offset (offset=" + offset + ")"), f.getSourceLanguage());
         }
         try {
             InteropLibrary lib = InteropLibrary.getUncached(f.getDelegate());
             long size = lib.getArraySize(f.getDelegate());
             if (offset + data.length > size) {
-                return MezzeVariant.err(errorTypeError(
+                return MezzeForeign.errored(errorTypeError(
                     "write_bytes: out of range (offset=" + offset + ", length="
-                        + data.length + ", size=" + size + ")"));
+                        + data.length + ", size=" + size + ")"), f.getSourceLanguage());
             }
             for (int i = 0; i < data.length; i++) {
                 lib.writeArrayElement(f.getDelegate(), offset + i, (int) (data[i] & 0xFF));
             }
-            return MezzeVariant.ok(MezzeRecord.empty());
+            return f;  // fluent
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -329,12 +331,53 @@ public final class PolyglotNatives {
         return out;
     }
 
+    /**
+     * The first errored foreign among the elements of the `name` arg-seq, or null
+     * if none is errored (or the field is absent / not a seq). Propagates an errored
+     * ARGUMENT through a call — `a.method { args = [errored] }` short-circuits to that
+     * error rather than handing the guest a dead (null) delegate.
+     */
+    @TruffleBoundary
+    static MezzeForeign firstErroredArg(MezzeRecord r, String name) {
+        int idx = r.getFieldIndex(name);
+        if (idx < 0) return null;
+        Object v = r.getField(idx);
+        Object[] raw;
+        if (v instanceof MezzeSeq seq) raw = seq.toArray();
+        else if (v instanceof Object[] arr) raw = arr;
+        else return null;
+        for (Object x : raw) {
+            if (x instanceof MezzeForeign mf && mf.isErrored()) return mf;
+        }
+        return null;
+    }
+
+    /** The carried error of an errored foreign, as an `Err` Result — the coercion
+     *  boundary where an error-carrying foreign finally becomes a Mezze `Result`. */
+    static MezzeVariant carriedErr(MezzeForeign f) {
+        return MezzeVariant.err((MezzeVariant) f.getCarriedError());
+    }
+
+    /**
+     * Surface an errored foreign as a `Result {}` WITHOUT extracting a value —
+     * `Ok {}` if live, `Err` if it carries an error. Backs `.ok{}`: the explicit
+     * check for a fire-and-forget call, and the presence probe a codec uses to
+     * tell a missing field / absent payload from a real one.
+     */
+    @TruffleBoundary
+    public static MezzeVariant checkOk(MezzeRecord args) {
+        MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
+        return MezzeVariant.ok(MezzeRecord.empty());
+    }
+
     // ==================== Type predicates & coercion ====================
 
     @TruffleBoundary
-    public static boolean isNull(MezzeRecord args) {
+    public static MezzeVariant isNull(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
-        return InteropLibrary.getUncached().isNull(f.getDelegate());
+        if (f.isErrored()) return carriedErr(f);
+        return MezzeVariant.ok(InteropLibrary.getUncached().isNull(f.getDelegate()));
     }
 
     @TruffleBoundary
@@ -346,6 +389,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant asString(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         try {
             return MezzeVariant.ok(InteropLibrary.getUncached().asString(f.getDelegate()));
         } catch (Throwable t) {
@@ -368,6 +412,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant asLong(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         try {
             return MezzeVariant.ok(InteropLibrary.getUncached().asLong(f.getDelegate()));
         } catch (Throwable t) {
@@ -378,6 +423,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant asDouble(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         try {
             return MezzeVariant.ok(InteropLibrary.getUncached().asDouble(f.getDelegate()));
         } catch (Throwable t) {
@@ -388,6 +434,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant asBoolean(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         try {
             return MezzeVariant.ok(InteropLibrary.getUncached().asBoolean(f.getDelegate()));
         } catch (Throwable t) {
@@ -510,10 +557,11 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
-    public static boolean hasMember(MezzeRecord args) {
+    public static MezzeVariant hasMember(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         String name = getString(args, "name");
-        return InteropLibrary.getUncached().isMemberReadable(f.getDelegate(), name);
+        return MezzeVariant.ok(InteropLibrary.getUncached().isMemberReadable(f.getDelegate(), name));
     }
 
     /**
@@ -531,15 +579,16 @@ public final class PolyglotNatives {
      * costs a successful read nothing.
      */
     @TruffleBoundary
-    public static MezzeVariant readMember(MezzeRecord args) {
+    public static MezzeForeign readMember(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
         String name = getString(args, "name");
         Object recv = f.getDelegate();
         try {
             Object result = InteropLibrary.getUncached(recv).readMember(recv, name);
-            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+            return new MezzeForeign(result, f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(readFailure(recv, name, t));
+            return MezzeForeign.errored(readFailure(recv, name, t), f.getSourceLanguage());
         }
     }
 
@@ -558,30 +607,35 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant writeMember(MezzeRecord args) {
+    public static MezzeForeign writeMember(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
-        String name = getString(args, "name");
+        if (f.isErrored()) return f;
         Object newVal = getField(args, "new_val");
+        if (newVal instanceof MezzeForeign mvErr && mvErr.isErrored()) return mvErr;
+        String name = getString(args, "name");
         Object raw = newVal instanceof MezzeForeign mf ? mf.getDelegate() : newVal;
         try {
             InteropLibrary.getUncached().writeMember(f.getDelegate(), name, raw);
-            return MezzeVariant.ok(MezzeRecord.empty());
+            return f;  // fluent: the receiver, so a write can be chained
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
     @TruffleBoundary
-    public static MezzeVariant invokeMember(MezzeRecord args) {
+    public static MezzeForeign invokeMember(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
+        MezzeForeign badArg = firstErroredArg(args, "args");
+        if (badArg != null) return badArg;
         String name = getString(args, "name");
         Object[] rawArgs = getArgArray(args, "args");
         try {
             Object result = InteropLibrary.getUncached().invokeMember(
                 f.getDelegate(), name, rawArgs);
-            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+            return new MezzeForeign(result, f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -604,29 +658,32 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant readArray(MezzeRecord args) {
+    public static MezzeForeign readArray(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
         long index = getLong(args, "index");
         try {
             Object result = InteropLibrary.getUncached().readArrayElement(
                 f.getDelegate(), index);
-            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+            return new MezzeForeign(result, f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
     @TruffleBoundary
-    public static MezzeVariant writeArray(MezzeRecord args) {
+    public static MezzeForeign writeArray(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
-        long index = getLong(args, "index");
+        if (f.isErrored()) return f;
         Object newVal = getField(args, "new_val");
+        if (newVal instanceof MezzeForeign mvErr && mvErr.isErrored()) return mvErr;
+        long index = getLong(args, "index");
         Object raw = newVal instanceof MezzeForeign mf ? mf.getDelegate() : newVal;
         try {
             InteropLibrary.getUncached().writeArrayElement(f.getDelegate(), index, raw);
-            return MezzeVariant.ok(MezzeRecord.empty());
+            return f;  // fluent
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -665,15 +722,17 @@ public final class PolyglotNatives {
      * as-is — ForeignDict normalizes guest strings to Java Strings on lookup.
      */
     @TruffleBoundary
-    public static MezzeVariant readHash(MezzeRecord args) {
+    public static MezzeForeign readHash(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
         Object key = getField(args, "key");
+        if (key instanceof MezzeForeign kErr && kErr.isErrored()) return kErr;
         Object rawKey = key instanceof MezzeForeign mf ? mf.getDelegate() : key;
         try {
             Object result = InteropLibrary.getUncached().readHashValue(f.getDelegate(), rawKey);
-            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+            return new MezzeForeign(result, f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -688,8 +747,9 @@ public final class PolyglotNatives {
      * reads keeps `decode_map` to the array natives it already uses for lists.
      */
     @TruffleBoundary
-    public static MezzeVariant hashEntries(MezzeRecord args) {
+    public static MezzeForeign hashEntries(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
         InteropLibrary interop = InteropLibrary.getUncached();
         try {
             Object iterator = interop.getHashEntriesIterator(f.getDelegate());
@@ -697,10 +757,10 @@ public final class PolyglotNatives {
             while (interop.hasIteratorNextElement(iterator)) {
                 pairs.add(interop.getIteratorNextElement(iterator));
             }
-            return MezzeVariant.ok(new MezzeForeign(
-                new ForeignContainers.ForeignList(pairs.toArray()), f.getSourceLanguage()));
+            return new MezzeForeign(
+                new ForeignContainers.ForeignList(pairs.toArray()), f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -722,6 +782,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant arrayToSeq(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         InteropLibrary interop = InteropLibrary.getUncached();
         try {
             long size = interop.getArraySize(f.getDelegate());
@@ -747,17 +808,20 @@ public final class PolyglotNatives {
      * bare Mezze value passes through as-is.
      */
     @TruffleBoundary
-    public static MezzeVariant writeHash(MezzeRecord args) {
+    public static MezzeForeign writeHash(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
         Object key = getField(args, "key");
+        if (key instanceof MezzeForeign kErr && kErr.isErrored()) return kErr;
         Object newVal = getField(args, "new_val");
+        if (newVal instanceof MezzeForeign vErr && vErr.isErrored()) return vErr;
         Object rawKey = key instanceof MezzeForeign mf ? mf.getDelegate() : key;
         Object rawVal = newVal instanceof MezzeForeign mv ? mv.getDelegate() : newVal;
         try {
             InteropLibrary.getUncached().writeHashEntry(f.getDelegate(), rawKey, rawVal);
-            return MezzeVariant.ok(MezzeRecord.empty());
+            return f;  // fluent
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -771,6 +835,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant size(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         InteropLibrary interop = InteropLibrary.getUncached();
         Object recv = f.getDelegate();
         try {
@@ -801,6 +866,7 @@ public final class PolyglotNatives {
     @TruffleBoundary
     public static MezzeVariant toSeq(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         InteropLibrary interop = InteropLibrary.getUncached();
         Object recv = f.getDelegate();
         String lang = f.getSourceLanguage();
@@ -840,14 +906,17 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant execute(MezzeRecord args) {
+    public static MezzeForeign execute(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
+        MezzeForeign badArg = firstErroredArg(args, "args");
+        if (badArg != null) return badArg;
         Object[] rawArgs = getArgArray(args, "args");
         try {
             Object result = InteropLibrary.getUncached().execute(f.getDelegate(), rawArgs);
-            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+            return new MezzeForeign(result, f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
@@ -858,37 +927,41 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant instantiate(MezzeRecord args) {
+    public static MezzeForeign instantiate(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return f;
+        MezzeForeign badArg = firstErroredArg(args, "args");
+        if (badArg != null) return badArg;
         Object[] rawArgs = getArgArray(args, "args");
         try {
             Object result = InteropLibrary.getUncached().instantiate(f.getDelegate(), rawArgs);
-            return MezzeVariant.ok(new MezzeForeign(result, f.getSourceLanguage()));
+            return new MezzeForeign(result, f.getSourceLanguage());
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), f.getSourceLanguage());
         }
     }
 
     // ==================== Meta ====================
 
     @TruffleBoundary
-    public static String typeName(MezzeRecord args) {
+    public static MezzeVariant typeName(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
         try {
             InteropLibrary lib = InteropLibrary.getUncached(f.getDelegate());
             if (lib.hasMetaObject(f.getDelegate())) {
                 Object meta = lib.getMetaObject(f.getDelegate());
                 InteropLibrary metaLib = InteropLibrary.getUncached(meta);
                 if (metaLib.isMetaObject(meta)) {
-                    return metaLib.getMetaQualifiedName(meta).toString();
+                    return MezzeVariant.ok(metaLib.getMetaQualifiedName(meta).toString());
                 }
             }
             // Fallback — return the Java class name of the delegate.
-            return f.getDelegate() == null
+            return MezzeVariant.ok(f.getDelegate() == null
                 ? "null"
-                : f.getDelegate().getClass().getSimpleName();
+                : f.getDelegate().getClass().getSimpleName());
         } catch (Throwable t) {
-            return "unknown";
+            return MezzeVariant.ok("unknown");
         }
     }
 }

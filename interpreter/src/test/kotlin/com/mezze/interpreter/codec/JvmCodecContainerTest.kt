@@ -65,9 +65,7 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [10, 20, 30].to_jvm {}
-            match f.at { index = 1 } is
-              Ok { val = e } -> e.int {}
-              Err { error = e } -> Err { error = e }
+            f.at { index = 1 }.int {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -100,9 +98,7 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [[1, 2], [3, 4, 5]].to_jvm {}
-            match f.at { index = 1 } is
-              Ok { val = inner } -> inner.len {}
-              Err { error = e } -> Err { error = e }
+            f.at { index = 1 }.len {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -118,9 +114,7 @@ class JvmCodecContainerTest {
             use std::codec::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = { count = 42, label = "hi" }.to_jvm {}
-            match f.key { of = "count" } is
-              Ok { val = c } -> c.int {}
-              Err { error = e } -> Err { error = e }
+            f.key { of = "count" }.int {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -172,9 +166,7 @@ class JvmCodecContainerTest {
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "a", v = 7 }
             let f = m.to_jvm {}
-            match f.key { of = "a" } is
-              Ok { val = v } -> v.int {}
-              Err { error = e } -> Err { error = e }
+            f.key { of = "a" }.int {}
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -386,9 +378,7 @@ class JvmCodecContainerTest {
             """
             use std::polyglot::jvm::{ jvm_list, from_int, null_val }
             let l = jvm_list { elems = [from_int { val = 1 }, null_val {}] }
-            match l.at { index = 1 } is
-              Ok { val = e } -> Ok { val = e.is_null {} }
-              Err { error = er } -> Err { error = er }
+            l.at { index = 1 }.is_null {}
             """.trimIndent()
         )
         val v = assertOk(result)

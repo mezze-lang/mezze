@@ -49,11 +49,30 @@ public final class MezzeForeign implements TruffleObject {
     final Object delegate;
     final String sourceLanguage;
 
+    // The error-carrying-foreign model: a foreign is a "try" — either a live guest
+    // handle (carriedError == null) or a carried InteropError. Value verbs return a
+    // foreign and short-circuit an errored one untouched; a guest throw is caught
+    // INTO an errored foreign; and the Result only materializes when a value is
+    // pulled back into Mezze (as_int/as_str/…). An errored foreign never reaches
+    // InteropLibrary — the natives short-circuit before delegating — and its
+    // delegate is MezzeNull, so even a stray message wouldn't NPE.
+    final Object carriedError;
+
     public MezzeForeign(Object delegate, String sourceLanguage) {
+        this(delegate, sourceLanguage, null);
+    }
+
+    public MezzeForeign(Object delegate, String sourceLanguage, Object carriedError) {
         // Never wrap a null delegate — replace with MezzeNull so InteropLibrary
         // delegation never NPEs on the receiver.
         this.delegate = delegate == null ? MezzeNull.INSTANCE : delegate;
         this.sourceLanguage = sourceLanguage == null ? "unknown" : sourceLanguage;
+        this.carriedError = carriedError;
+    }
+
+    /** An errored foreign carrying `error` (an InteropError variant). */
+    public static MezzeForeign errored(Object error, String sourceLanguage) {
+        return new MezzeForeign(MezzeNull.INSTANCE, sourceLanguage, error);
     }
 
     public Object getDelegate() {
@@ -62,6 +81,16 @@ public final class MezzeForeign implements TruffleObject {
 
     public String getSourceLanguage() {
         return sourceLanguage;
+    }
+
+    /** The carried InteropError variant, or null if this is a live handle. */
+    public Object getCarriedError() {
+        return carriedError;
+    }
+
+    /** True iff this foreign carries an error rather than a live guest handle. */
+    public boolean isErrored() {
+        return carriedError != null;
     }
 
     /**

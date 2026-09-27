@@ -59,43 +59,53 @@ pub type InteropError = |
 ## `PyForeign`, …) threads through unchanged and stays type-safe. Only `Runtime`
 ## (below) calls the natives — nothing else in the system does.
 ##
-## Ops split into two families:
-##   - value ops take an existing foreign `on: 'f` and are language-agnostic
-##     (the foreign already carries its own guest identity);
-##   - producers (`eval_raw`, `box_*`) take a `lang` and MINT a foreign — the
-##     only ops that must name the language.
+## The error-carrying-foreign model. A foreign `'f` is a "try": either a live guest
+## handle or a carried `InteropError`. Ops split by WHAT THEY YIELD:
+##   - a FOREIGN → return `'f` directly (no `Result`). An errored `'f` short-circuits
+##     the op untouched, and a guest throw is caught INTO an errored `'f`. So a chain
+##     `a.get{}.method{}` never allocates a `Result` between steps.
+##   - a MEZZE VALUE (a coercion, `is_null`, `type_name`, `size`, `to_seq`, `read_bytes`,
+##     `has_member`) → return `Result … InteropError`. This is the ONE crossing where a
+##     carried error finally becomes a Mezze `Result`.
+## Producers (`eval_raw`, `eval_bytes`, `box_*`) also yield a foreign → `'f`.
 effect Polyglot having 'f where {
-  ## ---- value ops: operate on an existing foreign ----
-  read_member:   { on: 'f, name: Str }              -> Result 'f InteropError <Polyglot>,
-  write_member:  { on: 'f, name: Str, val: 'f }     -> Result 'f InteropError <Polyglot>,
-  has_member:    { on: 'f, name: Str }              -> Bool <Polyglot>,
-  invoke_member: { on: 'f, name: Str, args: ['f] }  -> Result 'f InteropError <Polyglot>,
-  execute:       { on: 'f, args: ['f] }             -> Result 'f InteropError <Polyglot>,
-  instantiate:   { on: 'f, args: ['f] }             -> Result 'f InteropError <Polyglot>,
-  read_array:    { on: 'f, index: Int }             -> Result 'f InteropError <Polyglot>,
-  write_array:   { on: 'f, index: Int, val: 'f }    -> Result 'f InteropError <Polyglot>,
+  ## ---- value ops: yield a foreign (error-carrying, no Result) ----
+  read_member:   { on: 'f, name: Str }              -> 'f <Polyglot>,
+  write_member:  { on: 'f, name: Str, val: 'f }     -> 'f <Polyglot>,
+  invoke_member: { on: 'f, name: Str, args: ['f] }  -> 'f <Polyglot>,
+  execute:       { on: 'f, args: ['f] }             -> 'f <Polyglot>,
+  instantiate:   { on: 'f, args: ['f] }             -> 'f <Polyglot>,
+  read_array:    { on: 'f, index: Int }             -> 'f <Polyglot>,
+  write_array:   { on: 'f, index: Int, val: 'f }    -> 'f <Polyglot>,
   # hash `key` is a per-op free var `'k`, not `'f` — a mapping key may be a Foreign
   # OR a bare Mezze value (a codec passes a Str field name); the native unwraps a
   # Foreign and passes a bare value through unchanged.
-  read_hash:     { on: 'f, key: 'k }                -> Result 'f InteropError <Polyglot>,
-  write_hash:    { on: 'f, key: 'k, val: 'f }       -> Result 'f InteropError <Polyglot>,
-  hash_entries:  { on: 'f }                         -> Result 'f InteropError <Polyglot>,
+  read_hash:     { on: 'f, key: 'k }                -> 'f <Polyglot>,
+  write_hash:    { on: 'f, key: 'k, val: 'f }       -> 'f <Polyglot>,
+  hash_entries:  { on: 'f }                         -> 'f <Polyglot>,
+
+  ## ---- crossings: yield a Mezze value → Result (error surfaces HERE) ----
+  has_member:    { on: 'f, name: Str }              -> Result Bool InteropError <Polyglot>,
   size:          { on: 'f }                         -> Result Int InteropError <Polyglot>,
   to_seq:        { on: 'f }                         -> Result ['f] InteropError <Polyglot>,
   as_int:        { on: 'f }                         -> Result Int InteropError <Polyglot>,
   as_float:      { on: 'f }                         -> Result Float InteropError <Polyglot>,
   as_str:        { on: 'f }                         -> Result Str InteropError <Polyglot>,
   as_bool:       { on: 'f }                         -> Result Bool InteropError <Polyglot>,
-  is_null:       { on: 'f }                         -> Bool <Polyglot>,
-  type_name:     { on: 'f }                         -> Str <Polyglot>,
-
-  ## ---- producers: mint a foreign in language `lang` ----
-  eval_raw:      { lang: Str, source: Str }         -> Result 'f InteropError <Polyglot>,
-  ## Binary module eval (wasm, …) — a source string cannot express a wasm module.
-  eval_bytes:    { lang: Str, bytes: Bytes, name: Str } -> Result 'f InteropError <Polyglot>,
-  ## Bulk linear-memory access on a guest byte-buffer Foreign, one crossing each.
+  is_null:       { on: 'f }                         -> Result Bool InteropError <Polyglot>,
+  type_name:     { on: 'f }                         -> Result Str InteropError <Polyglot>,
   read_bytes:    { on: 'f, offset: Int, length: Int } -> Result Bytes InteropError <Polyglot>,
-  write_bytes:   { on: 'f, offset: Int, bytes: Bytes } -> Result {} InteropError <Polyglot>,
+  ## Surface an errored foreign WITHOUT extracting a value — `Ok {}` if live, `Err`
+  ## if it carries an error. Backs `.ok{}` (the fire-and-forget check) and a codec's
+  ## presence probe (missing field / absent payload vs a real one).
+  check:         { on: 'f }                         -> Result {} InteropError <Polyglot>,
+
+  ## ---- producers: mint a foreign in language `lang` (error-carrying) ----
+  eval_raw:      { lang: Str, source: Str }         -> 'f <Polyglot>,
+  ## Binary module eval (wasm, …) — a source string cannot express a wasm module.
+  eval_bytes:    { lang: Str, bytes: Bytes, name: Str } -> 'f <Polyglot>,
+  ## Bulk write into a guest byte-buffer; fluent — yields the receiver foreign.
+  write_bytes:   { on: 'f, offset: Int, bytes: Bytes } -> 'f <Polyglot>,
   ## 32-bit-typed int (wasm i32 ABI); the generic i64 form is `box_int`.
   box_i32:       { val: Int, lang: Str }            -> 'f <Polyglot>,
   box_int:       { val: Int, lang: Str }            -> 'f <Polyglot>,
@@ -133,6 +143,7 @@ impl Polyglot for Runtime having 'f = 'g where {
   as_bool       = { on }             -> __native_polyglot_as_boolean    { val = on },
   is_null       = { on }             -> __native_polyglot_is_null       { val = on },
   type_name     = { on }             -> __native_polyglot_type_name     { val = on },
+  check         = { on }             -> __native_polyglot_check         { val = on },
 
   eval_raw      = { lang, source }   -> __native_polyglot_eval          { lang = lang, source = source },
   eval_bytes    = { lang, bytes, name } -> __native_polyglot_eval_bytes { lang = lang, bytes = bytes, name = name },

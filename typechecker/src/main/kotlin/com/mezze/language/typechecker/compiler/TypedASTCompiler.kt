@@ -197,6 +197,12 @@ class TypedASTCompiler(
      */
     internal val slotConcreteTypes = mutableMapOf<Int, MezzeType>()
 
+    /** Ability-op PARAM name → concrete receiver type, from the impl's
+     *  `associatedTypeBindings`. A param left at the associated var (`val: 'in` where
+     *  `impl … having 'in = JvmForeign`) would otherwise stay a VarType at dispatch and
+     *  a foreign method call falls to DictFallback. Populated/restored per body. */
+    internal val paramConcreteReceiverTypes = mutableMapOf<String, MezzeType>()
+
     /** Pre-populated at compile() start: hash → callee's paramNames (regular + dict),
      *  in callee declaration order. Used by emitCallDirect to decide scalar ABI for
      *  cross-function direct calls (extends self-recursive coverage from #61).
@@ -412,9 +418,11 @@ class TypedASTCompiler(
                 compiledOpHashes.add(opHash)
                 currentCaptureNames = emptyMap() // ability ops aren't closures
                 if (opBody is TypedLambda) {
-                    functions.add(compileFunctionBody(opHash, opName, opBody.params, opBody.body, opBody.loc))
+                    functions.add(compileFunctionBody(opHash, opName, opBody.params, opBody.body, opBody.loc,
+                        assocBindings = impl.associatedTypeBindings))
                 } else {
-                    functions.add(compileFunctionBody(opHash, opName, emptyList(), opBody, opBody.loc))
+                    functions.add(compileFunctionBody(opHash, opName, emptyList(), opBody, opBody.loc,
+                        assocBindings = impl.associatedTypeBindings))
                 }
             }
         }
@@ -630,9 +638,12 @@ class TypedASTCompiler(
         params: List<TypedParam>,
         body: TypedExpr,
         loc: Loc,
-        captureInfo: List<Pair<String, SlotKind>> = emptyList()
+        captureInfo: List<Pair<String, SlotKind>> = emptyList(),
+        // Enclosing impl's associated-type bindings (see paramConcreteReceiverTypes).
+        assocBindings: Map<String, MezzeType> = emptyMap()
     ): FunctionIR {
         // Save and reset state
+        val prevParamConcrete = paramConcreteReceiverTypes.toMap()
         val prevParamCount = currentParamCount
         val prevNextLocal = nextLocalSlot
         val prevLocals = localsByName.toMap()
@@ -674,6 +685,15 @@ class TypedASTCompiler(
         // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
         // For non-lambda functions (called from compileLetDecl), it should be empty.
 
+        // Params typed as the impl's associated vars → concrete receiver type, by name.
+        paramConcreteReceiverTypes.clear()
+        for (p in params) {
+            val pt = substitution.apply(p.type) as? VarType ?: continue
+            val vn = pt.variable.name.removePrefix("'")
+            (assocBindings[vn] ?: assocBindings["'$vn"])?.takeIf { it !is VarType }
+                ?.let { paramConcreteReceiverTypes[p.name] = it }
+        }
+
         // Compile body
         val bodyIR = compileExpr(body)
 
@@ -707,6 +727,7 @@ class TypedASTCompiler(
         currentCaptureCount = prevCaptureCount
         currentDictParams = prevDictParams
         currentFunctionHash = prevFunctionHash
+        paramConcreteReceiverTypes.apply { clear(); putAll(prevParamConcrete) }
         recursiveLetLambdas.clear()
         recursiveLetLambdas.putAll(prevRecursiveLets)
 
@@ -1405,14 +1426,17 @@ class TypedASTCompiler(
                         // binding type that isn't this call site's receiver.
                         if (r is VarType) {
                             val slotOverride: MezzeType? =
-                                if (fn.record is TypedVar &&
-                                    (fn.record as TypedVar).binding is BindingRef.Local) {
-                                    val slot = localsByName[(fn.record as TypedVar).name]
-                                    slot?.let { slotConcreteTypes[it] }
+                                if (fn.record is TypedVar) {
+                                    val tv = fn.record as TypedVar
+                                    val bySlot = if (tv.binding is BindingRef.Local)
+                                        localsByName[tv.name]?.let { slotConcreteTypes[it] } else null
+                                    bySlot ?: paramConcreteReceiverTypes[tv.name]
                                 } else null
                             val recovered = slotOverride ?: deriveConcreteType(fn.record)
+                            // Accept if a dispatch target exists: ability op OR inherent method.
                             if (recovered != null && recovered !is VarType &&
-                                tryResolveAbilityOp(methodName, recovered, expr.arg) != null) recovered
+                                (tryResolveAbilityOp(methodName, recovered, expr.arg) != null ||
+                                 findAbilityOpBody(methodName, recovered) != null)) recovered
                             else r
                         } else r
                     }
