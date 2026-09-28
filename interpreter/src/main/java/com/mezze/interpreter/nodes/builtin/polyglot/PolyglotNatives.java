@@ -260,6 +260,72 @@ public final class PolyglotNatives {
         throw new NativeTypeMismatchException("Expected Bytes for field '" + name + "'");
     }
 
+    // ==================== Sandboxed inner contexts ====================
+    //
+    // A `GraalXWith { config }` handler opens a configured INNER context (isolated
+    // globals + access restricted BELOW the permissive parent), evals in it, and
+    // closes it at scope end. The handle is a Foreign whose delegate is a Long id
+    // into this registry. `eval_in` returns a Result SCALAR (a crossing) — a live
+    // guest object is bound to the inner context and would die on close, so scalar
+    // return is the proven path here; a persistent-context foreign-returning verb
+    // set is layered on separately.
+    private static final java.util.concurrent.ConcurrentHashMap<Long, com.oracle.truffle.api.TruffleContext>
+        INNER_CONTEXTS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicLong INNER_CTX_IDS =
+        new java.util.concurrent.atomic.AtomicLong(1);
+
+    private static MezzePolyglotSupport.ExecConfig execConfigOf(MezzeRecord args) {
+        return new MezzePolyglotSupport.ExecConfig(
+            getBool(args, "allow_io"), getBool(args, "allow_native"),
+            getBool(args, "allow_create_thread"), getBool(args, "allow_create_process"),
+            getBool(args, "allow_host_class_loading"), getBool(args, "allow_host_lookup"),
+            getBool(args, "allow_polyglot_access"));
+    }
+
+    /** open_context {lang, allow_io, …} -> Foreign handle (errored on failure). */
+    @TruffleBoundary
+    public static MezzeForeign openContext(MezzeRecord args, Node currentNode) {
+        String lang = getString(args, "lang");
+        try {
+            MezzePolyglotSupport support = MezzeContext.get(currentNode).getPolyglotSupport();
+            com.oracle.truffle.api.TruffleContext ctx = support.openContext(lang, execConfigOf(args));
+            long id = INNER_CTX_IDS.getAndIncrement();
+            INNER_CONTEXTS.put(id, ctx);
+            return new MezzeForeign(Long.valueOf(id), lang);
+        } catch (Throwable t) {
+            return MezzeForeign.errored(translateException(t), lang);
+        }
+    }
+
+    /** eval_in {val = ctx-handle, source} -> Result scalar (crossing). */
+    @TruffleBoundary
+    public static MezzeVariant evalIn(MezzeRecord args, Node currentNode) {
+        MezzeForeign handle = asForeign(args);
+        if (handle.isErrored()) return carriedErr(handle);
+        String source = getString(args, "source");
+        try {
+            com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get((Long) handle.getDelegate());
+            if (ctx == null) return MezzeVariant.err(errorTypeError("eval_in: context is closed or invalid"));
+            MezzePolyglotSupport support = MezzeContext.get(currentNode).getPolyglotSupport();
+            return MezzeVariant.ok(support.evalToStringIn(ctx, handle.getSourceLanguage(), source, currentNode));
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /** close_context {val = ctx-handle} -> Result {}. Idempotent. */
+    @TruffleBoundary
+    public static MezzeVariant closeContext(MezzeRecord args) {
+        MezzeForeign handle = asForeign(args);
+        try {
+            com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.remove((Long) handle.getDelegate());
+            if (ctx != null) ctx.close();
+            return MezzeVariant.ok(MezzeRecord.empty());
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
     // ==================== Foreign helpers ====================
 
     public static MezzeForeign asForeign(MezzeRecord r) {

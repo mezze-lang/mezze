@@ -4480,6 +4480,16 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_polyglot_box_i32",
             (r, c) -> PolyglotNatives.boxI32(r, PolyglotNatives.getString(r, "lang")));
 
+        // Sandboxed inner contexts — a `GraalXWith { config }` handler opens a
+        // configured inner context (isolated + access restricted below the parent),
+        // evals a scalar in it, and closes it. Generic over any enabled language.
+        HANDLERS.put("__native_polyglot_open_context",
+            (r, c) -> PolyglotNatives.openContext(r, c));
+        HANDLERS.put("__native_polyglot_eval_in",
+            (r, c) -> PolyglotNatives.evalIn(r, c));
+        HANDLERS.put("__native_polyglot_close_context",
+            (r, c) -> PolyglotNatives.closeContext(r));
+
         // JVM host access. Host class lookup is the JVM's one language-specific
         // native (its guest entry point, the analogue of `eval_raw`); it cannot be
         // a generic Polyglot op because it uses the Env's host-symbol lookup. Every

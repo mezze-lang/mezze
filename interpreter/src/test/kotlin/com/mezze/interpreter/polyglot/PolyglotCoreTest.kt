@@ -563,6 +563,24 @@ class PolyglotCoreTest {
     }
 
     @Test
+    fun `open_context on an unavailable language yields an errored foreign`() {
+        // Guest-language sandbox ENFORCEMENT (allow_io=false blocking IO) is proven
+        // via the CLI + a real provider — no guest language is on the unit-test
+        // classpath. What's unit-testable here: open_context on a missing language
+        // short-circuits to an errored foreign rather than crashing.
+        val result = eval(
+            """
+            use std::polyglot::core::{ Polyglot, Runtime }
+            let cfg = { allow_io = True, allow_native = True, allow_create_thread = True,
+                        allow_create_process = True, allow_host_class_loading = True,
+                        allow_host_lookup = True, allow_polyglot_access = True }
+            perform Runtime in Polyglot.open_context { lang = "nonexistent_lang_xyz", config = cfg }
+            """.trimIndent()
+        )
+        assertErrored(result)
+    }
+
+    @Test
     fun `verbs route through the Polyglot effect with NO enclosing perform`() {
         // Each JvmForeign verb buries its own `perform Runtime in Polyglot.<op>`, so
         // a whole chain runs with no enclosing perform. Math.PI read via `.get{}`

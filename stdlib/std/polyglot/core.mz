@@ -115,6 +115,16 @@ effect Polyglot having 'f where {
   box_null:      { lang: Str }                      -> 'f <Polyglot>,
   box_list:      { elems: ['f], lang: Str }         -> 'f <Polyglot>,
   box_dict:      { keys: ['f], vals: ['f], lang: Str } -> 'f <Polyglot>,
+
+  ## ---- sandboxed inner contexts ----
+  # Open a configured INNER context (isolated globals + access restricted BELOW the
+  # permissive parent). Yields a foreign HANDLE (error-carrying). `config` is a
+  # structural record of the Context.Builder sandbox knobs — a `GraalXWith` handler
+  # builds it from its own defaults. `eval_in` runs a scalar in the context and
+  # crosses the result back as a Str; `close_context` tears it down at scope end.
+  open_context:  { lang: Str, config: { allow_io: Bool, allow_native: Bool, allow_create_thread: Bool, allow_create_process: Bool, allow_host_class_loading: Bool, allow_host_lookup: Bool, allow_polyglot_access: Bool } } -> 'f <Polyglot>,
+  eval_in:       { ctx: 'f, source: Str }           -> Result Str InteropError <Polyglot>,
+  close_context: { ctx: 'f }                         -> Result {} InteropError <Polyglot>,
 }
 
 ## The sole handler of `Polyglot`, and the sole caller of `__native_*`. Binds the
@@ -156,4 +166,12 @@ impl Polyglot for Runtime having 'f = 'g where {
   box_null      = { lang }           -> __native_polyglot_box_null      { lang = lang },
   box_list      = { elems, lang }    -> __native_polyglot_box_list      { elems = elems, lang = lang },
   box_dict      = { keys, vals, lang } -> __native_polyglot_box_dict    { keys = keys, vals = vals, lang = lang },
+
+  open_context  = { lang, config } -> __native_polyglot_open_context {
+    lang = lang, allow_io = config.allow_io, allow_native = config.allow_native,
+    allow_create_thread = config.allow_create_thread, allow_create_process = config.allow_create_process,
+    allow_host_class_loading = config.allow_host_class_loading, allow_host_lookup = config.allow_host_lookup,
+    allow_polyglot_access = config.allow_polyglot_access },
+  eval_in       = { ctx, source } -> __native_polyglot_eval_in    { val = ctx, source = source },
+  close_context = { ctx }         -> __native_polyglot_close_context { val = ctx },
 }

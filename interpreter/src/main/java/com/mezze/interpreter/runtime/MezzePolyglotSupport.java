@@ -157,6 +157,73 @@ public final class MezzePolyglotSupport {
         return lib.readMember(bindings, name);
     }
 
+    /**
+     * Per-context execution policy — the sandbox knobs a `GraalXWith` handler
+     * carries. Mirrors the subset of {@code TruffleContext.Builder} access grants
+     * (see #polyglot context-management design). An inner context can restrict
+     * BELOW its {@code allowAllAccess(true)} parent, so this is real enforcement.
+     */
+    public record ExecConfig(
+        boolean allowIo, boolean allowNative, boolean allowCreateThread,
+        boolean allowCreateProcess, boolean allowHostClassLoading,
+        boolean allowHostLookup, boolean allowPolyglotAccess) {
+        /** All-permissive — matches the ambient context's allowAllAccess(true). */
+        public static ExecConfig permissive() {
+            return new ExecConfig(true, true, true, true, true, true, true);
+        }
+    }
+
+    /**
+     * Open a fresh INNER context for {@code languageId} configured by {@code cfg}.
+     * Isolated globals, and access restricted per {@code cfg} regardless of the
+     * permissive parent. The caller owns the returned handle and must
+     * {@link com.oracle.truffle.api.TruffleContext#close()} it (the scoped
+     * {@code GraalXWith} handler does this in {@code finalize_scope}).
+     */
+    @TruffleBoundary
+    public com.oracle.truffle.api.TruffleContext openContext(String languageId, ExecConfig cfg) {
+        assertLanguageAvailable(languageId);
+        // inheritAllAccess(true): inherit the parent's privileges (incl. access to
+        // the language itself and its resource loading) as the baseline, then the
+        // explicit allow*(…) below selectively DENY — that's the sandbox. Starting
+        // from inheritAllAccess(false) denies the language too ("not available").
+        return env.newInnerContextBuilder(languageId)
+            .inheritAllAccess(true)
+            .allowIO(cfg.allowIo())
+            .allowNativeAccess(cfg.allowNative())
+            .allowCreateThread(cfg.allowCreateThread())
+            .allowCreateProcess(cfg.allowCreateProcess())
+            .allowHostClassLoading(cfg.allowHostClassLoading())
+            .allowHostClassLookup(cfg.allowHostLookup())
+            .allowPolyglotAccess(cfg.allowPolyglotAccess())
+            .build();
+    }
+
+    /**
+     * Evaluate {@code code} inside {@code ctx} and return the result's display
+     * string, produced BEFORE leaving the context — a String crosses the context
+     * boundary safely, whereas a live guest object is bound to {@code ctx} and
+     * would die when it closes. This is the enforcement-proof path (config
+     * restrictions surface as a thrown PolyglotException here); the full
+     * error-carrying verb set that keeps a foreign alive across ops is layered on
+     * top separately.
+     */
+    @TruffleBoundary
+    public String evalToStringIn(com.oracle.truffle.api.TruffleContext ctx, String languageId,
+                                 String code, com.oracle.truffle.api.nodes.Node node)
+            throws UnsupportedMessageException {
+        // Do NOT enter `ctx` first — evalPublic enters the inner context itself and
+        // requires the PARENT (creator) context to be the current one, which it
+        // already is (we're running inside Mezze's context). The result is coerced
+        // to a String here so it crosses back safely.
+        Object result = ctx.evalPublic(node, com.oracle.truffle.api.source.Source
+            .newBuilder(languageId, code, "<mezze-sandbox>").build());
+        InteropLibrary lib = InteropLibrary.getUncached(result);
+        if (lib.isString(result)) return lib.asString(result);
+        Object display = lib.toDisplayString(result);
+        return InteropLibrary.getUncached(display).asString(display);
+    }
+
     private void assertLanguageAvailable(String languageId) {
         if (!isLanguageAvailable(languageId)) {
             throw new MezzePolyglotException(
