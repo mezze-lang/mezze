@@ -12,6 +12,14 @@ use std::abilities::inspect
 ## `<Exception>` row with `perform ExceptionToResult` (from
 ## `std::effects::exception`) to fold it back into a `Result`.
 use std::abilities::tryable
+## Arbitrary is DERIVED for every record and variant, the way Eq is — so a module
+## that never mentions sampling still has instances generated for the types it
+## declares, and each of those calls `Arbitrary.arbitrary` on its components. Both
+## the ability and its hand-written primitive impls therefore have to be in scope
+## everywhere, which is what this line is for: `Eq` needs no such thing only because
+## `==` on a primitive lowers to an inline comparison node instead of consulting an
+## impl, and generation has no equivalent. A newtype still opts in by writing its own.
+use std::abilities::arbitrary
 use std::int
 use std::float
 use std::nat

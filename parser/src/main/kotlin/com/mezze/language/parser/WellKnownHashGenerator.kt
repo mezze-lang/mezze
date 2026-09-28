@@ -115,6 +115,8 @@ fun main(args: Array<String>) {
         "LogicalAnd", "LogicalOr",
         // comptime: gates what a comptime block may return (marker ability)
         "Embeddable",
+        // structurally derived for records/variants/containers, like Eq
+        "Arbitrary",
     )
     val keptEffects = setOf("Mut", "Comptime")
     // Functions the compiler recognises STRUCTURALLY at a call site, by hash
@@ -182,6 +184,8 @@ fun main(args: Array<String>) {
     sb.appendLine("    fun isDecodeFlavoredCodec(hash: Hash?): Boolean = hash != null && hash in decodeFlavoredSet")
     sb.appendLine("    /** Marker ability gating what a `comptime` block may return. */")
     sb.appendLine("    fun isEmbeddable(hash: Hash?): Boolean = hash != null && hash == ABILITY_EMBEDDABLE")
+    sb.appendLine("    /** Generation: derived structurally like Eq, and a newtype opts in instead. */")
+    sb.appendLine("    fun isArbitrary(hash: Hash?): Boolean = hash != null && hash == ABILITY_ARBITRARY")
     sb.appendLine("    fun isEq(hash: Hash?): Boolean = hash != null && hash == ABILITY_EQ")
     sb.appendLine("    fun isOrd(hash: Hash?): Boolean = hash != null && hash == ABILITY_ORD")
     sb.appendLine("    fun isHash(hash: Hash?): Boolean = hash != null && hash == ABILITY_HASH")

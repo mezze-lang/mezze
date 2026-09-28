@@ -193,6 +193,45 @@ internal fun canDeriveAbilityStructurally(
                     (unwrappedType as MezzeType.TypeApplication).args
                         .all { componentSatisfies(abilityName, it, abilityHash, seen) })
 
+        // Arbitrary: how a value of this type is ASSEMBLED, which is structure — so
+        // it derives for the same shapes Eq does and stops at the same places.
+        //
+        // The PRIMITIVES are the deliberate difference. Eq derives them (the
+        // generator writes their bodies); Arbitrary does NOT, because the interesting
+        // part of generating an Int is WHICH ints — the spread over zero, the empty
+        // string, the boundary values — and that is a judgement, not a structure.
+        // Those bodies are hand-written in `std::abilities::arbitrary`, and a
+        // primitive component reaches them through `componentSatisfies` finding the
+        // declared impl, exactly as it would any other author's impl.
+        //
+        // NEWTYPES are excluded by the rule above, and this is the ability that
+        // wants it most: `newtype Email = Str` does not want arbitrary strings and
+        // `newtype Age = Int` does not want negative ones. The representation cannot
+        // answer what a VALID value is, so the author opts in by writing the impl —
+        // the same shape Embeddable uses.
+        WellKnownHashConstants.isArbitrary(resolvedHash) ->
+            unwrappedType is MezzeType.VarType ||
+                // Bool is a variant, so it would derive by the arm below on its
+                // payload-free constructors. It must not: a derived Bool would pick a
+                // constructor uniformly and the hand-written impl in the stdlib is the
+                // one that says what generating a Bool means.
+                (!BuiltInAbilities.isBoolVariant(unwrappedType) && (
+                    (unwrappedType is MezzeType.RecordType &&
+                        (unwrappedType as MezzeType.RecordType).fields.values
+                            .all { componentSatisfies(abilityName, it, abilityHash, seen) }) ||
+                        (unwrappedType is MezzeType.VariantType &&
+                            (unwrappedType as MezzeType.VariantType).constructors.values
+                                .all { it == null || componentSatisfies(abilityName, it, abilityHash, seen) }) ||
+                        // The immutable containers, on the same reserved-name identity
+                        // channel the Eq arm uses.
+                        (unwrappedType is MezzeType.TypeApplication &&
+                            com.mezze.language.ast.BuiltinTypes.isReservedTypeName(
+                                (unwrappedType as MezzeType.TypeApplication).constructor
+                            ) &&
+                            (unwrappedType as MezzeType.TypeApplication).args
+                                .all { componentSatisfies(abilityName, it, abilityHash, seen) })
+                    ))
+
         resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ->
             BuiltInAbilities.isBoolVariant(unwrappedType)

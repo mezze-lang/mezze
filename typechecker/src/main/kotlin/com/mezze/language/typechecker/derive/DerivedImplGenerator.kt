@@ -7,7 +7,11 @@ import com.mezze.language.typechecker.codec.mezzeTypeToParsedAnnotation
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedBinaryOp
 import com.mezze.language.parsedast.ParsedConstructorPattern
+import com.mezze.language.parsedast.ParsedDo
 import com.mezze.language.parsedast.ParsedExpr
+import com.mezze.language.parsedast.ParsedIntLit
+import com.mezze.language.parsedast.ParsedNatLit
+import com.mezze.language.parsedast.ParsedStatement
 import com.mezze.language.parsedast.ParsedFnAbilityConstraint
 import com.mezze.language.parsedast.ParsedFunctionCall
 import com.mezze.language.parsedast.ParsedRecordEntry
@@ -315,6 +319,213 @@ object DerivedImplGenerator {
         val whole = "${prefix}_${ctor.name}_payload"
         return ParsedConstructorPattern(ctor.name, ParsedVariablePattern(whole, loc()), loc()) to listOf(whole)
     }
+
+    // ---------------------------------------------------------------------
+    // Arbitrary
+    // ---------------------------------------------------------------------
+
+    private const val ARBITRARY_ABILITY = "Arbitrary"
+    private const val SAMPLE_EFFECT = "Sample"
+
+    /**
+     * `impl Arbitrary for <decl>`, or null when the shape has no structural one.
+     *
+     * Null for a NEWTYPE, and that is the rule rather than a limitation: a newtype
+     * is opaque, and generation also asks a question the representation cannot
+     * answer — `newtype Email = Str` does not want arbitrary strings, `newtype Age
+     * = Int` does not want negative ones. The author opts in by writing the impl.
+     * (Also null for an alias and an open record/variant, as `Eq` is.)
+     *
+     * Every component is a source-level `Arbitrary.arbitrary {}`, so it dispatches
+     * the component's own instance — derived, or the hand-written one a primitive
+     * and a newtype have. The call is receiver-less, so its type comes from the
+     * position it sits in; that only works because an impl op's body is now checked
+     * against the op's declared return type (S-1b), which is what gives a field its
+     * expected type.
+     */
+    fun arbitraryImpl(decl: ParsedTypeDecl): ParsedImplAbilityDecl? {
+        val body: ParsedExpr = when (val def = decl.definition) {
+            is ParsedRecordDef -> if (def.isOpen) return null else recordArbitrary(def.fields.map { it.name })
+            is ParsedVariantDef ->
+                if (def.isOpen) return null else variantArbitrary(def, decl.name) ?: return null
+            is ParsedNewtypeDef -> return null
+            is ParsedTypeAliasDef -> return null
+        }
+        val params = decl.typeParams.map { if (it.startsWith("'")) it else "'$it" }
+        val target: ParsedTypeAnnotation =
+            if (params.isEmpty()) ParsedNamedType(decl.name, loc())
+            else ParsedTypeApp(decl.name, params.map { ParsedNamedType(it, loc()) }, loc())
+
+        // `with Arbitrary 'a` per type param, written explicitly for the reason the
+        // Eq path documents: an inferred precondition stays in the declaring
+        // module's solver, an explicit one travels to every importer.
+        val preconditions = params.map { v ->
+            ParsedFnAbilityConstraint(
+                abilityName = ARBITRARY_ABILITY,
+                typeArgs = listOf(ParsedNamedType(v, loc())),
+                loc = loc(),
+            )
+        }
+        return ParsedImplAbilityDecl(
+            target = ParsedImplTarget.Named(ParsedQualifiedRef(ARBITRARY_ABILITY, null, loc())),
+            targetTypes = listOf(target),
+            forallVars = params,
+            operations = listOf(
+                ParsedImplOp(
+                    name = "arbitrary",
+                    implementation = ParsedLambda(
+                        params = ParsedLambdaParams.Untyped(names = emptyList()),
+                        body = body,
+                        loc = loc(),
+                    ),
+                    abilityConstraints = preconditions,
+                    loc = loc(),
+                ),
+            ),
+            loc = loc(),
+            derived = true,
+        )
+    }
+
+    /** `{ f1 = Arbitrary.arbitrary {}, … }`; the empty record generates as itself. */
+    private fun recordArbitrary(fieldNames: List<String>): ParsedExpr =
+        ParsedRecordLit(
+            fieldNames.map { name -> ParsedRecordEntry.Field(name, arbitraryCall(), loc()) },
+            loc(),
+        )
+
+    /**
+     * Pick a constructor, then generate its payload — or null when the shape has no
+     * derivable choice.
+     *
+     * Null for a RECURSIVE variant. Bounding the recursion needs the `Sample` size
+     * budget, and a generated body cannot name `Sample`: it is an effect, effects are
+     * not built-in and the prelude deliberately does not propagate them, so the
+     * generated impl would depend on whether its host module happened to import one.
+     * The `Hash` generator hit the same wall and answered it by calling a native
+     * instead. Rather than emit a body that only compiles in some modules, a
+     * recursive variant does not derive and its author writes the impl that says how
+     * to stop — the same opt-in a newtype gets, for a related reason.
+     */
+    private fun variantArbitrary(def: ParsedVariantDef, typeName: String): ParsedExpr? {
+        if (def.constructors.any { isRecursiveCtor(it, typeName) }) return null
+        return pickAmong(def.constructors)
+    }
+
+    /**
+     * ```
+     * do
+     *   let __arb_pick = Arbitrary.arbitrary {}
+     *   if __arb_pick < -33 then C0 { … }
+     *   else if __arb_pick < 34 then C1 { … }
+     *   else C2 { … }
+     * ```
+     *
+     * ## Everything a generated body mentions must be nameable EVERYWHERE
+     *
+     * This impl is written into whatever module declares the type, so it may only
+     * use what is in scope with no import at all. Two earlier attempts failed on
+     * exactly that, both inside `std::collections::iter` — a module with no reason to
+     * know sampling exists:
+     *
+     *  - `Sample.int {…}` — "'Sample' is not defined". Effects are not built-in, and
+     *    the prelude deliberately does not propagate them.
+     *  - a draw at `Nat`, chosen with `%` — "Cannot use '==' with Nat". `Nat` is a
+     *    NEWTYPE, so its equality is a real impl that must be imported.
+     *
+     * What survives is the primitive path: `<` on `Int` lowers to an inline
+     * comparison node, so it needs no impl in scope, and an `Int` literal is syntax.
+     * `Arbitrary` itself is nameable because it is a built-in ability. So the draw is
+     * an `Int`, pinned by the literals it is compared against, and the choice is made
+     * by RANGE rather than by modulus — which also sidesteps `Int`'s generator
+     * spreading across zero, where a negative modulus would leave the early arms
+     * unreachable and dump everything into the final `else`.
+     *
+     * The thresholds split [[INT_SPREAD_LO], [INT_SPREAD_HI]] — the range
+     * `impl Arbitrary for Int` draws from — into [ctors] roughly equal parts. That is
+     * a coupling to the stdlib impl and is only about DISTRIBUTION: a wider range
+     * keeps every arm reachable, and a narrower one would skew rather than break.
+     *
+     * The draw is bound ONCE. A fresh draw per arm would consume a new number at
+     * every comparison and skew hard toward the later constructors.
+     */
+    private fun pickAmong(ctors: List<ParsedVariantCtorDef>): ParsedExpr {
+        if (ctors.size == 1) return construct(ctors.first())
+        val name = "__arb_pick"
+        val span = INT_SPREAD_HI - INT_SPREAD_LO + 1
+        fun threshold(i: Int): Long = INT_SPREAD_LO + span * (i + 1) / ctors.size
+
+        var chain: ParsedExpr = construct(ctors.last())
+        for (i in ctors.size - 2 downTo 0) {
+            chain = ParsedIf(
+                ParsedBinaryOp(
+                    OperatorMapping.parse("<"),
+                    id(name),
+                    ParsedIntLit(threshold(i), loc()),
+                    loc(),
+                ),
+                construct(ctors[i]),
+                chain,
+                loc(),
+            )
+        }
+        return ParsedDo(
+            statements = listOf(
+                ParsedStatement.Let(
+                    pattern = ParsedVariablePattern(name, loc()),
+                    typeAnnotation = null,
+                    value = arbitraryCall(),
+                    loc = loc(),
+                ),
+            ),
+            result = chain,
+            loc = loc(),
+        )
+    }
+
+    /** The range `impl Arbitrary for Int` draws from. See [pickAmong]. */
+    private const val INT_SPREAD_LO = -100L
+    private const val INT_SPREAD_HI = 100L
+
+    /** `C`, `C { f = Arbitrary.arbitrary {} }`, or `C <arbitrary>` by payload shape. */
+    private fun construct(ctor: ParsedVariantCtorDef): ParsedExpr {
+        val payload = ctor.dataType ?: return ParsedVariantConstruct(ctor.name, null, loc())
+        val value: ParsedExpr = if (payload is ParsedRecordType) {
+            ParsedRecordLit(
+                payload.entries.map { ParsedRecordEntry.Field(it.name, arbitraryCall(), loc()) },
+                loc(),
+            )
+        } else {
+            arbitraryCall()
+        }
+        return ParsedVariantConstruct(ctor.name, value, loc())
+    }
+
+    /**
+     * Does this constructor mention [typeName], at any depth?
+     *
+     * Textual on the ANNOTATION tree rather than on a resolved type, because
+     * generation runs before types are resolved. That makes it conservative in the
+     * safe direction: a same-named type from elsewhere would be treated as
+     * recursive, costing a budget guard that is merely unnecessary — where missing
+     * a real recursion costs non-termination.
+     */
+    private fun isRecursiveCtor(ctor: ParsedVariantCtorDef, typeName: String): Boolean =
+        ctor.dataType?.let { mentionsType(it, typeName) } ?: false
+
+    private fun mentionsType(annotation: ParsedTypeAnnotation, typeName: String): Boolean = when (annotation) {
+        is ParsedNamedType -> annotation.name == typeName
+        is ParsedTypeApp -> annotation.constructor == typeName ||
+            annotation.args.any { mentionsType(it, typeName) }
+        is ParsedRecordType -> annotation.entries.any { mentionsType(it.type, typeName) }
+        else -> false
+    }
+
+    private fun arbitraryCall(): ParsedExpr = ParsedFunctionCall(
+        member(id(ARBITRARY_ABILITY), "arbitrary"),
+        ParsedRecordLit(emptyList(), loc()),
+        loc(),
+    )
 
     // ---------------------------------------------------------------------
     // AST helpers

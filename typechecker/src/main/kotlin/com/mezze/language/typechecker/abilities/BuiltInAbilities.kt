@@ -45,6 +45,14 @@ object BuiltInAbilities {
         "abilities/inspect.mz",
         "abilities/convert.mz",
         "abilities/default.mz",
+        // NO `abilities/arbitrary.mz`, deliberately, and it was tried.
+        //
+        // Being nameable without an import is not enough for `Arbitrary`, because a
+        // derived body bottoms out in `impl Arbitrary for Int` — and an IMPL still
+        // has to be import-visible. Putting the ability here made the name resolve
+        // and the instances not, which turns a clean "not imported" into "no impl in
+        // scope" raised from a body nobody wrote. `std::abilities::arbitrary` is in
+        // the prelude instead, which carries the impls too.
     )
 
     /** Read + parse each ability file, invoking [handle] for every ability decl.

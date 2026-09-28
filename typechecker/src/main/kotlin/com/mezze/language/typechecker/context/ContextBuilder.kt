@@ -279,9 +279,16 @@ class ContextBuilder {
         currentModulePath: String?,
         ctx: TypingContext,
     ): List<ParsedImplAbilityDecl> {
-        val eqDecl = allAbilityDecls["Eq"] ?: return emptyList()
-        val eqHash = eqDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(eqDecl)
-        if (!WellKnownHashConstants.isEq(eqHash)) return emptyList()
+        // Per-ability nameability, not one gate for the whole pass. This used to
+        // `return emptyList()` when `Eq` was absent, which silently meant "a module
+        // that does not import Eq derives NOTHING" — invisible for Eq itself, since
+        // `==` on a primitive is answered by an inline comparison node whether or not
+        // an instance exists. `Arbitrary` has no such node: the instance is the only
+        // way to generate a value, so inheriting Eq's gate made derivation depend on
+        // whether the module happened to import an unrelated ability.
+        val eqDecl = allAbilityDecls["Eq"]
+        val eqHash = eqDecl?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        val eqNameable = WellKnownHashConstants.isEq(eqHash)
 
         val declaredHere = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
         val homeHere = currentModulePath?.let { BuiltinTypeRegistry.getLocalTypesForModule(ModulePath.parse(it)) } ?: emptySet()
@@ -313,7 +320,9 @@ class ContextBuilder {
             .filter { it in homeHere }
             .flatMap { name ->
                 listOfNotNull(
-                    if (name in explicitEqTargets) null
+                    // `eqNameable` was implicit in the early return this function used
+                    // to do; splitting the gate per ability makes it explicit here.
+                    if (!eqNameable || name in explicitEqTargets) null
                     else com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqImpl(name),
                     if (!hashNameable || name in explicitHashTargets) null
                     else com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveHashImpl(name),
@@ -321,20 +330,44 @@ class ContextBuilder {
             }
             .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
 
-        return primitiveImpls + typeDecls.values.mapNotNull { decl ->
-            if (decl.name !in declaredHere && decl.name !in homeHere) return@mapNotNull null
-            if (PrimitiveTypes.fromName(decl.name) != null) return@mapNotNull null
-            if (decl.name in explicitEqTargets) return@mapNotNull null
-            val generated = com.mezze.language.typechecker.derive.DerivedImplGenerator.eqImpl(decl)
-                ?: return@mapNotNull null
-            val receiver = MezzeType.TypeApplication(
-                decl.name,
-                generated.forallVars.map { MezzeType.VarType(TypeVar.freshWithName(it)) },
-            )
-            if (!checker.canDeriveAbility("Eq", receiver, eqHash)) return@mapNotNull null
-            generated.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(generated))
+        // `Arbitrary` derives for the same shapes and by the same rule.
+        //
+        // The BUILT-IN decl is the fallback, and that is what makes it behave like
+        // `Eq` rather than like an ordinary import. `allAbilityDecls` holds what the
+        // module declares or imports, so keying off it alone would derive only in
+        // modules that happen to `use` the ability — and generation must be available
+        // wherever a type is declared, since the instance is the only way to produce a
+        // value of it. `BuiltInAbilities` is the same channel `==` resolves through.
+        val arbitraryDecl = allAbilityDecls["Arbitrary"]
+        val arbitraryHash = arbitraryDecl?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        val arbitraryNameable = WellKnownHashConstants.isArbitrary(arbitraryHash)
+        val explicitArbitraryTargets = explicitImplTargetNames(explicitImpls, "Arbitrary")
+
+        return primitiveImpls + typeDecls.values.flatMap { decl ->
+            if (decl.name !in declaredHere && decl.name !in homeHere) return@flatMap emptyList()
+            if (PrimitiveTypes.fromName(decl.name) != null) return@flatMap emptyList()
+
+            val eqGenerated =
+                if (!eqNameable || decl.name in explicitEqTargets) null
+                else com.mezze.language.typechecker.derive.DerivedImplGenerator.eqImpl(decl)
+                    ?.takeIf { g -> checker.canDeriveAbility("Eq", receiverOf(decl, g), eqHash) }
+
+            val arbitraryGenerated =
+                if (!arbitraryNameable || decl.name in explicitArbitraryTargets) null
+                else com.mezze.language.typechecker.derive.DerivedImplGenerator.arbitraryImpl(decl)
+                    ?.takeIf { g -> checker.canDeriveAbility("Arbitrary", receiverOf(decl, g), arbitraryHash) }
+
+            listOfNotNull(eqGenerated, arbitraryGenerated)
+                .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
         }
     }
+
+    /** The impl's receiver as a type, for the derivability question. */
+    private fun receiverOf(decl: ParsedTypeDecl, generated: ParsedImplAbilityDecl): MezzeType =
+        MezzeType.TypeApplication(
+            decl.name,
+            generated.forallVars.map { MezzeType.VarType(TypeVar.freshWithName(it)) },
+        )
 
     private fun validateAbilities(
         module: ParsedModule,
