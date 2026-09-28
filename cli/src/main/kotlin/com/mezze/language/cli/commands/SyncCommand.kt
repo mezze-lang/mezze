@@ -1028,7 +1028,21 @@ class SyncCommand {
             // {prefix}/{dest} are already absolute paths; quote them
             // too so a project living under a path with a space stays
             // valid.
+            // {graalpy}: a self-contained GraalPy launcher assembled from the jars
+            // mez ALREADY has — the runtime jar (truffle/polyglot/sdk) + the
+            // resolved [maven] python jars — so a provider's install template runs
+            // GraalPy without requiring a `graalpy` on PATH. mez IS the toolchain.
+            val graalpyCmd: String? = run {
+                val java = com.mezze.language.cli.JvmLauncher.findJava() ?: return@run null
+                val runtimeJar = com.mezze.language.cli.JvmLauncher.findRuntimeJar() ?: return@run null
+                val resolved = com.mezze.language.cli.`package`.ResolvedJarsClasspath
+                    .collect(projectRoot, storeRoot).asClasspath()
+                val cp = listOf(runtimeJar.absolutePath, resolved)
+                    .filter { it.isNotBlank() }.joinToString(File.pathSeparator)
+                "${shellQuote(java.absolutePath)} -cp ${shellQuote(cp)} com.oracle.graal.python.shell.GraalPythonMain"
+            }
             val substituted = prov.install
+                .let { if (graalpyCmd != null) it.replace("{graalpy}", graalpyCmd) else it }
                 .replace("{prefix}", shellQuote(prov.prefix.absolutePath))
                 .replace("{dest}", shellQuote(destDir.absolutePath))
                 .replace("{packages}", packages.joinToString(" ") { shellQuote(it) })
