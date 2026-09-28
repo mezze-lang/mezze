@@ -439,6 +439,45 @@ public final class PolyglotNatives {
 
     // ==================== Type predicates & coercion ====================
 
+    /** A guest scalar coercion (asLong/asDouble/asString/asBoolean), as a lambda. */
+    @FunctionalInterface
+    interface ScalarCoerce { Object apply(InteropLibrary lib, Object v) throws Exception; }
+
+    /**
+     * numpy scalars (numpy.int64 / float64 / bool_ / str_ …) do NOT implement the
+     * interop number/string/boolean messages — asLong/asDouble/… all throw
+     * UnsupportedMessage on them. They unwrap to a plain, coercible Python scalar
+     * via `.item()`. Returns that unwrapped value if the receiver has an invocable
+     * no-arg `item`, else null.
+     */
+    @TruffleBoundary
+    private static Object numpyItem(Object delegate) {
+        try {
+            InteropLibrary lib = InteropLibrary.getUncached(delegate);
+            if (lib.isMemberInvocable(delegate, "item")) return lib.invokeMember(delegate, "item");
+        } catch (Throwable ignore) { /* not unwrappable */ }
+        return null;
+    }
+
+    /** Coerce a foreign to a Mezze scalar, with a `.item()` fallback for numpy
+     *  scalars (retry the coercion on the unwrapped value). Errored → carried err. */
+    @TruffleBoundary
+    private static MezzeVariant coerceScalar(MezzeForeign f, ScalarCoerce coerce) {
+        if (f.isErrored()) return carriedErr(f);
+        InteropLibrary lib = InteropLibrary.getUncached();
+        Object d = f.getDelegate();
+        try {
+            return MezzeVariant.ok(coerce.apply(lib, d));
+        } catch (Throwable first) {
+            Object item = numpyItem(d);
+            if (item != null) {
+                try { return MezzeVariant.ok(coerce.apply(lib, item)); }
+                catch (Throwable ignore) { /* item didn't coerce either */ }
+            }
+            return MezzeVariant.err(translateException(first));
+        }
+    }
+
     @TruffleBoundary
     public static MezzeVariant isNull(MezzeRecord args) {
         MezzeForeign f = asForeign(args);
@@ -454,13 +493,7 @@ public final class PolyglotNatives {
 
     @TruffleBoundary
     public static MezzeVariant asString(MezzeRecord args) {
-        MezzeForeign f = asForeign(args);
-        if (f.isErrored()) return carriedErr(f);
-        try {
-            return MezzeVariant.ok(InteropLibrary.getUncached().asString(f.getDelegate()));
-        } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
-        }
+        return coerceScalar(asForeign(args), (lib, v) -> lib.asString(v));
     }
 
     @TruffleBoundary
@@ -477,35 +510,17 @@ public final class PolyglotNatives {
 
     @TruffleBoundary
     public static MezzeVariant asLong(MezzeRecord args) {
-        MezzeForeign f = asForeign(args);
-        if (f.isErrored()) return carriedErr(f);
-        try {
-            return MezzeVariant.ok(InteropLibrary.getUncached().asLong(f.getDelegate()));
-        } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
-        }
+        return coerceScalar(asForeign(args), (lib, v) -> lib.asLong(v));
     }
 
     @TruffleBoundary
     public static MezzeVariant asDouble(MezzeRecord args) {
-        MezzeForeign f = asForeign(args);
-        if (f.isErrored()) return carriedErr(f);
-        try {
-            return MezzeVariant.ok(InteropLibrary.getUncached().asDouble(f.getDelegate()));
-        } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
-        }
+        return coerceScalar(asForeign(args), (lib, v) -> lib.asDouble(v));
     }
 
     @TruffleBoundary
     public static MezzeVariant asBoolean(MezzeRecord args) {
-        MezzeForeign f = asForeign(args);
-        if (f.isErrored()) return carriedErr(f);
-        try {
-            return MezzeVariant.ok(InteropLibrary.getUncached().asBoolean(f.getDelegate()));
-        } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
-        }
+        return coerceScalar(asForeign(args), (lib, v) -> lib.asBoolean(v));
     }
 
     // ==================== Constructors ====================
