@@ -1,7 +1,9 @@
 # Arbitrary — how a value of a type is assembled.
 
-use std::effects::sample::{ Sample }
+use std::effects::sample::{ Sample, choose, int_between, one_of }
 use std::nat::{ Nat }
+use std::nat
+use std::option::{ get_or }
 # The arithmetic below needs the Int and Float numeric impls in scope; without
 # these, `0 - 100` reports no `NumSub` for Int because only Nat's were imported.
 use std::int
@@ -53,18 +55,52 @@ ability Arbitrary for 'a where {
 ## constraint is what carries `'a` out to the caller, whose expected type pins it.
 pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}
 
-## Spread across zero so a sample shows sign handling, not just positives.
+## ## Why these are not uniform draws
+##
+## A uniform draw over a wide range is close to the worst generator there is. Every
+## value it produces is unremarkable, and the values that actually break code are
+## the ones it will almost never pick: zero, one, minus one, the boundaries. Drawing
+## uniformly over the whole Int range hits `0` with probability 2^-64 — a generator
+## that will not find an off-by-one or a division by zero in the life of the
+## universe.
+##
+## So each impl below mixes a table of interesting values with a random one. This
+## knowledge lives HERE, with the type, and not in the `Sample` effect: which Ints
+## are worth trying is a fact about Int, where the effect's only job is answering
+## "a number below N".
+pub let interesting_ints: [Int] = [
+  0, 1, -1, 2, -2, 3, 4, 10, -10, 100, -100,
+  ## The boundaries, where overflow lives. The minimum is written as `-max - 1`
+  ## because the bare literal is one past the largest positive literal the lexer
+  ## accepts.
+  9223372036854775807, -9223372036854775807 - 1,
+]
+
+## How often a draw takes the table rather than a random value, as a percentage.
+## High on purpose: the table IS the point, and the random tail is there so a
+## generator is not merely a fixed set replayed forever.
+pub let interesting_percent: Int = 70
+
+let take_interesting: {} -> Bool <Sample> = {} -> choose { bound = 100 } < interesting_percent
+
 impl Arbitrary for Int where {
-  arbitrary = {} -> Sample.int { min = 0 - 100, max = 100 }
+  arbitrary = {} ->
+    if take_interesting {}
+      then one_of { xs = interesting_ints, def = 0 }
+      else int_between { min = -1000, max = 1000 }
 }
 
-## Scaled off [0, 1) and shifted, for the same reason.
+## `0.0` and `1.0` and their negatives are where float comparisons go wrong, so they
+## are in the table for the same reason zero is in Int's.
 impl Arbitrary for Float where {
-  arbitrary = {} -> (Sample.float {} * 200.0) - 100.0
+  arbitrary = {} ->
+    if take_interesting {}
+      then one_of { xs = [0.0, 1.0, -1.0, 0.5, -0.5, 100.0, -100.0], def = 0.0 }
+      else float::from_int { n = int_between { min = -1000, max = 1000 } } / 10.0
 }
 
 impl Arbitrary for Bool where {
-  arbitrary = {} -> Sample.int { min = 0, max = 1 } == 1
+  arbitrary = {} -> choose { bound = 2 } == 1
 }
 
 ## NO `Arbitrary for Char` yet, and the reason is a language fact worth recording.
@@ -77,12 +113,13 @@ impl Arbitrary for Bool where {
 ## Leaving it out means a record with a `Char` field reports a missing impl, which
 ## is accurate. Inventing an answer here would be guessing at a language decision.
 
-## The empty string is in the set on purpose: it is the case that breaks parsers,
-## and a generator that never produces it is not testing anything.
+## The empty string is first on purpose: it is the case that breaks parsers, and a
+## generator that never produces it is not testing anything. Then a lone space, a
+## quote and a newline — the three that break naive escaping — and a non-ASCII
+## character, because "it worked on my ASCII" is its own bug class.
 impl Arbitrary for Str where {
-  arbitrary = {} -> do
-    let n = Sample.int { min = 0, max = 3 }
-    if n == 0 then "" else if n == 1 then "a" else if n == 2 then "sample" else "mezze"
+  arbitrary = {} ->
+    one_of { xs = ["", " ", "a", "\"", "\n", "sample", "mezze", "ünïcödé"], def = "" }
 }
 
 ## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
@@ -91,6 +128,11 @@ impl Arbitrary for Str where {
 ## `nat::from_int` is partial, and here the `None` arm is unreachable because the
 ## range starts at zero. Rather than write a branch that cannot happen, the value
 ## is built from a non-negative Int through the one conversion that cannot fail.
+## A `Nat` cannot go below zero, so its interesting values are the low boundary and
+## a spread upward — there are no negatives to mirror.
 impl Arbitrary for Nat where {
-  arbitrary = {} -> Sample.nat { max = 100n }
+  arbitrary = {} ->
+    if take_interesting {}
+      then one_of { xs = [0n, 1n, 2n, 3n, 10n, 100n], def = 0n }
+      else nat::from_int { n = int_between { min = 0, max = 1000 } } |> get_or { opt = @, def = 0n }
 }

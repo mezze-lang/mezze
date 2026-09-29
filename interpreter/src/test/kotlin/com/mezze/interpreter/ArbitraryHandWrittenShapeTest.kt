@@ -29,7 +29,7 @@ class ArbitraryHandWrittenShapeTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sampler, RandomSampler, run }
+        use std::effects::sample::{ Sample, with_seed }
         use std::abilities::arbitrary::{ Arbitrary }
     """.trimIndent()
 
@@ -53,7 +53,7 @@ class ArbitraryHandWrittenShapeTest {
               arbitrary = {} -> { x = Arbitrary.arbitrary {}, y = Arbitrary.arbitrary {} }
             }
 
-            perform RandomSampler { seed = 4 } in run { call = {} -> do
+            with_seed { seed = 4, call = {} -> do
               let p: Point = Arbitrary.arbitrary {}
               p.x
             }
@@ -72,7 +72,7 @@ class ArbitraryHandWrittenShapeTest {
               arbitrary = {} -> Wrapped { val = Arbitrary.arbitrary {} }
             }
 
-            perform RandomSampler { seed = 6 } in run { call = {} -> do
+            with_seed { seed = 6, call = {} -> do
               let w: Wrap = Arbitrary.arbitrary {}
               match w is
                 Wrapped { val } -> val
@@ -100,7 +100,7 @@ class ArbitraryHandWrittenShapeTest {
 
             # A newtype is fully erased at runtime, so the value that comes back IS
             # the wrapped Int — no unwrap needed to check which generator ran.
-            perform RandomSampler { seed = 1 } in run { call = {} -> do
+            with_seed { seed = 1, call = {} -> do
               let a: Age = Arbitrary.arbitrary {}
               a
             }

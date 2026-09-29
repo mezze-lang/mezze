@@ -413,62 +413,57 @@ object DerivedImplGenerator {
     }
 
     /**
+     * Choose a constructor by COIN FLIPS, bisecting the list.
+     *
      * ```
      * do
-     *   let __arb_pick = Arbitrary.arbitrary {}
-     *   if __arb_pick < -33 then C0 { … }
-     *   else if __arb_pick < 34 then C1 { … }
-     *   else C2 { … }
+     *   let __arb_bit0 = Arbitrary.arbitrary {}
+     *   if __arb_bit0
+     *     then <bisect the first half>
+     *     else <bisect the second half>
      * ```
      *
-     * ## Everything a generated body mentions must be nameable EVERYWHERE
+     * ## Why flips and not a number
      *
-     * This impl is written into whatever module declares the type, so it may only
-     * use what is in scope with no import at all. Two earlier attempts failed on
-     * exactly that, both inside `std::collections::iter` — a module with no reason to
-     * know sampling exists:
+     * The previous version drew an `Int` and compared it against thresholds carved
+     * out of [-100, 100] — the range `impl Arbitrary for Int` happened to use. That
+     * was a silent coupling to another module's DISTRIBUTION, and it broke the
+     * moment `Int`'s generator started returning interesting values: one draw of
+     * `Int`'s minimum sends every such pick into the first arm, and the maximum into
+     * the last, so a variant would look like it generated and would in fact be
+     * answering two constructors almost always.
      *
-     *  - `Sample.int {…}` — "'Sample' is not defined". Effects are not built-in, and
-     *    the prelude deliberately does not propagate them.
-     *  - a draw at `Nat`, chosen with `%` — "Cannot use '==' with Nat". `Nat` is a
-     *    NEWTYPE, so its equality is a real impl that must be imported.
+     * A `Bool` has only two values, so there is no distribution to couple to. The
+     * flips also cost nothing extra to name: `Arbitrary` is in the prelude, and
+     * `if b then … else …` needs no `Eq` impl in scope — which matters because this
+     * body is written into whatever module declares the type, and may only use what
+     * is nameable with no import at all.
      *
-     * What survives is the primitive path: `<` on `Int` lowers to an inline
-     * comparison node, so it needs no impl in scope, and an `Int` literal is syntax.
-     * `Arbitrary` itself is nameable because it is a built-in ability. So the draw is
-     * an `Int`, pinned by the literals it is compared against, and the choice is made
-     * by RANGE rather than by modulus — which also sidesteps `Int`'s generator
-     * spreading across zero, where a negative modulus would leave the early arms
-     * unreachable and dump everything into the final `else`.
+     * ## What a generated body may mention, which decided the rest
      *
-     * The thresholds split [[INT_SPREAD_LO], [INT_SPREAD_HI]] — the range
-     * `impl Arbitrary for Int` draws from — into [ctors] roughly equal parts. That is
-     * a coupling to the stdlib impl and is only about DISTRIBUTION: a wider range
-     * keeps every arm reachable, and a narrower one would skew rather than break.
+     * Three earlier attempts died on that rule, all inside `std::collections::iter`,
+     * a module with no reason to know sampling exists:
      *
-     * The draw is bound ONCE. A fresh draw per arm would consume a new number at
-     * every comparison and skew hard toward the later constructors.
+     *  - `Sample.choose {…}` — "'Sample' is not defined". Effects are not built-in
+     *    and the prelude does not propagate them.
+     *  - a draw at `Nat`, chosen with `%` — "Cannot use '==' with Nat". A newtype's
+     *    equality is a real impl that has to be imported.
+     *  - registering the ability as a built-in — the NAME resolved and the INSTANCES
+     *    did not. 502 typechecker failures.
+     *
+     * ## Distribution
+     *
+     * Bisection is uniform only when the count is a power of two: for three
+     * constructors the halves are 1 and 2, so the first is picked half the time and
+     * the other two a quarter each. Bounded, every constructor reachable, and not
+     * worth more machinery — a sample is read, not measured.
      */
-    private fun pickAmong(ctors: List<ParsedVariantCtorDef>): ParsedExpr {
-        if (ctors.size == 1) return construct(ctors.first())
-        val name = "__arb_pick"
-        val span = INT_SPREAD_HI - INT_SPREAD_LO + 1
-        fun threshold(i: Int): Long = INT_SPREAD_LO + span * (i + 1) / ctors.size
+    private fun pickAmong(ctors: List<ParsedVariantCtorDef>): ParsedExpr = bisect(ctors, 0)
 
-        var chain: ParsedExpr = construct(ctors.last())
-        for (i in ctors.size - 2 downTo 0) {
-            chain = ParsedIf(
-                ParsedBinaryOp(
-                    OperatorMapping.parse("<"),
-                    id(name),
-                    ParsedIntLit(threshold(i), loc()),
-                    loc(),
-                ),
-                construct(ctors[i]),
-                chain,
-                loc(),
-            )
-        }
+    private fun bisect(ctors: List<ParsedVariantCtorDef>, depth: Int): ParsedExpr {
+        if (ctors.size == 1) return construct(ctors.first())
+        val name = "__arb_bit$depth"
+        val mid = ctors.size / 2
         return ParsedDo(
             statements = listOf(
                 ParsedStatement.Let(
@@ -478,14 +473,15 @@ object DerivedImplGenerator {
                     loc = loc(),
                 ),
             ),
-            result = chain,
+            result = ParsedIf(
+                id(name),
+                bisect(ctors.take(mid), depth + 1),
+                bisect(ctors.drop(mid), depth + 1),
+                loc(),
+            ),
             loc = loc(),
         )
     }
-
-    /** The range `impl Arbitrary for Int` draws from. See [pickAmong]. */
-    private const val INT_SPREAD_LO = -100L
-    private const val INT_SPREAD_HI = 100L
 
     /** `C`, `C { f = Arbitrary.arbitrary {} }`, or `C <arbitrary>` by payload shape. */
     private fun construct(ctor: ParsedVariantCtorDef): ParsedExpr {

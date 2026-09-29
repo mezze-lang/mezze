@@ -21,7 +21,7 @@ class ArbitraryDerivationTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sampler, RandomSampler, RandomSamplerWith, run }
+        use std::effects::sample::{ Sample, with_seed, with_seed_sized }
         use std::abilities::arbitrary::{ Arbitrary }
     """.trimIndent()
 
@@ -32,7 +32,7 @@ class ArbitraryDerivationTest {
         """
         $decls
 
-        perform RandomSampler { seed = $seed } in run { call = {} -> do
+        with_seed { seed = $seed, call = {} -> do
           let v: $type = Arbitrary.arbitrary {}
           $body
         }
@@ -46,7 +46,7 @@ class ArbitraryDerivationTest {
         )
         val x = rec.getField(rec.getFieldIndex("x")).toString().toLong()
         val y = rec.getField(rec.getFieldIndex("y")).toString().toLong()
-        assertTrue(x in -100L..100L && y in -100L..100L, "out of the Int impl's range: x=$x y=$y")
+        assertTrue(isValidIntDraw(x) && isValidIntDraw(y), "not Int-impl draws: x=$x y=$y")
     }
 
     @Test
@@ -55,7 +55,7 @@ class ArbitraryDerivationTest {
             draw("type Mixed = { n: Int, s: Str, f: Float }", "Mixed")
         )
         val s = rec.getField(rec.getFieldIndex("s")).toString()
-        assertTrue(s in setOf("", "a", "sample", "mezze"), "not from the Str impl: $s")
+        assertTrue(s in INTERESTING_STRS, "not from the Str impl: $s")
     }
 
     @Test
@@ -71,7 +71,7 @@ class ArbitraryDerivationTest {
         )
         val inner = MezzeTestHelper.asRecord(rec.getField(rec.getFieldIndex("inner")))
         val v = inner.getField(inner.getFieldIndex("v")).toString().toLong()
-        assertTrue(v in -100L..100L, "inner not generated: $v")
+        assertTrue(isValidIntDraw(v), "inner not generated: $v")
     }
 
     /** The case `mez sample` needs: a function's parameter IS a record. */
@@ -82,12 +82,12 @@ class ArbitraryDerivationTest {
 
             let add_them: Args -> Int = { a, b } -> a + b
 
-            perform RandomSampler { seed = 12 } in run { call = {} -> do
+            with_seed { seed = 12, call = {} -> do
               let args: Args = Arbitrary.arbitrary {}
               add_them { a = args.a, b = args.b }
             }
         """.trimIndent()))
-        assertTrue(n != null && n >= -200L && n <= 200L, "outside the sum of two Int draws: $n")
+        assertTrue(n != null, "the function did not run on the generated record")
     }
 
     @Test
@@ -100,7 +100,7 @@ class ArbitraryDerivationTest {
             let name_of: { c: Color } -> Str = { c } ->
               if c == Red then "R" else if c == Green then "G" else "B"
 
-            perform RandomSampler { seed = 21 } in run { call = {} -> do
+            with_seed { seed = 21, call = {} -> do
               let a: Color = Arbitrary.arbitrary {}
               let b: Color = Arbitrary.arbitrary {}
               let c: Color = Arbitrary.arbitrary {}
@@ -126,7 +126,7 @@ class ArbitraryDerivationTest {
                 body = "match v is\n    Wrapped { val } -> val",
             )
         )
-        assertTrue(n != null && n >= -100L && n <= 100L, "payload not generated: $n")
+        assertTrue(isValidIntDraw(n), "payload not generated: $n")
     }
 
     /**
@@ -168,5 +168,18 @@ class ArbitraryDerivationTest {
             draw("newtype Email = Str", "Email")
         }.exceptionOrNull()
         assertTrue(e != null, "a newtype derived Arbitrary; it must opt in instead")
+    }
+
+    /** What `impl Arbitrary for Int` can now produce: the interesting table, or the
+     *  random tail. Asserting a narrow range would just re-encode the old uniform
+     *  generator and fail the moment an interesting value came out. */
+    private fun isValidIntDraw(v: Long?): Boolean =
+        v != null && (v in INTERESTING_INTS || v in -1000L..1000L)
+
+    private companion object {
+        val INTERESTING_INTS = setOf(
+            0L, 1L, -1L, 2L, -2L, 3L, 4L, 10L, -10L, 100L, -100L, Long.MAX_VALUE, Long.MIN_VALUE,
+        )
+        val INTERESTING_STRS = setOf("", " ", "a", "\"", "\n", "sample", "mezze", "\u00fcn\u00efc\u00f6d\u00e9")
     }
 }

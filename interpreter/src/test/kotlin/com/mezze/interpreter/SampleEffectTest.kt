@@ -28,7 +28,7 @@ class SampleEffectTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sampler, RandomSampler, RandomSamplerWith, int, run, size }
+        use std::effects::sample::{ Sample, with_seed, with_seed_sized, choose, size }
         use std::abilities::arbitrary::{ Arbitrary, arbitrary }
     """.trimIndent()
 
@@ -36,7 +36,7 @@ class SampleEffectTest {
 
     /** One draw of an Int under a seeded sampler. */
     private fun draw(seed: Int): Long? = MezzeTestHelper.asLong(
-        eval("perform RandomSampler { seed = $seed } in run { call = {} -> int { min = 1, max = 1000000 } }")
+        eval("with_seed { seed = $seed, call = {} -> choose { bound = 1000000 } }")
     )
 
     @Test
@@ -45,9 +45,9 @@ class SampleEffectTest {
         // SeededRandom twice, and its stream resets at scope entry — so each draw
         // would restart the same sequence and return the same number.
         val rec = MezzeTestHelper.asRecord(eval("""
-            perform RandomSampler { seed = 42 } in run { call = {} -> do
-              let x = int { min = 1, max = 1000000 }
-              let y = int { min = 1, max = 1000000 }
+            with_seed { seed = 42, call = {} -> do
+              let x = choose { bound = 1000000 }
+              let y = choose { bound = 1000000 }
               { a = x, b = y }
             }
         """.trimIndent()))
@@ -68,7 +68,7 @@ class SampleEffectTest {
 
     @Test
     fun `the size budget is what the sampler was given`() {
-        val n = eval("perform RandomSamplerWith { seed = 1, size = 9n } in run { call = {} -> size {} }")
+        val n = eval("with_seed_sized { seed = 1, size = 9n, call = {} -> size {} }")
         assertEquals(9L, MezzeTestHelper.asLong(n))
     }
 
@@ -83,21 +83,19 @@ class SampleEffectTest {
     @Test
     fun `arbitrary generates with no other Sample call in the thunk`() {
         val v = MezzeTestHelper.asLong(eval("""
-            perform RandomSampler { seed = 5 } in run { call = {} -> do
+            with_seed { seed = 5, call = {} -> do
               let v: Int = Arbitrary.arbitrary {}
               v
             }
         """.trimIndent()))
-        // The Int impl spreads over [-100, 100], so the only thing worth asserting
-        // is the range — a specific value would pin this test to the RNG.
-        assertTrue(v != null && v >= -100L && v <= 100L, "out of the Int impl's range: $v")
+        assertTrue(isValidIntDraw(v), "not something the Int impl can produce: $v")
     }
 
     /** Two draws of a DIFFERENT type through `arbitrary`, still one seeded scope. */
     @Test
     fun `arbitrary at two types in one scope`() {
         val rec = MezzeTestHelper.asRecord(eval("""
-            perform RandomSampler { seed = 11 } in run { call = {} -> do
+            with_seed { seed = 11, call = {} -> do
               let n: Int = Arbitrary.arbitrary {}
               let s: Str = Arbitrary.arbitrary {}
               { n = n, s = s }
@@ -105,8 +103,8 @@ class SampleEffectTest {
         """.trimIndent()))
         val n = rec.getField(rec.getFieldIndex("n"))
         val s = rec.getField(rec.getFieldIndex("s"))
-        assertTrue(s.toString() in setOf("", "a", "sample", "mezze"), "not from the Str impl: $s")
-        assertTrue(n.toString().toLong() in -100L..100L, "not from the Int impl: $n")
+        assertTrue(s.toString() in INTERESTING_STRS, "not from the Str impl: $s")
+        assertTrue(isValidIntDraw(n.toString().toLong()), "not from the Int impl: $n")
     }
 
     /**
@@ -117,14 +115,25 @@ class SampleEffectTest {
     @Test
     fun `the arbitrary wrapper works through its ability constraint`() {
         val v = MezzeTestHelper.asLong(eval("""
-            perform RandomSampler { seed = 3 } in run { call = {} -> do
+            with_seed { seed = 3, call = {} -> do
               let v: Int = arbitrary {}
               v
             }
         """.trimIndent()))
-        assertTrue(v != null && v >= -100L && v <= 100L, "out of the Int impl's range: $v")
+        assertTrue(isValidIntDraw(v), "not something the Int impl can produce: $v")
     }
 
-    // A record still has no impl until structural derivation lands (S-2), which is
-    // the case that matters, since a function's parameter IS a record.
+
+    /** What `impl Arbitrary for Int` can now produce: the interesting table, or the
+     *  random tail. Asserting a narrow range would just re-encode the old uniform
+     *  generator and fail the moment an interesting value came out. */
+    private fun isValidIntDraw(v: Long?): Boolean =
+        v != null && (v in INTERESTING_INTS || v in -1000L..1000L)
+
+    private companion object {
+        val INTERESTING_INTS = setOf(
+            0L, 1L, -1L, 2L, -2L, 3L, 4L, 10L, -10L, 100L, -100L, Long.MAX_VALUE, Long.MIN_VALUE,
+        )
+        val INTERESTING_STRS = setOf("", " ", "a", "\"", "\n", "sample", "mezze", "\u00fcn\u00efc\u00f6d\u00e9")
+    }
 }

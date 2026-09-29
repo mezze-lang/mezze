@@ -1,112 +1,106 @@
-# Sampling — where generated values come from.
+# Sampling — the mechanism a generated value is drawn from.
 
-use std::effects::random::{ Random, SeededRandom, random_int, random_float, random_nat }
+use std::effects::random::{ Random, SeededRandom, random_int }
 use std::nat::{ Nat }
+# The arithmetic below needs Int's numeric impls in scope. Importing `std::nat`
+# alone brings only Nat's, and `bound - 1` then reports no `NumSub` for Int —
+# the same trap `std::abilities::arbitrary` documents.
+use std::int
+use std::option::{ get_or }
+use std::collections::seq
 
-## Draw the raw material a generated value is built from.
+## Where a generated value's choices come from — and NOTHING about types.
 ##
-## `Arbitrary` says how a value of a given type is ASSEMBLED — that part is
-## structure, so the compiler derives it. This effect is where the numbers come
-## from, which is not part of any type, so it is ambient instead.
+## `Arbitrary` says how a value of a given type is assembled, and which values of
+## that type are interesting: that `0`, `1` and `-1` matter for an `Int`, that the
+## empty string matters for a `Str`. All of that is knowledge ABOUT a type, so it
+## lives with the type. This effect only answers "give me a number below N", which
+## is the same question whatever is being built.
 ##
-## A derived `Arbitrary` impl performs only `<Sample>`. It never mentions
-## `Random`, and that is the point: the performer decides where entropy comes
-## from, so an impl does not have to be written twice for the seeded and
-## unseeded cases.
+## ## One draw, and why it is `bound` rather than `min`/`max`
 ##
-## ## `size` and why it is scoped
+## Every generated value of every type bottoms out in `choose`, so a whole
+## generation is a sequence of Ints — which is what makes a run recordable and
+## replayable without any per-type machinery.
 ##
-## Generation of a recursive type has to stop. `size` is the budget, and
-## `resize` lowers it for a nested draw — a derived impl wraps the children of a
-## recursive constructor in it, and at zero a variant is forced to pick a
-## constructor that does not mention its own type. Without that,
-## `type Tree = | Node { l: Tree, r: Tree }, Leaf Int |` generates forever.
-##
-## It is a scoped OPERATION rather than a parameter on `arbitrary` so that
-## `arbitrary` takes no arguments at all. That matters because the impls are
-## generated mechanically: threading a size through every field of every derived
-## record is machinery, and lowering it at the two places that actually recurse
-## is not.
+## The draw is `[0, bound)` rather than `[min, max]` so that **0 is always the
+## simplest answer**. That ordering is the entire basis of shrinking: a shrinker
+## walks the recorded sequence pushing choices toward zero and replays it. With a
+## `min`/`max` primitive there is no canonical simplest value and that ordering has
+## nothing to stand on. `int_between` is an ordinary function on top.
 effect Sample where {
+  ## A non-negative Int below `bound`. 0 is the simplest answer.
+  choose: { bound: Int } -> Int <Sample>,
   ## The current budget for recursion depth and collection length.
   size: {} -> Nat <Sample>,
   ## Run `call` with the budget lowered to `n`.
-  resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample>,
-  ## An Int in [min, max]. The workhorse: variant arms, lengths, Int values.
-  int: { min: Int, max: Int } -> Int <Sample>,
-  ## A Nat in [0, max]. Separate from `int` because Nat is a newtype, so there is
-  ## no total conversion from an Int to lean on.
-  nat: { max: Nat } -> Nat <Sample>,
-  ## A Float in [0, 1).
-  float: {} -> Float <Sample>
+  resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample>
 }
+
+## A recipe for an `'a` — the thing you CALL to get one.
+##
+## Deferred and re-runnable, which is the whole point: `g {}` twice gives two
+## values, where a plain `'a` would be one frozen value. Because the draws are
+## ambient, this needs no generator data type and no threaded seed — it is just a
+## thunk, and every combinator below is an ordinary function.
+##
+## `Arbitrary.arbitrary` is the canonical `Sampler 'a` for a type. Anything you
+## write by hand is another one, and you pass it explicitly where you want it.
+pub type Sampler 'a = {} -> 'a <Sample>
 
 ## The default budget.
 ##
-## Small on purpose. A sample exists to be READ, and a 40-element list nested
-## four deep is not read, it is scrolled past. Property testing will want to vary
-## this, which is what `DefaultSampleWith` is for.
+## Small on purpose. A sample exists to be READ, and a 40-element list nested four
+## deep is not read, it is scrolled past.
 pub let default_size: Nat = 5n
 
-## Entropy from whatever `Random` handler the caller installed.
+## Entropy from whatever `Random` handler is installed above.
 ##
-## `Random` is RAISED OUT, not handled — so the caller chooses: a seeded stream
-## for a reproducible run, real entropy, or a recorded one for a CI that has to
-## match byte for byte. That choice is the whole reason this performer exists
-## separately from `RandomSampler`, which makes it for you.
-impl Sample for DefaultSample where {
+## `Random` is RAISED OUT, not handled, so the caller chooses: a seeded stream for a
+## reproducible run, real entropy, or a recorded one. [with_seed] makes that choice
+## for you in the common case.
+impl Sample for RandomSample where {
+  ## `bound <= 1` has exactly one legal answer, and asking `random_int` for a range
+  ## of `[0, -1]` would be asking it for something that does not exist.
+  choose = { bound } -> if bound <= 1 then 0 else random_int { min = 0, max = bound - 1 },
   size = {} -> default_size,
-  resize = { n, call } -> perform DefaultSampleWith { size = n } in call {},
-  int = { min, max } -> random_int { min = min, max = max },
-  nat = { max } -> random_nat { max = max },
-  float = {} -> random_float {},
+  resize = { n, call } -> perform RandomSampleWith { size = n } in call {},
 }
 
-## `DefaultSample` with a budget you choose.
+## `RandomSample` with a budget you choose.
 ##
-## Note `resize` installs THIS performer rather than recursing into itself, which
-## is what lets a nested draw inherit a lowered budget without touching the
-## `Random` handler above it. Re-installing entropy per level would reset the
-## stream and every subtree would come out identical.
-impl Sample for DefaultSampleWith { size: Nat } where {
+## Note `resize` installs THIS performer rather than recursing into itself, which is
+## what lets a nested draw inherit a lowered budget without touching the `Random`
+## handler above it. Re-installing entropy per level would reset the stream and every
+## subtree would come out identical.
+impl Sample for RandomSampleWith { size: Nat } where {
+  choose = { bound } -> if bound <= 1 then 0 else random_int { min = 0, max = bound - 1 },
   size = {} -> size,
-  resize = { n, call } -> perform DefaultSampleWith { size = n } in call {},
-  int = { min, max } -> random_int { min = min, max = max },
-  nat = { max } -> random_nat { max = max },
-  float = {} -> random_float {},
+  resize = { n, call } -> perform RandomSampleWith { size = n } in call {},
 }
 
-## Run a generation under some sampling strategy.
+## Run `call` against a seeded stream: the same seed gives the same values.
 ##
-## Late-bound on purpose: library code performs `Sampler` and the application
-## decides which one is installed, the same way a workflow does not choose its
-## own runner. A property-test harness and `mez sample` want different strategies
-## over identical generators.
+## A plain FUNCTION rather than an effect, which is a deliberate simplification —
+## there used to be a `Sampler` effect whose only operation existed to install these
+## two performers as one scope. Late binding bought nothing there: the caller already
+## chooses by calling this or not.
 ##
-## `call`'s row is `<Sample, ...>` and the result's is not, so the performer
-## discharges `Sample` — the shape `Workflow.step` already uses.
-effect Sampler where {
-  run: { call: {} -> 'a <Sample, ...> } -> 'a <Sampler>
-}
-
-## Seeded and self-contained: the same seed gives the same values.
-##
-## `SeededRandom` is installed ONCE, around the whole generation. That is why
-## this is a scoped operation and not something a `Sample` performer could do
-## per-draw: `SeededRandom` resets its stream at scope entry, so installing it
-## per operation would hand back the same number every time — a generator that
-## looks like it works and produces constants.
-impl Sampler for RandomSampler { seed: Int } where {
-  run = { call } ->
-    perform SeededRandom { seed = seed } in perform DefaultSample in call {}
-}
+## `SeededRandom` is installed ONCE, around the whole generation, and that is the
+## point. Its stream resets at scope entry, so a performer that installed it per
+## draw would hand back the same number every time — a generator that looks like it
+## works and produces constants.
+pub let with_seed: { seed: Int, call: {} -> 'a <Sample, ...> } -> 'a <*> = { seed, call } ->
+  perform SeededRandom { seed = seed } in perform RandomSample in call {}
 
 ## Seeded, with a budget you choose.
-impl Sampler for RandomSamplerWith { seed: Int, size: Nat } where {
-  run = { call } ->
+pub let with_seed_sized: { seed: Int, size: Nat, call: {} -> 'a <Sample, ...> } -> 'a <*> =
+  { seed, size, call } ->
     perform SeededRandom { seed = seed } in
-      perform DefaultSampleWith { size = size } in call {}
-}
+      perform RandomSampleWith { size = size } in call {}
+
+## A non-negative Int below `bound`.
+pub let choose: { bound: Int } -> Int <Sample> = { bound } -> Sample.choose { bound = bound }
 
 ## The current size budget.
 pub let size: {} -> Nat <Sample> = {} -> Sample.size {}
@@ -115,16 +109,22 @@ pub let size: {} -> Nat <Sample> = {} -> Sample.size {}
 pub let resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample> = { n, call } ->
   Sample.resize { n = n, call = call }
 
-## An Int in [min, max].
-pub let int: { min: Int, max: Int } -> Int <Sample> = { min, max } ->
-  Sample.int { min = min, max = max }
+# ---------------------------------------------------------------------------
+# Combinators — ordinary functions over `Sampler`, not operations.
+#
+# This is the vocabulary you write a generator in. They are functions because
+# nothing about combining recipes needs to be swappable; only the draw does.
+# ---------------------------------------------------------------------------
 
-## A Nat in [0, max].
-pub let nat: { max: Nat } -> Nat <Sample> = { max } -> Sample.nat { max = max }
+## An Int in [min, max], inclusive.
+pub let int_between: { min: Int, max: Int } -> Int <Sample> = { min, max } ->
+  min + Sample.choose { bound = (max - min) + 1 }
 
-## A Float in [0, 1).
-pub let float: {} -> Float <Sample> = {} -> Sample.float {}
-
-## Run a generation under the installed sampler.
-pub let run: { call: {} -> 'a <Sample, ...> } -> 'a <Sampler> = { call } ->
-  Sampler.run { call = call }
+## One element of `xs`. `def` is returned only for an empty `xs`, which is a
+## generator that cannot produce anything and is the caller's mistake, not a case
+## worth making every call site unwrap an Option for.
+pub let one_of: { xs: ['a], def: 'a } -> 'a <Sample> = { xs, def } ->
+  get_or {
+    opt = seq::get { xs = xs, i = Sample.choose { bound = seq::size { xs = xs } } },
+    def = def,
+  }
