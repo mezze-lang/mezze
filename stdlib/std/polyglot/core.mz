@@ -101,6 +101,12 @@ effect Polyglot having 'f where {
   check:         { on: 'f }                         -> Result {} InteropError <Polyglot>,
 
   ## ---- producers: mint a foreign in language `lang` (error-carrying) ----
+  ## ENTRY ONLY. `eval_raw` gets your FIRST foreign — import a module or fetch a
+  ## function, ONCE. It is NOT the working API and must never sit in a hot loop: it
+  ## re-runs (and rebuilds) the whole source every call. Once you hold a foreign, use
+  ## the object API (read_member / invoke_member / execute) to call it, and the CODEC
+  ## (`to_<lang>` / `from_<lang>`) to move DATA across in one crossing — never eval a
+  ## data string, never cross element-by-element.
   eval_raw:      { lang: Str, source: Str }         -> 'f <Polyglot>,
   ## Binary module eval (wasm, …) — a source string cannot express a wasm module.
   eval_bytes:    { lang: Str, bytes: Bytes, name: Str } -> 'f <Polyglot>,
