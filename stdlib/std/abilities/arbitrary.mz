@@ -1,6 +1,6 @@
 # Arbitrary — how a value of a type is assembled.
 
-use std::effects::sample::{ Sample, choose, int_between, one_of }
+use std::effects::sample::{ Sample, choose, int_between, one_of, list_of }
 use std::nat::{ Nat }
 use std::nat
 use std::option::{ get_or }
@@ -12,11 +12,16 @@ use std::float
 ## A type that can be generated.
 ##
 ## The ability says HOW a value is assembled, which is structure — so the
-## compiler derives it for records, variants and containers the same way it
+## compiler derives it for records and non-recursive variants the same way it
 ## derives `Eq`. Where the numbers come from is not part of any type, so that
 ## lives in the `Sample` effect instead, and a derived impl performs only
 ## `<Sample>`: it never mentions `Random`, and the sampler decides whether
 ## entropy is seeded or live.
+##
+## NOT yet containers, despite the derivability rule answering yes for them: a
+## parameterised impl needs a dictionary for its element's instance, and that path
+## is broken for a receiver-less operation (S-3). `ArbitraryContainerTest` asserts
+## the boundary so it cannot silently drift.
 ##
 ## ## What this makes possible
 ##
@@ -122,14 +127,43 @@ impl Arbitrary for Str where {
     one_of { xs = ["", " ", "a", "\"", "\n", "sample", "mezze", "ünïcödé"], def = "" }
 }
 
+# ---------------------------------------------------------------------------
+# Sequences.
+#
+# This impl EXISTS but is not yet reachable, and the honest state is worth
+# recording rather than deleting.
+#
+# A sequence has no declaration — its identity is carried by a reserved NAME (see
+# `BuiltinTypes`) — so there is nothing for the generator to walk and the impl has
+# to be written here. It carries a `with Arbitrary 'a` precondition, so a call site
+# must pass a dictionary for the element's instance, and for a receiver-LESS
+# operation that path falls through to the receiver-taking convention and crashes:
+# `DictFallback[arbitrary]: record has no 'it' field`. That is S-3.
+#
+# `Option` and `Result` are stuck for the same reason by a different route. They
+# are real variant declarations and WOULD derive, but their home modules cannot
+# import `Arbitrary` — the prelude is built from them — so no instance is
+# generated, and a hand-written one is refused by the coherence rule, which asks
+# whether an instance COULD be derived rather than whether one exists. Even
+# allowed, it would meet the same dictionary gap.
+#
+# Kept rather than removed because it is correct code blocked by a compiler gap,
+# and because deleting it would lose the one worked example S-3 has to fix against.
+# ---------------------------------------------------------------------------
+
+## Length from the size budget, so nesting terminates rather than multiplying out.
+impl Arbitrary for ['a] where {
+  arbitrary: {} with Arbitrary 'a -> ['a] <Sample> = {} ->
+    list_of { g = {} -> Arbitrary.arbitrary {} }
+}
+
 ## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
 ## exactly as it does for `Embeddable`.
 ##
-## `nat::from_int` is partial, and here the `None` arm is unreachable because the
-## range starts at zero. Rather than write a branch that cannot happen, the value
-## is built from a non-negative Int through the one conversion that cannot fail.
 ## A `Nat` cannot go below zero, so its interesting values are the low boundary and
-## a spread upward — there are no negatives to mirror.
+## a spread upward: there are no negatives to mirror. `nat::from_int` is partial and
+## its `None` arm is unreachable here because the range starts at zero, so the
+## fallback is `0n` rather than a branch that cannot happen.
 impl Arbitrary for Nat where {
   arbitrary = {} ->
     if take_interesting {}

@@ -79,7 +79,21 @@ internal object AbilityImplFactory {
             is ParsedFunctionType -> "Function"
             is ParsedRecordType -> "Record"
             is ParsedVariantType -> "Variant"
-            is ParsedSeqType -> "Seq_${typeNameOf(annotation.elementType)}"
+            // A GENERIC sequence impl registers under the bare constructor, exactly
+            // as the `ParsedTypeApp` arm above does: `impl Eq for ['a]` is `Seq`, not
+            // `Seq_a`.
+            //
+            // This arm used to mangle unconditionally, so every `impl X for ['a]` in
+            // the stdlib was keyed by its own TYPE PARAMETER's spelling — `Seq_a`,
+            // where `a` is not a type and can never be a lookup's answer. Harmless
+            // for the receiver-TAKING path, which recovers the receiver from the
+            // argument and never consults this name, and fatal for a receiver-less
+            // operation, where the produced type is the ONLY thing that can pick an
+            // impl: `let xs: [Int] = Arbitrary.arbitrary {}` reported "No
+            // `impl Arbitrary for Seq` is in scope" with the impl sitting right there.
+            is ParsedSeqType ->
+                if ((annotation.elementType as? ParsedNamedType)?.name?.isTypeVarName() == true) "Seq"
+                else "Seq_${typeNameOf(annotation.elementType)}"
             is ParsedQualifiedType -> {
                 val modulePart = annotation.modulePath.joinToString("_")
                 val argNames = annotation.args.map { typeNameOf(it) }

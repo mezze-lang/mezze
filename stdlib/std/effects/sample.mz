@@ -128,3 +128,47 @@ pub let one_of: { xs: ['a], def: 'a } -> 'a <Sample> = { xs, def } ->
     opt = seq::get { xs = xs, i = Sample.choose { bound = seq::size { xs = xs } } },
     def = def,
   }
+
+## A list of `g`, with a length drawn from `[0, size]`.
+##
+## The empty list is in range on purpose: it is the case most code forgets, the
+## same reason the empty string leads `Arbitrary for Str`.
+##
+## The length comes from the size BUDGET rather than a fixed bound, which is what
+## makes nesting terminate — a list of lists halves its budget per level through
+## `resize`, instead of multiplying out.
+pub let list_of: { g: Sampler 'a } -> ['a] <Sample> = { g } -> do
+  let budget = int::from_nat { n = Sample.size {} }
+  let n = Sample.choose { bound = budget + 1 }
+  seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> g {} }
+
+## One of `choices`, each picked in proportion to its `weight`.
+##
+## For "mostly valid, occasionally pathological" — the distribution a hand-written
+## generator usually wants and the one a uniform pick cannot express. A non-positive
+## weight is simply never selected, which is a useful way to disable a case without
+## deleting it.
+##
+## `def` covers an empty or all-zero-weight `choices`: a generator with nothing to
+## choose from, the caller's mistake, and not worth an Option at every call site.
+pub let frequency: { choices: [{ weight: Int, gen: Sampler 'a }], def: 'a } -> 'a <Sample> =
+  { choices, def } -> do
+    let total = seq::fold { xs = choices, init = 0, f = { acc, x } -> acc + int::max { l = x.weight, r = 0 } }
+    let target = Sample.choose { bound = int::max { l = total, r = 1 } }
+    # Walk the weights, carrying the remaining distance and the first choice that
+    # covers it. `chosen` latching on the first hit is what makes this a selection
+    # rather than a last-one-wins fold.
+    let walked = seq::fold {
+      xs = choices,
+      init = { left = target, chosen = None },
+      f = { acc, x } -> match acc.chosen is
+        Some { val = _ } -> acc
+        None -> do
+          let w = int::max { l = x.weight, r = 0 }
+          if acc.left < w
+            then { left = acc.left, chosen = Some { val = x.gen } }
+            else { left = acc.left - w, chosen = None },
+    }
+    match walked.chosen is
+      Some { val = g } -> g {}
+      None -> def
