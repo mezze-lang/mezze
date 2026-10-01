@@ -169,6 +169,7 @@ fun main(rawArgs: Array<String>) {
             "search" -> handleSearchCommand(remainingArgs)
             "doc" -> handleDocCommand(remainingArgs)
             "eval" -> handleEvalCommand(remainingArgs)
+            "sample" -> handleSampleCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             "toolchain" -> handleToolchainCommand(remainingArgs)
@@ -277,7 +278,7 @@ private fun showUsage() {
     println()
     println("COMMANDS:")
     println("  Project:  init, dev, exec, build, check")
-    println("  Tools:    fmt, lsp, index, search, doc, eval")
+    println("  Tools:    fmt, lsp, index, search, doc, eval, sample")
     println("  Env:      doctor, toolchain")
     println()
     println("For command-specific help: mez <command> --help")
@@ -288,6 +289,28 @@ private fun showUsage() {
  */
 private fun showCommandHelp(command: String) {
     when (command) {
+        "sample" -> {
+            println("USAGE: mez sample <function> [--seed=N] [--json] [--depth=N] [--items=N]")
+            println()
+            println("Generate arguments for a function, run it, and show both. The arguments")
+            println("come from the Arbitrary instances the compiler derives, so there is")
+            println("nothing to configure — a function's parameter is an ordinary record.")
+            println()
+            println("The SEED is printed every time, because every run draws different")
+            println("values and a sample that surprised you is worthless if you cannot get")
+            println("it back. Pass it with --seed to reproduce a run exactly.")
+            println()
+            println("EXAMPLES:")
+            println("  mez sample total                  generate arguments and run")
+            println("  mez sample total --seed=258868    reproduce an earlier run")
+            println("  mez sample total --json           the sample as data")
+            println()
+            println("A function with an undischarged effect is refused rather than run:")
+            println("Mezze defers such a call, so it would return a suspended computation")
+            println("that renders as something plausible. Handle the effect inside the")
+            println("function, or sample one that already does.")
+        }
+
         "eval" -> {
             println("USAGE: mez eval '<expression>' [--type] [--json] [--depth=N] [--items=N] [--timeout=SECONDS]")
             println()
@@ -566,6 +589,10 @@ private fun handleSearchCommand(args: List<String>) {
 
 private fun handleEvalCommand(args: List<String>) {
     com.mezze.language.cli.commands.EvalCommand().execute(args)
+}
+
+private fun handleSampleCommand(args: List<String>) {
+    com.mezze.language.cli.commands.SampleCommand().execute(args)
 }
 
 private fun handleDocCommand(args: List<String>) {

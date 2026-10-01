@@ -197,94 +197,14 @@ class EvalCommand {
     // does not have to fold the tree itself.
 
     private fun valueJson(value: WireValue, type: String, elapsedMicros: Long): String = buildString {
-        append("{\"ok\":true,\"type\":").append(quote(type))
-        append(",\"text\":").append(quote(value.toText()))
+        append("{\"ok\":true,\"type\":").append(WireValueJson.quote(type))
+        append(",\"text\":").append(WireValueJson.quote(value.toText()))
         append(",\"elapsed_micros\":").append(elapsedMicros)
-        append(",\"value\":").append(treeJson(value))
+        append(",\"value\":").append(WireValueJson.tree(value))
         append("}")
     }
 
-    private fun errorJson(error: EvalError): String = buildString {
-        append("{\"ok\":false,\"kind\":").append(quote(error.kind))
-        append(",\"message\":").append(quote(error.detail.message))
-        append(",\"stack\":[")
-        error.detail.stack.forEachIndexed { i, f ->
-            if (i > 0) append(",")
-            append("{\"function\":").append(quote(f.function))
-            f.file?.let { append(",\"file\":").append(quote(it)) }
-            f.line?.let { append(",\"line\":").append(it) }
-            append("}")
-        }
-        append("]}")
-    }
-
-    private fun treeJson(value: WireValue): String = when (value) {
-        is WireValue.Scalar ->
-            "{\"node\":\"scalar\",\"kind\":${quote(value.kind)},\"text\":${quote(value.text)}}"
-
-        is WireValue.Newtype ->
-            "{\"node\":\"newtype\",\"name\":${quote(value.name)},\"inner\":${treeJson(value.inner)}}"
-
-        is WireValue.Record -> buildString {
-            append("{\"node\":\"record\",\"fields\":[")
-            value.fields.forEachIndexed { i, f ->
-                if (i > 0) append(",")
-                append("{\"name\":").append(quote(f.name))
-                append(",\"value\":").append(treeJson(f.value)).append("}")
-            }
-            append("]}")
-        }
-
-        is WireValue.Variant -> buildString {
-            append("{\"node\":\"variant\",\"constructor\":").append(quote(value.constructor))
-            value.payload?.let { append(",\"payload\":").append(treeJson(it)) }
-            append("}")
-        }
-
-        is WireValue.Sequence -> buildString {
-            append("{\"node\":\"seq\",\"kind\":").append(quote(value.kind))
-            append(",\"omitted\":").append(value.omitted)
-            append(",\"items\":[")
-            value.items.forEachIndexed { i, item ->
-                if (i > 0) append(",")
-                append(treeJson(item))
-            }
-            append("]}")
-        }
-
-        is WireValue.Mapping -> buildString {
-            append("{\"node\":\"map\",\"kind\":").append(quote(value.kind))
-            append(",\"omitted\":").append(value.omitted)
-            append(",\"entries\":[")
-            value.entries.forEachIndexed { i, e ->
-                if (i > 0) append(",")
-                append("{\"key\":").append(treeJson(e.key))
-                append(",\"value\":").append(treeJson(e.value)).append("}")
-            }
-            append("]}")
-        }
-
-        is WireValue.Fn ->
-            "{\"node\":\"fn\"" + (value.name?.let { ",\"name\":${quote(it)}" } ?: "") + "}"
-
-        // `path` is what an EXPAND names, so a JSON consumer can ask for this
-        // branch specifically rather than re-running at a larger depth.
-        is WireValue.Elided ->
-            "{\"node\":\"elided\",\"path\":${quote(value.path)},\"hint\":${quote(value.hint)}}"
-    }
-
-    private fun quote(s: String): String = buildString {
-        append('"')
-        for (c in s) when (c) {
-            '"' -> append("\\\"")
-            '\\' -> append("\\\\")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
-        }
-        append('"')
-    }
+    private fun errorJson(error: EvalError): String = WireValueJson.error(error)
 
     private fun printUsage() {
         println("USAGE: mez eval '<expression>' [--type] [--json] [--depth=N] [--items=N] [--timeout=SECONDS]")
