@@ -177,9 +177,16 @@ class SampleCommand {
         // reset the stream and print the same values N times.
         val rows = (0 until count).joinToString("\n") { i ->
             val args = "${ARGS}_$i"
-            val generated = target.fieldNames.joinToString(", ") { "$it = Arbitrary.arbitrary {}" }
             val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
-            "              let $args = { $generated }"
+            // A NAMED parameter type is annotated and drawn whole, which dispatches to
+            // the type's derived instance and so handles components the per-field form
+            // cannot — a `[Int]` field among them. An anonymous one is drawn per field,
+            // because an anonymous record annotation does not pin a receiver-less
+            // operation. See `SampleTarget.Result.Ready.paramTypeName`.
+            val draw = target.paramTypeName
+                ?.let { "let $args: $it = Arbitrary.arbitrary {}" }
+                ?: "let $args = { ${target.fieldNames.joinToString(", ") { f -> "$f = Arbitrary.arbitrary {}" }} }"
+            "              $draw"
                 .plus("\n              let ${ROW}_$i = { args = $args, result = $name { $forwarded } }")
         }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }

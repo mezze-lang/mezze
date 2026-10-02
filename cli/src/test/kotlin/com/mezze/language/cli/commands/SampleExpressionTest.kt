@@ -131,6 +131,48 @@ class SampleExpressionTest {
         }
     }
 
+    /**
+     * A NAMED parameter type is drawn WHOLE under an annotation, not per field — and
+     * that is a capability difference, not a style one. The annotated form dispatches
+     * to the type's derived instance, which handles a `[Int]` field; the per-field
+     * form cannot, because a bare field draw at a container type has nothing to pin
+     * it. Verified against the installed binary: `cart_total`, whose parameter is a
+     * named record with a `[Int]` field, samples under this shape and fails under the
+     * other.
+     */
+    @Test
+    fun `a named parameter type is drawn whole under its own annotation`() {
+        val out = command.buildExpression(
+            SampleTarget.Result.Ready("cart_total", listOf("items", "note"), paramTypeName = "Cart"),
+            seed = 7,
+        )
+        assertTrue("${ARGS}_0: Cart = Arbitrary.arbitrary {}" in out, "not annotated whole:\n$out")
+        assertEquals(
+            1,
+            Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(),
+            "expected ONE draw for the whole record, not one per field:\n$out",
+        )
+        // Fields are still forwarded individually — a spread-only record is rejected
+        // in a call position, so the call has to name them.
+        assertTrue("items = ${ARGS}_0.items" in out, "field not forwarded:\n$out")
+        assertTrue("note = ${ARGS}_0.note" in out, "field not forwarded:\n$out")
+    }
+
+    /** Anonymous stays per-field: an anonymous annotation does not pin. */
+    @Test
+    fun `an anonymous parameter type is still drawn per field`() {
+        val out = command.buildExpression(
+            SampleTarget.Result.Ready("f", listOf("a", "b"), paramTypeName = null),
+            seed = 7,
+        )
+        assertFalse(Regex("let \\S+\\s*:").containsMatchIn(out), "annotated anyway:\n$out")
+        assertEquals(
+            2,
+            Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(),
+            "expected one draw per field:\n$out",
+        )
+    }
+
     private companion object {
         /** Mirrors `SampleCommand.ARGS`, which is private to it. */
         const val ARGS = "__mez_sample_args__"

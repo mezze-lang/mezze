@@ -34,7 +34,27 @@ object SampleTarget {
          * that difference entirely and needs no type rendering, so there is no
          * round-trip through a printed type that might not re-parse.
          */
-        data class Ready(val name: String, val fieldNames: List<String>) : Result
+        data class Ready(
+            val name: String,
+            val fieldNames: List<String>,
+            /**
+             * The parameter type's own name, when it has one.
+             *
+             * Present changes the generated expression from per-field to a single
+             * annotated binding, and that is not cosmetic — it is the difference
+             * between what can and cannot be generated. A named annotation dispatches
+             * to the type's DERIVED instance, which handles components the per-field
+             * form cannot: a `[Int]` field works through the derived record impl and
+             * fails as a bare field draw.
+             *
+             * Null for an anonymous parameter (`{ n: Int } -> …`), where an annotation
+             * is useless: measured, an anonymous record annotation does not pin a
+             * receiver-less ability operation, so `let args: { n: Int } =
+             * Arbitrary.arbitrary {}` is rejected while `let args: Args = …` is
+             * accepted. Hence two shapes rather than one.
+             */
+            val paramTypeName: String? = null,
+        ) : Result
 
         /** Not sampleable, with the reason already formatted for a terminal. */
         data class Refused(val message: String) : Result
@@ -120,7 +140,14 @@ object SampleTarget {
                     "whose parameter is a record, which is how Mezze functions are normally written."
             )
 
-        return Result.Ready(declName, fields.keys.toList())
+        // The declaration's own name, read off the type's identity rather than any
+        // spelling at the use site — a parameter written as an alias still resolves to
+        // the declared record, and that identity is what names an impl.
+        val paramTypeName =
+            ((param as? MezzeType.RecordType)?.identity as? com.mezze.language.ast.TypeIdentity.Declared)
+                ?.displayName
+
+        return Result.Ready(declName, fields.keys.toList(), paramTypeName)
     }
 
     /**
