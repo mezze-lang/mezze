@@ -139,14 +139,46 @@ class SampleExpressionTest {
     }
 
     /**
-     * Every row draws inside ONE `with_seed`, so the seed reproduces the whole batch.
-     * A seeded scope per row would reset the stream and print the same values N times
-     * — a table that looks like it works and shows one sample repeated.
+     * Each row gets its OWN seeded scope at `seed + i`, and that is a reversal of
+     * what this test used to assert.
+     *
+     * It previously demanded exactly ONE `with_seed` around the batch, on the grounds
+     * that a scope per row would reset the stream and print the same values N times.
+     * That was true only while every row shared one seed. With `seed + i` the rows
+     * differ, and the per-row scope buys the thing a shared one cannot: a row can be
+     * re-run ALONE and produce byte-identical values, which is what makes a crashing
+     * row recoverable instead of fatal to the whole table.
+     *
+     * It depends on adjacent seeds giving unrelated streams, which they did NOT until
+     * S-5 was fixed alongside this — `java.util.Random(seed)` scrambles weakly, so
+     * `seed` and `seed + 1` returned near-identical first draws. Doing this earlier
+     * would have produced a table of near-duplicate rows.
      */
     @Test
-    fun `all rows draw inside a single seeded scope`() {
-        val out = expr("f", listOf("a"), count = 5)
-        assertEquals(1, Regex("with_seed").findAll(out).count(), "expected ONE seeded scope:\n$out")
+    fun `each row is seeded independently at seed plus its index`() {
+        val out = expr("f", listOf("a"), seed = 100, count = 3)
+        assertEquals(3, Regex("with_seed").findAll(out).count(), "expected one scope per row:\n$out")
+        for (i in 0 until 3) {
+            assertTrue("seed = ${100 + i}" in out, "row $i is not seeded at ${100 + i}:\n$out")
+        }
+    }
+
+    /**
+     * A single recovered row reproduces the batch's row `i` EXACTLY, because the seed
+     * is derived the same way. A recovered row that drew fresh values would be
+     * reporting a different run than the one that crashed.
+     */
+    @Test
+    fun `a single row expression uses the same seed the batch gave that row`() {
+        val target = SampleTarget.Result.Ready("f", mapOf("a" to MezzeType.IntType))
+        for (i in 0 until 3) {
+            val single = command.buildRowExpression(target, seed = 100, index = i)
+            assertTrue(
+                "seed = ${100 + i}" in single,
+                "row $i re-run would draw different values than the batch did:\n$single",
+            )
+            assertEquals(1, Regex("with_seed").findAll(single).count(), "expected one row:\n$single")
+        }
     }
 
     @Test

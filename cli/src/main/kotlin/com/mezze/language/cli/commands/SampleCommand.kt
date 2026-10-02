@@ -94,48 +94,37 @@ class SampleCommand {
             }
 
             is EvalClosure.Result.Compiled -> {
-                val runDir = com.mezze.language.store.ProjectLayout.runDir(currentDir)
-                val (fnsFile, metaFile) = EvalClosure.writeTo(runDir, compiled)
+                val batch = runExpression(currentDir, compiled, depth, items, timeoutMs)
 
-                val session = WireSession.start(currentDir, timing = false, t0 = System.nanoTime())
-                    ?: kotlin.system.exitProcess(1)
-                val result = try {
-                    session.evalOnce(
-                        fnsFile = fnsFile,
-                        metaFile = metaFile,
-                        requestId = 1,
-                        maxDepth = depth,
-                        maxItems = items,
-                        timeoutMs = timeoutMs,
-                    )
-                } finally {
-                    session.close()
-                }
+                // The whole batch is one invocation, so ONE crashing row kills every
+                // other row with it — and a crash is a finding, not a tool
+                // malfunction. The boundary values that cause one (`Int`'s minimum
+                // and maximum, 10% each) are exactly the inputs worth showing, so
+                // losing the table to them would mean the generator's best values
+                // make the command useless.
+                //
+                // Guest errors are UNCATCHABLE by design, so a row cannot be isolated
+                // inside Mezze. Recovery is therefore re-running rows one at a time —
+                // which produces identical values, because row `i`'s seed is
+                // `seed + i` either way (see buildRowExpression). The cost is paid
+                // only when something actually crashed.
+                val rows: List<RowOutcome> =
+                    if (batch?.error == null && batch?.value != null) readRows(batch.value!!)
+                    else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs)
 
-                if (result == null) kotlin.system.exitProcess(1)
-
-                val error = result.error
-                if (error != null) {
-                    // The function RAN and failed, which is a finding rather than a
-                    // tool malfunction — and the seed is what makes it actionable,
-                    // so it is printed even on the failure path.
+                if (rows.isEmpty()) {
                     System.err.println(
-                        "${Glyphs.CROSS} `$name` failed on its generated arguments\n" +
-                            "  ${error.detail.message}\n\n" +
-                            "${Glyphs.TIP} Reproduce it: mez sample $name --seed=$seed"
+                        "${Glyphs.CROSS} `$name` produced no rows, and no row reported a reason — " +
+                            "this is a defect in sample, not in `$name`"
                     )
                     kotlin.system.exitProcess(1)
                 }
 
-                val value = result.value
-                if (value == null) {
-                    System.err.println(
-                        "${Glyphs.CROSS} the runtime replied with neither a value nor an error"
-                    )
-                    kotlin.system.exitProcess(1)
-                }
+                if (json) println(sampleJson(name, seed, rows)) else printSample(target, seed, rows)
 
-                if (json) println(sampleJson(name, seed, value)) else printSample(target, seed, value)
+                // A crashed row is a real failure of the function under test, so the
+                // exit code says so even though the table printed.
+                if (rows.any { it is RowOutcome.Crashed }) kotlin.system.exitProcess(1)
             }
         }
     }
@@ -153,50 +142,162 @@ class SampleCommand {
      * draw, so wrapping it would declare a `<Sample>` the body never performs and be
      * rejected for exactly that.
      */
+    /** What one row produced: its values, or the reason it died. */
+    internal sealed interface RowOutcome {
+        data class Ran(val args: WireValue?, val result: WireValue?) : RowOutcome
+        /** [reason] is the runtime's own message — an overflow, a division by zero. */
+        data class Crashed(val reason: String) : RowOutcome
+    }
+
+    /** Compile-and-run is identical for the batch and for a single recovered row. */
+    private fun runExpression(
+        currentDir: File,
+        compiled: EvalClosure.Result.Compiled,
+        depth: Int,
+        items: Int,
+        timeoutMs: Long,
+    ): com.mezze.wire.EvalResult? {
+        val runDir = com.mezze.language.store.ProjectLayout.runDir(currentDir)
+        val (fnsFile, metaFile) = EvalClosure.writeTo(runDir, compiled)
+        val session = WireSession.start(currentDir, timing = false, t0 = System.nanoTime())
+            ?: return null
+        return try {
+            session.evalOnce(
+                fnsFile = fnsFile,
+                metaFile = metaFile,
+                requestId = 1,
+                maxDepth = depth,
+                maxItems = items,
+                timeoutMs = timeoutMs,
+            )
+        } finally {
+            session.close()
+        }
+    }
+
+    /** Unpack `{ rows = [{ args, result }] }` into one outcome per row. */
+    private fun readRows(value: WireValue): List<RowOutcome> =
+        (value as? WireValue.Record)
+            ?.fields?.firstOrNull { it.name == "rows" }?.value
+            ?.let { it as? WireValue.Sequence }
+            ?.items
+            ?.map { row ->
+                val fields = (row as? WireValue.Record)?.fields
+                RowOutcome.Ran(
+                    args = fields?.firstOrNull { it.name == "args" }?.value,
+                    result = fields?.firstOrNull { it.name == "result" }?.value,
+                )
+            }
+            ?: emptyList()
+
+    /**
+     * Re-run each row alone, so one crash costs one row instead of the table.
+     *
+     * Reached only after the batch failed. Each row recompiles — the seed is a literal
+     * in the expression, so there is nothing to vary without recompiling — which is
+     * why this is the recovery path and not the normal one.
+     */
+    private fun recoverRowByRow(
+        currentDir: File,
+        moduleFile: File,
+        target: SampleTarget.Result.Ready,
+        seed: Int,
+        count: Int,
+        depth: Int,
+        items: Int,
+        timeoutMs: Long,
+    ): List<RowOutcome> = (0 until count).map { i ->
+        when (val compiled = EvalClosure.compile(
+            currentDir, moduleFile, buildRowExpression(target, seed, i), SampleGen.IMPORTS,
+        )) {
+            is EvalClosure.Result.Failed -> RowOutcome.Crashed("did not compile: ${compiled.message.lines().first()}")
+            is EvalClosure.Result.Compiled -> {
+                val r = runExpression(currentDir, compiled, depth, items, timeoutMs)
+                val err = r?.error
+                when {
+                    r == null -> RowOutcome.Crashed("the runtime did not reply")
+                    err != null -> RowOutcome.Crashed(err.detail.message.ifBlank { err.kind })
+                    r.value != null -> readRows(r.value!!).firstOrNull()
+                        ?: RowOutcome.Crashed("sample could not read the row back")
+                    else -> RowOutcome.Crashed("neither a value nor an error")
+                }
+            }
+        }
+    }
+
+    /**
+     * One row per draw, each in its OWN seeded scope at `seed + i`.
+     *
+     * Per-row seeds rather than one scope around the batch, and the reason changed
+     * this commit. The earlier version used a single scope because a scope PER row
+     * reset the stream and every row drew the same values — but that was only true
+     * while all rows shared one seed. With `seed + i` the rows differ, and two things
+     * follow that a shared scope could not give:
+     *
+     *  - a row can be re-run ALONE and produce byte-identical values
+     *    ([buildRowExpression]), which is what makes a crashing row recoverable
+     *    rather than fatal to the whole table.
+     *  - `--seed=N` still reproduces the entire table, because row `i` is always
+     *    `N + i`.
+     *
+     * It depends on adjacent seeds giving unrelated streams, which they did NOT until
+     * S-5 was fixed in this same commit: `java.util.Random(seed)` scrambles weakly,
+     * so `seed` and `seed + 1` returned near-identical first draws. Doing this before
+     * that fix would have produced a table of near-duplicate rows.
+     *
+     * Rows are unrolled by NAME rather than looped because a loop would need a
+     * sequence combinator over `<Sample>` in the user's module scope, which it has no
+     * reason to import.
+     */
     internal fun buildExpression(
         target: SampleTarget.Result.Ready,
         seed: Int,
         count: Int = 1,
     ): String {
-        val name = target.name
-
-        // A zero-argument function has one answer, so [count] is meaningless for it
-        // and there is nothing to draw — hence no `with_seed`, which would declare a
-        // `<Sample>` the body never performs and be rejected for exactly that.
-        if (target.fields.isEmpty()) {
-            return "{ rows = [{ args = {}, result = $name {} }] }"
-        }
-
-        // Rows are built by NAME (`__row_0`, `__row_1`) rather than by a loop, and
-        // that is forced rather than chosen: a loop would need a sequence combinator
-        // over `<Sample>` in the user's module scope, which it has no reason to
-        // import. Unrolling needs nothing beyond what sampling already injects.
-        //
-        // All rows draw inside ONE `with_seed`, so the seed reproduces the whole
-        // batch — and consecutive rows differ, where a seeded scope per row would
-        // reset the stream and print the same values N times.
-        val rows = (0 until count).joinToString("\n") { i ->
-            val args = "${ARGS}_$i"
-            val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
-            // Generated FROM the parameter's types, which the command already knows,
-            // with one ANNOTATED binding per field. The annotation is what pins the
-            // draws — see [SampleGen.bindFields] — and that is what makes a container
-            // or an Option argument work regardless of whether the parameter type
-            // itself has a name.
-            val (lets, record) = SampleGen.bindFields(target.fields, args) {
-                com.mezze.language.ast.prettyPrintType(it)
-            }
-            lets
-                .plus("\n              let $args = $record")
-                .plus("\n              let ${ROW}_$i = { args = $args, result = $name { $forwarded } }")
-        }
+        if (target.fields.isEmpty()) return noArgRow(target.name)
+        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i) }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
-        return """
-            with_seed { seed = $seed, call = {} -> do
-$rows
-              { rows = [$collected] }
-            }
-        """.trimIndent()
+        return "do\n$rows\n              { rows = [$collected] }"
+    }
+
+    /**
+     * ONE row, for re-running it in isolation after the batch died.
+     *
+     * Produces the same values row [index] had in the batch, because the seed is
+     * derived identically. That is the whole point: a recovered row is the row that
+     * actually ran, not a fresh draw that happens to be adjacent.
+     */
+    internal fun buildRowExpression(
+        target: SampleTarget.Result.Ready,
+        seed: Int,
+        index: Int,
+    ): String {
+        if (target.fields.isEmpty()) return noArgRow(target.name)
+        return "do\n${rowBinding(target, seed + index, 0)}\n              { rows = [${ROW}_0] }"
+    }
+
+    /**
+     * A zero-argument function has one answer, so `--count` is meaningless for it and
+     * there is nothing to draw — hence no `with_seed`, which would declare a
+     * `<Sample>` the body never performs and be rejected for exactly that.
+     */
+    private fun noArgRow(name: String) = "{ rows = [{ args = {}, result = $name {} }] }"
+
+    /** `let __row_<i> = with_seed { … }` — the row's draws and its call. */
+    private fun rowBinding(target: SampleTarget.Result.Ready, rowSeed: Int, i: Int): String {
+        val args = "${ARGS}_$i"
+        val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
+        // Generated FROM the parameter's types, with one ANNOTATED binding per field.
+        // The annotation is what pins the draws — see [SampleGen.bindFields] — and is
+        // what makes a container or an Option argument work at all.
+        val (lets, record) = SampleGen.bindFields(target.fields, args) {
+            com.mezze.language.ast.prettyPrintType(it)
+        }
+        return "              let ${ROW}_$i = with_seed { seed = $rowSeed, call = {} -> do\n" +
+            lets + "\n" +
+            "                let $args = $record\n" +
+            "                { args = $args, result = ${target.name} { $forwarded } }\n" +
+            "              }"
     }
 
     /**
@@ -207,35 +308,25 @@ $rows
      * are measured over the actual values rather than fixed, because a column of
      * `-9223372036854775808` and a column of `True` want very different space.
      *
-     * A value containing a newline would break the grid, so rows are escaped — a
-     * generated `Str` can be `"\n"`, which is the whole point of having it in the
-     * table.
+     * A CRASHED row still occupies a line, carrying its reason where the result would
+     * be. The alternative — dropping it — would show a table with silently fewer rows
+     * than asked for, which reads as a smaller sample rather than as a failure. Its
+     * arguments are unknown because the crash happened while producing them or while
+     * the function ran on them, so there is nothing honest to print in those columns.
      */
-    private fun printSample(target: SampleTarget.Result.Ready, seed: Int, value: WireValue) {
-        val rows = (value as? WireValue.Record)
-            ?.fields?.firstOrNull { it.name == "rows" }?.value
-            ?.let { it as? WireValue.Sequence }
-            ?.items
-            ?.mapNotNull { row -> (row as? WireValue.Record)?.fields }
-
-        if (rows.isNullOrEmpty()) {
-            // The shape is this command's own doing, so a mismatch is a defect here
-            // rather than anything the user can act on.
-            println(value.toText())
-            System.err.println(
-                "${Glyphs.CROSS} sample expected a { rows = [{ args, result }] } record back; " +
-                    "this is a defect in sample, not in `${target.name}`"
-            )
-            return
-        }
-
+    private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
         val headers = target.fieldNames + "→ result"
-        val body = rows.map { fields ->
-            val args = (fields.firstOrNull { it.name == "args" }?.value as? WireValue.Record)?.fields
-            val cells = target.fieldNames.map { f ->
-                oneLine(args?.firstOrNull { it.name == f }?.value?.toText() ?: "?")
+        val body = rows.map { outcome ->
+            when (outcome) {
+                is RowOutcome.Ran -> {
+                    val args = (outcome.args as? WireValue.Record)?.fields
+                    target.fieldNames.map { f ->
+                        oneLine(args?.firstOrNull { it.name == f }?.value?.toText() ?: "?")
+                    } + oneLine(outcome.result?.toText() ?: "?")
+                }
+                is RowOutcome.Crashed ->
+                    target.fieldNames.map { "—" } + "${Glyphs.CROSS} ${oneLine(brief(outcome.reason))}"
             }
-            cells + oneLine(fields.firstOrNull { it.name == "result" }?.value?.toText() ?: "?")
         }
 
         val widths = headers.indices.map { c ->
@@ -247,9 +338,29 @@ $rows
         println(line(headers))
         println(widths.joinToString("  ") { "-".repeat(it) })
         for (row in body) println(line(row))
+
+        val crashed = rows.count { it is RowOutcome.Crashed }
         println()
+        if (crashed > 0) {
+            // Named plainly: a crash here is a finding about the function, and the
+            // boundary values that tend to cause one are the ones worth keeping.
+            println("  $crashed of ${rows.size} row(s) crashed — that is a failure of " +
+                "`${target.name}` on those inputs, not of sample")
+        }
         println("  seed $seed — rerun with: mez sample ${target.name} --seed=$seed")
     }
+
+    /**
+     * The reason without its trailing explanatory clause.
+     *
+     * A good runtime message explains itself — "(Int is 64-bit signed, so the result
+     * has no representable value)" — but repeated on every crashed row it is noise
+     * that doubles the table's width. The part that differs per row, and the part
+     * worth reading, is the operation and its operands. The full message is still
+     * what `--json` carries.
+     */
+    private fun brief(reason: String): String =
+        reason.replace(Regex("\\s*\\([^)]*\\)\\s*$"), "").trim()
 
     /** A cell cannot span lines; a generated `"\n"` would otherwise break the grid. */
     private fun oneLine(s: String): String =
@@ -258,31 +369,29 @@ $rows
     /**
      * The sample as data: one entry per row, each carrying the TREE for its args and
      * result so a consumer can read a field without parsing Mezze's rendering.
-     * `text` sits alongside for a consumer that only wants to display it.
      *
-     * `seed` is what makes this worth consuming programmatically — it is what lets a
-     * caller re-request this exact batch.
+     * A crashed row appears with `"crashed"` and its reason rather than being omitted
+     * — a consumer counting rows should see what was asked for, and the reason is the
+     * finding.
      */
-    private fun sampleJson(name: String, seed: Int, value: WireValue): String {
-        val rows = (value as? WireValue.Record)
-            ?.fields?.firstOrNull { it.name == "rows" }?.value
-            ?.let { it as? WireValue.Sequence }
-            ?.items
-            ?.mapNotNull { row -> (row as? WireValue.Record)?.fields }
-            ?: emptyList()
-
-        fun part(fields: List<WireValue.Field>, label: String): String {
-            val v = fields.firstOrNull { it.name == label }?.value ?: return "null"
-            return "{\"text\":${WireValueJson.quote(v.toText())},\"value\":${WireValueJson.tree(v)}}"
-        }
+    private fun sampleJson(name: String, seed: Int, rows: List<RowOutcome>): String {
+        fun part(v: WireValue?): String =
+            if (v == null) "null"
+            else "{\"text\":${WireValueJson.quote(v.toText())},\"value\":${WireValueJson.tree(v)}}"
         return buildString {
-            append("{\"ok\":true,\"function\":").append(WireValueJson.quote(name))
+            append("{\"ok\":").append(rows.none { it is RowOutcome.Crashed })
+            append(",\"function\":").append(WireValueJson.quote(name))
             append(",\"seed\":").append(seed)
             append(",\"rows\":[")
-            rows.forEachIndexed { i, fields ->
+            rows.forEachIndexed { i, outcome ->
                 if (i > 0) append(",")
-                append("{\"args\":").append(part(fields, "args"))
-                append(",\"result\":").append(part(fields, "result")).append("}")
+                when (outcome) {
+                    is RowOutcome.Ran ->
+                        append("{\"args\":").append(part(outcome.args))
+                            .append(",\"result\":").append(part(outcome.result)).append("}")
+                    is RowOutcome.Crashed ->
+                        append("{\"crashed\":").append(WireValueJson.quote(outcome.reason)).append("}")
+                }
             }
             append("]}")
         }

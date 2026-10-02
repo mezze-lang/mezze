@@ -66,18 +66,68 @@ public final class RandomNatives {
      * This should be called at the start of each `perform SeededRandom` block
      * to ensure deterministic behavior across multiple perform blocks with the same seed.
      */
+
+    // ============== Seeded-stream quality ==============
+
+    /**
+     * Decorrelate a user-chosen seed before it reaches {@link Random}.
+     *
+     * `java.util.Random(seed)` scrambles weakly, so nearby seeds produce nearby
+     * FIRST outputs. Measured before this: across seeds, the first
+     * `choose { bound = 100 }` clustered in roughly {19, 26, 63, 73}, and seeds 0 and
+     * 1 returned the same value. That is not academic — `mez sample` mints a fresh
+     * seed per run and a one-row sample takes exactly that first draw, so one-row
+     * samples systematically missed whole branches of a generator. See S-5.
+     *
+     * This is SplitMix64's finalizer: a bijection, so distinct seeds stay distinct
+     * and reproducibility is unaffected — the same seed still gives the same stream.
+     * Only the mapping from seed to stream changes.
+     */
+    private static long scrambleSeed(long seed) {
+        long z = seed + 0x9E3779B97F4A7C15L;
+        z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
+        z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
+        return z ^ (z >>> 31);
+    }
+
+    /** A `Random` for [seed], keyed by the seed the PROGRAM used, scrambled inside. */
+    private static Random seededRandom(long seed) {
+        return SEEDED_RANDOMS.computeIfAbsent(seed, s -> new Random(scrambleSeed(s)));
+    }
+
+    /**
+     * A uniform long in [min, max], inclusive.
+     *
+     * The previous `min + (long) (nextDouble() * (max - min + 1))` was wrong twice
+     * over. `nextDouble` carries 53 bits of mantissa, so scaling it across a 64-bit
+     * span produced at most 2^53 distinct values spread coarsely — the low bits were
+     * simply gone, which is why wide draws came out implausibly round. And
+     * `max - min + 1` OVERFLOWS for a wide span, which since S-6 is a hard error
+     * rather than a silently wrong modulus.
+     *
+     * `nextLong(origin, bound)` is uniform over the whole range and needs no
+     * arithmetic on the span. The full-range case is special-cased because its
+     * exclusive bound would be `Long.MAX_VALUE + 1`.
+     */
+    private static long nextInRange(Random random, long min, long max) {
+        if (min >= max) return min;
+        if (min == Long.MIN_VALUE && max == Long.MAX_VALUE) return random.nextLong();
+        return random.nextLong(min, max + 1);
+    }
+
     @TruffleBoundary
     public static Object resetSeededRandom(MezzeRecord args) {
         long seed = getLong(args, "seed");
-        SEEDED_RANDOMS.put(seed, new Random(seed));
+        // Scrambled the same way as the lazy path, or a reset and a first use of the
+        // same seed would hand back different streams.
+        SEEDED_RANDOMS.put(seed, new Random(scrambleSeed(seed)));
         return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static double seededRandomFloat(MezzeRecord args) {
         long seed = getLong(args, "seed");
-        Random random = SEEDED_RANDOMS.computeIfAbsent(seed, Random::new);
-        return random.nextDouble();
+        return seededRandom(seed).nextDouble();
     }
 
     @TruffleBoundary
@@ -85,24 +135,21 @@ public final class RandomNatives {
         long seed = getLong(args, "seed");
         long min = getLong(args, "min");
         long max = getLong(args, "max");
-        Random random = SEEDED_RANDOMS.computeIfAbsent(seed, Random::new);
-        // For longs, we need to handle the range ourselves
-        return min + (long) (random.nextDouble() * (max - min + 1));
+        return nextInRange(seededRandom(seed), min, max);
     }
 
     @TruffleBoundary
     public static long seededRandomNat(MezzeRecord args) {
         long seed = getLong(args, "seed");
         long max = getLong(args, "max");
-        Random random = SEEDED_RANDOMS.computeIfAbsent(seed, Random::new);
-        return (long) (random.nextDouble() * (max + 1));
+        return nextInRange(seededRandom(seed), 0, max);
     }
 
     @TruffleBoundary
     public static Object updateSeed(MezzeRecord args) {
         long oldSeed = getLong(args, "old_seed");
         long newSeed = getLong(args, "new_seed");
-        SEEDED_RANDOMS.put(oldSeed, new Random(newSeed));
+        SEEDED_RANDOMS.put(oldSeed, new Random(scrambleSeed(newSeed)));
         return MezzeRecord.empty();
     }
 
