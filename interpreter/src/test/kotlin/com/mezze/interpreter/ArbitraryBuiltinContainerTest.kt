@@ -6,8 +6,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Generating the BUILTIN CONTAINERS — `Set`, `SortedSet`, `Deque`, `NonEmptyList` —
- * and `Frac`.
+ * Generating the BUILTIN CONTAINERS — `Set`, `SortedSet`, `Deque` and
+ * `NonEmptyList` — and `Frac`.
  *
  * ## Why these are written impls and not derived ones
  *
@@ -17,19 +17,14 @@ import org.junit.jupiter.api.Test
  * none, and does not apply. `Option` and `Result` DO have declarations, which is
  * the entire reason they are still blocked (S-4) while these are not.
  *
- * ## Why every draw goes through a RECORD FIELD
+ * ## Every draw is a DIRECT annotation, deliberately
  *
- * Not incidental, and not the shape you would write by hand. A direct
- * `let s: Set Bool = Arbitrary.arbitrary {}` does NOT currently pin the impl — it
- * fails with "nothing here determines that type" even though the annotation says
- * exactly what the type is. That gap is older than these impls and is not about
- * containers: it reproduces on `let xs: [Int] = …` against the long-standing
- * `impl Arbitrary for ['a]`. It has its own task; `ArbitraryDirectAnnotationTest`
- * pins it so it cannot be forgotten.
- *
- * A record field is the form that works, and it is also the form that matters: a
- * Mezze function takes one record, so "generate arguments for `f`" is `arbitrary`
- * at a record type, which is what `mez sample` actually emits.
+ * `let s: Set Bool = Arbitrary.arbitrary {}` — the shape a person would write, and
+ * the shape `mez sample` emits. It was impossible until S-10: a parameterised impl
+ * of a receiver-less operation could not be entered from a hand-written call site
+ * at all, so every container test in this repo went through a record FIELD instead,
+ * where a derived instance injects the element dictionary as a literal. That was a
+ * workaround, and these tests exist partly to keep it from coming back.
  *
  * ## What these assert, and why not "it generated"
  *
@@ -45,10 +40,6 @@ import org.junit.jupiter.api.Test
  *    the wrong invariant would pass a size check.
  *  - a `Frac`'s denominator is never zero. The random half divides, so that is the
  *    one way the impl can produce a non-number.
- *
- * `Map` and `SortedMap` are NOT here: their impls are written but withheld, because
- * an impl head binding two type variables currently breaks resolution for every
- * `Arbitrary` call in the program, `Int` included. Also its own task.
  */
 class ArbitraryBuiltinContainerTest {
 
@@ -66,17 +57,14 @@ class ArbitraryBuiltinContainerTest {
         use std::collections::deque
         use std::collections::sorted_set
         use std::collections::nonemptylist
+        use std::option::{ get_or }
         use std::frac
         use std::bool
     """.trimIndent()
 
-    /**
-     * Runs `body` under a seed and returns the Int it produced. `decls` is spliced
-     * at MODULE level, because a `type` declaration is not an expression and a do
-     * block rejects it.
-     */
-    private fun drawInt(seed: Int, decls: String, body: String): Long {
-        val source = "$imports\n\n$decls\n\nwith_seed { seed = $seed, call = {} -> do\n$body\n}"
+    /** Runs `body` under a seed and returns the Int it produced. */
+    private fun drawInt(seed: Int, body: String): Long {
+        val source = "$imports\n\nwith_seed { seed = $seed, call = {} -> do\n$body\n}"
         val v = runCatching { MezzeTestHelper.run(source) }
         assertTrue(v.isSuccess, "failed to generate: ${v.exceptionOrNull()?.message}")
         return MezzeTestHelper.asLong(v.getOrNull())
@@ -84,8 +72,8 @@ class ArbitraryBuiltinContainerTest {
     }
 
     /** The body must evaluate to `1`; `0` means the invariant was violated. */
-    private fun holds(label: String, seed: Int, decls: String, body: String) {
-        assertEquals(1L, drawInt(seed, decls, body), "$label — the invariant does not hold")
+    private fun holds(label: String, seed: Int, body: String) {
+        assertEquals(1L, drawInt(seed, body), "$label — the invariant does not hold")
     }
 
     @Test
@@ -95,10 +83,9 @@ class ArbitraryBuiltinContainerTest {
         for (seed in 1..6) {
             val size = drawInt(
                 seed,
-                "type W = { s: Set Bool }",
                 """
-                let w: W = Arbitrary.arbitrary {}
-                set::size { s = w.s }
+                let s: Set Bool = Arbitrary.arbitrary {}
+                set::size { s = s }
                 """.trimIndent(),
             )
             assertTrue(
@@ -114,10 +101,9 @@ class ArbitraryBuiltinContainerTest {
         for (seed in 1..6) {
             val size = drawInt(
                 seed,
-                "type W = { xs: NonEmptyList Int }",
                 """
-                let w: W = Arbitrary.arbitrary {}
-                nonemptylist::size { xs = w.xs }
+                let xs: NonEmptyList Int = Arbitrary.arbitrary {}
+                nonemptylist::size { xs = xs }
                 """.trimIndent(),
             )
             assertTrue(size >= 1, "a NonEmptyList came out with $size elements at seed $seed")
@@ -133,11 +119,10 @@ class ArbitraryBuiltinContainerTest {
     fun `a SortedSet comes out strictly increasing`() {
         holds(
             "SortedSet Int ordering", 5,
-            "type W = { s: SortedSet Int }",
             """
-            let w: W = Arbitrary.arbitrary {}
+            let s: SortedSet Int = Arbitrary.arbitrary {}
             let r = seq::fold {
-              xs = sorted_set::to_seq { s = w.s },
+              xs = sorted_set::to_seq { s = s },
               init = { prev = int_min, ok = True, first = True },
               f = { acc, x } -> {
                 prev = x,
@@ -152,6 +137,8 @@ class ArbitraryBuiltinContainerTest {
             """.trimIndent(),
         )
     }
+
+
 
     /**
      * MEASURED LIMIT, recorded because it is not what the name promises: this
@@ -168,20 +155,19 @@ class ArbitraryBuiltinContainerTest {
      * The systematic failure also exposed something worth its own fix: it arrived
      * as `java.lang.ArithmeticException: Division by zero in fraction`, a HOST
      * exception, where `1 / 0` on `Int` raises a guest error. Same class of bug as
-     * S-6, in `frac::make` rather than in the generator.
+     * S-6, in `frac::make` rather than in the generator. Filed as S-9.
      */
     @Test
     fun `a Frac never has a zero denominator`() {
         holds(
             "Frac denominator", 13,
-            "type W = { q: Frac }",
             """
             let r = seq::fold {
               xs = seq::range { start = 0, end = 40 },
               init = True,
               f = { acc, x } -> do
-                let w: W = Arbitrary.arbitrary {}
-                bool::and { l = acc, r = frac::denominator { n = w.q } != 0 }
+                let q: Frac = Arbitrary.arbitrary {}
+                bool::and { l = acc, r = frac::denominator { n = q } != 0 }
             }
             if r then 1 else 0
             """.trimIndent(),
@@ -189,52 +175,53 @@ class ArbitraryBuiltinContainerTest {
     }
 
     @Test
-    fun `a Deque's size agrees with its own sequence`() {
+    fun `a Deque agrees with its own sequence`() {
         holds(
             "Deque size", 17,
-            "type W = { d: Deque Int }",
             """
-            let w: W = Arbitrary.arbitrary {}
-            if deque::size { d = w.d } == seq::size { xs = deque::to_seq { d = w.d } }
+            let d: Deque Int = Arbitrary.arbitrary {}
+            if deque::size { d = d } == seq::size { xs = deque::to_seq { d = d } }
               then 1
               else 0
             """.trimIndent(),
         )
     }
 
+
+
     /**
-     * Two container layers with no special case anywhere for the combination — the
-     * element draw is an ordinary recursive `arbitrary {}`, which is the whole claim.
-     * `[[Set Int]]` exercises three levels of peeling.
+     * Containers nested in containers, with no special case anywhere for the
+     * combination — the element draw is an ordinary recursive `arbitrary {}`, which
+     * is the whole claim. `[[Set Bool]]` is three levels of peeling.
      */
     @Test
     fun `containers nest`() {
         holds(
-            "[Set Bool] and [[Set Int]] nesting", 19,
-            "type Nested = { tags: [Set Bool], deep: [[Set Int]] }",
+            "[Set Int] and [[Set Bool]]", 19,
             """
-            let n: Nested = Arbitrary.arbitrary {}
-            let outer = seq::fold {
-              xs = n.tags,
-              init = True,
-              f = { acc, x } -> bool::and { l = acc, r = set::size { s = x } <= 2 },
-            }
+            let deep: [[Set Bool]] = Arbitrary.arbitrary {}
+            let nested: [Set Int] = Arbitrary.arbitrary {}
             let inner = seq::fold {
-              xs = n.deep,
+              xs = nested,
+              init = True,
+              f = { acc, x } -> bool::and {
+                l = acc,
+                r = set::size { s = x } == seq::size { xs = set::to_seq { s = x } },
+              },
+            }
+            let outer = seq::fold {
+              xs = deep,
               init = True,
               f = { acc, x } -> bool::and {
                 l = acc,
                 r = seq::fold {
                   xs = x,
                   init = True,
-                  f = { acc, x } -> bool::and {
-                    l = acc,
-                    r = set::size { s = x } == seq::size { xs = set::to_seq { s = x } },
-                  },
+                  f = { acc, x } -> bool::and { l = acc, r = set::size { s = x } <= 2 },
                 },
               },
             }
-            if bool::and { l = outer, r = inner } then 1 else 0
+            if bool::and { l = inner, r = outer } then 1 else 0
             """.trimIndent(),
         )
     }
@@ -251,17 +238,16 @@ class ArbitraryBuiltinContainerTest {
      */
     @Test
     fun `the same seed draws the same container`() {
-        val decls = "type W = { s: Set Int }"
         val body = """
-            let w: W = Arbitrary.arbitrary {}
+            let s: Set Int = Arbitrary.arbitrary {}
             seq::fold {
-              xs = set::to_seq { s = w.s },
+              xs = set::to_seq { s = s },
               init = 0,
               f = { acc, x } -> acc + x / 1000000000,
             }
         """.trimIndent()
         assertEquals(
-            drawInt(23, decls, body), drawInt(23, decls, body),
+            drawInt(23, body), drawInt(23, body),
             "the same seed produced two different Sets",
         )
     }

@@ -1063,6 +1063,35 @@ class Monomorphizer(
         return rewriteCalls(expr, opsByName)
     }
 
+    /**
+     * Pick the impl for a RECEIVER-LESS operation, by the type the call produces.
+     *
+     * Deliberately stricter than [selectOpEntry]: there is no "lone candidate on a
+     * type variable" case to honour here. A receiver-taking operation can defer to
+     * the specialization's evidence, because a real type variable in the receiver
+     * position is mono's signal that the evidence decides. A receiver-less operation
+     * has no such signal — if the produced type is not concrete, this specialization
+     * genuinely does not know which impl applies, and guessing is how
+     * `x.m == Get` once became `Eq Int`'s operation. So: concrete or nothing.
+     *
+     * Ambiguity is also nothing rather than a pick. Two impls of one ability cannot
+     * share a target name under coherence, so more than one match means the index
+     * holds something unexpected, and the caller falling through to the unrewritten
+     * call leaves the compiler's own resolution — which reports a real diagnostic —
+     * in charge.
+     */
+    private fun selectOpEntryByProducedType(entries: List<OpEntry>, producedType: MezzeType): OpEntry? {
+        if (producedType is MezzeType.VarType || producedType.holdsUnknownPlaceholder()) return null
+        val producedName =
+            com.mezze.language.typechecker.util.receiverTypeName(producedType) ?: return null
+        val matches = entries.filter { entry ->
+            entry.impl.targetTypes.any {
+                com.mezze.language.typechecker.util.receiverTypeName(it) == producedName
+            }
+        }
+        return matches.singleOrNull()
+    }
+
     /** Pick the impl whose receiver target matches [receiverType]. The receiver
      *  slot is the LAST entry in `targetTypes` (per the class-arg tuple with
      *  self last, see project_classparam_runtime_dispatch_tuple). Returns null
@@ -1198,6 +1227,43 @@ class Monomorphizer(
                         function = fn.copy(record = rewriteCalls(fn.record, opsByName)),
                         arg = rewrittenArg,
                     )
+                }
+                // A RECEIVER-LESS operation never reaches the branch above, because
+                // it has no receiver to be a field access OF: the emitter builds
+                // `Ability.op {}` as a TypedVar bound to the ability operation.
+                // Left unrewritten it survives into this specialization, which by
+                // design carries no dictionary parameters — "every dict was pinned
+                // to a concrete impl during specialization" — so the reference asked
+                // for a slot in a function deliberately compiled without one and
+                // failed as "nothing here determines that type". That is what made
+                // every parameterised impl of a receiver-less operation unusable
+                // (`impl Arbitrary for ['a]`, `Set 'a`, `Map 'k 'v`): the outer call
+                // resolved and injected its evidence, and then the body it entered
+                // could not reach it.
+                //
+                // The type the call PRODUCES plays exactly the receiver's role here,
+                // the same way it already does in `buildStaticAbilityOpCall` and in
+                // the compiler's instance-head binding — and in a specialization it
+                // is concrete.
+                if (fn is TypedVar) {
+                    val binding = fn.binding
+                    if (binding is BindingRef.AbilityOp) {
+                        val entry = opsByName[binding.opName]
+                            ?.let { selectOpEntryByProducedType(it, expr.type) }
+                        if (entry != null) {
+                            return expr.copy(
+                                function = TypedVar(
+                                    name = binding.opName,
+                                    binding = BindingRef.ByHash(entry.opHash),
+                                    type = fn.type,
+                                    loc = fn.loc,
+                                ),
+                                // Nothing to fold in — being receiver-less is the
+                                // whole distinction.
+                                arg = rewrittenArg,
+                            )
+                        }
+                    }
                 }
                 expr.copy(
                     function = rewriteCalls(fn, opsByName),

@@ -11,8 +11,7 @@ use std::int
 use std::float
 use std::frac
 # The container impls below build each container from a generated sequence, so
-# every one of these is a constructor, not a convenience. `map` and `sorted_map`
-# are absent because their impls are withheld — see the container section.
+# every one of these is a constructor, not a convenience.
 use std::collections::seq
 use std::collections::set
 use std::collections::deque
@@ -31,8 +30,7 @@ use std::collections::nonemptylist
 ## Containers are WRITTEN rather than derived, because a container's identity is a
 ## reserved name rather than a declaration, so there is no structure to walk. They
 ## are written below for sequences, `Set`, `SortedSet`, `Deque` and `NonEmptyList`.
-## `Map` and `SortedMap` are the exception, and for a compiler gap rather than a
-## design choice — see the container section.
+## `List`, `Map` and `SortedMap` are the exceptions — see the container section.
 ##
 ## ## What this makes possible
 ##
@@ -232,29 +230,16 @@ impl Arbitrary for Str where {
 # element draw is an ordinary recursive `Arbitrary.arbitrary {}` — which is why
 # `[[Set Int]]` needs no special case anywhere.
 #
-# ## `Map` and `SortedMap` are WITHHELD, and what that measured
-#
-# Both impls were written and are believed correct:
-#
-#     impl Arbitrary for Map 'k 'v where {
-#       arbitrary: {} with Arbitrary 'k, Arbitrary 'v, Eq 'k -> Map 'k 'v <Sample> = {} ->
-#         map::from_list { xs = list::from_seq {
-#           xs = list_of { g = {} -> { k = Arbitrary.arbitrary {}, v = Arbitrary.arbitrary {} } } } }
-#     }
-#
-# Adding either one breaks `Arbitrary` resolution for the WHOLE PROGRAM, `Int`
-# included: every `arbitrary {}` call then fails with "nothing here determines that
-# type". Bisected — removing just these two restores a green
-# `ArbitraryContainerTest`, and the single-variable containers above are harmless.
-#
-# What distinguishes them is that the head binds TWO type variables, so the op body
-# needs a dictionary at `'k` and at `'v`. `normalizeDictKeys` switches a method's
-# slot shape from the plain `arbitrary` to per-variable `arbitrary@k`/`arbitrary@v`
-# once it sees two variables, and the grouping that decides this is keyed on the
-# operation NAME — so a two-variable impl appears to change the slot shape for every
-# other impl of the same operation. Held out rather than left in to fail loudly,
-# because the failure is not local to `Map`: it takes down generation for types that
-# have nothing to do with it.
+# These were briefly held out, and the reason is worth keeping because it was a
+# WRONG diagnosis twice over. Adding the two map impls appeared to break
+# `Arbitrary` for the whole program, `Int` included, which read as a two-variable
+# impl head poisoning the operation's dictionary slots. It was neither: the arity
+# was innocent and nothing was poisoned. A parameterised impl of a receiver-less
+# operation simply could not be entered at all (S-10) — the monomorphizer rewrote a
+# constraint-driven call only when the function position was `receiver.method`, and
+# a receiver-less operation has no receiver to be a field access of. The whole
+# module failed, and a failure inside this module takes every consumer with it,
+# which is what made a local bug look global.
 # ---------------------------------------------------------------------------
 
 impl Arbitrary for ['a] where {
