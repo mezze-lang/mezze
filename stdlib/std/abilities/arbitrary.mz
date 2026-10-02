@@ -1,6 +1,6 @@
 # Arbitrary — how a value of a type is assembled.
 
-use std::effects::sample::{ Sample, choose, int_between, one_of, list_of }
+use std::effects::sample::{ Sample, choose, int_between, one_of, list_of, frequency }
 use std::nat::{ Nat }
 use std::nat
 use std::option::{ get_or }
@@ -118,13 +118,33 @@ impl Arbitrary for Bool where {
 ## Leaving it out means a record with a `Char` field reports a missing impl, which
 ## is accurate. Inventing an answer here would be guessing at a language decision.
 
-## The empty string is first on purpose: it is the case that breaks parsers, and a
-## generator that never produces it is not testing anything. Then a lone space, a
-## quote and a newline — the three that break naive escaping — and a non-ASCII
-## character, because "it worked on my ASCII" is its own bug class.
+## ## Readable usually, pathological often enough
+##
+## The awkward values matter — the empty string breaks parsers, a bare quote and a
+## newline break naive escaping, and non-ASCII breaks "it worked on my ASCII" — but
+## they cannot be the TYPICAL draw. One `Arbitrary` instance serves both consumers,
+## and they want opposite things: a sample is read by a person deciding whether a
+## function does what they think, where a lone `"` looks like the tool is broken
+## rather than like information. A property test runs a hundred cases and only needs
+## the awkward ones to appear.
+##
+## Weighting serves both. At 15%, a hundred-case property run sees roughly fifteen
+## pathological inputs — ample — while a single sample reads as an ordinary word
+## about two times in three.
 impl Arbitrary for Str where {
-  arbitrary = {} ->
-    one_of { xs = ["", " ", "a", "\"", "\n", "sample", "mezze", "ünïcödé"], def = "" }
+  arbitrary = {} -> frequency {
+    choices = [
+      ## Short and alphabetic: what a person reading one sample wants to see.
+      { weight = 65, gen = {} ->
+        one_of { xs = ["alpha", "beta", "gamma", "mezze", "sample", "hello", "world"], def = "" } },
+      ## The boundaries. Cheap to produce, and the ones most code forgets.
+      { weight = 20, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
+      ## The genuinely hostile set, kept rare rather than removed.
+      { weight = 15, gen = {} ->
+        one_of { xs = ["\"", "\n", "\t", "ünïcödé", "  padded  ", "a,b;c"], def = "" } },
+    ],
+    def = "",
+  }
 }
 
 # ---------------------------------------------------------------------------

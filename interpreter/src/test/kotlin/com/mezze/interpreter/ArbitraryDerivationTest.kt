@@ -180,6 +180,20 @@ class ArbitraryDerivationTest {
         val INTERESTING_INTS = setOf(
             0L, 1L, -1L, 2L, -2L, 3L, 4L, 10L, -10L, 100L, -100L, Long.MAX_VALUE, Long.MIN_VALUE,
         )
-        val INTERESTING_STRS = setOf("", " ", "a", "\"", "\n", "sample", "mezze", "\u00fcn\u00efc\u00f6d\u00e9")
+        /**
+         * Every string `impl Arbitrary for Str` can produce, across all three
+         * weighted groups. Listed in full rather than sampled: a membership check
+         * is the only assertion available (the value is drawn), so a set that
+         * drifted from the impl would start failing at random — the worst kind of
+         * flake to diagnose.
+         */
+        val INTERESTING_STRS = setOf(
+            // readable, weight 65
+            "alpha", "beta", "gamma", "mezze", "sample", "hello", "world",
+            // boundaries, weight 20
+            "", " ", "a",
+            // hostile, weight 15
+            "\"", "\n", "\t", "\u00fcn\u00efc\u00f6d\u00e9", "  padded  ", "a,b;c",
+        )
     }
 }
