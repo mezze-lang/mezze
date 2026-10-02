@@ -17,6 +17,9 @@ object BuiltinTypes {
     const val NON_EMPTY_LIST = "NonEmptyList"
     const val BYTES = "Bytes"
     const val ITER = "Iter"
+    // A builtin scalar spelled as a newtype (`pub newtype Nat = Int`): recognised
+    // by this reserved name, the way the rest of the compiler keys on it.
+    const val NAT = "Nat"
 
     val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST, ITER)
 

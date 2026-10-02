@@ -88,13 +88,13 @@ ability EncodeVariant for 'config having 'out where {
 
 ## Encode a list / sequence given per-element output already encoded.
 ## Sets flow through this after `set::to_seq`.
-ability EncodeList for 'config having 'out where {
-  encode_list: { it: 'config, elems: ['out], ctx: CodecCtx } -> 'out,
+ability EncodeSequence for 'config having 'out where {
+  encode_sequence: { it: 'config, elems: ['out], ctx: CodecCtx } -> 'out,
 }
 
 ## Encode a map given per-entry key/value output already encoded.
-ability EncodeMap for 'config having 'out where {
-  encode_map: { it: 'config, entries: [{ key: 'out, value: 'out }], ctx: CodecCtx } -> 'out,
+ability EncodeMapping for 'config having 'out where {
+  encode_mapping: { it: 'config, entries: [{ key: 'out, value: 'out }], ctx: CodecCtx } -> 'out,
 }
 
 ## Encode an option — `Some` wraps its inner encoded value, `None`
@@ -129,13 +129,13 @@ ability DecodeVariant for 'config having 'in where {
 }
 
 ## Decode a list into per-element input values; the walker recurses on each.
-ability DecodeList for 'config having 'in where {
-  decode_list: { it: 'config, val: 'in, ctx: CodecCtx } -> Result ['in] DecodeError,
+ability DecodeSequence for 'config having 'in where {
+  decode_sequence: { it: 'config, val: 'in, ctx: CodecCtx } -> Result ['in] DecodeError,
 }
 
 ## Decode a map into per-entry input pairs; the walker recurses on each side.
-ability DecodeMap for 'config having 'in where {
-  decode_map: { it: 'config, val: 'in, ctx: CodecCtx } -> Result [{ key: 'in, value: 'in }] DecodeError,
+ability DecodeMapping for 'config having 'in where {
+  decode_mapping: { it: 'config, val: 'in, ctx: CodecCtx } -> Result [{ key: 'in, value: 'in }] DecodeError,
 }
 
 ## Decode an option — `None` for absent / null, `Some` for present.

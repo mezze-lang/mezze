@@ -35,9 +35,10 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(MezzeType.FloatType))
         assertTrue(generator.isSerializable(MezzeType.StringType))
         assertTrue(generator.isSerializable(PrimitiveTypes.BOOL_TYPE))
-        // Nat is now a newtype (`newtype Nat = Int` in std/nat.mz), not a primitive.
-        // Newtypes are not auto-serializable — the impls live in std/nat.mz.
-        assertTrue(!generator.isSerializable(MezzeType.NewtypeType(
+        // Nat is a newtype (`newtype Nat = Int` in std/nat.mz) but a BUILTIN scalar:
+        // it auto-derives via the dedicated encode_nat/decode_nat Scalar methods, so
+        // it IS serializable. (User newtypes are not — see the dedicated test below.)
+        assertTrue(generator.isSerializable(MezzeType.NewtypeType(
             name = "Nat",
             constructor = "Nat",
             wrappedType = MezzeType.IntType,
@@ -52,6 +53,18 @@ class CodecGeneratorTest {
         // polymorphic helpers (`'a with Encode 'c 'a`) dispatch when `'a`
         // instantiates to Bytes.
         assertTrue(generator.isSerializable(MezzeType.BytesType))
+    }
+
+    @Test
+    fun `user newtype is not auto-serializable`() {
+        // Only the builtin Nat auto-derives among newtypes; a user newtype is opaque
+        // and needs an explicit impl, so the generator declines (which surfaces as a
+        // clean missing-impl error rather than a Tier-3 self-call).
+        assertTrue(!generator.isSerializable(MezzeType.NewtypeType(
+            name = "UserId",
+            constructor = "UserId",
+            wrappedType = MezzeType.IntType,
+        )))
     }
 
     @Test

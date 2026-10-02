@@ -23,8 +23,8 @@ use std::char
 use std::nat
 use std::codec::core::{
   Format,
-  EncodeScalar, EncodeRecord, EncodeVariant, EncodeList, EncodeMap, EncodeOption,
-  DecodeScalar, DecodeRecord, DecodeVariant, DecodeList, DecodeMap, DecodeOption,
+  EncodeScalar, EncodeRecord, EncodeVariant, EncodeSequence, EncodeMapping, EncodeOption,
+  DecodeScalar, DecodeRecord, DecodeVariant, DecodeSequence, DecodeMapping, DecodeOption,
   Encode, Decode,
   CodecCtx, SharedConfig, FieldTransform, DecodeError,
   default_shared,
@@ -215,12 +215,12 @@ impl EncodeVariant for JsonC having 'out = Json where {
     },
 }
 
-impl EncodeList for JsonC having 'out = Json where {
-  encode_list = { it, elems, ctx } -> JArray { items = elems },
+impl EncodeSequence for JsonC having 'out = Json where {
+  encode_sequence = { it, elems, ctx } -> JArray { items = elems },
 }
 
-impl EncodeMap for JsonC having 'out = Json where {
-  encode_map = { it, entries, ctx } -> JArray {
+impl EncodeMapping for JsonC having 'out = Json where {
+  encode_mapping = { it, entries, ctx } -> JArray {
     items = seq::map { xs = entries, f = { x } -> JObject {
       fields = [
         { key = "key", value = x.key },
@@ -369,8 +369,8 @@ impl DecodeVariant for JsonC having 'in = Json where {
     } },
 }
 
-impl DecodeList for JsonC having 'in = Json where {
-  decode_list = { it, val, ctx } -> match val is
+impl DecodeSequence for JsonC having 'in = Json where {
+  decode_sequence = { it, val, ctx } -> match val is
     JArray { items } -> Ok { val = items }
     _ -> Err { error = {
       path = ctx.path,
@@ -380,7 +380,7 @@ impl DecodeList for JsonC having 'in = Json where {
     } },
 }
 
-## One encoded map entry — the `{ "key": …, "value": … }` object `encode_map`
+## One encoded map entry — the `{ "key": …, "value": … }` object `encode_mapping`
 ## writes — pulled back apart. None when the item is not that shape.
 let map_entry_of: { j: Json } -> Option { key: Json, value: Json } = { j } -> match j is
   JObject { fields } -> match find_field_value { fields = fields, key = "key", idx = 0 } is
@@ -404,8 +404,8 @@ let read_map_entries:
         None -> None
       None -> None
 
-impl DecodeMap for JsonC having 'in = Json where {
-  ## Reads back exactly what `encode_map` writes: a JArray whose items are
+impl DecodeMapping for JsonC having 'in = Json where {
+  ## Reads back exactly what `encode_mapping` writes: a JArray whose items are
   ## `{ "key": …, "value": … }` objects.
   ##
   ## This used to expect a JObject and rebuild each key as
@@ -414,7 +414,7 @@ impl DecodeMap for JsonC having 'in = Json where {
   ## through JSON, and nothing caught it because no test decoded one.
   ## The array form is also the only one that survives a NON-string key, which a
   ## JSON object cannot represent at all.
-  decode_map = { it, val, ctx } -> match val is
+  decode_mapping = { it, val, ctx } -> match val is
     JArray { items } -> match read_map_entries { items = items, idx = 0, acc = [] } is
       Some { val = entries } -> Ok { val = entries }
       None -> Err { error = {

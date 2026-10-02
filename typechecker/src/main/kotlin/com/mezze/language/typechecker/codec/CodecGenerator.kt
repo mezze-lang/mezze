@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.codec
 
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.OperatorMapping
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.parsedast.*
@@ -56,9 +57,39 @@ class CodecGenerator(
         is MezzeType.VariantType -> type.constructors.values.all { payload ->
             payload == null || isSerializable(payload)
         }
-        is MezzeType.TypeApplication -> type.args.all { isSerializable(it) }
-        is MezzeType.NewtypeType -> false
+        // `Nat` is a builtin scalar spelled as a newtype — serializable via its
+        // dedicated `encode_nat`/`decode_nat` methods (see [isNatType]). Any OTHER
+        // newtype spelled as a `TypeApplication` is NOT auto-derivable: a newtype is
+        // opaque and its wire form is the author's decision, so it needs an explicit
+        // impl. Declining here yields a clean "no Decode impl" error instead of the
+        // self-recursive body that used to stack-overflow.
+        is MezzeType.TypeApplication ->
+            isNatType(type) || (!isNonNatNewtypeApp(type) && type.args.all { isSerializable(it) })
+        is MezzeType.NewtypeType -> isNatType(type)
         is MezzeType.VarType -> true
+    }
+
+    /**
+     * True iff [type] is the builtin `Nat` — a scalar primitive spelled as a
+     * newtype (`pub newtype Nat = Int`), recognised by its reserved name exactly
+     * as the rest of the compiler does (ExprLiteralConstraints, TypedAstBuilder,
+     * AbilityChecker all key on `"Nat"`). Catches both spellings it can arrive in:
+     * the structural `NewtypeType` and a `Declared` `TypeApplication("Nat")`.
+     */
+    private fun isNatType(type: MezzeType): Boolean = when (type) {
+        is MezzeType.NewtypeType -> type.name == BuiltinTypes.NAT
+        is MezzeType.TypeApplication -> type.constructor == BuiltinTypes.NAT
+        else -> false
+    }
+
+    /** A `TypeApplication` that resolves to a user (non-Nat) newtype declaration. */
+    private fun isNonNatNewtypeApp(type: MezzeType.TypeApplication): Boolean {
+        if (isNatType(type)) return false
+        val decl = registry.lookupType(
+            type.constructor,
+            (type.identity as? TypeIdentity.Declared)?.hash,
+        )
+        return decl?.definition is ParsedNewtypeDef
     }
 
     /**
@@ -112,6 +143,11 @@ class CodecGenerator(
     /** Encode a value of [type] bound to [valueExpr] into the format's output. */
     private fun buildEncodeExpr(type: MezzeType, valueExpr: ParsedExpr): ParsedExpr {
         if (PrimitiveTypes.isBoolVariant(type)) return scalarEncode("encode_bool", valueExpr)
+        // `Nat` is a builtin scalar spelled as a newtype — route it to the dedicated
+        // `encode_nat` method, the same way Bool (a builtin variant) routes to
+        // `encode_bool`. Without this it falls through to the newtype arm and emits
+        // a Tier-3 self-call that stack-overflows (there is no user impl to catch it).
+        if (isNatType(type)) return scalarEncode("encode_nat", valueExpr)
         // An Option has TWO representations — `TypeApplication(OPTION, [t])` and the
         // structural `VariantType(Some|None)` — and only the first was caught, by the
         // branch below. The structural one fell through to the generic VariantType
@@ -154,17 +190,17 @@ class CodecGenerator(
                 // that stack-overflows at runtime. Mirrors AbilityChecker's
                 // walkTier2Capabilities, which already special-cases these.
                 BuiltinTypes.SEQ ->
-                    buildEncodeListApp(type.args, valueExpr, toSeq = null)
+                    buildEncodeSequenceApp(type.args, valueExpr, toSeq = null)
                 BuiltinTypes.LIST ->
-                    buildEncodeListApp(type.args, valueExpr, toSeq = "__native_list_to_seq")
+                    buildEncodeSequenceApp(type.args, valueExpr, toSeq = "__native_list_to_seq")
                 BuiltinTypes.SET ->
-                    buildEncodeListApp(type.args, valueExpr, toSeq = "__native_set_to_seq")
+                    buildEncodeSequenceApp(type.args, valueExpr, toSeq = "__native_set_to_seq")
                 BuiltinTypes.SORTED_SET ->
-                    buildEncodeListApp(type.args, valueExpr, toSeq = "__native_sorted_set_to_seq")
+                    buildEncodeSequenceApp(type.args, valueExpr, toSeq = "__native_sorted_set_to_seq")
                 BuiltinTypes.MAP ->
-                    buildEncodeMapApp(type.args, valueExpr, toSeqNative = "__native_map_to_seq")
+                    buildEncodeMappingApp(type.args, valueExpr, toSeqNative = "__native_map_to_seq")
                 BuiltinTypes.SORTED_MAP ->
-                    buildEncodeMapApp(type.args, valueExpr, toSeqNative = "__native_sorted_map_to_seq")
+                    buildEncodeMappingApp(type.args, valueExpr, toSeqNative = "__native_sorted_map_to_seq")
                 else -> when {
                     type.identity is TypeIdentity.Declared ->
                         buildEncodeDeclared(type, valueExpr)
@@ -316,7 +352,7 @@ class CodecGenerator(
         return varPat(payloadVar) to id(payloadVar)
     }
 
-    private fun buildEncodeList(elemType: MezzeType, valueExpr: ParsedExpr, toSeq: String?): ParsedExpr {
+    private fun buildEncodeSequence(elemType: MezzeType, valueExpr: ParsedExpr, toSeq: String?): ParsedExpr {
         // __native_seq_map only accepts a MezzeSeq, so a non-Seq container is
         // first converted (List/Set/SortedSet). The converters take the value
         // under different field names: list -> `xs`, set/sorted-set -> `s`.
@@ -334,12 +370,12 @@ class CodecGenerator(
             ),
         )
         return call(
-            member(id("config"), "encode_list"),
+            member(id("config"), "encode_sequence"),
             record("elems" to mappedElems, "ctx" to id("ctx")),
         )
     }
 
-    private fun buildEncodeMap(
+    private fun buildEncodeMapping(
         keyType: MezzeType,
         valType: MezzeType,
         valueExpr: ParsedExpr,
@@ -375,26 +411,26 @@ class CodecGenerator(
             ),
         )
         return call(
-            member(id("config"), "encode_map"),
+            member(id("config"), "encode_mapping"),
             record("entries" to encodedEntries, "ctx" to id("ctx")),
         )
     }
 
-    /** [buildEncodeList] entry when the container arrived as a `TypeApplication`
+    /** [buildEncodeSequence] entry when the container arrived as a `TypeApplication`
      *  (its element type is [args]`[0]`). With no element arg (opaque container),
      *  fall back to Tier-3 so a user impl can win — never emit a bare self-call. */
-    private fun buildEncodeListApp(args: List<MezzeType>, valueExpr: ParsedExpr, toSeq: String?): ParsedExpr {
+    private fun buildEncodeSequenceApp(args: List<MezzeType>, valueExpr: ParsedExpr, toSeq: String?): ParsedExpr {
         val elem = args.firstOrNull() ?: return tierThreeEncode(valueExpr)
-        return buildEncodeList(elem, valueExpr, toSeq)
+        return buildEncodeSequence(elem, valueExpr, toSeq)
     }
 
-    /** [buildEncodeMap] entry when the map arrived as a `TypeApplication`
+    /** [buildEncodeMapping] entry when the map arrived as a `TypeApplication`
      *  (key = [args]`[0]`, value = [args]`[1]`). Missing args ⇒ Tier-3 fallback.
      *  [toSeqNative] selects the per-kind entries native (Map vs SortedMap). */
-    private fun buildEncodeMapApp(args: List<MezzeType>, valueExpr: ParsedExpr, toSeqNative: String): ParsedExpr {
+    private fun buildEncodeMappingApp(args: List<MezzeType>, valueExpr: ParsedExpr, toSeqNative: String): ParsedExpr {
         val k = args.getOrNull(0) ?: return tierThreeEncode(valueExpr)
         val v = args.getOrNull(1) ?: return tierThreeEncode(valueExpr)
-        return buildEncodeMap(k, v, valueExpr, toSeqNative)
+        return buildEncodeMapping(k, v, valueExpr, toSeqNative)
     }
 
     /**
@@ -443,6 +479,10 @@ class CodecGenerator(
     /** Decode [type] out of [inputExpr]. Returns `Result <type> DecodeError`. */
     private fun buildDecodeExpr(type: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
         if (PrimitiveTypes.isBoolVariant(type)) return scalarDecode("decode_bool", inputExpr)
+        // Mirror of the encode side: `Nat` decodes through its dedicated, validating
+        // `decode_nat` (which rejects negatives) — not by unwrapping to Int, and not
+        // via the newtype Tier-3 self-call that stack-overflowed.
+        if (isNatType(type)) return scalarDecode("decode_nat", inputExpr)
         // Mirrors the encode side: a structurally-spelled Option decodes through
         // `decode_option`, not as a tagged variant. Both sides must agree on which
         // of an Option's two representations means what, or a value encoded one way
@@ -473,10 +513,24 @@ class CodecGenerator(
                 // falling through to `tierThreeDecode` (a self-call into this derived
                 // impl → runtime stack overflow). Matches AbilityChecker's
                 // walkTier2Capabilities.
-                BuiltinTypes.LIST, BuiltinTypes.SEQ, BuiltinTypes.SET, BuiltinTypes.SORTED_SET ->
-                    buildDecodeListApp(type.args, inputExpr)
-                BuiltinTypes.MAP, BuiltinTypes.SORTED_MAP ->
-                    buildDecodeMapApp(type.args, inputExpr)
+                // All four decode from the same wire shape (a run of elements), but
+                // each is a DISTINCT runtime container: `decode_sequence` hands back a
+                // MezzeSeq, so List/Set/SortedSet must be rebuilt from it or they
+                // crash the moment they're used as their declared type ("Expected
+                // MezzeSet for field 's'"). A Seq needs no rebuild (it IS the Seq).
+                // Mirror of the encode side's per-container `to_seq` projection.
+                BuiltinTypes.SEQ ->
+                    buildDecodeSequenceApp(type.args, inputExpr, rebuild = null)
+                BuiltinTypes.LIST ->
+                    buildDecodeSequenceApp(type.args, inputExpr, rebuild = SeqRebuild.LIST)
+                BuiltinTypes.SET ->
+                    buildDecodeSequenceApp(type.args, inputExpr, rebuild = SeqRebuild.SET)
+                BuiltinTypes.SORTED_SET ->
+                    buildDecodeSequenceApp(type.args, inputExpr, rebuild = SeqRebuild.SORTED_SET)
+                BuiltinTypes.MAP ->
+                    buildDecodeMappingApp(type.args, inputExpr, sorted = false)
+                BuiltinTypes.SORTED_MAP ->
+                    buildDecodeMappingApp(type.args, inputExpr, sorted = true)
                 else -> when {
                     type.identity is TypeIdentity.Declared ->
                         buildDecodeDeclared(type, inputExpr)
@@ -635,11 +689,11 @@ class CodecGenerator(
         )
     }
 
-    private fun buildDecodeList(elemType: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
-        // config.decode_list { val = it, ctx = ctx } -> Ok { val = ['in] }.
+    private fun buildDecodeSequence(elemType: MezzeType, inputExpr: ParsedExpr, rebuild: SeqRebuild?): ParsedExpr {
+        // config.decode_sequence { val = it, ctx = ctx } -> Ok { val = ['in] }.
         // Then map each element through decodeExpr, gathering into Ok/Err.
         val listCall = call(
-            member(id("config"), "decode_list"),
+            member(id("config"), "decode_sequence"),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
         // Auto-derived list decode currently threads through a helper native
@@ -653,21 +707,44 @@ class CodecGenerator(
                 "f" to lambda(listOf("x"), buildDecodeExpr(elemType, id("x"))),
             ),
         )
+        // `mapped` is `Result [elem]` — a decoded MezzeSeq. For a Seq target that is
+        // the answer; for List/Set/SortedSet rebuild the declared container from it,
+        // the mirror of the encode side's `to_seq` and of `buildDecodeMapping`'s rebuild.
+        val gathered = if (rebuild == null) mapped else match(
+            mapped,
+            matchCase(
+                okPat("__decoded_seq"),
+                ok(rebuildSeq(rebuild, id("__decoded_seq"))),
+            ),
+            matchCase(errPat("e"), err(id("e"))),
+        )
         return match(
             listCall,
-            matchCase(okPat("__list_raw"), mapped),
+            matchCase(okPat("__list_raw"), gathered),
             matchCase(errPat("e"), err(id("e"))),
         )
     }
 
-    private fun buildDecodeMap(keyType: MezzeType, valType: MezzeType, inputExpr: ParsedExpr): ParsedExpr {
+    /** Wrap a decoded `[elem]` Seq into the declared container. Set rebuilds via
+     *  the Eq/Hash evidence-carrying native (see TypedASTCompiler.evidenceNativeForm);
+     *  List needs no evidence; SortedSet threads an `Ord`-derived comparator. */
+    private fun rebuildSeq(kind: SeqRebuild, decodedSeq: ParsedExpr): ParsedExpr = when (kind) {
+        SeqRebuild.LIST -> call(id("__native_list_from_seq"), record("xs" to decodedSeq))
+        SeqRebuild.SET -> call(id("__native_set_from_seq"), record("xs" to decodedSeq))
+        SeqRebuild.SORTED_SET -> call(
+            id("__native_sorted_set_from_seq"),
+            record("xs" to decodedSeq, "cmp" to ordCmpLambda()),
+        )
+    }
+
+    private fun buildDecodeMapping(keyType: MezzeType, valType: MezzeType, inputExpr: ParsedExpr, sorted: Boolean): ParsedExpr {
         val mapCall = call(
-            member(id("config"), "decode_map"),
+            member(id("config"), "decode_mapping"),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
         // __native_seq_try_map wraps each element as `{ x = <elem> }` (wrapX), so the
         // callback param is `x` and the `{key,value}` entry is reached via `x.key` /
-        // `x.value` — same convention as the encode side (see buildEncodeMap).
+        // `x.value` — same convention as the encode side (see buildEncodeMapping).
         val mapped = call(
             id("__native_seq_try_map"),
             record(
@@ -708,12 +785,25 @@ class CodecGenerator(
         // map's structural comparison IS that instance. A key type that wrote its
         // own gets the evidence-carrying form, because this native is in
         // TypedASTCompiler's `evidenceNativeForm` table.
+        // A plain Map rebuilds via `__native_map_from_seq` (Eq/Hash evidence threaded
+        // by TypedASTCompiler). A SortedMap is a DISTINCT runtime container with no
+        // from_seq native — build it from a List of {k,v} with an Ord-derived key
+        // comparator, the mirror of `sorted_map::from_list`. Routing SortedMap through
+        // the plain native produced a MezzeMap, which crashed on use as a SortedMap.
+        val rebuiltMap = if (!sorted) {
+            call(id("__native_map_from_seq"), record("xs" to id("__entries")))
+        } else {
+            call(
+                id("__native_sorted_map_from_list"),
+                record(
+                    "xs" to call(id("__native_list_from_seq"), record("xs" to id("__entries"))),
+                    "cmp" to ordCmpLambda(),
+                ),
+            )
+        }
         val rebuilt = match(
             mapped,
-            matchCase(
-                okPat("__entries"),
-                ok(call(id("__native_map_from_seq"), record("xs" to id("__entries")))),
-            ),
+            matchCase(okPat("__entries"), ok(rebuiltMap)),
             matchCase(errPat("e"), err(id("e"))),
         )
         return match(
@@ -723,19 +813,20 @@ class CodecGenerator(
         )
     }
 
-    /** [buildDecodeList] entry for a container that arrived as a `TypeApplication`
-     *  (element = [args]`[0]`). Missing element arg ⇒ Tier-3 fallback. */
-    private fun buildDecodeListApp(args: List<MezzeType>, inputExpr: ParsedExpr): ParsedExpr {
+    /** [buildDecodeSequence] entry for a container that arrived as a `TypeApplication`
+     *  (element = [args]`[0]`). [rebuild] names the declared container to rebuild
+     *  from the decoded Seq (null = Seq itself). Missing element arg ⇒ Tier-3 fallback. */
+    private fun buildDecodeSequenceApp(args: List<MezzeType>, inputExpr: ParsedExpr, rebuild: SeqRebuild?): ParsedExpr {
         val elem = args.firstOrNull() ?: return tierThreeDecode(inputExpr)
-        return buildDecodeList(elem, inputExpr)
+        return buildDecodeSequence(elem, inputExpr, rebuild)
     }
 
-    /** [buildDecodeMap] entry for a map that arrived as a `TypeApplication`
+    /** [buildDecodeMapping] entry for a map that arrived as a `TypeApplication`
      *  (key = [args]`[0]`, value = [args]`[1]`). Missing args ⇒ Tier-3 fallback. */
-    private fun buildDecodeMapApp(args: List<MezzeType>, inputExpr: ParsedExpr): ParsedExpr {
+    private fun buildDecodeMappingApp(args: List<MezzeType>, inputExpr: ParsedExpr, sorted: Boolean): ParsedExpr {
         val k = args.getOrNull(0) ?: return tierThreeDecode(inputExpr)
         val v = args.getOrNull(1) ?: return tierThreeDecode(inputExpr)
-        return buildDecodeMap(k, v, inputExpr)
+        return buildDecodeMapping(k, v, inputExpr, sorted)
     }
 
     private fun buildDecodeOption(innerType: MezzeType?, inputExpr: ParsedExpr): ParsedExpr {
@@ -931,6 +1022,27 @@ class CodecGenerator(
 
     private fun none(): ParsedVariantConstruct = variant("None", null)
 
+    private fun intLit(value: Long): ParsedIntLit = ParsedIntLit(value, GEN_LOC)
+
+    private fun lt(l: ParsedExpr, r: ParsedExpr): ParsedBinaryOp =
+        ParsedBinaryOp(OperatorMapping.parse("<"), l, r, GEN_LOC)
+
+    /**
+     * `{ a, b } -> if a < b then -1 else if b < a then 1 else 0` — the comparator a
+     * SortedSet / SortedMap builds from the element's (key's) `Ord`, mirroring the
+     * `cmp` that `sorted_set::from_seq` / `sorted_map::from_list` derive from `Ord`.
+     * The `<` resolves against the concrete element type at derivation time.
+     */
+    private fun ordCmpLambda(): ParsedLambda =
+        lambda(
+            listOf("a", "b"),
+            ifExpr(
+                lt(id("a"), id("b")),
+                intLit(-1),
+                ifExpr(lt(id("b"), id("a")), intLit(1), intLit(0)),
+            ),
+        )
+
     private fun okPat(varName: String): ParsedConstructorPattern =
         constructorPat("Ok", recordPat("val" to varPat(varName)))
 
@@ -953,6 +1065,10 @@ class CodecGenerator(
     // ---------------------------------------------------------------------
 
     private fun mezzeTypeToAnnotation(type: MezzeType): ParsedTypeAnnotation = mezzeTypeToParsedAnnotation(type, GEN_LOC)
+
+    /** Which linear container to rebuild a decoded `[elem]` Seq into. A Seq target
+     *  needs no rebuild (it IS the Seq) and is represented by a null rebuild. */
+    private enum class SeqRebuild { LIST, SET, SORTED_SET }
 
     companion object {
         private val GEN_LOC = Loc("<generated>", 0, 0, 0, 0)
@@ -1001,6 +1117,10 @@ internal fun mezzeTypeToParsedAnnotation(type: MezzeType, loc: Loc): ParsedTypeA
             returnType = mezzeTypeToParsedAnnotation(type.returnType, loc),
             loc = loc,
         )
+        // A newtype is nominal and module-opaque — name it, don't inline its wrapped
+        // shape. This is the impl-target spelling for `Nat` (the one builtin newtype
+        // that auto-derives a codec); matching the receiver dispatch, which is by name.
+        is MezzeType.NewtypeType -> ParsedNamedType(type.name, loc)
         else -> throw IllegalArgumentException("Cannot convert MezzeType to ParsedTypeAnnotation: $type")
     }
 }

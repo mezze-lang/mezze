@@ -22,10 +22,20 @@ public final class MapNatives {
 
     private MapNatives() {}
 
+    // ==================== Map-Entry Field Names ====================
+    // The canonical `{ k, v }` entry-record shape every map-like native (and the
+    // codec walker) produces and consumes. One spelling, referenced — never a
+    // scattered "k"/"v" literal (a stray "key"/"value" silently read null).
+
+    /** Entry-record key field: `{ k, v }`. */
+    public static final String ENTRY_KEY = "k";
+    /** Entry-record value field: `{ k, v }`. */
+    public static final String ENTRY_VALUE = "v";
+
     // ==================== Cached Field Name Arrays ====================
     // Used by non-HOF result record construction (entries, toSeq, toList, etc.)
 
-    private static final String[] FIELD_K_V = {"k", "v"};
+    private static final String[] FIELD_K_V = {ENTRY_KEY, ENTRY_VALUE};
     private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
     private static final String[] FIELD_FST_SND = {"fst", "snd"};
 

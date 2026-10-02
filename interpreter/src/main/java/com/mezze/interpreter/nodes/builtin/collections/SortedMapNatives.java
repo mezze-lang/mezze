@@ -668,8 +668,11 @@ public final class SortedMapNatives {
         for (Object item : list) {
             if (item instanceof MezzeRecord) {
                 MezzeRecord record = (MezzeRecord) item;
-                Object key = record.getField("key");
-                Object value = record.getField("value");
+                // Entries are `{ k, v }` — the stdlib signature (`from_list: { xs:
+                // List { k, v } }`) and what `entries()` / the codec walker produce.
+                // Reading `key`/`value` here returned null keys (cmp saw null < null).
+                Object key = record.getField(MapNatives.ENTRY_KEY);
+                Object value = record.getField(MapNatives.ENTRY_VALUE);
                 result = result.putObject(key, value);
             }
         }

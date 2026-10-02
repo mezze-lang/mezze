@@ -884,11 +884,128 @@ class CodecRoundTripTest {
     }
 
     // ========================================================================
-    // KNOWN GAPS — open work items after this commit
-    //
-    //  * `Nat` (newtype over Int) does not auto-derive: the walker recurses
-    //    through Tier 3, and newtype opacity prevents unwrapping at emit
-    //    time. Workaround: hand-write `impl Encode JsonC for Nat` at the
-    //    call site. Same for user newtypes over primitives.
+    // Container reconstruction — decode must rebuild the DECLARED container, not
+    // hand back the intermediate Seq. Before the fix, Set/List/SortedSet/SortedMap
+    // decode returned a MezzeSeq that crashed the moment it was used as its type
+    // ("Expected MezzeSet for field 's'"). Each test decodes then USES the result
+    // as its type (size), so a mislabeled Seq would throw, not mis-count.
     // ========================================================================
+
+    /**
+     * Round-trip a collection through JSON and return its size as an Int. The decode
+     * target carries NO type annotation — it is inferred from `c == original` (which
+     * pins `c` to `original`'s type) and from the `$sizeExpr` usage. That the decode
+     * resolves without an annotation is itself part of what these pin: a decode that
+     * NEEDED an annotation would be an inference bug. `c == original` also makes this
+     * a true round-trip-equality check; `$sizeExpr` additionally proves `c` is a real
+     * container of its declared kind (a mislabeled Seq would throw in e.g. set::size).
+     */
+    private fun collectionSizeRoundTrip(originalExpr: String, sizeExpr: String): String = """
+        use std::codec::json::{ ToJson, FromJson, to_str, parse_str }
+        use std::collections::set
+        use std::collections::sorted_set
+        use std::collections::list
+        use std::collections::map
+        use std::collections::sorted_map
+        let original = $originalExpr
+        let s = to_str { json = original.to_json {} }
+        match parse_str { s = s } is
+          Ok { val = j } -> match j.from_json {} is
+              Ok { val = c } -> if c == original then $sizeExpr else (0 - 3)
+              Err { error = _ } -> (0 - 1)
+          Err { error = _ } -> (0 - 2)
+    """.trimIndent()
+
+    @Test
+    fun `JsonC round-trip Set dedups into a real Set`() {
+        // 5 elements, 3 distinct. A mislabeled Seq would crash in set::size.
+        assertEquals(3L, eval(collectionSizeRoundTrip(
+            "set::from_seq { xs = [3, 1, 1, 2, 3] }", "set::size { s = c }")))
+    }
+
+    @Test
+    fun `JsonC round-trip List keeps all elements`() {
+        assertEquals(5L, eval(collectionSizeRoundTrip(
+            "list::from_seq { xs = [3, 1, 1, 2, 3] }", "list::size { xs = c }")))
+    }
+
+    @Test
+    fun `JsonC round-trip SortedSet dedups into a real SortedSet`() {
+        assertEquals(3L, eval(collectionSizeRoundTrip(
+            "sorted_set::from_seq { xs = [3, 1, 1, 2, 3] }", "sorted_set::size { s = c }")))
+    }
+
+    @Test
+    fun `JsonC round-trip Map into a real Map`() {
+        assertEquals(2L, eval(collectionSizeRoundTrip(
+            "map::from_list { xs = list::from_seq { xs = [{ k = 1, v = 10 }, { k = 2, v = 20 }] } }",
+            "map::size { m = c }")))
+    }
+
+    @Test
+    fun `JsonC round-trip SortedMap into a real SortedMap`() {
+        assertEquals(2L, eval(collectionSizeRoundTrip(
+            "sorted_map::from_list { xs = list::from_seq { xs = [{ k = 2, v = 20 }, { k = 1, v = 10 }] } }",
+            "sorted_map::size { m = c }")))
+    }
+
+    // ========================================================================
+    // Nat — a builtin scalar spelled as a newtype. Decode routes to the
+    // validating `decode_nat` (NOT a Tier-3 self-call, which stack-overflowed;
+    // NOT a bare unwrap to Int, which skips the >= 0 invariant).
+    // ========================================================================
+
+    @Test
+    fun `JsonC round-trip Nat positive`() {
+        // `c == original` pins the decode target to Nat (no annotation); `nat::to_int`
+        // reads it back. Routes through the validating decode_nat, not a Tier-3 self-call.
+        val src = """
+            use std::codec::json::{ ToJson, FromJson, to_str, parse_str }
+            use std::nat
+            let original = 5n
+            let s = to_str { json = original.to_json {} }
+            match parse_str { s = s } is
+              Ok { val = j } -> match j.from_json {} is
+                  Ok { val = n } -> if n == original then nat::to_int { n = n } else (0 - 3)
+                  Err { error = _ } -> (0 - 1)
+              Err { error = _ } -> (0 - 2)
+        """.trimIndent()
+        assertEquals(5L, eval(src))
+    }
+
+    @Test
+    fun `JsonC decode Nat rejects a negative number`() {
+        // Decoding a negative JSON number into Nat MUST fail (Nat >= 0) — and MUST NOT
+        // stack-overflow. `nat::to_int { n = n }` pins the target to Nat with no
+        // annotation. -99 is the "correctly rejected" sentinel.
+        val src = """
+            use std::codec::json::{ FromJson, parse_str }
+            use std::nat
+            match parse_str { s = "-5" } is
+              Ok { val = j } -> match j.from_json {} is
+                  Ok { val = n } -> nat::to_int { n = n }
+                  Err { error = _ } -> (0 - 99)
+              Err { error = _ } -> (0 - 98)
+        """.trimIndent()
+        assertEquals(-99L, eval(src))
+    }
+
+    @Test
+    fun `user newtype without a codec impl declines cleanly (no self-call)`() {
+        // A user newtype does NOT auto-derive a codec — it needs an explicit impl.
+        // Decode synthesis must DECLINE (surfacing a type error) rather than emit a
+        // Tier-3 self-call that stack-overflows. The `use_id` param pins the decode
+        // target to UserId without an annotation; with no impl it must fail to compile.
+        val src = """
+            use std::codec::json::{ FromJson, parse_str }
+            newtype UserId = Int
+            let use_id = { u: UserId } -> 0
+            match parse_str { s = "5" } is
+              Ok { val = j } -> match j.from_json {} is
+                  Ok { val = c } -> use_id { u = c }
+                  Err { error = _ } -> (0 - 1)
+              Err { error = _ } -> (0 - 2)
+        """.trimIndent()
+        assertThrows(Exception::class.java) { eval(src) }
+    }
 }

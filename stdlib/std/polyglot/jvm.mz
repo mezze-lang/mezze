@@ -83,7 +83,7 @@ impl JvmForeign where {
   set_key = { it, of, val } ->
     perform Runtime in Polyglot.write_hash { on = it, key = of, val = val },
   ## Every mapping entry as a Foreign holding a seq of two-element `[key, value]`
-  ## Foreigns — the shape a codec's `decode_map` walks. Yields a JvmForeign.
+  ## Foreigns — the shape a codec's `decode_mapping` walks. Yields a JvmForeign.
   entries = { it } ->
     perform Runtime in Polyglot.hash_entries { on = it },
 
@@ -136,12 +136,12 @@ pub let null_val:   {}            -> JvmForeign = {} ->
   __native_polyglot_box_null  { lang = "jvm" }
 
 ## Build a Java-visible list from already-wrapped Foreign elements — an interop
-## view over the elements, not a copy. Backs a codec's `encode_list`.
+## view over the elements, not a copy. Backs a codec's `encode_sequence`.
 pub let jvm_list: { elems: [JvmForeign] } -> JvmForeign = { elems } ->
   __native_polyglot_box_list { elems = elems, lang = "jvm" }
 
 ## Build a Java-visible mapping from parallel key and value sequences. Companion
-## to `jvm_list`, backing a codec's `encode_map` / `encode_record`. Keys keep the
+## to `jvm_list`, backing a codec's `encode_mapping` / `encode_record`. Keys keep the
 ## order they were given in.
 pub let jvm_dict: { keys: [JvmForeign], vals: [JvmForeign] } -> JvmForeign = { keys, vals } ->
   __native_polyglot_box_dict { keys = keys, vals = vals, lang = "jvm" }

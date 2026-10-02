@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test
  *
  * `std::codec::jvm` shipped only the SCALAR half — `EncodeScalar` /
  * `EncodeOption` and their decode mirrors — so `[1, 2, 3].to_jvm {}` had no
- * `EncodeList` to auto-derive through and failed to compile. That is the same
+ * `EncodeSequence` to auto-derive through and failed to compile. That is the same
  * gap the third-party `mezze-python` / `mezze-js` providers have, and it is the
  * reason a Mezze seq reaches a guest by being PRINTED INTO GUEST SOURCE and
  * parsed back: ~19 us fixed plus ~0.085 us per element, measured in

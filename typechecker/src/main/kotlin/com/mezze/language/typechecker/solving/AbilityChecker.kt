@@ -877,6 +877,15 @@ class AbilityChecker internal constructor(
             return require("${prefix}Scalar")
         }
 
+        // `Nat` is a builtin scalar spelled as a newtype — the emitter routes it to
+        // encode_nat/decode_nat (Scalar), so the capability check must demand Scalar,
+        // not fall through to the newtype no-op below. Keyed on the reserved name, as
+        // the rest of the compiler is; catches both the NewtypeType and TypeApplication
+        // spellings `Nat` can arrive in.
+        val isNat = (dataType is MezzeType.NewtypeType && dataType.name == BuiltinTypes.NAT) ||
+            (dataType is MezzeType.TypeApplication && dataType.constructor == BuiltinTypes.NAT)
+        if (isNat) return require("${prefix}Scalar")
+
         // An Option spelled structurally (`| Some { val }, None |`) needs the same
         // Option hook its `TypeApplication` spelling does, NOT the variant hook —
         // exactly as CodecGenerator now emits for it. The two must agree: when this
@@ -926,16 +935,19 @@ class AbilityChecker internal constructor(
                 // `TypeApplication("Map"|"List"|"Seq"|"Set"|…, args)` rather than
                 // the structural `MezzeType.MapType`/`ListType`/… — the two are
                 // interchangeable identity-wise (see BuiltinTypes.getGenericName).
+                // All linear containers share the one Sequence wire shape; all maps
+                // share the one Mapping wire shape (the ability is keyed on the shape,
+                // the specific container is rebuilt by the walker).
                 BuiltinTypes.LIST, BuiltinTypes.SEQ ->
-                    require("${prefix}List") ?: dataType.args.firstOrNull()?.let {
+                    require("${prefix}Sequence") ?: dataType.args.firstOrNull()?.let {
                         walkTier2Capabilities(it, configType, isEncode, path + "[]")
                     }
                 BuiltinTypes.SET, BuiltinTypes.SORTED_SET ->
-                    require("${prefix}List") ?: dataType.args.firstOrNull()?.let {
+                    require("${prefix}Sequence") ?: dataType.args.firstOrNull()?.let {
                         walkTier2Capabilities(it, configType, isEncode, path + "{}")
                     }
                 BuiltinTypes.MAP, BuiltinTypes.SORTED_MAP ->
-                    require("${prefix}Map") ?: run {
+                    require("${prefix}Mapping") ?: run {
                         val k = dataType.args.getOrNull(0)?.let {
                             walkTier2Capabilities(it, configType, isEncode, path + "key")
                         }
@@ -947,10 +959,12 @@ class AbilityChecker internal constructor(
                 else -> null
             }
 
-            // VarType / NewtypeType / FunctionType / EffectRow — the walker doesn't
-            // emit a Tier-2 call for these directly. NewtypeType falls back to a
-            // Tier-3 recursion at emit time; VarType is filtered by the
-            // containsVarType gate above. Nothing to check.
+            // VarType / FunctionType / EffectRow — the walker doesn't emit a Tier-2
+            // call for these. A non-Nat NewtypeType also reaches here: it is NOT
+            // auto-derivable (isSerializable declines it), so there is nothing to
+            // check — the missing user impl surfaces as a normal unresolved-ability
+            // error. (Nat was already handled as a Scalar above.) VarType is filtered
+            // by the containsVarType gate above.
             else -> null
         }
     }

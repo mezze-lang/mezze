@@ -108,7 +108,7 @@ impl EncodeOption for UrlC having 'out = Str where {
     None -> "",
 }
 
-## No `EncodeRecord`, `EncodeList`, `EncodeMap` for `UrlC` — a single URL
+## No `EncodeRecord`, `EncodeSequence`, `EncodeMapping` for `UrlC` — a single URL
 ## parameter value can't carry structure. Types containing those shapes
 ## will fail auto-derivation at the offending field path.
 

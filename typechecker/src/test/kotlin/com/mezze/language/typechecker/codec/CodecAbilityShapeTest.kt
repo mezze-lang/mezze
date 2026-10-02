@@ -186,34 +186,34 @@ class CodecAbilityShapeTest {
     }
 
     @Test
-    fun `Tier 2 EncodeList is callable directly`() {
+    fun `Tier 2 EncodeSequence is callable directly`() {
         checkPasses(
             """
-            use std::codec::core::{ EncodeList, CodecCtx }
+            use std::codec::core::{ EncodeSequence, CodecCtx }
             use std::codec::json::{ JsonC, Json }
 
-            pub let call_encode_list
+            pub let call_encode_sequence
               : { c: JsonC, elems: [Json], ctx: CodecCtx }
               -> Json
-              = { c, elems, ctx } -> c.encode_list { elems = elems, ctx = ctx }
+              = { c, elems, ctx } -> c.encode_sequence { elems = elems, ctx = ctx }
             """.trimIndent(),
-            "EncodeList.encode_list callable",
+            "EncodeSequence.encode_sequence callable",
         )
     }
 
     @Test
-    fun `Tier 2 EncodeMap is callable directly`() {
+    fun `Tier 2 EncodeMapping is callable directly`() {
         checkPasses(
             """
-            use std::codec::core::{ EncodeMap, CodecCtx }
+            use std::codec::core::{ EncodeMapping, CodecCtx }
             use std::codec::json::{ JsonC, Json }
 
-            pub let call_encode_map
+            pub let call_encode_mapping
               : { c: JsonC, entries: [{ key: Json, value: Json }], ctx: CodecCtx }
               -> Json
-              = { c, entries, ctx } -> c.encode_map { entries = entries, ctx = ctx }
+              = { c, entries, ctx } -> c.encode_mapping { entries = entries, ctx = ctx }
             """.trimIndent(),
-            "EncodeMap.encode_map callable",
+            "EncodeMapping.encode_mapping callable",
         )
     }
 
@@ -287,34 +287,34 @@ class CodecAbilityShapeTest {
     }
 
     @Test
-    fun `Tier 2 DecodeList is callable`() {
+    fun `Tier 2 DecodeSequence is callable`() {
         checkPasses(
             """
-            use std::codec::core::{ DecodeList, CodecCtx, DecodeError }
+            use std::codec::core::{ DecodeSequence, CodecCtx, DecodeError }
             use std::codec::json::{ JsonC, Json }
 
-            pub let call_decode_list
+            pub let call_decode_sequence
               : { c: JsonC, val: Json, ctx: CodecCtx }
               -> Result [Json] DecodeError
-              = { c, val, ctx } -> c.decode_list { val = val, ctx = ctx }
+              = { c, val, ctx } -> c.decode_sequence { val = val, ctx = ctx }
             """.trimIndent(),
-            "DecodeList.decode_list callable",
+            "DecodeSequence.decode_sequence callable",
         )
     }
 
     @Test
-    fun `Tier 2 DecodeMap is callable`() {
+    fun `Tier 2 DecodeMapping is callable`() {
         checkPasses(
             """
-            use std::codec::core::{ DecodeMap, CodecCtx, DecodeError }
+            use std::codec::core::{ DecodeMapping, CodecCtx, DecodeError }
             use std::codec::json::{ JsonC, Json }
 
-            pub let call_decode_map
+            pub let call_decode_mapping
               : { c: JsonC, val: Json, ctx: CodecCtx }
               -> Result [{ key: Json, value: Json }] DecodeError
-              = { c, val, ctx } -> c.decode_map { val = val, ctx = ctx }
+              = { c, val, ctx } -> c.decode_mapping { val = val, ctx = ctx }
             """.trimIndent(),
-            "DecodeMap.decode_map callable",
+            "DecodeMapping.decode_mapping callable",
         )
     }
 
@@ -767,7 +767,7 @@ class CodecAbilityShapeTest {
             "list + UrlC must be rejected at typecheck",
         )
         assertTrue(
-            msg.contains("EncodeList", ignoreCase = true) || msg.contains("does not implement"),
+            msg.contains("EncodeSequence", ignoreCase = true) || msg.contains("does not implement"),
             "error must name the missing Tier-2 or the containing ability: $msg",
         )
     }
@@ -786,7 +786,7 @@ class CodecAbilityShapeTest {
             "map + UrlC must be rejected at typecheck",
         )
         assertTrue(
-            msg.contains("EncodeMap", ignoreCase = true) || msg.contains("does not implement"),
+            msg.contains("EncodeMapping", ignoreCase = true) || msg.contains("does not implement"),
             "error must name the missing Tier-2 or the containing ability: $msg",
         )
     }

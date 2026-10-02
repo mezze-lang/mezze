@@ -1,0 +1,12 @@
+[package]
+name = "bench_seq_reconstruct"
+version = "0.1.0"
+
+[[app]]
+name = "bench_seq_reconstruct"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
