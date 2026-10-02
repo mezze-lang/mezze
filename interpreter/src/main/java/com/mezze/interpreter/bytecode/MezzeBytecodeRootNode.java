@@ -578,10 +578,22 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /**
      * Pop two longs, push their overflow-checked sum.
      *
-     * <p>Used to lower {@code InlineBinaryOpIR} with op = ADD when
-     * both operands are typed as {@code Int}. Overflow throws
-     * {@code ArithmeticException} — matching the AST
-     * {@code DirectAddNode.mulLongs} specialization.
+     * <p>NOT the production path, and the javadoc here was wrong about that in two
+     * ways worth recording. It claimed to match "{@code DirectAddNode.mulLongs}" — a
+     * method that does not exist in that class, the name belonging to
+     * {@code DirectMultiplyNode} — and claimed overflow threw, when
+     * {@code DirectAddNode} at the time silently WIDENED to a double. `a + b` is
+     * lowered through the {@code DirectAdd} operation proxy; {@code beginAddLong}
+     * appears only in {@code interpreter/src/test}.
+     *
+     * <p>It now raises the same guest-level overflow error the inline node and the
+     * primitive natives do. A raw {@code ArithmeticException} is a HOST error:
+     * Truffle does not classify it as a guest failure, so it surfaces to a user as
+     * an internal error with a JVM stack trace and the debugger's exception
+     * breakpoint never fires. Kept consistent even while unused, because the
+     * invariant {@code PrimitiveNatives.intDivide} states is that every route to the
+     * same operation fails the same way — and a route that is dead today is a trap
+     * for whoever revives it.
      */
     @Operation
     public static final class AddLong {
@@ -596,7 +608,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         @ForceQuickening
         public static long doLong(long left, long right) {
-            return Math.addExact(left, right);
+            try {
+                return Math.addExact(left, right);
+            } catch (ArithmeticException overflow) {
+                throw com.mezze.interpreter.values.MezzeGuestException
+                    .arithmeticOverflow("Addition", left, right);
+            }
         }
     }
 

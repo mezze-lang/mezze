@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.inline;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.values.MezzeGuestException;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
@@ -22,15 +23,21 @@ import com.oracle.truffle.api.bytecode.OperationProxy;
 @OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectNegateNode extends MezzeNode {
 
-    @Specialization(rewriteOn = ArithmeticException.class)
+    /**
+     * Overflow THROWS, it does not widen. See `DirectAddNode` for the full reasoning
+     * and for why this is a try/catch rather than a throwing `replaces` fallback.
+     *
+     * Only one input can reach it: `Int`'s minimum has no positive counterpart in a
+     * 64-bit signed range.
+     */
+    @Specialization
     @ForceQuickening
     public static long negateLong(long value) {
-        return Math.negateExact(value);
-    }
-
-    @Specialization(replaces = "negateLong")
-    public static double negateLongOverflow(long value) {
-        return -(double) value;
+        try {
+            return Math.negateExact(value);
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.arithmeticOverflow("Negation", value);
+        }
     }
 
     @Specialization

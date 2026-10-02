@@ -37,16 +37,34 @@ public final class PrimitiveNatives {
     // Note: The specialized Truffle nodes (IntAddNode, etc.) with rewriteOn
     // are optimized for AST-embedded use, not uncached execution.
     // For native dispatch, direct implementations are equally efficient.
+    // Guarded for the reason the intDivide comment below states: `a + b` reaches the
+    // primitive by four routes, and the same expression must fail the same way
+    // whichever one the compiler picks. These used to WRAP silently while the inline
+    // node widened to Double — so `+` meant two different things depending on a
+    // compilation decision the author cannot see. Both are now the guest-level
+    // overflow error. See S-6.
     public static long intAdd(long l, long r) {
-        return l + r;
+        try {
+            return Math.addExact(l, r);
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.arithmeticOverflow("Addition", l, r);
+        }
     }
 
     public static long intSubtract(long l, long r) {
-        return l - r;
+        try {
+            return Math.subtractExact(l, r);
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.arithmeticOverflow("Subtraction", l, r);
+        }
     }
 
     public static long intMultiply(long l, long r) {
-        return l * r;
+        try {
+            return Math.multiplyExact(l, r);
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.arithmeticOverflow("Multiplication", l, r);
+        }
     }
 
     // Guarded here, not just in DirectDivideNode/DirectModuloNode: `a / b`

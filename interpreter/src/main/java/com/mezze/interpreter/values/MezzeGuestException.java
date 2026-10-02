@@ -45,6 +45,44 @@ public final class MezzeGuestException extends AbstractTruffleException {
         return new MezzeGuestException(operation + " by zero");
     }
 
+    /**
+     * The one spelling of "this arithmetic does not fit in an `Int`".
+     *
+     * `Int` IS a 64-bit signed long, so a result outside that range is not a
+     * representable `Int` — and the previous answer, widening to a `double`, made a
+     * function declared `-> Int` return a Double. That is unsound rather than
+     * imprecise: the Double then flowed through comparisons unnoticed and only blew
+     * up where something cast it back, so the failure surfaced at an unrelated
+     * place or not at all. See S-6.
+     *
+     * Fatal and uncatchable, exactly as `/ 0` is. The two are the same kind of
+     * situation — an operation with no answer in the type — so they fail the same
+     * way, and a program cannot tell them apart by how they fail.
+     *
+     * The operands are in the message because an overflow you cannot see the inputs
+     * of tells you almost nothing about which computation went wrong.
+     *
+     * <p>{@code @TruffleBoundary} for the same reason as [dividingByZero]: the
+     * callers are partially-evaluated typed {@code (long, long)} ops, and the string
+     * concatenation here is on native-image's runtime-compilation blocklist.
+     *
+     * @param operation the failing operation, capitalised — "Addition", "Multiplication"
+     */
+    @TruffleBoundary
+    public static MezzeGuestException arithmeticOverflow(String operation, long left, long right) {
+        return new MezzeGuestException(
+            operation + " overflowed Int: " + left + " and " + right
+                + " (Int is 64-bit signed, so the result has no representable value)");
+    }
+
+    /** Unary overflow — only `negate` of `Int`'s minimum, which has no positive. */
+    @TruffleBoundary
+    public static MezzeGuestException arithmeticOverflow(String operation, long operand) {
+        return new MezzeGuestException(
+            operation + " overflowed Int: " + operand
+                + " (Int is 64-bit signed, so the result has no representable value)");
+    }
+
     public MezzeGuestException(String message, Node location) {
         super(message, location);
     }
