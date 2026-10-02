@@ -46,7 +46,7 @@ object SampleGen {
 
     /** Imports the emitted source needs. The command prepends these. */
     val IMPORTS: Set<String> = setOf(
-        "use std::effects::sample::{ with_seed, list_of, choose }",
+        "use std::effects::sample::{ with_seed, list_of, choose, size, resize }",
         "use std::abilities::arbitrary::{ Arbitrary }",
     )
 
@@ -58,13 +58,43 @@ object SampleGen {
      * dispatch default and stops here — but the bound is cheap and a generator that
      * recursed forever at compile time would be a worse failure than a missing case.
      */
-    fun of(type: MezzeType, depth: Int = 0): String {
+    fun of(
+        type: MezzeType,
+        depth: Int = 0,
+        /**
+         * Recursive variants met on the way, by display name.
+         *
+         * Collected rather than expanded because a recursive type cannot be
+         * expanded: `Node`'s payload is `TypeApplication(Tree)`, deliberately
+         * unexpanded, and chasing it would not terminate. Each one becomes a named
+         * top-level helper that calls ITSELF, which is also why the helper cannot
+         * live in the expression — a `do`-block `let` is not recursive.
+         */
+        recursive: MutableMap<String, MezzeType.VariantType> = mutableMapOf(),
+    ): String {
         if (depth > MAX_DEPTH) return DISPATCH
+
+        // A recursive reference INSIDE a helper being generated: call the helper.
+        // Reached before anything else, since the name is all there is to go on.
+        if (type is MezzeType.TypeApplication && type.constructor in recursive) {
+            return "${helperName(type.constructor)} {}"
+        }
+
+        // A recursive VARIANT: register it and call its helper. Without this the
+        // field fell through to dispatch and failed, because a recursive variant
+        // does not derive — bounding it needs the `Sample` size budget, which a
+        // DERIVED impl cannot name (it is written into the user's module, which has
+        // no reason to import sampling). This command injects its own imports, so
+        // here it can. See S-2's recursive-variant refusal.
+        recursiveVariantName(type)?.let { name ->
+            recursive[name] = type as MezzeType.VariantType
+            return "${helperName(name)} {}"
+        }
 
         BuiltinTypes.sequenceElementType(type)?.let { element ->
             // The element draw is at a CONCRETE type, which is the whole point:
             // dispatch works there, where it cannot at `[T]` itself.
-            return "list_of { g = {} -> ${of(element, depth + 1)} }"
+            return "list_of { g = {} -> ${of(element, depth + 1, recursive)} }"
         }
 
         if (type is MezzeType.TypeApplication) {
@@ -76,15 +106,15 @@ object SampleGen {
                     // the case code forgets is hit, rare enough that a record of five
                     // Options is not usually all empty.
                     return "if choose { bound = 10 } == 0 then None " +
-                        "else Some { val = ${of(inner, depth + 1)} }"
+                        "else Some { val = ${of(inner, depth + 1, recursive)} }"
                 }
                 "Result" -> {
                     if (type.args.size < 2) return DISPATCH
                     // Weighted toward `Ok`, but `Err` often enough to matter — the
                     // error path is the one that goes untested.
                     return "if choose { bound = 3 } == 0 " +
-                        "then Err { error = ${of(type.args[1], depth + 1)} } " +
-                        "else Ok { val = ${of(type.args[0], depth + 1)} }"
+                        "then Err { error = ${of(type.args[1], depth + 1, recursive)} } " +
+                        "else Ok { val = ${of(type.args[0], depth + 1, recursive)} }"
                 }
             }
         }
@@ -96,7 +126,7 @@ object SampleGen {
         if (type is MezzeType.RecordType && type.identity !is com.mezze.language.ast.TypeIdentity.Declared) {
             if (type.fields.isEmpty()) return "{}"
             return type.fields.entries.joinToString(", ", prefix = "{ ", postfix = " }") { (name, fieldType) ->
-                "$name = ${of(fieldType, depth + 1)}"
+                "$name = ${of(fieldType, depth + 1, recursive)}"
             }
         }
 
@@ -121,18 +151,106 @@ object SampleGen {
      * which the command prints along with the expression itself — so a failure names
      * both the type and what was written, rather than being silent.
      */
+    /** Bindings, the record built from them, and any generator declarations needed. */
+    data class Plan(val decls: List<String>, val lets: String, val record: String)
+
     fun bindFields(
         fields: Map<String, MezzeType>,
         argsName: String,
         render: (MezzeType) -> String,
-    ): Pair<String, String> {
+    ): Plan {
+        val recursive = mutableMapOf<String, MezzeType.VariantType>()
         val lets = fields.entries.joinToString("\n") { (name, type) ->
-            "              let ${argsName}_$name: ${render(type)} = ${of(type)}"
+            "              let ${argsName}_$name: ${render(type)} = ${of(type, 0, recursive)}"
         }
         val record = fields.keys.joinToString(", ", prefix = "{ ", postfix = " }") { name ->
             "$name = ${argsName}_$name"
         }
-        return lets to record
+        // Declared AFTER the walk, since the walk is what discovers them. A helper
+        // may itself mention another recursive variant, so the map can grow while
+        // being drained.
+        val decls = mutableListOf<String>()
+        val done = mutableSetOf<String>()
+        while (true) {
+            val next = recursive.keys.firstOrNull { it !in done } ?: break
+            done.add(next)
+            helperDecl(next, recursive.getValue(next), recursive)?.let { decls.add(it) }
+        }
+        return Plan(decls, lets, record)
+    }
+
+    private fun recursiveVariantName(type: MezzeType): String? {
+        val variant = type as? MezzeType.VariantType ?: return null
+        val name = (variant.identity as? com.mezze.language.ast.TypeIdentity.Declared)
+            ?.displayName ?: return null
+        val mentionsSelf = variant.constructors.values.any { payload ->
+            payload != null && mentions(payload, name)
+        }
+        return if (mentionsSelf) name else null
+    }
+
+    private fun mentions(type: MezzeType, name: String): Boolean = when (type) {
+        is MezzeType.TypeApplication -> type.constructor == name || type.args.any { mentions(it, name) }
+        is MezzeType.RecordType -> type.fields.values.any { mentions(it, name) }
+        is MezzeType.VariantType ->
+            (type.identity as? com.mezze.language.ast.TypeIdentity.Declared)?.displayName == name ||
+                type.constructors.values.any { it != null && mentions(it, name) }
+        else -> false
+    }
+
+    /** Not a name a user could collide with; it is spliced into their module. */
+    private fun helperName(typeName: String) = "__mez_sample_gen_$typeName"
+
+    /**
+     * A top-level generator for each recursive variant, bounded by the size budget.
+     *
+     * The shape:
+     *
+     *     let __mez_sample_gen_Tree: {} -> Tree <Sample> = {} ->
+     *       if size {} == 0n
+     *         then <pick among the NON-recursive constructors>
+     *         else resize { n = size {} / 2n, call = {} -> <pick among ALL> }
+     *
+     * At budget zero only a base case is reachable, so it terminates. HALVED rather
+     * than decremented because `Nat - Nat` is `Int` in this language and could go
+     * negative, which would need the partial `nat::from_int`; `Nat / Nat` is total
+     * and `1n / 2n` is `0n`. Halving also bounds depth logarithmically, which is what
+     * a sample meant to be READ wants — a linear budget on a branching type produces
+     * a tree nobody reads.
+     *
+     * A variant whose EVERY constructor is recursive has no base case and cannot be
+     * generated at all; it falls back to dispatch, which reports an ordinary
+     * missing-impl diagnostic naming the type.
+     */
+    private fun helperDecl(
+        name: String,
+        variant: MezzeType.VariantType,
+        recursive: MutableMap<String, MezzeType.VariantType>,
+    ): String? {
+        val ctors = variant.constructors.entries.toList()
+        val base = ctors.filterNot { (_, payload) -> payload != null && mentions(payload, name) }
+        if (base.isEmpty()) return null
+
+        fun construct(ctor: Map.Entry<String, MezzeType?>): String {
+            val payload = ctor.value ?: return ctor.key
+            return "${ctor.key} ${of(payload, 1, recursive)}"
+        }
+
+        fun pick(among: List<Map.Entry<String, MezzeType?>>): String {
+            if (among.size == 1) return construct(among.first())
+            // An if-ladder over ONE draw. A fresh draw per arm would consume a
+            // number at every comparison and skew hard toward the later arms.
+            val ladder = among.dropLast(1).foldRightIndexed("") { i, ctor, acc ->
+                "if __pick == $i then ${construct(ctor)} else " + acc
+            }
+            return "do\n    let __pick = choose { bound = ${among.size} }\n    " +
+                ladder + construct(among.last())
+        }
+
+        return "let ${helperName(name)}: {} -> $name <Sample> = {} ->\n" +
+            "  if size {} == 0n\n" +
+            "    then ${pick(base)}\n" +
+            "    else resize { n = size {} / 2n, call = {} -> ${pick(ctors)} }"
     }
 
     private const val DISPATCH = "Arbitrary.arbitrary {}"

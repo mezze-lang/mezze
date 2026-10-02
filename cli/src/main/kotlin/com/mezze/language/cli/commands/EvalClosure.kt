@@ -103,6 +103,18 @@ object EvalClosure {
          * harmless, so nothing has to diff them.
          */
         extraImports: Set<String> = emptySet(),
+        /**
+         * Declarations the expression needs, appended after the module's own and
+         * before the entry binding.
+         *
+         * Distinct from [extraImports] because position matters: a `use` belongs at
+         * the top, a `let` cannot go there. And distinct from putting them in the
+         * EXPRESSION because a top-level binding may refer to itself — which a
+         * `do`-block `let` cannot — so a RECURSIVE generated helper has nowhere else
+         * to live. `mez sample` needs one to generate a recursive variant: the
+         * bound-and-halve shape has to call itself.
+         */
+        extraDecls: List<String> = emptyList(),
     ): Result {
         if (expression.isBlank()) return Result.Failed("nothing to evaluate")
 
@@ -123,7 +135,9 @@ object EvalClosure {
         // A newline before it in case the file has no trailing one; otherwise the
         // binding joins the last line and an error points at source the user wrote.
         val prelude = if (extraImports.isEmpty()) "" else extraImports.joinToString("\n", postfix = "\n\n")
-        val source = prelude + moduleSource.trimEnd() + "\n\nlet $BINDING = {} -> $expression\n"
+        val declText = if (extraDecls.isEmpty()) "" else extraDecls.joinToString("\n\n", postfix = "\n\n")
+        val source = prelude + moduleSource.trimEnd() + "\n\n" + declText +
+            "let $BINDING = {} -> $expression\n"
 
         val parser = MezzeParser()
         val parsed = parser.parseWithRecovery(source, file = moduleFile.name)

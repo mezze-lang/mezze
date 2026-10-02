@@ -77,7 +77,9 @@ class SampleCommand {
 
         val expression = buildExpression(target, seed, count)
 
-        when (val compiled = EvalClosure.compile(currentDir, moduleFile, expression, EXTRA_IMPORTS)) {
+        when (val compiled = EvalClosure.compile(
+            currentDir, moduleFile, expression, EXTRA_IMPORTS, buildDecls(target),
+        )) {
             is EvalClosure.Result.Failed -> {
                 // The diagnostic is about an expression THIS command wrote, so it
                 // names a type the user never mentioned. Saying where it came from
@@ -209,6 +211,7 @@ class SampleCommand {
     ): List<RowOutcome> = (0 until count).map { i ->
         when (val compiled = EvalClosure.compile(
             currentDir, moduleFile, buildRowExpression(target, seed, i), SampleGen.IMPORTS,
+            buildDecls(target),
         )) {
             is EvalClosure.Result.Failed -> RowOutcome.Crashed("did not compile: ${compiled.message.lines().first()}")
             is EvalClosure.Result.Compiled -> {
@@ -255,7 +258,7 @@ class SampleCommand {
         count: Int = 1,
     ): String {
         if (target.fields.isEmpty()) return noArgRow(target.name)
-        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i) }
+        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i).lets }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
         return "do\n$rows\n              { rows = [$collected] }"
     }
@@ -273,7 +276,7 @@ class SampleCommand {
         index: Int,
     ): String {
         if (target.fields.isEmpty()) return noArgRow(target.name)
-        return "do\n${rowBinding(target, seed + index, 0)}\n              { rows = [${ROW}_0] }"
+        return "do\n${rowBinding(target, seed + index, 0).lets}\n              { rows = [${ROW}_0] }"
     }
 
     /**
@@ -284,36 +287,34 @@ class SampleCommand {
     private fun noArgRow(name: String) = "{ rows = [{ args = {}, result = $name {} }] }"
 
     /** `let __row_<i> = with_seed { … }` — the row's draws and its call. */
-    private fun rowBinding(target: SampleTarget.Result.Ready, rowSeed: Int, i: Int): String {
+    private fun rowBinding(target: SampleTarget.Result.Ready, rowSeed: Int, i: Int): SampleGen.Plan {
         val args = "${ARGS}_$i"
         val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
         // Generated FROM the parameter's types, with one ANNOTATED binding per field.
         // The annotation is what pins the draws — see [SampleGen.bindFields] — and is
-        // what makes a container or an Option argument work at all.
-        val (lets, record) = SampleGen.bindFields(target.fields, args) {
+        // what makes a container, an Option or a recursive variant work at all.
+        val plan = SampleGen.bindFields(target.fields, args) {
             com.mezze.language.ast.prettyPrintType(it)
         }
-        return "              let ${ROW}_$i = with_seed { seed = $rowSeed, call = {} -> do\n" +
-            lets + "\n" +
-            "                let $args = $record\n" +
+        val text = "              let ${ROW}_$i = with_seed { seed = $rowSeed, call = {} -> do\n" +
+            plan.lets + "\n" +
+            "                let $args = ${plan.record}\n" +
             "                { args = $args, result = ${target.name} { $forwarded } }\n" +
             "              }"
+        return plan.copy(lets = text)
     }
 
     /**
-     * One row per draw, as a table.
+     * Top-level declarations the generated expression needs, if any.
      *
-     * Columns come from the parameter's field names, so the header is the function's
-     * own signature and a reader does not have to map positions back to names. Widths
-     * are measured over the actual values rather than fixed, because a column of
-     * `-9223372036854775808` and a column of `True` want very different space.
-     *
-     * A CRASHED row still occupies a line, carrying its reason where the result would
-     * be. The alternative — dropping it — would show a table with silently fewer rows
-     * than asked for, which reads as a smaller sample rather than as a failure. Its
-     * arguments are unknown because the crash happened while producing them or while
-     * the function ran on them, so there is nothing honest to print in those columns.
+     * Only a recursive variant produces one — it needs a helper that calls ITSELF,
+     * and a `do`-block `let` is not recursive, so it cannot live in the expression.
+     * Identical across rows (it depends on the TYPE, not the seed), hence distinct.
      */
+    internal fun buildDecls(target: SampleTarget.Result.Ready): List<String> =
+        if (target.fields.isEmpty()) emptyList()
+        else rowBinding(target, 0, 0).decls.distinct()
+
     private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
         val headers = target.fieldNames + "→ result"
         val body = rows.map { outcome ->

@@ -218,6 +218,82 @@ class SampleExpressionTest {
         assertTrue("quantity = ${ARGS}_0.quantity" in callSite, "not forwarded:\n$out")
     }
 
+    /**
+     * A RECURSIVE variant gets a top-level helper that calls itself, bounded by the
+     * size budget.
+     *
+     * S-2 refused these outright, and the reason was never the generation — the
+     * bound-and-halve shape was measured to work and terminate. It was that a DERIVED
+     * impl cannot name `Sample`: it is written into the user's module, which has no
+     * reason to import sampling. This command injects its own imports, so it can.
+     *
+     * The helper has to be a top-level DECLARATION rather than part of the
+     * expression, because it refers to itself and a `do`-block `let` is not
+     * recursive. Hence `EvalClosure`'s `extraDecls`.
+     *
+     * Verified live: `tree_size`, over `| Leaf { v: Int }, Node { l: Tree, r: Tree } |`,
+     * produces both constructors and terminates — trees of 1 to 7 leaves.
+     */
+    @Test
+    fun `a recursive variant gets a bounded self-calling helper`() {
+        val tree = MezzeType.VariantType(
+            constructors = mapOf(
+                "Leaf" to MezzeType.RecordType(mapOf("v" to MezzeType.IntType)),
+                "Node" to MezzeType.RecordType(mapOf(
+                    "l" to MezzeType.TypeApplication("Tree", emptyList()),
+                    "r" to MezzeType.TypeApplication("Tree", emptyList()),
+                )),
+            ),
+            identity = com.mezze.language.ast.TypeIdentity.Declared(
+                hash = com.mezze.language.typedast.Hash("0".repeat(128)),
+                displayName = "Tree",
+            ),
+        )
+        val target = SampleTarget.Result.Ready("tree_size", mapOf("t" to tree))
+
+        val decls = command.buildDecls(target)
+        assertEquals(1, decls.size, "expected one helper:\n$decls")
+        val helper = decls.single()
+
+        // Bounded: at zero only a base case is reachable, which is what terminates it.
+        assertTrue("if size {} == 0n" in helper, "no budget check:\n$helper")
+        assertTrue("resize { n = size {} / 2n" in helper, "budget not halved:\n$helper")
+        // HALVED, not decremented: `Nat - Nat` is `Int` here and could go negative,
+        // needing the partial `nat::from_int`; `Nat / Nat` is total.
+        assertTrue("- 1n" !in helper, "budget decremented instead of halved:\n$helper")
+        // Self-calling, which is why it cannot live in the expression.
+        assertTrue(
+            Regex("__mez_sample_gen_Tree \\{\\}").findAll(helper).count() >= 2,
+            "the helper does not recurse:\n$helper",
+        )
+
+        // And the field draws THROUGH it rather than dispatching.
+        val out = command.buildExpression(target, seed = 7)
+        assertTrue("__mez_sample_gen_Tree {}" in out, "field does not use the helper:\n$out")
+        assertTrue("Arbitrary.arbitrary" !in out, "field still dispatches:\n$out")
+    }
+
+    /**
+     * A variant with NO base case cannot be generated — every constructor recurses,
+     * so there is nothing to stop at. It falls back to dispatch, which reports an
+     * ordinary missing-impl diagnostic naming the type, rather than emitting a
+     * helper that cannot terminate.
+     */
+    @Test
+    fun `a variant with no base case gets no helper`() {
+        val endless = MezzeType.VariantType(
+            constructors = mapOf(
+                "Wrap" to MezzeType.RecordType(mapOf("w" to MezzeType.TypeApplication("Endless", emptyList()))),
+            ),
+            identity = com.mezze.language.ast.TypeIdentity.Declared(
+                hash = com.mezze.language.typedast.Hash("1".repeat(128)),
+                displayName = "Endless",
+            ),
+        )
+        val target = SampleTarget.Result.Ready("f", mapOf("e" to endless))
+        assertTrue(command.buildDecls(target).isEmpty(), "emitted a non-terminating helper")
+    }
+
     private companion object {
         /** Mirrors `SampleCommand.ARGS`, which is private to it. */
         const val ARGS = "__mez_sample_args__"
