@@ -56,6 +56,11 @@ class SampleCommand {
         // that the number printed is provably the number used — a runtime-chosen
         // seed would have to be reported back and could drift from what ran.
         val seed = intFlag(flags, "--seed") ?: freshSeed()
+        // One row per draw. More than one is the common case for reading a function:
+        // a single sample shows what it returned, several show what it DOES — which
+        // arguments matter, where the output turns over, whether an edge case breaks
+        // it. The seed covers the whole batch, so `--seed` reproduces every row.
+        val count = (intFlag(flags, "--count") ?: 1).coerceIn(1, 100)
         val depth = intFlag(flags, "--depth") ?: WireProtocol.DEFAULT_EVAL_MAX_DEPTH
         val items = intFlag(flags, "--items") ?: WireProtocol.DEFAULT_EVAL_MAX_ITEMS
         val timeoutMs = intFlag(flags, "--timeout")?.toLong()?.times(1_000) ?: 0L
@@ -70,7 +75,7 @@ class SampleCommand {
             is SampleTarget.Result.Ready -> t
         }
 
-        val expression = buildExpression(target, seed)
+        val expression = buildExpression(target, seed, count)
 
         when (val compiled = EvalClosure.compile(currentDir, moduleFile, expression, EXTRA_IMPORTS)) {
             is EvalClosure.Result.Failed -> {
@@ -130,7 +135,7 @@ class SampleCommand {
                     kotlin.system.exitProcess(1)
                 }
 
-                if (json) println(sampleJson(name, seed, value)) else printSample(name, seed, value)
+                if (json) println(sampleJson(name, seed, value)) else printSample(target, seed, value)
             }
         }
     }
@@ -148,63 +153,130 @@ class SampleCommand {
      * draw, so wrapping it would declare a `<Sample>` the body never performs and be
      * rejected for exactly that.
      */
-    internal fun buildExpression(target: SampleTarget.Result.Ready, seed: Int): String {
+    internal fun buildExpression(
+        target: SampleTarget.Result.Ready,
+        seed: Int,
+        count: Int = 1,
+    ): String {
         val name = target.name
+
+        // A zero-argument function has one answer, so [count] is meaningless for it
+        // and there is nothing to draw — hence no `with_seed`, which would declare a
+        // `<Sample>` the body never performs and be rejected for exactly that.
         if (target.fieldNames.isEmpty()) {
-            return "{ args = {}, result = $name {} }"
+            return "{ rows = [{ args = {}, result = $name {} }] }"
         }
-        val generated = target.fieldNames.joinToString(", ") { "$it = Arbitrary.arbitrary {}" }
-        val forwarded = target.fieldNames.joinToString(", ") { "$it = $ARGS.$it" }
+
+        // Rows are built by NAME (`__row_0`, `__row_1`) rather than by a loop, and
+        // that is forced rather than chosen: a loop would need a sequence combinator
+        // over `<Sample>` in the user's module scope, which it has no reason to
+        // import. Unrolling needs nothing beyond what sampling already injects.
+        //
+        // All rows draw inside ONE `with_seed`, so the seed reproduces the whole
+        // batch — and consecutive rows differ, where a seeded scope per row would
+        // reset the stream and print the same values N times.
+        val rows = (0 until count).joinToString("\n") { i ->
+            val args = "${ARGS}_$i"
+            val generated = target.fieldNames.joinToString(", ") { "$it = Arbitrary.arbitrary {}" }
+            val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
+            "              let $args = { $generated }"
+                .plus("\n              let ${ROW}_$i = { args = $args, result = $name { $forwarded } }")
+        }
+        val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
         return """
             with_seed { seed = $seed, call = {} -> do
-              let $ARGS = { $generated }
-              { args = $ARGS, result = $name { $forwarded } }
+$rows
+              { rows = [$collected] }
             }
         """.trimIndent()
     }
 
-    private fun printSample(name: String, seed: Int, value: WireValue) {
-        val fields = (value as? WireValue.Record)?.fields
-        val argsValue = fields?.firstOrNull { it.name == "args" }?.value
-        val resultValue = fields?.firstOrNull { it.name == "result" }?.value
+    /**
+     * One row per draw, as a table.
+     *
+     * Columns come from the parameter's field names, so the header is the function's
+     * own signature and a reader does not have to map positions back to names. Widths
+     * are measured over the actual values rather than fixed, because a column of
+     * `-9223372036854775808` and a column of `True` want very different space.
+     *
+     * A value containing a newline would break the grid, so rows are escaped — a
+     * generated `Str` can be `"\n"`, which is the whole point of having it in the
+     * table.
+     */
+    private fun printSample(target: SampleTarget.Result.Ready, seed: Int, value: WireValue) {
+        val rows = (value as? WireValue.Record)
+            ?.fields?.firstOrNull { it.name == "rows" }?.value
+            ?.let { it as? WireValue.Sequence }
+            ?.items
+            ?.mapNotNull { row -> (row as? WireValue.Record)?.fields }
 
-        if (argsValue == null || resultValue == null) {
+        if (rows.isNullOrEmpty()) {
             // The shape is this command's own doing, so a mismatch is a defect here
-            // rather than anything the user can act on — print the tree and say so.
+            // rather than anything the user can act on.
             println(value.toText())
             System.err.println(
-                "${Glyphs.CROSS} sample expected an { args, result } record back; " +
-                    "this is a defect in sample, not in `$name`"
+                "${Glyphs.CROSS} sample expected a { rows = [{ args, result }] } record back; " +
+                    "this is a defect in sample, not in `${target.name}`"
             )
             return
         }
 
-        println("$name ${argsValue.toText()}")
-        println("  → ${resultValue.toText()}")
+        val headers = target.fieldNames + "→ result"
+        val body = rows.map { fields ->
+            val args = (fields.firstOrNull { it.name == "args" }?.value as? WireValue.Record)?.fields
+            val cells = target.fieldNames.map { f ->
+                oneLine(args?.firstOrNull { it.name == f }?.value?.toText() ?: "?")
+            }
+            cells + oneLine(fields.firstOrNull { it.name == "result" }?.value?.toText() ?: "?")
+        }
+
+        val widths = headers.indices.map { c ->
+            maxOf(headers[c].length, body.maxOf { it[c].length })
+        }
+        fun line(cells: List<String>) =
+            cells.indices.joinToString("  ") { cells[it].padEnd(widths[it]) }.trimEnd()
+
+        println(line(headers))
+        println(widths.joinToString("  ") { "-".repeat(it) })
+        for (row in body) println(line(row))
         println()
-        println("  seed ${seed} — rerun with: mez sample $name --seed=$seed")
+        println("  seed $seed — rerun with: mez sample ${target.name} --seed=$seed")
     }
 
+    /** A cell cannot span lines; a generated `"\n"` would otherwise break the grid. */
+    private fun oneLine(s: String): String =
+        s.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
     /**
-     * The sample as data: the TREE for both args and result, so a consumer can read
-     * a field without parsing Mezze's rendering. `text` sits alongside each for a
-     * consumer that only wants to display it.
+     * The sample as data: one entry per row, each carrying the TREE for its args and
+     * result so a consumer can read a field without parsing Mezze's rendering.
+     * `text` sits alongside for a consumer that only wants to display it.
      *
-     * `seed` is the field that makes this worth consuming programmatically — it is
-     * what lets a caller re-request the exact same sample.
+     * `seed` is what makes this worth consuming programmatically — it is what lets a
+     * caller re-request this exact batch.
      */
     private fun sampleJson(name: String, seed: Int, value: WireValue): String {
-        val fields = (value as? WireValue.Record)?.fields
-        fun part(label: String): String {
-            val v = fields?.firstOrNull { it.name == label }?.value ?: return "null"
+        val rows = (value as? WireValue.Record)
+            ?.fields?.firstOrNull { it.name == "rows" }?.value
+            ?.let { it as? WireValue.Sequence }
+            ?.items
+            ?.mapNotNull { row -> (row as? WireValue.Record)?.fields }
+            ?: emptyList()
+
+        fun part(fields: List<WireValue.Field>, label: String): String {
+            val v = fields.firstOrNull { it.name == label }?.value ?: return "null"
             return "{\"text\":${WireValueJson.quote(v.toText())},\"value\":${WireValueJson.tree(v)}}"
         }
         return buildString {
             append("{\"ok\":true,\"function\":").append(WireValueJson.quote(name))
             append(",\"seed\":").append(seed)
-            append(",\"args\":").append(part("args"))
-            append(",\"result\":").append(part("result"))
-            append("}")
+            append(",\"rows\":[")
+            rows.forEachIndexed { i, fields ->
+                if (i > 0) append(",")
+                append("{\"args\":").append(part(fields, "args"))
+                append(",\"result\":").append(part(fields, "result")).append("}")
+            }
+            append("]}")
         }
     }
 
@@ -253,10 +325,11 @@ class SampleCommand {
     }
 
     private fun printUsage() {
-        System.err.println("Usage: mez sample <function> [--seed=N] [--json]")
+        System.err.println("Usage: mez sample <function> [--count=N] [--seed=N] [--json]")
         System.err.println()
         System.err.println("Generate arguments for a function, run it, and show both.")
         System.err.println()
+        System.err.println("  --count=N    how many rows to draw (default 1, max 100)")
         System.err.println("  --seed=N     reproduce an earlier run (the seed is printed every time)")
         System.err.println("  --json       the sample as data")
         System.err.println("  --depth=N    how deep to render a nested value (default ${WireProtocol.DEFAULT_EVAL_MAX_DEPTH})")
@@ -270,6 +343,9 @@ class SampleCommand {
          * "already defined" against a line they never wrote.
          */
         const val ARGS = "__mez_sample_args__"
+
+        /** Per-row binding prefix. Same no-collision reasoning as [ARGS]. */
+        const val ROW = "__mez_sample_row__"
 
         /**
          * Sampling's own imports, which the user's module has no reason to carry.

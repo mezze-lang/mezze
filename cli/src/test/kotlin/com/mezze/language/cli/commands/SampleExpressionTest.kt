@@ -20,8 +20,8 @@ class SampleExpressionTest {
 
     private val command = SampleCommand()
 
-    private fun expr(name: String, fields: List<String>, seed: Int = 7): String =
-        command.buildExpression(SampleTarget.Result.Ready(name, fields), seed)
+    private fun expr(name: String, fields: List<String>, seed: Int = 7, count: Int = 1): String =
+        command.buildExpression(SampleTarget.Result.Ready(name, fields), seed, count)
 
     @Test
     fun `each field gets its own arbitrary call`() {
@@ -56,8 +56,8 @@ class SampleExpressionTest {
     @Test
     fun `the args are bound once and forwarded, not drawn twice`() {
         val out = expr("total", listOf("quantity", "unit_price"))
-        assertTrue("quantity = ${ARGS}.quantity" in out, "field not forwarded from the binding:\n$out")
-        assertTrue("unit_price = ${ARGS}.unit_price" in out, "field not forwarded from the binding:\n$out")
+        assertTrue("quantity = ${ARGS}_0.quantity" in out, "field not forwarded from the binding:\n$out")
+        assertTrue("unit_price = ${ARGS}_0.unit_price" in out, "field not forwarded from the binding:\n$out")
         // The call site must reference the binding, never generate again.
         val callSite = out.substringAfter("result = ")
         assertFalse(
@@ -84,13 +84,50 @@ class SampleExpressionTest {
         assertTrue("answer {}" in out, "expected a plain call:\n$out")
     }
 
-    /** Every sample returns `{ args, result }`; the printer reads both by name. */
+    /** Every sample returns `{ rows = [{ args, result }] }`; the printer reads by name. */
     @Test
-    fun `the result shape is args and result`() {
+    fun `the result shape is rows of args and result`() {
         for (fields in listOf(emptyList(), listOf("a"), listOf("a", "b"))) {
             val out = expr("f", fields)
+            assertTrue("rows = [" in out, "no rows field for $fields:\n$out")
             assertTrue("args = " in out, "no args field for $fields:\n$out")
             assertTrue("result = " in out, "no result field for $fields:\n$out")
+        }
+    }
+
+    /**
+     * Every row draws inside ONE `with_seed`, so the seed reproduces the whole
+     * batch. A seeded scope per row would reset the stream and print the same values
+     * N times — a table that looks like it works and shows one sample repeated.
+     */
+    @Test
+    fun `all rows draw inside a single seeded scope`() {
+        val out = expr("f", listOf("a"), count = 5)
+        assertEquals(1, Regex("with_seed").findAll(out).count(), "expected ONE seeded scope:\n$out")
+    }
+
+    /** One args binding and one draw per field, per row. */
+    @Test
+    fun `count produces that many rows, each with its own draws`() {
+        val out = expr("f", listOf("a", "b"), count = 4)
+        assertEquals(4, Regex("\\{ a = Arbitrary").findAll(out).count(), "wrong row count:\n$out")
+        assertEquals(8, Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(), "wrong draw count:\n$out")
+        for (i in 0 until 4) {
+            assertTrue("${ARGS}_$i" in out, "row $i has no args binding:\n$out")
+        }
+    }
+
+    /**
+     * Rows must not share an args binding — the easy mistake when unrolling, and one
+     * that would print the same values on every line while the draws really happened.
+     * Indistinguishable from a working table at a glance, which is why it is asserted
+     * rather than left to review.
+     */
+    @Test
+    fun `each row reads its OWN args binding`() {
+        val out = expr("f", listOf("a"), count = 3)
+        for (i in 0 until 3) {
+            assertTrue("a = ${ARGS}_$i.a" in out, "row $i does not read its own args:\n$out")
         }
     }
 

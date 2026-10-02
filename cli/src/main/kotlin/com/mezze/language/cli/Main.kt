@@ -290,7 +290,7 @@ private fun showUsage() {
 private fun showCommandHelp(command: String) {
     when (command) {
         "sample" -> {
-            println("USAGE: mez sample <function> [--seed=N] [--json] [--depth=N] [--items=N]")
+            println("USAGE: mez sample <function> [--count=N] [--seed=N] [--json] [--depth=N] [--items=N]")
             println()
             println("Generate arguments for a function, run it, and show both. The arguments")
             println("come from the Arbitrary instances the compiler derives, so there is")
@@ -300,10 +300,16 @@ private fun showCommandHelp(command: String) {
             println("values and a sample that surprised you is worthless if you cannot get")
             println("it back. Pass it with --seed to reproduce a run exactly.")
             println()
+            println("Output is a TABLE: one row per draw, one column per argument, the")
+            println("result last. Several rows show what a function DOES — which arguments")
+            println("matter, where the output turns over — where one row only shows what it")
+            println("returned once.")
+            println()
             println("EXAMPLES:")
-            println("  mez sample total                  generate arguments and run")
-            println("  mez sample total --seed=258868    reproduce an earlier run")
-            println("  mez sample total --json           the sample as data")
+            println("  mez sample total                  one row")
+            println("  mez sample total --count=10       ten rows, one seeded batch")
+            println("  mez sample total --seed=258868    reproduce an earlier run exactly")
+            println("  mez sample total --json           the rows as data")
             println()
             println("A function with an undischarged effect is refused rather than run:")
             println("Mezze defers such a call, so it would return a suspended computation")

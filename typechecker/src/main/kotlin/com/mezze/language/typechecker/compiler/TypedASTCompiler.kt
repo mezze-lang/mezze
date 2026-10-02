@@ -1898,58 +1898,7 @@ class TypedASTCompiler(
                             // …and from the RETURN, for a constraint variable the
                             // parameters never mention (`{} with Zero 'a -> 'a`).
                             .let { bindConstraintArgsViaReturn(rawFnType, expr.type, it) }
-                        // STRUCTURAL constraint binding for an ability-op callee — the
-                        // instance-head step (`instance Eq a => Eq [a]`: bind `a` from the
-                        // HEAD, then resolve the constraint on that binding). `fn.type` on a
-                        // mono-rewritten `Var(eq, ByHash)` is the field access's already
-                        // SUBSTITUTED arrow (`{it: [P], r: [P]}`), so the unify above has no
-                        // `'a` left to bind: the constraint arg stays generic, forwarding
-                        // finds nothing (a captureless comparator), and resolution falls to
-                        // the ARG types — where `[P]` matches the blanket `impl Eq for ['a]`
-                        // and the callee's `__dict_eq` becomes eq-for-`[P]` instead of `P`'s
-                        // eq. `[[P]] == [[P]]` then handed a P record to the seq op
-                        // ("Expected MezzeSeq for field 'l'"). NOTE the op's declared ARROW
-                        // is no use here either: it is LAUNDERED — its params are vars named
-                        // after the record fields (`{it: 'it, r: 'r}`), so unifying it binds
-                        // `it`/`r`, never `'a`. The structure survives only in the impl's
-                        // TARGET pattern (`['a]`): unify THAT against the receiver field's
-                        // actual type and take the impl's forall var from the bindings —
-                        // exactly what the field-access site does. The op is found by HASH,
-                        // never by name; non-op callees and failed bindings keep the
-                        // previous behaviour verbatim.
-                        val structuralConstraintTypes: List<MezzeType> = run {
-                            // Locate the op and its impl by HASH.
-                            var found: Pair<TypedAbilityImpl, String>? = null
-                            for (impl in abilityImpls) {
-                                for (opName in impl.operations.keys) {
-                                    if (computeOpHash(impl.hash, opName) == calleeHash) {
-                                        found = impl to opName
-                                        break
-                                    }
-                                }
-                                if (found != null) break
-                            }
-                            val (impl, opName) = found ?: return@run emptyList()
-                            // Single-type-param impls only (`['a]`, `List 'a`, …); anything
-                            // else keeps the old path.
-                            val varName = impl.forallVars.singleOrNull()?.name ?: return@run emptyList()
-                            val pattern = impl.targetTypes.lastOrNull() ?: return@run emptyList()
-                            // The receiver field is the op's OWN first param, read off its
-                            // lambda — the same structural derivation TypedAstBuilder uses.
-                            val recvField = (impl.operations[opName] as? TypedLambda)
-                                ?.params?.firstOrNull()?.name ?: return@run emptyList()
-                            val recvActual = (expr.arg as? TypedRecord)?.entries
-                                ?.filterIsInstance<TypedRecordEntry.Field>()
-                                ?.firstOrNull { it.name == recvField }
-                                ?.let { substitution.apply(it.value.type) }
-                                ?: return@run emptyList()
-                            val bindings = mutableMapOf<String, MezzeType>()
-                            harvestVarBindings(pattern, recvActual, bindings)
-                            val bound = bindings[varName]
-                                ?.takeIf { it !is VarType && !containsVarType(it) }
-                                ?: return@run emptyList()
-                            listOf(bound)
-                        }
+                        val structuralConstraintTypes = structuralConstraintTypesFor(calleeHash, expr)
                         val constraintTypes =
                             if (structuralConstraintTypes.isNotEmpty()) structuralConstraintTypes
                             else rawConstraintTypeArgs.filter { it !is VarType }
@@ -1967,7 +1916,11 @@ class TypedASTCompiler(
                             val argTypes = (expr.arg as? TypedRecord)?.entries
                                 ?.filterIsInstance<TypedRecordEntry.Field>()
                                 ?.map { substitution.apply(it.value.type) } ?: emptyList()
-                            val fromImpl = bindImplVarsForOp(calleeHash, argTypes)
+                            // S-3: a receiver-less op's arg record is `{}`, so there are no
+                            // argument types to bind through. Its PRODUCED type is the only
+                            // thing the instance head can match, same as above.
+                            val headTypes = argTypes.ifEmpty { listOf(substitution.apply(expr.type)) }
+                            val fromImpl = bindImplVarsForOp(calleeHash, headTypes)
                             if (fromImpl.isNotEmpty()) return@run fromImpl
                             val fromArrow = HashMap<String, MezzeType>()
                             rawFnType?.let { harvestVarBindings(it.paramType, substitution.apply(expr.arg.type), fromArrow) }
@@ -4295,5 +4248,79 @@ class TypedASTCompiler(
             )
         }
         return CallIndirectIR(fnIR, argIR, isTailCall, src)
+    }
+
+    /**
+     * STRUCTURAL constraint binding for an ability-op callee — the
+     * instance-head step (`instance Eq a => Eq [a]`: bind `a` from the
+     * HEAD, then resolve the constraint on that binding). `fn.type` on a
+     * mono-rewritten `Var(eq, ByHash)` is the field access's already
+     * SUBSTITUTED arrow (`{it: [P], r: [P]}`), so the unify above has no
+     * `'a` left to bind: the constraint arg stays generic, forwarding
+     * finds nothing (a captureless comparator), and resolution falls to
+     * the ARG types — where `[P]` matches the blanket `impl Eq for ['a]`
+     * and the callee's `__dict_eq` becomes eq-for-`[P]` instead of `P`'s
+     * eq. `[[P]] == [[P]]` then handed a P record to the seq op
+     * ("Expected MezzeSeq for field 'l'"). NOTE the op's declared ARROW
+     * is no use here either: it is LAUNDERED — its params are vars named
+     * after the record fields (`{it: 'it, r: 'r}`), so unifying it binds
+     * `it`/`r`, never `'a`. The structure survives only in the impl's
+     * TARGET pattern (`['a]`): unify THAT against the receiver field's
+     * actual type and take the impl's forall var from the bindings —
+     * exactly what the field-access site does. The op is found by HASH,
+     * never by name; non-op callees and failed bindings keep the
+     * previous behaviour verbatim.
+     *
+     * Extracted from `compileCall` under the file-size ratchet rather than raising
+     * its bound: it is a self-contained question — "what concrete type does this
+     * callee's instance head bind to?" — and splitting it out is what the ratchet
+     * is for.
+     */
+    private fun structuralConstraintTypesFor(calleeHash: Hash, expr: TypedCall): List<MezzeType> {
+                    // Locate the op and its impl by HASH.
+                    var found: Pair<TypedAbilityImpl, String>? = null
+                    for (impl in abilityImpls) {
+                        for (opName in impl.operations.keys) {
+                            if (computeOpHash(impl.hash, opName) == calleeHash) {
+                                found = impl to opName
+                                break
+                            }
+                        }
+                        if (found != null) break
+                    }
+                    val (impl, opName) = found ?: return emptyList()
+                    // Single-type-param impls only (`['a]`, `List 'a`, …); anything
+                    // else keeps the old path.
+                    val varName = impl.forallVars.singleOrNull()?.name ?: return emptyList()
+                    val pattern = impl.targetTypes.lastOrNull() ?: return emptyList()
+                    // The receiver field is the op's OWN first param, read off its
+                    // lambda — the same structural derivation TypedAstBuilder uses.
+                    //
+                    // S-3: an op with NO params has no receiver to read, and the type
+                    // it PRODUCES plays exactly the receiver's role in the instance
+                    // head. `arbitrary: {} with Arbitrary 'a -> ['a]` at `[Int]` binds
+                    // `'a = Int` from the return just as `eq: {it: ['a], …}` binds it
+                    // from `it`. Discriminated on the op having no parameters —
+                    // structural, not a name — and this block previously bailed here,
+                    // which is why every parameterised container reached a dictionary
+                    // slot nobody filled (`DictFallback[arbitrary]`).
+                    val opLambda = impl.operations[opName] as? TypedLambda
+                    val recvField = opLambda?.params?.firstOrNull()?.name
+                    val headActual = if (recvField == null) {
+                        if (opLambda == null) return emptyList()
+                        substitution.apply(expr.type)
+                    } else {
+                        (expr.arg as? TypedRecord)?.entries
+                            ?.filterIsInstance<TypedRecordEntry.Field>()
+                            ?.firstOrNull { it.name == recvField }
+                            ?.let { substitution.apply(it.value.type) }
+                            ?: return emptyList()
+                    }
+                    val bindings = mutableMapOf<String, MezzeType>()
+                    harvestVarBindings(pattern, headActual, bindings)
+                    val bound = bindings[varName]
+                        ?.takeIf { it !is VarType && !containsVarType(it) }
+                        ?: return emptyList()
+                    return listOf(bound)
     }
 }

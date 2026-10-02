@@ -177,6 +177,27 @@ impl Arbitrary for ['a] where {
     list_of { g = {} -> Arbitrary.arbitrary {} }
 }
 
+## NO `Arbitrary for Option` / `for Result`, and the reason is a RULE collision
+## rather than a missing feature.
+##
+## Both would work — the dictionary fix that made `['a]` work covers them, measured.
+## But the coherence rule refuses a hand-written impl for any type that is
+## STRUCTURALLY derivable, and a variant is; while the thing that would derive it
+## never runs, because `std::option` and `std::result` cannot import `Arbitrary`
+## (the prelude is built from them). So the type gets NEITHER instance: refused a
+## written one, never given a generated one.
+##
+## `['a]` escapes only by accident — it has no declaration, so
+## `coherenceReceiverName` returns null for it and the rule does not apply.
+##
+## The honest rule is "refuse a second instance", and for that the question is
+## whether derivation WILL produce one — structural derivability AND the ability
+## being nameable where the type is declared — not whether it could in principle.
+## Weakening it to "an instance already exists" was tried and is WRONG: derivation
+## deliberately steps aside when an explicit impl is present, so that condition is
+## false in precisely the case the rule must catch, and three coherence tests said
+## so. See S-4.
+
 ## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
 ## exactly as it does for `Embeddable`.
 ##

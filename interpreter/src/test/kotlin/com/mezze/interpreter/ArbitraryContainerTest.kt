@@ -5,41 +5,27 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Generating a type whose components are CONTAINERS — the boundary, asserted.
+ * Generating a type whose components are CONTAINERS.
  *
- * None of it works yet, and the three cases below say so rather than being left
- * out. A gap nothing tests is a gap nobody finds again: `S-2` shipped claiming
- * "records, variants and containers" because the derivability RULE answered yes for
- * a container, and nothing checked that an instance existed to go with the answer.
+ * SEQUENCES WORK — `[Int]`, `[Str]`, `[[Int]]` and `[Row]` all generate. That took
+ * two fixes: `impl X for ['a]` was registered under `Seq_a`, keyed by its own type
+ * PARAMETER's spelling (`typeNameOf`), and a receiver-less ability op was emitted
+ * with no dictionary at all, because the instance-head binding read its concrete
+ * type off a RECEIVER FIELD that a no-argument operation does not have. It now binds
+ * against the type the call PRODUCES, which plays exactly the receiver's role.
  *
- * The single blocker is S-3 (#160): a parameterised container's impl carries a
- * `with Arbitrary 'a` precondition, so its call site has to pass a dictionary for
- * the element's instance — and for a receiver-LESS operation that path falls
- * through to the receiver-taking convention, looking for an `it` field a
- * no-argument operation does not have.
+ * `Option` and `Result` do NOT, and the reason is no longer the dictionary — it is
+ * S-4 (#161). Their impls would work; they cannot be WRITTEN. The coherence rule
+ * refuses a hand-written impl for anything structurally derivable, a variant is, and
+ * the thing that would derive it never runs because `std::option`/`std::result`
+ * cannot import `Arbitrary` (the prelude is built from them). So the type gets
+ * neither instance. `['a]` escapes only because it has no declaration, so the rule
+ * does not apply to it at all.
  *
- * That hits every container, by two different routes:
- *
- *  - `[Int]` — the impl is HAND-WRITTEN in `std::abilities::arbitrary` (a sequence
- *    has no declaration to derive from) and carries the precondition, so it reaches
- *    a dictionary slot nobody filled and fails at RUNTIME.
- *  - `Option Int` / `Result Int Str` — these are real variant declarations and
- *    WOULD derive, except their home modules cannot import `Arbitrary` (the
- *    prelude is built from them), so no instance is generated and it fails in the
- *    TYPECHECKER. A hand-written one is refused by the coherence rule, which asks
- *    whether an instance COULD be derived rather than whether one exists — and
- *    would hit the same dictionary gap anyway, being equally generic.
- *
- * ## What is already proven to work, and so what the fix looks like
- *
- * `InlineContainerProbeTest` measured the alternative: generating a container
- * INLINE at a concrete element type needs no dictionary and works today —
- * `list_of { g = {} -> Arbitrary.arbitrary {} }` pinned to `[Int]`, and a record
- * built with such a field. A recursive variant bounded by `size`/`resize` works
- * too. So neither feature is blocked on generation; both are blocked on what a
- * GENERATED body is allowed to name, which is abilities only — the prelude
- * deliberately propagates no effects or bindings, and a fully-qualified path does
- * not resolve without an import either.
+ * The blocked cases assert the REASON, not merely that something threw. The first
+ * version accepted anything mentioning `Arbitrary`, so when the runtime diagnostic
+ * improved it could not tell an improvement from a regression — it failed, which is
+ * how the wording got locked.
  */
 class ArbitraryContainerTest {
 
@@ -78,15 +64,66 @@ class ArbitraryContainerTest {
         )
     }
 
+    /** Draws the component and returns something; the value itself is the RNG's. */
+    private fun generates(label: String, body: String) {
+        val v = runCatching { MezzeTestHelper.run("$imports\n\n$body") }
+        assertTrue(v.isSuccess, "$label failed to generate: ${v.exceptionOrNull()?.message}")
+    }
+
     @Test
-    fun `a seq component is blocked`() {
-        stillBlocked(
+    fun `a seq component generates`() {
+        generates(
             "a [Int] field",
             """
             type Tags = { xs: [Int] }
             with_seed { seed = 3, call = {} -> do
               let t: Tags = Arbitrary.arbitrary {}
               seq::size { xs = t.xs }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    @Test
+    fun `a seq of Str generates`() {
+        generates(
+            "a [Str] field",
+            """
+            type Tags = { xs: [Str] }
+            with_seed { seed = 9, call = {} -> do
+              let t: Tags = Arbitrary.arbitrary {}
+              seq::size { xs = t.xs }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /** NESTED — each level peels one container, so the inner dict must be right. */
+    @Test
+    fun `a nested seq generates`() {
+        generates(
+            "a [[Int]] field",
+            """
+            type N = { xss: [[Int]] }
+            with_seed { seed = 3, call = {} -> do
+              let n: N = Arbitrary.arbitrary {}
+              seq::size { xs = n.xss }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /** A seq of RECORDS — the element's own derived instance has to be reached. */
+    @Test
+    fun `a seq of records generates`() {
+        generates(
+            "a [Row] field",
+            """
+            type Row = { a: Int, b: Str }
+            type Table = { rows: [Row] }
+            with_seed { seed = 4, call = {} -> do
+              let t: Table = Arbitrary.arbitrary {}
+              seq::size { xs = t.rows }
             }
             """.trimIndent(),
         )

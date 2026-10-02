@@ -65,7 +65,15 @@ class EmitFileSizeRatchetTest {
         /** Measured after the split, with a little slack so an ordinary fix does
          *  not have to touch this file. Lower is better; never raise silently. */
         val BOUNDS = mapOf(
-            C + "TypedASTCompiler.kt" to 4300,   // was 5,580
+            // S-3: +26 for the receiver-less branch of the instance-head binding — a
+            // receiver-less ability op binds its impl's target pattern against the
+            // type it PRODUCES, where a receiver-taking one binds against `it`.
+            // Without it every parameterised container reached a dictionary slot
+            // nobody filled. The surrounding block was extracted to
+            // `structuralConstraintTypesFor` in the same commit, which shortens
+            // `compileCall` but not the file — so the bound moves rather than the
+            // code, which is what this test asks for when the code belongs here.
+            C + "TypedASTCompiler.kt" to 4330,   // was 5,580
             E + "TypedAstBuilder.kt" to 2350,    // was 3,107
         )
 
