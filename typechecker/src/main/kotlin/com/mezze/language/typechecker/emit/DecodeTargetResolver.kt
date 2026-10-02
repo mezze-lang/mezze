@@ -270,21 +270,90 @@ object DecodeTargetResolver {
             }
             ?.forEach { c -> c.typeArgs.firstOrNull()?.let { constraintTargets.add(it) } }
 
-        // Prefer constraint targets when they cover every call; else recon.
-        val targets: List<MezzeType> = when {
-            constraintTargets.size == entryLocs.size -> constraintTargets
-            reconTargets.size == entryLocs.size -> reconTargets
-            else -> return  // ambiguous count — don't risk a wrong pairing
-        }
+        // AUTHORITATIVE per-call target read straight off the Ok-arm binder (robust
+        // to == / arg / match usage). Positional constraint/recon targets are the
+        // fallback, each used only when its count lines up with the calls.
+        val directTargets = directTargetsByCall(root, entryOps)
+        val constraintAligned = constraintTargets.size == entryLocs.size
+        val reconAligned = reconTargets.size == entryLocs.size
 
         for (i in entryLocs.indices) {
-            val matches = decodeImpls.filter { shapeMatches(it.targetTypes[1], targets[i]) }
+            val target = directTargets[entryLocs[i]]
+                ?: (if (constraintAligned) constraintTargets[i] else null)
+                ?: (if (reconAligned) reconTargets[i] else null)
+                ?: continue  // no trustworthy target for this call — leave it to the solver
+            val matches = decodeImpls.filter { shapeMatches(it.targetTypes[1], target) }
             val impl = (if (matches.size == 1) matches[0]
-                        else matches.firstOrNull { structural(it.targetTypes[1]) == structural(targets[i]) }) ?: continue
+                        else matches.firstOrNull { structural(it.targetTypes[1]) == structural(target) }) ?: continue
             out[entryLocs[i]] = Hash.computeOpHash(impl.hash, decodeOpName(impl))
             refOut[entryLocs[i]] = AbilityImplRef(impl.abilityHash, impl.hash, impl.targetTypes[1])
         }
     }
+
+    /**
+     * AUTHORITATIVE per-site targets, read straight off the typed AST — robust to
+     * any usage (`c == original`, `size { s = c }`, nested `match`) that the
+     * field-access reconstruction below cannot see through.
+     *
+     * A `from_json` result consumed by `match … is Ok { val = c } -> …` binds `c`
+     * in the Ok arm's pattern, and `TypedVarPattern` carries `c`'s RESOLVED type.
+     * When that type is fully concrete (the solve settled it from the arm's usage),
+     * it IS the decode target — map the entry call's Loc to it directly. Without
+     * this, a second decode of a different shape fell back to the first decoder in
+     * scope (the field-access recon returns nothing for `==`/arg usage).
+     */
+    private fun directTargetsByCall(root: TypedExpr, entryOps: Set<String>): Map<Loc, MezzeType> {
+        val out = HashMap<Loc, MezzeType>()
+        fun go(e: TypedExpr) {
+            if (e is TypedMatch) {
+                val scrut = e.scrutinee
+                if (scrut is TypedCall && scrut.function.let { it is TypedFieldAccess && it.field in entryOps }) {
+                    // The decoded value is bound in the Ok arm (its binding stays a
+                    // bare var, so read the TARGET from how the arm USES it).
+                    for (case in e.cases) {
+                        val t = case.bindings.firstNotNullOfOrNull { b -> targetFromUsage(case.body, b.name) }
+                        if (t != null && isConcreteTarget(t)) { out[scrut.loc] = t; break }
+                    }
+                }
+            }
+            for (c in children(e)) go(c)
+        }
+        go(root)
+        return out
+    }
+
+    /**
+     * Recover the decode target of the value bound to [binder] from its usage in
+     * [body], WITHOUT the solve substitution (which keeps it a bare var):
+     *   - `binder == expr` — desugars to `binder.eq { r = expr }`, so the RHS's
+     *     resolved type IS the target (the two `==` operands share one type).
+     *   - else the CLOSED record of field accesses `binder.field` (hover's way).
+     */
+    private fun targetFromUsage(body: TypedExpr, binder: String): MezzeType? {
+        var eqRhs: MezzeType? = null
+        fun scan(e: TypedExpr) {
+            if (eqRhs != null) return
+            if (e is TypedCall) {
+                val fn = e.function
+                if (fn is TypedFieldAccess && fn.field == BuiltinTypes.EQ_METHOD &&
+                    fn.record.let { it is TypedVar && it.name == binder }) {
+                    val arg = e.arg
+                    if (arg is TypedRecord) {
+                        val rhs = arg.entries.firstNotNullOfOrNull {
+                            (it as? TypedRecordEntry.Field)?.takeIf { f -> f.name == "r" }?.value
+                        }
+                        if (rhs != null && isConcreteTarget(rhs.type)) { eqRhs = rhs.type; return }
+                    }
+                }
+            }
+            for (c in children(e)) scan(c)
+        }
+        scan(body)
+        return eqRhs ?: reconstructBinder(body, binder, 0)
+    }
+
+    /** No unresolved type variable anywhere — a target we can trust to pin a decoder. */
+    private fun isConcreteTarget(t: MezzeType): Boolean = !structural(t).contains("?")
 
     /** Reconstruct a CLOSED record from field accesses on the var named [binder]. */
     private fun reconstructBinder(root: TypedExpr, binder: String, depth: Int): MezzeType? {
