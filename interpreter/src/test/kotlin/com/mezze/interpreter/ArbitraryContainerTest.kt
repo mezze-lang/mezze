@@ -21,18 +21,25 @@ import org.junit.jupiter.api.Test
  * That hits every container, by two different routes:
  *
  *  - `[Int]` — the impl is HAND-WRITTEN in `std::abilities::arbitrary` (a sequence
- *    has no declaration to derive from), carries the precondition, and crashes at
- *    runtime with `DictFallback[arbitrary]: record has no 'it' field`.
+ *    has no declaration to derive from) and carries the precondition, so it reaches
+ *    a dictionary slot nobody filled and fails at RUNTIME.
  *  - `Option Int` / `Result Int Str` — these are real variant declarations and
  *    WOULD derive, except their home modules cannot import `Arbitrary` (the
- *    prelude is built from them), so no instance is generated. A hand-written one
- *    is refused by the coherence rule, which asks whether an instance COULD be
- *    derived rather than whether one exists — and would hit the same dictionary
- *    gap anyway, being equally generic.
+ *    prelude is built from them), so no instance is generated and it fails in the
+ *    TYPECHECKER. A hand-written one is refused by the coherence rule, which asks
+ *    whether an instance COULD be derived rather than whether one exists — and
+ *    would hit the same dictionary gap anyway, being equally generic.
  *
- * Each test asserts the failure mentions `Arbitrary`, so if any of this starts
- * working — or starts failing for a different reason — the test fails and S-3 gets
- * revisited instead of quietly going stale.
+ * ## What is already proven to work, and so what the fix looks like
+ *
+ * `InlineContainerProbeTest` measured the alternative: generating a container
+ * INLINE at a concrete element type needs no dictionary and works today —
+ * `list_of { g = {} -> Arbitrary.arbitrary {} }` pinned to `[Int]`, and a record
+ * built with such a field. A recursive variant bounded by `size`/`resize` works
+ * too. So neither feature is blocked on generation; both are blocked on what a
+ * GENERATED body is allowed to name, which is abilities only — the prelude
+ * deliberately propagates no effects or bindings, and a fully-qualified path does
+ * not resolve without an import either.
  */
 class ArbitraryContainerTest {
 
@@ -50,11 +57,23 @@ class ArbitraryContainerTest {
         use std::result::{ is_ok }
     """.trimIndent()
 
+    /**
+     * Blocked, and blocked for the REASON S-3 names.
+     *
+     * Matching the message rather than merely "it threw" is the point: the first
+     * version of this accepted anything mentioning `Arbitrary`, and when the
+     * diagnostic improved it could not tell an improvement from a regression. The
+     * two accepted shapes are the two places the gap surfaces — the typechecker
+     * declining to pick an impl, and the runtime reaching a dictionary slot nobody
+     * filled.
+     */
     private fun stillBlocked(label: String, body: String) {
         val e = runCatching { MezzeTestHelper.run("$imports\n\n$body") }.exceptionOrNull()
         val message = e?.message ?: ""
+        val noDictionary = "no dictionary was supplied for ability operation `arbitrary`" in message
+        val noImpl = "takes no receiver" in message && "chooses the implementation" in message
         assertTrue(
-            "Arbitrary" in message || "DictFallback" in message,
+            noDictionary || noImpl,
             "$label now works, or fails for a NEW reason — revisit S-3 (#160). Got: $message",
         )
     }
