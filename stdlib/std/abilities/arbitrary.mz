@@ -9,6 +9,15 @@ use std::option::{ get_or }
 # these, `0 - 100` reports no `NumSub` for Int because only Nat's were imported.
 use std::int
 use std::float
+use std::frac
+# The container impls below build each container from a generated sequence, so
+# every one of these is a constructor, not a convenience. `map` and `sorted_map`
+# are absent because their impls are withheld — see the container section.
+use std::collections::seq
+use std::collections::set
+use std::collections::deque
+use std::collections::sorted_set
+use std::collections::nonemptylist
 
 ## A type that can be generated.
 ##
@@ -19,10 +28,11 @@ use std::float
 ## `<Sample>`: it never mentions `Random`, and the sampler decides whether
 ## entropy is seeded or live.
 ##
-## NOT yet containers, despite the derivability rule answering yes for them: a
-## parameterised impl needs a dictionary for its element's instance, and that path
-## is broken for a receiver-less operation (S-3). `ArbitraryContainerTest` asserts
-## the boundary so it cannot silently drift.
+## Containers are WRITTEN rather than derived, because a container's identity is a
+## reserved name rather than a declaration, so there is no structure to walk. They
+## are written below for sequences, `Set`, `SortedSet`, `Deque` and `NonEmptyList`.
+## `Map` and `SortedMap` are the exception, and for a compiler gap rather than a
+## design choice — see the container section.
 ##
 ## ## What this makes possible
 ##
@@ -138,6 +148,27 @@ impl Arbitrary for Bool where {
   arbitrary = {} -> choose { bound = 2 } == 1
 }
 
+## ## `Frac` is exact, so its interesting values are the ones exactness is FOR
+##
+## The point of a rational is that `1//3` is not `0.333…`, so the table leans on
+## the fractions a float cannot hold: thirds, sixths, sevenths. The boundaries are
+## still the canonical five from `Gen.chooseNum`, written as fractions.
+##
+## The random half draws numerator and denominator separately, and the denominator
+## is `choose + 1` so it is never zero — `frac::make` auto-reduces, so no further
+## normalisation is wanted here. The magnitudes stay near a million rather than
+## spanning `Int`: reduction multiplies, and a numerator near `int_max` would
+## overflow inside the constructor rather than producing a large fraction.
+impl Arbitrary for Frac where {
+  arbitrary = {} ->
+    if take_interesting {}
+      then one_of { xs = [0//1, 1//1, -1//1, 1//2, -1//2, 1//3, 2//3, 1//6, 22//7], def = 0//1 }
+      else frac::make {
+        numerator = negate_sometimes { n = choose { bound = 1000000 } },
+        denominator = choose { bound = 1000 } + 1,
+      }
+}
+
 ## NO `Arbitrary for Char` yet, and the reason is a language fact worth recording.
 ##
 ## Mezze has no character literal: `'a` is a TYPE VARIABLE, so `'a'` does not
@@ -178,33 +209,90 @@ impl Arbitrary for Str where {
 }
 
 # ---------------------------------------------------------------------------
-# Sequences.
+# Containers.
 #
-# This impl EXISTS but is not yet reachable, and the honest state is worth
-# recording rather than deleting.
+# Every one of these has to be WRITTEN rather than derived, and for a reason that
+# is not about generation: a container's identity is carried by a reserved NAME
+# (see `BuiltinTypes`) rather than a declaration, so there is no structure for the
+# deriver to walk. That same absence is what lets them be written at all — the
+# coherence rule keys on a declaration, finds none, and does not apply. `Option`
+# and `Result` DO have declarations, which is the whole of why they are still
+# stuck (S-4, below).
 #
-# A sequence has no declaration — its identity is carried by a reserved NAME (see
-# `BuiltinTypes`) — so there is nothing for the generator to walk and the impl has
-# to be written here. It carries a `with Arbitrary 'a` precondition, so a call site
-# must pass a dictionary for the element's instance, and for a receiver-LESS
-# operation that path falls through to the receiver-taking convention and crashes:
-# `DictFallback[arbitrary]: record has no 'it' field`. That is S-3.
+# Each impl carries `with Arbitrary 'a`, so the call site must pass a dictionary
+# for the ELEMENT's instance. For a receiver-less operation there is no argument to
+# read that type off, and the dictionary used to be omitted entirely — the call
+# reached a slot nobody filled and died as
+# `DictFallback[arbitrary]: record has no 'it' field`. The instance head now binds
+# against the type the call PRODUCES, which plays exactly the receiver's role, so
+# the element's dictionary arrives. `ArbitraryContainerTest` holds that line.
 #
-# `Option` and `Result` are stuck for the same reason by a different route. They
-# are real variant declarations and WOULD derive, but their home modules cannot
-# import `Arbitrary` — the prelude is built from them — so no instance is
-# generated, and a hand-written one is refused by the coherence rule, which asks
-# whether an instance COULD be derived rather than whether one exists. Even
-# allowed, it would meet the same dictionary gap.
+# The shape is the same throughout: draw a sequence, then convert. The length comes
+# from the size budget, so nesting terminates rather than multiplying out, and the
+# element draw is an ordinary recursive `Arbitrary.arbitrary {}` — which is why
+# `[[Set Int]]` needs no special case anywhere.
 #
-# Kept rather than removed because it is correct code blocked by a compiler gap,
-# and because deleting it would lose the one worked example S-3 has to fix against.
+# ## `Map` and `SortedMap` are WITHHELD, and what that measured
+#
+# Both impls were written and are believed correct:
+#
+#     impl Arbitrary for Map 'k 'v where {
+#       arbitrary: {} with Arbitrary 'k, Arbitrary 'v, Eq 'k -> Map 'k 'v <Sample> = {} ->
+#         map::from_list { xs = list::from_seq {
+#           xs = list_of { g = {} -> { k = Arbitrary.arbitrary {}, v = Arbitrary.arbitrary {} } } } }
+#     }
+#
+# Adding either one breaks `Arbitrary` resolution for the WHOLE PROGRAM, `Int`
+# included: every `arbitrary {}` call then fails with "nothing here determines that
+# type". Bisected — removing just these two restores a green
+# `ArbitraryContainerTest`, and the single-variable containers above are harmless.
+#
+# What distinguishes them is that the head binds TWO type variables, so the op body
+# needs a dictionary at `'k` and at `'v`. `normalizeDictKeys` switches a method's
+# slot shape from the plain `arbitrary` to per-variable `arbitrary@k`/`arbitrary@v`
+# once it sees two variables, and the grouping that decides this is keyed on the
+# operation NAME — so a two-variable impl appears to change the slot shape for every
+# other impl of the same operation. Held out rather than left in to fail loudly,
+# because the failure is not local to `Map`: it takes down generation for types that
+# have nothing to do with it.
 # ---------------------------------------------------------------------------
 
-## Length from the size budget, so nesting terminates rather than multiplying out.
 impl Arbitrary for ['a] where {
   arbitrary: {} with Arbitrary 'a -> ['a] <Sample> = {} ->
     list_of { g = {} -> Arbitrary.arbitrary {} }
+}
+
+impl Arbitrary for Deque 'a where {
+  arbitrary: {} with Arbitrary 'a -> Deque 'a <Sample> = {} ->
+    deque::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
+}
+
+## A drawn sequence may repeat, so the set is usually SHORTER than the draw. That
+## is the correct behaviour rather than a flaw: a `Set` of a two-valued type can
+## only have three inhabitants, and a generator that insisted on a requested length
+## could not produce them.
+impl Arbitrary for Set 'a where {
+  arbitrary: {} with Arbitrary 'a, Eq 'a, Hash 'a -> Set 'a <Sample> = {} ->
+    set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
+}
+
+impl Arbitrary for SortedSet 'a where {
+  arbitrary: {} with Arbitrary 'a, Ord 'a -> SortedSet 'a <Sample> = {} ->
+    sorted_set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
+}
+
+## The one container whose emptiness is a TYPE error rather than a value, so it
+## cannot be built from a drawn sequence alone — `from_seq` returns an `Option` and
+## unwrapping it would need an answer for a case the type forbids. Built instead
+## from a guaranteed element, with the drawn sequence consed on top: total by
+## construction, no option to discharge.
+impl Arbitrary for NonEmptyList 'a where {
+  arbitrary: {} with Arbitrary 'a -> NonEmptyList 'a <Sample> = {} ->
+    seq::fold {
+      xs = list_of { g = {} -> Arbitrary.arbitrary {} },
+      init = nonemptylist::singleton { x = Arbitrary.arbitrary {} },
+      f = { acc, x } -> nonemptylist::cons { x = x, xs = acc },
+    }
 }
 
 ## NO `Arbitrary for Option` / `for Result`, and the reason is a RULE collision
