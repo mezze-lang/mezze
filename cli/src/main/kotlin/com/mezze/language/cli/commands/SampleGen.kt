@@ -1,6 +1,5 @@
 package com.mezze.language.cli.commands
 
-import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 
 /**
@@ -23,20 +22,28 @@ import com.mezze.language.ast.MezzeType
  * Descending structurally happens only where DISPATCH cannot reach, and each case
  * is a compiler gap with a task against it rather than a style choice:
  *
- *  - a sequence, because a receiver-less op at `[T]` has nothing to pin it unless it
- *    is reached through a record's derived instance (S-3, #160). Emitting
- *    `list_of { g = … }` puts the inner draw at the concrete element type, where
- *    dispatch works. Measured in `InlineContainerProbeTest`.
  *  - `Option` / `Result`, because no instance exists for them at all — not for want
  *    of a body, but because the coherence rule refuses a hand-written one and the
  *    thing that would derive it cannot name the ability (S-4, #161). Generating the
  *    constructors inline needs no instance for the container.
  *  - an ANONYMOUS record, because an anonymous annotation does not pin a
  *    receiver-less operation, so there is nothing to write a binding against.
+ *  - a RECURSIVE variant, which is the one arm that is not a gap: bounding the
+ *    recursion needs the `Sample` size budget, and a DERIVED impl cannot name it —
+ *    it is written into the user's module, which has no reason to import sampling.
+ *    This command injects its own imports, so here it can.
  *
  * When those tasks land, each arm here becomes dead and should be deleted — the
  * default already does the right thing. This file is a bridge, and its arms are the
  * list of what it is bridging.
+ *
+ * The SEQUENCE arm is gone, and that is what this list looked like one entry
+ * longer. It emitted `list_of { g = … }` to put the inner draw at a concrete
+ * element type "where dispatch works, and it cannot at `[T]` itself" — true until
+ * S-10 fixed the monomorphizer hole that made a parameterised impl of a
+ * receiver-less operation unreachable. `let xs: [Int] = Arbitrary.arbitrary {}` now
+ * resolves through `impl Arbitrary for ['a]`, so how long a sequence is and how its
+ * elements are drawn is back where it belongs: in the ability.
  *
  * The weights match `std::abilities::arbitrary`'s own, for the obvious reason: a
  * value's distribution should not depend on whether it was reached through dispatch
@@ -44,9 +51,15 @@ import com.mezze.language.ast.MezzeType
  */
 object SampleGen {
 
-    /** Imports the emitted source needs. The command prepends these. */
+    /**
+     * Imports the emitted source needs. The command prepends these.
+     *
+     * `list_of` is no longer among them: nothing emitted here calls it since the
+     * sequence arm went away. `choose` is still needed for the `Option`/`Result`
+     * weighting, and `size`/`resize` for the recursive-variant helper.
+     */
     val IMPORTS: Set<String> = setOf(
-        "use std::effects::sample::{ with_seed, list_of, choose, size, resize }",
+        "use std::effects::sample::{ with_seed, choose, size, resize }",
         "use std::abilities::arbitrary::{ Arbitrary }",
     )
 
@@ -91,12 +104,21 @@ object SampleGen {
             return "${helperName(name)} {}"
         }
 
-        BuiltinTypes.sequenceElementType(type)?.let { element ->
-            // The element draw is at a CONCRETE type, which is the whole point:
-            // dispatch works there, where it cannot at `[T]` itself.
-            return "list_of { g = {} -> ${of(element, depth + 1, recursive)} }"
-        }
-
+        // NO sequence arm, and its absence is the point. It used to read
+        //
+        //     return "list_of { g = {} -> ${'$'}{of(element, …)} }"
+        //
+        // because "the element draw is at a CONCRETE type, where dispatch works, and
+        // it cannot at `[T]` itself" — true at the time and not any more. S-10 fixed
+        // the monomorphizer hole that made a parameterised impl of a receiver-less
+        // operation unreachable, so `let xs: [Int] = Arbitrary.arbitrary {}` now
+        // resolves through `impl Arbitrary for ['a]` like any other impl. Descending
+        // here would mean this command deciding how long a sequence is and how its
+        // elements are drawn — type-specific knowledge belonging to the ability, not
+        // to the tool that calls it.
+        //
+        // The same will be true of the two arms below once S-4 lets `Option` and
+        // `Result` have instances at all.
         if (type is MezzeType.TypeApplication) {
             when (type.constructor) {
                 "Option" -> {

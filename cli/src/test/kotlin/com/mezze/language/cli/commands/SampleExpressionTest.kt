@@ -53,32 +53,44 @@ class SampleExpressionTest {
     }
 
     /**
-     * A SEQUENCE field becomes `list_of`, the case that cannot work any other way: a
-     * receiver-less op at `[T]` has nothing to pin it, while `list_of` is a FUNCTION
-     * whose `'a` the annotation solves — putting the inner draw at the concrete
-     * element type, where dispatch works.
+     * A SEQUENCE field takes the plain default, and this asserts the ABSENCE of what
+     * it used to assert the presence of.
      *
-     * Verified live: `tagged`, an ANONYMOUS record with a `[Str]` field, samples under
-     * this shape and failed under every earlier one.
+     * It read: "a sequence field becomes `list_of`, the case that cannot work any
+     * other way — a receiver-less op at `[T]` has nothing to pin it, while `list_of`
+     * is a FUNCTION whose `'a` the annotation solves." That was accurate, and it was
+     * describing a compiler gap rather than a design. S-10 fixed the monomorphizer
+     * hole that made a parameterised impl of a receiver-less operation unreachable,
+     * so `let tags: [Str] = Arbitrary.arbitrary {}` resolves through
+     * `impl Arbitrary for ['a]` now.
+     *
+     * Asserting the absence is the point: the arm coming back would be invisible
+     * otherwise, since the output would still be CORRECT — this command would just
+     * quietly be deciding sequence lengths again, which is the ability's decision.
      */
     @Test
-    fun `a sequence field is generated with list_of`() {
+    fun `a sequence field takes the plain default, not list_of`() {
         val out = command.buildExpression(
             ready("tagged", mapOf("tags" to seqOf(MezzeType.StringType), "id" to MezzeType.IntType)),
             seed = 7,
         )
-        assertTrue("list_of { g = {} -> Arbitrary.arbitrary {} }" in out, "no list_of:\n$out")
-        assertTrue("tags: [Str]" in out, "field not annotated with its type:\n$out")
+        assertTrue("tags: [Str] = Arbitrary.arbitrary {}" in out, "sequence not dispatched:\n$out")
+        assertTrue(
+            "list_of" !in out,
+            "the sequence arm is back — sequence length belongs to the ability:\n$out",
+        )
     }
 
-    /** A sequence OF a sequence descends, so each level pins its own element. */
+    /** A sequence OF a sequence is the default too: one annotated binding, and the
+     *  impl recurses into its own element. */
     @Test
-    fun `a nested sequence descends`() {
+    fun `a nested sequence needs no descent either`() {
         val out = command.buildExpression(
             ready("f", mapOf("xss" to seqOf(seqOf(MezzeType.IntType)))),
             seed = 7,
         )
-        assertEquals(2, Regex("list_of").findAll(out).count(), "expected two levels:\n$out")
+        assertTrue("xss: [[Int]] = Arbitrary.arbitrary {}" in out, "nested seq not dispatched:\n$out")
+        assertEquals(0, Regex("list_of").findAll(out).count(), "expected no descent:\n$out")
     }
 
     /**
