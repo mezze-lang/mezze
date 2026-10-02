@@ -29,7 +29,8 @@ class SampleEffectTest {
 
     private val imports = """
         use std::effects::sample::{ Sample, with_seed, with_seed_sized, choose, size }
-        use std::abilities::arbitrary::{ Arbitrary, arbitrary }
+        use std::abilities::arbitrary::{ Arbitrary, arbitrary, int_max, int_min }
+        use std::collections::seq
     """.trimIndent()
 
     private fun eval(body: String): Any? = MezzeTestHelper.run("$imports\n\n$body")
@@ -127,13 +128,73 @@ class SampleEffectTest {
     /** What `impl Arbitrary for Int` can now produce: the interesting table, or the
      *  random tail. Asserting a narrow range would just re-encode the old uniform
      *  generator and fail the moment an interesting value came out. */
-    private fun isValidIntDraw(v: Long?): Boolean =
-        v != null && (v in INTERESTING_INTS || v in -1000L..1000L)
+    /**
+     * The specials actually come up, and the random half actually goes wide.
+     *
+     * This is where the distribution is asserted, because [isValidIntDraw] cannot:
+     * once the random half spans every Long, a per-draw membership check accepts
+     * everything and proves nothing. A generator that returned only `0`, or only
+     * mid-range values, would pass every other test in this file.
+     *
+     * 200 draws from ONE seeded stream. Drawing 200 times with 200 different seeds
+     * instead measured the FIRST value of 200 streams, which is a different and
+     * badly-distributed quantity — see S-5 (#162): across seeds the first
+     * `choose { bound = 100 }` clusters in roughly {19, 26, 63, 73}, and seeds 0 and
+     * 1 return the same value. That version reported 0/200 specials and the generator
+     * was fine.
+     */
+    @Test
+    fun `the Int distribution covers the boundaries AND goes wide`() {
+        // Counted in MEZZE and returned as three Ints, rather than shipping 200
+        // values across and folding them here — the host side has no seq accessor
+        // and does not need one for a question this shape.
+        val rec = MezzeTestHelper.asRecord(eval("""
+            with_seed { seed = 20260101, call = {} -> do
+              let vs: [Int] = seq::map { xs = seq::range { start = 0, end = 200 }, f = { x } -> arbitrary {} }
+              {
+                specials = seq::count { xs = vs, p = { x } ->
+                  x == 0 || x == 1 || x == (0 - 1) || x == int_max || x == int_min },
+                wide = seq::count { xs = vs, p = { x } -> x > 1000000 || x < (0 - 1000000) },
+                boundary = seq::count { xs = vs, p = { x } -> x == int_max || x == int_min }
+              }
+            }
+        """.trimIndent()))
+        fun count(f: String) = rec.getField(rec.getFieldIndex(f)).toString().toLong()
+
+        assertTrue(
+            count("specials") >= 20,
+            "only ${count("specials")}/200 draws were one of the five specials — " +
+                "the interesting table is not being used",
+        )
+        assertTrue(
+            count("wide") >= 20,
+            "only ${count("wide")}/200 draws exceeded ±1e6 — the random half is too " +
+                "narrow to find an overflow, which is the whole reason it spans the full range",
+        )
+        assertTrue(
+            count("boundary") >= 1,
+            "neither Int boundary appeared in 200 draws",
+        )
+    }
+
+    /**
+     * Any Long, and that is the honest assertion rather than a weak one. The random
+     * half of `Arbitrary for Int` spans ±(2^63 - 2) by design — a narrower bound
+     * here would just re-encode the [-1000, 1000] tail that was replaced, and would
+     * fail at random once a wide value came out. What is actually worth asserting
+     * about the distribution lives in the boundary-coverage test below.
+     */
+    private fun isValidIntDraw(v: Long?): Boolean = v != null
 
     private companion object {
-        val INTERESTING_INTS = setOf(
-            0L, 1L, -1L, 2L, -2L, 3L, 4L, 10L, -10L, 100L, -100L, Long.MAX_VALUE, Long.MIN_VALUE,
-        )
+        /**
+         * The five canonical specials, from ScalaCheck's `Gen.chooseNum`:
+         * `List(minT, maxT, zero, one, -one)`. Everything else `Arbitrary for Int`
+         * can produce comes from the random half, which spans ±(2^63 - 2) — so a
+         * membership check is not available for it and [isValidIntDraw] accepts any
+         * Long instead.
+         */
+        val INTERESTING_INTS = setOf(0L, 1L, -1L, Long.MAX_VALUE, Long.MIN_VALUE)
         /**
          * Every string `impl Arbitrary for Str` can produce, across all three
          * weighted groups. Listed in full rather than sampled: a membership check

@@ -173,13 +173,24 @@ class ArbitraryDerivationTest {
     /** What `impl Arbitrary for Int` can now produce: the interesting table, or the
      *  random tail. Asserting a narrow range would just re-encode the old uniform
      *  generator and fail the moment an interesting value came out. */
-    private fun isValidIntDraw(v: Long?): Boolean =
-        v != null && (v in INTERESTING_INTS || v in -1000L..1000L)
+    /**
+     * Any Long, and that is the honest assertion rather than a weak one. The random
+     * half of `Arbitrary for Int` spans ±(2^63 - 2) by design — a narrower bound
+     * here would just re-encode the [-1000, 1000] tail that was replaced, and would
+     * fail at random once a wide value came out. What is actually worth asserting
+     * about the distribution lives in the boundary-coverage test below.
+     */
+    private fun isValidIntDraw(v: Long?): Boolean = v != null
 
     private companion object {
-        val INTERESTING_INTS = setOf(
-            0L, 1L, -1L, 2L, -2L, 3L, 4L, 10L, -10L, 100L, -100L, Long.MAX_VALUE, Long.MIN_VALUE,
-        )
+        /**
+         * The five canonical specials, from ScalaCheck's `Gen.chooseNum`:
+         * `List(minT, maxT, zero, one, -one)`. Everything else `Arbitrary for Int`
+         * can produce comes from the random half, which spans ±(2^63 - 2) — so a
+         * membership check is not available for it and [isValidIntDraw] accepts any
+         * Long instead.
+         */
+        val INTERESTING_INTS = setOf(0L, 1L, -1L, Long.MAX_VALUE, Long.MIN_VALUE)
         /**
          * Every string `impl Arbitrary for Str` can produce, across all three
          * weighted groups. Listed in full rather than sampled: a membership check
