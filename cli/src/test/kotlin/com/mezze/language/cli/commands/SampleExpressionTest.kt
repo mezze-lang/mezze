@@ -1,69 +1,112 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
  * The expression `mez sample` writes.
  *
- * Tested here rather than end to end because its SHAPE is the design decision, and
- * the shape was chosen against measurements that an end-to-end test would not
- * record: generating per FIELD, with no annotation on the record, because
- * `let args: { n: Int } = Arbitrary.arbitrary {}` is rejected (an anonymous record
- * annotation does not pin a receiver-less ability operation) while the per-field
- * form is pinned by the function's own parameter. If someone "simplifies" this to
- * one annotated binding, these tests say why not.
+ * Tested here rather than end to end because its SHAPE is the design, and the shape
+ * is what several measurements settled. Each test below names the measurement it
+ * stands on, so "simplifying" any of this fails something that explains why.
+ *
+ * The one idea underneath all of it: the command already knows every argument's TYPE
+ * — it read the function's parameter off the typed declaration — so it generates FROM
+ * that type rather than emitting a bare `Arbitrary.arbitrary {}` and hoping the call
+ * site pins it. That is what makes a container or an `Option` argument work at all.
  */
 class SampleExpressionTest {
 
     private val command = SampleCommand()
 
+    private fun ready(name: String, fields: Map<String, MezzeType>) =
+        SampleTarget.Result.Ready(name, fields)
+
+    /** Every field an `Int`, for the tests that are only about structure. */
     private fun expr(name: String, fields: List<String>, seed: Int = 7, count: Int = 1): String =
-        command.buildExpression(SampleTarget.Result.Ready(name, fields), seed, count)
+        command.buildExpression(ready(name, fields.associateWith { MezzeType.IntType }), seed, count)
+
+    private fun seqOf(element: MezzeType) = MezzeType.TypeApplication("Seq", listOf(element))
 
     @Test
-    fun `each field gets its own arbitrary call`() {
+    fun `each field gets its own draw`() {
         val out = expr("total", listOf("quantity", "unit_price"))
         assertEquals(
             2,
             Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(),
-            "expected one draw per field, got:\n$out",
+            "expected one draw per field:\n$out",
         )
     }
 
     /**
-     * The record carries NO type annotation, and that is the measured choice rather
-     * than an omission. An annotation would not pin the draws for an anonymous
-     * parameter type, so adding one would break exactly the functions whose
-     * parameter is written inline — which is most of them.
+     * EVERY field binding carries its type, and that annotation is load-bearing: it
+     * is what pins the draws. Dropping it is what made a container argument fail
+     * before — a bare field draw at `[T]` has nothing to dispatch on.
      */
     @Test
-    fun `the generated record is NOT annotated`() {
-        val out = expr("total", listOf("quantity"))
-        assertFalse(
-            Regex("let \\S+\\s*:").containsMatchIn(out),
-            "the args binding carries a type annotation; see the class doc:\n$out",
-        )
-    }
-
-    /**
-     * Bound once and forwarded field by field. Re-drawing inside the call would
-     * produce a sample whose printed arguments were not the ones the function saw —
-     * silently wrong, and the single worst outcome available to this command.
-     */
-    @Test
-    fun `the args are bound once and forwarded, not drawn twice`() {
+    fun `every field binding carries its type`() {
         val out = expr("total", listOf("quantity", "unit_price"))
-        assertTrue("quantity = ${ARGS}_0.quantity" in out, "field not forwarded from the binding:\n$out")
-        assertTrue("unit_price = ${ARGS}_0.unit_price" in out, "field not forwarded from the binding:\n$out")
-        // The call site must reference the binding, never generate again.
-        val callSite = out.substringAfter("result = ")
-        assertFalse(
-            "Arbitrary.arbitrary" in callSite,
-            "the call re-draws instead of using the bound args:\n$out",
+        assertTrue("quantity: Int = " in out, "field not annotated:\n$out")
+        assertTrue("unit_price: Int = " in out, "field not annotated:\n$out")
+    }
+
+    /**
+     * A SEQUENCE field becomes `list_of`, the case that cannot work any other way: a
+     * receiver-less op at `[T]` has nothing to pin it, while `list_of` is a FUNCTION
+     * whose `'a` the annotation solves — putting the inner draw at the concrete
+     * element type, where dispatch works.
+     *
+     * Verified live: `tagged`, an ANONYMOUS record with a `[Str]` field, samples under
+     * this shape and failed under every earlier one.
+     */
+    @Test
+    fun `a sequence field is generated with list_of`() {
+        val out = command.buildExpression(
+            ready("tagged", mapOf("tags" to seqOf(MezzeType.StringType), "id" to MezzeType.IntType)),
+            seed = 7,
         )
+        assertTrue("list_of { g = {} -> Arbitrary.arbitrary {} }" in out, "no list_of:\n$out")
+        assertTrue("tags: [Str]" in out, "field not annotated with its type:\n$out")
+    }
+
+    /** A sequence OF a sequence descends, so each level pins its own element. */
+    @Test
+    fun `a nested sequence descends`() {
+        val out = command.buildExpression(
+            ready("f", mapOf("xss" to seqOf(seqOf(MezzeType.IntType)))),
+            seed = 7,
+        )
+        assertEquals(2, Regex("list_of").findAll(out).count(), "expected two levels:\n$out")
+    }
+
+    /**
+     * `Option` is generated inline because no instance exists to dispatch to (S-4,
+     * #161). 1 in 10 is ScalaCheck's `Gen.option` — `frequency(1 -> None, 9 -> some)`
+     * — rather than a guess.
+     */
+    @Test
+    fun `an Option field is generated inline, weighted 1 in 10`() {
+        val out = command.buildExpression(
+            ready("f", mapOf("o" to MezzeType.TypeApplication("Option", listOf(MezzeType.StringType)))),
+            seed = 7,
+        )
+        assertTrue("choose { bound = 10 } == 0 then None" in out, "wrong Option shape:\n$out")
+        assertTrue("Some { val = Arbitrary.arbitrary {} }" in out, "no Some payload draw:\n$out")
+    }
+
+    /** `Result`, same reasoning — weighted toward `Ok`, `Err` often enough to matter. */
+    @Test
+    fun `a Result field is generated inline with both arms`() {
+        val out = command.buildExpression(
+            ready("f", mapOf(
+                "r" to MezzeType.TypeApplication("Result", listOf(MezzeType.IntType, MezzeType.StringType)),
+            )),
+            seed = 7,
+        )
+        assertTrue("Err { error =" in out, "no Err arm:\n$out")
+        assertTrue("Ok { val =" in out, "no Ok arm:\n$out")
     }
 
     @Test
@@ -72,14 +115,14 @@ class SampleExpressionTest {
     }
 
     /**
-     * A ZERO-argument function gets no `with_seed` wrapper. There is nothing to
-     * draw, so the wrapper would declare a `<Sample>` the body never performs and be
-     * rejected for precisely that — measured, not guessed.
+     * A ZERO-argument function gets no `with_seed`. There is nothing to draw, so the
+     * wrapper would declare a `<Sample>` the body never performs and be rejected for
+     * exactly that — measured, not guessed.
      */
     @Test
     fun `a zero-argument function is not wrapped in with_seed`() {
         val out = expr("answer", emptyList())
-        assertFalse("with_seed" in out, "a no-arg function was wrapped:\n$out")
+        assertTrue("with_seed" !in out, "a no-arg function was wrapped:\n$out")
         assertTrue("args = {}" in out, "expected an empty args record:\n$out")
         assertTrue("answer {}" in out, "expected a plain call:\n$out")
     }
@@ -96,9 +139,9 @@ class SampleExpressionTest {
     }
 
     /**
-     * Every row draws inside ONE `with_seed`, so the seed reproduces the whole
-     * batch. A seeded scope per row would reset the stream and print the same values
-     * N times — a table that looks like it works and shows one sample repeated.
+     * Every row draws inside ONE `with_seed`, so the seed reproduces the whole batch.
+     * A seeded scope per row would reset the stream and print the same values N times
+     * — a table that looks like it works and shows one sample repeated.
      */
     @Test
     fun `all rows draw inside a single seeded scope`() {
@@ -106,25 +149,24 @@ class SampleExpressionTest {
         assertEquals(1, Regex("with_seed").findAll(out).count(), "expected ONE seeded scope:\n$out")
     }
 
-    /** One args binding and one draw per field, per row. */
     @Test
     fun `count produces that many rows, each with its own draws`() {
         val out = expr("f", listOf("a", "b"), count = 4)
-        assertEquals(4, Regex("\\{ a = Arbitrary").findAll(out).count(), "wrong row count:\n$out")
-        assertEquals(8, Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(), "wrong draw count:\n$out")
-        for (i in 0 until 4) {
-            assertTrue("${ARGS}_$i" in out, "row $i has no args binding:\n$out")
-        }
+        assertEquals(
+            8,
+            Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(),
+            "wrong draw count for 4 rows x 2 fields:\n$out",
+        )
+        for (i in 0 until 4) assertTrue("${ARGS}_$i" in out, "row $i missing:\n$out")
     }
 
     /**
-     * Rows must not share an args binding — the easy mistake when unrolling, and one
-     * that would print the same values on every line while the draws really happened.
-     * Indistinguishable from a working table at a glance, which is why it is asserted
-     * rather than left to review.
+     * Rows must not share a binding — the easy mistake when unrolling, and one that
+     * would print identical values on every line while the draws really happened.
+     * Indistinguishable from a working table at a glance, hence asserted.
      */
     @Test
-    fun `each row reads its OWN args binding`() {
+    fun `each row reads its OWN bindings`() {
         val out = expr("f", listOf("a"), count = 3)
         for (i in 0 until 3) {
             assertTrue("a = ${ARGS}_$i.a" in out, "row $i does not read its own args:\n$out")
@@ -132,45 +174,16 @@ class SampleExpressionTest {
     }
 
     /**
-     * A NAMED parameter type is drawn WHOLE under an annotation, not per field — and
-     * that is a capability difference, not a style one. The annotated form dispatches
-     * to the type's derived instance, which handles a `[Int]` field; the per-field
-     * form cannot, because a bare field draw at a container type has nothing to pin
-     * it. Verified against the installed binary: `cart_total`, whose parameter is a
-     * named record with a `[Int]` field, samples under this shape and fails under the
-     * other.
+     * The call forwards fields from the bound record and never re-draws. Re-drawing
+     * would print arguments that are not the ones the function saw — silently wrong,
+     * and the worst outcome available to this command.
      */
     @Test
-    fun `a named parameter type is drawn whole under its own annotation`() {
-        val out = command.buildExpression(
-            SampleTarget.Result.Ready("cart_total", listOf("items", "note"), paramTypeName = "Cart"),
-            seed = 7,
-        )
-        assertTrue("${ARGS}_0: Cart = Arbitrary.arbitrary {}" in out, "not annotated whole:\n$out")
-        assertEquals(
-            1,
-            Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(),
-            "expected ONE draw for the whole record, not one per field:\n$out",
-        )
-        // Fields are still forwarded individually — a spread-only record is rejected
-        // in a call position, so the call has to name them.
-        assertTrue("items = ${ARGS}_0.items" in out, "field not forwarded:\n$out")
-        assertTrue("note = ${ARGS}_0.note" in out, "field not forwarded:\n$out")
-    }
-
-    /** Anonymous stays per-field: an anonymous annotation does not pin. */
-    @Test
-    fun `an anonymous parameter type is still drawn per field`() {
-        val out = command.buildExpression(
-            SampleTarget.Result.Ready("f", listOf("a", "b"), paramTypeName = null),
-            seed = 7,
-        )
-        assertFalse(Regex("let \\S+\\s*:").containsMatchIn(out), "annotated anyway:\n$out")
-        assertEquals(
-            2,
-            Regex("Arbitrary\\.arbitrary \\{\\}").findAll(out).count(),
-            "expected one draw per field:\n$out",
-        )
+    fun `the call forwards from the binding instead of re-drawing`() {
+        val out = expr("total", listOf("quantity"))
+        val callSite = out.substringAfter("result = ")
+        assertTrue("Arbitrary.arbitrary" !in callSite, "the call re-draws:\n$out")
+        assertTrue("quantity = ${ARGS}_0.quantity" in callSite, "not forwarded:\n$out")
     }
 
     private companion object {

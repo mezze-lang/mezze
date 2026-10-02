@@ -163,7 +163,7 @@ class SampleCommand {
         // A zero-argument function has one answer, so [count] is meaningless for it
         // and there is nothing to draw — hence no `with_seed`, which would declare a
         // `<Sample>` the body never performs and be rejected for exactly that.
-        if (target.fieldNames.isEmpty()) {
+        if (target.fields.isEmpty()) {
             return "{ rows = [{ args = {}, result = $name {} }] }"
         }
 
@@ -178,15 +178,16 @@ class SampleCommand {
         val rows = (0 until count).joinToString("\n") { i ->
             val args = "${ARGS}_$i"
             val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
-            // A NAMED parameter type is annotated and drawn whole, which dispatches to
-            // the type's derived instance and so handles components the per-field form
-            // cannot — a `[Int]` field among them. An anonymous one is drawn per field,
-            // because an anonymous record annotation does not pin a receiver-less
-            // operation. See `SampleTarget.Result.Ready.paramTypeName`.
-            val draw = target.paramTypeName
-                ?.let { "let $args: $it = Arbitrary.arbitrary {}" }
-                ?: "let $args = { ${target.fieldNames.joinToString(", ") { f -> "$f = Arbitrary.arbitrary {}" }} }"
-            "              $draw"
+            // Generated FROM the parameter's types, which the command already knows,
+            // with one ANNOTATED binding per field. The annotation is what pins the
+            // draws — see [SampleGen.bindFields] — and that is what makes a container
+            // or an Option argument work regardless of whether the parameter type
+            // itself has a name.
+            val (lets, record) = SampleGen.bindFields(target.fields, args) {
+                com.mezze.language.ast.prettyPrintType(it)
+            }
+            lets
+                .plus("\n              let $args = $record")
                 .plus("\n              let ${ROW}_$i = { args = $args, result = $name { $forwarded } }")
         }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
@@ -361,9 +362,6 @@ $rows
          * unaffected — a duplicate import is harmless, and diffing them would be
          * work for no benefit.
          */
-        val EXTRA_IMPORTS = setOf(
-            "use std::effects::sample::{ with_seed }",
-            "use std::abilities::arbitrary::{ Arbitrary }",
-        )
+        val EXTRA_IMPORTS = SampleGen.IMPORTS
     }
 }
