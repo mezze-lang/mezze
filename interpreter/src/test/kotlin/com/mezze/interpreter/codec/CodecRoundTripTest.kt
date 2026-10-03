@@ -956,6 +956,35 @@ class CodecRoundTripTest {
     // ========================================================================
 
     @Test
+    fun `multiple from_json of different shapes in one scope each decode correctly`() {
+        // Each from_json's decode target is return-type-polymorphic and inferred from
+        // usage (`c == original`). With several decodes of DIFFERENT shapes in one
+        // scope, the earlier fix wired every later call to the FIRST decoder (Map,
+        // Seq, and the nominal record each collapsed onto whichever registered first).
+        // Each round-trip contributes 1 iff it decoded into the RIGHT shape; sum is 3.
+        val src = """
+            use std::codec::json::{ ToJson, FromJson }
+            use std::collections::map
+            use std::collections::list
+            type Pt = { a: Int, b: Str }
+            let m = map::from_list { xs = list::from_seq { xs = [{ k = 1, v = 10 }, { k = 2, v = 20 }] } }
+            let s = [7, 8, 9]
+            let p: Pt = { a = 5, b = "hi" }
+            let r1 = match m.to_json{}.from_json {} is
+              Ok { val = c } -> if c == m then 1 else 0
+              Err { error = _ } -> 0
+            let r2 = match s.to_json{}.from_json {} is
+              Ok { val = c } -> if c == s then 1 else 0
+              Err { error = _ } -> 0
+            let r3 = match p.to_json{}.from_json {} is
+              Ok { val = c } -> if c == p then 1 else 0
+              Err { error = _ } -> 0
+            r1 + r2 + r3
+        """.trimIndent()
+        assertEquals(3L, eval(src))
+    }
+
+    @Test
     fun `JsonC round-trip Nat positive`() {
         // `c == original` pins the decode target to Nat (no annotation); `nat::to_int`
         // reads it back. Routes through the validating decode_nat, not a Tier-3 self-call.

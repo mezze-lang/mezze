@@ -333,16 +333,26 @@ object DecodeTargetResolver {
         var eqRhs: MezzeType? = null
         fun scan(e: TypedExpr) {
             if (eqRhs != null) return
+            // `binder == expr` desugars to the `eq` op applied to a record carrying
+            // BOTH operands (`{ it = binder, r = expr }`). `==` forces both operands to
+            // ONE type (Eq 'a), so the OTHER operand's resolved type IS the binder's.
+            // Restricted to `eq` — a general call's args do NOT share a type
+            // (`set::contains { s = c, x = 1 }`).
             if (e is TypedCall) {
                 val fn = e.function
-                if (fn is TypedFieldAccess && fn.field == BuiltinTypes.EQ_METHOD &&
-                    fn.record.let { it is TypedVar && it.name == binder }) {
-                    val arg = e.arg
-                    if (arg is TypedRecord) {
-                        val rhs = arg.entries.firstNotNullOfOrNull {
-                            (it as? TypedRecordEntry.Field)?.takeIf { f -> f.name == "r" }?.value
+                val isEq = (fn is TypedFieldAccess && fn.field == BuiltinTypes.EQ_METHOD) ||
+                    (fn is TypedVar && fn.name == BuiltinTypes.EQ_METHOD)
+                val arg = e.arg
+                if (isEq && arg is TypedRecord) {
+                    val fields = arg.entries.filterIsInstance<TypedRecordEntry.Field>()
+                    val usesBinder = fields.any { it.value.let { v -> v is TypedVar && v.name == binder } } ||
+                        (fn is TypedFieldAccess && fn.record.let { it is TypedVar && it.name == binder })
+                    if (usesBinder) {
+                        val other = fields.firstNotNullOfOrNull { f ->
+                            f.value.takeIf { it !is TypedVar || it.name != binder }
+                                ?.type?.takeIf { t -> isConcreteTarget(t) }
                         }
-                        if (rhs != null && isConcreteTarget(rhs.type)) { eqRhs = rhs.type; return }
+                        if (other != null) { eqRhs = other; return }
                     }
                 }
             }
@@ -354,6 +364,25 @@ object DecodeTargetResolver {
 
     /** No unresolved type variable anywhere — a target we can trust to pin a decoder. */
     private fun isConcreteTarget(t: MezzeType): Boolean = !structural(t).contains("?")
+
+    /**
+     * The declared NAME of a type when it has one and carries no distinguishing type
+     * args — so the nominal impl target (`TypeApplication("P", [])`) equates with the
+     * structural usage target (a `RecordType`/`NewtypeType` named `P`). Null for
+     * parametric applications (args compared instead) and anonymous shapes.
+     *
+     * NOT `TypeNames.head`: that returns the head name ignoring args, so `Map Int Int`
+     * and `Map Str Str` both answer `"Map"` and would falsely equate two different
+     * parametric decoders. This reuses `identity.displayNameOrNull()` but gates the
+     * arg-less case so the name-match only fires where it is unambiguous.
+     */
+    private fun nominalName(t: MezzeType): String? = when (t) {
+        is MezzeType.TypeApplication -> if (t.args.isEmpty()) t.constructor else null
+        is MezzeType.RecordType -> t.identity.displayNameOrNull()
+        is MezzeType.VariantType -> if (BuiltinTypes.isBoolVariant(t)) null else t.identity.displayNameOrNull()
+        is MezzeType.NewtypeType -> t.identity.displayNameOrNull() ?: t.name
+        else -> null
+    }
 
     /** Reconstruct a CLOSED record from field accesses on the var named [binder]. */
     private fun reconstructBinder(root: TypedExpr, binder: String, depth: Int): MezzeType? {
@@ -405,6 +434,13 @@ object DecodeTargetResolver {
     // still pin the decoder.
     private fun shapeMatches(impl: MezzeType, target: MezzeType): Boolean {
         if (impl is MezzeType.VarType || target is MezzeType.VarType) return true
+        // A DECLARED type reaches us in two representations: the impl target is
+        // NOMINAL (`mezzeTypeToParsedAnnotation` names it — `P`, `Nat`), while the
+        // usage-reconstructed target is STRUCTURAL (`{label,x}`, `newtype Nat(Int)`).
+        // Match them by nominal name — but only for the ARG-LESS case, so parametric
+        // containers (`Map Int Int` vs `Map Str Str`) still go through arg comparison.
+        val ni = nominalName(impl); val nt = nominalName(target)
+        if (ni != null && ni == nt) return true
         return when {
             impl is MezzeType.RecordType && target is MezzeType.RecordType -> {
                 if (impl.fields.keys != target.fields.keys) false
@@ -475,6 +511,9 @@ object DecodeTargetResolver {
         is TypedSeq -> e.copy(elements = e.elements.map { mapSeq(it, g) })
         is TypedPipe -> e.copy(left = g(e.left), right = g(e.right))
         is TypedPerform -> e.copy(body = g(e.body))
+        is TypedStringLit -> e.copy(parts = e.parts.map {
+            if (it is TypedStringPart.Interpolation) it.copy(expr = g(it.expr)) else it
+        })
         else -> e
     }
 
@@ -504,6 +543,9 @@ object DecodeTargetResolver {
         is TypedSeq -> e.elements.map { seqExpr(it) }
         is TypedPipe -> listOf(e.left, e.right)
         is TypedPerform -> listOf(e.body)
+        // A decoded value used only inside a `"…$(c == original)…"` interpolation
+        // lives here; without this the target reconstruction never reaches it.
+        is TypedStringLit -> e.parts.mapNotNull { (it as? TypedStringPart.Interpolation)?.expr }
         else -> emptyList()
     }
 
