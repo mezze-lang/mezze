@@ -14,6 +14,7 @@ use std::frac
 # every one of these is a constructor, not a convenience.
 use std::collections::seq
 use std::collections::set
+use std::collections::list
 use std::collections::map
 use std::collections::deque
 use std::collections::sorted_set
@@ -31,8 +32,8 @@ use std::collections::nonemptylist
 ##
 ## Containers are WRITTEN rather than derived, because a container's identity is a
 ## reserved name rather than a declaration, so there is no structure to walk. They
-## are written below for every one of them except `List`, whose two type
-## representations make it undispatchable — see the container section.
+## are written below for all of them: sequences, `List`, `Set`, `SortedSet`,
+## `Deque`, `NonEmptyList`, `Map` and `SortedMap`.
 ##
 ## ## What this makes possible
 ##
@@ -249,6 +250,11 @@ impl Arbitrary for ['a] where {
     list_of { g = {} -> Arbitrary.arbitrary {} }
 }
 
+impl Arbitrary for List 'a where {
+  arbitrary: {} with Arbitrary 'a -> List 'a <Sample> = {} ->
+    list::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
+}
+
 impl Arbitrary for Deque 'a where {
   arbitrary: {} with Arbitrary 'a -> Deque 'a <Sample> = {} ->
     deque::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
@@ -268,17 +274,11 @@ impl Arbitrary for SortedSet 'a where {
     sorted_set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
 }
 
-## ## The maps INSERT rather than converting, and `List` is left out entirely
+## ## The maps INSERT rather than converting
 ##
-## `map::from_list` would be the obvious constructor and it is not usable: it wants
-## a `List { k, v }`, so building a map that way needs an `Arbitrary for List 'a`
-## too, and `List` is the one container that cannot have one. It has TWO
-## representations — a dedicated `MezzeType.ListType` and the name-carried
-## `TypeApplication("List", ...)` — and `receiverTypeName` answers only for the
-## second, so a `List` produced type dispatches to nothing and the draw comes back
-## the wrong shape entirely (`Expected MezzeSeq for field 'xs', got: Long`). That is
-## S-12. Folding `insert` over a drawn sequence of pairs needs no `List`, and
-## `map::empty` with `map::insert` is total.
+## `map::from_list` would be the obvious constructor and folding `insert` is the
+## one chosen, because it needs no intermediate `List` at all — `map::empty` with
+## `map::insert` is total and the draw is already a sequence.
 ##
 ## TWO element dictionaries are live at once here, for the key and the value
 ## independently — the only impls in this file whose head binds more than one
@@ -286,7 +286,8 @@ impl Arbitrary for SortedSet 'a where {
 ## rather than read from the operation's own parameters. That combination was S-11:
 ## the capture lookup dropped the ability segment from its request, missed the exact
 ## per-variable slot, and fell through to a prefix scan answering with whichever
-## variable came first, so one dictionary served both.
+## variable came first, so one dictionary served both. Fixing it also fixed `List`,
+## whose draw had been coming back as the wrong runtime shape for the same reason.
 ##
 ## Keys deduplicate on the way in, so a drawn map is usually smaller than the draw,
 ## for the same reason a `Set` is.

@@ -6,7 +6,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Generating the BUILTIN CONTAINERS — `Set`, `SortedSet`, `Deque`,
+ * Generating the BUILTIN CONTAINERS — `Set`, `SortedSet`, `Deque`, `List`,
  * `NonEmptyList`, `Map`, `SortedMap` — and `Frac`.
  *
  * ## Why these are written impls and not derived ones
@@ -54,6 +54,7 @@ class ArbitraryBuiltinContainerTest {
         use std::abilities::arbitrary::{ Arbitrary, int_min }
         use std::collections::seq
         use std::collections::set
+        use std::collections::list
         use std::collections::map
         use std::collections::sorted_map
         use std::collections::deque
@@ -159,6 +160,32 @@ class ArbitraryBuiltinContainerTest {
      * exception, where `1 / 0` on `Int` raises a guest error. Same class of bug as
      * S-6, in `frac::make` rather than in the generator. Filed as S-9.
      */
+    /**
+     * `List`'s size agrees with a COUNT over its own elements — two independent
+     * natives walking the same drawn value.
+     *
+     * Deliberately NOT via `list::to_seq`, and that is a finding rather than a
+     * convenience: `seq::size { xs = list::to_seq { xs = l } }` fails on a
+     * cons-backed List with
+     * `UnsupportedSpecializationException: ListToLongSeq_Node: [List(a, b)], [MezzeCons]`
+     * — and it fails for a LITERAL `list::from_seq { xs = ["a", "b"] }` too, with no
+     * sampling anywhere. That is a pre-existing `list::to_seq` bug (S-12), not
+     * something about generation; `list::size` on a drawn List is correct, and
+     * `mez sample` renders one as `List("world")`.
+     */
+    @Test
+    fun `a List's size agrees with a count over its elements`() {
+        holds(
+            "List size", 17,
+            """
+            let l: List Str = Arbitrary.arbitrary {}
+            if list::size { xs = l } == list::count { xs = l, p = { x } -> True }
+              then 1
+              else 0
+            """.trimIndent(),
+        )
+    }
+
     @Test
     fun `a Frac never has a zero denominator`() {
         holds(
