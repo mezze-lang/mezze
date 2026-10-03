@@ -3319,6 +3319,10 @@ class TypedASTCompiler(
                 parentCaptureNames,
                 com.mezze.language.ast.MagicParams.methodOfKey(method),
                 com.mezze.language.ast.MagicParams.typeVarOfKey(method),
+                // S-11: without the ability segment this misses the exact per-variable
+                // slot, and the PREFIX scan below answers with whichever comes first —
+                // two keys from one lambda collapsing onto ONE captured dictionary.
+                com.mezze.language.ast.MagicParams.abilityOfKey(method),
             ) ?: return@mapNotNull null
             val parentParamIdx = parentParamNames.indexOf(dictName)
             if (parentParamIdx >= 0) {

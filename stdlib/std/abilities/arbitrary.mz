@@ -14,8 +14,10 @@ use std::frac
 # every one of these is a constructor, not a convenience.
 use std::collections::seq
 use std::collections::set
+use std::collections::map
 use std::collections::deque
 use std::collections::sorted_set
+use std::collections::sorted_map
 use std::collections::nonemptylist
 
 ## A type that can be generated.
@@ -29,8 +31,8 @@ use std::collections::nonemptylist
 ##
 ## Containers are WRITTEN rather than derived, because a container's identity is a
 ## reserved name rather than a declaration, so there is no structure to walk. They
-## are written below for sequences, `Set`, `SortedSet`, `Deque` and `NonEmptyList`.
-## `List`, `Map` and `SortedMap` are the exceptions — see the container section.
+## are written below for every one of them except `List`, whose two type
+## representations make it undispatchable — see the container section.
 ##
 ## ## What this makes possible
 ##
@@ -264,6 +266,46 @@ impl Arbitrary for Set 'a where {
 impl Arbitrary for SortedSet 'a where {
   arbitrary: {} with Arbitrary 'a, Ord 'a -> SortedSet 'a <Sample> = {} ->
     sorted_set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
+}
+
+## ## The maps INSERT rather than converting, and `List` is left out entirely
+##
+## `map::from_list` would be the obvious constructor and it is not usable: it wants
+## a `List { k, v }`, so building a map that way needs an `Arbitrary for List 'a`
+## too, and `List` is the one container that cannot have one. It has TWO
+## representations — a dedicated `MezzeType.ListType` and the name-carried
+## `TypeApplication("List", ...)` — and `receiverTypeName` answers only for the
+## second, so a `List` produced type dispatches to nothing and the draw comes back
+## the wrong shape entirely (`Expected MezzeSeq for field 'xs', got: Long`). That is
+## S-12. Folding `insert` over a drawn sequence of pairs needs no `List`, and
+## `map::empty` with `map::insert` is total.
+##
+## TWO element dictionaries are live at once here, for the key and the value
+## independently — the only impls in this file whose head binds more than one
+## variable — and the pair is drawn inside a LAMBDA, so both have to be CAPTURED
+## rather than read from the operation's own parameters. That combination was S-11:
+## the capture lookup dropped the ability segment from its request, missed the exact
+## per-variable slot, and fell through to a prefix scan answering with whichever
+## variable came first, so one dictionary served both.
+##
+## Keys deduplicate on the way in, so a drawn map is usually smaller than the draw,
+## for the same reason a `Set` is.
+impl Arbitrary for Map 'k 'v where {
+  arbitrary: {} with Arbitrary 'k, Arbitrary 'v, Eq 'k, Hash 'k -> Map 'k 'v <Sample> = {} ->
+    seq::fold {
+      xs = list_of { g = {} -> { k = Arbitrary.arbitrary {}, v = Arbitrary.arbitrary {} } },
+      init = map::empty {},
+      f = { acc, x } -> map::insert { m = acc, k = x.k, v = x.v },
+    }
+}
+
+impl Arbitrary for SortedMap 'k 'v where {
+  arbitrary: {} with Arbitrary 'k, Arbitrary 'v, Ord 'k -> SortedMap 'k 'v <Sample> = {} ->
+    seq::fold {
+      xs = list_of { g = {} -> { k = Arbitrary.arbitrary {}, v = Arbitrary.arbitrary {} } },
+      init = sorted_map::empty {},
+      f = { acc, x } -> sorted_map::insert { m = acc, k = x.k, v = x.v },
+    }
 }
 
 ## The one container whose emptiness is a TYPE error rather than a value, so it

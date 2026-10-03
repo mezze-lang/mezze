@@ -192,6 +192,42 @@ class ParameterisedImplReceiverlessOpTest {
         )
     }
 
+    /**
+     * S-11 PROBE: both draws inside a LAMBDA, so two per-variable dictionaries must
+     * be CAPTURED by the closure rather than read from the enclosing operation's
+     * parameters.
+     *
+     * This is the shape `impl Arbitrary for Map 'k 'v` has and `Box 'k 'v` above does
+     * not — the map draws its pair inside `list_of { g = {} -> … }`. ONE variable
+     * inside a lambda is fine (`impl Arbitrary for ['a]` is exactly that and works),
+     * so if this fails the combination is what matters, not either half.
+     */
+    @Test
+    fun `two variables drawn inside a lambda`() {
+        assertEquals(
+            7L,
+            long(
+                """
+                $ability
+
+                type Box 'k 'v = { first: 'k, second: 'v }
+
+                let apply: { f: {} -> 'a } -> 'a = { f } -> f {}
+
+                impl Make for Box 'k 'v where {
+                  make: {} with Make 'k, Make 'v -> Box 'k 'v = {} ->
+                    apply { f = {} -> { first = Make.make {}, second = Make.make {} } }
+                }
+
+                do
+                  let b: Box Int Str = Make.make {}
+                  b.first
+                """.trimIndent(),
+            ),
+            "two dictionaries were not captured into the closure",
+        )
+    }
+
     /** Pinned by a declared RETURN rather than a `let`, the other annotation position. */
     @Test
     fun `pinning by a function's return type works`() {

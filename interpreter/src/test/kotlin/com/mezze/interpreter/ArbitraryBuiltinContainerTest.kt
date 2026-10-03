@@ -6,8 +6,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Generating the BUILTIN CONTAINERS — `Set`, `SortedSet`, `Deque` and
- * `NonEmptyList` — and `Frac`.
+ * Generating the BUILTIN CONTAINERS — `Set`, `SortedSet`, `Deque`,
+ * `NonEmptyList`, `Map`, `SortedMap` — and `Frac`.
  *
  * ## Why these are written impls and not derived ones
  *
@@ -54,6 +54,8 @@ class ArbitraryBuiltinContainerTest {
         use std::abilities::arbitrary::{ Arbitrary, int_min }
         use std::collections::seq
         use std::collections::set
+        use std::collections::map
+        use std::collections::sorted_map
         use std::collections::deque
         use std::collections::sorted_set
         use std::collections::nonemptylist
@@ -168,6 +170,55 @@ class ArbitraryBuiltinContainerTest {
               f = { acc, x } -> do
                 let q: Frac = Arbitrary.arbitrary {}
                 bool::and { l = acc, r = frac::denominator { n = q } != 0 }
+            }
+            if r then 1 else 0
+            """.trimIndent(),
+        )
+    }
+
+    /**
+     * TWO element dictionaries live at once, for the key and the value
+     * independently, and the pair is drawn inside a LAMBDA so both must be
+     * CAPTURED. That combination was S-11, where one dictionary served both.
+     *
+     * The default is `x.v + 1` rather than a fixed sentinel so a missing key can
+     * never coincide with the value looked for: with `def = 0` an entry whose value
+     * is genuinely `0` would pass even if the lookup found nothing.
+     */
+    @Test
+    fun `a Map's keys look up to their own values`() {
+        holds(
+            "Map Str Int lookup", 7,
+            """
+            let m: Map Str Int = Arbitrary.arbitrary {}
+            let r = seq::fold {
+              xs = map::to_seq { m = m },
+              init = True,
+              f = { acc, x } -> bool::and {
+                l = acc,
+                r = get_or { opt = map::get { m = m, k = x.k }, def = x.v + 1 } == x.v,
+              },
+            }
+            if r then 1 else 0
+            """.trimIndent(),
+        )
+    }
+
+    /** Key and value types SWAPPED relative to the case above, so a single crossed
+     *  pair of dictionaries cannot satisfy both tests. */
+    @Test
+    fun `a SortedMap's keys look up to their own values`() {
+        holds(
+            "SortedMap Int Str lookup", 11,
+            """
+            let m: SortedMap Int Str = Arbitrary.arbitrary {}
+            let r = seq::fold {
+              xs = seq::from_list { xs = sorted_map::to_list { m = m } },
+              init = True,
+              f = { acc, x } -> bool::and {
+                l = acc,
+                r = get_or { opt = sorted_map::get { m = m, k = x.k }, def = " absent" } == x.v,
+              },
             }
             if r then 1 else 0
             """.trimIndent(),
