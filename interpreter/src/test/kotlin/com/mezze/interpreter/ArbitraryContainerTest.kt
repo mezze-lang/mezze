@@ -130,8 +130,8 @@ class ArbitraryContainerTest {
     }
 
     @Test
-    fun `an Option component is blocked`() {
-        stillBlocked(
+    fun `an Option component generates`() {
+        generates(
             "an Option Int field",
             """
             type Maybe = { o: Option Int }
@@ -144,8 +144,8 @@ class ArbitraryContainerTest {
     }
 
     @Test
-    fun `a Result component is blocked`() {
-        stillBlocked(
+    fun `a Result component generates`() {
+        generates(
             "a Result Int Str field",
             """
             type Outcome = { r: Result Int Str }

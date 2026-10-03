@@ -458,7 +458,54 @@ object DerivedImplGenerator {
      * the other two a quarter each. Bounded, every constructor reachable, and not
      * worth more machinery — a sample is read, not measured.
      */
-    private fun pickAmong(ctors: List<ParsedVariantCtorDef>): ParsedExpr = bisect(ctors, 0)
+    /**
+     * An EMPTY constructor is drawn one time in eight; the payload-carrying ones
+     * take the rest. Within each group, bisect as before.
+     *
+     * A derivation rule rather than a per-type choice, and it HAS to be: impls are
+     * not overridable, so a type whose generated distribution is wrong has no
+     * recourse short of a newtype. The rule therefore has to be defensible for
+     * every variant, and this one is — a payload-free value exercises nothing below
+     * it, so picking one half the time explores half as much. At a straight 50/50 a
+     * record of five `Option` fields comes out all-empty one time in 32; at one in
+     * eight, one time in 32768.
+     *
+     * MEASURED on `Option Int`: 153 `None` in 300 draws under plain bisection,
+     * which is the uniform coin flip two constructors give. ScalaCheck's
+     * `Gen.option` is `frequency(1 -> None, 9 -> some)`; one in eight is the nearest
+     * three flips reach, and flips are the only entropy available here —
+     * `Arbitrary.arbitrary {}` at `Bool`. A derived impl cannot name the `Sample`
+     * effect to ask for a weighted draw, because it is written into the user's
+     * module and that module has no reason to import sampling.
+     *
+     * Unchanged for an all-empty variant (an enum) or an all-carrying one
+     * (`Result`): no distinction to act on, so it bisects exactly as before.
+     */
+    private fun pickAmong(ctors: List<ParsedVariantCtorDef>): ParsedExpr {
+        val empty = ctors.filter { it.dataType == null }
+        val carrying = ctors.filter { it.dataType != null }
+        if (empty.isEmpty() || carrying.isEmpty()) return bisect(ctors, 0)
+        val bits = (0 until 3).map { "__arb_empty$it" }
+        return ParsedDo(
+            statements = bits.map { name ->
+                ParsedStatement.Let(
+                    pattern = ParsedVariablePattern(name, loc()),
+                    typeAnnotation = null,
+                    value = arbitraryCall(),
+                    loc = loc(),
+                )
+            },
+            // Distinct depth bases so neither branch's `__arb_bit<n>` names can
+            // collide with the other's.
+            result = ParsedIf(
+                conjunction(bits.map { id(it) }),
+                bisect(empty, 10),
+                bisect(carrying, 20),
+                loc(),
+            ),
+            loc = loc(),
+        )
+    }
 
     private fun bisect(ctors: List<ParsedVariantCtorDef>, depth: Int): ParsedExpr {
         if (ctors.size == 1) return construct(ctors.first())

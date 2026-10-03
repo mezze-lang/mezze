@@ -1,6 +1,12 @@
 use std::abilities::compare::{ Eq }
 use std::abilities::tryable::{ Tryable }
 use std::effects::exception::{ Exception }
+# Naming `Arbitrary` here is what lets the compiler DERIVE an instance for this
+# variant. It could not be imported before: `arbitrary` and `sample` each used
+# `option::get_or`, so this closed a cycle and the type got NEITHER a derived
+# instance nor a writable one. Both now match on `Some`/`None` instead —
+# builtin constructors, needing no import.
+use std::abilities::arbitrary::{ Arbitrary }
 
 ## Tryable for Result — extract Ok, throw the raw error on Err.
 ##

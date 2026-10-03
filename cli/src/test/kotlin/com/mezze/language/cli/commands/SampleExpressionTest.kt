@@ -13,9 +13,17 @@ import org.junit.jupiter.api.Test
  * stands on, so "simplifying" any of this fails something that explains why.
  *
  * The one idea underneath all of it: the command already knows every argument's TYPE
- * — it read the function's parameter off the typed declaration — so it generates FROM
- * that type rather than emitting a bare `Arbitrary.arbitrary {}` and hoping the call
- * site pins it. That is what makes a container or an `Option` argument work at all.
+ * — it read the function's parameter off the typed declaration — so it ANNOTATES
+ * every binding with that type and lets dispatch do the rest.
+ *
+ * It used to do more than annotate, descending into sequences, `Option`s and
+ * `Result`s to generate them inline, and several tests here asserted that shape.
+ * Every one of those arms was a compiler gap rather than a design: a parameterised
+ * impl of a receiver-less operation was unreachable (S-10), and `Option`/`Result`
+ * had no instance at all because `std::option` could not name `Arbitrary` without
+ * closing an import cycle. Both are fixed, so those tests now assert the ABSENCE of
+ * the descent — the arm coming back would still produce correct output, and would
+ * silently return a distribution decision to this file that belongs to the ability.
  */
 class SampleExpressionTest {
 
@@ -94,31 +102,48 @@ class SampleExpressionTest {
     }
 
     /**
-     * `Option` is generated inline because no instance exists to dispatch to (S-4,
-     * #161). 1 in 10 is ScalaCheck's `Gen.option` — `frequency(1 -> None, 9 -> some)`
-     * — rather than a guess.
+     * `Option` and `Result` take the plain default, and this asserts the ABSENCE of
+     * the inline generation that used to be here.
+     *
+     * Both arms existed because no instance existed for either type AT ALL:
+     * `std::option` could not name `Arbitrary` without closing an import cycle, so
+     * the coherence rule refused a hand-written impl for a type derivation never
+     * got to derive. The cycle is broken (two `get_or` calls became matches), so
+     * both derive now.
+     *
+     * The weighting moved WITH the behaviour, not away from it: `None` one time in
+     * ten is now a rule in the deriver for every variant — an empty constructor is
+     * drawn one time in eight — rather than a special case in this file. Measured
+     * 32 `None` in 300 draws, against 153 under the uniform coin flip plain
+     * bisection gave.
+     *
+     * Asserting absence is the point: an arm coming back would still produce
+     * CORRECT output, so nothing would fail. It would just mean two distributions —
+     * `mez sample` one way, a user's own `arbitrary {}` another.
      */
     @Test
-    fun `an Option field is generated inline, weighted 1 in 10`() {
+    fun `an Option field takes the plain default`() {
         val out = command.buildExpression(
             ready("f", mapOf("o" to MezzeType.TypeApplication("Option", listOf(MezzeType.StringType)))),
             seed = 7,
         )
-        assertTrue("choose { bound = 10 } == 0 then None" in out, "wrong Option shape:\n$out")
-        assertTrue("Some { val = Arbitrary.arbitrary {} }" in out, "no Some payload draw:\n$out")
+        assertTrue("o: Option Str = Arbitrary.arbitrary {}" in out, "Option not dispatched:\n$out")
+        assertTrue(
+            "then None" !in out,
+            "the Option arm is back — its distribution belongs to the deriver:\n$out",
+        )
     }
 
-    /** `Result`, same reasoning — weighted toward `Ok`, `Err` often enough to matter. */
     @Test
-    fun `a Result field is generated inline with both arms`() {
+    fun `a Result field takes the plain default`() {
         val out = command.buildExpression(
             ready("f", mapOf(
                 "r" to MezzeType.TypeApplication("Result", listOf(MezzeType.IntType, MezzeType.StringType)),
             )),
             seed = 7,
         )
-        assertTrue("Err { error =" in out, "no Err arm:\n$out")
-        assertTrue("Ok { val =" in out, "no Ok arm:\n$out")
+        assertTrue("r: Result Int Str = Arbitrary.arbitrary {}" in out, "Result not dispatched:\n$out")
+        assertTrue("Err { error =" !in out, "the Result arm is back:\n$out")
     }
 
     @Test

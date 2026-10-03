@@ -6,7 +6,6 @@ use std::nat::{ Nat }
 # alone brings only Nat's, and `bound - 1` then reports no `NumSub` for Int —
 # the same trap `std::abilities::arbitrary` documents.
 use std::int
-use std::option::{ get_or }
 use std::collections::seq
 
 ## Where a generated value's choices come from — and NOTHING about types.
@@ -123,11 +122,15 @@ pub let int_between: { min: Int, max: Int } -> Int <Sample> = { min, max } ->
 ## One element of `xs`. `def` is returned only for an empty `xs`, which is a
 ## generator that cannot produce anything and is the caller's mistake, not a case
 ## worth making every call site unwrap an Option for.
+## Matched rather than `get_or`'d, and that is a DEPENDENCY decision rather than a
+## style one. `Some`/`None` are builtin constructors, so a match needs no import,
+## while `get_or` makes this module depend on `std::option` — and that dependency
+## is exactly what stopped `std::option` from naming `Arbitrary` (a cycle), which
+## in turn stopped `Option` from ever being given a generated instance. See S-4.
 pub let one_of: { xs: ['a], def: 'a } -> 'a <Sample> = { xs, def } ->
-  get_or {
-    opt = seq::get { xs = xs, i = Sample.choose { bound = seq::size { xs = xs } } },
-    def = def,
-  }
+  match seq::get { xs = xs, i = Sample.choose { bound = seq::size { xs = xs } } } is
+    Some { val } -> val
+    None -> def
 
 ## A list of `g`, with a length drawn from `[0, size]`.
 ##

@@ -104,42 +104,25 @@ object SampleGen {
             return "${helperName(name)} {}"
         }
 
-        // NO sequence arm, and its absence is the point. It used to read
+        // NO arm for a sequence, an `Option` or a `Result`, and their absence is
+        // the point. Each was here because dispatch could not reach the type:
         //
-        //     return "list_of { g = {} -> ${'$'}{of(element, …)} }"
+        //   - a sequence, because a parameterised impl of a receiver-less operation
+        //     was unreachable from a written call site (S-10),
+        //   - `Option` / `Result`, because no instance existed for them AT ALL —
+        //     `std::option` could not name `Arbitrary` without closing an import
+        //     cycle, so the coherence rule refused a hand-written impl for a type
+        //     derivation never got to derive.
         //
-        // because "the element draw is at a CONCRETE type, where dispatch works, and
-        // it cannot at `[T]` itself" — true at the time and not any more. S-10 fixed
-        // the monomorphizer hole that made a parameterised impl of a receiver-less
-        // operation unreachable, so `let xs: [Int] = Arbitrary.arbitrary {}` now
-        // resolves through `impl Arbitrary for ['a]` like any other impl. Descending
-        // here would mean this command deciding how long a sequence is and how its
-        // elements are drawn — type-specific knowledge belonging to the ability, not
-        // to the tool that calls it.
+        // Both are fixed, so all three resolve through the ability now. The
+        // `Option` weighting this file used to carry — `None` one time in ten —
+        // lives in the DERIVER, as a rule for every variant rather than a special
+        // case here: an empty constructor is drawn one time in eight. Measured
+        // 32 `None` in 300 draws, against 153 under the uniform coin flip.
         //
-        // The same will be true of the two arms below once S-4 lets `Option` and
-        // `Result` have instances at all.
-        if (type is MezzeType.TypeApplication) {
-            when (type.constructor) {
-                "Option" -> {
-                    val inner = type.args.firstOrNull() ?: return DISPATCH
-                    // 1 in 10, which is ScalaCheck's `Gen.option`:
-                    // `frequency(1 -> const(None), 9 -> some(g))`. Often enough that
-                    // the case code forgets is hit, rare enough that a record of five
-                    // Options is not usually all empty.
-                    return "if choose { bound = 10 } == 0 then None " +
-                        "else Some { val = ${of(inner, depth + 1, recursive)} }"
-                }
-                "Result" -> {
-                    if (type.args.size < 2) return DISPATCH
-                    // Weighted toward `Ok`, but `Err` often enough to matter — the
-                    // error path is the one that goes untested.
-                    return "if choose { bound = 3 } == 0 " +
-                        "then Err { error = ${of(type.args[1], depth + 1, recursive)} } " +
-                        "else Ok { val = ${of(type.args[0], depth + 1, recursive)} }"
-                }
-            }
-        }
+        // Keeping any of them would mean this command deciding a distribution,
+        // which belongs to the ability. Worse, it would mean TWO distributions —
+        // `mez sample` one way and a user's own `arbitrary {}` another.
 
         // An ANONYMOUS record is built field by field. A record carrying a
         // declaration takes the default instead: it has a derived instance, and

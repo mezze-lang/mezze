@@ -4,7 +4,6 @@ use std::effects::sample::{ Sample, choose, one_of, list_of, frequency }
 use std::math::core
 use std::nat::{ Nat }
 use std::nat
-use std::option::{ get_or }
 # The arithmetic below needs the Int and Float numeric impls in scope; without
 # these, `0 - 100` reports no `NumSub` for Int because only Nat's were imported.
 use std::int
@@ -173,12 +172,24 @@ impl Arbitrary for Frac where {
 ## NO `Arbitrary for Char` yet, and the reason is a language fact worth recording.
 ##
 ## Mezze has no character literal: `'a` is a TYPE VARIABLE, so `'a'` does not
-## parse. Every route to a `Char` — `char::from_int`, `char::from_str` — returns an
-## `Option`, so a total impl would need a `Char` to fall back to when the option is
-## empty, and there is no way to write one. The fallback is circular.
+## parse. A total impl needs a `Char` to fall back to when a partial conversion
+## comes back empty, and there is no way to write one. Every route was checked:
 ##
-## Leaving it out means a record with a `Char` field reports a missing impl, which
-## is accurate. Inventing an answer here would be guessing at a language decision.
+##  - `char::from_int`, `char::from_str` — both return `Option Char`.
+##  - `str::chars` then `seq::get` — `Option Char` again.
+##  - `char::to_upper`, `to_lower` — total, and both TAKE a `Char`.
+##  - `MutChar` via `read_char` / `char_to_immut` — total, but the only way to make
+##    a `MutChar` is `char_to_mut { c: Char }`.
+##
+## The circle closes every way round: a `Char` can be OBTAINED by discharging an
+## `Option` and constructed no other way. That is a language hole rather than a
+## sampling one — any code wanting a known character meets it too.
+##
+## Closing it needs one of two things, and both are language decisions rather than
+## fixes: a character literal, or a total `Char`-producing primitive (which would
+## have to answer somehow for an out-of-range code point). Until one exists, a
+## record with a `Char` field reports a missing impl — accurate, and better than
+## inventing an answer here.
 
 ## ## Readable usually, pathological often enough
 ##
@@ -355,6 +366,12 @@ impl Arbitrary for Nat where {
   arbitrary = {} ->
     if take_interesting {}
       then one_of { xs = [0n, 1n], def = 0n }
-      else nat::from_int { n = choose { bound = int_max } } |> get_or { opt = @, def = 0n }
+      ## Matched rather than `get_or`'d so this module does not depend on
+      ## `std::option` — see the note in `sample.mz`'s `one_of`. The `None` arm is
+      ## unreachable because the draw starts at zero, which is why it answers `0n`
+      ## rather than branching on something that cannot happen.
+      else match nat::from_int { n = choose { bound = int_max } } is
+        Some { val } -> val
+        None -> 0n
 }
 
