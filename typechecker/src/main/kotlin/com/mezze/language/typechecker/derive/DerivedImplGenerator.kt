@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.derive
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.OperatorMapping
 import com.mezze.language.ast.PrimitiveTypes
@@ -36,6 +37,7 @@ import com.mezze.language.parsedast.ParsedRecordPatternEntry
 import com.mezze.language.parsedast.ParsedRecordType
 import com.mezze.language.parsedast.ParsedRecordTypeEntry
 import com.mezze.language.parsedast.ParsedTypeAliasDef
+import com.mezze.language.parsedast.ParsedSeqType
 import com.mezze.language.parsedast.ParsedTypeAnnotation
 import com.mezze.language.parsedast.ParsedTypeApp
 import com.mezze.language.parsedast.ParsedTypeDecl
@@ -133,6 +135,7 @@ object DerivedImplGenerator {
     val primitiveEqNames: Set<String> get() = PRIMITIVE_EQ.keys
 
     private const val HASH_ABILITY = "Hash"
+    private const val ORD_ABILITY = "Ord"
     private const val STRUCTURAL_HASH_NATIVE = "__native_structural_hash"
 
     /**
@@ -176,6 +179,20 @@ object DerivedImplGenerator {
      * body performs `Sample`, so it has to live where `Sample` is in scope, and
      * `std::int` importing `std::effects::sample` would be a cycle — `sample.mz`
      * imports `std::int` for its arithmetic.
+     *
+     * ## Only the PRIMITIVES, and the containers are not an oversight
+     *
+     * The same table was written for the eight builtin containers and reverted. The
+     * generated impl has to declare `with Arbitrary 'a` (and `Eq`/`Hash` for a
+     * `Set`, `Ord` for a `SortedSet`) and pass the element's dictionary through to
+     * the draw — and that forward LOSES the dictionary when the element's instance
+     * is one the compiler derived. Measured: with all eight forwarding, exactly one
+     * case in the suite failed, `[Row]` for `type Row = { a: Int, b: Str }`, while
+     * `[Int]`, `[Str]`, `[[Int]]` and every `Set`/`Map` case passed. Restoring
+     * `['a]`'s body inline while the other seven still forwarded turned it green, so
+     * it is the extra hop and not the container. Filed as S-17.
+     *
+     * A primitive draw takes no constraint, so it has nothing to forward and works.
      */
     fun builtinArbitraryImpl(name: String): ParsedImplAbilityDecl? {
         val draw = BUILTIN_ARBITRARY[name] ?: return null
