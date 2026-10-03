@@ -280,6 +280,9 @@ val compileStdlib by tasks.registering(JavaExec::class) {
     )
     outputs.file(outputFile)
     outputs.file(snapshotFile)
+    // Sibling schema fingerprint StdlibPrecompiler writes next to the cbor; checked
+    // at load before decode to reject a schema-skewed snapshot cleanly.
+    outputs.file(layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.fp"))
     inputs.dir(rootProject.projectDir.resolve("stdlib/std"))
 
     // Needs access to stdlib source files for parsing
@@ -351,6 +354,7 @@ tasks.named("processResources") {
 tasks.named<Test>("test") {
     dependsOn("compileStdlib")
     val snapshotFile = layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.cbor")
+    val fingerprintFile = layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.fp")
     val classesOut = layout.buildDirectory.dir("resources/main/META-INF/mezze")
     doFirst {
         val src = snapshotFile.get().asFile
@@ -358,6 +362,11 @@ tasks.named<Test>("test") {
         if (src.exists()) {
             destDir.mkdirs()
             src.copyTo(destDir.resolve("stdlib-snapshot.cbor"), overwrite = true)
+        }
+        val fpSrc = fingerprintFile.get().asFile
+        if (fpSrc.exists()) {
+            destDir.mkdirs()
+            fpSrc.copyTo(destDir.resolve("stdlib-snapshot.fp"), overwrite = true)
         }
     }
 }

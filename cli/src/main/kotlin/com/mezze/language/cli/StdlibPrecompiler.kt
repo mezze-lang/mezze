@@ -323,7 +323,12 @@ fun main(args: Array<String>) {
         typedModules = precompiled.stdlibTypedModules,
     )
     snapshotFile.writeBytes(com.mezze.language.typechecker.StdlibSnapshot.encode(snapshot))
-    println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) — SQLite-free snapshot")
+    // Sibling fingerprint of THIS build's serialization schema, checked at load
+    // before decode so a schema-skewed snapshot is rejected cleanly (see
+    // StdlibSnapshotData / StdlibSnapshot.schemaFingerprint).
+    snapshotFile.resolveSibling("stdlib-snapshot.fp")
+        .writeText(com.mezze.language.typechecker.StdlibSnapshot.schemaFingerprint)
+    println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) + fingerprint — SQLite-free snapshot")
 }
 
 /**
