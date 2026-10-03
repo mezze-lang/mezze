@@ -2926,6 +2926,14 @@ class TypedASTCompiler(
         "__native_set_insert" to "__native_set_insert_with_evidence",
         "__native_set_contains" to "__native_set_contains_with_evidence",
         "__native_set_remove" to "__native_set_remove_with_evidence",
+        // EQUALITY was the one set operation with no evidence form, so two sets whose
+        // elements are equal under a hand-written `Eq` but differently represented
+        // answered false. Every sibling container compares element-wise; `Set` alone
+        // compared by representation, and `map.mz` records the same bug for a map's
+        // values. Routed through the table rather than a source-level `eq` closure
+        // because a set's elements ARE its keys: re-bucketing both sides under the
+        // element's hashing keeps the probe O(n), where threading a comparator would
+        // force an O(n*m) scan.
         "__native_map_insert" to "__native_map_insert_with_evidence",
         "__native_map_get" to "__native_map_get_with_evidence",
         "__native_map_contains_key" to "__native_map_contains_key_with_evidence",

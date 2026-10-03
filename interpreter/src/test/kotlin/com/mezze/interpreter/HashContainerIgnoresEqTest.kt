@@ -6,52 +6,49 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * `Float`'s generated `Eq` and `Hash` DISAGREE, and a hash container keeps two
- * values that compare equal.
+ * A hash container's notion of "same element" is REPRESENTATION IDENTITY, not the
+ * element's `Eq` — and for `Float` those differ.
  *
- * IEEE says `0.0 == -0.0`; their bit patterns differ. `Eq for Float` is the native
- * comparison, which follows IEEE. `Hash for Float` is `__native_structural_hash`
- * on the runtime representation, which sees the sign bit. So:
+ *     0.0 == (0.0 - 1.0) * 0.0              -- True   (IEEE: -0.0 == 0.0)
+ *     set::from_seq { xs = [0.0, that] }    -- size 2
+ *     set::contains { s = {-0.0}, x = 0.0 } -- False
  *
- *     0.0 == (0.0 - 1.0) * 0.0        -- True
- *     set::from_seq { xs = [0.0, that] }  -- size 2
+ * ## Where it actually comes from
  *
- * which is verbatim the failure the coherence rule warns about when it refuses a
- * custom `Eq` paired with a derived hash:
+ * NOT from the `Eq`/`Hash` ability pair disagreeing — the container consults
+ * neither. `HashSetStorage` buckets with `elem.hashCode()` and compares with
+ * `Objects.equals`, so it is internally CONSISTENT: both halves use the Java
+ * representation, and `Double` distinguishes `±0.0` in both. The disagreement is
+ * between the container's notion of sameness and the LANGUAGE's `==`.
  *
- *     a hash container buckets by `hash` and compares by `eq`, so a custom
- *     equality left with the derived structural hash means two values that ARE
- *     equal hash apart, never meet, and are both kept.
+ * That is deliberate for most types: representation identity IS structural
+ * equality, so it agrees with every `Eq` the compiler derives, and
+ * `set::from_seq` is fast because of it. It is wrong for any type whose `Eq` is
+ * NOT representation equality — `Float`, whose `Eq` is the IEEE native, and any
+ * newtype with a hand-written `Eq`. `from_seq_with_evidence` and
+ * `contains_with_evidence` exist as the escape hatch, taking `hash` and `eq`
+ * explicitly.
  *
- * The rule exists to stop exactly this, and it does not catch this case, because
- * both halves are COMPILER-GENERATED. Generating them together is what the rule
- * accepts as evidence that they agree — and for `Float` they do not. The pairing
- * is enforced by provenance, and provenance is not agreement.
+ * So `set::from_seq`'s `with Eq 'a, Hash 'a` is the misleading part: it demands
+ * evidence the native does not use.
  *
- * ## How this was found
+ * ## Why this does NOT block deriving container Hash in the compiler
  *
- * Not by looking for it. Moving the eight hand-written container `Hash` impls into
- * the deriver (they are byte-identical `structural_hash` one-liners, which IS the
- * derived hash) was refused by that coherence rule, because container `Eq` is
- * hand-written and element-dispatched. Checking whether the rule's premise holds
- * where it is already satisfied produced this.
+ * It was first filed as if it did. Deriving `Hash for Set 'a` changes nothing at
+ * runtime, precisely because bucketing never calls the ability — so container
+ * derivation cannot inherit this. Recorded because the opposite was asserted.
  *
- * ## Scope
+ * ## These tests assert the CURRENT behaviour
  *
- * Any type whose `Eq` identifies two representations while its hash is structural.
- * `Float` is the one the stdlib ships: `0.0`/`-0.0` today, and NaN is the related
- * question (`nan != nan` under IEEE, so a NaN key can never be looked up at all —
- * not asserted here because it is a different decision, not a disagreement).
+ * Pinned so a change is visible rather than silent. If the size assertion becomes
+ * 1, hash containers were taught to use the element's `Eq`/`Hash` (or the float
+ * hash was normalised) and these tests have served their purpose. The equality
+ * assertion must NOT change: `0.0 == -0.0` is correct.
  *
- * ## This test asserts the BUG
- *
- * It pins current behaviour so a fix is visible rather than silent. When the pair
- * is made to agree — a float hash that normalises `-0.0` to `0.0`, or an `Eq` that
- * distinguishes them — the size assertion flips to 1 and this test fails, which is
- * the signal to delete it. The equality assertion must NOT change: `0.0 == -0.0`
- * is correct.
+ * NaN is adjacent and deliberately unasserted: `nan != nan` under IEEE makes a NaN
+ * key unfindable whatever the container does — a different question, not this one.
  */
-class FloatEqHashDisagreeTest {
+class HashContainerIgnoresEqTest {
 
     @BeforeEach
     fun setUp() {
@@ -93,7 +90,7 @@ class FloatEqHashDisagreeTest {
      * container does not deduplicate.
      */
     @Test
-    fun `but a Set of them keeps BOTH — the disagreement`() {
+    fun `but a Set of them keeps BOTH`() {
         val size = run(
             """
             do
@@ -103,7 +100,7 @@ class FloatEqHashDisagreeTest {
         )
         assertEquals(
             2L, size,
-            "the Set now holds $size — if that is 1, Eq and Hash were made to agree " +
+            "the Set now holds $size — if that is 1, containers now honour the element Eq " +
                 "and this test has served its purpose; delete it",
         )
     }
@@ -121,7 +118,7 @@ class FloatEqHashDisagreeTest {
                   if set::contains { s = s, x = 0.0 } then 1 else 0
                 """.trimIndent(),
             ),
-            "containment by an equal key now succeeds — the pair agrees; delete this test",
+            "containment by an equal key now succeeds — containers honour Eq; delete this test",
         )
     }
 

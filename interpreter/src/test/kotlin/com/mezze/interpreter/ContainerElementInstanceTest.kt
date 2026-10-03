@@ -151,6 +151,48 @@ class ContainerElementInstanceTest {
     @Test fun sortedMapRemoveUsesKeyOrd() = assertEquals(1L, runSm("$pKeyMap\nlet main = {} -> sorted_map::size { m = sorted_map::remove { m = m, k = p { x = 3, y = 42 } } }\nmain {}"))
     @Test fun sortedMapIntKeysStillWork() = assertEquals(20L, runSm("let main = {} -> match sorted_map::get { m = sorted_map::insert { m = sorted_map::empty {}, k = 2, v = 20 }, k = 2 } is\n  Some { val = v } -> v\n  None -> 0 - 1\nmain {}"))
 
+    // ---- Set EQUALITY -------------------------------------------------------
+    // Added because this file had no `set::` coverage, and `__native_set_equals`
+    // looks like it cannot be right: it is `MezzeSet.equals`, a `contains` probe
+    // bottoming out in `Objects.equals`, and it takes no `eq` — where every sibling
+    // container threads one (`seq_equals_with_eq` and six more).
+    //
+    // It IS right, and these cases are here to say why, because the reason is not
+    // visible at the native. Equality is not in `evidenceNativeForm`, but every set
+    // CONSTRUCTOR is — `from_seq` and `insert` both rewrite to forms that install the
+    // element's hashing ON THE SET. So a set of an element with a hand-written `Eq`
+    // is already `EvidenceSetStorage`, and the `contains` probe inside `equals` asks
+    // that element's `eq`. The storage carries the evidence; the comparison inherits
+    // it.
+    //
+    // A `*_equals_with_evidence` native was written for this and reverted: removing
+    // equality from the rewrite table changed none of these results, so it fixed
+    // nothing.
+    //
+    // THE REAL GAP IS THE GATE'S PREDICATE, not equality. The rewrite fires on
+    // `implIsHandWritten` — `!impl.derived` — when what matters is whether the `Eq`
+    // is representation equality. `Float`'s `Eq` is compiler-GENERATED yet is NOT
+    // representational (IEEE `0.0 == -0.0` ignores the sign bit), so it fails the
+    // gate, keeps the structural path, and a `Set Float` holds both zeros. That is
+    // `HashContainerIgnoresEqTest`.
+    private fun runSet(body: String) = run("use std::collections::set\n$body")
+
+    // (1,10) and (1,99) are EQUAL by P's Eq, so these two sets are equal.
+    @Test fun setEqualsUsesElementEq() = assertEquals(true,
+        runSet("let main = {} -> set::from_seq { xs = [ p { x = 1, y = 10 } ] } == set::from_seq { xs = [ p { x = 1, y = 99 } ] }\nmain {}"))
+    // Distinct by P's Eq stays unequal — the fix must not collapse to a constant.
+    @Test fun setEqualsStillDistinguishes() = assertEquals(false,
+        runSet("let main = {} -> set::from_seq { xs = [ p { x = 1, y = 0 } ] } == set::from_seq { xs = [ p { x = 2, y = 0 } ] }\nmain {}"))
+    // Different sizes stay unequal.
+    @Test fun setEqualsSizeMismatch() = assertEquals(false,
+        runSet("let main = {} -> set::from_seq { xs = [ p { x = 1, y = 0 } ] } == set::from_seq { xs = $threeP }\nmain {}"))
+    // Order of construction is irrelevant, as it must be for a set.
+    @Test fun setEqualsIgnoresInsertionOrder() = assertEquals(true,
+        runSet("let main = {} -> set::from_seq { xs = [ p { x = 1, y = 0 }, p { x = 2, y = 0 } ] } == set::from_seq { xs = [ p { x = 2, y = 9 }, p { x = 1, y = 9 } ] }\nmain {}"))
+    // Primitive elements keep the structural path.
+    @Test fun setEqualsIntsStillWork() = assertEquals(true,
+        runSet("let main = {} -> set::from_seq { xs = [1, 2, 3] } == set::from_seq { xs = [3, 2, 1] }\nmain {}"))
+
     // ---- regressions: primitives still work --------------------------------
 
     @Test fun listContainsInt() = assertEquals(true, run("let main = {} -> list::contains { xs = list::from_seq { xs = [1, 2, 3] }, x = 2 }\nmain {}"))

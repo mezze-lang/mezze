@@ -343,7 +343,29 @@ class ContextBuilder {
         val arbitraryNameable = WellKnownHashConstants.isArbitrary(arbitraryHash)
         val explicitArbitraryTargets = explicitImplTargetNames(explicitImpls, "Arbitrary")
 
-        return primitiveImpls + typeDecls.values.flatMap { decl ->
+        // The BUILTIN types' `Arbitrary`, written by the compiler the way
+        // `impl Eq for Int` is — a builtin does not get a hand-written impl in a
+        // stdlib file.
+        //
+        // Gated on the module that DECLARES the ability, not on the type's home, and
+        // that is the one way this differs from `Eq`. An `Arbitrary` body performs
+        // `Sample`, so the generated impl has to land where `Sample` is in scope;
+        // generating `impl Arbitrary for Int` into `std::int` would need that module
+        // to import `std::effects::sample`, and `sample.mz` imports `std::int` for
+        // its arithmetic — a cycle. The ability's own module already has both the
+        // effect and the draw functions the generated impls forward to.
+        val arbitraryDeclaredHere = module.decls.filterIsInstance<ParsedAbilityDecl>()
+            .any { it.name == "Arbitrary" }
+        val builtinArbitraryImpls =
+            if (!arbitraryNameable || !arbitraryDeclaredHere) emptyList()
+            else com.mezze.language.typechecker.derive.DerivedImplGenerator.builtinArbitraryNames
+                .filter { it !in explicitArbitraryTargets }
+                .mapNotNull {
+                    com.mezze.language.typechecker.derive.DerivedImplGenerator.builtinArbitraryImpl(it)
+                }
+                .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
+
+        return primitiveImpls + builtinArbitraryImpls + typeDecls.values.flatMap { decl ->
             if (decl.name !in declaredHere && decl.name !in homeHere) return@flatMap emptyList()
             if (PrimitiveTypes.fromName(decl.name) != null) return@flatMap emptyList()
 

@@ -112,17 +112,26 @@ let take_interesting: {} -> Bool <Sample> = {} -> choose { bound = 100 } < inter
 let negate_sometimes: { n: Int } -> Int <Sample> = { n } ->
   if choose { bound = 2 } == 0 then n else 0 - n
 
-impl Arbitrary for Int where {
-  arbitrary = {} ->
-    if take_interesting {}
-      then one_of { xs = [int_min, int_max, 0, 1, 0 - 1], def = 0 }
-      ## The widest magnitude one `choose` can express, with a sign on top.
-      ## `choose` draws `[0, bound)`, so a genuinely full-range draw would need the
-      ## bound to be 2^64 — which does not fit. Magnitude-plus-sign reaches
-      ## ±(2^63 - 2), and the two values it cannot produce are `int_min` and
-      ## `int_max`, which are in the table above.
-      else negate_sometimes { n = choose { bound = int_max } }
-}
+## The DRAW for an `Int`, with no `impl` around it.
+##
+## The instance is written by the compiler, exactly as `impl Eq for Int` is — a
+## builtin type does not get a hand-written impl in a stdlib file. What the compiler
+## cannot supply is which values are interesting, so that stays here, and the
+## generated impl forwards to this. `impl Eq for Int`'s generated body forwards to
+## `__native_int_eq` for the same reason: the instance is the compiler's, the
+## behaviour is not.
+##
+## Module-local rather than `pub`: the generated impl lands in THIS module, so it
+## needs no export, and `arbitrary {}` is the public way to reach it.
+let arbitrary_int: {} -> Int <Sample> = {} ->
+  if take_interesting {}
+    then one_of { xs = [int_min, int_max, 0, 1, 0 - 1], def = 0 }
+    ## The widest magnitude one `choose` can express, with a sign on top.
+    ## `choose` draws `[0, bound)`, so a genuinely full-range draw would need the
+    ## bound to be 2^64 — which does not fit. Magnitude-plus-sign reaches
+    ## ±(2^63 - 2), and the two values it cannot produce are `int_min` and
+    ## `int_max`, which are in the table above.
+    else negate_sometimes { n = choose { bound = int_max } }
 
 ## ## Float spans EXPONENTS, not a narrow band
 ##
@@ -134,19 +143,15 @@ impl Arbitrary for Int where {
 ## That is the part that matters. The previous `(unit {} * 200.0) - 100.0` could only
 ## ever produce a mid-range float — never 1e-18, never 1e18 — so it could not find a
 ## precision loss, an underflow, or a comparison that only fails at scale.
-impl Arbitrary for Float where {
-  arbitrary = {} ->
-    if take_interesting {}
-      then one_of { xs = [0.0, 1.0, 0.0 - 1.0, 0.5, 0.0 - 0.5], def = 0.0 }
-      else do
-        let mantissa = float::from_int { n = negate_sometimes { n = choose { bound = 1000000 } } }
-        let exponent = float::from_int { n = choose { bound = 121 } - 60 }
-        mantissa * core::pow { base = 2.0, exp = exponent }
-}
+let arbitrary_float: {} -> Float <Sample> = {} ->
+  if take_interesting {}
+    then one_of { xs = [0.0, 1.0, 0.0 - 1.0, 0.5, 0.0 - 0.5], def = 0.0 }
+    else do
+      let mantissa = float::from_int { n = negate_sometimes { n = choose { bound = 1000000 } } }
+      let exponent = float::from_int { n = choose { bound = 121 } - 60 }
+      mantissa * core::pow { base = 2.0, exp = exponent }
 
-impl Arbitrary for Bool where {
-  arbitrary = {} -> choose { bound = 2 } == 1
-}
+let arbitrary_bool: {} -> Bool <Sample> = {} -> choose { bound = 2 } == 1
 
 ## ## `Frac` is exact, so its interesting values are the ones exactness is FOR
 ##
@@ -159,15 +164,13 @@ impl Arbitrary for Bool where {
 ## normalisation is wanted here. The magnitudes stay near a million rather than
 ## spanning `Int`: reduction multiplies, and a numerator near `int_max` would
 ## overflow inside the constructor rather than producing a large fraction.
-impl Arbitrary for Frac where {
-  arbitrary = {} ->
-    if take_interesting {}
-      then one_of { xs = [0//1, 1//1, -1//1, 1//2, -1//2, 1//3, 2//3, 1//6, 22//7], def = 0//1 }
-      else frac::make {
-        numerator = negate_sometimes { n = choose { bound = 1000000 } },
-        denominator = choose { bound = 1000 } + 1,
-      }
-}
+let arbitrary_frac: {} -> Frac <Sample> = {} ->
+  if take_interesting {}
+    then one_of { xs = [0//1, 1//1, -1//1, 1//2, -1//2, 1//3, 2//3, 1//6, 22//7], def = 0//1 }
+    else frac::make {
+      numerator = negate_sometimes { n = choose { bound = 1000000 } },
+      denominator = choose { bound = 1000 } + 1,
+    }
 
 ## NO `Arbitrary for Char` yet, and the reason is a language fact worth recording.
 ##
@@ -204,20 +207,18 @@ impl Arbitrary for Frac where {
 ## Weighting serves both. At 15%, a hundred-case property run sees roughly fifteen
 ## pathological inputs — ample — while a single sample reads as an ordinary word
 ## about two times in three.
-impl Arbitrary for Str where {
-  arbitrary = {} -> frequency {
-    choices = [
-      ## Short and alphabetic: what a person reading one sample wants to see.
-      { weight = 65, gen = {} ->
-        one_of { xs = ["alpha", "beta", "gamma", "mezze", "sample", "hello", "world"], def = "" } },
-      ## The boundaries. Cheap to produce, and the ones most code forgets.
-      { weight = 20, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
-      ## The genuinely hostile set, kept rare rather than removed.
-      { weight = 15, gen = {} ->
-        one_of { xs = ["\"", "\n", "\t", "ünïcödé", "  padded  ", "a,b;c"], def = "" } },
-    ],
-    def = "",
-  }
+let arbitrary_str: {} -> Str <Sample> = {} -> frequency {
+  choices = [
+    ## Short and alphabetic: what a person reading one sample wants to see.
+    { weight = 65, gen = {} ->
+      one_of { xs = ["alpha", "beta", "gamma", "mezze", "sample", "hello", "world"], def = "" } },
+    ## The boundaries. Cheap to produce, and the ones most code forgets.
+    { weight = 20, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
+    ## The genuinely hostile set, kept rare rather than removed.
+    { weight = 15, gen = {} ->
+      one_of { xs = ["\"", "\n", "\t", "ünïcödé", "  padded  ", "a,b;c"], def = "" } },
+  ],
+  def = "",
 }
 
 # ---------------------------------------------------------------------------

@@ -136,6 +136,74 @@ object DerivedImplGenerator {
     private const val STRUCTURAL_HASH_NATIVE = "__native_structural_hash"
 
     /**
+     * The BUILTIN types whose `Arbitrary` instance the compiler writes, and the
+     * stdlib draw each forwards to.
+     *
+     * Same shape as [PRIMITIVE_EQ] and for the same reason: a builtin type does not
+     * get a hand-written impl in a stdlib file, so the INSTANCE is the compiler's.
+     * What the compiler cannot supply is which values are interesting — that `0`, `1`
+     * and `-1` matter for an `Int`, that the empty string matters for a `Str` — so
+     * the BODY stays in `std::abilities::arbitrary` and the generated impl forwards
+     * to it. `impl Eq for Int` forwards to `__native_int_eq` on the same split:
+     * instance generated, behaviour elsewhere.
+     *
+     * Why a stdlib `let` rather than a native, which is what `Eq` forwards to: an
+     * `Arbitrary` body PERFORMS `Sample`. Expressing a weighted draw as a native
+     * would take the sampler out of the effect, and the effect is what makes it
+     * swappable — a seeded run, live entropy, or a recorded one.
+     *
+     * `Nat` is deliberately absent: it is a newtype, and a newtype opting in BY HAND
+     * is exactly the rule `Arbitrary` documents — `newtype Age = Int` does not want
+     * arbitrary negative ints and only the author can say so. `Char` is absent
+     * because no total `Char` can be constructed at all.
+     */
+    private val BUILTIN_ARBITRARY: Map<String, String> = mapOf(
+        PrimitiveTypes.INT to "arbitrary_int",
+        PrimitiveTypes.FLOAT to "arbitrary_float",
+        PrimitiveTypes.BOOL to "arbitrary_bool",
+        PrimitiveTypes.STR to "arbitrary_str",
+        PrimitiveTypes.FRAC to "arbitrary_frac",
+    )
+
+    /** Every builtin whose `Arbitrary` the compiler writes, for the caller. */
+    val builtinArbitraryNames: Set<String> get() = BUILTIN_ARBITRARY.keys
+
+    /**
+     * `impl Arbitrary for Int`, and its siblings — a thin forward to the draw.
+     *
+     * Generated into the module that DECLARES `Arbitrary` rather than into the
+     * type's own home, which is the one way this differs from `Eq`. An `Arbitrary`
+     * body performs `Sample`, so it has to live where `Sample` is in scope, and
+     * `std::int` importing `std::effects::sample` would be a cycle — `sample.mz`
+     * imports `std::int` for its arithmetic.
+     */
+    fun builtinArbitraryImpl(name: String): ParsedImplAbilityDecl? {
+        val draw = BUILTIN_ARBITRARY[name] ?: return null
+        return ParsedImplAbilityDecl(
+            target = ParsedImplTarget.Named(ParsedQualifiedRef(ARBITRARY_ABILITY, null, loc())),
+            targetTypes = listOf(ParsedNamedType(name, loc())),
+            forallVars = emptyList(),
+            operations = listOf(
+                ParsedImplOp(
+                    name = "arbitrary",
+                    implementation = ParsedLambda(
+                        params = ParsedLambdaParams.Untyped(names = emptyList()),
+                        body = ParsedFunctionCall(
+                            function = id(draw),
+                            arguments = ParsedRecordLit(emptyList(), loc()),
+                            loc = loc(),
+                        ),
+                        loc = loc(),
+                    ),
+                    loc = loc(),
+                ),
+            ),
+            loc = loc(),
+            derived = true,
+        )
+    }
+
+    /**
      * `impl Hash for Int`, and its six siblings — the partner of [primitiveEqImpl].
      *
      * `Eq` and `Hash` are one decision: a hash container buckets by `hash` and then
