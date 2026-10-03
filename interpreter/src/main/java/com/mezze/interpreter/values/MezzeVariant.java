@@ -144,6 +144,19 @@ public final class MezzeVariant implements TruffleObject {
             this.nameToTagMap = new java.util.concurrent.ConcurrentHashMap<>();
             this.dynamicNames = new java.util.concurrent.CopyOnWriteArrayList<>();
             this.isDynamic = true;
+            // Pre-register the builtin variant constructors. ok()/err()/some() tag
+            // with precomputed tags (OK_TAG/ERR_TAG/SOME_TAG) and do NOT go through
+            // getOrCreateTag, so their NAME would otherwise be absent from the map and
+            // getConstructorName would reverse-lookup-fail → "Unknown(<tag>)". That
+            // showed up order-dependently (a native Err from parse_str rendered as
+            // Unknown when no user Err was compiled first). The tag is the same
+            // name-hash these accessors already use, so this only adds the reverse
+            // mapping — it changes no tag value.
+            for (String name : com.mezze.language.ast.BuiltinTypes.INSTANCE.getCoreVariantConstructors()) {
+                int tag = com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag(name, null);
+                nameToTagMap.put(name, tag);
+                dynamicNames.add(name);
+            }
         }
 
         /**
