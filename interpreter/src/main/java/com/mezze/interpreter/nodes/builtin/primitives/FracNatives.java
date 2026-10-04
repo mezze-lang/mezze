@@ -15,10 +15,23 @@ public final class FracNatives {
 
     // ==================== Factory Operations ====================
 
+    /**
+     * S-9: a zero denominator is a GUEST error, not a host one.
+     *
+     * This threw a bare {@code ArithmeticException}, which Truffle classifies as a
+     * host failure — so `frac::make { numerator = 1, denominator = 0 }` surfaced to
+     * the user as `java.lang.ArithmeticException: Division by zero in fraction`,
+     * where `1 / 0` on an `Int` says `Division by zero`. Two routes to the same
+     * mistake, two different kinds of failure, one of them a JVM leak.
+     *
+     * {@link FracNatives#divide} below had always raised correctly via
+     * {@code dividingByZero}, which is what makes this an oversight rather than a
+     * choice.
+     */
     @TruffleBoundary
     public static MezzeRecord make(long numerator, long denominator) {
         if (denominator == 0) {
-            throw new ArithmeticException("Division by zero in fraction");
+            throw MezzeGuestException.zeroDenominator(numerator);
         }
         // Normalize sign
         if (denominator < 0) {
@@ -172,8 +185,18 @@ public final class FracNatives {
      * best rational approximation whose denominator stays within a bound, so a
      * `Frac -> Float -> Frac` round trip recovers the "nice" fractions a codec
      * cares about (3/4, 1/3, 22/7) instead of the raw binary ratio of the double.
-     * NaN / infinity have no rational value and raise, matching how the other
-     * frac natives surface a domain error.
+     * NaN / infinity have no rational value, and this throw is UNREACHABLE from
+     * guest code: `frac::from_float` returns `Option Frac` and tests
+     * `float::is_finite` before calling, so the native only ever sees a finite
+     * value. The guard stays as a belt-and-braces check on that stdlib
+     * invariant — if it ever fires, the stdlib guard has gone, which is a defect
+     * rather than a user's domain error, so it is deliberately NOT routed through
+     * {@link com.mezze.interpreter.values.MezzeGuestException} the way
+     * {@link #make}'s zero denominator now is.
+     *
+     * (It previously claimed to "match how the other frac natives surface a domain
+     * error", which was never true — {@link #divide} raised a guest error while this
+     * raises a host one.)
      */
     @TruffleBoundary
     public static MezzeRecord fromFloat(double value) {

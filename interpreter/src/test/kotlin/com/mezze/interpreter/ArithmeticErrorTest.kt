@@ -106,4 +106,31 @@ class ArithmeticErrorTest {
             "Fraction division by zero",
         )
     }
+
+    /**
+     * S-9: CONSTRUCTING a fraction over zero — the same mistake as dividing by one,
+     * and the last route still leaking a host exception.
+     *
+     * `frac::make { numerator = 1, denominator = 0 }` surfaced as
+     * `java.lang.ArithmeticException: Division by zero in fraction` — a JVM class
+     * name — while `1 / 0` two tests above says `Division by zero`. The guard sat a
+     * few lines above `FracNatives.divide`, which had always raised correctly, so
+     * the two routes to "a fraction over zero" failed in two different ways.
+     *
+     * `frac::make` stays `-> Frac` rather than becoming `-> Option Frac`: a zero
+     * denominator IS division by zero, and this language raises for that (`1 / 0`
+     * above) instead of returning an option. `frac::from_float` is an `Option`
+     * because NaN is a value a caller can legitimately hold and test for — the
+     * difference between the two is deliberate.
+     */
+    @Test
+    fun `constructing a fraction over zero is a guest error`() {
+        assertGuestFailure(
+            """
+            use std::frac
+            frac::make { numerator = 1, denominator = 0 }
+            """,
+            "A fraction cannot have a zero denominator",
+        )
+    }
 }

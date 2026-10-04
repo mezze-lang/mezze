@@ -46,6 +46,28 @@ public final class MezzeGuestException extends AbstractTruffleException {
     }
 
     /**
+     * A fraction built with a zero denominator — `n//0`, which has no value.
+     *
+     * Separate from [dividingByZero] because what fails is a CONSTRUCTOR rather than
+     * an operator, so there is no operation to name; and the numerator belongs in the
+     * message for the same reason [arithmeticOverflow] shows its operands — a domain
+     * error whose input you cannot see says little about which call went wrong.
+     *
+     * S-9: that site threw a bare {@code ArithmeticException} until now, which is the
+     * exact HOST-error leak [dividingByZero]'s comment above describes for modulo.
+     * `FracNatives.divide` had always raised correctly, so the two routes to "a
+     * fraction over zero" failed in two different ways.
+     *
+     * @param numerator the numerator the caller passed, rendered against `//`
+     */
+    @TruffleBoundary
+    public static MezzeGuestException zeroDenominator(long numerator) {
+        return new MezzeGuestException(
+            "A fraction cannot have a zero denominator: " + numerator + "//0 has no value"
+                + " (guard the denominator before constructing — there is no Frac to return)");
+    }
+
+    /**
      * The one spelling of "this arithmetic does not fit in an `Int`".
      *
      * `Int` IS a 64-bit signed long, so a result outside that range is not a
