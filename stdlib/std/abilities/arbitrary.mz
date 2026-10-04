@@ -172,11 +172,12 @@ let arbitrary_frac: {} -> Frac <Sample> = {} ->
       denominator = choose { bound = 1000 } + 1,
     }
 
-## NO `Arbitrary for Char` yet, and the reason is a language fact worth recording.
+## ## `Char`'s alphabet comes from the COMPILER, because Mezze cannot write one
 ##
-## Mezze has no character literal: `'a` is a TYPE VARIABLE, so `'a'` does not
-## parse. A total impl needs a `Char` to fall back to when a partial conversion
-## comes back empty, and there is no way to write one. Every route was checked:
+## This draw takes its characters as arguments where every other one names its
+## values inline, and the asymmetry is forced rather than stylistic: Mezze has no
+## character literal. `'a` is a TYPE VARIABLE, so `'a'` does not parse, and every
+## route to a `Char` from something else is partial —
 ##
 ##  - `char::from_int`, `char::from_str` — both return `Option Char`.
 ##  - `str::chars` then `seq::get` — `Option Char` again.
@@ -184,15 +185,34 @@ let arbitrary_frac: {} -> Frac <Sample> = {} ->
 ##  - `MutChar` via `read_char` / `char_to_immut` — total, but the only way to make
 ##    a `MutChar` is `char_to_mut { c: Char }`.
 ##
-## The circle closes every way round: a `Char` can be OBTAINED by discharging an
-## `Option` and constructed no other way. That is a language hole rather than a
-## sampling one — any code wanting a known character meets it too.
+## So discharging the `Option` needs a `Char` for the empty case, which needs
+## another `Option` discharged. The circle closes every way round.
 ##
-## Closing it needs one of two things, and both are language decisions rather than
-## fixes: a character literal, or a total `Char`-producing primitive (which would
-## have to answer somehow for an out-of-range code point). Until one exists, a
-## record with a `Char` field reports a missing impl — accurate, and better than
-## inventing an answer here.
+## What breaks it is that the literal exists EVERYWHERE EXCEPT the parser:
+## `ParsedCharLit` → `TypedCharLit` → `CharLitIR` are all implemented, and only a
+## surface syntax is missing. A generated impl is built as AST, not parsed, so the
+## compiler can supply what no `.mz` file can say — and it does, in
+## `DerivedImplGenerator.CHAR_READABLE` / `CHAR_AWKWARD`.
+##
+## The split with the other primitives is therefore kept, not broken: the compiler
+## owns the INSTANCE and the characters it cannot express otherwise, and the
+## SAMPLING — the 85/15 weighting, and why — still lives here. The weighting is
+## `Arbitrary for Str`'s, for the same reason given there: one instance serves a
+## person reading a single sample and a hundred-case property run, and only the
+## second wants punctuation most of the time.
+##
+## `def` is never reached. `one_of` falls back only on an empty sequence and both
+## alphabets are non-empty by construction; it is required because `one_of` is
+## total, and the compiler passes a plain letter so that a future caller handing in
+## an empty alphabet degrades to something readable instead of crashing.
+let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char <Sample> =
+  { letters, awkward, def } -> frequency {
+    choices = [
+      { weight = 85, gen = {} -> one_of { xs = letters, def = def } },
+      { weight = 15, gen = {} -> one_of { xs = awkward, def = def } },
+    ],
+    def = def,
+  }
 
 ## ## Readable usually, pathological often enough
 ##

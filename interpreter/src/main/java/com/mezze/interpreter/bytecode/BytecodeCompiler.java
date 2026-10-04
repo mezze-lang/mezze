@@ -1910,9 +1910,20 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CharLitIR lit) {
-            // Mezze chars box as Character; the runtime treats primitive
-            // Character values uniformly with unboxed comparisons.
-            b.emitLoadObjectConstant(Character.valueOf(lit.getValue()));
+            // A Mezze `Char` VALUE is a one-character String at run time, not a
+            // boxed Character: `CharNatives.fromInt` returns
+            // `some(String.valueOf((char) codePoint))` and every `__native_char_*`
+            // handler reads its operand with `getString`. The IR node carries a
+            // Java char because that is the natural field type, and
+            // `ComptimeReifier` narrows the other way (`is String -> value[0]`)
+            // for the same reason.
+            //
+            // This emitted a Character until S-14. Nothing caught it because the
+            // PARSER has no character literal, so the only way to reach this node
+            // was comptime-folding a Char and re-emitting it — and the first real
+            // producer was the generated `impl Arbitrary for Char`, whose draw died
+            // in `getString` with "Expected String for field 'c'".
+            b.emitLoadObjectConstant(String.valueOf(lit.getValue()));
             return;
         }
         if (node instanceof UnitLitIR) {

@@ -147,6 +147,64 @@ class ArbitraryDerivationTest {
         assertTrue(e != null, "a recursive variant derived Arbitrary; it cannot be bounded")
     }
 
+    /**
+     * S-14: a `Char` generates, and its characters come from the COMPILER.
+     *
+     * Mezze has no character literal, so `std::abilities::arbitrary` cannot name a
+     * single character to draw from. What makes this work is that the literal exists
+     * everywhere EXCEPT the parser — `ParsedCharLit` → `TypedCharLit` → `CharLitIR`
+     * — and a generated impl is built as AST rather than parsed, so
+     * `DerivedImplGenerator` can hand the alphabet to the stdlib draw as an argument.
+     *
+     * Asserted through `char::to_str` rather than by reading the value out of the
+     * host, which makes it the end-to-end check too: a compiler-minted char literal
+     * survives typechecking, lowering, and execution.
+     */
+    @Test
+    fun `a Char derives, from the compiler-supplied alphabet`() {
+        val c = drawCharStr(seed = 3)
+        assertTrue(c in CHAR_ALPHABET, "not from the Char impl: ${c.map { it.code }}")
+    }
+
+    /**
+     * The shape that used to be unimplementable: a record with a `Char` field
+     * reported a missing impl. That was accurate at the time, and removing it is
+     * what S-14 was for.
+     */
+    @Test
+    fun `a record with a Char field derives`() {
+        val k = draw(
+            "use std::char\n\ntype Keyed = { k: Char, n: Int }",
+            "Keyed",
+            body = "char::to_str { c = v.k }",
+        ) as String
+        assertTrue(k in CHAR_ALPHABET, "Char field not generated: ${k.map { it.code }}")
+    }
+
+    /**
+     * Both weighted groups are reachable — the only claim worth making about the
+     * distribution here. The 85/15 split is the stdlib's, and asserting the ratio
+     * would be a flake.
+     *
+     * Thirty seeds rather than a handful: at 15%, five seeds miss the awkward group
+     * about one run in two, thirty about one in a hundred and forty thousand.
+     */
+    @Test
+    fun `a Char reaches both the readable and the awkward group`() {
+        val drawn = (1..30).map { drawCharStr(seed = it) }
+        assertTrue(drawn.all { it in CHAR_ALPHABET }, "outside the alphabet: $drawn")
+        assertTrue(drawn.any { it in CHAR_READABLE }, "never readable across 30 seeds: $drawn")
+        assertTrue(drawn.any { it in CHAR_AWKWARD }, "never awkward across 30 seeds: $drawn")
+    }
+
+    @Test
+    fun `the same seed replays a derived Char identically`() =
+        assertEquals(drawCharStr(seed = 11), drawCharStr(seed = 11), "same seed produced different Chars")
+
+    /** One drawn `Char`, as the one-character string `char::to_str` gives back. */
+    private fun drawCharStr(seed: Int): String =
+        draw("use std::char", "Char", seed, body = "char::to_str { c = v }") as String
+
     @Test
     fun `the same seed replays a derived record identically`() {
         val decls = "type Point = { x: Int, y: Int }"
@@ -206,5 +264,26 @@ class ArbitraryDerivationTest {
             // hostile, weight 15
             "\"", "\n", "\t", "\u00fcn\u00efc\u00f6d\u00e9", "  padded  ", "a,b;c",
         )
+
+        /**
+         * `DerivedImplGenerator.CHAR_READABLE` / `CHAR_AWKWARD`, restated.
+         *
+         * Duplicated on purpose, for the reason [INTERESTING_STRS] gives: the value
+         * is drawn, so membership is the only assertion available, and a set that
+         * drifted from the generator would fail at random. Spelled out here the
+         * drift is a test failure on the next run instead.
+         */
+        val CHAR_READABLE: Set<String> =
+            (('a'..'z') + ('A'..'Z') + ('0'..'9')).map { it.toString() }.toSet()
+
+        val CHAR_AWKWARD: Set<String> = listOf(
+            ' ', '\t', '\n', '"', '\'', '\\', '/',
+            '.', ',', ';', ':', '-', '_', '=', '+',
+            '(', ')', '[', ']', '{', '}', '<', '>',
+            '!', '?', '@', '#', '$', '%', '&', '*', '|', '~', '^', '`',
+            '\u00e9', '\u00fc', '\u00f1', '\u00df', '\u03a9', '\u4e2d', '\u2192',
+        ).map { it.toString() }.toSet()
+
+        val CHAR_ALPHABET: Set<String> = CHAR_READABLE + CHAR_AWKWARD
     }
 }

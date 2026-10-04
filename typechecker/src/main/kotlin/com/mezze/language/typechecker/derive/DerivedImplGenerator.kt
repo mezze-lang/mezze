@@ -8,6 +8,9 @@ import com.mezze.language.typechecker.codec.mezzeTypeToParsedAnnotation
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedBinaryOp
 import com.mezze.language.parsedast.ParsedConstructorPattern
+import com.mezze.language.parsedast.ParsedCharLit
+import com.mezze.language.parsedast.ParsedSeqLit
+import com.mezze.language.parsedast.ParsedSeqElement
 import com.mezze.language.parsedast.ParsedDo
 import com.mezze.language.parsedast.ParsedExpr
 import com.mezze.language.parsedast.ParsedIntLit
@@ -157,8 +160,9 @@ object DerivedImplGenerator {
      *
      * `Nat` is deliberately absent: it is a newtype, and a newtype opting in BY HAND
      * is exactly the rule `Arbitrary` documents — `newtype Age = Int` does not want
-     * arbitrary negative ints and only the author can say so. `Char` is absent
-     * because no total `Char` can be constructed at all.
+     * arbitrary negative ints and only the author can say so.
+     *
+     * `Char` is the one entry whose draw takes ARGUMENTS — see [drawArguments].
      */
     private val BUILTIN_ARBITRARY: Map<String, String> = mapOf(
         PrimitiveTypes.INT to "arbitrary_int",
@@ -166,6 +170,35 @@ object DerivedImplGenerator {
         PrimitiveTypes.BOOL to "arbitrary_bool",
         PrimitiveTypes.STR to "arbitrary_str",
         PrimitiveTypes.FRAC to "arbitrary_frac",
+        PrimitiveTypes.CHAR to "arbitrary_char_from",
+    )
+
+    /**
+     * What a person reading one sampled `Char` wants to see: a letter or a digit.
+     *
+     * Ordered lowercase, uppercase, digit so the boundary pairs `a`/`z`, `A`/`Z` and
+     * `0`/`9` are all present — those are `Char`'s equivalent of the `0`, `1`, `-1`
+     * that [BUILTIN_ARBITRARY]'s comment calls the interesting `Int`s.
+     */
+    private val CHAR_READABLE: List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+
+    /**
+     * The 15% that finds bugs: whitespace, the quoting and escaping characters, the
+     * brackets, and non-ASCII.
+     *
+     * `"`, `'`, `\`, tab and newline are here for the reason `Arbitrary for Str`
+     * lists the same ones — they break naive escaping. The non-ASCII tail is BMP
+     * only: a `Char` is one UTF-16 code unit, so an emoji is a surrogate PAIR and
+     * cannot be a `Char` at all. NUL is deliberately out: it survives no round trip
+     * through the string natives and would fail tests about the plumbing rather
+     * than about the code under test.
+     */
+    private val CHAR_AWKWARD: List<Char> = listOf(
+        ' ', '\t', '\n', '"', '\'', '\\', '/',
+        '.', ',', ';', ':', '-', '_', '=', '+',
+        '(', ')', '[', ']', '{', '}', '<', '>',
+        '!', '?', '@', '#', '$', '%', '&', '*', '|', '~', '^', '`',
+        'é', 'ü', 'ñ', 'ß', 'Ω', '中', '→',
     )
 
     /** Every builtin whose `Arbitrary` the compiler writes, for the caller. */
@@ -207,7 +240,7 @@ object DerivedImplGenerator {
                         params = ParsedLambdaParams.Untyped(names = emptyList()),
                         body = ParsedFunctionCall(
                             function = id(draw),
-                            arguments = ParsedRecordLit(emptyList(), loc()),
+                            arguments = drawArguments(name),
                             loc = loc(),
                         ),
                         loc = loc(),
@@ -219,6 +252,37 @@ object DerivedImplGenerator {
             derived = true,
         )
     }
+
+    /**
+     * The draw's argument record — empty for every primitive but `Char`.
+     *
+     * `Char` is the one type whose values the stdlib cannot NAME: Mezze has no
+     * character literal, so `std::abilities::arbitrary` can write the weighting but
+     * not a single character to weight. `ParsedCharLit` exists all the way through
+     * `TypedCharLit` to `CharLitIR` and only a parser rule is missing — and a
+     * generated impl is BUILT as AST rather than parsed, so the compiler can hand
+     * over the alphabet the source language cannot spell.
+     *
+     * That keeps the split the rest of the table documents rather than breaking it:
+     * the instance and the inexpressible literals are the compiler's, the sampling
+     * policy stays in the stdlib.
+     */
+    private fun drawArguments(typeName: String): ParsedRecordLit {
+        if (typeName != PrimitiveTypes.CHAR) return ParsedRecordLit(emptyList(), loc())
+        return ParsedRecordLit(
+            listOf(
+                ParsedRecordEntry.Field("letters", charSeq(CHAR_READABLE), loc()),
+                ParsedRecordEntry.Field("awkward", charSeq(CHAR_AWKWARD), loc()),
+                // Never selected — `one_of` falls back only on an empty sequence.
+                // Passed because `one_of` is total; see `arbitrary_char_from`.
+                ParsedRecordEntry.Field("def", ParsedCharLit('a', loc()), loc()),
+            ),
+            loc(),
+        )
+    }
+
+    private fun charSeq(chars: List<Char>): ParsedExpr =
+        ParsedSeqLit(chars.map { ParsedSeqElement.Regular(ParsedCharLit(it, loc())) }, loc())
 
     /**
      * `impl Hash for Int`, and its six siblings — the partner of [primitiveEqImpl].
