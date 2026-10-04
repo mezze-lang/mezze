@@ -161,17 +161,16 @@ class ArbitraryBuiltinContainerTest {
      * S-6, in `frac::make` rather than in the generator. Filed as S-9.
      */
     /**
-     * `List`'s size agrees with a COUNT over its own elements — two independent
-     * natives walking the same drawn value.
+     * `List`'s size agrees across THREE independent walks of the same drawn value:
+     * `list::size`, a `list::count` over every element, and a `seq::size` of
+     * `list::to_seq`.
      *
-     * Deliberately NOT via `list::to_seq`, and that is a finding rather than a
-     * convenience: `seq::size { xs = list::to_seq { xs = l } }` fails on a
-     * cons-backed List with
-     * `UnsupportedSpecializationException: ListToLongSeq_Node: [List(a, b)], [MezzeCons]`
-     * — and it fails for a LITERAL `list::from_seq { xs = ["a", "b"] }` too, with no
-     * sampling anywhere. That is a pre-existing `list::to_seq` bug (S-12), not
-     * something about generation; `list::size` on a drawn List is correct, and
-     * `mez sample` renders one as `List("world")`.
+     * The `to_seq` arm was omitted while S-12 was open — a drawn `List Str` is
+     * cons-backed, and a bare list source was admitted into FusedLongPipeline, which
+     * reads each element as a `Number`. It is back now that the source no longer
+     * counts as evidence of numeric elements, and it is the arm worth having: it
+     * crosses from the List representation into the Seq one, where the other two
+     * stay inside List.
      */
     @Test
     fun `a List's size agrees with a count over its elements`() {
@@ -179,9 +178,10 @@ class ArbitraryBuiltinContainerTest {
             "List size", 17,
             """
             let l: List Str = Arbitrary.arbitrary {}
-            if list::size { xs = l } == list::count { xs = l, p = { x } -> True }
-              then 1
-              else 0
+            let n = list::size { xs = l }
+            let counted = list::count { xs = l, p = { x } -> True }
+            let viaSeq = seq::size { xs = list::to_seq { xs = l } }
+            if n == counted && n == viaSeq then 1 else 0
             """.trimIndent(),
         )
     }

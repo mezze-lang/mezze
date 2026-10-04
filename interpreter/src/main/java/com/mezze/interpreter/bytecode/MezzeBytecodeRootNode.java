@@ -3228,6 +3228,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * boxing per element.
      *
      * Falls back to the empty seq for nil.
+     *
+     * DELIBERATELY PARTIAL over {@code MezzeList}'s four backings, and the two
+     * missing cases are a feature. FLP's loop reads every element as
+     * {@code ((Number) raw).longValue()}, so a {@code MezzeCons} of strings or a
+     * {@code MezzeDoubleCons} has no business reaching it; what keeps them out is
+     * the emit guard in {@code BytecodeCompiler} (see S-12), not a specialization
+     * here. Generalising this to {@code MezzeList<?>} via
+     * {@code MezzeSeq.fromArray(list.toArray())} was tried and is WORSE: it turns a
+     * routing defect that fails here, naming the operation and the backing, into a
+     * {@code ClassCastException: String cannot be cast to Number} from inside the
+     * pipeline loop. Fail where the wrong decision was made.
+     *
+     * The general conversion does exist, for the route that wants it:
+     * {@code ListNatives.toSeq} is total over all four backings.
      */
     @Operation
     public static final class ListToLongSeq {
@@ -3247,7 +3261,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     // in place: cursor = list; while (!isEmpty(cursor)) { x = head(cursor); cursor = tail(cursor); }
 
     /** Test whether a MezzeList cursor is empty (Nil).
-     *  Specialized on Cons → constant false for JIT devirtualization. */
+     *  Specialized on Cons → constant false for JIT devirtualization.
+     *
+     *  TOTAL over the four backings, unlike {@link ListToLongSeq}: this and
+     *  {@link ListHead} are the GENERIC traversal, so they answer for whatever the
+     *  list is made of. {@code MezzeDoubleCons} was missing from both until S-12,
+     *  which made a `List Float` untraversable — the generic fused loop, the very
+     *  path a non-long list is supposed to fall back to, died with
+     *  `UnsupportedSpecializationException: ListIsEmpty_Node: [MezzeDoubleCons]`.
+     *  It is the newest backing and three of these ops never grew to include it;
+     *  {@link ListTail} escaped only because it carries a {@code MezzeList}
+     *  catch-all. */
     @Operation
     public static final class ListIsEmpty {
         @Specialization
@@ -3259,13 +3283,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return false;
         }
         @Specialization
+        public static boolean doDoubleCons(com.mezze.datastructures.list.MezzeDoubleCons list) {
+            return false;
+        }
+        @Specialization
         public static boolean doNil(com.mezze.datastructures.list.MezzeNil<?> list) {
             return true;
         }
     }
 
     /** Read the head element of a non-empty MezzeList cursor.
-     *  Specialized on Cons/LongCons for direct field access. */
+     *  Specialized on Cons/LongCons/DoubleCons for direct field access.
+     *  Total over the non-empty backings for the reason {@link ListIsEmpty} gives;
+     *  `Nil` is deliberately absent, since the loop that drives this tests
+     *  {@link ListIsEmpty} first and a head of nil is a defect, not an input. */
     @Operation
     public static final class ListHead {
         @Specialization
@@ -3276,10 +3307,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
             return list.head();
         }
+        @Specialization
+        public static Object doDoubleCons(com.mezze.datastructures.list.MezzeDoubleCons list) {
+            return list.head();
+        }
     }
 
     /** Advance a MezzeList cursor to its tail.
-     *  Specialized on Cons/LongCons for direct field access. */
+     *  Specialized on Cons/LongCons/DoubleCons for direct field access.
+     *  Total over the non-empty backings for the reason {@link ListIsEmpty} gives. */
     @Operation
     public static final class ListTail {
         @Specialization
@@ -3288,6 +3324,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
         @Specialization
         public static com.mezze.datastructures.list.MezzeList<?> doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return list.tail();
+        }
+        @Specialization
+        public static com.mezze.datastructures.list.MezzeList<?> doDoubleCons(com.mezze.datastructures.list.MezzeDoubleCons list) {
             return list.tail();
         }
     }

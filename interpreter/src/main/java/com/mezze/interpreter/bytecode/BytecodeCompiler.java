@@ -4725,7 +4725,14 @@ public final class BytecodeCompiler {
                 return true;
             }
             // Sum over RawList with no stages → ListToLongSeq + BuiltinSumLongSeq.
-            if (rawListExpr != null && isSumSink && !hasStages) {
+            // SAME GUARD as the RawSeq branch above, and it was missing here: the
+            // sink ignores the fold's `init`, so without `longZeroInit` a List fold
+            // with a non-zero init silently dropped it —
+            //     list::fold_left { xs = [1,2,3], init = 10, f = acc + x }  =>  6
+            // where the Seq twin of the same fold correctly gave 16. A wrong answer
+            // with no error, and the only difference between the two was this
+            // condition. See S-12.
+            if (rawListExpr != null && isSumSink && !hasStages && longZeroInit) {
                 b.beginBuiltinSumLongSeq();
                   b.beginListToLongSeq();
                     emitNode(rawListExpr, b, argCount, localMap);
@@ -4760,7 +4767,33 @@ public final class BytecodeCompiler {
         // written that way: the condition should read as "a Materialize sink is
         // not by itself a reason to fuse".
         boolean hasMaterializeSink = sinkMode instanceof FusedSinkMode.Materialize && hasStages;
-        if (hasStages || rawListExpr != null || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
+        // S-12: a LIST source is not by itself evidence the elements are numbers —
+        // the same thing BUG 8 established one line above for a Materialize sink, and
+        // this term let that sink back in through the side door. FLP's loop reads
+        // every element as `((Number) raw).longValue()`, so admitting a list source
+        // on its own sent `list::to_seq { xs = ["a","b"] }` and
+        // `seq::size { xs = list::to_seq { xs = [1.5, 2.5] } }` straight into it.
+        //
+        // The symptom was `UnsupportedSpecializationException: ListToLongSeq_Node:
+        // [List(a, b)], [MezzeCons]` — the conversion refusing a non-long backing one
+        // step before the cast that would have failed anyway. Generalising THAT
+        // conversion only buys a ClassCastException from deeper in the loop; the
+        // wrong decision is here.
+        //
+        // Requiring a stage is BUG 8's own remedy, applied to the source: a stage is
+        // rejected unless its operands are long literals, so a surviving stage is the
+        // evidence the source cannot supply. Enumerating "safe" sinks instead was
+        // tried and is where this went wrong twice — Materialize was excluded and
+        // Count walked in, because neither reads an element at all.
+        //
+        // PERF NOTE: this gives up FLP for a no-stages plain fold over a list, which
+        // the comment above claimed as a win over cons-cell traversal. The dominant
+        // case of that shape — a zero-init sum — is still fast via the
+        // BuiltinSumLongSeq branch above, which keeps its own guard. Recovering the
+        // rest needs the element kind carried on the IR rather than guessed from the
+        // source, which is the real fix and is not this one.
+        boolean hasListSource = rawListExpr != null && hasStages;
+        if (hasStages || hasListSource || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
                 if (rangeStart != null && rangeStep == null) {
