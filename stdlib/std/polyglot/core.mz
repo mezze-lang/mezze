@@ -181,3 +181,15 @@ impl Polyglot for Runtime having 'f = 'g where {
   eval_in       = { ctx, source } -> __native_polyglot_eval_in    { val = ctx, source = source },
   close_context = { ctx }         -> __native_polyglot_close_context { val = ctx },
 }
+
+## Lift an error-carrying PRODUCER foreign into a Mezze `Result`: `Ok { val }` for a
+## live handle, `Err { error }` for one that carries an interop error. This is the
+## ONE place a producer's foreign (`eval_raw` / `eval_bytes` / an `execute` result)
+## becomes a `Result` — a typed language entry point (`Js.eval`, `Python.import`, …)
+## calls it ONCE at entry, then the object API keeps chaining on the bare foreign.
+## Without it, an entry point returning `eval_raw`'s bare foreign under a `Result`
+## signature hands callers a non-variant that `match … is Ok/Err` cannot destructure.
+pub let lift: { on: 'f } -> Result 'f InteropError <Polyglot> = { on } ->
+  match Polyglot.check { on = on } is
+    Ok  { val = _ }   -> Ok { val = on }
+    Err { error = e } -> Err { error = e }

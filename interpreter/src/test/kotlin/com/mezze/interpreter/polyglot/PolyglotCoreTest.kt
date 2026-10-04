@@ -563,6 +563,45 @@ class PolyglotCoreTest {
     }
 
     @Test
+    fun `lift turns a live producer foreign into an Ok that pattern-matches`() {
+        // REGRESSION: a provider entry point (Js.eval / Python.import / Wasm.load_module)
+        // declares `Result XForeign InteropError`, but the producer op underneath
+        // (`eval_raw` / `instantiate` / a class lookup) YIELDS A BARE FOREIGN. Returning
+        // that foreign directly under a Result signature laundered a non-variant into a
+        // Result — and a caller's `match ... is Ok/Err` crashed at runtime with
+        // "no variant tag matched". `lift` is the one crossing that materializes a REAL
+        // Result from the error-carrying foreign, so the match destructures correctly.
+        // Without a correct `lift` the in-guest `match` below would not reach the Ok arm.
+        val result = eval(
+            """
+            use std::polyglot::core::{ Runtime, lift }
+            use std::polyglot::jvm as jvm
+            match perform Runtime in lift { on = jvm::class { name = "java.util.ArrayList" } } is
+              Ok  { val = _ }   -> "matched-ok"
+              Err { error = _ } -> "matched-err"
+            """.trimIndent()
+        )
+        assertEquals("matched-ok", result)
+    }
+
+    @Test
+    fun `lift turns an errored producer foreign into an Err that pattern-matches`() {
+        // The error half of the same crossing: a producer that failed (here a missing
+        // class) comes back as an ERRORED foreign; `lift` surfaces it as `Err`, which
+        // the in-guest `match` destructures — no crash, the carried InteropError flows.
+        val result = eval(
+            """
+            use std::polyglot::core::{ Runtime, lift }
+            use std::polyglot::jvm as jvm
+            match perform Runtime in lift { on = jvm::class { name = "com.does.not.Exist_XYZ" } } is
+              Ok  { val = _ }   -> "matched-ok"
+              Err { error = _ } -> "matched-err"
+            """.trimIndent()
+        )
+        assertEquals("matched-err", result)
+    }
+
+    @Test
     fun `open_context on an unavailable language yields an errored foreign`() {
         // Guest-language sandbox ENFORCEMENT (allow_io=false blocking IO) is proven
         // via the CLI + a real provider — no guest language is on the unit-test
