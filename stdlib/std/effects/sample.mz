@@ -1,6 +1,6 @@
 # Sampling — the mechanism a generated value is drawn from.
 
-use std::effects::random::{ Random, SeededRandom, random_int }
+use std::effects::random::{ Random, random_int }
 use std::nat::{ Nat }
 # The arithmetic below needs Int's numeric impls in scope. Importing `std::nat`
 # alone brings only Nat's, and `bound - 1` then reports no `NumSub` for Int —
@@ -56,7 +56,7 @@ pub let default_size: Nat = 5n
 ## Entropy from whatever `Random` handler is installed above.
 ##
 ## `Random` is RAISED OUT, not handled, so the caller chooses: a seeded stream for a
-## reproducible run, real entropy, or a recorded one. [with_seed] makes that choice
+## reproducible run, real entropy, or a recorded one. [SeededSample] makes that choice
 ## for you in the common case.
 impl Sample for RandomSample where {
   ## `bound <= 1` has exactly one legal answer, and asking `random_int` for a range
@@ -78,25 +78,73 @@ impl Sample for RandomSampleWith { size: Nat } where {
   resize = { n, call } -> perform RandomSampleWith { size = n } in call {},
 }
 
-## Run `call` against a seeded stream: the same seed gives the same values.
+## A seeded stream: the same seed gives the same values.
 ##
-## A plain FUNCTION rather than an effect, which is a deliberate simplification —
-## there used to be a `Sampler` effect whose only operation existed to install these
-## two performers as one scope. Late binding bought nothing there: the caller already
-## chooses by calling this or not.
+##     perform SeededSample { seed = 7 } in do
+##       let xs: [Int] = Arbitrary.arbitrary {}
+##       …
 ##
-## `SeededRandom` is installed ONCE, around the whole generation, and that is the
-## point. Its stream resets at scope entry, so a performer that installed it per
-## draw would hand back the same number every time — a generator that looks like it
-## works and produces constants.
-pub let with_seed: { seed: Int, call: {} -> 'a <Sample, ...> } -> 'a <*> = { seed, call } ->
-  perform SeededRandom { seed = seed } in perform RandomSample in call {}
+## ## Why a PERFORMER, and not a `with_seed { seed, call }` function
+##
+## Choosing where entropy comes from is exactly what an effect handler is for, so a
+## function taking a `call` thunk was the wrong shape twice over.
+##
+## It did not compose. `perform Console in with_seed { call = {} -> … println … }`
+## typechecks and prints NOTHING: the `Log` performed inside the callback has already
+## left the `perform` body by the time the handler is installed, so the handler never
+## sees it. A performer has no such shape — `perform Console in perform SeededSample
+## { seed = 7 } in <body>` nests the way every other effect does, and the body is the
+## body.
+##
+## And it was redundant. The function's whole content was two nested `perform`s,
+## which the caller can write — so it bought no late binding, only an extra calling
+## convention to learn. Its own comment said as much, having already replaced an
+## earlier `Sampler` effect on that reasoning; the simplification went one step too
+## far and took composition with it.
+##
+## ## Why this one OWNS the stream instead of raising `Random`
+##
+## [RandomSample] below takes its entropy from whatever `Random` handler is installed
+## above it. That is the composable choice and why it stays. A SEEDED run cannot be
+## written that way in one `perform`: a performer handles exactly ONE effect (V0701),
+## so a single scope cannot be both the `Sample` performer and the `Random` handler
+## the old function paired it with. This one therefore reads the seeded stream
+## directly — no more privileged than what `impl Random for SeededRandom` does with
+## the same natives, because discharging an effect with a real side effect is what a
+## performer IS.
+impl Sample for SeededSample { seed: Int } where {
+  ## The stream resets ONCE, at scope entry. That is the whole reason the old
+  ## function installed `SeededRandom` around the entire generation rather than per
+  ## draw: a reset per draw hands back the same number every time, which is a
+  ## generator that looks like it works and produces constants.
+  initialize_scope = {} -> do
+    __native_reset_seeded_random { seed = seed }
+    {},
+  finalize_scope = {} -> {},
+  ## `bound <= 1` has exactly one legal answer, and asking for a range of `[0, -1]`
+  ## would be asking for something that does not exist.
+  choose = { bound } ->
+    if bound <= 1 then 0
+    else __native_seeded_random_int { seed = seed, min = 0, max = bound - 1 },
+  size = {} -> default_size,
+  resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
+}
 
-## Seeded, with a budget you choose.
-pub let with_seed_sized: { seed: Int, size: Nat, call: {} -> 'a <Sample, ...> } -> 'a <*> =
-  { seed, size, call } ->
-    perform SeededRandom { seed = seed } in
-      perform RandomSampleWith { size = size } in call {}
+## The same stream with a budget you choose.
+##
+## Deliberately has NO `initialize_scope`: `resize` installs this performer, so
+## re-entering must CONTINUE the stream. A reset here would fire per nested draw and
+## every subtree would come out identical — the exact failure the entry reset above
+## is careful to do only once. The stream is keyed by seed and lives outside any
+## scope (`SEEDED_RANDOMS` in `RandomNatives`), so continuing is simply what happens
+## when nothing resets it.
+impl Sample for SeededSampleWith { seed: Int, size: Nat } where {
+  choose = { bound } ->
+    if bound <= 1 then 0
+    else __native_seeded_random_int { seed = seed, min = 0, max = bound - 1 },
+  size = {} -> size,
+  resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
+}
 
 ## A non-negative Int below `bound`.
 pub let choose: { bound: Int } -> Int <Sample> = { bound } -> Sample.choose { bound = bound }

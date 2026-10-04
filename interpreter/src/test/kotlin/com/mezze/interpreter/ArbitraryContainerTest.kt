@@ -36,7 +36,7 @@ class ArbitraryContainerTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, with_seed }
+        use std::effects::sample::{ Sample, SeededSample }
         use std::abilities::arbitrary::{ Arbitrary }
         use std::collections::seq
         use std::option::{ get_or }
@@ -76,10 +76,9 @@ class ArbitraryContainerTest {
             "a [Int] field",
             """
             type Tags = { xs: [Int] }
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let t: Tags = Arbitrary.arbitrary {}
               seq::size { xs = t.xs }
-            }
             """.trimIndent(),
         )
     }
@@ -90,10 +89,9 @@ class ArbitraryContainerTest {
             "a [Str] field",
             """
             type Tags = { xs: [Str] }
-            with_seed { seed = 9, call = {} -> do
+            perform SeededSample { seed = 9 } in do
               let t: Tags = Arbitrary.arbitrary {}
               seq::size { xs = t.xs }
-            }
             """.trimIndent(),
         )
     }
@@ -105,10 +103,9 @@ class ArbitraryContainerTest {
             "a [[Int]] field",
             """
             type N = { xss: [[Int]] }
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let n: N = Arbitrary.arbitrary {}
               seq::size { xs = n.xss }
-            }
             """.trimIndent(),
         )
     }
@@ -121,10 +118,9 @@ class ArbitraryContainerTest {
             """
             type Row = { a: Int, b: Str }
             type Table = { rows: [Row] }
-            with_seed { seed = 4, call = {} -> do
+            perform SeededSample { seed = 4 } in do
               let t: Table = Arbitrary.arbitrary {}
               seq::size { xs = t.rows }
-            }
             """.trimIndent(),
         )
     }
@@ -135,10 +131,9 @@ class ArbitraryContainerTest {
             "an Option Int field",
             """
             type Maybe = { o: Option Int }
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let m: Maybe = Arbitrary.arbitrary {}
               get_or { opt = m.o, def = 0 - 1 }
-            }
             """.trimIndent(),
         )
     }
@@ -149,10 +144,9 @@ class ArbitraryContainerTest {
             "a Result Int Str field",
             """
             type Outcome = { r: Result Int Str }
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let o: Outcome = Arbitrary.arbitrary {}
               is_ok { result = o.r }
-            }
             """.trimIndent(),
         )
     }
@@ -170,10 +164,9 @@ class ArbitraryContainerTest {
             type Inner = { n: Int, s: Str }
             type Outer = { a: Inner, b: Inner, flag: Bool }
 
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let o: Outer = Arbitrary.arbitrary {}
               o.a.n
-            }
         """.trimIndent()))
         assertTrue(v != null, "a nested record of primitives failed to generate")
     }

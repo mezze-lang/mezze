@@ -152,14 +152,14 @@ class SampleExpressionTest {
     }
 
     /**
-     * A ZERO-argument function gets no `with_seed`. There is nothing to draw, so the
-     * wrapper would declare a `<Sample>` the body never performs and be rejected for
-     * exactly that — measured, not guessed.
+     * A ZERO-argument function gets no `perform SeededSample`. There is nothing to
+     * draw, so the scope would declare a `<Sample>` the body never performs and be
+     * rejected for exactly that — measured, not guessed.
      */
     @Test
-    fun `a zero-argument function is not wrapped in with_seed`() {
+    fun `a zero-argument function gets no seeded scope`() {
         val out = expr("answer", emptyList())
-        assertTrue("with_seed" !in out, "a no-arg function was wrapped:\n$out")
+        assertTrue("SeededSample" !in out, "a no-arg function got a seeded scope:\n$out")
         assertTrue("args = {}" in out, "expected an empty args record:\n$out")
         assertTrue("answer {}" in out, "expected a plain call:\n$out")
     }
@@ -179,7 +179,7 @@ class SampleExpressionTest {
      * Each row gets its OWN seeded scope at `seed + i`, and that is a reversal of
      * what this test used to assert.
      *
-     * It previously demanded exactly ONE `with_seed` around the batch, on the grounds
+     * It previously demanded exactly ONE seeded scope around the batch, on the grounds
      * that a scope per row would reset the stream and print the same values N times.
      * That was true only while every row shared one seed. With `seed + i` the rows
      * differ, and the per-row scope buys the thing a shared one cannot: a row can be
@@ -194,7 +194,7 @@ class SampleExpressionTest {
     @Test
     fun `each row is seeded independently at seed plus its index`() {
         val out = expr("f", listOf("a"), seed = 100, count = 3)
-        assertEquals(3, Regex("with_seed").findAll(out).count(), "expected one scope per row:\n$out")
+        assertEquals(3, Regex("SeededSample").findAll(out).count(), "expected one scope per row:\n$out")
         for (i in 0 until 3) {
             assertTrue("seed = ${100 + i}" in out, "row $i is not seeded at ${100 + i}:\n$out")
         }
@@ -214,7 +214,7 @@ class SampleExpressionTest {
                 "seed = ${100 + i}" in single,
                 "row $i re-run would draw different values than the batch did:\n$single",
             )
-            assertEquals(1, Regex("with_seed").findAll(single).count(), "expected one row:\n$single")
+            assertEquals(1, Regex("SeededSample").findAll(single).count(), "expected one row:\n$single")
         }
     }
 

@@ -50,7 +50,7 @@ class ArbitraryBuiltinContainerTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, with_seed }
+        use std::effects::sample::{ Sample, SeededSample }
         use std::abilities::arbitrary::{ Arbitrary, int_min }
         use std::collections::seq
         use std::collections::set
@@ -67,7 +67,7 @@ class ArbitraryBuiltinContainerTest {
 
     /** Runs `body` under a seed and returns the Int it produced. */
     private fun drawInt(seed: Int, body: String): Long {
-        val source = "$imports\n\nwith_seed { seed = $seed, call = {} -> do\n$body\n}"
+        val source = "$imports\n\nperform SeededSample { seed = $seed } in do\n$body\n"
         val v = runCatching { MezzeTestHelper.run(source) }
         assertTrue(v.isSuccess, "failed to generate: ${v.exceptionOrNull()?.message}")
         return MezzeTestHelper.asLong(v.getOrNull())

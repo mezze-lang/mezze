@@ -29,7 +29,7 @@ class ArbitraryHandWrittenShapeTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, with_seed }
+        use std::effects::sample::{ Sample, SeededSample }
         use std::abilities::arbitrary::{ Arbitrary }
     """.trimIndent()
 
@@ -53,10 +53,9 @@ class ArbitraryHandWrittenShapeTest {
               arbitrary = {} -> { x = Arbitrary.arbitrary {}, y = Arbitrary.arbitrary {} }
             }
 
-            with_seed { seed = 4, call = {} -> do
+            perform SeededSample { seed = 4 } in do
               let p: Point = Arbitrary.arbitrary {}
               p.x
-            }
             """.trimIndent(),
         )
     }
@@ -72,11 +71,10 @@ class ArbitraryHandWrittenShapeTest {
               arbitrary = {} -> Wrapped { val = Arbitrary.arbitrary {} }
             }
 
-            with_seed { seed = 6, call = {} -> do
+            perform SeededSample { seed = 6 } in do
               let w: Wrap = Arbitrary.arbitrary {}
               match w is
                 Wrapped { val } -> val
-            }
             """.trimIndent(),
         )
     }
@@ -100,10 +98,9 @@ class ArbitraryHandWrittenShapeTest {
 
             # A newtype is fully erased at runtime, so the value that comes back IS
             # the wrapped Int — no unwrap needed to check which generator ran.
-            with_seed { seed = 1, call = {} -> do
+            perform SeededSample { seed = 1 } in do
               let a: Age = Arbitrary.arbitrary {}
               a
-            }
         """.trimIndent()))
         assertTrue(v == 42L, "the newtype's own generator was not used: $v")
     }

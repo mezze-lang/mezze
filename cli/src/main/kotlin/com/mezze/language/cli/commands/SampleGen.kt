@@ -59,7 +59,7 @@ object SampleGen {
      * weighting, and `size`/`resize` for the recursive-variant helper.
      */
     val IMPORTS: Set<String> = setOf(
-        "use std::effects::sample::{ with_seed, choose, size, resize }",
+        "use std::effects::sample::{ SeededSample, choose, size, resize }",
         "use std::abilities::arbitrary::{ Arbitrary }",
     )
 

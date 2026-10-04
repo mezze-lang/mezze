@@ -28,7 +28,7 @@ class SampleEffectTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, with_seed, with_seed_sized, choose, size }
+        use std::effects::sample::{ Sample, SeededSample, SeededSampleWith, choose, size }
         use std::abilities::arbitrary::{ Arbitrary, arbitrary, int_max, int_min }
         use std::collections::seq
     """.trimIndent()
@@ -37,7 +37,7 @@ class SampleEffectTest {
 
     /** One draw of an Int under a seeded sampler. */
     private fun draw(seed: Int): Long? = MezzeTestHelper.asLong(
-        eval("with_seed { seed = $seed, call = {} -> choose { bound = 1000000 } }")
+        eval("perform SeededSample { seed = $seed } in choose { bound = 1000000 } ")
     )
 
     @Test
@@ -46,11 +46,10 @@ class SampleEffectTest {
         // SeededRandom twice, and its stream resets at scope entry — so each draw
         // would restart the same sequence and return the same number.
         val rec = MezzeTestHelper.asRecord(eval("""
-            with_seed { seed = 42, call = {} -> do
+            perform SeededSample { seed = 42 } in do
               let x = choose { bound = 1000000 }
               let y = choose { bound = 1000000 }
               { a = x, b = y }
-            }
         """.trimIndent()))
         val x = rec.getField(rec.getFieldIndex("a"))
         val y = rec.getField(rec.getFieldIndex("b"))
@@ -69,8 +68,49 @@ class SampleEffectTest {
 
     @Test
     fun `the size budget is what the sampler was given`() {
-        val n = eval("with_seed_sized { seed = 1, size = 9n, call = {} -> size {} }")
+        val n = eval("perform SeededSampleWith { seed = 1, size = 9n } in size {} ")
         assertEquals(9L, MezzeTestHelper.asLong(n))
+    }
+
+    /**
+     * A seeded scope NESTS with a `Log` handler, in both orders.
+     *
+     * This is the reproduction of the bug that made `with_seed` a performer, written
+     * with the effect and the handler that actually exhibited it:
+     *
+     *     perform Console in with_seed { call = {} -> … println … }
+     *
+     * typechecks and prints NOTHING. The `Log` performed inside the `call` thunk has
+     * already left the `perform` body by the time `Console` is installed, so the
+     * handler never fires — silently, which is why the shape was worth removing
+     * rather than documenting.
+     *
+     * The draw and the print are both in the body, so `Sample` and `Log` are live in
+     * the one scope and each handler has to discharge its own. Note what the nesting
+     * is NOT: `Console` and the sampler are SIBLING handlers around a shared body,
+     * not one effect inside the other.
+     */
+    @Test
+    fun `a seeded scope nests with a Log handler, either way round`() {
+        fun printsUnder(wrap: (String) -> String): String {
+            val body = """
+                do
+                  let n = choose { bound = 1000000 }
+                  println { msg = "drew $(n.to_dbg {})" }
+            """.trimIndent().prependIndent("  ").trimStart()
+            return MezzeTestHelper.runWithOutput(
+                "$imports\nuse std::effects::log::{ println, Console }\n\n${wrap(body)}"
+            ).output
+        }
+
+        val outerLog = printsUnder { "perform Console in perform SeededSample { seed = 5 } in $it" }
+        assertTrue(outerLog.contains("drew "), "the OUTER Console never fired; printed: <$outerLog>")
+
+        val outerSeeded = printsUnder { "perform SeededSample { seed = 5 } in perform Console in $it" }
+        assertTrue(outerSeeded.contains("drew "), "the INNER Console never fired; printed: <$outerSeeded>")
+
+        // Same seed both ways: the draw is the sampler's, not the nesting order's.
+        assertEquals(outerLog.trim(), outerSeeded.trim(), "nesting order changed the draw")
     }
 
     /**
@@ -84,10 +124,9 @@ class SampleEffectTest {
     @Test
     fun `arbitrary generates with no other Sample call in the thunk`() {
         val v = MezzeTestHelper.asLong(eval("""
-            with_seed { seed = 5, call = {} -> do
+            perform SeededSample { seed = 5 } in do
               let v: Int = Arbitrary.arbitrary {}
               v
-            }
         """.trimIndent()))
         assertTrue(isValidIntDraw(v), "not something the Int impl can produce: $v")
     }
@@ -96,11 +135,10 @@ class SampleEffectTest {
     @Test
     fun `arbitrary at two types in one scope`() {
         val rec = MezzeTestHelper.asRecord(eval("""
-            with_seed { seed = 11, call = {} -> do
+            perform SeededSample { seed = 11 } in do
               let n: Int = Arbitrary.arbitrary {}
               let s: Str = Arbitrary.arbitrary {}
               { n = n, s = s }
-            }
         """.trimIndent()))
         val n = rec.getField(rec.getFieldIndex("n"))
         val s = rec.getField(rec.getFieldIndex("s"))
@@ -116,10 +154,9 @@ class SampleEffectTest {
     @Test
     fun `the arbitrary wrapper works through its ability constraint`() {
         val v = MezzeTestHelper.asLong(eval("""
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let v: Int = arbitrary {}
               v
-            }
         """.trimIndent()))
         assertTrue(isValidIntDraw(v), "not something the Int impl can produce: $v")
     }
@@ -149,7 +186,7 @@ class SampleEffectTest {
         // values across and folding them here — the host side has no seq accessor
         // and does not need one for a question this shape.
         val rec = MezzeTestHelper.asRecord(eval("""
-            with_seed { seed = 20260101, call = {} -> do
+            perform SeededSample { seed = 20260101 } in do
               let vs: [Int] = seq::map { xs = seq::range { start = 0, end = 200 }, f = { x } -> arbitrary {} }
               {
                 specials = seq::count { xs = vs, p = { x } ->
@@ -157,7 +194,6 @@ class SampleEffectTest {
                 wide = seq::count { xs = vs, p = { x } -> x > 1000000 || x < (0 - 1000000) },
                 boundary = seq::count { xs = vs, p = { x } -> x == int_max || x == int_min }
               }
-            }
         """.trimIndent()))
         fun count(f: String) = rec.getField(rec.getFieldIndex(f)).toString().toLong()
 

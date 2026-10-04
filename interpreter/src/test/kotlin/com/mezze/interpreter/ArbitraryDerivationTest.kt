@@ -21,7 +21,7 @@ class ArbitraryDerivationTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, with_seed, with_seed_sized }
+        use std::effects::sample::{ Sample, SeededSample }
         use std::abilities::arbitrary::{ Arbitrary }
     """.trimIndent()
 
@@ -32,10 +32,9 @@ class ArbitraryDerivationTest {
         """
         $decls
 
-        with_seed { seed = $seed, call = {} -> do
+        perform SeededSample { seed = $seed } in do
           let v: $type = Arbitrary.arbitrary {}
           $body
-        }
         """.trimIndent()
     )
 
@@ -82,10 +81,9 @@ class ArbitraryDerivationTest {
 
             let add_them: Args -> Int = { a, b } -> a + b
 
-            with_seed { seed = 12, call = {} -> do
+            perform SeededSample { seed = 12 } in do
               let args: Args = Arbitrary.arbitrary {}
               add_them { a = args.a, b = args.b }
-            }
         """.trimIndent()))
         assertTrue(n != null, "the function did not run on the generated record")
     }
@@ -100,7 +98,7 @@ class ArbitraryDerivationTest {
             let name_of: { c: Color } -> Str = { c } ->
               if c == Red then "R" else if c == Green then "G" else "B"
 
-            with_seed { seed = 21, call = {} -> do
+            perform SeededSample { seed = 21 } in do
               let a: Color = Arbitrary.arbitrary {}
               let b: Color = Arbitrary.arbitrary {}
               let c: Color = Arbitrary.arbitrary {}
@@ -110,7 +108,6 @@ class ArbitraryDerivationTest {
               let g: Color = Arbitrary.arbitrary {}
               let h: Color = Arbitrary.arbitrary {}
               { s = "$(name_of { c = a })$(name_of { c = b })$(name_of { c = c })$(name_of { c = d })$(name_of { c = e })$(name_of { c = f })$(name_of { c = g })$(name_of { c = h })" }
-            }
         """.trimIndent()))
         val s = seen.getField(seen.getFieldIndex("s")).toString()
         assertEquals(8, s.length, "expected 8 draws, got: $s")

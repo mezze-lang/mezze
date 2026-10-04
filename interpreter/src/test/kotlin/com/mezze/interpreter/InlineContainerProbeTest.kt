@@ -15,7 +15,7 @@ class InlineContainerProbeTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, with_seed, list_of, choose, size, resize }
+        use std::effects::sample::{ Sample, SeededSample, list_of, choose, size, resize }
         use std::abilities::arbitrary::{ Arbitrary }
         use std::collections::seq
         use std::option::{ get_or }
@@ -34,10 +34,9 @@ class InlineContainerProbeTest {
     /** THE question: list_of at a CONCRETE element type. */
     @Test fun `I1 list_of with a concrete element`() {
         show("I1  list_of { g = {} -> Arbitrary.arbitrary {} } pinned to [Int]", """
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let xs: [Int] = list_of { g = {} -> Arbitrary.arbitrary {} }
               seq::size { xs = xs }
-            }
         """.trimIndent())
     }
 
@@ -47,10 +46,9 @@ class InlineContainerProbeTest {
             type Tags = { xs: [Int], n: Int }
             let count: Tags -> Int = { xs, n } -> seq::size { xs = xs } + n
 
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let t = { xs = list_of { g = {} -> Arbitrary.arbitrary {} }, n = Arbitrary.arbitrary {} }
               count { xs = t.xs, n = t.n }
-            }
         """.trimIndent())
     }
 
@@ -60,10 +58,9 @@ class InlineContainerProbeTest {
             type Maybe = { o: Option Int }
             let unwrap: Maybe -> Int = { o } -> get_or { opt = o, def = 0 - 1 }
 
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let m = { o = if choose { bound = 4 } == 0 then None else Some { val = Arbitrary.arbitrary {} } }
               unwrap { o = m.o }
-            }
         """.trimIndent())
     }
 
@@ -73,12 +70,11 @@ class InlineContainerProbeTest {
             type Outcome = { r: Result Int Str }
             let ok: Outcome -> Bool = { r } -> is_ok { result = r }
 
-            with_seed { seed = 3, call = {} -> do
+            perform SeededSample { seed = 3 } in do
               let o = { r = if choose { bound = 3 } == 0
                               then Err { error = Arbitrary.arbitrary {} }
                               else Ok { val = Arbitrary.arbitrary {} } }
               ok { r = o.r }
-            }
         """.trimIndent())
     }
 
@@ -99,7 +95,7 @@ class InlineContainerProbeTest {
                     then Leaf { v = Arbitrary.arbitrary {} }
                     else Node { l = gen_tree {}, r = gen_tree {} } }
 
-            with_seed { seed = 5, call = {} -> count { t = gen_tree {} } }
+            perform SeededSample { seed = 5 } in count { t = gen_tree {} } 
         """.trimIndent())
     }
 }

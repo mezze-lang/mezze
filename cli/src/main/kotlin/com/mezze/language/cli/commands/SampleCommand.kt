@@ -140,7 +140,7 @@ class SampleCommand {
      * while the per-field form is pinned by the function's own parameter and needs
      * no rendered type at all. See [SampleTarget.Result.Ready].
      *
-     * A zero-argument function gets no `with_seed` wrapper: there is nothing to
+     * A zero-argument function gets no `perform SeededSample`: there is nothing to
      * draw, so wrapping it would declare a `<Sample>` the body never performs and be
      * rejected for exactly that.
      */
@@ -281,12 +281,13 @@ class SampleCommand {
 
     /**
      * A zero-argument function has one answer, so `--count` is meaningless for it and
-     * there is nothing to draw — hence no `with_seed`, which would declare a
-     * `<Sample>` the body never performs and be rejected for exactly that.
+     * there is nothing to draw — hence no `perform SeededSample`, which would
+     * declare a `<Sample>` the body never performs and be rejected for exactly that.
      */
     private fun noArgRow(name: String) = "{ rows = [{ args = {}, result = $name {} }] }"
 
-    /** `let __row_<i> = with_seed { … }` — the row's draws and its call. */
+    /** `let __row_<i> = perform SeededSample { … } in do …` — the row's draws
+     *  and its call. */
     private fun rowBinding(target: SampleTarget.Result.Ready, rowSeed: Int, i: Int): SampleGen.Plan {
         val args = "${ARGS}_$i"
         val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
@@ -296,11 +297,16 @@ class SampleCommand {
         val plan = SampleGen.bindFields(target.fields, args) {
             com.mezze.language.ast.prettyPrintType(it)
         }
-        val text = "              let ${ROW}_$i = with_seed { seed = $rowSeed, call = {} -> do\n" +
-            plan.lets + "\n" +
+        // `bindFields` indents its lets to the same depth as this `let`, which was
+        // invisible while the row was `with_seed { … }` — the braces delimited the
+        // body, so indentation carried no meaning. A `perform … in do` body is
+        // delimited by INDENTATION, so at equal depth the do block has no body at all
+        // and the parser says "Do block is empty". Push them one level in.
+        val lets = plan.lets.lines().joinToString("\n") { "  $it" }
+        val text = "              let ${ROW}_$i = perform SeededSample { seed = $rowSeed } in do\n" +
+            lets + "\n" +
             "                let $args = ${plan.record}\n" +
-            "                { args = $args, result = ${target.name} { $forwarded } }\n" +
-            "              }"
+            "                { args = $args, result = ${target.name} { $forwarded } }"
         return plan.copy(lets = text)
     }
 
