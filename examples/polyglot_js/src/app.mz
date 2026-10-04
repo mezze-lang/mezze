@@ -86,17 +86,18 @@ let main = {} -> perform Console in perform GraalJs in do
   let slice_r = Js.eval { source = "'JavaScript is fun'.slice(0, 10)" }
   let _       = show_str { label = "slice ", r = slice_r }
 
-  # ---- Date via new{} ----
+  # ---- Date via .new{} ----
+  # A flat chain on the `Result JsForeign` mirror impl: eval the `Date`
+  # constructor, `.new{}` it, then invoke `.getFullYear()` — each step stays a
+  # `Result`, so no `match` is needed between steps; `show_int` coerces at the end.
   println { msg = "" }
   println { msg = "Date via .new{}:" }
-  match Js.eval { source = "Date" } is
-    Ok { val = ctor } -> match ctor.new { args = [] } is
-      Ok { val = d } -> show_int {
-        label = "getFullYear",
-        r = d.method { name = "getFullYear", args = [] },
-      }
-      Err { error = _ } -> println { msg = "  Date: instantiate failed" }
-    Err { error = _ } -> println { msg = "  Date: constructor lookup failed" }
+  let _ = show_int {
+    label = "getFullYear",
+    r = Js.eval { source = "Date" }
+      .new { args = [] }
+      .method { name = "getFullYear", args = [] },
+  }
 
   println { msg = "" }
   println { msg = "== done ==" }

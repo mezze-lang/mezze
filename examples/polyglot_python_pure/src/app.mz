@@ -16,7 +16,7 @@ use std::int
 ## Coerce a PyForeign result to a Mezze Float and print it.
 let show_float: { label: Str, r: Result PyForeign InteropError } -> {} <Log>
   = { label, r } -> match r is
-    Ok { val = f } -> match f.as_float{} is
+    Ok { val = f } -> match f.float{} is
       Ok { val = d } -> println { msg = "  $(label) = $(float::to_str { n = d })" }
       Err { error = _ } -> println { msg = "  $(label): could not coerce to float" }
     Err { error = _ } -> println { msg = "  $(label): guest error" }
@@ -24,7 +24,7 @@ let show_float: { label: Str, r: Result PyForeign InteropError } -> {} <Log>
 ## Coerce a PyForeign result to a Mezze Int and print it.
 let show_int: { label: Str, r: Result PyForeign InteropError } -> {} <Log>
   = { label, r } -> match r is
-    Ok { val = f } -> match f.as_int{} is
+    Ok { val = f } -> match f.int{} is
       Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
       Err { error = _ } -> println { msg = "  $(label): could not coerce to int" }
     Err { error = _ } -> println { msg = "  $(label): guest error" }
