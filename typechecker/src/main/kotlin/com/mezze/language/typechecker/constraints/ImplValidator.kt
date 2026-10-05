@@ -372,7 +372,11 @@ internal class ImplValidator(
                                 code = ErrorCode.T0201_TYPE_MISMATCH,
                             )
                         }
-                        false
+                        // Handled: every error here is the benign inherent-method-read
+                        // case above, which is deliberately NOT reported. Said `false`
+                        // before S-19 made that mean "decline" — which then read as
+                        // "the validator reports it" while in fact dropping it.
+                        true
                     },
                 )
             }
@@ -483,6 +487,15 @@ internal class ImplValidator(
         recordLiteralBindings: Set<String> = emptySet(),
         prepareContext: ((TypingContext) -> TypingContext)? = null,
         onBodyResult: ((ConstraintResult, TypingContext) -> Unit)? = null,
+        // Both hooks SPECIALISE the default check, they do not replace it. Return
+        // `true` only when the hook owns the outcome — it threw, or it judged the
+        // problem benign on purpose. Return `false` to decline, and the default
+        // check below reports it.
+        //
+        // S-19: both were effectively "swallow" either way. `onUndefinedVars`
+        // returning `true` skipped the default check, and `onSolveFailure` had
+        // nothing after its `when`, so `false` discarded the failure too. A
+        // performer op body with a plain typo compiled in silence.
         onUndefinedVars: ((ConstraintResult) -> Boolean)? = null,
         onSolveFailure: ((ConstraintSolver.SolveResult.Failure) -> Boolean)? = null,
         // asymmetry fix: the impl's declared type params (tick-prefixed). When set,
@@ -539,9 +552,16 @@ internal class ImplValidator(
 
         onBodyResult?.invoke(bodyResult, bodyContext)
 
-        if (onUndefinedVars != null) {
-            if (onUndefinedVars(bodyResult)) return
-        } else {
+        // A handler returning `true` has reported (or deliberately excused) the
+        // undefined variables itself and owns the outcome. DECLINING must fall
+        // through to this check rather than replacing it: S-19's performer handler
+        // declined everything that was not named `scope` and returned `true`, so an
+        // ordinary typo in a performer op body — `beep = {} -> nonexistent_thing` —
+        // was accepted in silence, while the identical mistake in a plain function
+        // or an ability impl was reported. The handler is a SPECIALISATION of this
+        // check, not a substitute for it.
+        val undefinedHandled = onUndefinedVars != null && onUndefinedVars(bodyResult)
+        if (!undefinedHandled) {
             val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) }
             if (realUndefined.isNotEmpty()) {
                 val undefinedVar = realUndefined.first()
@@ -593,9 +613,17 @@ internal class ImplValidator(
 
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
-                if (onSolveFailure != null) {
-                    if (onSolveFailure(solveResult)) return
-                } else {
+                // `true` means the handler owns this failure — it either threw, or
+                // judged it provisional and deliberately left it unreported.
+                // `false` means it declined, and the failure falls through to the
+                // default report below.
+                //
+                // S-19: declining used to drop the failure. Nothing follows this
+                // `when`, so returning `false` and returning `true` were the same
+                // thing — a handler that read as "not mine, you report it" silently
+                // discarded the error instead.
+                val handled = onSolveFailure != null && onSolveFailure(solveResult)
+                if (!handled) {
                     throw TypeCheckError(
                         "Type error in $implLabel operation '$opName' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
                         opLoc,
@@ -962,29 +990,32 @@ internal class ImplValidator(
                             performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
                         }
                     },
+                    // `scope` gets a tailored explanation; everything else is an
+                    // ordinary undefined variable and belongs to the shared check.
+                    //
+                    // S-19: this used to return `true` for ANY other undefined
+                    // variable, which stopped validation and reported nothing — so a
+                    // typo in a performer op body compiled. The only thing special
+                    // about this handler is the `scope` message.
                     onUndefinedVars = { bodyResult ->
-                        if (bodyResult.undefinedVariables.isNotEmpty()) {
-                            val scopeUndefined = bodyResult.undefinedVariables.find { it.name == "scope" }
-                            if (scopeUndefined != null) {
-                                val errorMessage = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
-                                    "The 'scope' variable is not available in initialize_scope. " +
-                                    "The scope is being created here and will only be available in operations and finalize_scope."
-                                } else if (!isScopedEffect) {
-                                    "The 'scope' variable is not available because this impl does not define initialize_scope. " +
-                                    "Add 'initialize_scope = {} -> { ... }' to create a scope."
-                                } else {
-                                    "Undefined variable 'scope' in operation '${implOp.name}'."
-                                }
-                                throw TypeCheckError(
-                                    errorMessage,
-                                    scopeUndefined.loc,
-                                    code = ErrorCode.V0702_UNDEFINED_VARIABLE,
-                                )
+                        val scopeUndefined = bodyResult.undefinedVariables.find { it.name == "scope" }
+                        if (scopeUndefined != null) {
+                            val errorMessage = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
+                                "The 'scope' variable is not available in initialize_scope. " +
+                                "The scope is being created here and will only be available in operations and finalize_scope."
+                            } else if (!isScopedEffect) {
+                                "The 'scope' variable is not available because this impl does not define initialize_scope. " +
+                                "Add 'initialize_scope = {} -> { ... }' to create a scope."
+                            } else {
+                                "Undefined variable 'scope' in operation '${implOp.name}'."
                             }
-                            true
-                        } else {
-                            false
+                            throw TypeCheckError(
+                                errorMessage,
+                                scopeUndefined.loc,
+                                code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                            )
                         }
+                        false
                     },
                     onSolveFailure = { solveResult ->
                         val firstError = solveResult.errors.firstOrNull()
