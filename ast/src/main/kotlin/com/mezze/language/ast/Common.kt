@@ -30,6 +30,24 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
      */
     val isPlaceholder: Boolean get() = name == UNKNOWN_NAME
 
+    /**
+     * True when this variable stands for a polyglot FOREIGN handle — the associated
+     * type of the `Polyglot` effect (`having 'f`). Such a variable is still fully
+     * flexible for inference (it unifies with `JvmForeign`/`JsForeign`/… — the
+     * `newtype … = Foreign` handles — so `x.attr{}.call{}` chains and providers need
+     * ZERO annotations), but it is NOT a blank slate: it may NOT be bound to a
+     * STRUCTURAL type (`Result`, a record, a non-foreign variant, a primitive). That
+     * is the gate that stops a provider op declared `-> Result XForeign` from
+     * silently laundering `eval_raw`'s bare foreign into a `Result` and crashing a
+     * caller's `match … is Ok/Err` at runtime (see Unification.unifyVar).
+     *
+     * DERIVED from the name for the same reason as [isPlaceholder]: the flag would
+     * be dropped by instantiation/freshening/substitution, but the name survives
+     * (the leading `'` keeps `freshWithName` from replacing it). [FOREIGN_KIND_NAME]
+     * carries a `~`, which a source type variable cannot, so it never collides.
+     */
+    val isForeignKinded: Boolean get() = name == FOREIGN_KIND_NAME
+
     companion object {
         private var globalCounter = 0
         private var currentLevel = 0
@@ -132,6 +150,17 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
             unknownMinted.add(reason)
             return TypeVar(UNKNOWN_NAME, level, id)
         }
+
+        /** The reserved name marking a polyglot foreign-handle variable (see
+         *  [isForeignKinded]). The leading `'` makes instantiation preserve it;
+         *  the `~` cannot appear in a source type variable, so it never collides. */
+        const val FOREIGN_KIND_NAME = "'~foreign"
+
+        /** A fresh foreign-kinded variable — the `Polyglot` effect's associated
+         *  type at a handler binding / call site. Flexible for inference but gated
+         *  against structural types in unification. */
+        fun foreignKinded(level: Int = currentLevel): TypeVar =
+            freshWithName(FOREIGN_KIND_NAME, level)
 
         /** Reasons an unknown placeholder was minted, for the ratchet that bounds
          *  them. Per thread: test classes run in parallel. */

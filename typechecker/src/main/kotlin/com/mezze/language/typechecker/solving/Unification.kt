@@ -129,6 +129,28 @@ internal fun isOpaqueWall(type: MezzeType): Boolean = when {
 }
 
 /**
+ * #22: would binding a `Polyglot` foreign-handle variable (`TypeVar.isForeignKinded`)
+ * to [type] launder the opaque foreign into an observable STRUCTURE? A foreign handle
+ * legitimately resolves to another variable, a `newtype <Lang>Foreign = Foreign`
+ * handle, or the opaque nullary `Foreign` primitive — none of which is rejected here.
+ * It must NOT become a `Result`/`Option`/`[T]`/`Map`, a record, a constructor-bearing
+ * variant, a function, or a primitive: those have observable structure a raw guest
+ * handle does not, and accepting the bind is the laundering hole (a producer op
+ * declared `-> Result XForeign` returning `eval_raw`'s bare foreign). Keyed on
+ * STRUCTURE (type args / constructors / fields), not on type names.
+ */
+private fun foreignHandleRejects(type: MezzeType): Boolean = when (type) {
+    is MezzeType.TypeApplication -> type.args.isNotEmpty()        // Result/Option/[T]/Map … ; a nullary nominal (Foreign) passes
+    is MezzeType.VariantType -> type.constructors.isNotEmpty()    // Ok/Err & user variants ; a constructor-less nominal passes
+    is MezzeType.RecordType -> true
+    is MezzeType.FunctionType -> true
+    is MezzeType.EffectRow -> true
+    MezzeType.IntType, MezzeType.FloatType, MezzeType.StringType,
+    MezzeType.FracType, MezzeType.CharType, MezzeType.BytesType -> true
+    else -> false                                                 // VarType, NewtypeType, opaque nullary nominal: allowed
+}
+
+/**
  * True iff two identities are the SAME *concrete declaration* — both [TypeIdentity.Declared]
  * with equal hash, or both [TypeIdentity.Builtin] with equal name. Unlike [identityVerdict]'s
  * SAME verdict this does NOT include two [TypeIdentity.Anonymous] (two anonymous shapes are
@@ -411,6 +433,33 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
 private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
     if (type is MezzeType.VarType && type.variable == typeVar) {
         return UnificationResult.Success(Substitution.empty)
+    }
+    // #22: foreign-handle gate. A `Polyglot` foreign-handle variable (`having 'f`)
+    // is flexible for inference — it unifies with another variable or a `newtype
+    // <Lang>Foreign = Foreign` handle, so `x.attr{}.call{}` chains and providers
+    // need no annotations — but it may NOT be bound to a STRUCTURAL type (`Result`,
+    // a record, a constructor-bearing variant, a function, a primitive). That bind
+    // is exactly the laundering that let a provider op declared `-> Result XForeign`
+    // return `eval_raw`'s bare foreign, crashing a caller's `match … is Ok/Err`.
+    // (A structure that merely CONTAINS a foreign — `Result ['f]` from `to_seq` — is
+    // fine: it unifies structurally and the foreign lands at the element position.)
+    if (typeVar.isForeignKinded && foreignHandleRejects(type)) {
+        return UnificationResult.Failure(
+            message = "A polyglot foreign handle cannot be a ${prettyPrintType(type)}. " +
+                "A `perform Runtime in Polyglot.<op>` producer (eval_raw / a member op) yields a bare " +
+                "error-carrying foreign, not a `Result` — surface it with `std::polyglot::core::lift` " +
+                "(→ `Result <Foreign> InteropError`) or a coercion (`.as_int{}` / `.str{}`) before using it " +
+                "where a ${prettyPrintType(type)} is required.",
+            type1 = MezzeType.VarType(typeVar),
+            type2 = type,
+            code = ErrorCode.T0201_TYPE_MISMATCH,
+        )
+    }
+    // Keep the foreign kind when a foreign handle meets a plain variable: bind the
+    // PLAIN one to the foreign one so the gate still applies downstream (the default
+    // `typeVar := type` bind would erase the kind).
+    if (type is MezzeType.VarType && typeVar.isForeignKinded && !type.variable.isForeignKinded) {
+        return UnificationResult.Success(Substitution.single(type.variable, MezzeType.VarType(typeVar)))
     }
     if (occursCheck(typeVar, type)) {
         return UnificationResult.Failure(

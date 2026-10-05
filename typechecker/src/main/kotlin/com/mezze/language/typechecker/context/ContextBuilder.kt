@@ -700,6 +700,15 @@ class ContextBuilder {
             ?: error("Content hash not computed for impl: ${implDecl.performerName}. " +
                 "Ensure computeDeclarationHashes was called before ContextBuilder.")
 
+        // #22: `Polyglot` is THE foreign boundary — its associated type `'f` is a
+        // guest-language handle. Mint its binding as a FOREIGN-KINDED var: still
+        // flexible (it unifies with each provider's `newtype <Lang>Foreign = Foreign`,
+        // so chains infer with no annotations), but gated in unification against
+        // STRUCTURAL targets so a provider op declared `-> Result XForeign` cannot
+        // launder the bare foreign into a `Result` (which crashed `match … is Ok/Err`
+        // at runtime). The handler's own `having 'f = 'g` binding is abstract, so
+        // there is no structural signal to key on — the effect name is.
+        val isForeignEffect = implDecl.effect.localName == "Polyglot"
         val performerType = if (hasAssocTypes) {
             val bindingFields = implDecl.associatedTypeBindings.mapValues { (_, ann) ->
                 convertParsedTypeAnnotationInternal(ann)
@@ -707,7 +716,9 @@ class ContextBuilder {
             MezzeType.RecordType(
                 fields = effectDecl.associatedTypes.associate { assocType ->
                     val varName = assocType.removePrefix("'")
-                    varName to (bindingFields[assocType] ?: bindingFields["'$assocType"] ?: MezzeType.VarType(TypeVar.fresh()))
+                    val binding = if (isForeignEffect) MezzeType.VarType(TypeVar.foreignKinded())
+                        else bindingFields[assocType] ?: bindingFields["'$assocType"] ?: MezzeType.VarType(TypeVar.fresh())
+                    varName to binding
                 }
             )
         } else MezzeType.RecordType(emptyMap())

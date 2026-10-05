@@ -3,9 +3,11 @@ package com.mezze.interpreter.polyglot
 import com.mezze.interpreter.MezzeTestHelper
 import com.mezze.interpreter.values.MezzeForeign
 import com.mezze.interpreter.values.MezzeVariant
+import com.mezze.language.typechecker.TypeCheckError
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -599,6 +601,53 @@ class PolyglotCoreTest {
             """.trimIndent()
         )
         assertEquals("matched-err", result)
+    }
+
+    @Test
+    fun `a provider entry declared Result cannot launder a bare producer foreign`() {
+        // #22 foreign-kind gate: `eval_raw` yields a BARE error-carrying foreign.
+        // An entry point that DECLARES `Result XForeign InteropError` but returns that
+        // foreign directly used to typecheck — the foreign var laundered into the
+        // Result — then crash a caller's `match … is Ok/Err` at runtime with
+        // "no variant tag matched". It is now REJECTED at compile time: a foreign
+        // handle may not be bound to a structural `Result`. (Fix is `lift`, below.)
+        assertThrows(TypeCheckError::class.java) {
+            MezzeTestHelper.typeCheck(
+                """
+                use std::polyglot::core::{ Polyglot, Runtime, Foreign, InteropError }
+                newtype XForeign = Foreign
+                effect X where { run: { source: Str } -> Result XForeign InteropError <X> }
+                impl X for XHost where {
+                  run = { source } -> perform Runtime in Polyglot.eval_raw { lang = "js", source = source }
+                }
+                perform XHost in X.run { source = "1 + 1" }
+                """.trimIndent()
+            )
+        }
+    }
+
+    @Test
+    fun `the same entry typechecks and runs once it lifts the foreign into a Result`() {
+        // The correct form: `lift` crosses the error-carrying foreign to a real
+        // `Result`, so the declared return is honest and the caller's match works.
+        // (jvm has no source eval, so eval_raw errors → Err — either arm is a valid
+        // Str; the point is it TYPECHECKS and the match destructures at runtime.)
+        val result = eval(
+            """
+            use std::polyglot::core::{ Polyglot, Runtime, Foreign, InteropError, lift }
+            newtype XForeign = Foreign
+            effect X where { run: { source: Str } -> Result XForeign InteropError <X> }
+            impl X for XHost where {
+              run = { source } ->
+                perform Runtime in lift { on = Polyglot.eval_raw { lang = "jvm", source = source } }
+            }
+            match perform XHost in X.run { source = "1 + 1" } is
+              Ok  { val = _ }   -> "matched-ok"
+              Err { error = _ } -> "matched-err"
+            """.trimIndent()
+        )
+        assertTrue(result == "matched-ok" || result == "matched-err",
+            "lifted entry must produce a matchable Result; got $result")
     }
 
     @Test

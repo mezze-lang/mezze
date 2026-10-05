@@ -339,24 +339,22 @@ internal fun ExpressionConstraintGenerator.generatePipeExpression(expr: ParsedPi
 }
 
 /**
- * Synthesized type for a polyglot member native — the ones that take a foreign
- * value in `val` and return another foreign, so their result type is
- * `Result 'F InteropError` with the SAME `'F` as the `val` argument. Consulted in
- * the `__native_*` fast path (the NotFound branch above), which otherwise types
- * every intrinsic as a bare fresh var. Giving THESE a real signature is what lets
- * `x.attr{}.call{}.…` chains INFER: the foreign type flows through each step, so
- * the next inherent method resolves its dispatch dict WITHOUT any return-type
- * annotation in the provider (`impl PyForeign` / `impl JvmForeign`).
+ * Synthesized type for a polyglot member native. Consulted in the `__native_*` fast
+ * path (the NotFound branch above), which otherwise types every intrinsic as a bare
+ * fresh var. Giving THESE a real signature is what lets `x.attr{}.call{}.…` chains
+ * INFER: the FOREIGN-KINDED handle flows through each step, so the next inherent
+ * method resolves its dispatch dict WITHOUT any return-type annotation in the
+ * provider (`impl PyForeign` / `impl JvmForeign`). Two shapes:
  *
- * The error arm is pinned to the concrete `InteropError` (not a free var). This
- * matters for MULTI-PROVIDER dispatch: an intermediate chain type is then
- * `Result <Foreign> InteropError` — fully concrete — so its mangled receiver name
- * `Result_<Foreign>_InteropError` matches the specific `impl Result <Foreign>
- * InteropError` candidate exactly. Left as a free var, the receiver mangles to
- * `Result_<Foreign>_'?`, which matches NEITHER provider's specific candidate, so
- * dispatch fell through to a load-order tiebreak between `impl Result PyForeign`
- * and `impl Result JsForeign` (whichever provider was imported first won). Pinning
- * the error is faithful — every `__native_polyglot_*` op returns exactly this.
+ *  - PRODUCER member natives (read_member / invoke_member / execute / instantiate /
+ *    read_array / write_array) yield the SAME foreign handle `'F` BARE — current
+ *    core.mz declares them `-> 'f`, the error-carrying-foreign model. (They used to
+ *    be typed `-> Result 'F InteropError`, the pre-redesign shape; under the #22
+ *    foreign-kind gate that now launders a handle into a `Result`, so it is wrong.)
+ *  - COERCION natives (`as_string`/`as_long`/`as_double`/`as_boolean`) CROSS to a
+ *    concrete-primitive `Result`, error arm pinned to `InteropError` (not a free
+ *    var) so a generic combinator can chain past the coercion — `.as_str{}.get_or{}`
+ *    resolves `Result.get_or` on a concrete `Result Str` instead of `Result 'a`.
  *
  * The param record is OPEN (rowVar) so the other, type-irrelevant args (`name`,
  * `args`, `index`, …) unify freely; only `val: 'F` and the return are pinned.
@@ -394,8 +392,22 @@ private fun ExpressionConstraintGenerator.polyglotNativeSignature(
     val isForeign = name in foreignReturning
     if (!isForeign && name !in coercionReturn) return null
 
-    val f = MezzeType.VarType(TypeVar.fresh())          // the foreign type 'F (the `val` arg)
-    val okType: MezzeType = if (isForeign) f else coercionReturn.getValue(name)
+    // #22: the `val` foreign and (for producers) the result are FOREIGN-KINDED — the
+    // same opaque-handle kind as the `Polyglot` effect's `having 'f`, so a producer
+    // native result is gated against structural types in unification just like the op.
+    val f = MezzeType.VarType(TypeVar.foreignKinded())  // the foreign handle 'F (the `val` arg)
+    val param = MezzeType.RecordType(
+        fields = mapOf("val" to f),
+        rowVar = RowVar.fresh(),                         // open: other args unify freely
+    )
+    // A PRODUCER member native yields the bare error-carrying foreign (current
+    // core.mz declares `read_member … -> 'f`, NOT a `Result`); returning `Result 'F`
+    // here — the pre-error-carrying-foreign shape — laundered the handle and is what
+    // the foreign-kind gate now forbids. A COERCION crosses to a concrete primitive
+    // `Result`, pinned so a generic combinator can chain past it (`.as_str{}.get_or{}`).
+    if (isForeign) {
+        return MezzeType.FunctionType(paramType = param, returnType = f)
+    }
     // Concrete InteropError when its decl is in scope (it always is where the
     // polyglot natives are used — the provider `use`s std::polyglot::core), else
     // a fresh var so this never fails a build that references the native oddly.
@@ -403,10 +415,6 @@ private fun ExpressionConstraintGenerator.polyglotNativeSignature(
         if (context.typeDeclarations.containsKey("InteropError"))
             com.mezze.language.typechecker.util.WellKnownTypeApp.of("InteropError")
         else MezzeType.VarType(TypeVar.fresh())
-    val param = MezzeType.RecordType(
-        fields = mapOf("val" to f),
-        rowVar = RowVar.fresh(),                         // open: other args unify freely
-    )
-    val ret = com.mezze.language.typechecker.util.WellKnownTypeApp.result(okType, e)
+    val ret = com.mezze.language.typechecker.util.WellKnownTypeApp.result(coercionReturn.getValue(name), e)
     return MezzeType.FunctionType(paramType = param, returnType = ret)
 }
