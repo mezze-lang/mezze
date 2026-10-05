@@ -303,23 +303,45 @@ internal fun TypedAstBuilder.buildStaticAbilityOpCall(
             ?: importContext?.importedAbilities?.get(name)
                 ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
     }
-    val producedName = com.mezze.language.typechecker.util.receiverTypeName(produced)
+    // Dispatch on the ability's CLASS VARIABLE, not on whatever sits at the top of
+    // the type the call produces.
+    //
+    // For `mk: {} -> 'a` the two coincide, which is why reading `produced` worked at
+    // all. For an op whose return type merely CONTAINS the variable — `mk: {} ->
+    // ({} -> 'a)`, or `{} -> { made: 'a }` — `produced` is an arrow or a record,
+    // which has no dispatch name, so `let f: {} -> P = Mk.mk {}` was refused as
+    // undeterminable even though the annotation pins `'a` to `P` (L-3).
+    //
+    // The variable is already recorded per call site for exactly this purpose:
+    // `ExprMethodConstraints` mints it fresh so that, in its own words, everything
+    // the call learns about the produced type flows through it. There is one
+    // producer of a receiver-less MethodCallInfo and it always records it, so a
+    // missing entry is a compiler defect rather than a shape to tolerate.
+    val classVar = methodInfo.typeArgs.firstOrNull()
+        ?: unreachedPosition("receiver-less ability op with no class variable recorded")
+    val dispatchType = substitution.apply(classVar)
+    val producedName = com.mezze.language.typechecker.util.receiverTypeName(dispatchType)
     val implEntry = if (abilityHash != null && producedName != null) {
         abilityImpls.entries.firstOrNull { (_, info) ->
             info.abilityDeclHash == abilityHash && producedName in info.targetTypes
         }
     } else null
-    // The produced type is still a VARIABLE: the impl is not this call's to pick.
+    // The class variable is still a VARIABLE: the impl is not this call's to pick.
     // The enclosing function declared a constraint for that variable, so the
     // dictionary it carries holds the operation — reference it and let the caller
     // supply the evidence, exactly as a receiver-taking operation does.
-    if (implEntry == null && abilityHash != null && produced is MezzeType.VarType) {
+    //
+    // Tested on the class variable rather than on `produced` for the same reason as
+    // above: with a nested return type `produced` is an arrow or a record even while
+    // the variable inside it is unresolved, so this branch was skipped and the call
+    // was rejected instead of being forwarded.
+    if (implEntry == null && abilityHash != null && dispatchType is MezzeType.VarType) {
         val fn = TypedVar(
             name = methodInfo.methodName,
             binding = BindingRef.AbilityOp(
                 abilityHash = abilityHash,
                 opName = methodInfo.methodName,
-                typeVarName = produced.variable.name,
+                typeVarName = dispatchType.variable.name,
             ),
             type = solvedFnType ?: contextType?.let { substitution.apply(it) }
                 ?: noContextType("ability op reference with no solved signature"),
@@ -339,13 +361,25 @@ internal fun TypedAstBuilder.buildStaticAbilityOpCall(
             message = "'$abilityName.${methodInfo.methodName}' takes no receiver, so the type it " +
                 "produces is what chooses the implementation" +
                 if (producedName == null) {
-                    " — and nothing at this call determines that type. Say what the call " +
-                    "produces: `let x: <Type> = $abilityName.${methodInfo.methodName} {…}`. " +
-                    "An enclosing `with $abilityName 'a` does not carry it: an operation " +
-                    "with no receiver is resolved at the call, never forwarded."
+                    // This used to end "An enclosing `with $abilityName 'a` does not
+                    // carry it: an operation with no receiver is resolved at the
+                    // call, never forwarded." That is false — the branch above
+                    // forwards exactly that, and `{ n: Int } with $abilityName 'a ->
+                    // 'a = { n } -> $abilityName.op {}` compiles. The message named
+                    // the one remedy that works and told the user it was unavailable.
+                    // The wording now matches `abilityOpDictSlot`, which reports the
+                    // same situation from the dictionary side and always offered both.
+                    " — and nothing here determines that type. Say what the call " +
+                    "produces (`let x: <Type> = $abilityName.${methodInfo.methodName} " +
+                    "{…}`), or declare the constraint on the enclosing function so the " +
+                    "caller supplies it (`{ … } with $abilityName 'a -> …`)."
                 } else {
-                    ", and here it produces $producedName. No `impl $abilityName for " +
-                    "$producedName` is in scope — write one, or import it."
+                    // `producedName` is the CLASS VARIABLE's solution, which for a
+                    // nested return type is not the whole produced type — so this
+                    // names what dispatch keys on rather than claiming the call
+                    // produces it.
+                    ", and here that type is $producedName. No `impl $abilityName " +
+                    "for $producedName` is in scope — write one, or import it."
                 },
             loc = loc,
             errorType = com.mezze.language.typechecker.ErrorType.MISSING_FIELD,
