@@ -88,6 +88,12 @@ effect Polyglot having 'f where {
   has_member:    { on: 'f, name: Str }              -> Result Bool InteropError <Polyglot>,
   size:          { on: 'f }                         -> Result Int InteropError <Polyglot>,
   to_seq:        { on: 'f }                         -> Result ['f] InteropError <Polyglot>,
+  ## Bulk drain + coerce: a whole guest numeric array/iterable → `[Int]` / `[Float]`
+  ## in ONE crossing — the element loop AND the scalar coercion stay host-side, so N
+  ## numbers cost one boundary hit, not N. THE bulk path for numeric data; prefer it
+  ## over element-by-element `read_array` + `as_int`/`as_float`.
+  to_int_seq:    { on: 'f }                         -> Result [Int] InteropError <Polyglot>,
+  to_float_seq:  { on: 'f }                         -> Result [Float] InteropError <Polyglot>,
   as_int:        { on: 'f }                         -> Result Int InteropError <Polyglot>,
   as_float:      { on: 'f }                         -> Result Float InteropError <Polyglot>,
   as_str:        { on: 'f }                         -> Result Str InteropError <Polyglot>,
@@ -121,6 +127,11 @@ effect Polyglot having 'f where {
   box_null:      { lang: Str }                      -> 'f <Polyglot>,
   box_list:      { elems: ['f], lang: Str }         -> 'f <Polyglot>,
   box_dict:      { keys: ['f], vals: ['f], lang: Str } -> 'f <Polyglot>,
+  ## Bulk numeric WRITE: a whole `[Int]`/`[Float]` → a guest array in ONE crossing
+  ## (counterpart of `to_int_seq`/`to_float_seq`). Skips the N per-element `box_int`/
+  ## `box_float` crossings a `box_list` of wrapped foreigns would cost.
+  box_int_seq:   { vals: [Int], lang: Str }         -> 'f <Polyglot>,
+  box_float_seq: { vals: [Float], lang: Str }       -> 'f <Polyglot>,
 
   ## ---- sandboxed inner contexts ----
   # Open a configured INNER context (isolated globals + access restricted BELOW the
@@ -152,6 +163,8 @@ impl Polyglot for Runtime having 'f = 'g where {
   hash_entries  = { on }             -> __native_polyglot_hash_entries  { val = on },
   size          = { on }             -> __native_polyglot_size          { val = on },
   to_seq        = { on }             -> __native_polyglot_to_seq        { val = on },
+  to_int_seq    = { on }             -> __native_polyglot_to_int_seq    { val = on },
+  to_float_seq  = { on }             -> __native_polyglot_to_float_seq  { val = on },
   as_int        = { on }             -> __native_polyglot_as_long       { val = on },
   as_float      = { on }             -> __native_polyglot_as_double     { val = on },
   as_str        = { on }             -> __native_polyglot_as_string     { val = on },
@@ -172,6 +185,8 @@ impl Polyglot for Runtime having 'f = 'g where {
   box_null      = { lang }           -> __native_polyglot_box_null      { lang = lang },
   box_list      = { elems, lang }    -> __native_polyglot_box_list      { elems = elems, lang = lang },
   box_dict      = { keys, vals, lang } -> __native_polyglot_box_dict    { keys = keys, vals = vals, lang = lang },
+  box_int_seq   = { vals, lang }     -> __native_polyglot_box_int_seq   { vals = vals, lang = lang },
+  box_float_seq = { vals, lang }     -> __native_polyglot_box_float_seq { vals = vals, lang = lang },
 
   open_context  = { lang, config } -> __native_polyglot_open_context {
     lang = lang, allow_io = config.allow_io, allow_native = config.allow_native,

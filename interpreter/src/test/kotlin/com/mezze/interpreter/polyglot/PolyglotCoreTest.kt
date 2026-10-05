@@ -651,6 +651,38 @@ class PolyglotCoreTest {
     }
 
     @Test
+    fun `bulk numeric round-trip - jvm_ints boxes a whole seq, to_ints drains it in one crossing`() {
+        // #11: box a whole [Int] into a guest array (ONE crossing, no per-element
+        // from_int) and drain it back to [Int] (ONE crossing, loop host-side).
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            match jvm::jvm_ints { vals = [10, 20, 30] }.to_ints {} is
+              Ok { val = xs } -> match xs is
+                [a, b, c] -> a + b + c
+                _         -> 0
+              Err { error = _ } -> 0 - 1
+            """.trimIndent()
+        )
+        assertEquals(60L, MezzeTestHelper.asLong(result))
+    }
+
+    @Test
+    fun `bulk numeric round-trip - jvm_floats boxes and to_floats drains a whole seq`() {
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            match jvm::jvm_floats { vals = [1.5, 2.5] }.to_floats {} is
+              Ok { val = xs } -> match xs is
+                [a, b] -> a + b
+                _      -> 0.0
+              Err { error = _ } -> 0.0 - 1.0
+            """.trimIndent()
+        )
+        assertEquals(4.0, MezzeTestHelper.asDouble(result))
+    }
+
+    @Test
     fun `open_context on an unavailable language yields an errored foreign`() {
         // Guest-language sandbox ENFORCEMENT (allow_io=false blocking IO) is proven
         // via the CLI + a real provider — no guest language is on the unit-test

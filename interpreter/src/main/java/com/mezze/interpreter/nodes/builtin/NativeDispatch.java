@@ -4421,6 +4421,12 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.size(r));
         HANDLERS.put("__native_polyglot_to_seq",
             (r, c) -> PolyglotNatives.toSeq(r));
+        // Bulk drain + coerce: whole guest array → Mezze [Int]/[Float] in ONE
+        // crossing (loop host-side). Backs a codec's bulk scalar-seq decode.
+        HANDLERS.put("__native_polyglot_to_int_seq",
+            (r, c) -> PolyglotNatives.toIntSeq(r));
+        HANDLERS.put("__native_polyglot_to_float_seq",
+            (r, c) -> PolyglotNatives.toFloatSeq(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",
@@ -4466,6 +4472,12 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.makeList(r, PolyglotNatives.getString(r, "lang")));
         HANDLERS.put("__native_polyglot_box_dict",
             (r, c) -> PolyglotNatives.makeDict(r, PolyglotNatives.getString(r, "lang")));
+        // Bulk numeric WRITE: a whole [Int]/[Float] → guest array in ONE crossing
+        // (counterpart of to_int_seq/to_float_seq). Raw scalars, no per-element box.
+        HANDLERS.put("__native_polyglot_box_int_seq",
+            (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_float_seq",
+            (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
 
         // Binary guest entry + bulk byte-buffer access + narrow-int boxing — the
         // generic ops a wasm-style provider needs (binary module eval, linear

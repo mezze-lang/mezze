@@ -603,6 +603,20 @@ public final class PolyglotNatives {
     }
 
     /**
+     * Bulk numeric WRITE: box a whole Mezze `[Int]`/`[Float]` into a guest array in
+     * ONE crossing. The counterpart of {@link #toIntSeq}/{@link #toFloatSeq} — the
+     * raw scalars (Long/Double) go straight into a guest-visible array, skipping the
+     * N per-element `box_int`/`box_float` crossings a `[Foreign]` would cost. `vals`
+     * is a seq of primitives (not pre-wrapped foreigns), so `getArgArray` passes them
+     * through untouched.
+     */
+    @TruffleBoundary
+    public static MezzeForeign boxScalarSeq(MezzeRecord args, String sourceLanguage) {
+        return new MezzeForeign(
+            new ForeignContainers.ForeignList(getArgArray(args, "vals")), sourceLanguage);
+    }
+
+    /**
      * BUG 2 — build a guest mapping from already-encoded keys and values.
      * Companion to {@link #makeList}, backing a codec's `encode_map` /
      * `encode_record`. Insertion order is preserved so a record's fields reach
@@ -975,6 +989,68 @@ public final class PolyglotNatives {
             return MezzeVariant.err(errorUnsupported());
         } catch (Throwable t) {
             return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /**
+     * Bulk drain + coerce: turn a whole guest array/iterable into a Mezze seq of
+     * scalars in ONE crossing — the element loop AND coercion stay host-side, so
+     * decoding N numbers costs one boundary hit, not N. Backs a codec's bulk `[Int]`
+     * / `[Float]` decode (the per-element `.int{}`/`.float{}` path is O(N) crossings).
+     * numpy scalars unwrap via `.item()` per element, same as the scalar coercions.
+     */
+    @TruffleBoundary
+    public static MezzeVariant toIntSeq(MezzeRecord args) {
+        return toScalarSeq(args, (lib, v) -> lib.asLong(v));
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant toFloatSeq(MezzeRecord args) {
+        return toScalarSeq(args, (lib, v) -> lib.asDouble(v));
+    }
+
+    @TruffleBoundary
+    private static MezzeVariant toScalarSeq(MezzeRecord args, ScalarCoerce coerce) {
+        MezzeForeign f = asForeign(args);
+        if (f.isErrored()) return carriedErr(f);
+        InteropLibrary interop = InteropLibrary.getUncached();
+        Object recv = f.getDelegate();
+        try {
+            if (interop.hasArrayElements(recv)) {
+                long size = interop.getArraySize(recv);
+                if (size > Integer.MAX_VALUE) {
+                    throw new NativeTypeMismatchException(
+                        "Guest array of " + size + " elements is too large to read into a seq");
+                }
+                Object[] out = new Object[(int) size];
+                for (int i = 0; i < out.length; i++) {
+                    out[i] = coerceElem(interop, interop.readArrayElement(recv, i), coerce);
+                }
+                return MezzeVariant.ok(MezzeSeq.fromArray(out));
+            }
+            if (interop.hasIterator(recv)) {
+                Object iterator = interop.getIterator(recv);
+                java.util.ArrayList<Object> out = new java.util.ArrayList<>();
+                while (interop.hasIteratorNextElement(iterator)) {
+                    out.add(coerceElem(interop, interop.getIteratorNextElement(iterator), coerce));
+                }
+                return MezzeVariant.ok(MezzeSeq.fromArray(out.toArray()));
+            }
+            return MezzeVariant.err(errorUnsupported());
+        } catch (Throwable t) {
+            return MezzeVariant.err(translateException(t));
+        }
+    }
+
+    /** Coerce one element with the numpy `.item()` fallback — all host-side, no
+     *  crossing back to Mezze per element. */
+    private static Object coerceElem(InteropLibrary lib, Object e, ScalarCoerce coerce) throws Exception {
+        try {
+            return coerce.apply(lib, e);
+        } catch (Exception first) {
+            Object item = numpyItem(e);
+            if (item != null) return coerce.apply(lib, item);
+            throw first;
         }
     }
 
