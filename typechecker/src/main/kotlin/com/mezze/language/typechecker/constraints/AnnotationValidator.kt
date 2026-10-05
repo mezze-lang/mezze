@@ -177,6 +177,29 @@ internal class AnnotationValidator(
         }
     }
 
+    /**
+     * Does [type] contain a function whose own effect row is a BARE `<...>` — open
+     * with no named effects, i.e. "any effects at all"?
+     *
+     * Used only to improve a diagnostic (see [validateEffectsNotOverpromised]).
+     * Structural, so no diagnostic's wording can change which programs compile —
+     * the mistake this file's sibling checks were burned by twice.
+     *
+     * The case set mirrors `TypePrinter.collectFreeTypeVars` deliberately rather
+     * than inventing another partial walker: same five shapes, same `else -> false`.
+     */
+    private fun hasBareOpenRow(type: MezzeType): Boolean = when (type) {
+        is MezzeType.FunctionType -> {
+            val row = type.effects
+            (row != null && row.isOpen && row.allEffectNames.isEmpty()) ||
+                hasBareOpenRow(type.paramType) || hasBareOpenRow(type.returnType)
+        }
+        is MezzeType.RecordType -> type.fields.values.any { hasBareOpenRow(it) }
+        is MezzeType.VariantType -> type.constructors.values.filterNotNull().any { hasBareOpenRow(it) }
+        is MezzeType.TypeApplication -> type.args.any { hasBareOpenRow(it) }
+        else -> false
+    }
+
     fun validateEffectsNotOverpromised(
         annotationType: MezzeType,
         inferredType: MezzeType,
@@ -190,12 +213,35 @@ internal class AnnotationValidator(
             val isPolymorphic = annotationType.effects?.isOpen == true
             val overpromisedEffects = annotatedEffects - inferredEffects
             if (overpromisedEffects.isNotEmpty() && !isPolymorphic) {
+                // A parameter whose own row is a BARE `<...>` is the common cause, and
+                // "not used in the implementation" is the wrong story for it. Such a
+                // parameter may perform ANY effects, so a body that only calls it
+                // cannot be known to perform THIS one — the declaration would be a
+                // lie, and the rejection is right. What the author needs is which
+                // spelling to use instead, and the message said nothing about that.
+                //
+                // Both honest forms are measured working, and both work through a type
+                // alias: name the effect on the parameter (`{} -> 'a <E, ...>`), which
+                // guarantees it is performed; or let the row flow out to the result
+                // (`-> 'r <...>`), which promises only what the callee promises.
+                val bareOpenRowParam = hasBareOpenRow(annotationType.paramType)
                 throw TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
-                    "which are not used in the implementation.",
+                    "which are not used in the implementation." +
+                    if (bareOpenRowParam) {
+                        " A parameter declared `<...>` may perform ANY effects, so calling it does not " +
+                        "establish ${overpromisedEffects.joinToString(", ")} — nothing here performs that."
+                    } else "",
                     sourceLoc,
                     code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                    hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
+                    hints = if (bareOpenRowParam) {
+                        listOf(
+                            "name the effect on the parameter's own row — `<${overpromisedEffects.joinToString(", ")}, ...>` — " +
+                                "which says the callee DOES perform it",
+                            "or let the row flow through instead of naming it here: declare the result `<...>`, " +
+                                "promising only what the callee promises",
+                        )
+                    } else listOf(DiagnosticHints.ANNOTATION_VS_BODY),
                 )
             }
 

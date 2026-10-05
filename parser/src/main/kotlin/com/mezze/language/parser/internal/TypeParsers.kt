@@ -607,13 +607,35 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<ParsedTypeAnnotation
                         val stream2 = skipNewlines(entries.remaining)
 
                         if (entries.value.isEmpty() && stream2.current()?.type == TokenType.IDENTIFIER) {
-                            val fieldName = stream2.current()?.text ?: "field"
-                            val message = "Record type field '$fieldName' is missing a type annotation.\n" +
-                                    "Expected format: { $fieldName: Type }"
-                            stream2.failure(
-                                message,
-                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
-                            )
+                            // `sepEndBy` tolerates matching nothing, so a field whose TYPE failed
+                            // to parse arrives here indistinguishable from a field with no type at
+                            // all — the stream is still sitting on the field name either way, and
+                            // the entry parser's honest failure has been discarded.
+                            //
+                            // A following `:` settles it: the field does have an annotation, so
+                            // "missing a type annotation" is simply false. Re-run the entry parser
+                            // to recover the real reason, which it already reports correctly (see
+                            // its `is ParseResult.Failure -> typeAnnotation` arm).
+                            //
+                            // `{ h: { run: Thunk <Tick> } }` used to blame the OUTER field `h` for
+                            // lacking an annotation it plainly has; the cause is `<Tick>` in a
+                            // field with no arrow to own the row, which the same construct reports
+                            // honestly when the record is written as a named alias.
+                            val hasColon = stream2.advance().current()?.type == TokenType.COLON
+                            val innerFailure = if (hasColon) {
+                                recordTypeEntryParser(stream2) as? ParseResult.Failure
+                            } else {
+                                null
+                            }
+                            innerFailure ?: run {
+                                val fieldName = stream2.current()?.text ?: "field"
+                                val message = "Record type field '$fieldName' is missing a type annotation.\n" +
+                                        "Expected format: { $fieldName: Type }"
+                                stream2.failure(
+                                    message,
+                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
+                                )
+                            }
                         } else {
                             val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
                                 skipNewlines(stream2.advance())

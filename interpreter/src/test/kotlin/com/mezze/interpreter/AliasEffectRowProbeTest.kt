@@ -1,6 +1,7 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -15,8 +16,12 @@ import org.junit.jupiter.api.Test
  * one and the positives are its context.
  *
  * This is what lets `std::effects::sample` declare `type Gen 'a = {} -> 'a <Sample>`
- * and rely on it. The one shape that does NOT work is an OPEN row inside an alias
- * (`{} -> 'a <...>`), which is task L-2 and deliberately not asserted here.
+ * and rely on it.
+ *
+ * An OPEN row inside an alias was filed as a bug (L-2) and is NOT one — the last
+ * three tests here are the measurement that closed it. A bare `<...>` parameter may
+ * perform ANY effects, so an enclosing function cannot declare a specific one; both
+ * honest spellings work, and both work THROUGH an alias.
  */
 class AliasEffectRowProbeTest {
 
@@ -118,5 +123,168 @@ class AliasEffectRowProbeTest {
             let run_it: { g: Gen Int } -> Int = { g } -> g {}
             run_it { g = {} -> 7 }
         """.trimIndent())))
+    }
+
+    // ── L-2, closed: a bare `<...>` parameter is correctly refused ────────────
+
+    /**
+     * A bare `<...>` parameter cannot justify a declared effect, and refusing it is
+     * SOUND rather than the bug L-2 filed.
+     *
+     * `g : {} -> Int <...>` may perform anything, so a body that only calls `g`
+     * cannot be known to perform `Tick` — declaring `<Tick>` would be a lie, and
+     * accepting it would let a `g` that performs `Tock` hide behind a `<Tick>`
+     * signature. The diagnostic now says so and names both honest spellings.
+     */
+    @Test
+    fun `a bare open-row parameter cannot justify a declared effect`() {
+        val t = assertThrows(Throwable::class.java) {
+            eval("""
+                type UnitFn 'a = {} -> 'a <...>
+                let run_it: { g: UnitFn Int } -> Int <Tick> = { g } -> g {}
+                perform Ticker in run_it { g = {} -> Tick.tick {} }
+            """.trimIndent())
+        }
+        val message = t.message ?: ""
+        assertTrue(
+            message.contains("may perform ANY effects"),
+            "expected the open-row explanation, got: $message",
+        )
+    }
+
+    /**
+     * THE measurement that closed L-2: the identical shape with NO alias is refused
+     * identically, so the alias carries the open row faithfully and is uninvolved.
+     *
+     * L-2 was filed as "an OPEN row inside a type alias does not propagate". It
+     * propagates; what fails is the signature, aliased or not.
+     */
+    @Test
+    fun `the same refusal happens INLINE, so the alias is not the cause`() {
+        val t = assertThrows(Throwable::class.java) {
+            eval("""
+                let run_it: { g: {} -> Int <...> } -> Int <Tick> = { g } -> g {}
+                perform Ticker in run_it { g = {} -> Tick.tick {} }
+            """.trimIndent())
+        }
+        assertTrue(
+            (t.message ?: "").contains("may perform ANY effects"),
+            "inline form should fail the same way as the aliased one: ${t.message}",
+        )
+    }
+
+    /**
+     * Honest spelling ONE, through an alias: name the effect on the parameter's own
+     * row. `<Tick, ...>` says the callee DOES perform Tick, so `<Tick>` on the
+     * enclosing function is true — and extra effects are still allowed by the tail.
+     */
+    @Test
+    fun `an alias with a named effect AND an open tail justifies the declaration`() {
+        assertEquals(7L, MezzeTestHelper.asLong(eval("""
+            type TickFn 'a = {} -> 'a <Tick, ...>
+            let run_it: { g: TickFn Int } -> Int <Tick> = { g } -> g {}
+            perform Ticker in run_it { g = {} -> Tick.tick {} }
+        """.trimIndent())))
+    }
+
+    /**
+     * Honest spelling TWO, through an alias: let the row FLOW THROUGH. The function
+     * promises only what its callee promises, which is what a bare `<...>` parameter
+     * supports — and it is the shape a higher-order combinator wants.
+     */
+    @Test
+    fun `a bare open row flows through when the result is open too`() {
+        assertEquals(7L, MezzeTestHelper.asLong(eval("""
+            type UnitFn 'a = {} -> 'a <...>
+            let run_it: { g: UnitFn Int } -> Int <...> = { g } -> g {}
+            perform Ticker in run_it { g = {} -> Tick.tick {} }
+        """.trimIndent())))
+    }
+
+    // ── what `<E>` actually attaches to ───────────────────────────────────────
+
+    /**
+     * `<E>` is ARROW syntax, not a modifier on the type beside it.
+     *
+     * `-> MyInt <Tick>` does not describe a `MyInt` that carries `Tick`; it describes
+     * an arrow that performs `Tick` and returns a `MyInt`. The alias here is `Int` —
+     * nothing about an `Int` can hold a row — so the row demonstrably went to the
+     * `->`. The same reading explains why `-> Map Int Int <Http>` parses: the row is
+     * the arrow's, and `Map Int Int` is merely what it returns.
+     *
+     * This pins the rule because the obvious "fix" for the record-field refusal below
+     * is to make `<E>` a postfix type modifier — which would be a DIFFERENT language,
+     * and would change what this test asserts.
+     */
+    @Test
+    fun `a row after a non-function alias belongs to the arrow`() {
+        assertEquals(7L, MezzeTestHelper.asLong(eval("""
+            type MyInt = Int
+            let f: {} -> MyInt <Tick> = {} -> Tick.tick {}
+            perform Ticker in f {}
+        """.trimIndent())))
+    }
+
+    /** And it is the arrow's REAL row: drop it and the same body is refused. */
+    @Test
+    fun `without that row the same body is refused`() {
+        val t = assertThrows(Throwable::class.java) {
+            eval("""
+                type MyInt = Int
+                let f: {} -> MyInt = {} -> Tick.tick {}
+                perform Ticker in f {}
+            """.trimIndent())
+        }
+        assertTrue(
+            (t.message ?: "").contains("performs effect"),
+            "the row after the alias name was decorative; got: ${t.message}",
+        )
+    }
+
+    /**
+     * A use-site row does NOT override the alias's own row — it belongs to the
+     * enclosing arrow, and both rows stay live.
+     *
+     * `TickThunk <Tock>` reads like "TickThunk, but performing Tock". It is not:
+     * it expands to `({} -> Int <Tick>) <Tock>`. The outer arrow performs `Tock`;
+     * the thunk it returns still performs `Tick`, exactly as the alias says. The two
+     * spellings even print identically, which is how this was established.
+     *
+     * So there is no syntax for "this alias with a different row" — the row inside an
+     * alias is fixed at the point of definition. That gap is what L-1 (row
+     * parameters) exists to close; it is deliberately NOT closed by reinterpreting
+     * `A <E>` as an override, which would silently change every signature above.
+     */
+    @Test
+    fun `a use-site row does not override the alias's own row`() {
+        assertEquals(16L, MezzeTestHelper.asLong(eval("""
+            type TickThunk = {} -> Int <Tick>
+            let f: { n: Int } -> TickThunk <Tock> = { n } -> do
+              let t = Tock.tock {}
+              {} -> Tick.tick {} + t
+            perform Tocker in perform Ticker in (f { n = 1 }) {}
+        """.trimIndent())))
+    }
+
+    /**
+     * The enforcement half: the returned thunk performs `Tock`, so it does not match
+     * the alias's `<Tick>` — even though the use site wrote `<Tock>` right next to the
+     * alias name. If `<Tock>` overrode the alias, this would be accepted.
+     */
+    @Test
+    fun `the alias's row still binds the returned thunk`() {
+        val t = assertThrows(Throwable::class.java) {
+            eval("""
+                type TickThunk = {} -> Int <Tick>
+                let f: { n: Int } -> TickThunk <Tock> = { n } -> do
+                  let t = Tock.tock {}
+                  {} -> Tock.tock {} + t
+                perform Tocker in (f { n = 1 }) {}
+            """.trimIndent())
+        }
+        assertTrue(
+            (t.message ?: "").contains("Type annotation mismatch for 'f'"),
+            "the use-site row overrode the alias's own row; got: ${t.message}",
+        )
     }
 }

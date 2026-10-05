@@ -69,4 +69,62 @@ class TypeVarJuxtapositionErrorTest {
         val module = parser.parseParsedModule(source)
         assertNotNull(module)
     }
+
+    /**
+     * The same misleading framing, reached a second way: a NESTED record type whose
+     * field type fails to parse was reported as the OUTER field missing an annotation
+     * it plainly has.
+     *
+     * `{ h: { run: Thunk <Tick> } }` is genuinely invalid — `<Tick>` is arrow syntax,
+     * and `run` has no arrow for the row to attach to. But the message named `h` and
+     * said `h` had no type annotation, pointing at the one part of the line that was
+     * fine. The cause: the field-list parser tolerates matching nothing, so a failure
+     * deep in a field's type arrives looking identical to "no fields parsed", with the
+     * stream still sitting on the first field name — and the entry parser's honest
+     * message had already been discarded.
+     *
+     * Writing the inner record as a named alias always reported it correctly, so the
+     * same construct produced two different diagnostics depending on spelling.
+     */
+    @Test
+    fun `a nested record field whose TYPE fails reports the real reason`() {
+        val source = """
+            type Thunk = {} -> Int
+            let use_it: { h: { run: Thunk <Tick> } } -> Int = { h } -> (h.run) {}
+        """.trimIndent()
+
+        try {
+            parser.parseParsedModule(source)
+            fail("Expected a parse error: `<Tick>` has no arrow to attach to")
+        } catch (e: Exception) {
+            val msg = e.message ?: ""
+            assertTrue(
+                msg.contains("<"),
+                "the message should name the token that actually failed, got: $msg",
+            )
+            assertTrue(
+                !msg.contains("'h' is missing a type annotation"),
+                "blamed the outer field for an annotation it has: $msg",
+            )
+        }
+    }
+
+    /** A field that really has no annotation must still say so. */
+    @Test
+    fun `a field with no annotation at all still reports the missing type`() {
+        val source = """
+            let use_it: { h: { run } } -> Int = { h } -> 1
+        """.trimIndent()
+
+        try {
+            parser.parseParsedModule(source)
+            fail("Expected a parse error: `run` has no type annotation")
+        } catch (e: Exception) {
+            val msg = e.message ?: ""
+            assertTrue(
+                msg.contains("missing a type annotation"),
+                "a genuinely annotation-less field should still report that, got: $msg",
+            )
+        }
+    }
 }
