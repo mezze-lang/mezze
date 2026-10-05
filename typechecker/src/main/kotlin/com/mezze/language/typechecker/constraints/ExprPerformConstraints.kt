@@ -101,6 +101,27 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
 
     val isNestedPerform = expr.body is ParsedPerform
     val extractedEffects = extractEffectsFromType(exprResult.type)
+    // The row carried by the body's own TYPE counts, alongside what the body
+    // actually performs.
+    //
+    // Narrowing this to `exprResult.effects` fails 19 tests that pin
+    // `perform H in <an uncalled function>` as discharging `<E>` from the
+    // function's type (ComprehensiveEffectHandlingTest "perform on uncalled
+    // function … removes effect from function type"). Do not narrow it without
+    // settling what that form MEANS first — measured, the three answers disagree:
+    //
+    //   - the runtime does NOT bind the handler into the value: `let h = perform
+    //     Console in my_func` then `h {}` prints nothing;
+    //   - `mez check` REFUSES that same code in a function body, via the V0510
+    //     branch below, and its verdict ("the handler can never fire") matches
+    //     the runtime;
+    //   - those 19 tests assert it is legal and yields `{} -> Str <*>`.
+    //
+    // The two gates differ only because the reference's `<Log>` is present at
+    // module top level and absent inside a do-block, so `extractEffectsFromType`
+    // returns nothing there and V0510 fires. Two defects that currently cancel:
+    // recovering the lost row alone would turn a correct refusal into a silently
+    // empty program. See the backlog item before touching either.
     val allEffects = exprResult.effects + extractedEffects.effects
     val hasPolymorphicEffects = extractedEffects.isPolymorphic
     val hasPerformedMarker = exprResult.performed || hasPerformedMarkerInType(exprResult.type)
