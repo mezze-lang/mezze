@@ -2430,6 +2430,25 @@ class TypedASTCompiler(
                         // missed this receiver's type var: resolve against the spec's
                         // own typeArgs (see specTypeArgs).
                         dictFields.add(FieldIR(dictParamName, specResolved))
+                    } else if (plainSlotForQualifiedRequest(dictMethod, keyVar)
+                            ?.let { plain ->
+                                val idx = currentParamNames.indexOf(plain)
+                                if (idx >= 0) {
+                                    dictFields.add(FieldIR(dictParamName,
+                                        ReadLocalIR(currentCaptureCount + idx, SlotKind.OBJECT, src)))
+                                    true
+                                } else currentCaptureNames[plain]?.let { cap ->
+                                    dictFields.add(FieldIR(dictParamName,
+                                        ReadCaptureIR(cap, SlotKind.OBJECT, src)))
+                                    true
+                                } ?: false
+                            } == true) {
+                        // 5. LAST RESORT (S-17): the callee's key is ability-qualified
+                        // while the caller, which allocated its slot by propagation,
+                        // holds the plain name — one dictionary under two names. Only
+                        // reached once resolution from concrete types has failed, and
+                        // only when the plain slot is unambiguous; see
+                        // [plainSlotForQualifiedRequest] for both guards.
                     } else {
                         // Don't inject a sentinel — leave the field absent so the
                         // callee's trampoline resolves DictFallback for primitive ops

@@ -277,9 +277,22 @@ let arbitrary_str: {} -> Str <Sample> = {} -> frequency {
 # which is what made a local bug look global.
 # ---------------------------------------------------------------------------
 
+## The DRAW for a sequence, named for the same reason the primitive draws above
+## are: the behaviour gets a name of its own and the impl is a thin forward to it.
+##
+## It is also the one shape in the stdlib that exercises S-17 — a CONSTRAINED op
+## forwarding to a CONSTRAINED function, where the callee's dictionary has to be
+## threaded across the hop. That is worth keeping deliberately, because the bug is
+## not reachable from a user module: it needs the stdlib's per-module lowering,
+## where each module gets a fresh compiler and `putIfAbsent` keeps whichever
+## finished first. A user-level repro with its own ability and explicit impls was
+## written and PASSES either way, so inlining this body again would retire the only
+## coverage the fix has. See the task for the measurement.
+let arbitrary_seq: {} with Arbitrary 'a -> ['a] <Sample> = {} ->
+  list_of { g = {} -> Arbitrary.arbitrary {} }
+
 impl Arbitrary for ['a] where {
-  arbitrary: {} with Arbitrary 'a -> ['a] <Sample> = {} ->
-    list_of { g = {} -> Arbitrary.arbitrary {} }
+  arbitrary: {} with Arbitrary 'a -> ['a] <Sample> = {} -> arbitrary_seq {}
 }
 
 impl Arbitrary for List 'a where {

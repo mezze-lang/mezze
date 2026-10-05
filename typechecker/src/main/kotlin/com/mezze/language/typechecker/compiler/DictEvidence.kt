@@ -417,6 +417,13 @@ internal fun TypedASTCompiler.enclosingDictSlotIn(
             mp.dictParamName(mp.dictKey(method, typeVar, abilityHash)).let { if (has(it)) return it }
         }
         mp.dictParamName("$method${mp.ABILITY_SEP}$ability").let { if (has(it)) return it }
+        // No plain-slot fallback HERE, deliberately. A caller forwarding to a
+        // constrained callee does hold the plain slot (see
+        // [plainSlotForQualifiedRequest]), but bridging to it at this level makes
+        // the forward-from-caller path in `injectDictFields` fire BEFORE concrete
+        // resolution, which hijacks cases that resolve correctly on their own —
+        // measured: it broke `impl Arbitrary for Result 'a 'e`. The bridge belongs
+        // at the last resort, after resolution has been tried.
         return null
     }
     if (typeVar != null) mp.dictParamName(mp.dictKey(method, typeVar)).let { if (has(it)) return it }
@@ -453,6 +460,38 @@ internal fun TypedASTCompiler.abilityOpDictSlot(binding: BindingRef.AbilityOp): 
         errorType = com.mezze.language.typechecker.ErrorType.CONSTRAINT_VIOLATION,
         code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0408_NO_IMPLEMENTATION,
     )
+}
+
+/**
+ * The caller's PLAIN slot for [method], when a qualified request may safely read it.
+ *
+ * `scanExprForDictFunctionCalls` drops the ability qualifier when it propagates a
+ * callee's requirement up to a caller, on purpose: a per-var split belongs to each
+ * body and is never inherited. So a caller forwarding to a constrained callee
+ * allocates `__dict_arbitrary` while the callee, whose key came from its own body
+ * scan, expects `__dict_arbitrary#<ability>` — one dictionary under two names, and
+ * the forward matches nothing (S-17).
+ *
+ * This is a LAST RESORT, consulted only after resolution from concrete types has
+ * failed. Folding it into [enclosingDictSlotIn] instead was measured to break
+ * `impl Arbitrary for Result 'a 'e`: that made the forward-from-caller path run
+ * before concrete resolution and take over a case that was already correct.
+ *
+ * Two guards, both load-bearing:
+ *  - NO per-var request. A callee wanting `arbitrary@a` and `arbitrary@e` must not
+ *    be handed one plain slot for both — BUG 9's shape across variables.
+ *  - NO other ability-qualified slot of this method in the frame. The plain slot is
+ *    then the frame's only dictionary of that name, so there is no second ability it
+ *    could belong to, which is what BUG 9 was about.
+ */
+internal fun TypedASTCompiler.plainSlotForQualifiedRequest(method: String, typeVar: String?): String? {
+    if (typeVar != null) return null
+    val mp = com.mezze.language.ast.MagicParams
+    val qualifiedPrefix = mp.dictParamName(method) + mp.ABILITY_SEP
+    val names = currentParamNames + currentCaptureNames.keys
+    if (names.any { it.startsWith(qualifiedPrefix) }) return null
+    val plain = mp.dictParamName(method)
+    return if (names.contains(plain)) plain else null
 }
 
 internal fun TypedASTCompiler.enclosingDictSlot(method: String, typeVar: String?, abilityHash: String? = null): String? =

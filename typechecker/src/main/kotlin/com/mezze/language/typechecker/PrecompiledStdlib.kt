@@ -225,7 +225,14 @@ object PrecompiledStdlib {
 
                 val preFunctions = mutableMapOf<Hash, FunctionIR>()
                 val prePerformers = mutableListOf<Array<String>>()
-                val preDictMethods = mutableMapOf<Hash, Set<String>>()
+                // Prescan ALL modules BEFORE lowering any, and seed every
+                // per-module compiler with the result. Lowering is per-module with a
+                // fresh compiler, but `abilityImpls` is every module's impls — so each
+                // module's lowering compiles every impl op, and `putIfAbsent` below
+                // keeps whichever got there first. With only its own module
+                // prescanned, that compiler does not know a callee elsewhere needs a
+                // dictionary and emits the call bare. See S-17.
+                val preDictMethods = prescanDictMethodsFromModules(allModulesForPrelower).toMutableMap()
                 val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
                 val allAbilityOpNames = abilityOpNamesOf(allModulesForPrelower.values)
                 for ((modHash, typedMod) in allModulesForPrelower) {
@@ -233,6 +240,7 @@ object PrecompiledStdlib {
                         val compiler = TypedASTCompiler(
                             abilityImpls = allAbilityImpls,
                             abilityOpNames = allAbilityOpNames,
+                            preloweredDictMethods = preDictMethods,
                         )
                         val result = compiler.compile(typedMod, isStdlibCompilation = true)
                         for (pr in result.performerRecords) {
