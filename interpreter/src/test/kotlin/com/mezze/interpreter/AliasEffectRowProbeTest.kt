@@ -201,23 +201,29 @@ class AliasEffectRowProbeTest {
         """.trimIndent())))
     }
 
-    // ── what `<E>` actually attaches to ───────────────────────────────────────
+    // ── a row has no standalone form ──────────────────────────────────────────
 
     /**
-     * `<E>` is ARROW syntax, not a modifier on the type beside it.
+     * There is no such type as "`T` with a row". A row exists ONLY as the trailing
+     * part of a function type — `params -> return <row>` — and the type written
+     * before it is simply the return type.
      *
-     * `-> MyInt <Tick>` does not describe a `MyInt` that carries `Tick`; it describes
-     * an arrow that performs `Tick` and returns a `MyInt`. The alias here is `Int` —
-     * nothing about an `Int` can hold a row — so the row demonstrably went to the
-     * `->`. The same reading explains why `-> Map Int Int <Http>` parses: the row is
-     * the arrow's, and `Map Int Int` is merely what it returns.
+     * So `MyInt <Tick>`, `Map Int Int <Http>` and `AliasName <Effect>` are not
+     * forms at all. What parses in `{} -> MyInt <Tick>` is the function form, whose
+     * return type happens to be `MyInt`; the row is the ARROW's. Every position
+     * without an arrow to own it is a PARSE error, and
+     * `AliasEffectRowSyntaxTest` is the list of them.
      *
-     * This pins the rule because the obvious "fix" for the record-field refusal below
-     * is to make `<E>` a postfix type modifier — which would be a DIFFERENT language,
-     * and would change what this test asserts.
+     * This test and its negative are the pair that shows the row is the arrow's and
+     * is real: the alias is `Int`, which cannot carry a row under any reading, and
+     * removing `<Tick>` refuses the identical body.
+     *
+     * Pinned because the obvious "fix" for those parse errors is to make `<E>` a
+     * postfix type modifier — a different language, in which `Map Int Int <Http>`
+     * would mean something, and in which the record-field case below would compile.
      */
     @Test
-    fun `a row after a non-function alias belongs to the arrow`() {
+    fun `the row is the arrow's even when the return type is an alias`() {
         assertEquals(7L, MezzeTestHelper.asLong(eval("""
             type MyInt = Int
             let f: {} -> MyInt <Tick> = {} -> Tick.tick {}
@@ -225,7 +231,7 @@ class AliasEffectRowProbeTest {
         """.trimIndent())))
     }
 
-    /** And it is the arrow's REAL row: drop it and the same body is refused. */
+    /** The negative half: drop the arrow's row and the same body is refused. */
     @Test
     fun `without that row the same body is refused`() {
         val t = assertThrows(Throwable::class.java) {
@@ -237,26 +243,25 @@ class AliasEffectRowProbeTest {
         }
         assertTrue(
             (t.message ?: "").contains("performs effect"),
-            "the row after the alias name was decorative; got: ${t.message}",
+            "the arrow's row was decorative; got: ${t.message}",
         )
     }
 
     /**
-     * A use-site row does NOT override the alias's own row — it belongs to the
-     * enclosing arrow, and both rows stay live.
+     * Two arrows, two rows, both enforced — and neither is "applied to" the alias.
      *
-     * `TickThunk <Tock>` reads like "TickThunk, but performing Tock". It is not:
-     * it expands to `({} -> Int <Tick>) <Tock>`. The outer arrow performs `Tock`;
-     * the thunk it returns still performs `Tick`, exactly as the alias says. The two
-     * spellings even print identically, which is how this was established.
+     * `{ n: Int } -> TickThunk <Tock>` is the ordinary function form: `<Tock>` is
+     * this arrow's row, and `TickThunk` is its return type, which is itself a
+     * function type carrying `<Tick>`. Nothing overrides anything. Written out in
+     * full it is `{ n: Int } -> ({} -> Int <Tick>) <Tock>`, and the aliased and
+     * inline spellings print identically — which is how this was established.
      *
-     * So there is no syntax for "this alias with a different row" — the row inside an
-     * alias is fixed at the point of definition. That gap is what L-1 (row
-     * parameters) exists to close; it is deliberately NOT closed by reinterpreting
-     * `A <E>` as an override, which would silently change every signature above.
+     * Since a row has no standalone form, there is no way to write "this alias but
+     * with a different row", and no way to name a row. That is the gap L-1 (row
+     * parameters) exists to close.
      */
     @Test
-    fun `a use-site row does not override the alias's own row`() {
+    fun `an alias return type keeps its own row while the arrow keeps its`() {
         assertEquals(16L, MezzeTestHelper.asLong(eval("""
             type TickThunk = {} -> Int <Tick>
             let f: { n: Int } -> TickThunk <Tock> = { n } -> do
@@ -268,8 +273,9 @@ class AliasEffectRowProbeTest {
 
     /**
      * The enforcement half: the returned thunk performs `Tock`, so it does not match
-     * the alias's `<Tick>` — even though the use site wrote `<Tock>` right next to the
-     * alias name. If `<Tock>` overrode the alias, this would be accepted.
+     * the alias's `<Tick>` — even though `<Tock>` is written immediately after the
+     * alias name. If that `<Tock>` were somehow modifying `TickThunk`, this would be
+     * accepted; it belongs to the outer arrow instead.
      */
     @Test
     fun `the alias's row still binds the returned thunk`() {
