@@ -114,11 +114,34 @@ public final class UrlNatives {
             // would then reject the result. Use the ASCII form so
             // parse ∘ render is stable across the wire.
             return uri.toASCIIString();
-        } catch (URISyntaxException e) {
-            // Round-trip should not fail on a well-formed input; if it does,
-            // surface the message so it's not silently swallowed.
-            throw new IllegalArgumentException(
-                "URL render error: " + e.getMessage(), e);
+        } catch (URISyntaxException | RuntimeException e) {
+            // A GUEST error, not a host one. `Url` is a record of free-form
+            // `Option Str` fields, so a program can build one whose components do
+            // not form a URI — `scheme = Some { val = "ht tp" }` renders as
+            //
+            //     java.lang.IllegalArgumentException: URL render error:
+            //     Illegal character in scheme name at index 2: ht tp://example.com/
+            //
+            // which is a JVM class name reaching the user from ordinary code. The
+            // asymmetry was with `urlParse` directly above, which already catches
+            // BOTH of these and returns an `Err` rather than "propagating to the
+            // interpreter" in its own words. Same shape as S-9's `frac::make` next
+            // to `frac::divide`.
+            //
+            // RuntimeException is caught for the reason urlParse gives: `URI` raises
+            // IllegalArgumentException for extreme inputs, so catching only the
+            // checked exception would leave the same leak one input away.
+            //
+            // Raising rather than returning a `Result` keeps `render`'s total type,
+            // and is the right call here: `urlParse` only ever yields a VALID `Url`,
+            // so `render ∘ parse` cannot fail and the only way to reach this is a
+            // hand-built `Url` — a program error, like dividing by zero, not
+            // untrusted input.
+            String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                "This Url's components do not form a valid URI: " + reason
+                    + " (the fields are not escaped for you — `url_encode_component`"
+                    + " is there for the parts that need it)", e);
         }
     }
 

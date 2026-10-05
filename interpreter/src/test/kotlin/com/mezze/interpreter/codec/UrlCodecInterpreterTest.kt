@@ -358,4 +358,57 @@ class UrlCodecInterpreterTest {
         """.trimIndent()) as String
         assertEquals("https://alice:pw@host.example:8443/p?q=1#top", rendered)
     }
+
+    /**
+     * An unrenderable `Url` is a GUEST error, not a JVM exception.
+     *
+     * `Url` is a record of free-form `Option Str` fields, so a program can build one
+     * whose components do not form a URI. `render` wrapped the resulting
+     * `URISyntaxException` in an `IllegalArgumentException`, which Truffle treats as
+     * a HOST failure — so ordinary code saw
+     *
+     *     java.lang.IllegalArgumentException: URL render error:
+     *     Illegal character in scheme name at index 2: ht tp://example.com/
+     *
+     * The asymmetry was with `parse` in the same native file, which already caught
+     * both URISyntaxException and RuntimeException and returned an `Err` rather than,
+     * in its own comment's words, "propagating to the interpreter". Same shape as
+     * S-9's `frac::make` beside `frac::divide`.
+     *
+     * `render` keeps its total `-> Str` type rather than becoming a `Result`: `parse`
+     * only ever yields a VALID `Url`, so `render ∘ parse` cannot fail, and the only
+     * way here is a hand-built `Url` — a program error, not untrusted input.
+     */
+    @Test
+    fun `rendering an invalid Url is a guest error, not a host exception`() {
+        val t = assertThrows(Throwable::class.java) {
+            eval("""
+                use std::codec::url::{ Url, render }
+
+                let bad: Url = {
+                  scheme = Some { val = "ht tp" },
+                  user_info = None,
+                  host = Some { val = "example.com" },
+                  port = None,
+                  path = "/",
+                  query = None,
+                  fragment = None,
+                }
+
+                render { url = bad }
+            """.trimIndent())
+        }
+        val message = t.message ?: ""
+        assertTrue(
+            message.contains("do not form a valid URI"),
+            "expected the Url render diagnostic, got ${t::class.java.name}: $message",
+        )
+        val polyglot = t as? org.graalvm.polyglot.PolyglotException
+        if (polyglot != null) {
+            assertTrue(polyglot.isGuestException,
+                "an unrenderable Url must be a guest error, not a host one: $message")
+            assertTrue(!polyglot.isInternalError,
+                "an unrenderable Url must not surface as an internal error: $message")
+        }
+    }
 }
