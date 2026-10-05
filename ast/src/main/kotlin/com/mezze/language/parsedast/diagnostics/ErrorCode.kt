@@ -83,6 +83,7 @@ enum class ErrorCode {
     T0214_TYPECHECK_LIMIT_EXCEEDED,
     T0215_AMBIGUOUS_ABILITY_TYPE, // an ability method whose type is decided by neither the parameters nor the result — no call site can pin it, so it could never dispatch // the typechecker hit an internal recursion/work limit on this program (pathological or malformed) — a clean bail-out instead of ever crashing/hanging
     T0216_AMBIGUOUS_DISPATCH, // two same-priority impls apply to this call and the receiver's type does not choose between them
+    T0217_FOREIGN_HANDLE_NOT_STRUCTURAL, // a polyglot foreign handle bound to a structural type (`Result`, a record, a variant, a function, a primitive) — the #22 laundering gate. A KIND violation, so it is settled the moment it is raised: no later pinning of the surrounding type vars can make it legal, which is why the impl-body suppression must not treat it as provisional (S-18)
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────
     T0301_UNBOUND_TYPE_VAR,

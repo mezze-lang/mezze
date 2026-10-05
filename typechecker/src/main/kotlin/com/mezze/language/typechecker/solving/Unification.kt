@@ -452,7 +452,10 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
                 "where a ${prettyPrintType(type)} is required.",
             type1 = MezzeType.VarType(typeVar),
             type2 = type,
-            code = ErrorCode.T0201_TYPE_MISMATCH,
+            // Its OWN code, not T0201: a kind violation is settled the moment it is
+            // raised, and the impl-body suppression treats a plain T0201 mentioning
+            // an unresolved var as provisional. See S-18.
+            code = ErrorCode.T0217_FOREIGN_HANDLE_NOT_STRUCTURAL,
         )
     }
     // Keep the foreign kind when a foreign handle meets a plain variable: bind the

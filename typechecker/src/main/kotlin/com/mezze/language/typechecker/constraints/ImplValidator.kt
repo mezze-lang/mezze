@@ -1035,10 +1035,29 @@ internal class ImplValidator(
                                 is Constraint.Subsumes -> listOf(constraint.general, constraint.specific)
                                 else -> emptyList()
                             }
-                            val settled = firstError.code == ErrorCode.T0201_TYPE_MISMATCH &&
-                                mismatched.isNotEmpty() &&
-                                mismatched.none { it.holdsTypeVar() } &&
-                                mismatched.none { (it as? MezzeType.FunctionType)?.effects != null }
+                            // A KIND violation is settled the moment it is raised, so
+                            // it skips the "are the types pinned yet" test entirely. The
+                            // #22 foreign-handle gate rejects binding a polyglot handle
+                            // to a structural type, and no later pinning of the
+                            // surrounding vars can make that legal — where an ordinary
+                            // T0201 between two not-yet-pinned types genuinely may
+                            // resolve at the use site.
+                            //
+                            // S-18: without this, S-1b's declared-return-type equality
+                            // put exactly that rejection into this solve, the body type
+                            // was still a bare var (`'u651` vs
+                            // `Result XForeign InteropError`), `holdsTypeVar()` called it
+                            // provisional, and the gate's error was dropped — so a
+                            // provider op declared `-> Result XForeign` laundered
+                            // `eval_raw`'s bare foreign and crashed a caller's
+                            // `match … is Ok/Err` with "no variant tag matched".
+                            val isKindViolation =
+                                firstError.code == ErrorCode.T0217_FOREIGN_HANDLE_NOT_STRUCTURAL
+                            val settled = isKindViolation || (
+                                firstError.code == ErrorCode.T0201_TYPE_MISMATCH &&
+                                    mismatched.isNotEmpty() &&
+                                    mismatched.none { it.holdsTypeVar() } &&
+                                    mismatched.none { (it as? MezzeType.FunctionType)?.effects != null })
 
                             if (settled) {
                                 throw TypeCheckError(

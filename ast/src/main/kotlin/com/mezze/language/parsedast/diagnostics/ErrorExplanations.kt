@@ -497,6 +497,18 @@ fun ErrorCode.explain(): String = when (this) {
         "receiver's type does not say which one to use. Make the receiver's type " +
         "specific enough to choose, or remove the overlapping implementation."
 
+    ErrorCode.T0217_FOREIGN_HANDLE_NOT_STRUCTURAL ->
+        "A polyglot foreign handle is an opaque reference into the guest language, " +
+        "not a Mezze structure, so it cannot be used where a `Result`, a record, a " +
+        "variant, a function or a primitive is required. A producer — `eval_raw`, or " +
+        "a member operation like `read_member` — yields the bare error-carrying " +
+        "handle, so declaring the operation `-> Result <Lang>Foreign InteropError` " +
+        "and returning it directly would make the declaration a lie: a caller's " +
+        "`match … is Ok/Err` would then find no variant tag at runtime. Cross the " +
+        "boundary explicitly first — `std::polyglot::core::lift` turns the handle " +
+        "into a real `Result`, and a coercion such as `.as_int{}` or `.str{}` turns " +
+        "it into a concrete primitive `Result`."
+
     ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE ->
         "An unexpected internal error occurred during type checking. " +
         "This is a compiler bug — please report it."
