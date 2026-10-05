@@ -30,13 +30,13 @@ use std::polyglot::core::{ InteropError }
 use mezze_wasm::wasm::{ Wasm, GraalWasm, WasmForeign, from_int }
 use std::int
 
-## Coerce a WasmForeign result to a Mezze Int and print it.
-let show_int: { label: Str, r: Result WasmForeign InteropError } -> {} <Log>
-  = { label, r } -> match r is
-    Ok { val = f } -> match f.as_int{} is
-      Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
-      Err { error = _ } -> println { msg = "  $(label): could not coerce to int" }
-    Err { error = _ } -> println { msg = "  $(label): guest error" }
+## Coerce a WasmForeign to a Mezze Int and print it. `call_export` yields a BARE
+## (error-carrying) WasmForeign, so this takes the handle directly and `.as_int{}`
+## CROSSES it to a `Result` at the end (where any carried error surfaces).
+let show_int: { label: Str, r: WasmForeign } -> {} <Log>
+  = { label, r } -> match r.as_int{} is
+    Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
+    Err { error = _ } -> println { msg = "  $(label): coerce failed / guest error" }
 
 ## Hand-assembled wasm module. 85 bytes; see the doc comment above for
 ## the export table. The byte layout is:
@@ -100,26 +100,24 @@ let run_demo: { mod: WasmForeign } -> {} <Log, *>
     let _ = show_int { label = "sub(100,42)", r = c }
 
     # ---- Composed: mul(add(3, 4), sub(10, 3)) ----
+    # `a` (the add result) and the sub result are bare WasmForeigns; feed them
+    # straight into `mul` as args — an errored handle short-circuits the mul, and
+    # the final `.as_int{}` in `show_int` surfaces any error.
     println { msg = "" }
     println { msg = "Composed calc — mul(add(3, 4), sub(10, 3)):" }
-    let _ = match a is
-      Err { error = _ } -> println { msg = "  aborted: add failed" }
-      Ok { val = sum } -> match mod.call_export {
-        name = "sub",
-        args = [from_int { val = 10 }, from_int { val = 3 }],
-      } is
-        Err { error = _ } -> println { msg = "  aborted: sub failed" }
-        Ok { val = diff } -> show_int {
-          label = "final     ",
-          r = mod.call_export { name = "mul", args = [sum, diff] },
-        }
+    let _ = show_int {
+      label = "final     ",
+      r = mod.call_export {
+        name = "mul",
+        args = [a, mod.call_export { name = "sub", args = [from_int { val = 10 }, from_int { val = 3 }] }],
+      },
+    }
 
     # ---- Linear memory ----
+    # `get_export` yields a bare WasmForeign; pass it straight on.
     println { msg = "" }
     println { msg = "Linear memory:" }
-    match mod.get_export { name = "memory" } is
-      Err { error = _ } -> println { msg = "  memory export lookup failed" }
-      Ok { val = mem } -> run_memory_demo { mem = mem }
+    run_memory_demo { mem = mod.get_export { name = "memory" } }
 
 ## Byte-oriented memory round-trip: write ASCII bytes, read them back.
 let run_memory_demo: { mem: WasmForeign } -> {} <Log, *>
@@ -130,7 +128,9 @@ let run_memory_demo: { mem: WasmForeign } -> {} <Log, *>
     let payload = bytes::from_seq { arr = [72, 105, 44, 32, 87, 65, 83, 77, 33] }
     let _ = show_write {
       label = "write \"Hi, WASM!\" at offset 0",
-      r = mem.memory_write { offset = 0, bytes = payload },
+      # `memory_write` is a fluent producer (yields the receiver handle); `.check{}`
+      # crosses it to `Result {}` so success/failure can be reported.
+      r = mem.memory_write { offset = 0, bytes = payload }.check {},
     }
     show_read {
       label = "read back  ",
