@@ -297,19 +297,68 @@ public final class PolyglotNatives {
         }
     }
 
-    /** eval_in {val = ctx-handle, source} -> Result scalar (crossing). */
+    /**
+     * eval_in {val = ctx-handle, source} -> a live FOREIGN in the inner context (#8).
+     * The result is NOT crossed to a display string — it stays a guest handle tagged
+     * with the inner context's id, so the caller can keep messaging it (`.as_int{}`,
+     * `.property{}`, …); each such op re-enters the context via {@link #inInnerContext}.
+     * Errors (closed context, guest throw) come back as an errored foreign, which the
+     * next verb short-circuits and a coercion surfaces as `Err`.
+     */
     @TruffleBoundary
-    public static MezzeVariant evalIn(MezzeRecord args, Node currentNode) {
+    public static MezzeForeign evalIn(MezzeRecord args, Node currentNode) {
         MezzeForeign handle = asForeign(args);
-        if (handle.isErrored()) return carriedErr(handle);
+        if (handle.isErrored()) return handle;
         String source = getString(args, "source");
+        String lang = handle.getSourceLanguage();
+        Long cid = (Long) handle.getDelegate();
+        com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get(cid);
+        if (ctx == null) return MezzeForeign.errored(errorTypeError("eval_in: context is closed or invalid"), lang);
         try {
-            com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get((Long) handle.getDelegate());
-            if (ctx == null) return MezzeVariant.err(errorTypeError("eval_in: context is closed or invalid"));
+            // evalPublic enters `ctx` itself; the raw guest result is tagged with `cid`
+            // so later value ops re-enter it (inInnerContext).
             MezzePolyglotSupport support = MezzeContext.get(currentNode).getPolyglotSupport();
-            return MezzeVariant.ok(support.evalToStringIn(ctx, handle.getSourceLanguage(), source, currentNode));
+            Object result = support.evalRawIn(ctx, lang, source, currentNode);
+            return new MezzeForeign(result, lang, null, cid);
         } catch (Throwable t) {
-            return MezzeVariant.err(translateException(t));
+            return MezzeForeign.errored(translateException(t), lang);
+        }
+    }
+
+    /** Null-safe read of the `val` receiver foreign — returns null if `val` is absent
+     *  or not a foreign (so the context wrapper no-ops on constructors/eval_raw). */
+    static MezzeForeign peekForeign(MezzeRecord r) {
+        int idx = r.getFieldIndex("val");
+        if (idx < 0) return null;
+        return r.getField(idx) instanceof MezzeForeign f ? f : null;
+    }
+
+    /** A polyglot value op, deferred so {@link #inInnerContext} can bracket it. */
+    @FunctionalInterface
+    public interface ValueOp { Object run(); }
+
+    /**
+     * #8: run a polyglot value op INSIDE the owning inner context of its `val`
+     * receiver, if any. A guest object may only be messaged while its context is
+     * entered, so an op on an `eval_in` result (tagged with an inner-context id) is
+     * bracketed with enter/leave and its foreign result re-tagged with the same id,
+     * keeping a chain usable. A main-context foreign (id == null) takes the
+     * zero-overhead path — no enter/leave — which is every non-sandbox op. A closed
+     * context (id no longer live) falls through to `op.run()`, which messages a stale
+     * handle and fails into the op's own typed error (errored foreign / Err).
+     */
+    public static Object inInnerContext(MezzeRecord args, Node node, ValueOp op) {
+        MezzeForeign recv = peekForeign(args);
+        Long cid = recv == null ? null : recv.getInnerContextId();
+        if (cid == null) return op.run();
+        com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get(cid);
+        if (ctx == null) return op.run();
+        Object prev = ctx.enter(node);
+        try {
+            Object result = op.run();
+            return result instanceof MezzeForeign mf ? mf.withInnerContext(cid) : result;
+        } finally {
+            ctx.leave(node, prev);
         }
     }
 

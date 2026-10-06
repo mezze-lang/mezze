@@ -137,10 +137,13 @@ effect Polyglot having 'f where {
   # Open a configured INNER context (isolated globals + access restricted BELOW the
   # permissive parent). Yields a foreign HANDLE (error-carrying). `config` is a
   # structural record of the Context.Builder sandbox knobs — a `GraalXWith` handler
-  # builds it from its own defaults. `eval_in` runs a scalar in the context and
-  # crosses the result back as a Str; `close_context` tears it down at scope end.
+  # builds it from its own defaults. `eval_in` evaluates in the context and yields a
+  # LIVE foreign over the result (error-carrying), tagged with the context so the
+  # object API keeps working on it (`.as_int{}`, `.property{}`, …) — stay guest-side,
+  # cross once at the end. `close_context` tears it down at scope end; a foreign from
+  # a closed context short-circuits to an error on its next op.
   open_context:  { lang: Str, config: { allow_io: Bool, allow_native: Bool, allow_create_thread: Bool, allow_create_process: Bool, allow_host_class_loading: Bool, allow_host_lookup: Bool, allow_polyglot_access: Bool } } -> 'f <Polyglot>,
-  eval_in:       { ctx: 'f, source: Str }           -> Result Str InteropError <Polyglot>,
+  eval_in:       { ctx: 'f, source: Str }           -> 'f <Polyglot>,
   close_context: { ctx: 'f }                         -> Result {} InteropError <Polyglot>,
 }
 

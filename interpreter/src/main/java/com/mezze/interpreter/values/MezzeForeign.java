@@ -58,16 +58,30 @@ public final class MezzeForeign implements TruffleObject {
     // delegate is MezzeNull, so even a stray message wouldn't NPE.
     final Object carriedError;
 
+    // #8: the key of the INNER TruffleContext (a sandboxed `open_context`) this
+    // handle lives in, or null for a handle in the ambient/main context. A guest
+    // object may only be messaged while its owning context is entered, so a value
+    // op on an inner-context foreign brackets its InteropLibrary call with
+    // enter/leave (see PolyglotNatives.inInnerContext) and tags its foreign result
+    // with the same id so the chain keeps working. null ⇒ the zero-overhead main
+    // path (no enter/leave), which is every non-sandbox foreign.
+    final Long innerContextId;
+
     public MezzeForeign(Object delegate, String sourceLanguage) {
-        this(delegate, sourceLanguage, null);
+        this(delegate, sourceLanguage, null, null);
     }
 
     public MezzeForeign(Object delegate, String sourceLanguage, Object carriedError) {
+        this(delegate, sourceLanguage, carriedError, null);
+    }
+
+    public MezzeForeign(Object delegate, String sourceLanguage, Object carriedError, Long innerContextId) {
         // Never wrap a null delegate — replace with MezzeNull so InteropLibrary
         // delegation never NPEs on the receiver.
         this.delegate = delegate == null ? MezzeNull.INSTANCE : delegate;
         this.sourceLanguage = sourceLanguage == null ? "unknown" : sourceLanguage;
         this.carriedError = carriedError;
+        this.innerContextId = innerContextId;
     }
 
     /** An errored foreign carrying `error` (an InteropError variant). */
@@ -91,6 +105,19 @@ public final class MezzeForeign implements TruffleObject {
     /** True iff this foreign carries an error rather than a live guest handle. */
     public boolean isErrored() {
         return carriedError != null;
+    }
+
+    /** The owning INNER-context key (#8), or null for an ambient/main-context handle. */
+    public Long getInnerContextId() {
+        return innerContextId;
+    }
+
+    /** This foreign re-tagged as living in inner context [id] — used to propagate the
+     *  owning context to the result of a value op performed inside it. An errored
+     *  handle is returned unchanged (it carries no live guest object to re-enter for). */
+    public MezzeForeign withInnerContext(Long id) {
+        if (carriedError != null || id == null) return this;
+        return new MezzeForeign(delegate, sourceLanguage, null, id);
     }
 
     /**

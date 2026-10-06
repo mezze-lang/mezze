@@ -4518,6 +4518,19 @@ public final class NativeDispatch extends MezzeNode {
         // pure Mezze and no Java at all — the ServiceLoader NativePlugin SPI
         // stays available for genuinely new native capabilities, but the polyglot
         // providers no longer need it.
+
+        // #8: wrap every polyglot op so one performed on an INNER-context foreign
+        // (an `eval_in` result, tagged with its sandbox context) runs with that
+        // context entered and its foreign result stays tagged — a chain off an
+        // eval_in result keeps working. PolyglotNatives.inInnerContext is a no-op
+        // (zero overhead) for a main-context foreign or a native with no `val`
+        // receiver, so blanket-wrapping is safe. Done once here, not per-handler.
+        for (String name : new java.util.ArrayList<>(HANDLERS.keySet())) {
+            if (name.startsWith("__native_polyglot_")) {
+                NativeHandler inner = HANDLERS.get(name);
+                HANDLERS.put(name, (r, c) -> PolyglotNatives.inInnerContext(r, c, () -> inner.handle(r, c)));
+            }
+        }
     }
 
     @TruffleBoundary
