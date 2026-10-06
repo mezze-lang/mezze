@@ -24,6 +24,21 @@
 #   n=100     per-element  29 us    whole-array   1 us
 #   n=1000    per-element 228 us    whole-array  10 us      ~23x
 #
+# RE-MEASURED 2026-10-06 (#12), JVM dev path, 2000 reps, current API (`at`/`to_seq`),
+# now with a NUMERIC arm added for #11 (`at{}.int{}` per element vs bulk `to_ints{}`):
+#
+#   FOREIGN drain ([Foreign], via at / to_seq):
+#     n=100   per-element  76 us    whole-array  4 us
+#     n=1000  per-element 487 us    whole-array 19 us      ~26x
+#   NUMERIC drain ([Int], read+coerce):
+#     n=100   at+int/elem  97 us    to_ints(bulk) 3 us     ~32x
+#     n=1000  at+int/elem 959 us    to_ints(bulk) 16 us    ~60x
+#
+# The NUMERIC per-element path pays TWO crossings per element (read the handle,
+# then coerce it), so it is ~2x the foreign-drain per-element path and the bulk
+# `to_ints` win is correspondingly larger: the element loop AND the coercion both
+# move host-side, to one boundary for the whole array (#11).
+#
 # Read the n=100 and n=1000 rows. The n=10 row is the first timed loop in the
 # process and reports warm-up, not shape — that is why it costs MORE than n=100
 # on both sides. The real signal is that per-element scales with n (29 -> 228 us
@@ -77,9 +92,9 @@ let build_foreigns: { i: Int, n: Int, acc: [JvmForeign] } -> [JvmForeign] =
 let read_each: { f: JvmForeign, i: Int, n: Int, acc: [JvmForeign] } -> [JvmForeign] =
   { f, i, n, acc } ->
     if i >= n then acc
-    else match f.array_at { index = i } is
-      Ok { val = e } -> read_each { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = e } }
-      Err { error = _ } -> acc
+    # `at{}` yields a bare (error-carrying) JvmForeign — accumulate the handle
+    # directly, one crossing per element, no Result between steps.
+    else read_each { f = f, i = i + 1, n = n, acc = seq::add { xs = acc, x = f.at { index = i } } }
 
 let loop_each: { f: JvmForeign, n: Int, reps: Int, acc: Int } -> Int =
   { f, n, reps, acc } ->
@@ -91,8 +106,31 @@ let loop_each: { f: JvmForeign, n: Int, reps: Int, acc: Int } -> Int =
 let loop_whole: { f: JvmForeign, reps: Int, acc: Int } -> Int =
   { f, reps, acc } ->
     if reps <= 0 then acc
-    else match f.array_to_seq {} is
+    else match f.to_seq {} is
       Ok { val = es } -> loop_whole { f = f, reps = reps - 1, acc = acc + seq::size { xs = es } }
+      Err { error = _ } -> acc
+
+## ---- NUMERIC drain, per-element: `at{}` THEN `int{}` — two crossings per element
+## (read the handle, then coerce it). This is what a codec's per-element decode does. ----
+let read_each_int: { f: JvmForeign, i: Int, n: Int, acc: Int } -> Int =
+  { f, i, n, acc } ->
+    if i >= n then acc
+    else match f.at { index = i }.int {} is
+      Ok { val = v } -> read_each_int { f = f, i = i + 1, n = n, acc = acc + v }
+      Err { error = _ } -> acc
+
+let loop_each_int: { f: JvmForeign, n: Int, reps: Int, acc: Int } -> Int =
+  { f, n, reps, acc } ->
+    if reps <= 0 then acc
+    else loop_each_int { f = f, n = n, reps = reps - 1,
+                         acc = acc + read_each_int { f = f, i = 0, n = n, acc = 0 } }
+
+## ---- NUMERIC drain, bulk: `to_ints{}` — ONE crossing, loop AND coercion host-side (#11). ----
+let loop_whole_ints: { f: JvmForeign, reps: Int, acc: Int } -> Int =
+  { f, reps, acc } ->
+    if reps <= 0 then acc
+    else match f.to_ints {} is
+      Ok { val = xs } -> loop_whole_ints { f = f, reps = reps - 1, acc = acc + seq::size { xs = xs } }
       Err { error = _ } -> acc
 
 let us_per: { reps: Int, t0: Duration, t1: Duration } -> Int =
@@ -113,7 +151,19 @@ let run_size: { n: Int } -> {} <Log, Time> = { n } -> do
   let _b = loop_whole { f = f, reps = reps, acc = 0 }
   let b1 = monotonic {}
 
-  println { msg = "  n=$(int::to_str { n = n })\tper-element $(int::to_str { n = us_per { reps = reps, t0 = a0, t1 = a1 } }) us\twhole-array $(int::to_str { n = us_per { reps = reps, t0 = b0, t1 = b1 } }) us" }
+  # NUMERIC drain: per-element at+int vs bulk to_ints (#11)
+  let _w3 = loop_each_int { f = f, n = n, reps = 200, acc = 0 }
+  let c0 = monotonic {}
+  let _c = loop_each_int { f = f, n = n, reps = reps, acc = 0 }
+  let c1 = monotonic {}
+
+  let _w4 = loop_whole_ints { f = f, reps = 200, acc = 0 }
+  let d0 = monotonic {}
+  let _d = loop_whole_ints { f = f, reps = reps, acc = 0 }
+  let d1 = monotonic {}
+
+  let _ = println { msg = "  n=$(int::to_str { n = n })\tFOREIGN  per-element $(int::to_str { n = us_per { reps = reps, t0 = a0, t1 = a1 } }) us\twhole-array $(int::to_str { n = us_per { reps = reps, t0 = b0, t1 = b1 } }) us" }
+  println { msg = "  n=$(int::to_str { n = n })\tNUMERIC  at+int/elem $(int::to_str { n = us_per { reps = reps, t0 = c0, t1 = c1 } }) us\tto_ints(bulk) $(int::to_str { n = us_per { reps = reps, t0 = d0, t1 = d1 } }) us" }
 
 let main = {} -> perform Console in perform SystemTime in do
   println { msg = "guest array -> Mezze seq, $(int::to_str { n = reps }) reps each" }
