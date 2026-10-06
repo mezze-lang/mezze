@@ -7402,15 +7402,30 @@ public final class BytecodeCompiler {
      */
     private void emitHandle(HandleIR h, MezzeBytecodeRootNodeGen.Builder b,
                             int argCount, BytecodeLocal[] localMap) {
-        emitHandleNested(h.getHandlers(), 0, h.getBody(), b, argCount, localMap);
+        emitHandleNested(h.getHandlers(), 0, h.getBody(), b, argCount, localMap,
+                         h.getCapturesIntoResult());
     }
 
     private void emitHandleNested(java.util.List<HandlerBindIR> handlers, int idx,
                                   NodeIR body,
                                   MezzeBytecodeRootNodeGen.Builder b,
-                                  int argCount, BytecodeLocal[] localMap) {
+                                  int argCount, BytecodeLocal[] localMap,
+                                  boolean capturesIntoResult) {
         if (idx >= handlers.size()) {
-            emitNode(body, b, argCount, localMap);
+            // S-20: the body evaluates TO a function still carrying one of the
+            // handled effects — `perform Console in my_func` produces `my_func`
+            // rather than calling it. Bind the chain into that value HERE, at the
+            // innermost point: every one of this Handle's handlers is installed at
+            // this instant and all the pops are still ahead. Otherwise the chain is
+            // gone before the returned function is ever called, and `handled {}`
+            // performs Log against nothing.
+            if (capturesIntoResult) {
+                b.beginBindHandlerChainIntoResult();
+                emitNode(body, b, argCount, localMap);
+                b.endBindHandlerChainIntoResult();
+            } else {
+                emitNode(body, b, argCount, localMap);
+            }
             return;
         }
         HandlerBindIR hb = handlers.get(idx);
@@ -7456,10 +7471,10 @@ public final class BytecodeCompiler {
         b.beginStoreLocal(resultSlot);
         if (isOutermost) {
             b.beginAutoForceIfSuspended();
-            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap, capturesIntoResult);
             b.endAutoForceIfSuspended();
         } else {
-            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap, capturesIntoResult);
         }
         b.endStoreLocal();
         b.endBlock();

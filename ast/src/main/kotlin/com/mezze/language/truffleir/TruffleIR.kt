@@ -536,7 +536,24 @@ sealed interface SinkIR {
     val body: NodeIR,
     val handlers: List<HandlerBindIR>,
     override val src: SourceInfo,
-    val staticallyFullyDischarges: Boolean = false
+    val staticallyFullyDischarges: Boolean = false,
+    /**
+     * S-20: the body EVALUATES TO a function whose own effect row carries one of
+     * the handled effects, so the handler has to travel with that function
+     * instead of only wrapping the body's evaluation.
+     *
+     * `perform Console in my_func` does not CALL `my_func`, it produces it. A
+     * Handle lowers to push / body / pop, so the handler was already popped by
+     * the time the returned function was called: `handled {}` printed nothing
+     * while the type said `Log` had been discharged. When this is set, the
+     * emitted code binds the installed handler INTO the resulting function value
+     * — while the chain is still up — so invoking it later re-installs it.
+     *
+     * Decided from the body's TYPE, not from what the body performs: the two are
+     * independent (a body can perform some handled effects AND return a function
+     * carrying others). The push/pop happens either way, so this is additive.
+     */
+    val capturesIntoResult: Boolean = false
 ) : NodeIR
 @Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?, val isScoped: Boolean = false)
 /** Effect operation call — runtime dispatch via handler stack.

@@ -1298,7 +1298,21 @@ class TypedAstBuilder(
                 // effects). Value types are bare now, so a perform loc absent from
                 // the channel fully discharges by default.
                 val fullyDischarges = performFullyDischarged[expr.loc] ?: true
-                TypedPerform(handlers, body, performType, loc, fullyDischarges)
+                // S-20: does the body evaluate TO a function that still carries one
+                // of the effects we are handling? `perform Console in my_func`
+                // produces `my_func`, it does not call it — so the handler has to
+                // travel with the value, not just wrap this evaluation. Keyed on the
+                // effect HASH rather than the row's name, so a user effect that
+                // happens to share a name cannot be mistaken for the handled one.
+                val capturesIntoResult = run {
+                    val row = (body.type as? MezzeType.FunctionType)?.effects ?: return@run false
+                    val handledHashes = handlers.map { it.effectHash }.toSet()
+                    row.allEffectNames.any { name ->
+                        val h = try { resolveEffectHash(name) } catch (_: IllegalStateException) { null }
+                        h != null && h in handledHashes
+                    }
+                }
+                TypedPerform(handlers, body, performType, loc, fullyDischarges, capturesIntoResult)
             }
             is ParsedEffectCall -> {
                 val opName = expr.operation.localName

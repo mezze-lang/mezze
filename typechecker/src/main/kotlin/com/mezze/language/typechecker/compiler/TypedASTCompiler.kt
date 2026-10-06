@@ -1023,7 +1023,8 @@ class TypedASTCompiler(
                         HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) }, h.isScoped)
                     },
                     src,
-                    staticallyFullyDischarges = expr.fullyDischarges
+                    staticallyFullyDischarges = expr.fullyDischarges,
+                    capturesIntoResult = expr.capturesIntoResult
                 )
             }
             is TypedPerformOp -> {

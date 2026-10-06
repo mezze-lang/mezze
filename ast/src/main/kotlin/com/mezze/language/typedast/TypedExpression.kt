@@ -291,6 +291,19 @@ data class TypedPerform(
      * from the value-carried effect row. See docs/effect-model.md (S0/S1).
      */
     val fullyDischarges: Boolean = true,
+    /**
+     * S-20: `body` evaluates TO a function whose own effect row carries one of
+     * the handled effects — `perform Console in my_func`, which produces
+     * `my_func` rather than calling it.
+     *
+     * The handler must then travel with that function value: a Handle is
+     * push / body / pop, so without this the handler is popped before the
+     * returned function is ever called, and `handled {}` performs `Log` with
+     * nothing installed — printing nothing, while the type says `Log` was
+     * discharged. Computed at EMIT from `body.type`'s row versus the handled
+     * effect hashes.
+     */
+    val capturesIntoResult: Boolean = false,
 ) : TypedExpr
 
 @Serializable

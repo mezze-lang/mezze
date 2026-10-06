@@ -4472,6 +4472,31 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * <p>Chain state is read live from HandlerChain, so this op picks up
      * whatever the enclosing BDSL PushHandlerChain sequences have installed.
      */
+    /**
+     * S-20: bind the installed handler chain into a function the Handle body
+     * PRODUCED rather than called.
+     *
+     * `perform Console in my_func` evaluates to `my_func`; the Handle then pops
+     * its chain, so calling the result later performed `Log` with nothing
+     * installed and printed nothing — while the type said `Log` had been
+     * discharged. Emitted only when the body's TYPE is a function whose row
+     * carries one of the handled effects ({@code HandleIR.capturesIntoResult}),
+     * and positioned INSIDE the pushes so the chain it snapshots is this
+     * Handle's.
+     *
+     * <p>A non-function value passes straight through, so wrapping the body in
+     * this is safe wherever the flag is set.
+     */
+    @Operation
+    public static final class BindHandlerChainIntoResult {
+        @TruffleBoundary
+        @Specialization
+        public static Object doBind(Object value) {
+            return com.mezze.interpreter.nodes.continuation.HandlerBoundFunction
+                .bindCurrentChain(value);
+        }
+    }
+
     @Operation
     public static final class AutoForceIfSuspended {
         @TruffleBoundary
