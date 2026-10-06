@@ -144,6 +144,10 @@ effect Polyglot having 'f where {
   # a closed context short-circuits to an error on its next op.
   open_context:  { lang: Str, config: { allow_io: Bool, allow_native: Bool, allow_create_thread: Bool, allow_create_process: Bool, allow_host_class_loading: Bool, allow_host_lookup: Bool, allow_polyglot_access: Bool } } -> 'f <Polyglot>,
   eval_in:       { ctx: 'f, source: Str }           -> 'f <Polyglot>,
+  ## Binary `eval_in` — compile a guest module from raw BYTES in the inner context
+  ## (a wasm binary; a source string cannot express one). Yields a live foreign over
+  ## the result, tagged with the context, same as `eval_in`.
+  eval_bytes_in: { ctx: 'f, bytes: Bytes, name: Str } -> 'f <Polyglot>,
   close_context: { ctx: 'f }                         -> Result {} InteropError <Polyglot>,
 }
 
@@ -197,6 +201,7 @@ impl Polyglot for Runtime having 'f = 'g where {
     allow_host_class_loading = config.allow_host_class_loading, allow_host_lookup = config.allow_host_lookup,
     allow_polyglot_access = config.allow_polyglot_access },
   eval_in       = { ctx, source } -> __native_polyglot_eval_in    { val = ctx, source = source },
+  eval_bytes_in = { ctx, bytes, name } -> __native_polyglot_eval_bytes_in { val = ctx, bytes = bytes, name = name },
   close_context = { ctx }         -> __native_polyglot_close_context { val = ctx },
 }
 

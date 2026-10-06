@@ -4499,6 +4499,8 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.openContext(r, c));
         HANDLERS.put("__native_polyglot_eval_in",
             (r, c) -> PolyglotNatives.evalIn(r, c));
+        HANDLERS.put("__native_polyglot_eval_bytes_in",
+            (r, c) -> PolyglotNatives.evalBytesIn(r, c));
         HANDLERS.put("__native_polyglot_close_context",
             (r, c) -> PolyglotNatives.closeContext(r));
 

@@ -325,6 +325,30 @@ public final class PolyglotNatives {
         }
     }
 
+    /**
+     * eval_bytes_in {val = ctx-handle, bytes, name} -> a live FOREIGN in the inner
+     * context (#8, binary counterpart of {@link #evalIn}). A sandboxed
+     * `Wasm.load_module` compiles its module INSIDE the scope and keeps the handle.
+     */
+    @TruffleBoundary
+    public static MezzeForeign evalBytesIn(MezzeRecord args, Node currentNode) {
+        MezzeForeign handle = asForeign(args);
+        if (handle.isErrored()) return handle;
+        String name = getString(args, "name");
+        byte[] data = getBytes(args, "bytes");
+        String lang = handle.getSourceLanguage();
+        Long cid = (Long) handle.getDelegate();
+        com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get(cid);
+        if (ctx == null) return MezzeForeign.errored(errorTypeError("eval_bytes_in: context is closed or invalid"), lang);
+        try {
+            MezzePolyglotSupport support = MezzeContext.get(currentNode).getPolyglotSupport();
+            Object result = support.evalRawBytesIn(ctx, lang, data, name, currentNode);
+            return new MezzeForeign(result, lang, null, cid);
+        } catch (Throwable t) {
+            return MezzeForeign.errored(translateException(t), lang);
+        }
+    }
+
     /** Null-safe read of the `val` receiver foreign — returns null if `val` is absent
      *  or not a foreign (so the context wrapper no-ops on constructors/eval_raw). */
     static MezzeForeign peekForeign(MezzeRecord r) {
