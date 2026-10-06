@@ -59,18 +59,30 @@ public final class HandlerBoundFunction {
         if (chain.length == 0) {
             return value;
         }
-        return wrap(fn, chain);
+        // The SCOPE travels with the chain. A HandlerChainEntry is only
+        // (handler, effectHash), so without this a scoped performer's ops read a
+        // null `scope` when the bound function is called later — measured, that
+        // surfaced as `Field not found: n` for an impl whose op reads `scope.n`.
+        //
+        // Note the scope value here is the record `initialize_scope` produced, and
+        // `finalize_scope` has already run by the time the bound function is
+        // invoked (the Handle pops before its result is used, wherever the bind
+        // happens). That is correct for a scope that is a plain value, and is a
+        // dangling reference for one holding an external resource — see the
+        // lifetime item in the backlog; it is the general escaping-closure problem
+        // rather than something this binding introduces.
+        return wrap(fn, chain, HandlerChainRegistry.lookupScopeVar());
     }
 
     @TruffleBoundary
-    private static MezzeFunction wrap(MezzeFunction inner, HandlerChainEntry[] chain) {
+    private static MezzeFunction wrap(MezzeFunction inner, HandlerChainEntry[] chain, Object scope) {
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode body = new MezzeNode() {
             @Child private IndirectCallNode callNode = IndirectCallNode.create();
 
             @Override
             public Object execute(VirtualFrame frame) {
-                return invokeUnderChain(inner, chain, frame.getArguments(), callNode);
+                return invokeUnderChain(inner, chain, scope, frame.getArguments(), callNode);
             }
         };
         RootCallTarget target = new MezzeRootNode(
@@ -88,22 +100,25 @@ public final class HandlerBoundFunction {
     }
 
     /**
-     * Install {@code chain}, call {@code inner} with {@code args}, pop.
+     * Install {@code chain} and {@code scope}, call {@code inner} with
+     * {@code args}, then tear both down.
      *
      * The result is carried out through a one-element array because
      * {@link HandlerChainRegistry#runWithHandlerChain} takes a {@link Runnable} —
      * reusing it rather than open-coding push/pop keeps the teardown (including
-     * scope restoration) in the one place that already gets it right.
+     * restoring the previous scope) in the one place that already gets it right.
      */
     @TruffleBoundary
     private static Object invokeUnderChain(
             MezzeFunction inner,
             HandlerChainEntry[] chain,
+            Object scope,
             Object[] args,
             IndirectCallNode callNode) {
         Object[] out = new Object[1];
         HandlerChainRegistry.runWithHandlerChain(
             chain,
+            scope,
             () -> out[0] = callNode.call(inner.getCallTarget(), args));
         return out[0];
     }

@@ -113,6 +113,36 @@ class PerformOnFunctionValueTest {
     }
 
     /**
+     * A SCOPED performer's `scope` has to travel with the binding too.
+     *
+     * A HandlerChainEntry is only (handler, effectHash), so re-installing the
+     * chain alone left `scope` null and an op reading `scope.n` died with
+     * `Field not found: n` — the chain came back, the scope did not.
+     *
+     * Note what this does NOT claim: `finalize_scope` has already run by the time
+     * the bound function is called, since the Handle pops before its result is
+     * used. Carrying the scope VALUE is right for a scope that is a plain record,
+     * as here. A scope holding an external resource is the general
+     * escaping-closure lifetime problem — binding does not create it.
+     */
+    @Test
+    fun `a scoped performer's scope travels with the binding`() {
+        assertEquals(42L, MezzeTestHelper.asLong(MezzeTestHelper.run("""
+            effect Beep where { beep: {} -> Int <Beep> }
+
+            impl Beep for Beeper where {
+              initialize_scope = {} -> { n = 42 },
+              finalize_scope = {} -> {},
+              beep = {} -> scope.n
+            }
+
+            let use_beep: {} -> Int <Beep> = {} -> Beep.beep {}
+            let bound = perform Beeper in use_beep
+            bound {}
+        """.trimIndent())))
+    }
+
+    /**
      * A body producing a non-function is unaffected — the capture passes any
      * other value straight through, so wrapping it is safe wherever the flag is
      * set.
