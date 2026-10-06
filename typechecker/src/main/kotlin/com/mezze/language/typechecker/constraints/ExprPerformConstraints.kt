@@ -102,26 +102,32 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     val isNestedPerform = expr.body is ParsedPerform
     val extractedEffects = extractEffectsFromType(exprResult.type)
     // The row carried by the body's own TYPE counts, alongside what the body
-    // actually performs.
+    // actually performs. `perform H in <an uncalled function>` is a real form:
+    // it discharges `<E>` from the function's type, and 19 tests pin that
+    // (ComprehensiveEffectHandlingTest "perform on uncalled function … removes
+    // effect from function type"). Narrowing this to `exprResult.effects` alone
+    // fails all of them.
     //
-    // Narrowing this to `exprResult.effects` fails 19 tests that pin
-    // `perform H in <an uncalled function>` as discharging `<E>` from the
-    // function's type (ComprehensiveEffectHandlingTest "perform on uncalled
-    // function … removes effect from function type"). Do not narrow it without
-    // settling what that form MEANS first — measured, the three answers disagree:
+    // But the RUNTIME does not implement it. `HandleIR` lowers to
+    // PushHandlerChain / body / PopHandlerChain — strictly dynamic — so when the
+    // body only RETURNS a closure, the handler is popped before the closure is
+    // ever called:
     //
-    //   - the runtime does NOT bind the handler into the value: `let h = perform
-    //     Console in my_func` then `h {}` prints nothing;
-    //   - `mez check` REFUSES that same code in a function body, via the V0510
-    //     branch below, and its verdict ("the handler can never fire") matches
-    //     the runtime;
-    //   - those 19 tests assert it is legal and yields `{} -> Str <*>`.
+    //     let handled = perform Console in my_func   -- type says Log discharged
+    //     handled {}                                 -- prints nothing, exit 0
     //
-    // The two gates differ only because the reference's `<Log>` is present at
-    // module top level and absent inside a do-block, so `extractEffectsFromType`
-    // returns nothing there and V0510 fires. Two defects that currently cancel:
-    // recovering the lost row alone would turn a correct refusal into a silently
-    // empty program. See the backlog item before touching either.
+    // Verified against a CLEAN build end to end: `mez check` accepts it, `mez
+    // build` succeeds, the program runs and silently does nothing, while
+    // `perform Console in my_func {}` prints correctly. (An earlier note here
+    // claimed V0510 refused the form and that the gates disagreed — both were
+    // artefacts of a stale incremental build. They do not.)
+    //
+    // The fix belongs at lowering, not here: when the body performs NONE of the
+    // handled effects and its result is a function whose row carries them,
+    // eta-expand `perform H in f` into `{ x } -> perform H in f x`, which gets
+    // handler capture out of the dynamic scoping that already exists. Only valid
+    // under that condition — if the body performs some of them itself (`perform
+    // C in do …; someFn`), moving the perform inward would drop those. See S-20.
     val allEffects = exprResult.effects + extractedEffects.effects
     val hasPolymorphicEffects = extractedEffects.isPolymorphic
     val hasPerformedMarker = exprResult.performed || hasPerformedMarkerInType(exprResult.type)
