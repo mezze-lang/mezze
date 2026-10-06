@@ -31,6 +31,28 @@ public final class RandomNatives {
     private static final ConcurrentHashMap<Long, Random> SEEDED_RANDOMS =
         new ConcurrentHashMap<>();
 
+    /**
+     * S-21 branch-covering draw state, keyed by the row's seed.
+     *
+     * `{remaining, position}` — `remaining` is the row index being decomposed into
+     * mixed-radix digits, `position` counts how many digits have been handed out.
+     * Keyed by SEED alone because `mez sample` already gives every row its own
+     * seed (`seed + i`), so no two rows share an entry.
+     */
+    private static final ConcurrentHashMap<Long, long[]> COVERING_DRAWS =
+        new ConcurrentHashMap<>();
+
+    /**
+     * How many leading choices are enumerated rather than drawn.
+     *
+     * Constructor selection happens in the FIRST few draws — a derived variant
+     * bisects over `Bool`s, so eight constructors are decided within three — and
+     * nesting adds a handful more. Past this depth it is payloads that vary, which
+     * is what random draws are good at; enumerating them would only make every row
+     * share a long prefix.
+     */
+    private static final int COVERING_DEPTH = 12;
+
     // ============== System Random Operations ==============
 
     @TruffleBoundary
@@ -122,6 +144,54 @@ public final class RandomNatives {
         // same seed would hand back different streams.
         SEEDED_RANDOMS.put(seed, new Random(scrambleSeed(seed)));
         return MezzeRecord.empty();
+    }
+
+    /**
+     * S-21: start a branch-covering row. Resets the seeded stream too, so the
+     * random tail past [COVERING_DEPTH] is reproducible for a given seed.
+     */
+    @TruffleBoundary
+    public static Object resetCoveringSample(MezzeRecord args) {
+        long seed = getLong(args, "seed");
+        long run = getLong(args, "run");
+        SEEDED_RANDOMS.put(seed, new Random(scrambleSeed(seed)));
+        COVERING_DRAWS.put(seed, new long[]{ run, 0 });
+        return MezzeRecord.empty();
+    }
+
+    /**
+     * S-21: a choice that ENUMERATES instead of guessing, for the leading draws.
+     *
+     * Every generated value bottoms out in `Sample.choose`, and a derived variant
+     * picks its constructor by bisecting over `Bool` draws — so the first few
+     * choices decide which shape comes out, and therefore which `match` arm or
+     * `if` branch the code under test takes. Drawing them randomly is what lets a
+     * sample run miss an arm entirely: the derivation weights an EMPTY constructor
+     * at one in eight, and nesting compounds it.
+     *
+     * So the row index is decomposed into mixed-radix digits, consuming each
+     * `bound` as it arrives — no need to know the bounds in advance. Row 0 leaves
+     * `remaining` at 0 and is therefore a plain random row; successive rows walk
+     * the combinations of the leading choices.
+     *
+     * Falls back to the seeded stream once the digits run out or the depth is
+     * reached, so deep payloads stay varied rather than all sharing a prefix.
+     */
+    @TruffleBoundary
+    public static long coveringChoose(MezzeRecord args) {
+        long seed = getLong(args, "seed");
+        long bound = getLong(args, "bound");
+        // `bound <= 1` has exactly one legal answer; asking for [0, -1] asks for
+        // something that does not exist. Same guard the stdlib performers apply.
+        if (bound <= 1) return 0;
+        long[] state = COVERING_DRAWS.get(seed);
+        if (state != null && state[1] < COVERING_DEPTH && state[0] > 0) {
+            long digit = state[0] % bound;
+            state[0] /= bound;
+            state[1]++;
+            return digit;
+        }
+        return nextInRange(seededRandom(seed), 0, bound - 1);
     }
 
     @TruffleBoundary

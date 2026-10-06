@@ -2784,6 +2784,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seeded_random_nat", (r, c) -> RandomNatives.seededRandomNat(r));
         HANDLERS.put("__native_update_seed", (r, c) -> RandomNatives.updateSeed(r));
         HANDLERS.put("__native_reset_seeded_random", (r, c) -> RandomNatives.resetSeededRandom(r));
+        // S-21: branch-covering draws — see `impl Sample for CoveringSample`.
+        HANDLERS.put("__native_reset_covering_sample", (r, c) -> RandomNatives.resetCoveringSample(r));
+        HANDLERS.put("__native_covering_choose", (r, c) -> RandomNatives.coveringChoose(r));
     }
 
     // ==================== Filesystem (LocalDisk, #82) ====================

@@ -57,9 +57,14 @@ object SampleGen {
      * `list_of` is no longer among them: nothing emitted here calls it since the
      * sequence arm went away. `choose` is still needed for the `Option`/`Result`
      * weighting, and `size`/`resize` for the recursive-variant helper.
+     *
+     * S-21: the performer is `CoveringSample`, not `SeededSample` — see
+     * [SampleCommand.rowBinding]. A performer name has to be IMPORTED to be
+     * installable; without it the generated rows fail with "Unknown performer",
+     * which is what this list is for.
      */
     val IMPORTS: Set<String> = setOf(
-        "use std::effects::sample::{ SeededSample, choose, size, resize }",
+        "use std::effects::sample::{ CoveringSample, choose, size, resize }",
         "use std::abilities::arbitrary::{ Arbitrary }",
     )
 
@@ -157,16 +162,40 @@ object SampleGen {
      * both the type and what was written, rather than being silent.
      */
     /** Bindings, the record built from them, and any generator declarations needed. */
-    data class Plan(val decls: List<String>, val lets: String, val record: String)
+    data class Plan(
+        val decls: List<String>,
+        val lets: String,
+        val record: String,
+        /**
+         * S-21: does this row DRAW anything? A row pinned entirely to empty
+         * constructors does not, and installing a `Sample` handler over it is a
+         * handler that can never fire — rejected by V0510, the same way a
+         * zero-argument function is. The command reads this to decide whether to
+         * emit the `perform` at all.
+         */
+        val draws: Boolean = true,
+    )
 
     fun bindFields(
         fields: Map<String, MezzeType>,
         argsName: String,
+        /**
+         * S-21: source PINNING a field for this row, or null to draw it normally.
+         *
+         * Used to put a row on a chosen `match` arm — see [SampleBranches]. The
+         * annotation is emitted either way, since it is what makes a container or a
+         * recursive variant resolve at all.
+         */
+        pin: (String) -> SampleBranches.Pinned? = { null },
         render: (MezzeType) -> String,
     ): Plan {
         val recursive = mutableMapOf<String, MezzeType.VariantType>()
+        var draws = false
         val lets = fields.entries.joinToString("\n") { (name, type) ->
-            "              let ${argsName}_$name: ${render(type)} = ${of(type, 0, recursive)}"
+            val pinned = pin(name)
+            if (pinned == null || pinned.draws) draws = true
+            val value = pinned?.source ?: of(type, 0, recursive)
+            "              let ${argsName}_$name: ${render(type)} = $value"
         }
         val record = fields.keys.joinToString(", ", prefix = "{ ", postfix = " }") { name ->
             "$name = ${argsName}_$name"
@@ -181,7 +210,7 @@ object SampleGen {
             done.add(next)
             helperDecl(next, recursive.getValue(next), recursive)?.let { decls.add(it) }
         }
-        return Plan(decls, lets, record)
+        return Plan(decls, lets, record, draws)
     }
 
     private fun recursiveVariantName(type: MezzeType): String? {

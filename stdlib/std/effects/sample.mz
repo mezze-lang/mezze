@@ -146,6 +146,58 @@ impl Sample for SeededSampleWith { seed: Int, size: Nat } where {
   resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
 }
 
+## A seeded stream whose LEADING choices are enumerated rather than guessed, so a
+## set of rows covers the shapes instead of stumbling on them.
+##
+##     perform CoveringSample { seed = 7, run = 3 } in do
+##       let x: Shape = Arbitrary.arbitrary {}
+##       …
+##
+## ## Why this belongs here and not in `Arbitrary`
+##
+## Every generated value bottoms out in `choose` — the premise of this whole
+## effect — and a derived variant picks its constructor by bisecting over `Bool`
+## draws, which are `choose { bound = 2 }`. So WHICH SHAPE comes out is decided by
+## the first few choices, and steering those steers which `match` arm or `if`
+## branch the code under test takes. Nothing type-specific is involved, so nothing
+## type-specific is needed: this is a draw strategy, which is what a `Sample`
+## performer IS.
+##
+## ## Why blind draws are not enough
+##
+## The derivation weights an EMPTY constructor at one in eight, so an arm reachable
+## only through one shows up in about an eighth of rows — and nesting compounds it:
+## five `Option` fields come out all-empty one time in 32768. A run that never
+## reached an arm looks exactly like a run that reached it and found nothing wrong.
+##
+## ## How `run` is used
+##
+## The row index is decomposed into mixed-radix digits, consuming each `bound` as
+## it arrives, so no bound has to be known in advance. Row 0 has nothing to
+## decompose and is an ordinary random row; later rows walk the combinations of the
+## leading choices. Past a fixed depth, or once the digits run out, draws come from
+## the seeded stream — deep payloads are what random draws are good at, and
+## enumerating them would only make every row share a long prefix.
+##
+## `resize` hands off to [SeededSampleWith] rather than to itself: a nested draw
+## must CONTINUE the row, and re-entering this performer would restart the
+## enumeration at position 0 and make every subtree identical — the same trap
+## [SeededSampleWith]'s own note describes.
+impl Sample for CoveringSample { seed: Int, run: Int } where {
+  ## Resets the enumeration position and the seeded stream once, at entry, for the
+  ## reason [SeededSample] gives: a reset per draw hands back the same answer every
+  ## time, which is a generator that looks like it works and produces constants.
+  initialize_scope = {} -> do
+    __native_reset_covering_sample { seed = seed, run = run }
+    {},
+  finalize_scope = {} -> {},
+  choose = { bound } ->
+    if bound <= 1 then 0
+    else __native_covering_choose { seed = seed, bound = bound },
+  size = {} -> default_size,
+  resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
+}
+
 ## A non-negative Int below `bound`.
 pub let choose: { bound: Int } -> Int <Sample> = { bound } -> Sample.choose { bound = bound }
 

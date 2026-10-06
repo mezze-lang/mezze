@@ -258,7 +258,7 @@ class SampleCommand {
         count: Int = 1,
     ): String {
         if (target.fields.isEmpty()) return noArgRow(target.name)
-        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i).lets }
+        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i, i).lets }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
         return "do\n$rows\n              { rows = [$collected] }"
     }
@@ -276,7 +276,7 @@ class SampleCommand {
         index: Int,
     ): String {
         if (target.fields.isEmpty()) return noArgRow(target.name)
-        return "do\n${rowBinding(target, seed + index, 0).lets}\n              { rows = [${ROW}_0] }"
+        return "do\n${rowBinding(target, seed + index, 0, index).lets}\n              { rows = [${ROW}_0] }"
     }
 
     /**
@@ -286,15 +286,48 @@ class SampleCommand {
      */
     private fun noArgRow(name: String) = "{ rows = [{ args = {}, result = $name {} }] }"
 
-    /** `let __row_<i> = perform SeededSample { … } in do …` — the row's draws
-     *  and its call. */
-    private fun rowBinding(target: SampleTarget.Result.Ready, rowSeed: Int, i: Int): SampleGen.Plan {
-        val args = "${ARGS}_$i"
+    /** `let __row_<i> = perform CoveringSample { … } in do …` — the row's draws
+     *  and its call.
+     *
+     *  S-21: `CoveringSample` rather than `SeededSample`. Both are seeded and
+     *  reproducible; this one additionally ENUMERATES the leading choices from the
+     *  row index, so a set of rows covers the shapes a type can take instead of
+     *  stumbling on them. It matters because a derived variant picks its
+     *  constructor from the first few draws and weights an EMPTY constructor at one
+     *  in eight — so under blind draws an `if`/`match` arm reachable only through
+     *  one appears in about an eighth of rows, and a run that never reached it
+     *  looks exactly like a run that reached it and found nothing wrong. */
+    private fun rowBinding(
+        target: SampleTarget.Result.Ready,
+        rowSeed: Int,
+        /** Names this row's bindings. Always 0 on the one-row recovery path. */
+        slot: Int,
+        /**
+         * WHICH row this is, which is not the same as [slot].
+         *
+         * Recovery re-runs each row as its own one-row expression, so the binding
+         * name resets to 0 while the row is still row N — and the arm to pin is
+         * chosen by the ROW, not by the name. Passing one number for both pinned
+         * every recovered row to the first arm: `area` crashed on its `Rect` arm,
+         * fell into recovery, and printed `Empty` five times.
+         */
+        row: Int,
+    ): SampleGen.Plan {
+        val args = "${ARGS}_$slot"
         val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
         // Generated FROM the parameter's types, with one ANNOTATED binding per field.
         // The annotation is what pins the draws — see [SampleGen.bindFields] — and is
         // what makes a container, an Option or a recursive variant work at all.
-        val plan = SampleGen.bindFields(target.fields, args) {
+        // S-21: row `i` is pinned to the `i`-th constructor the function matches on,
+        // so the leading rows walk the arms instead of waiting for a draw to land on
+        // them. Payloads inside are still drawn, so the SHAPE is pinned and the
+        // VALUES vary. Rows past the arm count pin nothing and draw as before —
+        // beyond covering the shapes, what is wanted is variety.
+        val plan = SampleGen.bindFields(
+            target.fields,
+            args,
+            pin = { field -> target.branches[field]?.getOrNull(row)?.let { SampleBranches.construct(it) } },
+        ) {
             com.mezze.language.ast.prettyPrintType(it)
         }
         // `bindFields` indents its lets to the same depth as this `let`, which was
@@ -303,10 +336,21 @@ class SampleCommand {
         // delimited by INDENTATION, so at equal depth the do block has no body at all
         // and the parser says "Do block is empty". Push them one level in.
         val lets = plan.lets.lines().joinToString("\n") { "  $it" }
-        val text = "              let ${ROW}_$i = perform SeededSample { seed = $rowSeed } in do\n" +
-            lets + "\n" +
-            "                let $args = ${plan.record}\n" +
-            "                { args = $args, result = ${target.name} { $forwarded } }"
+        // A row pinned entirely to EMPTY constructors draws nothing, and a handler
+        // over a body that performs no `Sample` is one that can never fire — V0510
+        // rejects it, exactly as it already does for a zero-argument function. So
+        // the `perform` is emitted only when the row actually draws.
+        val text = if (plan.draws) {
+            "              let ${ROW}_$slot = perform CoveringSample { seed = $rowSeed, run = $row } in do\n" +
+                lets + "\n" +
+                "                let $args = ${plan.record}\n" +
+                "                { args = $args, result = ${target.name} { $forwarded } }"
+        } else {
+            "              let ${ROW}_$slot = do\n" +
+                lets + "\n" +
+                "                let $args = ${plan.record}\n" +
+                "                { args = $args, result = ${target.name} { $forwarded } }"
+        }
         return plan.copy(lets = text)
     }
 
@@ -319,7 +363,7 @@ class SampleCommand {
      */
     internal fun buildDecls(target: SampleTarget.Result.Ready): List<String> =
         if (target.fields.isEmpty()) emptyList()
-        else rowBinding(target, 0, 0).decls.distinct()
+        else rowBinding(target, 0, 0, 0).decls.distinct()
 
     private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
         val headers = target.fieldNames + "→ result"

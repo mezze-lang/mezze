@@ -194,9 +194,13 @@ class SampleExpressionTest {
     @Test
     fun `each row is seeded independently at seed plus its index`() {
         val out = expr("f", listOf("a"), seed = 100, count = 3)
-        assertEquals(3, Regex("SeededSample").findAll(out).count(), "expected one scope per row:\n$out")
+        assertEquals(3, Regex("CoveringSample").findAll(out).count(), "expected one scope per row:\n$out")
         for (i in 0 until 3) {
             assertTrue("seed = ${100 + i}" in out, "row $i is not seeded at ${100 + i}:\n$out")
+            // S-21: the row INDEX travels too — it is what picks the arm to pin and
+            // which leading choices are enumerated, and it is not recoverable from
+            // the seed.
+            assertTrue("run = $i" in out, "row $i does not carry its index:\n$out")
         }
     }
 
@@ -214,7 +218,13 @@ class SampleExpressionTest {
                 "seed = ${100 + i}" in single,
                 "row $i re-run would draw different values than the batch did:\n$single",
             )
-            assertEquals(1, Regex("SeededSample").findAll(single).count(), "expected one row:\n$single")
+            assertEquals(1, Regex("CoveringSample").findAll(single).count(), "expected one row:\n$single")
+            // S-21: and it re-runs as the SAME row. Recovery rebuilds each row as a
+            // one-row expression, where the binding NAME resets to 0 — but the row
+            // index must not, or every recovered row pins the first `match` arm.
+            // Measured: `area` crashed on its `Rect` arm, fell into recovery, and
+            // printed `Empty` five times.
+            assertTrue("run = $i" in single, "recovered row $i lost its index:\n$single")
         }
     }
 

@@ -26,8 +26,17 @@ object SampleTarget {
         data class Ready(
             val name: String,
             val fields: Map<String, com.mezze.language.ast.MezzeType>,
+            /**
+             * S-21: per field, the constructors this function's own `match` arms
+             * discriminate on — the shapes worth generating, taken from the function
+             * rather than guessed at. Empty for a function that matches on nothing.
+             * See [SampleBranches].
+             */
+            val branches: Map<String, List<SampleBranches.Arm>> = emptyMap(),
         ) : Result {
             val fieldNames: List<String> get() = fields.keys.toList()
+            /** Rows that can be pinned to an arm — the longest arm list. */
+            val pinnableRows: Int get() = branches.values.maxOfOrNull { it.size } ?: 0
         }
 
         /** Not sampleable, with the reason already formatted for a terminal. */
@@ -114,7 +123,10 @@ object SampleTarget {
                     "whose parameter is a record, which is how Mezze functions are normally written."
             )
 
-        return Result.Ready(declName, fields)
+        // S-21: the function's own `match` arms are the list of shapes worth
+        // generating. Read here because this is where the typed declaration is in
+        // hand; the command turns them into pinned rows.
+        return Result.Ready(declName, fields, SampleBranches.inventory(decl, fields.keys))
     }
 
     /**
