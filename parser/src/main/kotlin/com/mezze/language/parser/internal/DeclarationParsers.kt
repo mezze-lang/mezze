@@ -881,7 +881,10 @@ internal val MezzeParser.performerParamsParser: Parser<List<ParsedPerformerParam
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
-                val params = sepByWithNewlines(
+                // sepEndBy (not sepBy): a TRAILING COMMA before `}` is allowed, so a
+                // handler's inline field list `impl E for H { a: Int, b: Int, }` matches
+                // record literals/types (which already permit the trailing comma).
+                val params = sepEndByWithNewlines(
                     performerParamParser,
                     tok(TokenType.COMMA)
                 )(stream1)

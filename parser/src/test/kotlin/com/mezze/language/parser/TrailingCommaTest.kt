@@ -493,4 +493,53 @@ class TrailingCommaTest {
         assertNotNull(module)
         // Just verify it parses without errors
     }
+
+    // ========== Effect Impl Handler Fields (performer params) ==========
+
+    @Test
+    fun `parse effect impl handler fields with trailing comma - single line`() {
+        val code = """
+            effect E where { op: {} -> {} <E> }
+            impl E for H { a: Int, b: Int, } where { op = {} -> {} }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
+
+        val impl = module.decls.filterIsInstance<ParsedPerformerDecl>().first()
+        assertEquals(2, impl.params.size)
+    }
+
+    @Test
+    fun `parse effect impl handler fields with trailing comma - multiline`() {
+        // The GraalJsWith shape: a many-field handler head that wants to wrap.
+        val code = """
+            effect E where { op: {} -> {} <E> }
+            impl E for H {
+              a: Int,
+              b: Int,
+              c: Int,
+            } where { op = {} -> {} }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
+
+        val impl = module.decls.filterIsInstance<ParsedPerformerDecl>().first()
+        assertEquals(3, impl.params.size)
+    }
+
+    @Test
+    fun `parse effect impl handler fields WITHOUT trailing comma still works`() {
+        val code = """
+            effect E where { op: {} -> {} <E> }
+            impl E for H { a: Int, b: Int } where { op = {} -> {} }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
+
+        val impl = module.decls.filterIsInstance<ParsedPerformerDecl>().first()
+        assertEquals(2, impl.params.size)
+    }
 }
