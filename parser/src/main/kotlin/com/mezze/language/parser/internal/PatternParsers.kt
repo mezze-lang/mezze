@@ -48,6 +48,25 @@ internal val MezzeParser.variablePatternForLet: Parser<ParsedPattern>
                         ident.value.line,
                         ident.value.column
                     )
+                } else if (name.first().isUpperCase()) {
+                    // An uppercase name is a CONSTRUCTOR everywhere else in the
+                    // language, so a use site reads it as one: `let MAX = 100` was
+                    // accepted here, and `n > MAX` then failed with "expected Int, got
+                    // | MAX |" — the binding silently unreachable, the error pointing
+                    // at the use instead of the cause. Refuse it where it is defined.
+                    // Covers top-level and do-block lets alike: both bind through here.
+                    val lower = name.replaceFirstChar { it.lowercaseChar() }
+                    val suggestion = if (name.all { !it.isLetter() || it.isUpperCase() }) name.lowercase() else lower
+                    ParseResult.Failure(
+                        message = "`let $name` — a name starting with an uppercase letter is a " +
+                            "constructor, so every use of it would be read as a variant. " +
+                            "Name the binding in lowercase: `let $suggestion`.",
+                        position = ident.value.position,
+                        line = ident.value.line,
+                        column = ident.value.column,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0134_LET_NAME_UPPERCASE,
+                        isFatal = true,
+                    )
                 } else {
                     val file = currentFile ?: "<unknown>"
                     ParseResult.Success(

@@ -206,15 +206,21 @@ class NamespaceSeparationTest {
     // CROSS-NAMESPACE — type-only and value-only names sharing
     // ========================================================================
 
+    /**
+     * Previously ACCEPTED, on the reasoning that a record alias puts nothing in the
+     * value namespace, so `let BoxR = 42` collides with nothing. True, and beside
+     * the point: an uppercase name is read as a CONSTRUCTOR at every use site, so
+     * `BoxR + 1` meant a variant and the binding was unreachable. An uppercase
+     * `let` is now refused where it is defined (P0134), whatever else is in scope.
+     */
     @Test
-    fun `record type alias with no constructor allows same-name let`() {
-        // type Box = { x: Int } — Box is type-ns only (records have no
-        // constructor in value ns).  let Box = 5 is fine.
-        assertAccepts(
+    fun `an uppercase let is refused even with no same-name constructor`() {
+        assertRejects(
             """
                 type BoxR = { x: Int }
                 let BoxR = 42
-            """.trimIndent()
+            """.trimIndent(),
+            "lowercase"
         )
     }
 

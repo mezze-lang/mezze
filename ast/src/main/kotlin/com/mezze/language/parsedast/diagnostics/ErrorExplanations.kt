@@ -112,6 +112,11 @@ fun ErrorCode.explain(): String = when (this) {
         "If the RETURNED function performs one effect and the outer function another, " +
         "parenthesise the inner type: `{} -> ({} -> Int <A>) <B>`."
 
+    ErrorCode.P0134_LET_NAME_UPPERCASE ->
+        "A `let` name must start with a lowercase letter. Names starting with an uppercase " +
+        "letter are constructors (`Some`, `Circle`), so `let Max = 100` could never be used: " +
+        "`n > Max` would read `Max` as a variant. Write `let max = 100`."
+
     ErrorCode.P0121_LAMBDA_BODY_BARE_LET ->
         "A lambda body cannot start with a bare `let`. " +
         "Wrap the body in a `do` block: `{x} -> do let y = ...; y`."
