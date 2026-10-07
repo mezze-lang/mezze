@@ -117,4 +117,36 @@ class EffectRowSyntaxTest {
             assertNotNull(e.message)
         }
     }
+
+    /**
+     * A function type has ONE trailing row. This used to PARSE: the inner arrow took
+     * `<Tick>`, the outer silently took `<Tock>` — an associativity nobody reading it
+     * can see, and the printer emitted it back in exactly this unreadable form.
+     */
+    @Test
+    fun `two trailing rows on one return do not parse`() {
+        try {
+            parser.parseParsedModule(
+                "$effects\neffect Tock where { tock: {} -> Int <Tock> }\n" +
+                    "let f: { n: Int } -> {} -> Int <Tick> <Tock> = { n } -> {} -> Tick.tick {}",
+                "test.mz",
+            )
+            fail("a second row has no arrow of its own and must be refused")
+        } catch (e: Exception) {
+            assertTrue(
+                (e.message ?: "").contains("one effect row"),
+                "expected the two-rows explanation, got: ${e.message}",
+            )
+        }
+    }
+
+    /** The honest spelling: parenthesise the returned function, and each row has its arrow. */
+    @Test
+    fun `a parenthesised returned function may carry its own row`() {
+        assertNotNull(parser.parseParsedModule(
+            "$effects\neffect Tock where { tock: {} -> Int <Tock> }\n" +
+                "let f: { n: Int } -> ({} -> Int <Tick>) <Tock> = { n } -> {} -> Tick.tick {}",
+            "test.mz",
+        ))
+    }
 }

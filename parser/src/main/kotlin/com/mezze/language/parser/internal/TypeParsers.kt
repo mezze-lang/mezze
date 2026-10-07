@@ -296,6 +296,29 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                         val streamAfterReturn = skipNewlines(returnType.remaining)
                         val ltToken = streamAfterReturn.current()
 
+                        // A function type has ONE trailing row. `{} -> {} -> Int <A> <B>`
+                        // used to parse: the inner arrow took `<A>`, this one silently took
+                        // `<B>` — an associativity the reader cannot see and the printer then
+                        // emitted back as-is, unparenthesised and unreadable. When the return
+                        // type is a function that already carries its own row, a second row
+                        // here is only legal if that function was PARENTHESISED.
+                        val returnedFn = returnType.value as? ParsedFunctionType
+                        val lastOfReturn = returnType.remaining.peek(-1)
+                        if (ltToken?.type == TokenType.LT && returnedFn?.effects != null &&
+                            lastOfReturn?.type != TokenType.RPAREN
+                        ) {
+                            result = ParseResult.Failure(
+                                message = "A function type has one effect row; this is a second one with " +
+                                    "no arrow of its own. Parenthesise the returned function: " +
+                                    "`-> (… -> T <A>) <B>`.",
+                                position = ltToken.position,
+                                line = ltToken.line,
+                                column = ltToken.column,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0133_TWO_EFFECT_ROWS,
+                                isFatal = true,
+                            )
+                            break
+                        }
                         val effectRowResult = if (ltToken?.type == TokenType.LT) {
                             val afterLt = streamAfterReturn.advance()
                             val gtToken = afterLt.current()

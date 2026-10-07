@@ -279,7 +279,15 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
             ""
         }
 
-        paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
+        // A trailing row belongs to the NEAREST arrow when parsed, so if this
+        // function prints a row and returns a function, the returned type must be
+        // parenthesised — whether or not it has a row of its own:
+        //   `{} -> ({} -> Int <A>) <B>`  — unparenthesised was `… <A> <B>`, now P0133
+        //   `{} -> ({} -> Int) <B>`      — unparenthesised reads back as the INNER
+        //                                  arrow owning `<B>`: a different type
+        // The printer must never emit what the parser reads back differently.
+        val shownReturn = if (effects.isNotEmpty() && type.returnType is MezzeType.FunctionType) "($returnTypeStr)" else returnTypeStr
+        paramTypeStr + abilityConstraints + " -> " + shownReturn + effects
     }
     is MezzeType.NewtypeType -> type.name
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
@@ -490,7 +498,15 @@ private fun prettyPrintTypeWithAliasesRecursive(
             ""
         }
 
-        paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
+        // A trailing row belongs to the NEAREST arrow when parsed, so if this
+        // function prints a row and returns a function, the returned type must be
+        // parenthesised — whether or not it has a row of its own:
+        //   `{} -> ({} -> Int <A>) <B>`  — unparenthesised was `… <A> <B>`, now P0133
+        //   `{} -> ({} -> Int) <B>`      — unparenthesised reads back as the INNER
+        //                                  arrow owning `<B>`: a different type
+        // The printer must never emit what the parser reads back differently.
+        val shownReturn = if (effects.isNotEmpty() && type.returnType is MezzeType.FunctionType) "($returnTypeStr)" else returnTypeStr
+        paramTypeStr + abilityConstraints + " -> " + shownReturn + effects
     }
     is MezzeType.NewtypeType -> type.name
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)

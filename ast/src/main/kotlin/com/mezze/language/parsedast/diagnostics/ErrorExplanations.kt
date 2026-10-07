@@ -106,6 +106,12 @@ fun ErrorCode.explain(): String = when (this) {
         "The `with` clause for ability constraints must come before the `->` arrow. " +
         "Use `{x} with Show 'a -> body` not `{x} -> body with Show 'a`."
 
+    ErrorCode.P0133_TWO_EFFECT_ROWS ->
+        "A function type has ONE effect row, written after its return type. In " +
+        "`{} -> {} -> Int <A> <B>` the second row has no arrow of its own to belong to. " +
+        "If the RETURNED function performs one effect and the outer function another, " +
+        "parenthesise the inner type: `{} -> ({} -> Int <A>) <B>`."
+
     ErrorCode.P0121_LAMBDA_BODY_BARE_LET ->
         "A lambda body cannot start with a bare `let`. " +
         "Wrap the body in a `do` block: `{x} -> do let y = ...; y`."
