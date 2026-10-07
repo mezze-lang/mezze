@@ -31,7 +31,8 @@ class SampleBranchesTest {
         val decl = decls.single { it.name == target }
         val fields = ((decl.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
         val out = linkedMapOf<String, MutableList<String>>()
-        for (row in SampleBranches.inventory(decl, fields, decls)) {
+        val imported = success.loadedModules.values.flatMap { it.typedModule?.decls.orEmpty() }.filterIsInstance<TypedLetDecl>()
+        for (row in SampleBranches.inventory(decl, fields, decls, imported)) {
             for ((param, pin) in row.pins) out.getOrPut(param) { mutableListOf() }.add("${pin.source} | ${pin.why}")
         }
         return out
@@ -269,7 +270,8 @@ class SampleBranchesTest {
         val decls = success.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
         val decl = decls.single { it.name == target }
         val fields = ((decl.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
-        return SampleBranches.inventory(decl, fields, decls).map { row ->
+        val imported = success.loadedModules.values.flatMap { it.typedModule?.decls.orEmpty() }.filterIsInstance<TypedLetDecl>()
+        return SampleBranches.inventory(decl, fields, decls, imported).map { row ->
             row.pins.entries.joinToString(", ") { "${it.key} = ${it.value.source}" } + " | " + row.why
         }
     }
@@ -315,5 +317,53 @@ class SampleBranchesTest {
         assertEquals(5, r.size, "got $r")
         assertTrue(r.count { it.contains("a > 10") } == 2, "got $r")
         assertTrue(r.count { it.contains("a < b") } == 3, "got $r")
+    }
+
+    // ── sizes ─────────────────────────────────────────────────────────────────
+
+    /** `seq::size { xs } > min_chunk` pins sequences of length 3 and 4. */
+    @Test
+    fun `a size comparison pins sequences either side of the length`() {
+        val p = pins("""
+            use std::collections::seq
+            let min_chunk = 3
+            pub let f = { xs: [Int] } -> seq::size { xs = xs } > min_chunk
+        """, "f")["xs"]!!
+        assertEquals(2, p.size, "got $p")
+        assertEquals(3, p[0].substringBefore(" |").count { it == ',' } + 1, "got ${p[0]}")
+        assertTrue(p[0].endsWith("if size(xs) > min_chunk (= 3) — else"), "got ${p[0]}")
+        assertEquals(4, p[1].substringBefore(" |").count { it == ',' } + 1, "got ${p[1]}")
+    }
+
+    /** The inherent `xs.size {}` reaches the same native and gets the same treatment. */
+    @Test
+    fun `the dot spelling of size is read too`() {
+        val p = pins("pub let f = { xs: [Int] } -> xs.size {} <= 2", "f")["xs"]!!
+        assertEquals(listOf("then", "else"), p.map { it.substringAfterLast("— ") }, "got $p")
+    }
+
+    @Test
+    fun `is_empty pins an empty and a non-empty sequence`() {
+        val p = pins("""
+            use std::collections::seq
+            pub let f = { xs: [Str] } -> if seq::is_empty { xs = xs } then 0 else 1
+        """, "f")["xs"]!!
+        assertEquals("[] | is_empty(xs) — empty", p[0])
+        assertTrue(p[1].endsWith("is_empty(xs) — not empty"), "got $p")
+    }
+
+    /**
+     * Identity, not name: a user function that happens to be called `size` is a
+     * different hash with a different body, and must not be read as a length.
+     */
+    @Test
+    fun `a user function named size is not mistaken for the sequence size`() {
+        assertEquals(
+            emptyMap<String, List<String>>(),
+            pins("""
+                let size = { xs: [Int] } -> 42
+                pub let f = { xs: [Int] } -> size { xs = xs } > 3
+            """, "f"),
+        )
     }
 }

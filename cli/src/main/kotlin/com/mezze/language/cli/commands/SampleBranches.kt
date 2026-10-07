@@ -99,6 +99,13 @@ object SampleBranches {
         decl: TypedLetDecl,
         params: Map<String, MezzeType>,
         decls: List<TypedLetDecl> = emptyList(),
+        /**
+         * Declarations of the modules this one imports. Needed to see THROUGH a
+         * call to a stdlib function — `seq::size { xs }` is a reference by hash to
+         * a declaration that lives in `std::collections::seq` — and it also lets a
+         * constant imported from another module resolve like a local one.
+         */
+        imported: List<TypedLetDecl> = emptyList(),
     ): List<Row> {
         val wanted = mutableListOf<Map<String, Pinned>>()
         fun want(req: Map<String, Pinned>) {
@@ -106,13 +113,16 @@ object SampleBranches {
             val key = req.mapValues { it.value.source }
             if (wanted.none { w -> w.mapValues { it.value.source } == key }) wanted.add(req)
         }
-        val byHash = decls.associateBy { it.hash }
+        val byHash = (imported + decls).associateBy { it.hash }
         val locals = blockLocals(decl.value, params.keys)
 
         walk(decl.value) { expr ->
             when (expr) {
                 is TypedMatch -> matchArms(expr, params).forEach { (f, p) -> want(mapOf(f to p)) }
-                is TypedCall -> comparison(expr, params, byHash, locals).forEach { want(it) }
+                is TypedCall -> {
+                    comparison(expr, params, byHash, locals).forEach { want(it) }
+                    emptiness(expr, params, byHash).forEach { want(it) }
+                }
                 else -> Unit
             }
         }
@@ -219,8 +229,9 @@ object SampleBranches {
         val (path, other, effectiveOp) = when {
             leftPath != null -> Triple(leftPath, right, op)
             rightPath != null -> Triple(rightPath, left, MIRROR.getValue(op))
-            else -> return derivedComparison(left, right, op, params, byHash, locals)
-                ?.let { (param, pins) -> pins.map { mapOf(param to it) } } ?: emptyList()
+            else -> return sizeComparison(left, right, op, params, byHash)
+                ?: derivedComparison(left, right, op, params, byHash, locals)
+                    ?.let { (param, pins) -> pins.map { mapOf(param to it) } } ?: emptyList()
         }
         val known = knownValue(other, byHash) ?: return emptyList()
         val shown = known.describe()
@@ -352,6 +363,104 @@ object SampleBranches {
 
     private fun Long.safeInc(): Long? = if (this == Long.MAX_VALUE) null else this + 1
     private fun Long.safeDec(): Long? = if (this == Long.MIN_VALUE) null else this - 1
+
+    // ── sizes ─────────────────────────────────────────────────────────────────
+
+    /**
+     * The sequence parameter path whose SIZE [expr] computes, if it computes one.
+     *
+     * Two spellings reach the same native:
+     *
+     *  - `seq::size { xs = xs }` — a reference by HASH to a declaration that is a
+     *    thin wrapper over `__native_seq_size`. Recognised by following the hash
+     *    and checking the body calls that native; a user function that merely
+     *    happens to be named `size` is a different hash and never matches.
+     *  - `xs.size {}` — the inherent method on a SEQUENCE receiver. Keyed on the
+     *    receiver being a `Seq`, as comparisons are keyed on primitive operands.
+     */
+    private fun sizeOf(
+        expr: TypedExpr,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        native: String = SEQ_SIZE,
+        method: String = "size",
+    ): Path? {
+        val call = expr as? TypedCall ?: return null
+        val fn = call.function
+        if (fn is TypedVar) {
+            val ref = fn.binding as? BindingRef.ByHash ?: return null
+            if (!wrapsNative(byHash[ref.hash] ?: return null, native)) return null
+            val only = (call.arg as? TypedRecord)?.entries
+                ?.filterIsInstance<TypedRecordEntry.Field>()?.singleOrNull() ?: return null
+            return pathOf(only.value, params)?.takeIf { isSeq(only.value.type) }
+        }
+        if (fn is TypedFieldAccess && fn.field == method && isSeq(fn.record.type)) return pathOf(fn.record, params)
+        return null
+    }
+
+    private fun wrapsNative(decl: TypedLetDecl, native: String): Boolean {
+        val body = (decl.value as? com.mezze.language.typedast.TypedLambda)?.body as? TypedCall ?: return false
+        val callee = body.function as? TypedVar ?: return false
+        return (callee.binding as? BindingRef.Native)?.name == native
+    }
+
+    private fun isSeq(type: MezzeType): Boolean =
+        type is MezzeType.TypeApplication && type.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && type.args.size == 1
+
+    /** `size(xs) <op> k`: sequences of the lengths either side of the flip. */
+    private fun sizeComparison(
+        left: TypedExpr,
+        right: TypedExpr,
+        op: String,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+    ): List<Map<String, Pinned>>? {
+        val (path, other, effectiveOp) = sizeOf(left, params, byHash)?.let { Triple(it, right, op) }
+            ?: sizeOf(right, params, byHash)?.let { Triple(it, left, MIRROR.getValue(op)) }
+            ?: return null
+        val k = knownValue(other, byHash) as? Known.IntValue ?: return emptyList()
+        val elem = (typeAt(path, params) as? MezzeType.TypeApplication)?.args?.single() ?: return emptyList()
+        val where = "size(${path.label}) ${SYMBOL.getValue(effectiveOp)} ${k.describe()}"
+        return intBoundary(k.value, effectiveOp)
+            // A length is never negative, and one past MAX_PINNED_LENGTH is a value
+            // nobody reads in a table — that branch is left to the draws.
+            .filter { (n, _) -> n in 0..MAX_PINNED_LENGTH }
+            .mapNotNull { (n, holds) ->
+                val leaf = seqOfLength(n.toInt(), elem)
+                placeAt(path, params, leaf)?.copy(why = "if $where — ${verdict(holds)}")
+            }
+            .map { mapOf(path.param to it) }
+    }
+
+    /**
+     * `is_empty(xs)` anywhere in the body: one empty sequence, one with an element.
+     * The emptiness test is a branch in its own right whether or not it sits in an
+     * `if`, and the empty case is the one a sized draw reaches least often.
+     */
+    private fun emptiness(
+        expr: TypedExpr,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+    ): List<Map<String, Pinned>> {
+        val path = sizeOf(expr, params, byHash, SEQ_IS_EMPTY, "is_empty") ?: return emptyList()
+        val elem = (typeAt(path, params) as? MezzeType.TypeApplication)?.args?.single() ?: return emptyList()
+        return listOf(0 to true, 1 to false).mapNotNull { (n, holds) ->
+            placeAt(path, params, seqOfLength(n, elem))
+                ?.copy(why = "is_empty(${path.label}) — ${if (holds) "empty" else "not empty"}")
+        }.map { mapOf(path.param to it) }
+    }
+
+    /** A sequence literal of exactly [n] drawn elements. */
+    private fun seqOfLength(n: Int, elem: MezzeType): Pinned =
+        if (n == 0) Pinned("[]", draws = false)
+        else Pinned((1..n).joinToString(", ", prefix = "[", postfix = "]") { SampleGen.of(elem) }, draws = true)
+
+    /** The type at [path] within its parameter. */
+    private fun typeAt(path: Path, params: Map<String, MezzeType>): MezzeType? {
+        var t = params[path.param] ?: return null
+        for (f in path.fields) t = (t as? MezzeType.RecordType)?.fields?.get(f) ?: return null
+        return t
+    }
 
     // ── two parameters ────────────────────────────────────────────────────────
 
@@ -607,6 +716,11 @@ object SampleBranches {
 
     private val COMPARISONS = setOf("gt", "ge", "lt", "le", "eq", "neq")
     private val ARITHMETIC = setOf("add", "sub", "mul", "div")
+    private const val SEQ_SIZE = "__native_seq_size"
+    private const val SEQ_IS_EMPTY = "__native_seq_is_empty"
+
+    /** Longest sequence written out as a pinned row — past it, a row is unreadable. */
+    private const val MAX_PINNED_LENGTH = 16L
     private val MIRROR = mapOf("gt" to "lt", "lt" to "gt", "ge" to "le", "le" to "ge", "eq" to "eq", "neq" to "neq")
     private val SYMBOL = mapOf("gt" to ">", "ge" to ">=", "lt" to "<", "le" to "<=", "eq" to "==", "neq" to "!=")
 
