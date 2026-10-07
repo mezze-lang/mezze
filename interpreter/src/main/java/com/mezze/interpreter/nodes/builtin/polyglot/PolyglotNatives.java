@@ -1083,6 +1083,16 @@ public final class PolyglotNatives {
     }
 
     @TruffleBoundary
+    public static MezzeVariant toStrSeq(MezzeRecord args) {
+        return toScalarSeq(args, (lib, v) -> lib.asString(v));
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant toBoolSeq(MezzeRecord args) {
+        return toScalarSeq(args, (lib, v) -> lib.asBoolean(v));
+    }
+
+    @TruffleBoundary
     private static MezzeVariant toScalarSeq(MezzeRecord args, ScalarCoerce coerce) {
         MezzeForeign f = asForeign(args);
         if (f.isErrored()) return carriedErr(f);

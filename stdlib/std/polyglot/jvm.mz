@@ -111,6 +111,9 @@ impl JvmForeign where {
   ## one boundary hit per element.
   to_ints   = { it } -> perform Runtime in Polyglot.to_int_seq   { on = it },
   to_floats = { it } -> perform Runtime in Polyglot.to_float_seq { on = it },
+  ## Bulk-drain a STRING / BOOLEAN array to a Mezze `[Str]` / `[Bool]` in ONE crossing.
+  to_strs   = { it } -> perform Runtime in Polyglot.to_str_seq   { on = it },
+  to_bools  = { it } -> perform Runtime in Polyglot.to_bool_seq  { on = it },
   ## Coerce a numeric Foreign to Int.
   int       = { it } -> perform Runtime in Polyglot.as_int    { on = it },
   ## Coerce a numeric Foreign to Float.
@@ -155,6 +158,10 @@ pub let jvm_ints:   { vals: [Int] }   -> JvmForeign = { vals } ->
   __native_polyglot_box_int_seq   { vals = vals, lang = "jvm" }
 pub let jvm_floats: { vals: [Float] } -> JvmForeign = { vals } ->
   __native_polyglot_box_float_seq { vals = vals, lang = "jvm" }
+pub let jvm_strs:   { vals: [Str] }   -> JvmForeign = { vals } ->
+  __native_polyglot_box_str_seq   { vals = vals, lang = "jvm" }
+pub let jvm_bools:  { vals: [Bool] }  -> JvmForeign = { vals } ->
+  __native_polyglot_box_bool_seq  { vals = vals, lang = "jvm" }
 
 ## Build a Java-visible mapping from parallel key and value sequences. Companion
 ## to `jvm_list`, backing a codec's `encode_mapping` / `encode_record`. Keys keep the

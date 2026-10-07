@@ -94,6 +94,8 @@ effect Polyglot having 'f where {
   ## over element-by-element `read_array` + `as_int`/`as_float`.
   to_int_seq:    { on: 'f }                         -> Result [Int] InteropError <Polyglot>,
   to_float_seq:  { on: 'f }                         -> Result [Float] InteropError <Polyglot>,
+  to_str_seq:    { on: 'f }                         -> Result [Str] InteropError <Polyglot>,
+  to_bool_seq:   { on: 'f }                         -> Result [Bool] InteropError <Polyglot>,
   as_int:        { on: 'f }                         -> Result Int InteropError <Polyglot>,
   as_float:      { on: 'f }                         -> Result Float InteropError <Polyglot>,
   as_str:        { on: 'f }                         -> Result Str InteropError <Polyglot>,
@@ -132,6 +134,8 @@ effect Polyglot having 'f where {
   ## `box_float` crossings a `box_list` of wrapped foreigns would cost.
   box_int_seq:   { vals: [Int], lang: Str }         -> 'f <Polyglot>,
   box_float_seq: { vals: [Float], lang: Str }       -> 'f <Polyglot>,
+  box_str_seq:   { vals: [Str], lang: Str }         -> 'f <Polyglot>,
+  box_bool_seq:  { vals: [Bool], lang: Str }        -> 'f <Polyglot>,
 
   ## ---- sandboxed inner contexts ----
   # Open a configured INNER context (isolated globals + access restricted BELOW the
@@ -172,6 +176,8 @@ impl Polyglot for Runtime having 'f = 'g where {
   to_seq        = { on }             -> __native_polyglot_to_seq        { val = on },
   to_int_seq    = { on }             -> __native_polyglot_to_int_seq    { val = on },
   to_float_seq  = { on }             -> __native_polyglot_to_float_seq  { val = on },
+  to_str_seq    = { on }             -> __native_polyglot_to_str_seq    { val = on },
+  to_bool_seq   = { on }             -> __native_polyglot_to_bool_seq   { val = on },
   as_int        = { on }             -> __native_polyglot_as_long       { val = on },
   as_float      = { on }             -> __native_polyglot_as_double     { val = on },
   as_str        = { on }             -> __native_polyglot_as_string     { val = on },
@@ -194,6 +200,8 @@ impl Polyglot for Runtime having 'f = 'g where {
   box_dict      = { keys, vals, lang } -> __native_polyglot_box_dict    { keys = keys, vals = vals, lang = lang },
   box_int_seq   = { vals, lang }     -> __native_polyglot_box_int_seq   { vals = vals, lang = lang },
   box_float_seq = { vals, lang }     -> __native_polyglot_box_float_seq { vals = vals, lang = lang },
+  box_str_seq   = { vals, lang }     -> __native_polyglot_box_str_seq   { vals = vals, lang = lang },
+  box_bool_seq  = { vals, lang }     -> __native_polyglot_box_bool_seq  { vals = vals, lang = lang },
 
   open_context  = { lang, config } -> __native_polyglot_open_context {
     lang = lang, allow_io = config.allow_io, allow_native = config.allow_native,

@@ -4427,6 +4427,10 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.toIntSeq(r));
         HANDLERS.put("__native_polyglot_to_float_seq",
             (r, c) -> PolyglotNatives.toFloatSeq(r));
+        HANDLERS.put("__native_polyglot_to_str_seq",
+            (r, c) -> PolyglotNatives.toStrSeq(r));
+        HANDLERS.put("__native_polyglot_to_bool_seq",
+            (r, c) -> PolyglotNatives.toBoolSeq(r));
 
         // Execution
         HANDLERS.put("__native_polyglot_is_executable",
@@ -4477,6 +4481,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_polyglot_box_int_seq",
             (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
         HANDLERS.put("__native_polyglot_box_float_seq",
+            (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_str_seq",
+            (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
+        HANDLERS.put("__native_polyglot_box_bool_seq",
             (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
 
         // Binary guest entry + bulk byte-buffer access + narrow-int boxing — the

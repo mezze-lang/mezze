@@ -683,6 +683,39 @@ class PolyglotCoreTest {
     }
 
     @Test
+    fun `bulk scalar round-trip - jvm_strs boxes and to_strs drains a whole seq`() {
+        // #11 extended to Str: the same generic drain (asString host-side) + box.
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            match jvm::jvm_strs { vals = ["x", "y"] }.to_strs {} is
+              Ok { val = xs } -> match xs is
+                [a, b] -> "$(a)-$(b)"
+                _      -> "?"
+              Err { error = _ } -> "err"
+            """.trimIndent()
+        )
+        assertEquals("x-y", result)
+    }
+
+    @Test
+    fun `bulk scalar round-trip - jvm_bools boxes and to_bools drains a whole seq`() {
+        // #11 extended to Bool (asBoolean). Encode both elements as an Int so a
+        // mis-ordered / wrong-valued round-trip yields a different number: [True,False] = 2.
+        val result = eval(
+            """
+            use std::polyglot::jvm as jvm
+            match jvm::jvm_bools { vals = [True, False] }.to_bools {} is
+              Ok { val = xs } -> match xs is
+                [a, b] -> (if a then 2 else 0) + (if b then 1 else 0)
+                _      -> 0 - 1
+              Err { error = _ } -> 0 - 2
+            """.trimIndent()
+        )
+        assertEquals(2L, MezzeTestHelper.asLong(result))
+    }
+
+    @Test
     fun `open_context on an unavailable language yields an errored foreign`() {
         // Guest-language sandbox ENFORCEMENT (allow_io=false blocking IO) is proven
         // via the CLI + a real provider — no guest language is on the unit-test
