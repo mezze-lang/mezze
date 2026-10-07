@@ -326,7 +326,7 @@ class SampleCommand {
         val plan = SampleGen.bindFields(
             target.fields,
             args,
-            pin = { field -> target.branches[field]?.getOrNull(row)?.let { SampleBranches.construct(it) } },
+            pin = { field -> target.branches[field]?.getOrNull(row) },
         ) {
             com.mezze.language.ast.prettyPrintType(it)
         }
@@ -366,17 +366,22 @@ class SampleCommand {
         else rowBinding(target, 0, 0, 0).decls.distinct()
 
     private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
-        val headers = target.fieldNames + "→ result"
-        val body = rows.map { outcome ->
+        // A pinned row says WHICH branch it was built to reach. Without it, a row
+        // with `n = 101` reads as a coincidence; with it, as the `then` side of
+        // `n > max_value (= 100)`. Shown only when some row is pinned.
+        val showWhy = target.branches.isNotEmpty()
+        val headers = target.fieldNames + "→ result" + (if (showWhy) listOf("why") else emptyList())
+        val body = rows.mapIndexed { i, outcome ->
+            val why = if (showWhy) listOf(SampleBranches.why(target.branches, i) ?: "") else emptyList()
             when (outcome) {
                 is RowOutcome.Ran -> {
                     val args = (outcome.args as? WireValue.Record)?.fields
                     target.fieldNames.map { f ->
                         oneLine(args?.firstOrNull { it.name == f }?.value?.toText() ?: "?")
-                    } + oneLine(outcome.result?.toText() ?: "?")
+                    } + oneLine(outcome.result?.toText() ?: "?") + why
                 }
                 is RowOutcome.Crashed ->
-                    target.fieldNames.map { "—" } + "${Glyphs.CROSS} ${oneLine(brief(outcome.reason))}"
+                    target.fieldNames.map { "—" } + "${Glyphs.CROSS} ${oneLine(brief(outcome.reason))}" + why
             }
         }
 

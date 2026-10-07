@@ -32,7 +32,7 @@ object SampleTarget {
              * rather than guessed at. Empty for a function that matches on nothing.
              * See [SampleBranches].
              */
-            val branches: Map<String, List<SampleBranches.Arm>> = emptyMap(),
+            val branches: Map<String, List<SampleBranches.Pinned>> = emptyMap(),
         ) : Result {
             val fieldNames: List<String> get() = fields.keys.toList()
             /** Rows that can be pinned to an arm — the longest arm list. */
@@ -126,7 +126,7 @@ object SampleTarget {
         // S-21: the function's own `match` arms are the list of shapes worth
         // generating. Read here because this is where the typed declaration is in
         // hand; the command turns them into pinned rows.
-        return Result.Ready(declName, fields, SampleBranches.inventory(decl, fields.keys))
+        return Result.Ready(declName, fields, SampleBranches.inventory(decl, fields.keys, decls))
     }
 
     /**
