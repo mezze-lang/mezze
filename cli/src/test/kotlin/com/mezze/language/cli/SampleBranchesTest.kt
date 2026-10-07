@@ -407,4 +407,50 @@ class SampleBranchesTest {
             """, "f")["n"],
         )
     }
+
+    // ── constants that need evaluating ────────────────────────────────────────
+
+    private val viaCall = """
+        let compute = { x: Int } -> x * 2
+        let limit = compute { x = 21 }
+        pub let f = { n: Int } -> n > limit
+    """
+
+    private fun typed(source: String): Pair<TypedLetDecl, List<TypedLetDecl>> {
+        val parsed = MezzeParser().parseParsedModule(source.trimIndent(), "test.mz")
+        val success = TypeChecker().checkParsedModule(parsed, Paths.get("."), currentModulePath = null)
+            as TypeChecker.TypeCheckResult.Success
+        val decls = success.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
+        return decls.single { it.name == "f" } to decls
+    }
+
+    /** Folding cannot see through a call, so the constant is reported for evaluation. */
+    @Test
+    fun `a constant defined by a call is reported as needing evaluation`() {
+        val (f, decls) = typed(viaCall)
+        assertEquals(listOf("limit"), SampleBranches.unresolvedConstants(f, decls).map { it.name })
+    }
+
+    /** A foldable constant is NOT reported — no round-trip for what folding already knows. */
+    @Test
+    fun `a foldable constant is not reported`() {
+        val (f, decls) = typed("""
+            let limit = 6 * 7
+            pub let f = { n: Int } -> n > limit
+        """)
+        assertEquals(emptyList<String>(), SampleBranches.unresolvedConstants(f, decls).map { it.name })
+    }
+
+    /** Given the evaluated value, the branch is pinned exactly as a literal would be. */
+    @Test
+    fun `an evaluated constant is used like a literal`() {
+        val (f, decls) = typed(viaCall)
+        val limit = decls.single { it.name == "limit" }
+        val fields = ((f.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
+        val rows = SampleBranches.inventory(f, fields, decls, evaluated = mapOf(limit.hash to 42L))
+        assertEquals(
+            listOf("42 | if n > limit (= 42) — else", "43 | if n > limit (= 42) — then"),
+            rows.map { r -> r.pins.getValue("n").let { "${it.source} | ${it.why}" } },
+        )
+    }
 }

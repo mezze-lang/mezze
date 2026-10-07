@@ -108,6 +108,13 @@ object SampleBranches {
          * constant imported from another module resolve like a local one.
          */
         imported: List<TypedLetDecl> = emptyList(),
+        /**
+         * Values of constants that folding could not resolve, EVALUATED by the
+         * interpreter — see [unresolvedConstants]. Each replaces its declaration's
+         * body with the literal, for the purposes of this analysis only, so every
+         * reader of constants picks it up unchanged.
+         */
+        evaluated: Map<com.mezze.language.typedast.Hash, Long> = emptyMap(),
     ): List<Row> {
         val wanted = mutableListOf<Map<String, Pinned>>()
         fun want(req: Map<String, Pinned>) {
@@ -115,7 +122,11 @@ object SampleBranches {
             val key = req.mapValues { it.value.source }
             if (wanted.none { w -> w.mapValues { it.value.source } == key }) wanted.add(req)
         }
-        val byHash = (imported + decls).associateBy { it.hash }
+        val byHash = (imported + decls).associateBy { it.hash }.toMutableMap()
+        for ((hash, value) in evaluated) {
+            val d = byHash[hash] ?: continue
+            byHash[hash] = d.copy(value = TypedIntLit(value, MezzeType.IntType, d.loc))
+        }
         val locals = blockLocals(decl.value, params.keys)
 
         walk(decl.value) { expr ->
@@ -132,6 +143,30 @@ object SampleBranches {
             }
         }
         return pack(wanted)
+    }
+
+    /**
+     * This module's top-level `Int` constants that the body refers to and that
+     * folding cannot resolve — `let limit = compute { x = 21 }`.
+     *
+     * Their values are knowable without guessing: a top-level value cannot perform
+     * effects (V0502), so evaluating it is deterministic and touches nothing. The
+     * command evaluates these with the interpreter itself — so the value is exactly
+     * what the program sees — and passes them back as `evaluated`.
+     *
+     * Only this module's constants: generated source refers to them by name, and a
+     * name is unambiguous only in the module that declares it.
+     */
+    fun unresolvedConstants(decl: TypedLetDecl, decls: List<TypedLetDecl>): List<TypedLetDecl> {
+        val local = decls.associateBy { it.hash }
+        val out = linkedMapOf<com.mezze.language.typedast.Hash, TypedLetDecl>()
+        walk(decl.value) { e ->
+            val ref = ((e as? TypedVar)?.binding as? BindingRef.ByHash)?.hash ?: return@walk
+            val target = local[ref] ?: return@walk
+            if (target.scheme.type !is MezzeType.IntType) return@walk
+            if (knownValue(e, local) == null) out[ref] = target
+        }
+        return out.values.toList()
     }
 
     /**

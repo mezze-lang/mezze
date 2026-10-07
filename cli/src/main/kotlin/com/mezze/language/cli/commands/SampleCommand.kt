@@ -72,7 +72,7 @@ class SampleCommand {
                 System.err.println(t.message)
                 kotlin.system.exitProcess(1)
             }
-            is SampleTarget.Result.Ready -> t
+            is SampleTarget.Result.Ready -> withEvaluatedConstants(currentDir, moduleFile, t)
         }
 
         val expression = buildExpression(target, seed, count)
@@ -144,6 +144,38 @@ class SampleCommand {
      * draw, so wrapping it would declare a `<Sample>` the body never performs and be
      * rejected for exactly that.
      */
+    /**
+     * Evaluate the constants the analysis could not fold — `let limit = compute
+     * { x = 21 }` — with the interpreter, then re-run the analysis with their values.
+     *
+     * One extra round-trip for all of them, as a single record `{ c0 = limit, … }`.
+     * A top-level value cannot perform effects (V0502), so this touches nothing and
+     * gives the value the program itself will see. Bounded by a short timeout; on
+     * any failure — the constant crashes, loops, or is not an `Int` — the target is
+     * returned unchanged and those branches simply keep their ordinary draws.
+     */
+    private fun withEvaluatedConstants(
+        currentDir: File,
+        moduleFile: File,
+        target: SampleTarget.Result.Ready,
+    ): SampleTarget.Result.Ready {
+        if (target.unresolved.isEmpty()) return target
+        val expression = target.unresolved.indices.joinToString(", ", prefix = "{ ", postfix = " }") { i ->
+            "c$i = ${target.unresolved[i].name}"
+        }
+        val compiled = EvalClosure.compile(currentDir, moduleFile, expression)
+            as? EvalClosure.Result.Compiled ?: return target
+        val result = runExpression(currentDir, compiled, depth = 4, items = 64, timeoutMs = CONSTANT_TIMEOUT_MS)
+        val fields = (result?.value as? WireValue.Record)?.fields ?: return target
+        val evaluated = target.unresolved.mapIndexedNotNull { i, decl ->
+            val v = fields.firstOrNull { it.name == "c$i" }?.value as? WireValue.Scalar ?: return@mapIndexedNotNull null
+            if (v.kind != WireValue.Scalar.Kind.INT) return@mapIndexedNotNull null
+            v.text.toLongOrNull()?.let { decl.hash to it }
+        }.toMap()
+        if (evaluated.isEmpty()) return target
+        return target.copy(branches = target.reanalyze(evaluated))
+    }
+
     /** What one row produced: its values, or the reason it died. */
     internal sealed interface RowOutcome {
         data class Ran(val args: WireValue?, val result: WireValue?) : RowOutcome
@@ -510,6 +542,9 @@ class SampleCommand {
     }
 
     private companion object {
+        /** A constant that takes longer than this to evaluate is left unresolved. */
+        const val CONSTANT_TIMEOUT_MS = 5_000L
+
         /**
          * The binding the generated record uses. Not a name a user could collide
          * with: it is spliced into their module's scope, where a clash would report

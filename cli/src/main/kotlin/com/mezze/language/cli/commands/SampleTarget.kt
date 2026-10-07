@@ -33,6 +33,13 @@ object SampleTarget {
              * See [SampleBranches].
              */
             val branches: List<SampleBranches.Row> = emptyList(),
+            /**
+             * Constants the analysis could not resolve by folding, for the command
+             * to evaluate — and how to re-run the analysis once it has their values.
+             * See [SampleBranches.unresolvedConstants].
+             */
+            val unresolved: List<TypedLetDecl> = emptyList(),
+            val reanalyze: (Map<com.mezze.language.typedast.Hash, Long>) -> List<SampleBranches.Row> = { branches },
         ) : Result {
             val fieldNames: List<String> get() = fields.keys.toList()
             /** Rows that can be pinned to an arm — the longest arm list. */
@@ -126,12 +133,16 @@ object SampleTarget {
         // S-21: the function's own `match` arms are the list of shapes worth
         // generating. Read here because this is where the typed declaration is in
         // hand; the command turns them into pinned rows.
-        return Result.Ready(declName, fields, SampleBranches.inventory(
-            decl, fields, decls,
-            imported = success.loadedModules.values
-                .flatMap { it.typedModule?.decls.orEmpty() }
-                .filterIsInstance<TypedLetDecl>(),
-        ))
+        val imported = success.loadedModules.values
+            .flatMap { it.typedModule?.decls.orEmpty() }
+            .filterIsInstance<TypedLetDecl>()
+        return Result.Ready(
+            declName,
+            fields,
+            SampleBranches.inventory(decl, fields, decls, imported),
+            unresolved = SampleBranches.unresolvedConstants(decl, decls),
+            reanalyze = { evaluated -> SampleBranches.inventory(decl, fields, decls, imported, evaluated) },
+        )
     }
 
     /**
