@@ -7,6 +7,8 @@ import com.mezze.language.typedast.TypedMatch
 import com.mezze.language.typedast.TypedVar
 import com.mezze.language.typedast.TypedVariantPattern
 import com.mezze.language.typedast.BindingRef
+import com.mezze.language.typedast.TypedBlock
+import com.mezze.language.typedast.TypedStatement
 import com.mezze.language.typedast.TypedCall
 import com.mezze.language.typedast.TypedFieldAccess
 import com.mezze.language.typedast.TypedIntLit
@@ -95,7 +97,7 @@ object SampleBranches {
      */
     fun inventory(
         decl: TypedLetDecl,
-        fieldNames: Set<String>,
+        params: Map<String, MezzeType>,
         decls: List<TypedLetDecl> = emptyList(),
     ): Map<String, List<Pinned>> {
         val found = linkedMapOf<String, MutableList<Pinned>>()
@@ -104,11 +106,12 @@ object SampleBranches {
             if (list.none { it.source == pinned.source }) list.add(pinned)
         }
         val byHash = decls.associateBy { it.hash }
+        val locals = blockLocals(decl.value, params.keys)
 
         walk(decl.value) { expr ->
             when (expr) {
-                is TypedMatch -> matchArms(expr, fieldNames).forEach { (f, p) -> add(f, p) }
-                is TypedCall -> comparison(expr, fieldNames, byHash)?.let { (f, ps) -> ps.forEach { add(f, it) } }
+                is TypedMatch -> matchArms(expr, params).forEach { (f, p) -> add(f, p) }
+                is TypedCall -> comparison(expr, params, byHash, locals)?.let { (f, ps) -> ps.forEach { add(f, it) } }
                 else -> Unit
             }
         }
@@ -122,11 +125,9 @@ object SampleBranches {
 
     // ── match arms ────────────────────────────────────────────────────────────
 
-    private fun matchArms(match: TypedMatch, fieldNames: Set<String>): List<Pair<String, Pinned>> {
-        // A Mezze function destructures its parameter record into locals, so a
-        // match ON a parameter reads as a plain variable of that field's name.
-        val scrutinee = match.scrutinee as? TypedVar ?: return emptyList()
-        if (scrutinee.name !in fieldNames) return emptyList()
+    private fun matchArms(match: TypedMatch, params: Map<String, MezzeType>): List<Pair<String, Pinned>> {
+        // The scrutinee is a parameter, or a field path into one (`match p.shape`).
+        val path = pathOf(match.scrutinee, params) ?: return emptyList()
         val ctors = (match.scrutinee.type as? MezzeType.VariantType)?.constructors ?: return emptyList()
         val out = mutableListOf<Pair<String, Pinned>>()
         for (case in match.cases) {
@@ -136,7 +137,8 @@ object SampleBranches {
                 // payload maps to null, and that is exactly the case to keep.
                 if (!ctors.containsKey(tag)) continue
                 val built = construct(Arm(tag, ctors[tag]))
-                out.add(scrutinee.name to built.copy(why = "match ${scrutinee.name} — `$tag` arm"))
+                val placed = placeAt(path, params, built) ?: continue
+                out.add(path.param to placed.copy(why = "match ${path.label} — `$tag` arm"))
             }
         }
         return out
@@ -173,8 +175,9 @@ object SampleBranches {
      */
     private fun comparison(
         call: TypedCall,
-        fieldNames: Set<String>,
+        params: Map<String, MezzeType>,
         byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr> = emptyMap(),
     ): Pair<String, List<Pinned>>? {
         val op = (call.function as? TypedFieldAccess)?.field ?: return null
         if (op !in COMPARISONS) return null
@@ -186,21 +189,23 @@ object SampleBranches {
 
         // Either side may hold the parameter. `k < n` is `n > k` seen from `n`, so
         // the operator is MIRRORED rather than read as written.
-        val (param, other, effectiveOp) = when {
-            isParam(left, fieldNames) -> Triple(left as TypedVar, right, op)
-            isParam(right, fieldNames) -> Triple(right as TypedVar, left, MIRROR.getValue(op))
-            else -> return null
+        val leftPath = pathOf(left, params)
+        val rightPath = pathOf(right, params)
+        val (path, other, effectiveOp) = when {
+            leftPath != null -> Triple(leftPath, right, op)
+            rightPath != null -> Triple(rightPath, left, MIRROR.getValue(op))
+            else -> return derivedComparison(left, right, op, params, byHash, locals)
         }
         val known = knownValue(other, byHash) ?: return null
         val shown = known.describe()
-        val where = "${param.name} ${SYMBOL.getValue(effectiveOp)} $shown"
-        val pins = when (known) {
+        val where = "${path.label} ${SYMBOL.getValue(effectiveOp)} $shown"
+        val leaves = when (known) {
             is Known.IntValue -> intBoundary(known.value, effectiveOp)
                 .map { (v, holds) -> Pinned(v.toString(), draws = false, why = "if $where — ${verdict(holds)}") }
             is Known.StrValue -> strBoundary(known.value, effectiveOp)
                 .map { (v, holds) -> Pinned(strLiteral(v), draws = false, why = "if $where — ${verdict(holds)}") }
         }
-        return param.name to pins
+        return path.param to leaves.mapNotNull { leaf -> placeAt(path, params, leaf)?.copy(why = leaf.why) }
     }
 
     /** A compile-time value, with how it should read in a row's reason. */
@@ -321,8 +326,189 @@ object SampleBranches {
     private fun Long.safeInc(): Long? = if (this == Long.MAX_VALUE) null else this + 1
     private fun Long.safeDec(): Long? = if (this == Long.MIN_VALUE) null else this - 1
 
-    private fun isParam(expr: TypedExpr, fieldNames: Set<String>): Boolean =
-        expr is TypedVar && expr.name in fieldNames && expr.binding is BindingRef.Local
+    // ── derived values ────────────────────────────────────────────────────────
+
+    /**
+     * `a * x + b` where `x` is the Int at a parameter path. What a comparison side
+     * reduces to when it is computed FROM a parameter — `let m = n * 2` then
+     * `m > 10` — rather than being the parameter itself.
+     */
+    private data class Linear(val path: Path, val a: Long, val b: Long, val shown: String) {
+        fun at(x: Long): Long? = try { Math.addExact(Math.multiplyExact(a, x), b) } catch (_: ArithmeticException) { null }
+    }
+
+    /**
+     * Every `let` bound inside a `do` block of the function, by name — the
+     * definitions a derived comparison side is read back through.
+     *
+     * A name bound MORE THAN ONCE, or one that shadows a parameter, is left out:
+     * which binding a given use refers to is then a scoping question this does not
+     * answer, and reading the wrong one would pin the wrong side of the branch.
+     */
+    private fun blockLocals(root: TypedExpr, paramNames: Set<String>): Map<String, TypedExpr> {
+        val seen = mutableMapOf<String, TypedExpr>()
+        val ambiguous = mutableSetOf<String>()
+        walk(root) { e ->
+            if (e is TypedBlock) for (st in e.statements) {
+                if (st !is TypedStatement.Let) continue
+                if (st.name in seen || st.name in paramNames) ambiguous.add(st.name) else seen[st.name] = st.value
+            }
+        }
+        return seen - ambiguous
+    }
+
+    /** [expr] as linear in one parameter path, through `+ - *` with known values and through locals. */
+    private fun linearOf(
+        expr: TypedExpr,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+        depth: Int = 0,
+    ): Linear? {
+        if (depth > MAX_CONSTANT_CHAIN || expr.type !is MezzeType.IntType) return null
+        pathOf(expr, params)?.let { return Linear(it, 1, 0, it.label) }
+        if (expr is TypedVar && expr.binding is BindingRef.Local) {
+            val def = locals[expr.name] ?: return null
+            return linearOf(def, params, byHash, locals, depth + 1)
+        }
+        val call = expr as? TypedCall ?: return null
+        val op = (call.function as? TypedFieldAccess)?.field ?: return null
+        if (op !in setOf("add", "sub", "mul")) return null
+        val args = (call.arg as? TypedRecord)?.entries
+            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return null
+        val l = args["it"] ?: return null
+        val r = args["r"] ?: return null
+        val sym = mapOf("add" to "+", "sub" to "-", "mul" to "*").getValue(op)
+        return try {
+            val ll = linearOf(l, params, byHash, locals, depth + 1)
+            val rl = linearOf(r, params, byHash, locals, depth + 1)
+            val lk = (knownValue(l, byHash) as? Known.IntValue)?.value
+            val rk = (knownValue(r, byHash) as? Known.IntValue)?.value
+            when {
+                ll != null && rk != null -> when (op) {
+                    "add" -> Linear(ll.path, ll.a, Math.addExact(ll.b, rk), "${ll.shown} $sym $rk")
+                    "sub" -> Linear(ll.path, ll.a, Math.subtractExact(ll.b, rk), "${ll.shown} $sym $rk")
+                    else -> if (rk == 0L) null
+                        else Linear(ll.path, Math.multiplyExact(ll.a, rk), Math.multiplyExact(ll.b, rk), "${grouped(ll.shown)} $sym $rk")
+                }
+                rl != null && lk != null -> when (op) {
+                    "add" -> Linear(rl.path, rl.a, Math.addExact(rl.b, lk), "$lk $sym ${rl.shown}")
+                    "sub" -> Linear(rl.path, Math.negateExact(rl.a), Math.subtractExact(lk, rl.b), "$lk $sym ${grouped(rl.shown)}")
+                    else -> if (lk == 0L) null
+                        else Linear(rl.path, Math.multiplyExact(rl.a, lk), Math.multiplyExact(rl.b, lk), "$lk $sym ${grouped(rl.shown)}")
+                }
+                // Two parameter-dependent sides, or nothing known: not linear in ONE path.
+                else -> null
+            }
+        } catch (_: ArithmeticException) {
+            null
+        }
+    }
+
+    /**
+     * A comparison where one side is DERIVED from a parameter and the other is
+     * known: solve for the parameter values either side of the flip.
+     *
+     * Rather than dividing — which loses exactness for `a != ±1` and sign for
+     * `a < 0` — this evaluates the candidates around `(k - b) / a` and keeps the
+     * first adjacent pair on which the comparison disagrees. For `==` with no
+     * integer solution (`2 * n == 7`) there is no such pair, and only the side
+     * that is reachable is pinned.
+     */
+    private fun derivedComparison(
+        left: TypedExpr,
+        right: TypedExpr,
+        op: String,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+    ): Pair<String, List<Pinned>>? {
+        val (lin, other, effectiveOp, sideLabel) = run {
+            val l = linearOf(left, params, byHash, locals)
+            if (l != null) return@run Quad(l, right, op, describeSide(left).takeIf { it != "…" } ?: l.shown)
+            val r = linearOf(right, params, byHash, locals) ?: return null
+            Quad(r, left, MIRROR.getValue(op), describeSide(right).takeIf { it != "…" } ?: r.shown)
+        }
+        val k = (knownValue(other, byHash) as? Known.IntValue) ?: return null
+        val center = try { Math.floorDiv(Math.subtractExact(k.value, lin.b), lin.a) } catch (_: ArithmeticException) { return null }
+        val xs = (-2L..3L).mapNotNull { d -> try { Math.addExact(center, d) } catch (_: ArithmeticException) { null } }
+        val results = xs.mapNotNull { x -> lin.at(x)?.let { v -> x to holds(v.compareTo(k.value), effectiveOp) } }
+        val where = "$sideLabel ${SYMBOL.getValue(effectiveOp)} ${k.describe()}"
+        val via = if (sideLabel == lin.shown) "" else " ($sideLabel = ${lin.shown})"
+        fun pin(x: Long, h: Boolean): Pinned? =
+            placeAt(lin.path, params, Pinned(x.toString(), draws = false))
+                ?.copy(why = "if $where — ${verdict(h)}$via")
+        val flip = results.zipWithNext().firstOrNull { (p, q) -> p.second != q.second }
+        val pins = if (flip != null) {
+            listOfNotNull(pin(flip.first.first, flip.first.second), pin(flip.second.first, flip.second.second))
+        } else {
+            results.firstOrNull()?.let { (x, h) -> listOfNotNull(pin(x, h)) } ?: emptyList()
+        }
+        return lin.path.param to pins
+    }
+
+    /** Parenthesise a shown sum before multiplying or subtracting it, so the text means what was computed. */
+    private fun grouped(shown: String): String = if (" + " in shown || " - " in shown) "($shown)" else shown
+
+    private data class Quad(val lin: Linear, val other: TypedExpr, val op: String, val label: String)
+
+    /** How a derived side reads in a reason: the local's name, or the path. */
+    private fun describeSide(expr: TypedExpr): String = when (expr) {
+        is TypedVar -> expr.name
+        is TypedFieldAccess -> describeSide(expr.record) + "." + expr.field
+        else -> "…"
+    }
+
+    // ── paths ─────────────────────────────────────────────────────────────────
+
+    /** A parameter, followed by the fields reached through it: `p.shape.r`. */
+    private data class Path(val param: String, val fields: List<String>) {
+        val label: String get() = (listOf(param) + fields).joinToString(".")
+    }
+
+    /**
+     * The parameter path [expr] reads, if it reads one: a bare parameter, or a
+     * chain of field accesses rooted at one. A Mezze function destructures its
+     * parameter record into locals, so a parameter reads as a LOCAL variable of
+     * that field's name.
+     */
+    private fun pathOf(expr: TypedExpr, params: Map<String, MezzeType>): Path? = when (expr) {
+        is TypedVar ->
+            if (expr.name in params && expr.binding is BindingRef.Local) Path(expr.name, emptyList()) else null
+        is TypedFieldAccess -> pathOf(expr.record, params)?.let { it.copy(fields = it.fields + expr.field) }
+        else -> null
+    }
+
+    /**
+     * The whole parameter value with [leaf] placed at [path], every other field
+     * drawn as usual — so `p.x > 0` pins `p = { x = 1, y = <draw> }`: the field the
+     * branch reads is fixed and the rest still varies.
+     *
+     * Null when the path goes through a type this cannot write out field by field
+     * (anything that is not a record); that branch is then left to the draws.
+     */
+    private fun placeAt(path: Path, params: Map<String, MezzeType>, leaf: Pinned): Pinned? {
+        fun build(type: MezzeType, rest: List<String>): Pinned? {
+            if (rest.isEmpty()) return leaf
+            val record = type as? MezzeType.RecordType ?: return null
+            val target = rest.first()
+            if (target !in record.fields) return null
+            var draws = false
+            val parts = record.fields.entries.map { (name, fieldType) ->
+                if (name == target) {
+                    val inner = build(fieldType, rest.drop(1)) ?: return null
+                    if (inner.draws) draws = true
+                    "$name = ${inner.source}"
+                } else {
+                    draws = true
+                    "$name = ${SampleGen.of(fieldType)}"
+                }
+            }
+            return Pinned(parts.joinToString(", ", prefix = "{ ", postfix = " }"), draws)
+        }
+        val root = params[path.param] ?: return null
+        return build(root, path.fields)
+    }
 
     private fun isPrimitive(type: MezzeType): Boolean =
         type is MezzeType.IntType || type is MezzeType.StringType

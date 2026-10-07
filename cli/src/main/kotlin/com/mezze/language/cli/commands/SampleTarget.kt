@@ -126,7 +126,7 @@ object SampleTarget {
         // S-21: the function's own `match` arms are the list of shapes worth
         // generating. Read here because this is where the typed declaration is in
         // hand; the command turns them into pinned rows.
-        return Result.Ready(declName, fields, SampleBranches.inventory(decl, fields.keys, decls))
+        return Result.Ready(declName, fields, SampleBranches.inventory(decl, fields, decls))
     }
 
     /**
