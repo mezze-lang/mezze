@@ -6,6 +6,8 @@ import com.mezze.language.typedast.TypedLetDecl
 import com.mezze.language.typedast.TypedMatch
 import com.mezze.language.typedast.TypedVar
 import com.mezze.language.typedast.TypedVariantPattern
+import com.mezze.language.typedast.TypedRecordPattern
+import com.mezze.language.typedast.TypedVarPattern
 import com.mezze.language.typedast.BindingRef
 import com.mezze.language.typedast.TypedBlock
 import com.mezze.language.typedast.TypedStatement
@@ -118,7 +120,10 @@ object SampleBranches {
 
         walk(decl.value) { expr ->
             when (expr) {
-                is TypedMatch -> matchArms(expr, params).forEach { (f, p) -> want(mapOf(f to p)) }
+                is TypedMatch -> {
+                    matchArms(expr, params).forEach { (f, p) -> want(mapOf(f to p)) }
+                    guards(expr, params, byHash, locals).forEach { want(it) }
+                }
                 is TypedCall -> {
                     comparison(expr, params, byHash, locals).forEach { want(it) }
                     emptiness(expr, params, byHash).forEach { want(it) }
@@ -176,6 +181,90 @@ object SampleBranches {
             }
         }
         return out
+    }
+
+    /**
+     * A GUARD — `Circle { r } if r > 10`, or `n if n > limit` — reaches its arm only
+     * for some payloads, so pinning the constructor alone lands on either side of it
+     * by chance.
+     *
+     * The variables a pattern binds are treated as pseudo-parameters, typed from the
+     * constructor's payload (or, for a bare variable pattern, from the scrutinee),
+     * and the guard is read with exactly the machinery a function body gets —
+     * constants, derived values, two-variable comparisons. Each requirement that
+     * comes back is wrapped into the constructor, the unconstrained payload fields
+     * drawn, and placed at the scrutinee's path.
+     */
+    private fun guards(
+        match: TypedMatch,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+    ): List<Map<String, Pinned>> {
+        val path = pathOf(match.scrutinee, params) ?: return emptyList()
+        val ctors = (match.scrutinee.type as? MezzeType.VariantType)?.constructors
+        val out = mutableListOf<Map<String, Pinned>>()
+        for (case in match.cases) {
+            val guard = case.guard ?: continue
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    // `n if n > limit` — the bound name IS the scrutinee.
+                    is TypedVarPattern -> {
+                        val pseudo = mapOf(pattern.name to match.scrutinee.type)
+                        for (req in guardRequirements(guard, pseudo, byHash, locals)) {
+                            val leaf = req[pattern.name] ?: continue
+                            val placed = placeAt(path, params, leaf) ?: continue
+                            out.add(mapOf(path.param to placed.copy(why = "match ${path.label} guard — ${leaf.why}")))
+                        }
+                    }
+                    // `Circle { r } if r > 10` — names bound to payload fields.
+                    is TypedVariantPattern -> {
+                        val payload = ctors?.get(pattern.tag) as? MezzeType.RecordType ?: continue
+                        val bound = payloadBindings(pattern) // var -> field
+                        val pseudo = bound.mapNotNull { (v, f) -> payload.fields[f]?.let { v to it } }.toMap()
+                        for (req in guardRequirements(guard, pseudo, byHash, locals)) {
+                            val byField = req.mapKeys { (v, _) -> bound.getValue(v) }
+                            var draws = false
+                            val src = payload.fields.entries.joinToString(", ", prefix = "${pattern.tag} { ", postfix = " }") { (f, t) ->
+                                val pin = byField[f]
+                                if (pin == null || pin.draws) draws = true
+                                "$f = ${pin?.source ?: SampleGen.of(t)}"
+                            }
+                            val why = req.values.map { it.why }.distinct().joinToString("; ")
+                            val placed = placeAt(path, params, Pinned(src, draws)) ?: continue
+                            out.add(mapOf(path.param to placed.copy(why = "match ${path.label} — `${pattern.tag}` guard: $why")))
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        return out
+    }
+
+    /** The guard read as a body over pseudo-parameters: every comparison in it. */
+    private fun guardRequirements(
+        guard: TypedExpr,
+        pseudo: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+    ): List<Map<String, Pinned>> {
+        if (pseudo.isEmpty()) return emptyList()
+        val out = mutableListOf<Map<String, Pinned>>()
+        walk(guard) { e -> if (e is TypedCall) out.addAll(comparison(e, pseudo, byHash, locals)) }
+        return out
+    }
+
+    /** Variable name → payload field it binds, for `Tag { field }` / `Tag { field = v }`. */
+    private fun payloadBindings(pattern: TypedVariantPattern): Map<String, String> {
+        val record = pattern.payload as? TypedRecordPattern ?: return emptyMap()
+        return record.fields.mapNotNull { fp ->
+            when (val inner = fp.pattern) {
+                null -> fp.name to fp.name
+                is TypedVarPattern -> inner.name to fp.name
+                else -> null
+            }
+        }.toMap()
     }
 
     /**

@@ -366,4 +366,45 @@ class SampleBranchesTest {
             """, "f"),
         )
     }
+
+    // ── guards ────────────────────────────────────────────────────────────────
+
+    private val classify = """
+        let big_r = 10
+        type Shape = | Empty, Circle { r: Int }, Rect { w: Int, h: Int } |
+        pub let f = { s: Shape } -> match s is
+          Circle { r } if r > big_r -> "big circle"
+          Circle { r } -> "circle"
+          Rect { w, h } if w == h -> "square"
+          Rect { w, h } -> "rect"
+          Empty -> "empty"
+    """
+
+    /** A guard on a payload field pins the constructor AND that field's boundary. */
+    @Test
+    fun `a guard on a payload field pins both sides of the guard`() {
+        val p = pins(classify, "f")["s"]!!
+        assertTrue("Circle { r = 10 } | match s — `Circle` guard: if r > big_r (= 10) — else" in p, "got $p")
+        assertTrue("Circle { r = 11 } | match s — `Circle` guard: if r > big_r (= 10) — then" in p, "got $p")
+    }
+
+    /** `w == h` between two payload fields: the equal pair is what reaches "square". */
+    @Test
+    fun `a guard relating two payload fields pins the equal pair`() {
+        val p = pins(classify, "f")["s"]!!
+        assertTrue("Rect { w = 1, h = 1 } | match s — `Rect` guard: if w == h — then (==)" in p, "got $p")
+    }
+
+    /** `x if x < 0` — the bound name is the scrutinee itself. */
+    @Test
+    fun `a guard on a bare variable pattern pins the scrutinee`() {
+        assertEquals(
+            listOf("-1 | match n guard — if x < 0 — then", "0 | match n guard — if x < 0 — else"),
+            pins("""
+                pub let f = { n: Int } -> match n is
+                  x if x < 0 -> "neg"
+                  x -> "non-neg"
+            """, "f")["n"],
+        )
+    }
 }
