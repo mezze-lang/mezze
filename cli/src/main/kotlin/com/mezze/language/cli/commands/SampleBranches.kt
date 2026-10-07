@@ -99,29 +99,53 @@ object SampleBranches {
         decl: TypedLetDecl,
         params: Map<String, MezzeType>,
         decls: List<TypedLetDecl> = emptyList(),
-    ): Map<String, List<Pinned>> {
-        val found = linkedMapOf<String, MutableList<Pinned>>()
-        fun add(field: String, pinned: Pinned) {
-            val list = found.getOrPut(field) { mutableListOf() }
-            if (list.none { it.source == pinned.source }) list.add(pinned)
+    ): List<Row> {
+        val wanted = mutableListOf<Map<String, Pinned>>()
+        fun want(req: Map<String, Pinned>) {
+            if (req.isEmpty()) return
+            val key = req.mapValues { it.value.source }
+            if (wanted.none { w -> w.mapValues { it.value.source } == key }) wanted.add(req)
         }
         val byHash = decls.associateBy { it.hash }
         val locals = blockLocals(decl.value, params.keys)
 
         walk(decl.value) { expr ->
             when (expr) {
-                is TypedMatch -> matchArms(expr, params).forEach { (f, p) -> add(f, p) }
-                is TypedCall -> comparison(expr, params, byHash, locals)?.let { (f, ps) -> ps.forEach { add(f, it) } }
+                is TypedMatch -> matchArms(expr, params).forEach { (f, p) -> want(mapOf(f to p)) }
+                is TypedCall -> comparison(expr, params, byHash, locals).forEach { want(it) }
                 else -> Unit
             }
         }
-        return found.filterValues { it.isNotEmpty() }
+        return pack(wanted)
     }
 
-    /** The reason row [row] exists, or null when it pins nothing. */
-    fun why(branches: Map<String, List<Pinned>>, row: Int): String? =
-        branches.values.mapNotNull { it.getOrNull(row)?.why?.takeIf { w -> w.isNotEmpty() } }
-            .joinToString("; ").ifEmpty { null }
+    /**
+     * One row's pins — values for one or more parameters, chosen TOGETHER.
+     *
+     * A row rather than a per-parameter list because some branches constrain two
+     * parameters at once: `a < b` needs `a` and `b` picked as a pair, and picking
+     * each from its own list would put them in rows that have nothing to do with
+     * each other.
+     */
+    data class Row(val pins: Map<String, Pinned>) {
+        val why: String get() = pins.values.map { it.why }.filter { it.isNotEmpty() }.distinct().joinToString("; ")
+    }
+
+    /**
+     * Requirements packed into as few rows as possible: each goes into the first
+     * row that pins none of its parameters yet. Independent single-parameter pins
+     * therefore share rows exactly as they did when each parameter had its own
+     * list — row `i` carrying each parameter's `i`-th value — so adding row-level
+     * pins costs the existing cases nothing.
+     */
+    private fun pack(wanted: List<Map<String, Pinned>>): List<Row> {
+        val rows = mutableListOf<MutableMap<String, Pinned>>()
+        for (req in wanted) {
+            val home = rows.firstOrNull { row -> req.keys.none { it in row } }
+            if (home != null) home.putAll(req) else rows.add(req.toMutableMap())
+        }
+        return rows.map { Row(it) }
+    }
 
     // ── match arms ────────────────────────────────────────────────────────────
 
@@ -178,25 +202,27 @@ object SampleBranches {
         params: Map<String, MezzeType>,
         byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
         locals: Map<String, TypedExpr> = emptyMap(),
-    ): Pair<String, List<Pinned>>? {
-        val op = (call.function as? TypedFieldAccess)?.field ?: return null
-        if (op !in COMPARISONS) return null
+    ): List<Map<String, Pinned>> {
+        val op = (call.function as? TypedFieldAccess)?.field ?: return emptyList()
+        if (op !in COMPARISONS) return emptyList()
         val args = (call.arg as? TypedRecord)?.entries
-            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return null
-        val left = args["it"] ?: return null
-        val right = args["r"] ?: return null
-        if (!isPrimitive(left.type) || !isPrimitive(right.type)) return null
+            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return emptyList()
+        val left = args["it"] ?: return emptyList()
+        val right = args["r"] ?: return emptyList()
+        if (!isPrimitive(left.type) || !isPrimitive(right.type)) return emptyList()
 
         // Either side may hold the parameter. `k < n` is `n > k` seen from `n`, so
         // the operator is MIRRORED rather than read as written.
         val leftPath = pathOf(left, params)
         val rightPath = pathOf(right, params)
+        if (leftPath != null && rightPath != null) return relational(leftPath, rightPath, left.type, op, params)
         val (path, other, effectiveOp) = when {
             leftPath != null -> Triple(leftPath, right, op)
             rightPath != null -> Triple(rightPath, left, MIRROR.getValue(op))
             else -> return derivedComparison(left, right, op, params, byHash, locals)
+                ?.let { (param, pins) -> pins.map { mapOf(param to it) } } ?: emptyList()
         }
-        val known = knownValue(other, byHash) ?: return null
+        val known = knownValue(other, byHash) ?: return emptyList()
         val shown = known.describe()
         val where = "${path.label} ${SYMBOL.getValue(effectiveOp)} $shown"
         val leaves = when (known) {
@@ -205,7 +231,8 @@ object SampleBranches {
             is Known.StrValue -> strBoundary(known.value, effectiveOp)
                 .map { (v, holds) -> Pinned(strLiteral(v), draws = false, why = "if $where — ${verdict(holds)}") }
         }
-        return path.param to leaves.mapNotNull { leaf -> placeAt(path, params, leaf)?.copy(why = leaf.why) }
+        return leaves.mapNotNull { leaf -> placeAt(path, params, leaf)?.copy(why = leaf.why) }
+            .map { mapOf(path.param to it) }
     }
 
     /** A compile-time value, with how it should read in a row's reason. */
@@ -325,6 +352,48 @@ object SampleBranches {
 
     private fun Long.safeInc(): Long? = if (this == Long.MAX_VALUE) null else this + 1
     private fun Long.safeDec(): Long? = if (this == Long.MIN_VALUE) null else this - 1
+
+    // ── two parameters ────────────────────────────────────────────────────────
+
+    /**
+     * `a < b` where BOTH sides are parameters (or paths into them): one row each
+     * for less, equal and greater. Equal is the one worth spelling out — blind
+     * draws over 64-bit ints essentially never produce two equal values, so the
+     * `==` edge of every `<`/`<=` between two inputs went untested.
+     *
+     * Both leaves may sit in the SAME parameter (`p.x < p.y`); they are then placed
+     * into one record together.
+     */
+    private fun relational(
+        leftPath: Path,
+        rightPath: Path,
+        type: MezzeType,
+        op: String,
+        params: Map<String, MezzeType>,
+    ): List<Map<String, Pinned>> {
+        if (leftPath == rightPath) return emptyList()
+        val pairs: List<Triple<String, String, Int>> = when (type) {
+            is MezzeType.IntType -> listOf(Triple("0", "1", -1), Triple("1", "1", 0), Triple("1", "0", 1))
+            is MezzeType.StringType -> listOf(Triple("\"a\"", "\"b\"", -1), Triple("\"a\"", "\"a\"", 0), Triple("\"b\"", "\"a\"", 1))
+            else -> return emptyList()
+        }
+        val relation = mapOf(-1 to "<", 0 to "==", 1 to ">")
+        return pairs.mapNotNull { (l, r, cmp) ->
+            val why = "if ${leftPath.label} ${SYMBOL.getValue(op)} ${rightPath.label} — " +
+                "${verdict(holds(cmp, op))} (${relation.getValue(cmp)})"
+            val lp = Pinned(l, draws = false, why = why)
+            val rp = Pinned(r, draws = false, why = why)
+            if (leftPath.param == rightPath.param) {
+                val both = placeAll(params[leftPath.param] ?: return@mapNotNull null,
+                    listOf(leftPath.fields to lp, rightPath.fields to rp)) ?: return@mapNotNull null
+                mapOf(leftPath.param to both.copy(why = why))
+            } else {
+                val a = placeAt(leftPath, params, lp)?.copy(why = why) ?: return@mapNotNull null
+                val b = placeAt(rightPath, params, rp)?.copy(why = why) ?: return@mapNotNull null
+                mapOf(leftPath.param to a, rightPath.param to b)
+            }
+        }
+    }
 
     // ── derived values ────────────────────────────────────────────────────────
 
@@ -488,26 +557,32 @@ object SampleBranches {
      * (anything that is not a record); that branch is then left to the draws.
      */
     private fun placeAt(path: Path, params: Map<String, MezzeType>, leaf: Pinned): Pinned? {
-        fun build(type: MezzeType, rest: List<String>): Pinned? {
-            if (rest.isEmpty()) return leaf
-            val record = type as? MezzeType.RecordType ?: return null
-            val target = rest.first()
-            if (target !in record.fields) return null
-            var draws = false
-            val parts = record.fields.entries.map { (name, fieldType) ->
-                if (name == target) {
-                    val inner = build(fieldType, rest.drop(1)) ?: return null
-                    if (inner.draws) draws = true
-                    "$name = ${inner.source}"
-                } else {
-                    draws = true
-                    "$name = ${SampleGen.of(fieldType)}"
-                }
-            }
-            return Pinned(parts.joinToString(", ", prefix = "{ ", postfix = " }"), draws)
-        }
         val root = params[path.param] ?: return null
-        return build(root, path.fields)
+        return placeAll(root, listOf(path.fields to leaf))
+    }
+
+    /**
+     * A value of [type] with each leaf placed at its field path and every other
+     * field drawn. Two leaves may share a record (`p.x` and `p.y`); a leaf at the
+     * ROOT alongside any other leaf is a contradiction, and yields null.
+     */
+    private fun placeAll(type: MezzeType, leaves: List<Pair<List<String>, Pinned>>): Pinned? {
+        leaves.firstOrNull { it.first.isEmpty() }?.let { return if (leaves.size == 1) it.second else null }
+        val record = type as? MezzeType.RecordType ?: return null
+        if (leaves.any { it.first.first() !in record.fields }) return null
+        var draws = false
+        val parts = record.fields.entries.map { (name, fieldType) ->
+            val sub = leaves.filter { it.first.first() == name }.map { it.first.drop(1) to it.second }
+            if (sub.isEmpty()) {
+                draws = true
+                "$name = ${SampleGen.of(fieldType)}"
+            } else {
+                val inner = placeAll(fieldType, sub) ?: return null
+                if (inner.draws) draws = true
+                "$name = ${inner.source}"
+            }
+        }
+        return Pinned(parts.joinToString(", ", prefix = "{ ", postfix = " }"), draws)
     }
 
     private fun isPrimitive(type: MezzeType): Boolean =

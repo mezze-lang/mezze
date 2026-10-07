@@ -32,11 +32,11 @@ object SampleTarget {
              * rather than guessed at. Empty for a function that matches on nothing.
              * See [SampleBranches].
              */
-            val branches: Map<String, List<SampleBranches.Pinned>> = emptyMap(),
+            val branches: List<SampleBranches.Row> = emptyList(),
         ) : Result {
             val fieldNames: List<String> get() = fields.keys.toList()
             /** Rows that can be pinned to an arm — the longest arm list. */
-            val pinnableRows: Int get() = branches.values.maxOfOrNull { it.size } ?: 0
+            val pinnableRows: Int get() = branches.size
         }
 
         /** Not sampleable, with the reason already formatted for a terminal. */

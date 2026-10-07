@@ -30,8 +30,11 @@ class SampleBranchesTest {
         val decls = success.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
         val decl = decls.single { it.name == target }
         val fields = ((decl.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
-        return SampleBranches.inventory(decl, fields, decls)
-            .mapValues { (_, ps) -> ps.map { "${it.source} | ${it.why}" } }
+        val out = linkedMapOf<String, MutableList<String>>()
+        for (row in SampleBranches.inventory(decl, fields, decls)) {
+            for ((param, pin) in row.pins) out.getOrPut(param) { mutableListOf() }.add("${pin.source} | ${pin.why}")
+        }
+        return out
     }
 
     @Test
@@ -250,5 +253,67 @@ class SampleBranchesTest {
                   m > 10
             """, "f"),
         )
+    }
+
+    // ── two parameters ────────────────────────────────────────────────────────
+
+    /**
+     * Raw rows, for branches that constrain two parameters TOGETHER — the
+     * per-parameter view in [pins] cannot show that `a` and `b` were chosen as a
+     * pair.
+     */
+    private fun rows(source: String, target: String): List<String> {
+        val parsed = MezzeParser().parseParsedModule(source.trimIndent(), "test.mz")
+        val success = TypeChecker().checkParsedModule(parsed, Paths.get("."), currentModulePath = null)
+            as TypeChecker.TypeCheckResult.Success
+        val decls = success.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
+        val decl = decls.single { it.name == target }
+        val fields = ((decl.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
+        return SampleBranches.inventory(decl, fields, decls).map { row ->
+            row.pins.entries.joinToString(", ") { "${it.key} = ${it.value.source}" } + " | " + row.why
+        }
+    }
+
+    /**
+     * Less, equal, greater — as PAIRS. Equal is the edge blind draws never reach:
+     * two independent 64-bit draws are essentially never the same value.
+     */
+    @Test
+    fun `a comparison between two parameters pins less equal and greater`() {
+        assertEquals(
+            listOf(
+                "a = 0, b = 1 | if a < b — then (<)",
+                "a = 1, b = 1 | if a < b — else (==)",
+                "a = 1, b = 0 | if a < b — else (>)",
+            ),
+            rows("pub let f = { a: Int, b: Int } -> a < b", "f"),
+        )
+    }
+
+    /** Two leaves in ONE parameter are placed into the same record. */
+    @Test
+    fun `two fields of one parameter are pinned in the same record`() {
+        assertEquals(
+            listOf(
+                "p = { x = 0, y = 1 } | if p.x <= p.y — then (<)",
+                "p = { x = 1, y = 1 } | if p.x <= p.y — then (==)",
+                "p = { x = 1, y = 0 } | if p.x <= p.y — else (>)",
+            ),
+            rows("pub let f = { p: { x: Int, y: Int } } -> p.x <= p.y", "f"),
+        )
+    }
+
+    /** Pairs and single-parameter pins share the table without displacing each other. */
+    @Test
+    fun `single-parameter pins and pairs pack without clashing`() {
+        val r = rows("""
+            pub let f = { a: Int, b: Int } -> do
+              let x = a > 10
+              let y = a < b
+              y
+        """, "f")
+        assertEquals(5, r.size, "got $r")
+        assertTrue(r.count { it.contains("a > 10") } == 2, "got $r")
+        assertTrue(r.count { it.contains("a < b") } == 3, "got $r")
     }
 }

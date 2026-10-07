@@ -326,7 +326,7 @@ class SampleCommand {
         val plan = SampleGen.bindFields(
             target.fields,
             args,
-            pin = { field -> target.branches[field]?.getOrNull(row) },
+            pin = { field -> target.branches.getOrNull(row)?.pins?.get(field) },
         ) {
             com.mezze.language.ast.prettyPrintType(it)
         }
@@ -372,7 +372,7 @@ class SampleCommand {
         val showWhy = target.branches.isNotEmpty()
         val headers = target.fieldNames + "→ result" + (if (showWhy) listOf("why") else emptyList())
         val body = rows.mapIndexed { i, outcome ->
-            val why = if (showWhy) listOf(SampleBranches.why(target.branches, i) ?: "") else emptyList()
+            val why = if (showWhy) listOf(target.branches.getOrNull(i)?.why ?: "") else emptyList()
             when (outcome) {
                 is RowOutcome.Ran -> {
                     val args = (outcome.args as? WireValue.Record)?.fields
