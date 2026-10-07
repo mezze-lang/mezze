@@ -10,6 +10,7 @@ import com.mezze.language.typedast.TypedRecordPattern
 import com.mezze.language.typedast.TypedVarPattern
 import com.mezze.language.typedast.BindingRef
 import com.mezze.language.typedast.TypedBlock
+import com.mezze.language.typedast.TypedPerformOp
 import com.mezze.language.typedast.TypedStatement
 import com.mezze.language.typedast.TypedCall
 import com.mezze.language.typedast.TypedFieldAccess
@@ -115,6 +116,13 @@ object SampleBranches {
          * reader of constants picks it up unchanged.
          */
         evaluated: Map<com.mezze.language.typedast.Hash, Long> = emptyMap(),
+        /**
+         * Results of SCRIPTED effect operations, as further row inputs: key →
+         * (label, type). See [SampleScripts]. An operation's result is a hidden
+         * input like any argument, so `n > Config.threshold {}` is a comparison
+         * between two inputs and is read exactly like `a < b`.
+         */
+        context: Map<String, Pair<String, MezzeType>> = emptyMap(),
     ): List<Row> {
         val wanted = mutableListOf<Map<String, Pinned>>()
         fun want(req: Map<String, Pinned>) {
@@ -128,6 +136,13 @@ object SampleBranches {
             byHash[hash] = d.copy(value = TypedIntLit(value, MezzeType.IntType, d.loc))
         }
         val locals = blockLocals(decl.value, params.keys)
+        contextLabels = context.mapValues { it.value.first }
+        contextLocals = locals.mapNotNull { (name, def) ->
+            (def as? TypedPerformOp)?.let { SampleScripts.contextKey(it.effectHash, it.operationName) }
+                ?.takeIf { it in context }?.let { name to it }
+        }.toMap()
+        @Suppress("NAME_SHADOWING")
+        val params = params + context.mapValues { it.value.second }
 
         walk(decl.value) { expr ->
             when (expr) {
@@ -763,10 +778,19 @@ object SampleBranches {
 
     // ── paths ─────────────────────────────────────────────────────────────────
 
-    /** A parameter, followed by the fields reached through it: `p.shape.r`. */
+    /** A parameter (or a scripted operation's result), followed by the fields reached through it. */
     private data class Path(val param: String, val fields: List<String>) {
-        val label: String get() = (listOf(param) + fields).joinToString(".")
+        val label: String get() = (listOf(contextLabels[param] ?: param) + fields).joinToString(".")
     }
+
+    /**
+     * Per-inventory context for [pathOf]: the label of each scripted operation's
+     * result, and the block-local names bound directly to one (`let t =
+     * Config.threshold {}`). Set at the start of [inventory]; the CLI is
+     * single-threaded and an inventory runs to completion before the next.
+     */
+    private var contextLabels: Map<String, String> = emptyMap()
+    private var contextLocals: Map<String, String> = emptyMap()
 
     /**
      * The parameter path [expr] reads, if it reads one: a bare parameter, or a
@@ -775,8 +799,15 @@ object SampleBranches {
      * that field's name.
      */
     private fun pathOf(expr: TypedExpr, params: Map<String, MezzeType>): Path? = when (expr) {
-        is TypedVar ->
-            if (expr.name in params && expr.binding is BindingRef.Local) Path(expr.name, emptyList()) else null
+        is TypedVar -> when {
+            expr.binding !is BindingRef.Local -> null
+            expr.name in params -> Path(expr.name, emptyList())
+            // `let t = Config.threshold {}` then `t`: the scripted operation's result.
+            else -> contextLocals[expr.name]?.takeIf { it in params }?.let { Path(it, emptyList()) }
+        }
+        // `Config.threshold {}` used inline.
+        is TypedPerformOp -> SampleScripts.contextKey(expr.effectHash, expr.operationName)
+            .takeIf { it in params }?.let { Path(it, emptyList()) }
         is TypedFieldAccess -> pathOf(expr.record, params)?.let { it.copy(fields = it.fields + expr.field) }
         else -> null
     }

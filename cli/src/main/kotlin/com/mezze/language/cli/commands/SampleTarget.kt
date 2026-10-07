@@ -40,6 +40,8 @@ object SampleTarget {
              */
             val unresolved: List<TypedLetDecl> = emptyList(),
             val reanalyze: (Map<com.mezze.language.typedast.Hash, Long>) -> List<SampleBranches.Row> = { branches },
+            /** Scripted performers for the effects nothing handles — see [SampleScripts]. */
+            val scripts: List<SampleScripts.Script> = emptyList(),
         ) : Result {
             val fieldNames: List<String> get() = fields.keys.toList()
             /** Rows that can be pinned to an arm — the longest arm list. */
@@ -103,8 +105,31 @@ object SampleTarget {
         // it returns a suspended computation that renders as something plausible.
         // For a command whose whole job is showing what a function does, that is the
         // worst outcome available.
-        when (val runnable = RunnabilityCheck.check(decl)) {
-            is RunnabilityCheck.Result.Runnable -> Unit
+        // S-21 step 7: an undischarged effect is SCRIPTED rather than refused, when it
+        // can be — every operation's result drawn by the row and shown as a column.
+        // See [SampleScripts] for why that keeps the original concern (a sample must
+        // not be "a run you set up") rather than waiving it.
+        val scripts: List<SampleScripts.Script> = when (val runnable = RunnabilityCheck.check(decl)) {
+            is RunnabilityCheck.Result.Runnable -> emptyList()
+            is RunnabilityCheck.Result.NeedsHandlers -> {
+                val residual = (decl.scheme.type as MezzeType.FunctionType).residualEffects!!
+                when (val plan = SampleScripts.plan(
+                    residual,
+                    local = success.typedModule?.effectDecls.orEmpty(),
+                    loaded = success.loadedModules.mapValues { (_, m) -> m.typedModule?.effectDecls.orEmpty() },
+                )) {
+                    is SampleScripts.Plan.Scripted -> plan.scripts
+                    // Only the effect that defeats scripting is named — the old refusal
+                    // text ("sample is offered only for discharged effects") is no
+                    // longer true, so it is not appended.
+                    is SampleScripts.Plan.Refused -> return Result.Refused(
+                        "`$declName` performs ${plan.effect}, which sample cannot script: ${plan.reason}.\n\n" +
+                            "Sample draws every other effect's results itself and shows them as columns. " +
+                            "For ${plan.effect}, handle it inside `$declName` — `perform <Performer> in …` — " +
+                            "or sample a function that already does."
+                    )
+                }
+            }
             else -> return Result.Refused(
                 RunnabilityCheck.refusal(runnable, declName)
                     ?: "`$declName` cannot be sampled"
@@ -139,9 +164,12 @@ object SampleTarget {
         return Result.Ready(
             declName,
             fields,
-            SampleBranches.inventory(decl, fields, decls, imported),
+            SampleBranches.inventory(decl, fields, decls, imported, context = SampleScripts.context(scripts)),
             unresolved = SampleBranches.unresolvedConstants(decl, decls),
-            reanalyze = { evaluated -> SampleBranches.inventory(decl, fields, decls, imported, evaluated) },
+            reanalyze = { evaluated ->
+                SampleBranches.inventory(decl, fields, decls, imported, evaluated, SampleScripts.context(scripts))
+            },
+            scripts = scripts,
         )
     }
 

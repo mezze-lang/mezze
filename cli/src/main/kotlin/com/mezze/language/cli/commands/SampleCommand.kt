@@ -78,7 +78,7 @@ class SampleCommand {
         val expression = buildExpression(target, seed, count)
 
         when (val compiled = EvalClosure.compile(
-            currentDir, moduleFile, expression, EXTRA_IMPORTS, buildDecls(target),
+            currentDir, moduleFile, expression, imports(target), buildDecls(target),
         )) {
             is EvalClosure.Result.Failed -> {
                 // The diagnostic is about an expression THIS command wrote, so it
@@ -178,7 +178,7 @@ class SampleCommand {
 
     /** What one row produced: its values, or the reason it died. */
     internal sealed interface RowOutcome {
-        data class Ran(val args: WireValue?, val result: WireValue?) : RowOutcome
+        data class Ran(val args: WireValue?, val result: WireValue?, val ctx: WireValue? = null) : RowOutcome
         /** [reason] is the runtime's own message — an overflow, a division by zero. */
         data class Crashed(val reason: String) : RowOutcome
     }
@@ -220,6 +220,7 @@ class SampleCommand {
                 RowOutcome.Ran(
                     args = fields?.firstOrNull { it.name == "args" }?.value,
                     result = fields?.firstOrNull { it.name == "result" }?.value,
+                    ctx = fields?.firstOrNull { it.name == "ctx" }?.value,
                 )
             }
             ?: emptyList()
@@ -242,7 +243,7 @@ class SampleCommand {
         timeoutMs: Long,
     ): List<RowOutcome> = (0 until count).map { i ->
         when (val compiled = EvalClosure.compile(
-            currentDir, moduleFile, buildRowExpression(target, seed, i), SampleGen.IMPORTS,
+            currentDir, moduleFile, buildRowExpression(target, seed, i), imports(target),
             buildDecls(target),
         )) {
             is EvalClosure.Result.Failed -> RowOutcome.Crashed("did not compile: ${compiled.message.lines().first()}")
@@ -289,7 +290,7 @@ class SampleCommand {
         seed: Int,
         count: Int = 1,
     ): String {
-        if (target.fields.isEmpty()) return noArgRow(target.name)
+        if (target.fields.isEmpty() && target.scripts.isEmpty()) return noArgRow(target.name)
         val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i, i).lets }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
         return "do\n$rows\n              { rows = [$collected] }"
@@ -307,7 +308,7 @@ class SampleCommand {
         seed: Int,
         index: Int,
     ): String {
-        if (target.fields.isEmpty()) return noArgRow(target.name)
+        if (target.fields.isEmpty() && target.scripts.isEmpty()) return noArgRow(target.name)
         return "do\n${rowBinding(target, seed + index, 0, index).lets}\n              { rows = [${ROW}_0] }"
     }
 
@@ -367,23 +368,41 @@ class SampleCommand {
         // body, so indentation carried no meaning. A `perform … in do` body is
         // delimited by INDENTATION, so at equal depth the do block has no body at all
         // and the parser says "Do block is empty". Push them one level in.
-        val lets = plan.lets.lines().joinToString("\n") { "  $it" }
+        // S-21 step 7: each scripted operation's result is drawn HERE, like an
+        // argument, so it can be shown — the performer only hands it back.
+        val valuedOps = target.scripts.flatMap { sc -> sc.ops.filter { it.valued }.map { sc to it } }
+        val ctxNames = valuedOps.indices.map { k -> "${CTX}_${slot}_$k" }
+        val ctxLets = valuedOps.mapIndexed { k, (_, op) ->
+            val sc = valuedOps[k].first
+            // Pinned when the analysis found a branch on this result; drawn otherwise.
+            val value = target.branches.getOrNull(row)?.pins?.get(sc.key(op))?.source ?: SampleGen.of(op.returnType)
+            "              let ${ctxNames[k]}: ${com.mezze.language.ast.prettyPrintType(op.returnType)} = $value"
+        }
+        val call = target.scripts.joinToString("") { sc ->
+            val mine = valuedOps.withIndex().filter { it.value.first === sc }
+            val init = if (mine.isEmpty()) "" else
+                mine.joinToString(", ", prefix = " { ", postfix = " }") { (k, pair) -> "${sc.field(pair.second)} = ${ctxNames[k]}" }
+            "perform ${sc.performer}$init in "
+        } + "${target.name} { $forwarded }"
+        val ctxRecord = if (valuedOps.isEmpty()) "" else
+            ", ctx = " + ctxNames.indices.joinToString(", ", prefix = "{ ", postfix = " }") { k -> "c$k = ${ctxNames[k]}" }
+        // Draws only if some argument or some operation result is actually DRAWN. A row
+        // whose every input is pinned to a literal performs no `Sample`, and wrapping
+        // it in `perform CoveringSample` is a handler that can never fire (V0510).
+        val draws = plan.draws || valuedOps.any { (sc, op) ->
+            target.branches.getOrNull(row)?.pins?.get(sc.key(op))?.draws ?: true
+        }
+        val lets = (plan.lets.lines().filter { it.isNotBlank() } + ctxLets).joinToString("\n") { "  $it" }
         // A row pinned entirely to EMPTY constructors draws nothing, and a handler
         // over a body that performs no `Sample` is one that can never fire — V0510
         // rejects it, exactly as it already does for a zero-argument function. So
         // the `perform` is emitted only when the row actually draws.
-        val text = if (plan.draws) {
-            "              let ${ROW}_$slot = perform CoveringSample { seed = $rowSeed, run = $row } in do\n" +
-                lets + "\n" +
-                "                let $args = ${plan.record}\n" +
-                "                { args = $args, result = ${target.name} { $forwarded } }"
-        } else {
-            "              let ${ROW}_$slot = do\n" +
-                lets + "\n" +
-                "                let $args = ${plan.record}\n" +
-                "                { args = $args, result = ${target.name} { $forwarded } }"
-        }
-        return plan.copy(lets = text)
+        val head = if (draws) "perform CoveringSample { seed = $rowSeed, run = $row } in do" else "do"
+        val text = "              let ${ROW}_$slot = $head\n" +
+            (if (lets.isBlank()) "" else lets + "\n") +
+            "                let $args = ${plan.record.ifBlank { "{}" }.let { if (it == "{  }") "{}" else it }}\n" +
+            "                { args = $args$ctxRecord, result = $call }"
+        return plan.copy(lets = text, draws = draws)
     }
 
     /**
@@ -393,27 +412,43 @@ class SampleCommand {
      * and a `do`-block `let` is not recursive, so it cannot live in the expression.
      * Identical across rows (it depends on the TYPE, not the seed), hence distinct.
      */
-    internal fun buildDecls(target: SampleTarget.Result.Ready): List<String> =
-        if (target.fields.isEmpty()) emptyList()
-        else rowBinding(target, 0, 0, 0).decls.distinct()
+    internal fun buildDecls(target: SampleTarget.Result.Ready): List<String> {
+        val helpers = if (target.fields.isEmpty() && target.scripts.isEmpty()) emptyList()
+            else rowBinding(target, 0, 0, 0).decls.distinct()
+        val scripted = target.scripts.map { SampleScripts.implDecl(it) { t -> com.mezze.language.ast.prettyPrintType(t) } }
+        return helpers + scripted
+    }
+
+    /** Sample's own imports, plus a `use` for every scripted effect declared elsewhere. */
+    internal fun imports(target: SampleTarget.Result.Ready): Set<String> =
+        EXTRA_IMPORTS + target.scripts.mapNotNull { it.importLine }
 
     private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
         // A pinned row says WHICH branch it was built to reach. Without it, a row
         // with `n = 101` reads as a coincidence; with it, as the `then` side of
         // `n > max_value (= 100)`. Shown only when some row is pinned.
         val showWhy = target.branches.isNotEmpty()
-        val headers = target.fieldNames + "→ result" + (if (showWhy) listOf("why") else emptyList())
+        // A scripted operation's result is an INPUT the row drew, so it gets a
+        // column beside the arguments — `⟨Config.ask⟩` — rather than staying
+        // hidden in the performer. That visibility is what keeps a scripted run
+        // from being "a run you set up". See [SampleScripts].
+        val ctxLabels = target.scripts.flatMap { sc -> sc.ops.filter { it.valued }.map { sc.label(it) } }
+        val headers = target.fieldNames + ctxLabels + "→ result" + (if (showWhy) listOf("why") else emptyList())
         val body = rows.mapIndexed { i, outcome ->
             val why = if (showWhy) listOf(target.branches.getOrNull(i)?.why ?: "") else emptyList()
             when (outcome) {
                 is RowOutcome.Ran -> {
                     val args = (outcome.args as? WireValue.Record)?.fields
+                    val ctx = (outcome.ctx as? WireValue.Record)?.fields
                     target.fieldNames.map { f ->
                         oneLine(args?.firstOrNull { it.name == f }?.value?.toText() ?: "?")
+                    } + ctxLabels.indices.map { k ->
+                        oneLine(ctx?.firstOrNull { it.name == "c$k" }?.value?.toText() ?: "?")
                     } + oneLine(outcome.result?.toText() ?: "?") + why
                 }
                 is RowOutcome.Crashed ->
-                    target.fieldNames.map { "—" } + "${Glyphs.CROSS} ${oneLine(brief(outcome.reason))}" + why
+                    target.fieldNames.map { "—" } + ctxLabels.map { "—" } +
+                        "${Glyphs.CROSS} ${oneLine(brief(outcome.reason))}" + why
             }
         }
 
@@ -562,6 +597,8 @@ class SampleCommand {
          * unaffected — a duplicate import is harmless, and diffing them would be
          * work for no benefit.
          */
+        /** Prefix for a row's drawn operation results — see [SampleScripts]. */
+        const val CTX = "__mez_sample_ctx"
         val EXTRA_IMPORTS = SampleGen.IMPORTS
     }
 }
