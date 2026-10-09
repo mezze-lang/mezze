@@ -453,4 +453,61 @@ class SampleBranchesTest {
             rows.map { r -> r.pins.getValue("n").let { "${it.source} | ${it.why}" } },
         )
     }
+
+    // ── path constraints ──────────────────────────────────────────────────────
+
+    /** `if strict` — a bare Bool parameter as the condition pins True and False. */
+    @Test
+    fun `a bare Bool condition pins both values`() {
+        assertEquals(
+            listOf("strict = True | if strict — then", "strict = False | if strict — else"),
+            rows("pub let f = { strict: Bool } -> if strict then 1 else 2", "f"),
+        )
+    }
+
+    /**
+     * THE case that motivated it. Each inner comparison carries the outer
+     * condition that reaches it — without that, a row pinned `n = 0` for
+     * `n >= 0 — then` while `strict` was drawn True, so the function took the
+     * OTHER branch and the reason described a test it never performed.
+     */
+    @Test
+    fun `an inner condition carries the outer condition that reaches it`() {
+        val r = rows("""
+            let limit = 100
+            pub let f = { n: Int, strict: Bool } -> if strict then n > limit else n >= 0
+        """, "f")
+        assertTrue("strict = True, n = 101 | if strict — then; if n > limit (= 100) — then" in r, "got $r")
+        assertTrue("strict = True, n = 100 | if strict — then; if n > limit (= 100) — else" in r, "got $r")
+        assertTrue("strict = False, n = 0 | if strict — else; if n >= 0 — then" in r, "got $r")
+        assertTrue("strict = False, n = -1 | if strict — else; if n >= 0 — else" in r, "got $r")
+        // and no inner pin appears WITHOUT its path
+        assertTrue(r.none { it.contains("n >= 0") && !it.contains("strict = False") }, "got $r")
+    }
+
+    /**
+     * Inside `if n > 10`, `n < 5` can never hold. Its pins contradict the path
+     * (`n = 11` vs `n = 4`), so they are dropped — no row claims a test it cannot
+     * reach.
+     */
+    @Test
+    fun `a branch that contradicts its path is not claimed`() {
+        val r = rows("""
+            pub let f = { n: Int } -> if n > 10 then (if n < 5 then 1 else 2) else 3
+        """, "f")
+        assertTrue(r.none { it.contains("n < 5 — then") }, "got $r")
+    }
+
+    /** A match arm is a path too: a comparison inside an arm is reached through it. */
+    @Test
+    fun `a condition inside a match arm carries the arm`() {
+        val r = rows("""
+            type Shape = | Empty, Circle { r: Int } |
+            pub let f = { s: Shape, n: Int } -> match s is
+              Empty -> n > 3
+              Circle { r } -> False
+        """, "f")
+        assertTrue(r.any { it.startsWith("s = Empty, n = 4") }, "got $r")
+        assertTrue(r.none { it.contains("n > 3") && !it.contains("s = Empty") }, "got $r")
+    }
 }

@@ -10,6 +10,7 @@ import com.mezze.language.typedast.TypedRecordPattern
 import com.mezze.language.typedast.TypedVarPattern
 import com.mezze.language.typedast.BindingRef
 import com.mezze.language.typedast.TypedBlock
+import com.mezze.language.typedast.TypedIf
 import com.mezze.language.typedast.TypedPerformOp
 import com.mezze.language.typedast.TypedStatement
 import com.mezze.language.typedast.TypedCall
@@ -81,7 +82,19 @@ object SampleBranches {
      * so a reader sees `if n > max_value (= 100) — then` beside `n = 101` rather
      * than wondering where 101 came from.
      */
-    data class Pinned(val source: String, val draws: Boolean, val why: String = "")
+    data class Pinned(
+        val source: String,
+        val draws: Boolean,
+        val why: String = "",
+        /**
+         * Whether the condition this pin targets HOLDS for it — the `then` side
+         * (true) or the `else` side (false) — or null when it targets no condition
+         * (a match arm). This is what lets an `if` know which pins put a row on
+         * which side of it, so the branches INSIDE it can be reached on purpose:
+         * see the path constraint in [inventory].
+         */
+        val outcome: Boolean? = null,
+    )
 
     /**
      * Per parameter field, the values worth pinning it to — one per branch it
@@ -144,19 +157,48 @@ object SampleBranches {
         @Suppress("NAME_SHADOWING")
         val params = params + context.mapValues { it.value.second }
 
-        walk(decl.value) { expr ->
+        /**
+         * Walk with the PATH CONSTRAINT: the pins that put a row on the way to the
+         * current node. Every requirement found inside a branch is merged with it.
+         *
+         * Without this, a pin for an inner condition could point at code the row
+         * never runs. `if strict then n > limit else n >= 0` pinned `n = 0` for the
+         * `then` side of `n >= 0` while `strict` was drawn `True` — so the function
+         * took the OTHER branch, and the row's reason described a test it did not
+         * perform. A requirement whose pins contradict its path is dropped rather
+         * than kept with a reason that lies.
+         */
+        fun visit(expr: TypedExpr, path: Map<String, Pinned>) {
+            fun found(req: Map<String, Pinned>) { merge(path, req)?.let { want(it) } }
             when (expr) {
+                is TypedIf -> {
+                    val cond = condition(expr.condition, params, byHash, locals)
+                    cond.forEach { found(it) }
+                    visit(expr.condition, path)
+                    val thenSide = cond.firstOrNull { r -> r.values.all { it.outcome == true } }
+                    val elseSide = cond.firstOrNull { r -> r.values.all { it.outcome == false } }
+                    visit(expr.thenBranch, thenSide?.let { merge(path, it) } ?: path)
+                    visit(expr.elseBranch, elseSide?.let { merge(path, it) } ?: path)
+                }
                 is TypedMatch -> {
-                    matchArms(expr, params).forEach { (f, p) -> want(mapOf(f to p)) }
-                    guards(expr, params, byHash, locals).forEach { want(it) }
+                    guards(expr, params, byHash, locals).forEach { found(it) }
+                    visit(expr.scrutinee, path)
+                    val arms = matchArms(expr, params)
+                    arms.forEach { (_, f, p) -> found(mapOf(f to p)) }
+                    expr.cases.forEachIndexed { i, case ->
+                        case.guard?.let { visit(it, path) }
+                        val arm = arms.firstOrNull { it.first == i }?.let { (_, f, p) -> mapOf(f to p) }
+                        visit(case.body, arm?.let { merge(path, it) } ?: path)
+                    }
                 }
                 is TypedCall -> {
-                    comparison(expr, params, byHash, locals).forEach { want(it) }
-                    emptiness(expr, params, byHash).forEach { want(it) }
+                    condition(expr, params, byHash, locals).forEach { found(it) }
+                    expr.forEachChild { visit(it, path) }
                 }
-                else -> Unit
+                else -> expr.forEachChild { visit(it, path) }
             }
         }
+        visit(decl.value, emptyMap())
         return pack(wanted)
     }
 
@@ -182,6 +224,56 @@ object SampleBranches {
             if (knownValue(e, local) == null) out[ref] = target
         }
         return out.values.toList()
+    }
+
+    /**
+     * Every requirement that decides [cond]: comparisons, emptiness, and a bare
+     * `Bool` parameter used as the condition itself (`if strict`), which pins
+     * `True` and `False`.
+     */
+    private fun condition(
+        cond: TypedExpr,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+    ): List<Map<String, Pinned>> {
+        val out = mutableListOf<Map<String, Pinned>>()
+        if (cond is TypedCall) {
+            out.addAll(comparison(cond, params, byHash, locals))
+            out.addAll(emptiness(cond, params, byHash))
+        }
+        if (isBool(cond.type)) pathOf(cond, params)?.let { path ->
+            for (v in listOf(true, false)) {
+                val leaf = Pinned(if (v) "True" else "False", draws = false)
+                placeAt(path, params, leaf)?.let {
+                    out.add(mapOf(path.param to it.copy(why = "if ${path.label} — ${verdict(v)}", outcome = v)))
+                }
+            }
+        }
+        return out
+    }
+
+    /** The builtin Bool, by its canonical identity — a user variant `| True, False |` is not it. */
+    private fun isBool(type: MezzeType): Boolean =
+        type is MezzeType.VariantType &&
+            type.identity == com.mezze.language.ast.BuiltinTypes.getBoolType().identity
+
+    /**
+     * [req] under [path]: the union of both, or null when they CONTRADICT — the
+     * same parameter pinned to two different values. A contradicting requirement
+     * asks for a row that cannot reach the branch it describes.
+     */
+    private fun merge(path: Map<String, Pinned>, req: Map<String, Pinned>): Map<String, Pinned>? {
+        val out = LinkedHashMap(path)
+        for ((k, v) in req) {
+            val held = out[k]
+            if (held != null && held.source != v.source) return null
+            // The inner requirement's reason is the one this row is FOR; the path
+            // is how it gets there.
+            out[k] = v.copy(why = v.why)
+        }
+        // Reasons of the path pins stay too, so the row says how it was reached.
+        return out
     }
 
     /**
@@ -214,12 +306,12 @@ object SampleBranches {
 
     // ── match arms ────────────────────────────────────────────────────────────
 
-    private fun matchArms(match: TypedMatch, params: Map<String, MezzeType>): List<Pair<String, Pinned>> {
+    private fun matchArms(match: TypedMatch, params: Map<String, MezzeType>): List<Triple<Int, String, Pinned>> {
         // The scrutinee is a parameter, or a field path into one (`match p.shape`).
         val path = pathOf(match.scrutinee, params) ?: return emptyList()
         val ctors = (match.scrutinee.type as? MezzeType.VariantType)?.constructors ?: return emptyList()
-        val out = mutableListOf<Pair<String, Pinned>>()
-        for (case in match.cases) {
+        val out = mutableListOf<Triple<Int, String, Pinned>>()
+        for ((index, case) in match.cases.withIndex()) {
             for (pattern in case.patterns) {
                 val tag = (pattern as? TypedVariantPattern)?.tag ?: continue
                 // `containsKey` rather than a null check: a constructor with no
@@ -227,7 +319,7 @@ object SampleBranches {
                 if (!ctors.containsKey(tag)) continue
                 val built = construct(Arm(tag, ctors[tag]))
                 val placed = placeAt(path, params, built) ?: continue
-                out.add(path.param to placed.copy(why = "match ${path.label} — `$tag` arm"))
+                out.add(Triple(index, path.param, placed.copy(why = "match ${path.label} — `$tag` arm")))
             }
         }
         return out
@@ -377,11 +469,11 @@ object SampleBranches {
         val where = "${path.label} ${SYMBOL.getValue(effectiveOp)} $shown"
         val leaves = when (known) {
             is Known.IntValue -> intBoundary(known.value, effectiveOp)
-                .map { (v, holds) -> Pinned(v.toString(), draws = false, why = "if $where — ${verdict(holds)}") }
+                .map { (v, holds) -> Pinned(v.toString(), draws = false, why = "if $where — ${verdict(holds)}", outcome = holds) }
             is Known.StrValue -> strBoundary(known.value, effectiveOp)
-                .map { (v, holds) -> Pinned(strLiteral(v), draws = false, why = "if $where — ${verdict(holds)}") }
+                .map { (v, holds) -> Pinned(strLiteral(v), draws = false, why = "if $where — ${verdict(holds)}", outcome = holds) }
         }
-        return leaves.mapNotNull { leaf -> placeAt(path, params, leaf)?.copy(why = leaf.why) }
+        return leaves.mapNotNull { leaf -> placeAt(path, params, leaf)?.copy(why = leaf.why, outcome = leaf.outcome) }
             .map { mapOf(path.param to it) }
     }
 
@@ -566,7 +658,7 @@ object SampleBranches {
             .filter { (n, _) -> n in 0..MAX_PINNED_LENGTH }
             .mapNotNull { (n, holds) ->
                 val leaf = seqOfLength(n.toInt(), elem)
-                placeAt(path, params, leaf)?.copy(why = "if $where — ${verdict(holds)}")
+                placeAt(path, params, leaf)?.copy(why = "if $where — ${verdict(holds)}", outcome = holds)
             }
             .map { mapOf(path.param to it) }
     }
@@ -585,7 +677,7 @@ object SampleBranches {
         val elem = (typeAt(path, params) as? MezzeType.TypeApplication)?.args?.single() ?: return emptyList()
         return listOf(0 to true, 1 to false).mapNotNull { (n, holds) ->
             placeAt(path, params, seqOfLength(n, elem))
-                ?.copy(why = "is_empty(${path.label}) — ${if (holds) "empty" else "not empty"}")
+                ?.copy(why = "is_empty(${path.label}) — ${if (holds) "empty" else "not empty"}", outcome = holds)
         }.map { mapOf(path.param to it) }
     }
 
@@ -627,17 +719,18 @@ object SampleBranches {
         }
         val relation = mapOf(-1 to "<", 0 to "==", 1 to ">")
         return pairs.mapNotNull { (l, r, cmp) ->
+            val outcome = holds(cmp, op)
             val why = "if ${leftPath.label} ${SYMBOL.getValue(op)} ${rightPath.label} — " +
-                "${verdict(holds(cmp, op))} (${relation.getValue(cmp)})"
+                "${verdict(outcome)} (${relation.getValue(cmp)})"
             val lp = Pinned(l, draws = false, why = why)
             val rp = Pinned(r, draws = false, why = why)
             if (leftPath.param == rightPath.param) {
                 val both = placeAll(params[leftPath.param] ?: return@mapNotNull null,
                     listOf(leftPath.fields to lp, rightPath.fields to rp)) ?: return@mapNotNull null
-                mapOf(leftPath.param to both.copy(why = why))
+                mapOf(leftPath.param to both.copy(why = why, outcome = outcome))
             } else {
-                val a = placeAt(leftPath, params, lp)?.copy(why = why) ?: return@mapNotNull null
-                val b = placeAt(rightPath, params, rp)?.copy(why = why) ?: return@mapNotNull null
+                val a = placeAt(leftPath, params, lp)?.copy(why = why, outcome = outcome) ?: return@mapNotNull null
+                val b = placeAt(rightPath, params, rp)?.copy(why = why, outcome = outcome) ?: return@mapNotNull null
                 mapOf(leftPath.param to a, rightPath.param to b)
             }
         }
@@ -754,7 +847,7 @@ object SampleBranches {
         val via = if (sideLabel == lin.shown) "" else " ($sideLabel = ${lin.shown})"
         fun pin(x: Long, h: Boolean): Pinned? =
             placeAt(lin.path, params, Pinned(x.toString(), draws = false))
-                ?.copy(why = "if $where — ${verdict(h)}$via")
+                ?.copy(why = "if $where — ${verdict(h)}$via", outcome = h)
         val flip = results.zipWithNext().firstOrNull { (p, q) -> p.second != q.second }
         val pins = if (flip != null) {
             listOfNotNull(pin(flip.first.first, flip.first.second), pin(flip.second.first, flip.second.second))
