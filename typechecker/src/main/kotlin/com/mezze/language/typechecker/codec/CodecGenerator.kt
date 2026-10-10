@@ -33,10 +33,49 @@ class CodecGenerator(
     // consulted when a user-declared TypeApplication reaches the encode/decode
     // walk.
     private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
+    // #11/codec: "does format <config> implement ability <name>?" — supplied by the
+    // emit site (ConstraintSolver.implementsAbility). Used ONLY to pick the optional
+    // bulk scalar-sequence fast path; defaults to "no" so check-only generator
+    // instances (which never emit the final impl) safely take the generic walk.
+    private val implementsAbility: (String, MezzeType) -> Boolean = { _, _ -> false },
 ) {
 
     private val encodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
     private val decodeCache = mutableMapOf<String, ParsedImplAbilityDecl>()
+
+    /** The concrete format type of the impl currently being synthesized. Set at each
+     *  generate*Impl entry; read by the sequence builders to ask [implementsAbility]
+     *  whether the bulk `ScalarSequence` fast path applies. The format never changes
+     *  mid-derivation, so a field (vs threading through every build* call) is safe. */
+    private var currentConfig: MezzeType? = null
+
+    /** Tier-2 hook method names. Centralized so the emitter never spells a codec
+     *  method as a bare string (and the bulk names line up with core.mz). */
+    private object Hooks {
+        fun encodeScalarSeq(t: String) = "encode_${t}_seq"
+        fun decodeScalarSeq(t: String) = "decode_${t}_seq"
+        const val ENCODE_SEQUENCE = "encode_sequence"
+        const val DECODE_SEQUENCE = "decode_sequence"
+    }
+
+    /** The interop-scalar tag (`int`/`float`/`str`/`bool`) for an element type that
+     *  the bulk ScalarSequence path can carry, or null for anything else (Nat/Char/
+     *  Frac/Bytes/records/nested — those always take the generic per-element walk). */
+    private fun scalarSeqTag(elemType: MezzeType): String? = when {
+        com.mezze.language.ast.PrimitiveTypes.isBoolVariant(elemType) -> "bool"
+        elemType is MezzeType.IntType    -> "int"
+        elemType is MezzeType.FloatType  -> "float"
+        elemType is MezzeType.StringType -> "str"
+        else -> null
+    }
+
+    /** True iff the current format implements the given-direction ScalarSequence
+     *  ability, so the bulk hook can be emitted for a scalar-element sequence. */
+    private fun bulkScalarSeqAvailable(isEncode: Boolean): Boolean {
+        val cfg = currentConfig ?: return false
+        val ability = if (isEncode) "EncodeScalarSequence" else "DecodeScalarSequence"
+        return implementsAbility(ability, cfg)
+    }
 
     // ---------------------------------------------------------------------
     // Public API
@@ -105,6 +144,7 @@ class CodecGenerator(
         val key = "$formatType|$dataType"
         encodeCache[key]?.let { return it }
 
+        currentConfig = formatType
         val encoded = buildEncodeExpr(dataType, id("it"))
         val body = doWithLet("ctx", initialCtx(), encoded)
         val impl = createEncodeImpl(formatType, dataType, body)
@@ -129,6 +169,7 @@ class CodecGenerator(
         val key = "$formatType|$dataType|$inType"
         decodeCache[key]?.let { return it }
 
+        currentConfig = formatType
         val decoded = buildDecodeExpr(dataType, id("it"))
         val body = doWithLet("ctx", initialCtx(), decoded)
         val impl = createDecodeImpl(formatType, dataType, inType, body)
@@ -360,6 +401,19 @@ class CodecGenerator(
             null -> valueExpr
             "__native_list_to_seq" -> call(id(toSeq), record("xs" to valueExpr))
             else -> call(id(toSeq), record("s" to valueExpr))
+        }
+        // BULK scalar fast path: a `[Int]/[Float]/[Str]/[Bool]` whose format implements
+        // EncodeScalarSequence crosses the whole array in one `encode_<t>_seq` call —
+        // no per-element `encode_<t>` walk. `asSeq` already normalized List/Set → Seq,
+        // so `vals` is the `[scalar]` the hook expects. Non-scalar elements, or a format
+        // without the ability, fall through to the generic per-element path below.
+        scalarSeqTag(elemType)?.let { tag ->
+            if (bulkScalarSeqAvailable(isEncode = true)) {
+                return call(
+                    member(id("config"), Hooks.encodeScalarSeq(tag)),
+                    record("vals" to asSeq, "ctx" to id("ctx")),
+                )
+            }
         }
         // seq::map { xs = <asSeq>, f = { x } -> <encode x> } — then wrap.
         val mappedElems = call(
@@ -690,6 +744,24 @@ class CodecGenerator(
     }
 
     private fun buildDecodeSequence(elemType: MezzeType, inputExpr: ParsedExpr, rebuild: SeqRebuild?): ParsedExpr {
+        // BULK scalar fast path: `config.decode_<t>_seq { val = it }` yields a whole
+        // `Result [scalar]` in one crossing — no per-element `decode_<t>` walk. For a
+        // Seq target that Result IS the answer; for List/Set/SortedSet rebuild the
+        // declared container from the decoded seq (same as the generic path's tail).
+        // Falls through for non-scalar elements or a format lacking DecodeScalarSequence.
+        scalarSeqTag(elemType)?.let { tag ->
+            if (bulkScalarSeqAvailable(isEncode = false)) {
+                val bulk = call(
+                    member(id("config"), Hooks.decodeScalarSeq(tag)),
+                    record("val" to inputExpr, "ctx" to id("ctx")),
+                )
+                return if (rebuild == null) bulk else match(
+                    bulk,
+                    matchCase(okPat("__decoded_seq"), ok(rebuildSeq(rebuild, id("__decoded_seq")))),
+                    matchCase(errPat("e"), err(id("e"))),
+                )
+            }
+        }
         // config.decode_sequence { val = it, ctx = ctx } -> Ok { val = ['in] }.
         // Then map each element through decodeExpr, gathering into Ok/Err.
         val listCall = call(

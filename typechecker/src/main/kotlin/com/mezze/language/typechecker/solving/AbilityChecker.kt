@@ -1228,6 +1228,12 @@ class AbilityChecker internal constructor(
      * names (see the `prettyPrintType`-is-lossy rule), and this predicate should
      * agree with its strict sibling rather than approximate it.
      */
+    /** Public predicate for the codec emitter (via [ConstraintSolver]): does [configType]
+     *  implement [abilityName]? Used only to pick the optional bulk ScalarSequence
+     *  fast path — a "no" just means the generic Sequence walk is emitted instead. */
+    internal fun implementsAbility(abilityName: String, configType: MezzeType): Boolean =
+        abilityImplExistsForType(abilityName, listOf(configType))
+
     private fun abilityImplExistsForType(abilityName: String, typeArgs: List<MezzeType>): Boolean {
         if (typeArgs.isEmpty()) return false
         return abilityImpls(abilityName).any { info ->

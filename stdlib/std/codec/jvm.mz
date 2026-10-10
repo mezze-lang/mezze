@@ -18,6 +18,7 @@ use std::codec::core::{
   Format,
   EncodeScalar, EncodeOption, EncodeSequence, EncodeMapping, EncodeRecord, EncodeVariant,
   DecodeScalar, DecodeOption, DecodeSequence, DecodeMapping, DecodeRecord, DecodeVariant,
+  EncodeScalarSequence, DecodeScalarSequence,
   Encode, Decode,
   CodecCtx, SharedConfig, DecodeError,
   default_shared,
@@ -27,7 +28,8 @@ use std::polyglot::core::{ InteropError }
 use std::polyglot::jvm::{
   JvmForeign,
   from_int, from_float, from_str, from_bool, null_val,
-  jvm_list, jvm_dict
+  jvm_list, jvm_dict,
+  jvm_ints, jvm_floats, jvm_strs, jvm_bools
 }
 use std::collections::seq
 use std::float
@@ -87,6 +89,17 @@ impl EncodeOption for JvmC having 'out = JvmForeign where {
 
 impl EncodeSequence for JvmC having 'out = JvmForeign where {
   encode_sequence = { it, elems, ctx } -> jvm_list { elems = elems },
+}
+
+## BULK scalar-sequence fast path (optional Tier-2): box a whole `[Int]`/`[Float]`/
+## `[Str]`/`[Bool]` into a guest array in ONE crossing, instead of boxing each
+## element and building a list. The auto-derived `Encode JvmC [Int]` routes here
+## when this impl is present; other element types stay on `EncodeSequence`.
+impl EncodeScalarSequence for JvmC having 'out = JvmForeign where {
+  encode_int_seq   = { it, vals, ctx } -> jvm_ints   { vals = vals },
+  encode_float_seq = { it, vals, ctx } -> jvm_floats { vals = vals },
+  encode_str_seq   = { it, vals, ctx } -> jvm_strs   { vals = vals },
+  encode_bool_seq  = { it, vals, ctx } -> jvm_bools  { vals = vals },
 }
 
 impl EncodeMapping for JvmC having 'out = JvmForeign where {
@@ -263,6 +276,38 @@ impl DecodeSequence for JvmC having 'in = JvmForeign where {
       message = "Expected an array-shaped Foreign",
       expected = "List",
       found = Some { val = type_name_or { f = val } },
+    },
+}
+
+## BULK scalar-sequence fast path (optional Tier-2): drain + coerce a whole numeric /
+## string / boolean guest array to a Mezze `[Int]`/`[Float]`/`[Str]`/`[Bool]` in ONE
+## crossing (the element loop + coercion stay host-side). The auto-derived
+## `Decode JvmC [Int]` routes here when present; other element types stay on
+## `DecodeSequence` + per-element `DecodeScalar`.
+impl DecodeScalarSequence for JvmC having 'in = JvmForeign where {
+  decode_int_seq = { it, val, ctx } -> match val.to_ints {} is
+    Ok { val = xs } -> Ok { val = xs }
+    Err { error = _ } -> decode_error {
+      path = ctx.path, message = "Expected an array of Int-coercible Foreigns",
+      expected = "[Int]", found = Some { val = type_name_or { f = val } },
+    },
+  decode_float_seq = { it, val, ctx } -> match val.to_floats {} is
+    Ok { val = xs } -> Ok { val = xs }
+    Err { error = _ } -> decode_error {
+      path = ctx.path, message = "Expected an array of Float-coercible Foreigns",
+      expected = "[Float]", found = Some { val = type_name_or { f = val } },
+    },
+  decode_str_seq = { it, val, ctx } -> match val.to_strs {} is
+    Ok { val = xs } -> Ok { val = xs }
+    Err { error = _ } -> decode_error {
+      path = ctx.path, message = "Expected an array of Str-coercible Foreigns",
+      expected = "[Str]", found = Some { val = type_name_or { f = val } },
+    },
+  decode_bool_seq = { it, val, ctx } -> match val.to_bools {} is
+    Ok { val = xs } -> Ok { val = xs }
+    Err { error = _ } -> decode_error {
+      path = ctx.path, message = "Expected an array of Bool-coercible Foreigns",
+      expected = "[Bool]", found = Some { val = type_name_or { f = val } },
     },
 }
 

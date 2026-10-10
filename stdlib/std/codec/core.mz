@@ -143,6 +143,33 @@ ability DecodeOption for 'config having 'in where {
   decode_option: { it: 'config, val: 'in, ctx: CodecCtx } -> Result (Option 'in) DecodeError,
 }
 
+## ---- Tier 2 — OPTIONAL bulk scalar-sequence fast path -------------------
+##
+## A `[Int]`/`[Float]`/`[Str]`/`[Bool]` is a Sequence of Scalars. The generic
+## `Sequence` + per-element `Scalar` walk is correct for every format, but for a
+## format whose input/output is a FOREIGN handle (the polyglot codecs) it pays one
+## guest-boundary crossing PER ELEMENT. These optional abilities fuse container +
+## scalar so the whole array crosses in ONE go. A format implements them ONLY if it
+## can beat the generic walk (polyglot → the bulk `to_<t>_seq`/`box_<t>_seq` ops);
+## JSON/URL etc. simply don't, and the auto-derivation falls back to the generic
+## `Sequence` path (which still errors by name if `Sequence` itself is missing).
+## `Sequence` remains the REQUIRED base — this is purely an additive speed-up.
+ability EncodeScalarSequence for 'config having 'out where {
+  encode_int_seq:   { it: 'config, vals: [Int],   ctx: CodecCtx } -> 'out,
+  encode_float_seq: { it: 'config, vals: [Float], ctx: CodecCtx } -> 'out,
+  encode_str_seq:   { it: 'config, vals: [Str],   ctx: CodecCtx } -> 'out,
+  encode_bool_seq:  { it: 'config, vals: [Bool],  ctx: CodecCtx } -> 'out,
+}
+
+## Decode mirror of [EncodeScalarSequence] — a whole scalar array from the format's
+## input representation in ONE step.
+ability DecodeScalarSequence for 'config having 'in where {
+  decode_int_seq:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Int]   DecodeError,
+  decode_float_seq: { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Float] DecodeError,
+  decode_str_seq:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Str]   DecodeError,
+  decode_bool_seq:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Bool]  DecodeError,
+}
+
 ## ---- Tier 3 — Encode / Decode primitives -------------------------------
 ##
 ## The compiler auto-derives `impl Encode 'config for 'a having 'out`

@@ -29,6 +29,38 @@ class CodecGeneratorTest {
         generator = CodecGenerator()
     }
 
+    private val seqInt = MezzeType.TypeApplication(BuiltinTypes.SEQ, listOf(MezzeType.IntType))
+
+    @Test
+    fun `scalar-seq decode routes to the bulk hook when the format implements DecodeScalarSequence`() {
+        // #11/codec: with the optional ability present, `Decode <fmt> [Int]` must emit
+        // the one-crossing `config.decode_int_seq`, NOT the per-element decode_sequence walk.
+        val gen = CodecGenerator(implementsAbility = { ability, _ -> ability == "DecodeScalarSequence" })
+        val body = gen.generateDecodeImpl(jsonC, seqInt, jsonInType).toString()
+        assertTrue(body.contains("decode_int_seq"), "expected bulk decode_int_seq; got:\n$body")
+        assertFalse(body.contains("decode_sequence"), "should NOT also emit the generic decode_sequence walk")
+    }
+
+    @Test
+    fun `scalar-seq decode falls back to decode_sequence when the format lacks DecodeScalarSequence`() {
+        // Same type, format without the optional ability → the existing generic walk.
+        val gen = CodecGenerator(implementsAbility = { _, _ -> false })
+        val body = gen.generateDecodeImpl(jsonC, seqInt, jsonInType).toString()
+        assertTrue(body.contains("decode_sequence"), "expected generic decode_sequence; got:\n$body")
+        assertFalse(body.contains("decode_int_seq"), "should NOT use the bulk hook when unimplemented")
+    }
+
+    @Test
+    fun `scalar-seq encode routes to the bulk hook only when EncodeScalarSequence is implemented`() {
+        val withBulk = CodecGenerator(implementsAbility = { ability, _ -> ability == "EncodeScalarSequence" })
+            .generateEncodeImpl(jsonC, seqInt).toString()
+        assertTrue(withBulk.contains("encode_int_seq"), "expected bulk encode_int_seq; got:\n$withBulk")
+        val without = CodecGenerator(implementsAbility = { _, _ -> false })
+            .generateEncodeImpl(jsonC, seqInt).toString()
+        assertTrue(without.contains("encode_sequence"), "expected generic encode_sequence; got:\n$without")
+        assertFalse(without.contains("encode_int_seq"), "should NOT use the bulk hook when unimplemented")
+    }
+
     @Test
     fun `primitives should be serializable`() {
         assertTrue(generator.isSerializable(MezzeType.IntType))

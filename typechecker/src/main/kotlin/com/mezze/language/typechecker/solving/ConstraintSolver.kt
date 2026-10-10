@@ -144,6 +144,11 @@ class ConstraintSolver(
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
 
+    /** Does format [configType] implement [abilityName]? Lets the codec emitter pick
+     *  the optional bulk ScalarSequence fast path (see CodecGenerator). */
+    internal fun implementsAbility(abilityName: String, configType: MezzeType): Boolean =
+        abilityChecker.implementsAbility(abilityName, configType)
+
     /**
      * What solving concluded about one ability constraint's arguments. The three
      * answers are genuinely different and a caller must not collapse them:

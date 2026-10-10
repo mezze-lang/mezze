@@ -84,7 +84,12 @@ internal fun emitTypedModuleAndLower(
         val typed = builder.build(parsedModule)
 
         val codecImpls = solver.getGeneratedCodecImpls()
-        val codecGen = CodecGenerator(registry)
+        // Pass the solver's impl-presence predicate so the generator can route a
+        // scalar-element sequence through the bulk ScalarSequence fast path when the
+        // format implements it, and fall back to the generic Sequence walk otherwise.
+        val codecGen = CodecGenerator(registry, implementsAbility = { ability, config ->
+            solver.implementsAbility(ability, config)
+        })
         val extraImpls = mutableListOf<TypedAbilityImpl>()
 
         // New codec ability shape (docs/codec/redesign-2026-09.md):
