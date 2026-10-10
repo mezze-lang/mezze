@@ -3,6 +3,7 @@ package com.mezze.language.cli.commands
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.ModulePath
 import com.mezze.language.typedast.TypedEffectDecl
+import com.mezze.language.typedast.forEachChild
 
 /**
  * Scripted performers: how `mez sample` runs a function whose effects nothing
@@ -41,9 +42,23 @@ import com.mezze.language.typedast.TypedEffectDecl
  */
 object SampleScripts {
 
-    data class Op(val name: String, val params: List<String>, val returnType: MezzeType) {
+    data class Op(
+        val name: String,
+        val params: List<String>,
+        val returnType: MezzeType,
+        /**
+         * Whether the target can REACH this operation — from its own body or from
+         * anything it calls. An operation it cannot reach still gets a value, so the
+         * performer is total, but no column: it is not an input to this function.
+         * Reachable rather than "in the body", because hiding a column for an
+         * operation a helper performs would hide an input the function does see.
+         */
+        val called: Boolean = true,
+    ) {
         /** An operation returning `{}` carries nothing worth drawing or showing. */
         val valued: Boolean get() = !(returnType is MezzeType.RecordType && returnType.fields.isEmpty())
+        /** Gets a column: carries a value AND the function can observe it. */
+        val shown: Boolean get() = valued && called
     }
 
     data class Script(
@@ -68,6 +83,35 @@ object SampleScripts {
     /** Every valued operation of [scripts] as analysis context: key → (label, type). */
     fun context(scripts: List<Script>): Map<String, Pair<String, MezzeType>> =
         scripts.flatMap { sc -> sc.ops.filter { it.valued }.map { sc.key(it) to (sc.label(it) to it.returnType) } }.toMap()
+
+    /**
+     * Context keys of every operation reachable from [root]: its body, then every
+     * declaration it references by HASH, transitively. A visited set bounds it, so
+     * recursion and mutual recursion terminate.
+     */
+    fun reachedOperations(
+        root: com.mezze.language.typedast.TypedLetDecl,
+        decls: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedLetDecl>,
+    ): Set<String> {
+        val keys = mutableSetOf<String>()
+        val seen = mutableSetOf<com.mezze.language.typedast.Hash>()
+        val pending = ArrayDeque(listOf(root))
+        while (pending.isNotEmpty()) {
+            val d = pending.removeFirst()
+            if (!seen.add(d.hash)) continue
+            fun walk(e: com.mezze.language.typedast.TypedExpr) {
+                when (e) {
+                    is com.mezze.language.typedast.TypedPerformOp -> keys.add(contextKey(e.effectHash, e.operationName))
+                    is com.mezze.language.typedast.TypedVar ->
+                        (e.binding as? com.mezze.language.typedast.BindingRef.ByHash)?.let { ref -> decls[ref.hash]?.let { pending.add(it) } }
+                    else -> Unit
+                }
+                e.forEachChild { walk(it) }
+            }
+            walk(d.value)
+        }
+        return keys
+    }
 
     sealed interface Plan {
         data class Scripted(val scripts: List<Script>) : Plan

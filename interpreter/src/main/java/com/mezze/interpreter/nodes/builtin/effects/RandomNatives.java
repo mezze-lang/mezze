@@ -34,24 +34,19 @@ public final class RandomNatives {
     /**
      * S-21 branch-covering draw state, keyed by the row's seed.
      *
-     * `{remaining, position}` — `remaining` is the row index being decomposed into
-     * mixed-radix digits, `position` counts how many digits have been handed out.
+     * `{remaining, position, depth}` — `remaining` is the row index being decomposed
+     * into mixed-radix digits, `position` counts how many digits have been handed
+     * out, `depth` is how many may be (the performer's `SampleConfig.enumerate`).
      * Keyed by SEED alone because `mez sample` already gives every row its own
      * seed (`seed + i`), so no two rows share an entry.
      */
     private static final ConcurrentHashMap<Long, long[]> COVERING_DRAWS =
         new ConcurrentHashMap<>();
 
-    /**
-     * How many leading choices are enumerated rather than drawn.
-     *
-     * Constructor selection happens in the FIRST few draws — a derived variant
-     * bisects over `Bool`s, so eight constructors are decided within three — and
-     * nesting adds a handful more. Past this depth it is payloads that vary, which
-     * is what random draws are good at; enumerating them would only make every row
-     * share a long prefix.
-     */
-    private static final int COVERING_DEPTH = 12;
+    // How many leading choices are enumerated now arrives as `depth` from the
+    // performer's `SampleConfig.enumerate` (default 12): constructor selection
+    // happens in the first few draws, and past that it is payloads that vary,
+    // which random draws handle better than enumeration.
 
     // ============== System Random Operations ==============
 
@@ -148,14 +143,15 @@ public final class RandomNatives {
 
     /**
      * S-21: start a branch-covering row. Resets the seeded stream too, so the
-     * random tail past [COVERING_DEPTH] is reproducible for a given seed.
+     * random tail past the enumerated depth is reproducible for a given seed.
      */
     @TruffleBoundary
     public static Object resetCoveringSample(MezzeRecord args) {
         long seed = getLong(args, "seed");
         long run = getLong(args, "run");
+        long depth = getLong(args, "depth");
         SEEDED_RANDOMS.put(seed, new Random(scrambleSeed(seed)));
-        COVERING_DRAWS.put(seed, new long[]{ run, 0 });
+        COVERING_DRAWS.put(seed, new long[]{ run, 0, depth });
         return MezzeRecord.empty();
     }
 
@@ -185,7 +181,7 @@ public final class RandomNatives {
         // something that does not exist. Same guard the stdlib performers apply.
         if (bound <= 1) return 0;
         long[] state = COVERING_DRAWS.get(seed);
-        if (state != null && state[1] < COVERING_DEPTH && state[0] > 0) {
+        if (state != null && state[1] < state[2] && state[0] > 0) {
             long digit = state[0] % bound;
             state[0] /= bound;
             state[1]++;

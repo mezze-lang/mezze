@@ -510,4 +510,19 @@ class SampleBranchesTest {
         assertTrue(r.any { it.startsWith("s = Empty, n = 4") }, "got $r")
         assertTrue(r.none { it.contains("n > 3") && !it.contains("s = Empty") }, "got $r")
     }
+
+    /**
+     * Two pins for one parameter are not necessarily a contradiction. Inside
+     * `if n > 10`, `n = 15` serves both `n > 10` and `n < 15 — else`, and the path's
+     * own `n = 11` serves `n < 5 — else`. Both rows used to be dropped.
+     */
+    @Test
+    fun `a value satisfying both conditions keeps the inner row`() {
+        val r = rows("pub let f = { n: Int } -> if n > 10 then (if n < 15 then 1 else 2) else 3", "f")
+        assertTrue("n = 15 | if n > 10 — then; if n < 15 — else" in r, "got $r")
+        assertTrue("n = 14 | if n > 10 — then; if n < 15 — then" in r, "got $r")
+        val s = rows("pub let f = { n: Int } -> if n > 10 then (if n < 5 then 1 else 2) else 3", "f")
+        assertTrue("n = 11 | if n > 10 — then; if n < 5 — else" in s, "got $s")
+        assertTrue(s.none { it.contains("n < 5 — then") }, "got $s")
+    }
 }

@@ -94,6 +94,14 @@ object SampleBranches {
          * see the path constraint in [inventory].
          */
         val outcome: Boolean? = null,
+        /**
+         * Whether a CANDIDATE value (as source) would land on the same side of this
+         * pin's condition, when that can be decided — for a comparison on a whole
+         * primitive parameter. Lets [merge] tell a real contradiction from two pins
+         * that merely differ: inside `if n > 10`, `n = 11` already satisfies
+         * `n < 5 — else`, so that row is kept rather than dropped.
+         */
+        val check: ((String) -> Boolean)? = null,
     )
 
     /**
@@ -141,7 +149,16 @@ object SampleBranches {
         fun want(req: Map<String, Pinned>) {
             if (req.isEmpty()) return
             val key = req.mapValues { it.value.source }
-            if (wanted.none { w -> w.mapValues { it.value.source } == key }) wanted.add(req)
+            val i = wanted.indexOfFirst { w -> w.mapValues { it.value.source } == key }
+            if (i < 0) { wanted.add(req); return }
+            // Same values, another branch they reach: one row, and it says BOTH.
+            // Dropping the second reason would hide that `n = 11` also tests
+            // `n < 5 — else` inside `if n > 10`.
+            wanted[i] = wanted[i].mapValues { (k, held) ->
+                val extra = req.getValue(k).why
+                if (extra.isEmpty() || held.why.split("; ").containsAll(extra.split("; "))) held
+                else held.copy(why = (held.why.split("; ") + extra.split("; ")).distinct().joinToString("; "))
+            }
         }
         val byHash = (imported + decls).associateBy { it.hash }.toMutableMap()
         for ((hash, value) in evaluated) {
@@ -246,7 +263,11 @@ object SampleBranches {
             for (v in listOf(true, false)) {
                 val leaf = Pinned(if (v) "True" else "False", draws = false)
                 placeAt(path, params, leaf)?.let {
-                    out.add(mapOf(path.param to it.copy(why = "if ${path.label} — ${verdict(v)}", outcome = v)))
+                    out.add(mapOf(path.param to it.copy(
+                        why = "if ${path.label} — ${verdict(v)}",
+                        outcome = v,
+                        check = if (path.fields.isNotEmpty()) null else { src -> src == "True" },
+                    )))
                 }
             }
         }
@@ -267,12 +288,24 @@ object SampleBranches {
         val out = LinkedHashMap(path)
         for ((k, v) in req) {
             val held = out[k]
-            if (held != null && held.source != v.source) return null
-            // The inner requirement's reason is the one this row is FOR; the path
-            // is how it gets there.
-            out[k] = v.copy(why = v.why)
+            if (held == null || held.source == v.source) {
+                out[k] = v
+                continue
+            }
+            // Two different values for one parameter. Not necessarily a
+            // contradiction: one value may satisfy BOTH conditions.
+            val innerFitsPath = held.check?.invoke(v.source) == held.outcome
+            val pathFitsInner = v.check?.invoke(held.source) == v.outcome
+            out[k] = when {
+                // e.g. path `n > 10 — then` (n = 11), inner `n < 15 — else` (n = 15):
+                // 15 also satisfies `n > 10`, so use it and keep both reasons.
+                held.outcome != null && innerFitsPath -> v.copy(why = held.why + "; " + v.why)
+                // e.g. path n = 11, inner `n < 5 — else` (n = 5): 11 already
+                // satisfies `n < 5 — else`, so the path's value serves both.
+                v.outcome != null && pathFitsInner -> held.copy(why = held.why + "; " + v.why, outcome = held.outcome)
+                else -> return null
+            }
         }
-        // Reasons of the path pins stay too, so the row says how it was reached.
         return out
     }
 
@@ -473,7 +506,13 @@ object SampleBranches {
             is Known.StrValue -> strBoundary(known.value, effectiveOp)
                 .map { (v, holds) -> Pinned(strLiteral(v), draws = false, why = "if $where — ${verdict(holds)}", outcome = holds) }
         }
-        return leaves.mapNotNull { leaf -> placeAt(path, params, leaf)?.copy(why = leaf.why, outcome = leaf.outcome) }
+        val check: ((String) -> Boolean)? = if (path.fields.isNotEmpty()) null else when (known) {
+            is Known.IntValue -> { src -> src.toLongOrNull()?.let { holds(it.compareTo(known.value), effectiveOp) } ?: false }
+            is Known.StrValue -> { src -> holds(if (src == strLiteral(known.value)) 0 else 1, effectiveOp) }
+        }
+        return leaves.mapNotNull { leaf ->
+            placeAt(path, params, leaf)?.copy(why = leaf.why, outcome = leaf.outcome, check = check)
+        }
             .map { mapOf(path.param to it) }
     }
 
@@ -847,7 +886,13 @@ object SampleBranches {
         val via = if (sideLabel == lin.shown) "" else " ($sideLabel = ${lin.shown})"
         fun pin(x: Long, h: Boolean): Pinned? =
             placeAt(lin.path, params, Pinned(x.toString(), draws = false))
-                ?.copy(why = "if $where — ${verdict(h)}$via", outcome = h)
+                ?.copy(
+                    why = "if $where — ${verdict(h)}$via",
+                    outcome = h,
+                    check = if (lin.path.fields.isNotEmpty()) null else { src ->
+                        src.toLongOrNull()?.let { x -> lin.at(x)?.let { v -> holds(v.compareTo(k.value), effectiveOp) } } ?: false
+                    },
+                )
         val flip = results.zipWithNext().firstOrNull { (p, q) -> p.second != q.second }
         val pins = if (flip != null) {
             listOfNotNull(pin(flip.first.first, flip.first.second), pin(flip.second.first, flip.second.second))

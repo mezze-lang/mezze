@@ -60,9 +60,16 @@ class SampleCommand {
         // a single sample shows what it returned, several show what it DOES — which
         // arguments matter, where the output turns over, whether an edge case breaks
         // it. The seed covers the whole batch, so `--seed` reproduces every row.
-        val count = (intFlag(flags, "--count") ?: 1).coerceIn(1, 100)
+        val count = (intFlag(flags, "--count") ?: 1).coerceIn(1, MAX_COUNT)
         val depth = intFlag(flags, "--depth") ?: WireProtocol.DEFAULT_EVAL_MAX_DEPTH
         val items = intFlag(flags, "--items") ?: WireProtocol.DEFAULT_EVAL_MAX_ITEMS
+        // GENERATION knobs, carried into each row's `SampleConfig`. Not to be
+        // confused with `--depth`/`--items` above, which only limit how a value is
+        // PRINTED.
+        val config = Config(
+            size = (intFlag(flags, "--size") ?: DEFAULT_SIZE).coerceAtLeast(0),
+            enumerate = (intFlag(flags, "--enumerate") ?: DEFAULT_ENUMERATE).coerceAtLeast(0),
+        )
         val timeoutMs = intFlag(flags, "--timeout")?.toLong()?.times(1_000) ?: 0L
 
         val moduleFile = resolveAppFile(currentDir) ?: kotlin.system.exitProcess(1)
@@ -75,7 +82,7 @@ class SampleCommand {
             is SampleTarget.Result.Ready -> withEvaluatedConstants(currentDir, moduleFile, t)
         }
 
-        val expression = buildExpression(target, seed, count)
+        val expression = buildExpression(target, seed, count, config)
 
         when (val compiled = EvalClosure.compile(
             currentDir, moduleFile, expression, imports(target), buildDecls(target),
@@ -112,7 +119,7 @@ class SampleCommand {
                 // only when something actually crashed.
                 val rows: List<RowOutcome> =
                     if (batch?.error == null && batch?.value != null) readRows(batch.value!!)
-                    else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs)
+                    else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs, config)
 
                 if (rows.isEmpty()) {
                     System.err.println(
@@ -175,6 +182,9 @@ class SampleCommand {
         if (evaluated.isEmpty()) return target
         return target.copy(branches = target.reanalyze(evaluated))
     }
+
+    /** Generation settings for every row: `--size` and `--enumerate`. */
+    internal data class Config(val size: Int = DEFAULT_SIZE, val enumerate: Int = DEFAULT_ENUMERATE)
 
     /** What one row produced: its values, or the reason it died. */
     internal sealed interface RowOutcome {
@@ -241,9 +251,10 @@ class SampleCommand {
         depth: Int,
         items: Int,
         timeoutMs: Long,
+        config: Config = Config(),
     ): List<RowOutcome> = (0 until count).map { i ->
         when (val compiled = EvalClosure.compile(
-            currentDir, moduleFile, buildRowExpression(target, seed, i), imports(target),
+            currentDir, moduleFile, buildRowExpression(target, seed, i, config), imports(target),
             buildDecls(target),
         )) {
             is EvalClosure.Result.Failed -> RowOutcome.Crashed("did not compile: ${compiled.message.lines().first()}")
@@ -289,9 +300,10 @@ class SampleCommand {
         target: SampleTarget.Result.Ready,
         seed: Int,
         count: Int = 1,
+        config: Config = Config(),
     ): String {
         if (target.fields.isEmpty() && target.scripts.isEmpty()) return noArgRow(target.name)
-        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i, i).lets }
+        val rows = (0 until count).joinToString("\n") { i -> rowBinding(target, seed + i, i, i, config).lets }
         val collected = (0 until count).joinToString(", ") { "${ROW}_$it" }
         return "do\n$rows\n              { rows = [$collected] }"
     }
@@ -307,9 +319,10 @@ class SampleCommand {
         target: SampleTarget.Result.Ready,
         seed: Int,
         index: Int,
+        config: Config = Config(),
     ): String {
         if (target.fields.isEmpty() && target.scripts.isEmpty()) return noArgRow(target.name)
-        return "do\n${rowBinding(target, seed + index, 0, index).lets}\n              { rows = [${ROW}_0] }"
+        return "do\n${rowBinding(target, seed + index, 0, index, config).lets}\n              { rows = [${ROW}_0] }"
     }
 
     /**
@@ -345,6 +358,7 @@ class SampleCommand {
          * fell into recovery, and printed `Empty` five times.
          */
         row: Int,
+        config: Config = Config(),
     ): SampleGen.Plan {
         val args = "${ARGS}_$slot"
         val forwarded = target.fieldNames.joinToString(", ") { "$it = $args.$it" }
@@ -384,8 +398,11 @@ class SampleCommand {
                 mine.joinToString(", ", prefix = " { ", postfix = " }") { (k, pair) -> "${sc.field(pair.second)} = ${ctxNames[k]}" }
             "perform ${sc.performer}$init in "
         } + "${target.name} { $forwarded }"
-        val ctxRecord = if (valuedOps.isEmpty()) "" else
-            ", ctx = " + ctxNames.indices.joinToString(", ", prefix = "{ ", postfix = " }") { k -> "c$k = ${ctxNames[k]}" }
+        // Only operations the function can REACH come back for display; the rest
+        // still get a value (the performer must be total) but are not its inputs.
+        val shownIdx = valuedOps.indices.filter { valuedOps[it].second.shown }
+        val ctxRecord = if (shownIdx.isEmpty()) "" else
+            ", ctx = " + shownIdx.withIndex().joinToString(", ", prefix = "{ ", postfix = " }") { (c, k) -> "c$c = ${ctxNames[k]}" }
         // Draws only if some argument or some operation result is actually DRAWN. A row
         // whose every input is pinned to a literal performs no `Sample`, and wrapping
         // it in `perform CoveringSample` is a handler that can never fire (V0510).
@@ -397,7 +414,10 @@ class SampleCommand {
         // over a body that performs no `Sample` is one that can never fire — V0510
         // rejects it, exactly as it already does for a zero-argument function. So
         // the `perform` is emitted only when the row actually draws.
-        val head = if (draws) "perform CoveringSample { seed = $rowSeed, run = $row } in do" else "do"
+        val head = if (draws) {
+            "perform CoveringSampleWith { seed = $rowSeed, run = $row, " +
+                "config = { size = ${config.size}n, enumerate = ${config.enumerate}n } } in do"
+        } else "do"
         val text = "              let ${ROW}_$slot = $head\n" +
             (if (lets.isBlank()) "" else lets + "\n") +
             "                let $args = ${plan.record.ifBlank { "{}" }.let { if (it == "{  }") "{}" else it }}\n" +
@@ -432,7 +452,7 @@ class SampleCommand {
         // column beside the arguments — `⟨Config.ask⟩` — rather than staying
         // hidden in the performer. That visibility is what keeps a scripted run
         // from being "a run you set up". See [SampleScripts].
-        val ctxLabels = target.scripts.flatMap { sc -> sc.ops.filter { it.valued }.map { sc.label(it) } }
+        val ctxLabels = target.scripts.flatMap { sc -> sc.ops.filter { it.shown }.map { sc.label(it) } }
         val headers = target.fieldNames + ctxLabels + "→ result" + (if (showWhy) listOf("why") else emptyList())
         val body = rows.mapIndexed { i, outcome ->
             val why = if (showWhy) listOf(target.branches.getOrNull(i)?.why ?: "") else emptyList()
@@ -469,6 +489,14 @@ class SampleCommand {
             // boundary values that tend to cause one are the ones worth keeping.
             println("  $crashed of ${rows.size} row(s) crashed — that is a failure of " +
                 "`${target.name}` on those inputs, not of sample")
+        }
+        // Branch rows the analysis found but `--count` did not leave room for. Said
+        // out loud: a table that silently omits them reads as "every branch shown".
+        val pinned = target.branches.size
+        if (pinned > rows.size) {
+            val cap = if (pinned > MAX_COUNT) " (more than the maximum of $MAX_COUNT)" else ""
+            println("  ${Glyphs.WARN} $pinned branch rows found, ${rows.size} shown$cap — " +
+                "rerun with --count=${minOf(pinned, MAX_COUNT)} to see them")
         }
         println("  seed $seed — rerun with: mez sample ${target.name} --seed=$seed")
     }
@@ -572,6 +600,10 @@ class SampleCommand {
         System.err.println("  --count=N    how many rows to draw (default 1, max 100)")
         System.err.println("  --seed=N     reproduce an earlier run (the seed is printed every time)")
         System.err.println("  --json       the sample as data")
+        System.err.println("  --size=N     generation budget: collection length and recursion depth (default $DEFAULT_SIZE)")
+        System.err.println("  --enumerate=N  leading choices steered across rows before drawing randomly (default $DEFAULT_ENUMERATE)")
+        System.err.println("")
+        System.err.println("  Printing only — these do not change what is generated:")
         System.err.println("  --depth=N    how deep to render a nested value (default ${WireProtocol.DEFAULT_EVAL_MAX_DEPTH})")
         System.err.println("  --items=N    how many elements of a collection to render (default ${WireProtocol.DEFAULT_EVAL_MAX_ITEMS})")
     }
@@ -599,6 +631,11 @@ class SampleCommand {
          */
         /** Prefix for a row's drawn operation results — see [SampleScripts]. */
         const val CTX = "__mez_sample_ctx"
+        /** `SampleConfig` defaults — the same values as `std::effects::sample::default_config`. */
+        /** Most rows one run draws. */
+        const val MAX_COUNT = 100
+        const val DEFAULT_SIZE = 5
+        const val DEFAULT_ENUMERATE = 12
         val EXTRA_IMPORTS = SampleGen.IMPORTS
     }
 }

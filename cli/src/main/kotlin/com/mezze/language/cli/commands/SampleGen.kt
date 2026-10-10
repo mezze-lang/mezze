@@ -64,7 +64,7 @@ object SampleGen {
      * which is what this list is for.
      */
     val IMPORTS: Set<String> = setOf(
-        "use std::effects::sample::{ CoveringSample, choose, size, resize }",
+        "use std::effects::sample::{ CoveringSampleWith, choose, size, resize }",
         "use std::abilities::arbitrary::{ Arbitrary }",
     )
 

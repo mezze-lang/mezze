@@ -111,4 +111,20 @@ class SampleScriptsTest {
             rows(c, "f"),
         )
     }
+
+    /**
+     * An operation performed by a HELPER is still an input the function observes,
+     * so it is reached; one nothing calls is not, and gets no column.
+     */
+    @Test
+    fun `operations are reached through helpers, unused ones are not`() {
+        val c = check("""
+            let read_threshold: {} -> Int <Config> = {} -> Config.threshold {}
+            pub let f: { n: Int } -> Bool <Config> = { n } -> n > read_threshold {}
+        """)
+        val reached = SampleScripts.reachedOperations(c.decl("f"), c.decls.associateBy { it.hash })
+        val script = (plan(c, "f") as SampleScripts.Plan.Scripted).scripts.single()
+        val byName = script.ops.associate { it.name to (script.key(it) in reached) }
+        assertEquals(mapOf("threshold" to true, "mode" to false, "note" to false), byName)
+    }
 }

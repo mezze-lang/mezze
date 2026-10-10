@@ -118,7 +118,12 @@ object SampleTarget {
                     local = success.typedModule?.effectDecls.orEmpty(),
                     loaded = success.loadedModules.mapValues { (_, m) -> m.typedModule?.effectDecls.orEmpty() },
                 )) {
-                    is SampleScripts.Plan.Scripted -> plan.scripts
+                    is SampleScripts.Plan.Scripted -> {
+                        val all = (success.loadedModules.values.flatMap { it.typedModule?.decls.orEmpty() } +
+                            decls).filterIsInstance<TypedLetDecl>().associateBy { it.hash }
+                        val reached = SampleScripts.reachedOperations(decl, all)
+                        plan.scripts.map { sc -> sc.copy(ops = sc.ops.map { it.copy(called = sc.key(it) in reached) }) }
+                    }
                     // Only the effect that defeats scripting is named — the old refusal
                     // text ("sample is offered only for discharged effects") is no
                     // longer true, so it is not appended.

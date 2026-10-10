@@ -53,6 +53,21 @@ pub type Sampler 'a = {} -> 'a <Sample>
 ## deep is not read, it is scrolled past.
 pub let default_size: Nat = 5n
 
+## Every knob a sampling performer takes, in ONE record.
+##
+## - `size` — the budget for collection length and recursion depth. A recursive
+##   type halves it per level, so a tree is at most about `log2(size) + 1` deep.
+## - `enumerate` — how many LEADING choices [CoveringSampleWith] steers before
+##   drawing randomly. Ignored by the purely random performers.
+##
+## One record rather than one `…With` performer per combination of knobs: a new
+## knob is a new field, not a new set of performers. `resize` passes it down with
+## only `size` changed, so a nested draw keeps every other setting.
+pub type SampleConfig = { size: Nat, enumerate: Nat }
+
+## The defaults the plain performers use.
+pub let default_config: SampleConfig = { size = default_size, enumerate = 12n }
+
 ## Entropy from whatever `Random` handler is installed above.
 ##
 ## `Random` is RAISED OUT, not handled, so the caller chooses: a seeded stream for a
@@ -63,7 +78,8 @@ impl Sample for RandomSample where {
   ## of `[0, -1]` would be asking it for something that does not exist.
   choose = { bound } -> if bound <= 1 then 0 else random_int { min = 0, max = bound - 1 },
   size = {} -> default_size,
-  resize = { n, call } -> perform RandomSampleWith { size = n } in call {},
+  resize = { n, call } ->
+    perform RandomSampleWith { config = { size = n, enumerate = default_config.enumerate } } in call {},
 }
 
 ## `RandomSample` with a budget you choose.
@@ -72,10 +88,11 @@ impl Sample for RandomSample where {
 ## what lets a nested draw inherit a lowered budget without touching the `Random`
 ## handler above it. Re-installing entropy per level would reset the stream and every
 ## subtree would come out identical.
-impl Sample for RandomSampleWith { size: Nat } where {
+impl Sample for RandomSampleWith { config: SampleConfig } where {
   choose = { bound } -> if bound <= 1 then 0 else random_int { min = 0, max = bound - 1 },
-  size = {} -> size,
-  resize = { n, call } -> perform RandomSampleWith { size = n } in call {},
+  size = {} -> config.size,
+  resize = { n, call } ->
+    perform RandomSampleWith { config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
 ## A seeded stream: the same seed gives the same values.
@@ -127,10 +144,11 @@ impl Sample for SeededSample { seed: Int } where {
     if bound <= 1 then 0
     else __native_seeded_random_int { seed = seed, min = 0, max = bound - 1 },
   size = {} -> default_size,
-  resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
+  resize = { n, call } ->
+    perform SeededSampleWith { seed = seed, config = { size = n, enumerate = default_config.enumerate } } in call {},
 }
 
-## The same stream with a budget you choose.
+## The same stream with a [SampleConfig] you choose.
 ##
 ## Deliberately has NO `initialize_scope`: `resize` installs this performer, so
 ## re-entering must CONTINUE the stream. A reset here would fire per nested draw and
@@ -138,12 +156,13 @@ impl Sample for SeededSample { seed: Int } where {
 ## is careful to do only once. The stream is keyed by seed and lives outside any
 ## scope (`SEEDED_RANDOMS` in `RandomNatives`), so continuing is simply what happens
 ## when nothing resets it.
-impl Sample for SeededSampleWith { seed: Int, size: Nat } where {
+impl Sample for SeededSampleWith { seed: Int, config: SampleConfig } where {
   choose = { bound } ->
     if bound <= 1 then 0
     else __native_seeded_random_int { seed = seed, min = 0, max = bound - 1 },
-  size = {} -> size,
-  resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
+  size = {} -> config.size,
+  resize = { n, call } ->
+    perform SeededSampleWith { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
 ## A seeded stream whose LEADING choices are enumerated rather than guessed, so a
@@ -188,14 +207,33 @@ impl Sample for CoveringSample { seed: Int, run: Int } where {
   ## reason [SeededSample] gives: a reset per draw hands back the same answer every
   ## time, which is a generator that looks like it works and produces constants.
   initialize_scope = {} -> do
-    __native_reset_covering_sample { seed = seed, run = run }
+    __native_reset_covering_sample { seed = seed, run = run, depth = default_config.enumerate }
     {},
   finalize_scope = {} -> {},
   choose = { bound } ->
     if bound <= 1 then 0
     else __native_covering_choose { seed = seed, bound = bound },
   size = {} -> default_size,
-  resize = { n, call } -> perform SeededSampleWith { seed = seed, size = n } in call {},
+  resize = { n, call } ->
+    perform SeededSampleWith { seed = seed, config = { size = n, enumerate = default_config.enumerate } } in call {},
+}
+
+## [CoveringSample] with a [SampleConfig] you choose — `enumerate` sets how many
+## leading choices are steered, `size` the budget.
+##
+## `resize` hands off to [SeededSampleWith] carrying the SAME config with only
+## `size` lowered, so a nested draw continues the row with your settings.
+impl Sample for CoveringSampleWith { seed: Int, run: Int, config: SampleConfig } where {
+  initialize_scope = {} -> do
+    __native_reset_covering_sample { seed = seed, run = run, depth = config.enumerate }
+    {},
+  finalize_scope = {} -> {},
+  choose = { bound } ->
+    if bound <= 1 then 0
+    else __native_covering_choose { seed = seed, bound = bound },
+  size = {} -> config.size,
+  resize = { n, call } ->
+    perform SeededSampleWith { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
 ## A non-negative Int below `bound`.

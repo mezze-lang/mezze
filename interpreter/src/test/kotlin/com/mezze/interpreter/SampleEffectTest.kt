@@ -68,7 +68,7 @@ class SampleEffectTest {
 
     @Test
     fun `the size budget is what the sampler was given`() {
-        val n = eval("perform SeededSampleWith { seed = 1, size = 9n } in size {} ")
+        val n = eval("perform SeededSampleWith { seed = 1, config = { size = 9n, enumerate = 12n } } in size {} ")
         assertEquals(9L, MezzeTestHelper.asLong(n))
     }
 

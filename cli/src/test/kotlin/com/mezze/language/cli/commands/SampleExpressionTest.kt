@@ -345,4 +345,14 @@ class SampleExpressionTest {
         /** Mirrors `SampleCommand.ARGS`, which is private to it. */
         const val ARGS = "__mez_sample_args__"
     }
+
+    /** `--size` / `--enumerate` reach every row's `SampleConfig`. */
+    @Test
+    fun `generation settings are carried into each row's config`() {
+        val out = command.buildExpression(
+            ready("f", mapOf("a" to MezzeType.IntType)), seed = 1, count = 2,
+            config = SampleCommand.Config(size = 20, enumerate = 4),
+        )
+        assertEquals(2, Regex("config = \\{ size = 20n, enumerate = 4n \\}").findAll(out).count(), out)
+    }
 }
