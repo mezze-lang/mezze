@@ -14,7 +14,7 @@ entry = "main"
 # numpy site-packages under `.deps/python/` — the runtime points
 # `python.PythonPath` there automatically.
 [dependencies]
-mezze-python = "github:mezze-lang/mezze-python@0.2.1"
+mezze-python = "github:mezze-lang/mezze-python@0.6.1"
 
 # `[polyglot.python]` opts this project in to the GraalPy Truffle
 # language. The `packages` list drives the provider's install phase.

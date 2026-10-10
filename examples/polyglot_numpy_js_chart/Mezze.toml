@@ -26,8 +26,8 @@ entry = "main"
 # npm's natural layout applies and no `node_modules` override is
 # needed on the consumer side.
 [dependencies]
-mezze_python = "github:mezze-lang/mezze-python@0.3.0"
-mezze_js     = "github:mezze-lang/mezze-js@0.2.1"
+mezze_python = "github:mezze-lang/mezze-python@0.6.1"
+mezze_js     = "github:mezze-lang/mezze-js@0.5.1"
 
 # `[polyglot.python]` opts this project in to GraalPy. `packages` is
 # the "polyglot-as-a-package" surface: `mez sync` runs the

@@ -17,7 +17,7 @@ entry = "main"
 #     launcher) and `polyglot-python-natives` — put on the wire child's
 #     classpath by `mez sync` so `[polyglot.python]` boots successfully.
 [dependencies]
-mezze-python = "github:mezze-lang/mezze-python@0.2.1"
+mezze-python = "github:mezze-lang/mezze-python@0.6.1"
 
 # The presence of `[polyglot.python]` alone opts the run in; we do NOT
 # set `python_path` because there are no site-packages to point at.
