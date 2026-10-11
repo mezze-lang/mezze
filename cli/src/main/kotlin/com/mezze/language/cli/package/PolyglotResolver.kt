@@ -19,9 +19,11 @@ import java.io.File
 object PolyglotResolver {
 
     /**
-     * The resolved shape of `[polyglot.*]` — same fields as the
-     * interpreter's `ResolvedPolyglot`, kept in sync but not shared
-     * (see class-level rationale above).
+     * The resolved shape of `[polyglot.*]` — the shared fields mirror the
+     * interpreter's `ResolvedPolyglot`, kept in sync but not shared (see
+     * class-level rationale above: the CLI never links the interpreter).
+     * `PolyglotConfigContractTest` parses one fixture through both resolvers
+     * and asserts every overlapping field agrees — the guard against drift.
      */
     data class Resolved(
         /** True iff `[polyglot.python]` is present in the manifest. */
