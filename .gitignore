@@ -93,6 +93,10 @@ logs/
 
 # --- never track: build caches & deps (regenerated) ---
 node_modules/
+# `mez sync` scratch in examples/ (resolved dep tree + lockfile, regenerated).
+# Provider repos already ignore these; the main repo was missing them.
+.deps/
+Mezze.lock
 website/wasm-build/.binaryen-*/
 website/wasm-build/.graalvm-*/
 website/wasm-build/.jars/
