@@ -33,6 +33,8 @@ data class StdlibSnapshot(
     // callsite that flows through a stdlib polymorphic decl (fold, map, …).
     // Optional so pre-v2 snapshots keep decoding via ignoreUnknownKeys.
     val typedModules: Map<Hash, TypedModule> = emptyMap(),
+    /** Every stdlib ability, effect and public type by identity — see [StdlibIdentities]. */
+    val identities: StdlibIdentityTable? = null,
 ) {
     companion object {
         const val CURRENT_VERSION = 1

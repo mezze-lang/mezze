@@ -236,7 +236,15 @@ class TypeChecker(
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
     ): TypeCheckResult = try {
-        checkParsedModuleInner(module, currentPath, currentModulePath, enablePrelude)
+        // The outermost check on this thread starts a new view of the sources;
+        // the checks it runs for its imports share it.
+        if (checkDepth.get() == 0) ModuleResolver.beginCheck(world)
+        checkDepth.set(checkDepth.get() + 1)
+        try {
+            checkParsedModuleInner(module, currentPath, currentModulePath, enablePrelude)
+        } finally {
+            checkDepth.set(checkDepth.get() - 1)
+        }
     } catch (e: StackOverflowError) {
         // Ultimate anti-crash backstop: a pathological/malformed program can drive
         // the checker's recursive descent (type-annotation conversion, unification,
@@ -1256,6 +1264,9 @@ class TypeChecker(
     }
 
     companion object {
+        /** How many checks are running on this thread — imports are checked inside their importer's check. */
+        private val checkDepth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
+
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
 

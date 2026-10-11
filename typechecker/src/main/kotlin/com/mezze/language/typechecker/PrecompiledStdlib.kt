@@ -402,6 +402,9 @@ object PrecompiledStdlib {
         private fun tryLoadFromSnapshot(): FullCacheData? {
         if (!StdlibSnapshotData.present) return null
         val ic = StdlibSnapshotData.importContext ?: return null
+        // Every stdlib identity, complete — before anything below asks for one.
+        // The native binary ships no stdlib sources to stamp them from.
+        StdlibSnapshotData.identities?.let { StdlibIdentities.restore(it) }
         DebugLogger.debug(DebugLogger.Category.Stdlib) {
             "[PrecompiledStdlib] Loaded from StdlibSnapshotData (image heap): " +
             "${StdlibSnapshotData.functions.size} functions, " +

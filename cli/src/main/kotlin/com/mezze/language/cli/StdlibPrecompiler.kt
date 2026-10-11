@@ -326,6 +326,7 @@ fun main(args: Array<String>) {
         // #415: ship TypedModules so mono can specialize any callsite
         // that flows through a polymorphic stdlib decl.
         typedModules = precompiled.stdlibTypedModules,
+        identities = com.mezze.language.typechecker.StdlibIdentities.table(),
     )
     snapshotFile.writeBytes(com.mezze.language.typechecker.StdlibSnapshot.encode(snapshot))
     // Sibling fingerprint of THIS build's serialization schema, checked at load

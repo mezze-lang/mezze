@@ -70,6 +70,26 @@ object StdlibIdentities {
         }
     }
 
+    /**
+     * The whole registry, for the precompiled stdlib to carry. Stamps every stdlib
+     * module first, so what is written is complete — a snapshot is read where the
+     * stdlib's sources may not exist at all (the native binary ships none).
+     */
+    fun table(): StdlibIdentityTable {
+        if (!complete) { stampAll(); complete = true }
+        return StdlibIdentityTable(abilities.toMap(), abilityOps.toMap(), effects.toMap(), types.toMap())
+    }
+
+    /** Restore a [table] written by [table]: complete, so a miss means no such stdlib declaration. */
+    fun restore(table: StdlibIdentityTable) {
+        val from = "the precompiled stdlib's identity table"
+        table.abilities.forEach { (n, h) -> record(abilities, "ability", n, h, from) }
+        table.abilityOps.forEach { (n, ops) -> abilityOps.putIfAbsent(n, ops) }
+        table.effects.forEach { (n, h) -> record(effects, "effect", n, h, from) }
+        table.types.forEach { (n, h) -> record(types, "type", n, h, from) }
+        complete = true
+    }
+
     fun ability(name: String): Hash? = lookup(abilities, name)
     fun effect(name: String): Hash? = lookup(effects, name)
     fun type(name: String): Hash? = lookup(types, name)
@@ -116,3 +136,12 @@ object StdlibIdentities {
         }
     }
 }
+
+/** [StdlibIdentities], as the precompiled stdlib carries it. */
+@kotlinx.serialization.Serializable
+data class StdlibIdentityTable(
+    val abilities: Map<String, Hash>,
+    val abilityOps: Map<String, List<String>>,
+    val effects: Map<String, Hash>,
+    val types: Map<String, Hash>,
+)

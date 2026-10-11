@@ -17,6 +17,7 @@ object StdlibSnapshotData {
     val declHashes: Set<Hash>
     val moduleHashes: Set<Hash>
     val typedModules: Map<Hash, TypedModule>
+    val identities: StdlibIdentityTable?
 
     init {
         //     stacktrace stays gated. See task #203 + #201.
@@ -72,6 +73,7 @@ object StdlibSnapshotData {
             declHashes = decoded.declHashes
             moduleHashes = decoded.moduleHashes
             typedModules = decoded.typedModules
+            identities = decoded.identities
         } else {
             present = false
             importContext = null
@@ -82,6 +84,7 @@ object StdlibSnapshotData {
             declHashes = emptySet()
             moduleHashes = emptySet()
             typedModules = emptyMap()
+            identities = null
         }
     }
 }

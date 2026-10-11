@@ -309,6 +309,13 @@ class ModuleResolver(
             val modules = mutableMapOf<String, Module>()
             /** Held for a whole stamping pass, which may stamp many modules at once. */
             val stampLock = Any()
+            /**
+             * Which cached modules are known current, for the rest of this check.
+             * Sources are read once per check, not once per import resolution;
+             * anything that can change one (a new check, an invalidation, an
+             * overlay) forgets this.
+             */
+            val current: MutableMap<String, Boolean> = java.util.concurrent.ConcurrentHashMap()
             val lock = Any()
 
             /**
@@ -390,7 +397,19 @@ class ModuleResolver(
             val c = caches(world)
             synchronized(c.lock) {
                 c.modules.clear()
+                c.current.clear()
             }
+        }
+
+        /**
+         * A new top-level check starts: files may have changed since the last one,
+         * so every module's currency is re-read once.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun beginCheck(world: World = World.DEFAULT) {
+            val c = caches(world)
+            synchronized(c.lock) { c.current.clear() }
         }
 
         /**
@@ -407,6 +426,7 @@ class ModuleResolver(
             synchronized(c.lock) {
                 c.sourceOverlay[modulePath] = source
                 c.modules.remove(modulePath)
+                c.current.clear()
             }
         }
 
@@ -425,6 +445,7 @@ class ModuleResolver(
                     c.modules.remove(path)
                 }
                 c.sourceOverlay.clear()
+                c.current.clear()
             }
         }
 
@@ -452,10 +473,14 @@ class ModuleResolver(
                 for (path in modulePaths) {
                     c.modules.remove(path)
                 }
+                c.current.clear()
             }
         }
 
                 private fun stampLock(world: World): Any = caches(world).stampLock
+
+                /** This check's currency answers — held under [stampLock]. */
+                private fun currency(world: World): MutableMap<String, Boolean> = caches(world).current
 
                 internal fun getFromCache(world: World, modulePath: String): Module? {
             val c = caches(world)
@@ -591,7 +616,7 @@ class ModuleResolver(
                 suggestion = suggestModulePath(modulePath),
             )
             getFromCache(world, modulePath)?.let { cached ->
-                if (isCurrent(modulePath, HashMap())) return cached
+                if (isCurrent(modulePath, currency(world))) return cached
                 DebugLogger.debug(Category.ModuleResolver) {
                     "$modulePath or something it was stamped against changed; re-stamping"
                 }
@@ -637,8 +662,15 @@ class ModuleResolver(
      * stamped against. Reads, never loads — so checking cannot start a stamping
      * pass inside another.
      */
-    private fun isCurrent(modulePath: String, memo: HashMap<String, Boolean>): Boolean {
+    private fun isCurrent(modulePath: String, memo: MutableMap<String, Boolean>): Boolean {
         memo[modulePath]?.let { return it }
+        // A stamped stdlib module is current: its sources cannot change while a
+        // process runs, unless this world overlays it.
+        if (ModulePathConventions.isStdlib(modulePath) && overlayFor(world, modulePath) == null &&
+            getFromCache(world, modulePath)?.source != null) {
+            memo[modulePath] = true
+            return true
+        }
         memo[modulePath] = true   // a group-mate checking back; the group is judged as a whole below
         val cached = getFromCache(world, modulePath)
         val current = cached?.source != null && run {
@@ -673,7 +705,7 @@ class ModuleResolver(
      * module at all; the typechecker reports it when it processes the import.
      */
     private fun stampFrom(root: String) {
-        val memo = HashMap<String, Boolean>()
+        val memo = currency(world)
         val raws = HashMap<String, Raw>()
         val stampedNow = HashSet<String>()
 
@@ -732,7 +764,7 @@ class ModuleResolver(
     private fun stampGroup(
         members: List<String>,
         raws: Map<String, Raw>,
-        memo: Map<String, Boolean>,
+        memo: MutableMap<String, Boolean>,
         stampedNow: MutableSet<String>,
     ) {
         val group = IdentityGroup(members.map { raws.getValue(it).parsed })
@@ -773,6 +805,7 @@ class ModuleResolver(
                 groupSources = sources - path,
             ))
             stampedNow.add(path)
+            memo[path] = true
         }
     }
 
