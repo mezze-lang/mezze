@@ -708,7 +708,7 @@ class ContextBuilder {
         // launder the bare foreign into a `Result` (which crashed `match … is Ok/Err`
         // at runtime). The handler's own `having 'f = 'g` binding is abstract, so
         // there is no structural signal to key on — the effect name is.
-        val isForeignEffect = implDecl.effect.localName == "Polyglot"
+        val isForeignEffect = implDecl.effect.localName == TypeVar.POLYGLOT_EFFECT_NAME
         val performerType = if (hasAssocTypes) {
             val bindingFields = implDecl.associatedTypeBindings.mapValues { (_, ann) ->
                 convertParsedTypeAnnotationInternal(ann)
