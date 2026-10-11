@@ -1,8 +1,11 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.parsedast.DeclIdentity
+import com.mezze.language.parsedast.IdentityScope
+import com.mezze.language.parsedast.identity
+
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.ParsedTypeDecl
-import com.mezze.language.parsedast.ParsedDeclHasher
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertEquals
@@ -17,7 +20,7 @@ import kotlin.test.assertNotEquals
  *   - renaming the DECLARATION itself (`type Bar` → `type Qux`) DOES change the
  *     identity: it is a different declaration, hence a different type.
  *
- * These pin `ParsedDeclHasher.hashTypeDecl` (which hashes `decl.name` + params +
+ * These pin a type's identity (DeclIdentity — it hashes `decl.name` + params +
  * body) — the property the import machinery relies on when it computes an
  * imported type's `typeHash` from the ORIGINAL decl, tracking the alias only as
  * a local binding name.
@@ -30,34 +33,35 @@ class ImportRenameHashIdentityTest {
     }
 
     private fun typeDeclOf(source: String): ParsedTypeDecl =
-        parser.parseParsedModule(source, "t.mz").decls.filterIsInstance<ParsedTypeDecl>().first()
+        DeclIdentity.stamp(parser.parseParsedModule(source, "t.mz"), IdentityScope.NONE, "t")
+            .decls.filterIsInstance<ParsedTypeDecl>().first()
 
     // The hash depends only on the decl (name+params+body), so the SAME decl —
     // regardless of any import alias applied at a use site — has the SAME hash.
     // An alias never touches the declaration, so it cannot change this hash.
     @Test fun `same declaration hashes identically (alias at use site is irrelevant)`() {
         val decl = typeDeclOf("type Bar 'a = | Wrap { val: 'a }, Empty |")
-        val h1 = ParsedDeclHasher.hashTypeDecl(decl)
+        val h1 = decl.identity
         // Re-parsing the identical declaration yields the identical hash: the
         // hash is a pure function of the decl, so importing it elsewhere under
         // any alias reuses THIS hash unchanged.
         val declAgain = typeDeclOf("type Bar 'a = | Wrap { val: 'a }, Empty |")
-        val h2 = ParsedDeclHasher.hashTypeDecl(declAgain)
+        val h2 = declAgain.identity
         assertEquals(h1, h2, "same declaration must hash identically; an import alias never changes it")
     }
 
     // Renaming the DECLARATION (not an import alias) changes the identity —
     // it is a different type.
     @Test fun `renaming the declaration name changes the hash`() {
-        val bar = ParsedDeclHasher.hashTypeDecl(typeDeclOf("type Bar 'a = | Wrap { val: 'a }, Empty |"))
-        val qux = ParsedDeclHasher.hashTypeDecl(typeDeclOf("type Qux 'a = | Wrap { val: 'a }, Empty |"))
+        val bar = typeDeclOf("type Bar 'a = | Wrap { val: 'a }, Empty |").identity
+        val qux = typeDeclOf("type Qux 'a = | Wrap { val: 'a }, Empty |").identity
         assertNotEquals(bar, qux, "renaming the declaration itself is a different type → different hash")
     }
 
     // Body change → different hash (identity tracks content, not just name).
     @Test fun `changing the body changes the hash`() {
-        val a = ParsedDeclHasher.hashTypeDecl(typeDeclOf("type Bar = { x: Int }"))
-        val b = ParsedDeclHasher.hashTypeDecl(typeDeclOf("type Bar = { x: Str }"))
+        val a = typeDeclOf("type Bar = { x: Int }").identity
+        val b = typeDeclOf("type Bar = { x: Str }").identity
         assertNotEquals(a, b, "different body content → different hash")
     }
 }

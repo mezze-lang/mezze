@@ -26,3 +26,21 @@ sourceSets {
         }
     }
 }
+
+// Every stdlib module, for the compiler's registry of stdlib identities
+// (StdlibIdentities): a stdlib public type is nameable without an import, so
+// the registry must know all of them, not only the modules loaded so far.
+tasks.named<ProcessResources>("processResources") {
+    val stdDir = projectDir.resolve("std")
+    inputs.dir(stdDir)
+    doLast {
+        val out = destinationDir.resolve("std/MANIFEST.txt")
+        out.parentFile.mkdirs()
+        out.writeText(
+            fileTree(stdDir) { include("**/*.mz") }.files
+                .map { "std/" + it.relativeTo(stdDir).invariantSeparatorsPath }
+                .sorted()
+                .joinToString("\n")
+        )
+    }
+}

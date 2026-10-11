@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker.context
 
+import com.mezze.language.parsedast.identity
 import com.mezze.language.parsedast.ParsedAbilityDecl
-import com.mezze.language.parsedast.ParsedDeclHasher
 import com.mezze.language.parsedast.ParsedEffectDecl
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.typedast.Hash
@@ -60,14 +60,38 @@ class DeclarationRegistry(
 
     /** Content hash for an ability by name (check-time replacement for the
      *  generated WellKnownHashConstants.resolveAbilityHash). Same pure value:
-     *  `decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)`. */
+     *  `decl.identity`. */
     fun resolveAbilityHash(name: String): Hash? =
-        lookupAbility(name)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        lookupAbility(name)?.let { it.identity }
 
     /** Content hash for an effect by name (check-time replacement for the
      *  generated WellKnownHashConstants.resolveEffectHash). */
     fun resolveEffectHash(name: String): Hash? =
-        lookupEffect(name)?.let { it.contentHash ?: ParsedDeclHasher.hashEffectDecl(it) }
+        lookupEffect(name)?.let { it.identity }
+
+    /**
+     * Names as this module resolves them, for stamping an impl the compiler
+     * generates here (a derived `Eq`, a codec): abilities, effects and types in
+     * scope, by identity.
+     */
+    fun identityScope(): com.mezze.language.parsedast.IdentityScope = object : com.mezze.language.parsedast.IdentityScope {
+        override fun resolve(
+            kind: com.mezze.language.parsedast.RefKind, qualifier: List<String>?, name: String,
+        ): com.mezze.language.parsedast.Referent? {
+            if (qualifier != null) return null
+            val id = when (kind) {
+                com.mezze.language.parsedast.RefKind.ABILITY -> lookupAbility(name)?.identity
+                com.mezze.language.parsedast.RefKind.EFFECT -> lookupEffect(name)?.identity
+                com.mezze.language.parsedast.RefKind.TYPE -> lookupType(name)?.identity ?: typeHashFor(name)
+                com.mezze.language.parsedast.RefKind.CONSTRUCTOR -> typesByName.values.firstOrNull { t ->
+                    (t.definition as? com.mezze.language.parsedast.ParsedVariantDef)?.constructors?.any { it.name == name } == true
+                }?.identity
+                com.mezze.language.parsedast.RefKind.VALUE, com.mezze.language.parsedast.RefKind.PERFORMER -> null
+            }
+            return id?.let { com.mezze.language.parsedast.Referent.Known(it) }
+        }
+        override fun providers(name: String): Set<com.mezze.language.parsedast.Referent> = emptySet()
+    }
 
     val typeNames: Set<String> get() = typesByName.keys
     val abilityNames: Set<String> get() = abilitiesByName.keys
@@ -109,15 +133,9 @@ class DeclarationRegistry(
             // resolvable (keeps import-scoping + avoids name collisions).
             hashOnlyTypeDecls: Collection<ParsedTypeDecl> = emptyList(),
         ): DeclarationRegistry {
-            // Stamp a content hash onto EVERY type decl entering the registry. The
-            // hash is a pure function of the decl and always computable, so no type
-            // decl is ever stored hashless — which means every MezzeType built from a
-            // registry decl (expandTypeApplicationToVariant, VariantSolver, alias
-            // resolution, …) carries a real nominal identity (Declared), never Named.
-            // Mirrors the effect/performer stamping idiom in ContextBuilder.
-            val typeDeclsStamped = typeDecls.mapValues { (_, d) ->
-                if (d.contentHash != null) d else d.copy(contentHash = ParsedDeclHasher.hashTypeDecl(d))
-            }
+            // Every type decl arrives stamped (DeclIdentity), so every MezzeType
+            // built from a registry decl carries a real nominal identity (Declared).
+            val typeDeclsStamped = typeDecls
             val byHash = LinkedHashMap<Hash, ParsedTypeDecl>()
             val hashByName = LinkedHashMap<String, Hash>()
             for (d in hashOnlyTypeDecls) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }

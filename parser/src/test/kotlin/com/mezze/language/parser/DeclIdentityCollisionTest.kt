@@ -1,12 +1,14 @@
 package com.mezze.language.parser
 
-import com.mezze.language.parsedast.ParsedDeclHasher
+import com.mezze.language.parsedast.DeclIdentity
+import com.mezze.language.parsedast.IdentityScope
+import com.mezze.language.parsedast.identity
 import com.mezze.language.parsedast.ParsedLetDecl
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
 
 /**
- * Content-hash collision regression tests for [ParsedDeclHasher].
+ * Content-hash collision regression tests for [DeclIdentity].
  *
  * The content hash is identity for by-hash registries and cross-module import
  * merge (DeclarationRegistry.byHash, extendMono/extendPoly(contentHash)), so two
@@ -16,13 +18,13 @@ import org.junit.jupiter.api.Test
  *   - ParsedFunctionType.abilityConstraints  (`with Eq 'a` etc.)
  *   - ParsedQualifiedType.args          (type args of a qualified type)
  */
-class ParsedDeclHasherCollisionTest {
+class DeclIdentityCollisionTest {
     private val parser = MezzeParser()
 
     private fun letHash(src: String): com.mezze.language.typedast.Hash {
-        val decl = parser.parseParsedModule(src.trimIndent())
+        val decl = DeclIdentity.stamp(parser.parseParsedModule(src.trimIndent()), IdentityScope.NONE, "test")
             .decls.filterIsInstance<ParsedLetDecl>().first()
-        return ParsedDeclHasher.hashLetDecl(decl)
+        return decl.identity
     }
 
     @Test

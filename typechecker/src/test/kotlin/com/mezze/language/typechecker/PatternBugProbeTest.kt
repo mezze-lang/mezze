@@ -264,8 +264,8 @@ class PatternBugProbeTest {
 
     @Test
     fun `WellKnownHashConstants resolves stdlib type hashes for hash-based identity`() {
-        // After #309 — the WellKnownHashGenerator scans stdlib for ParsedTypeDecl
-        // alongside abilities and effects. Public stdlib types should have
+        // After #309 — stdlib type identities are known alongside abilities and
+        // effects (StdlibIdentities). Public stdlib types should have
         // resolvable hashes; an unknown type returns null.
         val jsonHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveTypeHash("Json")
         assertTrue(jsonHash != null,
@@ -309,6 +309,11 @@ class PatternBugProbeTest {
         )
     }
 
+    /** A standalone module as the loader would stamp it: nothing imported. */
+    private fun stamped(code: String) = com.mezze.language.parsedast.DeclIdentity.stamp(
+        parser.parseParsedModule(code, "test.mz"), com.mezze.language.parsedast.IdentityScope.NONE, "test",
+    )
+
     @Test
     fun `user-defined TypeApplication carries typeHash for rename-safe identity`() {
         // White-box: parse a module declaring a generic variant type, then
@@ -321,7 +326,7 @@ class PatternBugProbeTest {
             type Box 'a = | Wrap { val: 'a } |
             let b = Wrap { val = 42 }
         """.trimIndent()
-        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val parsedModule = stamped(code)
         typeChecker.typeCheck(parsedModule, Paths.get("."))
         val typeDecl = parsedModule.decls
             .filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
@@ -348,7 +353,7 @@ class PatternBugProbeTest {
                 op = {it, r} -> 42,
             }
         """.trimIndent()
-        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val parsedModule = stamped(code)
         // typeCheck populates contentHashes on the parsed decls.
         typeChecker.typeCheck(parsedModule, Paths.get("."))
         val implDecl = parsedModule.decls
@@ -384,7 +389,7 @@ class PatternBugProbeTest {
                 myeq = {it, r} -> True,
             }
         """.trimIndent()
-        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val parsedModule = stamped(code)
         try { typeChecker.typeCheck(parsedModule, Paths.get(".")) } catch (_: Exception) { /* ok */ }
         val implDecl = parsedModule.decls
             .filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
@@ -629,7 +634,7 @@ class PatternBugProbeTest {
                 ping: {it: 'a} -> Str,
             }
         """.trimIndent()
-        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val parsedModule = stamped(code)
         val abilityDecl = parsedModule.decls
             .filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .single()

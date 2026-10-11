@@ -170,11 +170,16 @@ object HashTags {
     const val IMPL_DECLARATION: Byte = 0x43
     const val ABILITY_DECLARATION: Byte = 0x44
     const val IMPL_ABILITY_DECLARATION: Byte = 0x45
+    const val TOP_LEVEL_EXPRESSION: Byte = 0x46
+    const val RECURSIVE_GROUP: Byte = 0x47   // the declarations of one mutually recursive group
+    const val GROUP_MEMBER: Byte = 0x48      // one declaration's place in its group
 
     // References
     const val LOCAL_REF: Byte = 0x50  // De Bruijn index for internal bindings
     const val EXTERNAL_REF: Byte = 0x51  // Hash of external definition
     const val RECURSIVE_REF: Byte = 0x52  // Self-reference
+    const val RESOLVED_REF: Byte = 0x53   // a written name plus the identity it resolves to
+    const val MEMBER_PROVIDERS: Byte = 0x54  // every declaration in scope that can answer a member name
 
     // Operators
     const val OP_PLUS: Byte = 0x60

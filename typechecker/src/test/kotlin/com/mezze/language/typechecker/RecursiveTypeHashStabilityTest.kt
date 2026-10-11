@@ -1,7 +1,10 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.parsedast.DeclIdentity
+import com.mezze.language.parsedast.IdentityScope
+import com.mezze.language.parsedast.identity
+
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.parsedast.ParsedDeclHasher
 import com.mezze.language.parsedast.ParsedTypeDecl
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -12,7 +15,7 @@ import org.junit.jupiter.api.assertDoesNotThrow
  * #318 regression: a recursive (self- or mutually-referential) type declaration must
  * produce a FINITE, DETERMINISTIC content hash.
  *
- * Why it can't run away: the identity hash (`ParsedDeclHasher.hashTypeDecl`) is computed
+ * Why it can't run away: the identity hash (`DeclIdentity`) is computed
  * from the PARSED AST, where a self-reference — `Tree` inside
  * `type Tree 'a = | Node { left: Tree 'a } |` — is a `ParsedNamedType("Tree")` LEAF (a
  * name token), never an expanded structure. The parsed tree is finite, so the walk
@@ -31,9 +34,9 @@ class RecursiveTypeHashStabilityTest {
     private val parser = MezzeParser()
 
     private fun hashTypeDecls(source: String): Map<String, com.mezze.language.typedast.Hash> {
-        val module = parser.parseParsedModule(source, "test.mz")
+        val module = DeclIdentity.stamp(parser.parseParsedModule(source, "test.mz"), IdentityScope.NONE, "test")
         return module.decls.filterIsInstance<ParsedTypeDecl>()
-            .associate { it.name to ParsedDeclHasher.hashTypeDecl(it) }
+            .associate { it.name to it.identity }
     }
 
     @Test

@@ -299,9 +299,9 @@ internal fun TypedAstBuilder.buildStaticAbilityOpCall(
 
     val abilityName = methodInfo.abilityName
     val abilityHash = abilityName?.let { name ->
-        registry.lookupAbility(name)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        registry.lookupAbility(name)?.let { it.identity }
             ?: importContext?.importedAbilities?.get(name)
-                ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                ?.let { it.identity }
     }
     // Dispatch on the ability's CLASS VARIABLE, not on whatever sits at the top of
     // the type the call produces.
@@ -497,13 +497,13 @@ internal fun TypedAstBuilder.buildMethodCall(
         if (methodInfo.isInherentMethod) return@run null
         val abilityName = methodInfo.abilityName ?: return@run null
         val abilityHash = registry.lookupAbility(abilityName)
-            ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+            ?.let { it.identity }
             ?: importContext?.importedAbilities?.get(abilityName)
-                ?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                ?.let { it.identity }
             ?: return@run null
         val declaringAbilities = registry.abilityDeclarations.values
             .filter { ad -> ad.operations.any { it.name == methodInfo.methodName } }
-            .mapNotNull { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+            .mapNotNull { it.identity }
             .distinct()
         if (declaringAbilities.size < 2) null else abilityHash
     }

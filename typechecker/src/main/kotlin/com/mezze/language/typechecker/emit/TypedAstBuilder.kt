@@ -195,7 +195,7 @@ class TypedAstBuilder(
         decls.mapNotNull { decl ->
             val def = decl.definition
             if (def is ParsedRecordDef && !def.isOpen) {
-                val hash = decl.contentHash ?: ParsedDeclHasher.hashTypeDecl(decl)
+                val hash = decl.identity
                 // S3.1 identity-stability invariant: the hash emit stamps for an alias
                 // name MUST equal the registry's canonical hash for that name — no
                 // silent re-derivation drift between registry and emit. (Under
@@ -225,17 +225,32 @@ class TypedAstBuilder(
             }
         }
 
-        val moduleHashes = ParsedDeclHasher.hashAllLetDecls(module)
-        for ((name, hash) in moduleHashes) {
-            val key = BindingKey.unqualified(name)
-            if (key !in mutableHashes) {
-                mutableHashes[key] = hash
-            }
+        for (decl in module.decls) {
+            if (decl !is ParsedLetDecl || !decl.isSimpleBinding) continue
+            mutableHashes.putIfAbsent(BindingKey.unqualified(decl.variableName), decl.identity)
         }
         precomputedHashes = mutableHashes
     }
 
     private var precomputedHashes: Map<BindingKey, Hash>? = null
+
+    /** The top-level declaration being built — what a local binding belongs to. */
+    private var enclosing: Hash? = null
+    private var doBlocksInDecl = 0
+
+    /**
+     * A local `let`'s identity: its place inside the declaration that owns it.
+     * The owner's identity already includes what every name in its body resolves
+     * to, so the local inherits that rather than hashing its text again.
+     */
+    private fun localIdentity(name: String, block: Int, statement: Int): Hash =
+        MezzeHashBuilder().apply {
+            append(byteArrayOf(com.mezze.language.ast.hashing.HashTags.LOCAL_REF))
+            append((enclosing ?: error("internal: a local binding '$name' outside any top-level declaration")).hex)
+            append(name)
+            appendInt(block)
+            appendInt(statement)
+        }.buildHash()
     private val lambdaParamScopes = ArrayDeque<MutableList<String>>()
 
     private val lambdaScopeIsLambdaBoundary = ArrayDeque<Boolean>()
@@ -274,6 +289,14 @@ class TypedAstBuilder(
         val exports = mutableMapOf<String, ExportEntry>()
 
         for (decl in module.decls) {
+            enclosing = when (decl) {
+                is ParsedLetDecl -> decl.identity
+                is ParsedImplAbilityDecl -> decl.identity
+                is ParsedPerformerDecl -> decl.identity
+                is ParsedTopLevelExpr -> decl.identity
+                else -> null
+            }
+            doBlocksInDecl = 0
             when (decl) {
                 is ParsedLetDecl -> buildLetDecl(decl, module.path, decls, exports)
                 is ParsedTypeDecl -> buildTypeDecl(decl, module.path, decls, exports)
@@ -341,7 +364,7 @@ class TypedAstBuilder(
             val type = closeGeneratedRowVars(rawType)
             val value = buildExpr(decl.value, file, type)
 
-            val destrHash = ParsedDeclHasher.hashLetDecl(decl)
+            val destrHash = decl.identity
             val scheme = TypeScheme(emptyList(), emptyList(), type)
             decls.add(TypedLetDecl(destrHash, destrName, emptyList(), value, scheme, false, loc))
 
@@ -375,8 +398,7 @@ class TypedAstBuilder(
 
         identifierContext[name] = type
 
-        val hash = ParsedDeclHasher.hashLetDecl(decl, file)
-            ?: ParsedDeclHasher.hashLetDecl(decl)
+        val hash = decl.identity
 
         val freeVars = collectTypeVarsInOrder(type, sortFields = false)
             .distinctBy { it.name }
@@ -416,7 +438,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = decl.contentHash ?: ParsedDeclHasher.hashTypeDecl(decl)
+        val hash = decl.identity
 
         val def: TypedTypeDef = when (val d = decl.definition) {
             is ParsedRecordDef -> TypedRecordDef(
@@ -454,7 +476,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
+        val hash = decl.identity
 
         // ONE clear for the whole ability, not one per op.
         //
@@ -603,7 +625,7 @@ class TypedAstBuilder(
             }
             is ParsedImplTarget.Inherent -> null
         }
-        val abilityHash = abilityDecl?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) } ?: Hash.ZERO
+        val abilityHash = abilityDecl?.let { it.identity } ?: Hash.ZERO
 
         // Full class-arg tuple (concrete `abilityTypeArgs` before `for` + `targetTypes`
         // after), positional to the ability's type params ("extra params first, self
@@ -684,8 +706,8 @@ class TypedAstBuilder(
             // make the compiler pick a decoder by receiver instead. Such ops keep the
             // untyped body until dispatch reads evidence (elaboration plan, C).
             val opCarriesCodecConstraint = op.abilityConstraints.any { c ->
-                val h = registry.lookupAbility(c.abilityName)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
-                    ?: importContext?.importedAbilities?.get(c.abilityName)?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+                val h = registry.lookupAbility(c.abilityName)?.let { it.identity }
+                    ?: importContext?.importedAbilities?.get(c.abilityName)?.let { it.identity }
                 WellKnownHashConstants.isCodecAbility(h)
             }
             // A newtype receiver USED to be excluded here. The reason was real:
@@ -742,9 +764,9 @@ class TypedAstBuilder(
                         abilityName = c.abilityName,
                         typeArgs = c.typeArgs.map { convertParsedTypeAnnotation(it) },
                         abilityHash = registry.lookupAbility(c.abilityName)?.let {
-                            it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it)
+                            it.identity
                         } ?: importContext?.importedAbilities?.get(c.abilityName)?.let {
-                            it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it)
+                            it.identity
                         }
                     )
                 }
@@ -765,7 +787,7 @@ class TypedAstBuilder(
             op.name to opWithConstraints
         }
 
-        val hash = decl.contentHash ?: ParsedDeclHasher.hashImplAbilityDecl(decl)
+        val hash = decl.identity
 
         val forallVars = decl.forallVars.map { TypeParam(it, TypeKind.Star) }
 
@@ -788,7 +810,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
+        val hash = decl.identity
 
         // One clear for the whole effect — see buildAbilityDecl, and
         // `ContextBuilder.addEffectOperations`, which scopes it the same way.
@@ -813,7 +835,7 @@ class TypedAstBuilder(
         val contentHash = decl.contentHash
             ?: implDeclarations[decl.performerName]?.contentHash
             ?: identifierContentHashes[BindingKey(null, decl.performerName)]
-        val hash = decl.contentHash ?: ParsedDeclHasher.hashPerformerDecl(decl)
+        val hash = decl.identity
 
         val effectName = decl.effect.localName
         val effectHash = resolveEffectHash(effectName)
@@ -858,7 +880,7 @@ class TypedAstBuilder(
         decls: MutableList<TypedDecl>
     ) {
         val loc = decl.loc
-        val hash = ParsedDeclHasher.hashExpr(decl.expression)
+        val hash = decl.identity
         // The generator records this expression's solved type under `_toplevel`
         // (ConstraintGenerator's ParsedTopLevelExpr arm). Minting a placeholder as
         // the context and building against THAT threw the answer away and handed
@@ -1332,6 +1354,7 @@ class TypedAstBuilder(
 
 
     private fun buildDoBlock(expr: ParsedDo, file: String, contextType: MezzeType?): TypedBlock {
+        val block = doBlocksInDecl++
         val pushedBlockScope = lambdaParamScopes.isEmpty()
         if (pushedBlockScope) {
             pushScope(mutableListOf(), isLambdaBoundary = false)
@@ -1348,7 +1371,7 @@ class TypedAstBuilder(
                         // the block's content hash if the lowerer's expansion changed, on
                         // byte-identical source. srcIdx is source-pure AND unique per statement.
                         val destrName = "${com.mezze.language.ast.MagicParams.DESTRUCTURE_PREFIX}${srcIdx}"
-                        val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
+                        val destrHash = localIdentity(destrName, block, srcIdx)
                         val valueType = stmt.typeAnnotation
                             ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
                             ?: MezzeType.VarType(TypeVar.freshInternal("let_destr"))
@@ -1433,8 +1456,7 @@ class TypedAstBuilder(
                             }
                         }
 
-                        val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
-                        val contentHash = v1LetHash ?: ParsedDeclHasher.hashExpr(stmt.value)
+                        val contentHash = localIdentity(name, block, srcIdx)
                         // #378: a do-block `let` whose RHS PERFORMS an unhandled
                         // effect carries that effect row on the BINDING's stored
                         // type — effects ride on value types, not only on arrows.
@@ -1731,7 +1753,6 @@ class TypedAstBuilder(
         val performerHash = identifierContentHashes[BindingKey(null, performerName)]
             ?: implDecl?.contentHash
             ?: importedImpl?.contentHash
-            ?: implDecl?.let { ParsedDeclHasher.hashPerformerDecl(it) }
             ?: error("Performer '$performerName' has no content hash — cannot build handler chain entry")
 
         val effectName = implDecl?.effect?.localName
@@ -2043,14 +2064,20 @@ class TypedAstBuilder(
         }
     }
 
+    /** A destructured field's identity: a place inside the declaration that owns it. */
     private fun fieldHash(parentVarName: String, name: String): Hash =
-        MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(name) }.buildHash()
+        MezzeHashBuilder().also {
+            it.append("field")
+            it.append((enclosing ?: error("internal: destructured field '$name' outside any top-level declaration")).hex)
+            it.append(parentVarName)
+            it.append(name)
+        }.buildHash()
 
     internal fun resolveEffectHash(effectName: String): Hash {
         val decl = registry.lookupEffect(effectName)
             ?: importContext?.importedEffects?.get(effectName)
             ?: error("Effect '$effectName' not found in declarations or imports")
-        return decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
+        return decl.identity
     }
 
     /**

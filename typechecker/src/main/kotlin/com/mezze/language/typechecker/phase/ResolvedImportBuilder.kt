@@ -1,8 +1,8 @@
 package com.mezze.language.typechecker.phase
 
+import com.mezze.language.parsedast.identity
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
-import com.mezze.language.parsedast.ParsedDeclHasher
 import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.typechecker.ResolvedImport
 import com.mezze.language.typechecker.module.ModuleImportContext
@@ -30,7 +30,7 @@ internal fun buildResolvedImports(importContext: ModuleImportContext?): List<Res
                 modulePath = "",
                 type = WellKnownTypeApp.of(
                     name, typeParams,
-                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                    typeHash = typeDecl.identity
                 ),
                 kind = ImportKind.TYPE
             ))
@@ -43,7 +43,7 @@ internal fun buildResolvedImports(importContext: ModuleImportContext?): List<Res
                 modulePath = "",
                 type = WellKnownTypeApp.of(
                     name, emptyList(),
-                    typeHash = abilityDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(abilityDecl)
+                    typeHash = abilityDecl.identity
                 ),
                 kind = ImportKind.ABILITY
             ))
@@ -56,7 +56,7 @@ internal fun buildResolvedImports(importContext: ModuleImportContext?): List<Res
                 modulePath = "",
                 type = WellKnownTypeApp.of(
                     name, emptyList(),
-                    typeHash = effectDecl.contentHash ?: ParsedDeclHasher.hashEffectDecl(effectDecl)
+                    typeHash = effectDecl.identity
                 ),
                 kind = ImportKind.EFFECT
             ))

@@ -46,11 +46,6 @@ class ContextBuilder {
         val file = module.path
 
         val typeDecls = module.decls.filterIsInstance<ParsedTypeDecl>()
-            // Stamp the decl content hash up front so every downstream
-            // typeDecl.contentHash read carries a real hash (pure fn of the decl,
-            // always computable). A hashless type decl loses its nominal identity
-            // (Anonymous) under TypeIdentity, breaking the name-in-scope wall.
-            .map { if (it.contentHash != null) it else it.copy(contentHash = ParsedDeclHasher.hashTypeDecl(it)) }
             .associateBy { it.name }
             .toMutableMap()
 
@@ -61,13 +56,6 @@ class ContextBuilder {
 
         val effectDecls = module.decls.filterIsInstance<ParsedEffectDecl>()
             .associateBy { it.name }
-            .mapValues { (_, decl) ->
-                if (decl.contentHash != null) decl
-                else {
-                    val hash = ParsedDeclHasher.hashEffectDecl(decl)
-                    if (hash != null) decl.copy(contentHash = hash) else decl
-                }
-            }
 
         val allAbilityNames = abilityDecls.keys + importedAbilities.keys +
             importedAbilities.values.map { it.name }.toSet()
@@ -79,7 +67,7 @@ class ContextBuilder {
         val convertedPerformerDecls = mutableMapOf<ParsedPerformerDecl, ParsedImplAbilityDecl>()
 
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
-            resolvedAbilityImplDecls.add(ensureContentHash(impl, file))
+            resolvedAbilityImplDecls.add(impl)
         }
 
         for (perfDecl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
@@ -92,13 +80,12 @@ class ContextBuilder {
                     stripEmptyRecordParams = true,
                     targetLoc = perfDecl.loc,
                 )
-                val withHash = ensureContentHash(converted, file)
+                // The same declaration, read as the impl it is: same identity.
+                val withHash = converted.copy(contentHash = perfDecl.identity)
                 resolvedAbilityImplDecls.add(withHash)
                 convertedPerformerDecls[perfDecl] = withHash
             } else {
-                val perfWithHash = if (perfDecl.contentHash != null) perfDecl
-                    else perfDecl.copy(contentHash = ParsedDeclHasher.hashPerformerDecl(perfDecl))
-                resolvedParsedPerformerDecls.add(perfWithHash)
+                resolvedParsedPerformerDecls.add(perfDecl)
             }
         }
 
@@ -287,7 +274,7 @@ class ContextBuilder {
         // way to generate a value, so inheriting Eq's gate made derivation depend on
         // whether the module happened to import an unrelated ability.
         val eqDecl = allAbilityDecls["Eq"]
-        val eqHash = eqDecl?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        val eqHash = eqDecl?.let { it.identity }
         val eqNameable = WellKnownHashConstants.isEq(eqHash)
 
         val declaredHere = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
@@ -295,6 +282,10 @@ class ContextBuilder {
         val explicitEqTargets = explicitImplTargetNames(explicitImpls, "Eq")
         val registry = DeclarationRegistry.from(typeDecls + importedTypes, allAbilityDecls, effectDecls)
         val checker = com.mezze.language.typechecker.solving.AbilityChecker(ctx, registry)
+
+        // A generated impl's names resolve as the receiving module's do.
+        val derivedIn = currentModulePath ?: ""
+        val derivedScope = registry.identityScope()
 
         // A PRIMITIVE has no `ParsedTypeDecl` to walk, so it is generated from its
         // home module rather than from the decl list — `Int` in `std::int`, `Str` in
@@ -313,7 +304,7 @@ class ContextBuilder {
         // imported", pointing at an impl the author never wrote.
         val hashDecl = allAbilityDecls["Hash"]
         val hashNameable = hashDecl != null && WellKnownHashConstants.isHash(
-            hashDecl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(hashDecl)
+            hashDecl.identity
         )
         val explicitHashTargets = explicitImplTargetNames(explicitImpls, "Hash")
         val primitiveImpls = com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveEqNames
@@ -328,7 +319,7 @@ class ContextBuilder {
                     else com.mezze.language.typechecker.derive.DerivedImplGenerator.primitiveHashImpl(name),
                 )
             }
-            .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
+            .map { DeclIdentity.stampSynthetic(it, derivedScope, derivedIn) }
 
         // `Arbitrary` derives for the same shapes and by the same rule.
         //
@@ -339,7 +330,7 @@ class ContextBuilder {
         // wherever a type is declared, since the instance is the only way to produce a
         // value of it. `BuiltInAbilities` is the same channel `==` resolves through.
         val arbitraryDecl = allAbilityDecls["Arbitrary"]
-        val arbitraryHash = arbitraryDecl?.let { it.contentHash ?: ParsedDeclHasher.hashAbilityDecl(it) }
+        val arbitraryHash = arbitraryDecl?.let { it.identity }
         val arbitraryNameable = WellKnownHashConstants.isArbitrary(arbitraryHash)
         val explicitArbitraryTargets = explicitImplTargetNames(explicitImpls, "Arbitrary")
 
@@ -363,7 +354,7 @@ class ContextBuilder {
                 .mapNotNull {
                     com.mezze.language.typechecker.derive.DerivedImplGenerator.builtinArbitraryImpl(it)
                 }
-                .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
+                .map { DeclIdentity.stampSynthetic(it, derivedScope, derivedIn) }
 
         return primitiveImpls + builtinArbitraryImpls + typeDecls.values.flatMap { decl ->
             if (decl.name !in declaredHere && decl.name !in homeHere) return@flatMap emptyList()
@@ -380,7 +371,7 @@ class ContextBuilder {
                     ?.takeIf { g -> checker.canDeriveAbility("Arbitrary", receiverOf(decl, g), arbitraryHash) }
 
             listOfNotNull(eqGenerated, arbitraryGenerated)
-                .map { it.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(it)) }
+                .map { DeclIdentity.stampSynthetic(it, derivedScope, derivedIn) }
         }
     }
 
@@ -465,7 +456,7 @@ class ContextBuilder {
                 }
                 val newtypeResult = WellKnownTypeApp.of(
                     typeDecl.name, typeArgs,
-                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                    typeHash = typeDecl.identity
                 )
                 val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
                 val typeVars = mutableSetOf<TypeVar>()
@@ -483,7 +474,7 @@ class ContextBuilder {
             when (val def = typeDecl.definition) {
                 is ParsedNewtypeDef -> WellKnownTypeApp.of(
                     typeDecl.name, emptyList(),
-                    typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                    typeHash = typeDecl.identity
                 )
                 else -> {
                     val constructors = when (def) {
@@ -496,12 +487,11 @@ class ContextBuilder {
                     }
                     MezzeType.VariantType(
                         constructors = constructors, rowVar = null,
-                        // A declared variant always has a content hash — it is a pure
-                        // function of the decl (ParsedDeclHasher), so compute it rather
-                        // than falling back to a hashless identity. S3.1: via the factory.
+                        // A declared variant always has an identity (stamped with its
+                        // module), never a hashless fallback. S3.1: via the factory.
                         identity = TypeIdentity.declared(
                             typeDecl.name,
-                            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                            typeDecl.identity
                         )
                     )
                 }
@@ -512,7 +502,7 @@ class ContextBuilder {
                 args = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
                 },
-                typeHash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                typeHash = typeDecl.identity
             )
         }
         val ctorType = when (val dataType = constructor.dataType) {
@@ -731,12 +721,6 @@ class ContextBuilder {
         implDecl: ParsedPerformerDecl,
         effectDecls: Map<String, ParsedEffectDecl>
     ): TypingContext {
-        val implWithHash = if (implDecl.contentHash != null) implDecl else {
-            implDecl.copy(contentHash = ParsedDeclHasher.hashPerformerDecl(implDecl))
-        }
-        @Suppress("NAME_SHADOWING")
-        val implDecl = implWithHash
-
         val effectDecl = effectDecls[implDecl.effect.localName] ?: return ctx
         val hasAssocTypes = effectDecl.associatedTypes.isNotEmpty()
         if (!hasAssocTypes && implDecl.params.isEmpty()) return ctx
@@ -1041,7 +1025,7 @@ class ContextBuilder {
             }
 
     private fun buildConversionConfig() = TypeAnnotationConverter.ConversionConfig(
-        resolveTypeHash = { currentTypeDecls[it]?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+        resolveTypeHash = { currentTypeDecls[it]?.let { d -> d.identity } },
         resolveAbilityHash = { currentAbilityDecls[it]?.contentHash },
         validateEffects = { effectRow ->
             TypeAnnotationConverter.validateUnknownEffects(
@@ -1084,9 +1068,11 @@ class ContextBuilder {
             ParsedRecordType(listOf(ParsedRecordTypeEntry(fieldName, ParsedNamedType(typeParam, loc), loc)), false, loc)
         fun syntheticVariant(name: String, typeParams: List<String>, ctors: List<ParsedVariantCtorDef>) {
             if (!typeDecls.containsKey(name)) {
-                typeDecls[name] = ParsedTypeDecl(name, typeParams,
-                    ParsedVariantDef(ctors, isOpen = false, loc = loc),
-                    visibility = ParsedVisibility.PUBLIC, loc = loc)
+                typeDecls[name] = DeclIdentity.stampSynthetic(
+                    ParsedTypeDecl(name, typeParams,
+                        ParsedVariantDef(ctors, isOpen = false, loc = loc),
+                        visibility = ParsedVisibility.PUBLIC, loc = loc),
+                    IdentityScope.NONE, "<builtin>")
             }
         }
         // Bool's declaration is what makes `True` and `False` RESOLVE — as
@@ -1102,11 +1088,6 @@ class ContextBuilder {
         syntheticVariant(BuiltinTypes.RESULT, listOf("a", "e"), listOf(
             ParsedVariantCtorDef(BuiltinTypes.OK, payloadField(BuiltinTypes.VAL_FIELD, "a"), loc = loc),
             ParsedVariantCtorDef(BuiltinTypes.ERR, payloadField(BuiltinTypes.ERROR_FIELD, "e"), loc = loc)))
-    }
-
-    private fun ensureContentHash(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): ParsedImplAbilityDecl {
-        if (decl.contentHash != null) return decl
-        return decl.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(decl))
     }
 
     companion object {

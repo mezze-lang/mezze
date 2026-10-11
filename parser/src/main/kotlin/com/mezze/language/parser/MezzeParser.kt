@@ -227,9 +227,7 @@ class MezzeParser {
             val stream = TokenStream(tokens)
 
             return when (val result = parsedModuleParser(stream)) {
-                is ParseResult.Success -> com.mezze.language.parsedast.ParsedDeclHasher.computeAllHashes(
-                    resolveParsedImplDeclarations(result.value)
-                )
+                is ParseResult.Success -> resolveParsedImplDeclarations(result.value)
                 is ParseResult.Failure -> throw ParseException(
                     result.message,
                     result.position,
@@ -367,22 +365,11 @@ class MezzeParser {
 
             orphanComments.addAll(pendingBlock.regularComments)
 
-            // Mirror parseParsedModule: resolve impl decls AND compute
-            // content hashes. The LSP path lives or dies by these hashes —
-            // ability impl lookup (NumMul, NumAdd, Eq, etc.) is keyed on
-            // ParsedImplAbilityDecl.contentHash, which is null until
-            // computeAllHashes runs. Without it, a file like
-            //   use std::collections::seq
-            //   let f = { x } -> x * 2
-            // typechecks fine via `mez check` (which calls
-            // parseParsedModule) but fails in the LSP with
-            //   "Cannot use '*' with Int. To enable this, implement:
-            //    impl NumMul for Int where { ... }"
-            // because the prelude's NumMul-for-Int impl has no hash to
-            // match against. (#233)
-            val parsedModule = com.mezze.language.parsedast.ParsedDeclHasher.computeAllHashes(
+            // Mirror parseParsedModule. No identities: a declaration's identity
+            // includes what its names resolve to, so it is stamped once the
+            // module's imports are known (DeclIdentity), never at parse time.
+            val parsedModule =
                 resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments))
-            )
 
             return ParseResultWithRecovery(parsedModule, errors)
         } catch (e: ParseException) {
@@ -393,17 +380,14 @@ class MezzeParser {
             // cleanly before the abort, so the frontend shows a located
             // diagnostic instead of falling over.
             errors.add(e)
-            val partial = com.mezze.language.parsedast.ParsedDeclHasher.computeAllHashes(
+            val partial =
                 resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments))
-            )
             return ParseResultWithRecovery(partial, errors)
         } catch (e: StackOverflowError) {
             // Ultimate anti-crash backstop: pathologically deep input can overflow
-            // a recursive walk — the parser's own descent OR the post-parse AST
-            // hasher — before a depth guard trips. Convert it to a located P0131
-            // instead of crashing the frontend. Deliberately do NOT re-run the
-            // hasher over the partial decls (that walk is what overflowed): return
-            // an empty module carrying just the diagnostic.
+            // the parser's recursive descent before a depth guard trips. Convert it
+            // to a located P0131 instead of crashing the frontend, and return an
+            // empty module carrying just the diagnostic.
             errors.add(ParseException(
                 "Input is nested too deeply for the parser to process safely.",
                 0, 1, 1, source, file,

@@ -3,7 +3,6 @@ package com.mezze.language.typechecker.abilities
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.isTypeVarName
-import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.ModuleResolver
@@ -22,7 +21,7 @@ object BuiltInAbilities {
      * type var and so cannot represent a class parameter like `NumAdd 'r for 'l`),
      * these are the untouched `ParsedAbilityDecl`s straight from the ability
      * `.mz` files, with their real `typeParams` / `receiverTypeParam` /
-     * `associatedTypes` and a valid `contentHash` (the parser runs the hasher).
+     * `associatedTypes` and their identity (stamped by the module resolver).
      *
      * These are seeded into the base typing context / registry so a bare `2 + 3`
      * (which never `use`s NumAdd) resolves `.add` through the SAME class-param-
@@ -55,31 +54,21 @@ object BuiltInAbilities {
         // the prelude instead, which carries the impls too.
     )
 
-    /** Read + parse each ability file, invoking [handle] for every ability decl.
+    /** Each ability file's decls, invoking [handle] for every ability decl.
      *  Shared by [buildAbilitiesFromMzFiles] and [parseBuiltInAbilityDecls] so the
-     *  flattened method-type map and the raw-decl map stay in lock-step. */
+     *  flattened method-type map and the raw-decl map stay in lock-step.
+     *
+     *  Loaded through the module resolver, not parsed here: a built-in ability
+     *  must have the SAME identity as the one an import of its module brings, and
+     *  identity is stamped once names are resolved — which only the resolver does. */
     private fun forEachBuiltInAbilityDecl(handle: (ParsedAbilityDecl) -> Unit) {
-        val parser = MezzeParser()
+        val resolver = ModuleResolver()
         for (name in abilityFileNames) {
-            val embeddedPath = "stdlib/std/$name"
-            val diskPath = "std/$name"
-            try {
-                val source = ModuleResolver.readStdlibFile(embeddedPath)
-                    ?: ModuleResolver.readStdlibFile(diskPath)
-                    ?: readFromFilesystem(diskPath)
-                    ?: continue
-                val module = parser.parseParsedModule(source, embeddedPath)
-                for (decl in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
-                    handle(decl)
-                }
-            } catch (e: Exception) {
-                // warning so it's at least visible in CI logs. (#308)
-                System.err.println(
-                    "[BuiltInAbilities] WARNING: failed to parse $embeddedPath: " +
-                    "${e.javaClass.simpleName}: ${e.message}. " +
-                    "Affected abilities will appear missing to user code."
-                )
-                DebugLogger.debug(DebugLogger.Category.TypeChecker) { e.stackTraceToString() }
+            val modulePath = "std::" + name.removeSuffix(".mz").replace("/", "::")
+            val module = resolver.resolveModule(modulePath).source
+                ?: error("Compiler internal error: built-in ability module $modulePath has no stamped source")
+            for (decl in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
+                handle(decl)
             }
         }
     }
@@ -118,12 +107,6 @@ object BuiltInAbilities {
         }
 
         return result
-    }
-
-        private fun readFromFilesystem(relativePath: String): String? {
-        val projectRoot = System.getProperty("mezze.project.root") ?: return null
-        val file = java.io.File(projectRoot, "stdlib/$relativePath")
-        return if (file.exists()) file.readText() else null
     }
 
         /**

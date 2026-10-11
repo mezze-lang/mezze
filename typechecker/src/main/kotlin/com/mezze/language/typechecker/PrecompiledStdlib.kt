@@ -168,6 +168,7 @@ object PrecompiledStdlib {
             // stdlib decls in the fast-load path. Old snapshots default
             // to an empty map, preserving the pre-#415 behavior.
             stdlibTypedModules = fullCache.typedModules
+            stdlibTypedModules.values.forEach { StdlibIdentities.register(it) }
             loadedModules = emptyMap()
             // Re-derive dict methods — the snapshot format doesn't store them.
             preloweredDictMethods = prescanDictMethodsFromModules(stdlibTypedModules)

@@ -260,8 +260,13 @@ class TypeChecker(
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
     ): TypeCheckResult {
+        // Identities first: everything below keys declarations by them. A module
+        // imported through the resolver arrives stamped; stamping again from the
+        // same resolver gives the same answer, and an entry module arrives bare.
         @Suppress("NAME_SHADOWING")
-        val module = desugarPipesInParsedModule(module)
+        val module = desugarPipesInParsedModule(
+            ModuleResolver(currentPath, world).stampEntry(module, currentModulePath)
+        )
 
         clearUnificationCache()
         if (!TypeCheckCache.hasPersistence()) {
@@ -415,7 +420,7 @@ class TypeChecker(
             // Declared(hash) at construction instead of Anonymous-with-a-name that
             // stampTypeHashes has to repair by reading `.constructor` — the deferred
             // case that blocked constructor from deriving purely from identity.
-            registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) }
+            registry.lookupType(name)?.let { d -> d.identity }
                 ?: registry.typeHashFor(name)
         }) {
 

@@ -60,7 +60,9 @@ data class ParsedLetDecl(
     override val trailingComment: ParsedComment? = null,
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl {
     val isSimpleBinding: Boolean get() = pattern is ParsedVariablePattern
     val variableName: String get() = (pattern as ParsedVariablePattern).name
@@ -81,7 +83,7 @@ data class ParsedTypeDecl(
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
-    /** Content hash — populated by typechecker, not parser */
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
     val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
@@ -189,7 +191,7 @@ data class ParsedAbilityDecl(
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
-    /** Content hash — populated by typechecker, not parser */
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
     val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
@@ -249,7 +251,7 @@ data class ParsedImplAbilityDecl(
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
-    /** Content hash — populated by typechecker, not parser */
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
     val contentHash: com.mezze.language.typedast.Hash? = null,
     /** Compiler-DERIVED instance (structural `Eq` for a record / variant — the
      *  `#[derive]` the compiler writes itself). Never produced by the parser. It is
@@ -315,7 +317,7 @@ data class ParsedEffectDecl(
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
-    /** Content hash — populated by typechecker, not parser */
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
     val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
@@ -364,7 +366,7 @@ data class ParsedPerformerDecl(
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
-    /** Content hash — populated by typechecker, not parser */
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
     val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
@@ -433,5 +435,7 @@ data class ParsedTopLevelExpr(
     override val trailingComment: ParsedComment? = null,
     override val docComment: String? = null,
     override val metadata: ParsedMetadata? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl

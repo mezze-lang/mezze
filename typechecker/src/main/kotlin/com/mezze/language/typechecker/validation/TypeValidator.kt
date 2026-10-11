@@ -195,7 +195,7 @@ class TypeValidator(
                             val definition = typeDeclarations[appliedType.constructor]?.definition
                             if (definition is ParsedVariantDef) {
                                 MezzeType.VariantType(
-                                    constructors = definition.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } }) } },
+                                    constructors = definition.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } }) } },
                                     rowVar = if (definition.isOpen) RowVar.fresh() else null
                                 )
                             } else null
@@ -343,7 +343,7 @@ class TypeValidator(
             val aliasFields = def.fields.associate { it.name to it.type }
             if (aliasFields.size != recordType.fields.size || aliasFields.keys != recordType.fields.keys) return@mapNotNull null
             val compatible = aliasFields.all { (name, parsedType) ->
-                val aliasFieldType = TypeAnnotationConverter.convert(parsedType, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } })
+                val aliasFieldType = TypeAnnotationConverter.convert(parsedType, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } })
                 val recordFieldType = recordType.fields[name]
                 recordFieldType != null && alphaEquivalent(aliasFieldType, recordFieldType, mutableMapOf())
             }
@@ -429,7 +429,7 @@ class TypeValidator(
         val annotatedType =
             TypeAnnotationConverter.convert(
                 parsedAnnotation,
-                resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+                resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } },
                 // THIS module's abilities, so a local `ability Ord` shadows the
                 // prelude's as it does everywhere else. Without it the annotation
                 // was stamped from the generated stdlib table and compared against

@@ -82,7 +82,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         ),
     )
 
-    val abilityHash = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
+    val abilityHash = decl.identity
     val abilityConstraint = Constraint.AbilityRequired(
         typeVar = abilityVar.variable,
         abilityName = abilityName,

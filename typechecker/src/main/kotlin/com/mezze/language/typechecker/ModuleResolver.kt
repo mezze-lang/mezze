@@ -1,5 +1,7 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.typechecker.module.ModuleIdentity
+
 import com.mezze.language.ast.*
 import com.mezze.language.ast.debug.ContentHashRegistry
 import com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind
@@ -56,45 +58,18 @@ data class ProgramIndex(
             val abilityImplDecls = decls.filterIsInstance<ParsedImplAbilityDecl>()
             val letDecls = decls.filterIsInstance<ParsedLetDecl>()
 
-            val hasher = ParsedDeclHasher
-            val file = module.path
-
-            val hashedEffects = effectDecls.mapValues { (_, decl) ->
-                if (decl.contentHash != null) decl
-                else {
-                    val hash = hasher.hashEffectDecl(decl, file)
-                    if (hash != null) decl.copy(contentHash = hash) else decl
-                }
-            }
-
-            val hashedPerformers = performerDecls.map { perf ->
-                if (perf.contentHash != null) perf
-                else {
-                    val hash = hasher.hashPerformerDecl(perf, file)
-                    if (hash != null) perf.copy(contentHash = hash) else perf
-                }
-            }
-
-            val hashedAbilityImpls = abilityImplDecls.map { impl ->
-                if (impl.contentHash != null) impl
-                else {
-                    val hash = hasher.hashImplAbilityDecl(impl, file)
-                    if (hash != null) impl.copy(contentHash = hash) else impl
-                }
-            }
-
+            // Declarations arrive stamped (DeclIdentity): an index is built only
+            // from a module whose names have been resolved.
             return ProgramIndex(
                 typeDeclarations = typeDecls,
                 abilityDeclarations = abilityDecls,
-                effectDeclarations = hashedEffects,
-                performersByName = hashedPerformers.associateBy { it.performerName },
-                performersByEffect = hashedPerformers.groupBy { it.effect.localName },
-                abilityImplsByAbility = hashedAbilityImpls
+                effectDeclarations = effectDecls,
+                performersByName = performerDecls.associateBy { it.performerName },
+                performersByEffect = performerDecls.groupBy { it.effect.localName },
+                abilityImplsByAbility = abilityImplDecls
                     .filter { !it.isInherent }
                     .groupBy { it.abilityName!! },
-                abilityImplsByHash = hashedAbilityImpls.associateBy { impl ->
-                    impl.contentHash!!
-                },
+                abilityImplsByHash = abilityImplDecls.associateBy { it.identity },
                 letBindings = letDecls
                     .filter { it.isSimpleBinding }
                     .associateBy { it.variableName },
@@ -125,7 +100,24 @@ data class Module(
     val dependencies: List<ModuleDependency>,
     val sourceHash: Hash? = null,
     val index: ProgramIndex = ProgramIndex.EMPTY,
-    val parsedModule: ParsedModule? = null
+    val parsedModule: ParsedModule? = null,
+    /** Fingerprint of every identity this module declares. */
+    val identity: Hash? = null,
+    /**
+     * The modules its identities were computed against — each import, and the
+     * prelude — with the fingerprint each had then (null: it would not load).
+     * Unchanged source is not enough to reuse a module: a declaration's identity
+     * includes what its names resolve to, so a changed dependency changes it.
+     */
+    val stampedAgainst: Map<String, Hash?> = emptyMap(),
+    /**
+     * The module as stamped, before the typechecker transforms it — what a
+     * restamp and an importer's scope read. [parsedModule] is replaced by the
+     * typechecked module once it has been checked.
+     */
+    val source: ParsedModule? = null,
+    /** Modules stamped together with this one (they import each other), with their source hashes. */
+    val groupSources: Map<String, Hash> = emptyMap(),
 ) {
     val name: String get() = path.fullPath
 }
@@ -315,8 +307,8 @@ class ModuleResolver(
          */
         private class Caches {
             val modules = mutableMapOf<String, Module>()
-            val byContentHash = mutableMapOf<Hash, Module>()
-            val loadingLocks = mutableMapOf<String, Any>()
+            /** Held for a whole stamping pass, which may stamp many modules at once. */
+            val stampLock = Any()
             val lock = Any()
 
             /**
@@ -398,8 +390,6 @@ class ModuleResolver(
             val c = caches(world)
             synchronized(c.lock) {
                 c.modules.clear()
-                c.byContentHash.clear()
-                c.loadingLocks.clear()
             }
         }
 
@@ -416,8 +406,7 @@ class ModuleResolver(
             val c = caches(world)
             synchronized(c.lock) {
                 c.sourceOverlay[modulePath] = source
-                val stale = c.modules.remove(modulePath)
-                stale?.sourceHash?.let { c.byContentHash.remove(it) }
+                c.modules.remove(modulePath)
             }
         }
 
@@ -433,8 +422,7 @@ class ModuleResolver(
             val c = caches(world)
             synchronized(c.lock) {
                 for (path in c.sourceOverlay.keys) {
-                    val stale = c.modules.remove(path)
-                    stale?.sourceHash?.let { c.byContentHash.remove(it) }
+                    c.modules.remove(path)
                 }
                 c.sourceOverlay.clear()
             }
@@ -462,17 +450,12 @@ class ModuleResolver(
             val c = caches(world)
             synchronized(c.lock) {
                 for (path in modulePaths) {
-                    val mod = c.modules.remove(path)
-                    mod?.sourceHash?.let { c.byContentHash.remove(it) }
-                    c.loadingLocks.remove(path)
+                    c.modules.remove(path)
                 }
             }
         }
 
-                private fun getModuleLock(world: World, modulePath: String): Any {
-            val c = caches(world)
-            synchronized(c.lock) { return c.loadingLocks.getOrPut(modulePath) { Any() } }
-        }
+                private fun stampLock(world: World): Any = caches(world).stampLock
 
                 internal fun getFromCache(world: World, modulePath: String): Module? {
             val c = caches(world)
@@ -486,16 +469,10 @@ class ModuleResolver(
             return synchronized(c.lock) { c.modules.toMap() }
         }
 
-                internal fun getFromCacheByContentHash(world: World, contentHash: Hash): Module? {
-            val c = caches(world)
-            synchronized(c.lock) { return c.byContentHash[contentHash] }
-        }
-
                 internal fun putInCache(world: World, modulePath: String, module: Module) {
             val c = caches(world)
             synchronized(c.lock) {
                 c.modules[modulePath] = module
-                module.sourceHash?.let { hash -> c.byContentHash[hash] = module }
             }
         }
 
@@ -538,10 +515,17 @@ class ModuleResolver(
         fun create(): ModuleResolver {
             return ModuleResolver()
         }
+
+        /** The modules every non-stdlib module sees implicitly, from `_prelude.mz`. */
+        private val PRELUDE_MODULES: List<List<String>> by lazy {
+            val source = readStdlibFile("stdlib/std/_prelude.mz") ?: readStdlibFile("std/_prelude.mz")
+                ?: error("Compiler internal error: stdlib/std/_prelude.mz not found on the classpath")
+            MezzeParser().parseParsedModule(source, file = "<prelude>").decls
+                .filterIsInstance<ParsedUseDecl>()
+                .map { ModuleIdentity.segments(it.path) }
+        }
     }
 
-    // Track modules currently being loaded to detect circular dependencies (per-instance to track call stack)
-    private val loadingStack = mutableSetOf<String>()
     
     // Only skip modules where ALL functionality is built-in and there's no stdlib wrapper.
     // Collection modules with stdlib wrappers (map.mz, set.mz) are NOT skipped.
@@ -596,95 +580,228 @@ class ModuleResolver(
         if (modulePath in coreTypeModules) {
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
         }
+        checkForDeprecatedCoreModule(modulePath)
 
-        val moduleLock = getModuleLock(world, modulePath)
-        synchronized(moduleLock) {
-            checkForDeprecatedCoreModule(modulePath)
-
-            if (modulePath in loadingStack) {
-                throw ModuleError.CircularDependency(loadingStack.toList() + modulePath)
-            }
-
-            // The overlay is consulted BEFORE the file is resolved, not after it is
-            // read: a changeset that ADDS a module has no file to find, so resolving
-            // first would throw ModuleNotFound on source we already hold.
-            val overlaid = overlayFor(world, modulePath)
-            val resolvedFile = resolveModuleFile(modulePath)
-            if (resolvedFile == null && overlaid == null) {
-                throw ModuleError.ModuleNotFound(
-                    modulePath,
-                    getSearchPaths(modulePath),
-                    suggestion = suggestModulePath(modulePath),
-                )
-            }
-            // An overlaid module with no file still needs a path: it names where the
-            // module WOULD live, so diagnostics and FunctionIR.sourceFile point
-            // somewhere a reader recognises rather than at a synthetic blank.
-            val filePath = resolvedFile
-                ?: Paths.get(projectRoot.toString(), "src", modulePath.replace("::", "/") + ".mz")
-
-            val source = overlaid ?: Files.readString(filePath)
-            val sourceHash = Hash(sha256Hex(source))
-
-            getFromCacheByContentHash(world, sourceHash)?.let { cachedModule ->
+        // One stamping pass at a time per world: a pass stamps whole groups of
+        // modules, so per-module locks could not keep two passes apart.
+        synchronized(stampLock(world)) {
+            readSource(modulePath) ?: throw ModuleError.ModuleNotFound(
+                modulePath,
+                getSearchPaths(modulePath),
+                suggestion = suggestModulePath(modulePath),
+            )
+            getFromCache(world, modulePath)?.let { cached ->
+                if (isCurrent(modulePath, HashMap())) return cached
                 DebugLogger.debug(Category.ModuleResolver) {
-                    "Found module with same content hash at different path: $modulePath (reusing ${cachedModule.name})"
-                }
-                putInCache(world, modulePath, cachedModule)
-                return cachedModule
-            }
-
-            getFromCache(world, modulePath)?.let { cachedModule ->
-                if (cachedModule.sourceHash == sourceHash) {
-                    DebugLogger.debug(Category.ModuleResolver) {
-                        "Found cached module with matching content hash: $modulePath"
-                    }
-                    return cachedModule
-                } else {
-                    DebugLogger.debug(Category.ModuleResolver) {
-                        "Cached module has stale content hash, reloading: $modulePath"
-                    }
+                    "$modulePath or something it was stamped against changed; re-stamping"
                 }
             }
+            stampFrom(modulePath)
+            return getFromCache(world, modulePath)
+                ?: error("internal: stamping $modulePath did not cache it")
+        }
+    }
 
-            loadingStack.add(modulePath)
+    /** A module's text, wherever it comes from. */
+    private class Source(val modulePath: String, val filePath: String, val text: String, val hash: Hash)
 
-            try {
-                val cached = tryLoadParsedFromStore(modulePath, sourceHash)
-                    ?: ParsedModuleCacheHolder.get(filePath.toString(), sourceHash.hex)
-                val parsedModule = cached ?: run {
-                    val parser = MezzeParser()
-                    parser.parseParsedModule(source, file = filePath.toString())
+    /** Read [modulePath] without loading anything, or null when there is nothing to read. */
+    private fun readSource(modulePath: String): Source? {
+        // The overlay is consulted BEFORE the file is resolved, not after it is
+        // read: a changeset that ADDS a module has no file to find.
+        val overlaid = overlayFor(world, modulePath)
+        val resolvedFile = resolveModuleFile(modulePath)
+        if (resolvedFile == null && overlaid == null) return null
+        // An overlaid module with no file still needs a path: it names where the
+        // module WOULD live, so diagnostics and FunctionIR.sourceFile point
+        // somewhere a reader recognises rather than at a synthetic blank.
+        val filePath = resolvedFile
+            ?: Paths.get(projectRoot.toString(), "src", modulePath.replace("::", "/") + ".mz")
+        val text = overlaid ?: Files.readString(filePath)
+        return Source(modulePath, filePath.toString(), text, Hash(sha256Hex(text)))
+    }
+
+    private fun parse(src: Source): ParsedModule = try {
+        tryLoadParsedFromStore(src.modulePath, src.hash)
+            ?: ParsedModuleCacheHolder.get(src.filePath, src.hash.hex)
+            ?: MezzeParser().parseParsedModule(src.text, file = src.filePath)
+    } catch (e: ParseException) {
+        throw ModuleError.ParseError(src.modulePath, e.message ?: "Unknown parse error")
+    } catch (e: Exception) {
+        throw ModuleError.ParseError(src.modulePath, "Unexpected error: ${e.message}")
+    }
+
+    /**
+     * Whether the cached [modulePath] still has the identities it would get now:
+     * its source and its group-mates' are unchanged, and so is everything it was
+     * stamped against. Reads, never loads — so checking cannot start a stamping
+     * pass inside another.
+     */
+    private fun isCurrent(modulePath: String, memo: HashMap<String, Boolean>): Boolean {
+        memo[modulePath]?.let { return it }
+        memo[modulePath] = true   // a group-mate checking back; the group is judged as a whole below
+        val cached = getFromCache(world, modulePath)
+        val current = cached?.source != null && run {
+            val via = resolverFor(cached.filePath)
+            via.readSource(modulePath)?.hash == cached.sourceHash &&
+                cached.groupSources.all { (mate, hash) -> via.readSource(mate)?.hash == hash } &&
+                cached.stampedAgainst.all { (dep, was) ->
+                    if (was == null) via.readSource(dep) == null      // still absent
+                    else getFromCache(world, dep)?.identity == was && via.isCurrent(dep, memo)
                 }
+        }
+        memo[modulePath] = current
+        return current
+    }
 
-                val parsedExports = extractExportsFromParsedModule(parsedModule, modulePath)
-                val dependencies = extractDependenciesFromParsedModule(parsedModule)
-                val programIndex = ProgramIndex.build(parsedModule)
-                val structuredPath = ModulePath.parse(modulePath)
-                val module = Module(
-                    path = structuredPath,
-                    filePath = filePath.toString(),
-                    exports = parsedExports,
-                    dependencies = dependencies,
-                    sourceHash = sourceHash,
-                    index = programIndex,
-                    parsedModule = parsedModule
-                )
+    /** What a stamping pass works on: a module's source, parsed, and who resolves its imports. */
+    private class Raw(val source: Source, val parsed: ParsedModule, val resolver: ModuleResolver)
 
-                putInCache(world, modulePath, module)
-                return module
+    private fun dependencyPaths(raw: Raw): List<String> {
+        val imports = ModuleIdentity.dependencies(raw.parsed)
+        val prelude = if (ModulePathConventions.isStdlib(raw.source.modulePath)) emptyList() else PRELUDE_MODULES
+        return (imports + prelude).map { it.joinToString("::") }.filter { it !in coreTypeModules }.distinct()
+    }
 
-            } catch (e: ParseException) {
-                throw ModuleError.ParseError(modulePath, e.message ?: "Unknown parse error")
-            } catch (e: Exception) {
-                throw ModuleError.ParseError(modulePath, "Unexpected error: ${e.message}")
-            } finally {
-                loadingStack.remove(modulePath)
+    /**
+     * Stamp [root] and everything it depends on that is not current.
+     *
+     * Modules that import each other are stamped together ([IdentityGroup]), so
+     * this finds them: Tarjan over the modules that need stamping, every group
+     * stamped after the groups it imports. A current module is a leaf — its
+     * identities are already final. A dependency that cannot be loaded is no
+     * module at all; the typechecker reports it when it processes the import.
+     */
+    private fun stampFrom(root: String) {
+        val memo = HashMap<String, Boolean>()
+        val raws = HashMap<String, Raw>()
+        val stampedNow = HashSet<String>()
+
+        fun load(path: String, via: ModuleResolver, isRoot: Boolean): Raw? {
+            raws[path]?.let { return it }
+            val src = via.readSource(path) ?: return null
+            val parsed = try { via.parse(src) } catch (e: ModuleError.ParseError) { if (isRoot) throw e else return null }
+            return Raw(src, parsed, via.resolverFor(src.filePath)).also { raws[path] = it }
+        }
+        fun needsStamp(path: String, via: ModuleResolver): Boolean =
+            getFromCache(world, path) == null || !via.isCurrent(path, memo)
+
+        load(root, this, isRoot = true)
+        val index = HashMap<String, Int>()
+        val low = HashMap<String, Int>()
+        val onStack = HashSet<String>()
+        val stack = ArrayDeque<String>()
+        val successors = HashMap<String, List<String>>()
+        fun succ(path: String): List<String> = successors.getOrPut(path) {
+            val raw = raws.getValue(path)
+            dependencyPaths(raw).filter { dep -> needsStamp(dep, raw.resolver) && load(dep, raw.resolver, false) != null }
+        }
+
+        // Iterative, so a deep import chain cannot overflow the stack.
+        val frames = ArrayDeque<Pair<String, Int>>()
+        fun enter(v: String) {
+            index[v] = index.size; low[v] = index.getValue(v)
+            stack.addLast(v); onStack.add(v)
+            frames.addLast(v to 0)
+        }
+        enter(root)
+        while (frames.isNotEmpty()) {
+            val (v, at) = frames.removeLast()
+            val next = succ(v)
+            if (at < next.size) {
+                frames.addLast(v to at + 1)
+                val w = next[at]
+                if (w !in index) enter(w)
+                else if (w in onStack) low[v] = minOf(low.getValue(v), index.getValue(w))
+                continue
+            }
+            frames.lastOrNull()?.let { (parent, _) -> low[parent] = minOf(low.getValue(parent), low.getValue(v)) }
+            if (low[v] == index[v]) {
+                val group = ArrayList<String>()
+                do {
+                    val w = stack.removeLast()
+                    onStack.remove(w)
+                    group.add(w)
+                } while (w != v)
+                stampGroup(group.sorted(), raws, memo, stampedNow)
             }
         }
     }
-    
-        private fun createEmptyModule(modulePath: String, reason: String): Module {
+
+    /** Stamp modules that import each other, as one group, and cache each. */
+    private fun stampGroup(
+        members: List<String>,
+        raws: Map<String, Raw>,
+        memo: Map<String, Boolean>,
+        stampedNow: MutableSet<String>,
+    ) {
+        val group = IdentityGroup(members.map { raws.getValue(it).parsed })
+        val memberIndex = members.withIndex().associate { it.value to it.index }
+        val against = LinkedHashMap<String, Hash?>()
+        val loader = ModuleIdentity.Loader { segments ->
+            val path = segments.joinToString("::")
+            memberIndex[path]?.let { return@Loader ModuleIdentity.Visible(raws.getValue(path).parsed, it) }
+            // Outside the group: stamped earlier in this pass, or found current.
+            val module = getFromCache(world, path)
+                ?.takeIf { path in stampedNow || memo[path] == true }
+                ?.takeIf { path !in coreTypeModules }
+            against[path] = module?.identity
+            module?.source?.let { ModuleIdentity.Visible(it, null) }
+        }
+        val scopes = members.map { path ->
+            val prelude = if (ModulePathConventions.isStdlib(path)) emptyList()
+                else PRELUDE_MODULES.mapNotNull { loader.load(it) }
+            ModuleIdentity.scope(raws.getValue(path).parsed, loader, prelude, group)
+        }
+        val stamped = group.stamp(scopes, members)
+        val sources = members.associateWith { raws.getValue(it).source.hash }
+
+        members.forEachIndexed { i, path ->
+            val module = stamped[i]
+            if (ModulePathConventions.isStdlib(path)) com.mezze.language.typechecker.StdlibIdentities.register(module)
+            putInCache(world, path, Module(
+                path = ModulePath.parse(path),
+                filePath = raws.getValue(path).source.filePath,
+                exports = extractExportsFromParsedModule(module, path),
+                dependencies = extractDependenciesFromParsedModule(module),
+                sourceHash = raws.getValue(path).source.hash,
+                index = ProgramIndex.build(module),
+                parsedModule = module,
+                source = module,
+                identity = ModuleIdentity.fingerprint(module),
+                stampedAgainst = against.toMap(),
+                groupSources = sources - path,
+            ))
+            stampedNow.add(path)
+        }
+    }
+
+    /**
+     * Stamp an ENTRY module — one handed to the typechecker directly rather than
+     * loaded through an import. A module that arrives stamped came through this
+     * resolver, stamped together with any module it imports back, and is kept.
+     * [modulePath] salts its nominal types; an entry with none is the program.
+     */
+    fun stampEntry(parsed: ParsedModule, modulePath: String?): ParsedModule {
+        if (ModuleIdentity.isStamped(parsed)) return parsed
+        val loader = ModuleIdentity.Loader { segments ->
+            // A module that will not load contributes no names; the typechecker
+            // reports it when it processes the import.
+            val module = try { resolveModuleInternal(segments.joinToString("::")) } catch (_: ModuleError) { null }
+            module?.source?.let { ModuleIdentity.Visible(it, null) }
+        }
+        val prelude = if (ModulePathConventions.isStdlib(modulePath)) emptyList()
+            else PRELUDE_MODULES.mapNotNull { loader.load(it) }
+        return DeclIdentity.stamp(parsed, ModuleIdentity.scope(parsed, loader, prelude, null), modulePath ?: "")
+    }
+
+    /** The resolver a module's own imports go through: rooted at its own project. */
+    private fun resolverFor(filePath: String): ModuleResolver {
+        val dir = Paths.get(filePath).toAbsolutePath().parent ?: return this
+        return if (findProjectRoot(dir) == projectRoot) this else ModuleResolver(dir, world)
+    }
+
+    private fun createEmptyModule(modulePath: String, reason: String): Module {
         return Module(
             path = ModulePath.parse(modulePath),
             filePath = "built-in",
@@ -715,14 +832,6 @@ class ModuleResolver(
      * Layout: `<tmpdir>/mezze-stdlib-cache/<resource-path>` (directory structure
      * PRESERVED, not flattened). Same resource → same path on every compile, every
      * JVM, every host. Idempotent: skip write if file already exists with matching bytes.
-     *
-     * #400: the subdirectory structure is preserved (was flattened `/`→`-`) so a
-     * stdlib file's BASENAME stays its true leaf name (`datetime.mz`, not
-     * `std-datetime.mz`). The newtype identity hash is decl-site-salted by that
-     * basename (ParsedDeclHasher), and the build-time WellKnownHashGenerator parses
-     * from the original resource paths whose basenames are the true leaf names — so
-     * flattening here would make a stdlib newtype's runtime hash disagree with its
-     * baked well-known hash, breaking `Duration`/`MutSeq`/… identity resolution.
      */
     private fun materializeStdlibTempFile(relativeFilePath: String, content: String): Path {
         val normalized = relativeFilePath.replace('\\', '/')
@@ -957,7 +1066,7 @@ class ModuleResolver(
                         else fromContext
                             ?: fromAnnotation
                             ?: MezzeType.VarType(TypeVar.fresh())
-                    val contentHash = ParsedDeclHasher.hashLetDecl(decl)
+                    val contentHash = decl.identity
 
                     exports[name] = ExportedItem(
                         name = name,
@@ -978,7 +1087,7 @@ class ModuleResolver(
 
                 is ParsedTypeDecl -> {
                     if (decl.visibility != Visibility.PUBLIC) continue
-                    val contentHash = ParsedDeclHasher.hashTypeDecl(decl)
+                    val contentHash = decl.identity
                     val fromContext = typeContext?.get(decl.name)
                     val typeMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1011,7 +1120,7 @@ class ModuleResolver(
                 }
 
                 is ParsedEffectDecl -> {
-                    val contentHash = ParsedDeclHasher.hashEffectDecl(decl)
+                    val contentHash = decl.identity
                     val fromContext = typeContext?.get(decl.name)
                     val mezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1037,7 +1146,7 @@ class ModuleResolver(
                 }
 
                 is ParsedAbilityDecl -> {
-                    val contentHash = ParsedDeclHasher.hashAbilityDecl(decl)
+                    val contentHash = decl.identity
                     val fromContext = typeContext?.get(decl.name)
                     val abilityMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1058,7 +1167,7 @@ class ModuleResolver(
                 }
 
                 is ParsedPerformerDecl -> {
-                    val contentHash = ParsedDeclHasher.hashPerformerDecl(decl)
+                    val contentHash = decl.identity
                     val existingExport = exports[decl.performerName]
                     // Don't overwrite a TYPE export with a HANDLER export
                     if (existingExport?.type != ExportedItemType.TYPE) {
@@ -1176,14 +1285,9 @@ class ModuleResolver(
         val module = getFromCache(world, modulePath)
 
         if (module != null) {
-            val updatedExports = if (typeContext != null && typeContext.isNotEmpty()) {
-                module.exports.mapValues { (_, export) ->
-                    val inferredType = typeContext[export.originalName]
-                    if (inferredType != null) export.copy(mezzeType = inferredType) else export
-                }
-            } else {
-                module.exports
-            }
+            // Re-derived, not patched: the module handed back is the one the
+            // typechecker resolved, and its exports carry its identities.
+            val updatedExports = extractExportsFromParsedModule(parsedModule, modulePath, typeContext)
 
             val updatedIndex = ProgramIndex.build(parsedModule)
 

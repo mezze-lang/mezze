@@ -208,22 +208,6 @@ class WorldIsolationTest {
     }
 
     @Test
-    fun `the content-hash index is per world too`() {
-        // Two indexes back the same cache; separating one and not the other would
-        // leave a path miss followed by a content-hash HIT in the wrong world.
-        val a = world("a")
-        val b = world("b")
-        val hash = "ab".repeat(32)
-        ModuleResolver.putInCache(a, "app::x", module("app::x", hash))
-
-        assertNotNull(ModuleResolver.getFromCacheByContentHash(a, Hash(hash)))
-        assertNull(
-            ModuleResolver.getFromCacheByContentHash(b, Hash(hash)),
-            "the content-hash index leaks across worlds",
-        )
-    }
-
-    @Test
     fun `resolver snapshots are per world`() {
         val a = world("a")
         val b = world("b")

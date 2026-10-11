@@ -827,7 +827,7 @@ class MatchValidator(
         val def = typeDeclarations[name]?.definition as? ParsedVariantDef ?: return null
         if (def.isOpen) return null
         return MezzeType.VariantType(
-            constructors = def.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) } },
+            constructors = def.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } }) } },
             rowVar = null,
         )
     }
@@ -922,7 +922,7 @@ class MatchValidator(
                 if (constructorNames.all { it in variantConstructors }) {
                     return MezzeType.VariantType(
                         constructors = definition.constructors.associate { ctor ->
-                            ctor.name to ctor.dataType?.let { TypeAnnotationConverter.convert(it, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } }) }
+                            ctor.name to ctor.dataType?.let { TypeAnnotationConverter.convert(it, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } }) }
                         },
                         rowVar = if (definition.isOpen) RowVar.fresh() else null
                     )

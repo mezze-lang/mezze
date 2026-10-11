@@ -6,7 +6,6 @@ import com.mezze.language.typechecker.World
 import com.mezze.language.typechecker.Module as ResolverModule
 import com.mezze.language.typechecker.ModuleError as ResolverModuleError
 import java.nio.file.Paths
-import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.ExportedItemType as ResolverItemType
 
 class ModuleLoader(
@@ -74,15 +73,10 @@ class ModuleLoader(
 
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
         @Suppress("DEPRECATION")
+        // Never re-parsed here: a module's declarations carry identities the
+        // resolver stamps once its imports are known, and a fresh parse has none.
         val parsedModule = resolverModule.parsedModule
-            // The read is NOT wrapped in a catch that substitutes "". A file that
-            // cannot be read is not an empty module: every name it exports would
-            // vanish and the consumer would be told those names are "not exported",
-            // pointing at the wrong file. Measured at zero firings.
-            ?: MezzeParser().parseParsedModule(
-                java.io.File(resolverModule.filePath).readText(),
-                resolverModule.filePath
-            )
+            ?: error("internal: the resolver produced ${resolverModule.path.fullPath} with no parsed module")
         return LoadedModule(
             path = resolverModule.path,
             filePath = resolverModule.filePath,

@@ -356,7 +356,7 @@ object AbilityValidator {
         val cache = mutableMapOf<String, TypeVar>()
         val resolveTypeHash: (String) -> com.mezze.language.typedast.Hash? = { name ->
             registry?.lookupType(name)?.let { d ->
-                d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d)
+                d.identity
             }
         }
         // Both conversions used to be wrapped in `catch (_: Exception) { return false }`

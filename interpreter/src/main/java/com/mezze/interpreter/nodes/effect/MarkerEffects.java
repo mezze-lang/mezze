@@ -15,24 +15,17 @@ import com.mezze.language.typedast.Hash;
  * Mut effect; the BDSL Handle @Operation consults it.
  *
  * <p>The interpreter module does not depend on the typechecker (the
- * runtime jar stays slim), so we can't import the generated
- * {@code WellKnownHashConstants.EFFECT_MUT}. Instead we hardcode the
- * hex here and lock it down with a regression test in
- * {@code :typechecker} that asserts the two values are equal.
+ * runtime jar stays slim), so the identity is read from
+ * {@link com.mezze.language.truffleir.RuntimeAnchors}, which a regression
+ * test pins to the identity the compiler computes.
  */
 public final class MarkerEffects {
 
     private MarkerEffects() {}
 
-    /**
-     * Content hash of the Mut effect declaration. Must match
-     * {@code WellKnownHashConstants.EFFECT_MUT.getHex()} from the
-     * generated typechecker file; the
-     * {@code MarkerEffectsHashConsistencyTest} in :typechecker asserts
-     * this and breaks the build if they drift.
-     */
+    /** Identity of the Mut effect declaration — see RuntimeAnchors. */
     public static final String MUT_EFFECT_HASH_HEX =
-        "a0170b84db725d0a7e5e84a1bf06b194c340122a89494fc6d33703c2186e89cad5eb0bfe52761a0875aed1c919b2d26aaba004bbe21bb489edd2c27d58368429";
+        com.mezze.language.truffleir.RuntimeAnchors.MUT_EFFECT_HASH_HEX;
 
     /**
      * True if {@code hash} is the Mut effect hash. Cheap O(1) — the

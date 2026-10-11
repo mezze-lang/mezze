@@ -844,7 +844,7 @@ internal class VariantSolver(
             // S3.1: via THE canonical factory.
             identity = TypeIdentity.declared(
                 typeDecl.name,
-                typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                typeDecl.identity
             )
         )
 
@@ -884,7 +884,7 @@ internal class VariantSolver(
         val config = TypeAnnotationConverter.ConversionConfig(
             // Resolve declared-type hashes from the registry so converted
             // TypeApplications carry real nominal identity (Declared), never Named.
-            resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+            resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } },
             validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
             honorOpenRowVars = true,
             typeParamSubst = typeParamSubst,

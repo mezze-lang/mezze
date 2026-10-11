@@ -246,7 +246,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                             // machinery; here we only enforce the field types, which
                             // was the missing check that let `Point { x = "no" }` pass.)
                             for (entry in wrapped.entries) {
-                                val expectedFieldType = TypeAnnotationConverter.convert(entry.type, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } })
+                                val expectedFieldType = TypeAnnotationConverter.convert(entry.type, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.identity } })
                                 val actualFieldType = providedType?.fields?.get(entry.name)
                                 if (actualFieldType != null) {
                                     newtypeFieldConstraints.add(Constraint.Equality(
@@ -263,7 +263,7 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
                             // wrapped TYPE on whatever single field was provided,
                             // without pinning the field NAME — so `Meters { val =
                             // "boom" }` (Str into an Int newtype) is now rejected.
-                            val expectedFieldType = TypeAnnotationConverter.convert(wrapped, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(d) } })
+                            val expectedFieldType = TypeAnnotationConverter.convert(wrapped, resolveTypeHash = { name -> registry?.lookupType(name)?.let { d -> d.identity } })
                             val soleField = literalFields.singleOrNull()
                             val actualFieldType = soleField?.let { providedType?.fields?.get(it.name) }
                             if (expectedFieldType != null && actualFieldType != null) {
@@ -964,8 +964,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                         val pinType = com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                             constructor = receiverName,
                             args = emptyList(),
-                            typeHash = typeDecl.contentHash
-                                ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(typeDecl),
+                            typeHash = typeDecl.identity,
                         )
                         val pinContext = context.copy(pinFirstAbilityTypeArg = pinType)
                         val methodResult = tryGenerateMethodCall(

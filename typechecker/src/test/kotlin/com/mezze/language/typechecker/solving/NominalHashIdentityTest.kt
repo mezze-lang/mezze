@@ -1,5 +1,9 @@
 package com.mezze.language.typechecker.solving
 
+import com.mezze.language.parsedast.DeclIdentity
+import com.mezze.language.parsedast.IdentityScope
+import com.mezze.language.parsedast.identity
+
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeIdentity
 import com.mezze.language.typedast.Hash
@@ -98,7 +102,10 @@ class NominalHashIdentityTest {
     // tests gave FALSE confidence. These assert on the genuine pipeline output.
 
     private fun newtypeDecl(src: String, file: String): com.mezze.language.parsedast.ParsedTypeDecl {
-        val parsed = com.mezze.language.parser.MezzeParser().parseParsedModule(src.trimIndent(), file)
+        val parsed = DeclIdentity.stamp(
+            com.mezze.language.parser.MezzeParser().parseParsedModule(src.trimIndent(), file),
+            IdentityScope.NONE, file.removeSuffix(".mz"),
+        )
         return parsed.decls.filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
             .first { it.definition is com.mezze.language.parsedast.ParsedNewtypeDef }
     }
@@ -107,8 +114,8 @@ class NominalHashIdentityTest {
         // Two files each `newtype Id = Str`. Module-salted decl hash ⇒ distinct.
         val a = newtypeDecl("pub newtype Id = Str", "mod_a.mz")
         val b = newtypeDecl("pub newtype Id = Str", "mod_b.mz")
-        val ha = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(a)
-        val hb = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(b)
+        val ha = a.identity
+        val hb = b.identity
         kotlin.test.assertNotEquals(
             ha, hb,
             "mod_a::Id and mod_b::Id are distinct nominal types — their decl-site-salted " +
@@ -117,13 +124,13 @@ class NominalHashIdentityTest {
     }
 
     @Test fun `pipeline — the same newtype decl hashes identically (stable within a module)`() {
-        // Same file, same decl ⇒ same hash. The salt is decl-site (file), NOT line/col,
+        // Same module, same decl ⇒ same hash. The salt is the declaring module, NOT line/col,
         // so a newtype's identity is stable across edits elsewhere in its module.
         val a1 = newtypeDecl("pub newtype Id = Str\npub let x : Int = 1", "mod_a.mz")
         val a2 = newtypeDecl("pub newtype Id = Str", "mod_a.mz")
         kotlin.test.assertEquals(
-            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(a1),
-            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(a2),
+            a1.identity,
+            a2.identity,
             "the same newtype decl in the same module must hash identically regardless of siblings",
         )
     }
@@ -134,8 +141,8 @@ class NominalHashIdentityTest {
         val len = newtypeDecl("newtype Length = Float", "m.mz")
         val age = newtypeDecl("newtype Age = Float", "m.mz")
         kotlin.test.assertNotEquals(
-            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(len),
-            com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(age),
+            len.identity,
+            age.identity,
             "Length and Age both wrap Float but are distinct newtypes — hashes must differ",
         )
     }

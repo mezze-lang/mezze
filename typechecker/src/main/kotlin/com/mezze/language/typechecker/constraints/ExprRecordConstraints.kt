@@ -294,7 +294,7 @@ internal fun ExpressionConstraintGenerator.adoptRecordAlias(
     val aliases = context.typeDeclarations.entries.mapNotNull { (aliasName, typeDecl) ->
         val def = typeDecl.definition as? ParsedRecordDef ?: return@mapNotNull null
         if (def.isOpen) return@mapNotNull null
-        val hash = typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+        val hash = typeDecl.identity
         Triple(aliasName, hash, def.fields.associate { it.name to convertParsedFieldType(it.type) })
     }
     return com.mezze.language.ast.adoptRecordAlias(record, aliases)
@@ -332,7 +332,7 @@ internal fun ExpressionConstraintGenerator.generateMemberAccess(expr: ParsedMemb
         val declaredHere = context.abilityDeclarations[receiverName]
         val receiverIsBuiltInAbility = BuiltInAbilities.isBuiltInAbility(receiverName) &&
             (declaredHere == null ||
-                (declaredHere.contentHash ?: ParsedDeclHasher.hashAbilityDecl(declaredHere)) ==
+                (declaredHere.identity) ==
                     com.mezze.language.typechecker.WellKnownHashConstants.resolveAbilityHash(receiverName))
         if (receiverIsBuiltInAbility) {
             val freshTypeVar = MezzeType.VarType(TypeVar.fresh())

@@ -284,7 +284,7 @@ sealed interface ParsedStatement {
      * on [ParsedDecl]. `leadingComments` = regular `#` lines above the
      * statement; `trailingComment` = a `#` on the same line after it;
      * `docComment` = merged `##` lines; `metadata` = a `#{…}` block. None of
-     * these affect the content hash (see ParsedDeclHasher — statements are
+     * these affect the identity (see DeclIdentity — statements are
      * hashed by structure only). In-block `##` doc comments are preserved as
      * text but do NOT become an LSP doc (there's no decl to attach to).
      */

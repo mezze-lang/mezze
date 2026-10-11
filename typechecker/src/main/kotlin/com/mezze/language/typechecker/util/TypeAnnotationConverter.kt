@@ -68,8 +68,8 @@ object TypeAnnotationConverter {
      *
      * Six call sites had hand-written the same `resolveTypeHash` lambda, and they
      * had drifted: some resolved via `typeDeclarations`, some via `lookupType`,
-     * some only consulted the precomputed table, and the ones that forgot
-     * `?: ParsedDeclHasher.hashTypeDecl(d)` silently produced a NULL hash — which
+     * some only consulted the precomputed table, and the ones that could not
+     * find a hash silently produced a NULL one — which
      * is not a missing optimisation but weaker type identity, the exact failure
      * where two same-named types from different modules stop being distinguishable.
      *
@@ -85,7 +85,7 @@ object TypeAnnotationConverter {
         stripTickFromTypeVars: Boolean = false,
     ): ConversionConfig = ConversionConfig(
         resolveTypeHash = { name ->
-            registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) }
+            registry.lookupType(name)?.let { d -> d.identity }
                 ?: registry.typeHashFor(name)
         },
         resolveAbilityHash = { name ->

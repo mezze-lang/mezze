@@ -59,7 +59,7 @@ class ConstraintGenerator(
     private val sharedRowVar = TypeAnnotationConverter.SharedRowVar()
 
     private val constraintConversionConfig = TypeAnnotationConverter.ConversionConfig(
-        resolveTypeHash = { registry.typeDeclarations[it]?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+        resolveTypeHash = { registry.typeDeclarations[it]?.let { d -> d.identity } },
         resolveAbilityHash = { registry.abilityDeclarations[it]?.contentHash },
         validateEffects = { effectRow ->
             TypeAnnotationConverter.validateUnknownEffects(

@@ -118,7 +118,13 @@ internal fun emitTypedModuleAndLower(
                     }
                     else -> continue
                 }
-                builder.buildCodecImpl(parsedImpl, extraImpls)
+                // Generated here, so stamped here: as the module would resolve its names.
+                builder.buildCodecImpl(
+                    com.mezze.language.parsedast.DeclIdentity.stampSynthetic(
+                        parsedImpl, registry.identityScope(), currentModulePath ?: "",
+                    ),
+                    extraImpls,
+                )
             } catch (e: com.mezze.language.typechecker.TypeCheckError) {
                 // A diagnostic is never "this codec simply does not apply" — it is a
                 // message written for the person compiling, at a location they can

@@ -318,7 +318,7 @@ class CrossModuleNewtypeTest {
     // case. So in Unification.kt the NewtypeType/NewtypeType branch (~lines 380-405)
     // takes the `else` arm and decides identity by bare `type1.name == type2.name`
     // → "Id" == "Id" → unify(Str, Str) succeeds. Compounding it, the newtype
-    // content hash (ParsedDeclHasher) folds in only name + wrapped body, no module/
+    // content hash (then text-only) folded in only name + wrapped body, no module/
     // decl-site salt, so even a stamped `Declared` hash would collide. The
     // assertion is left UNWEAKENED. (case6b confirms each module's own Id round-
     // trips, so the collision is genuinely the cross-module mismatch.)

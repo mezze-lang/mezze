@@ -40,13 +40,7 @@ import com.mezze.language.typedast.Hash
  */
 object MutEraser {
 
-    /**
-     * Hex of the Mut effect content hash — kept in sync with
-     * `WellKnownHashConstants.EFFECT_MUT` via the
-     * `MarkerEffectsHashConsistencyTest` regression test.
-     */
-    private const val MUT_EFFECT_HASH_HEX =
-        "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba"
+    private const val MUT_EFFECT_HASH_HEX = RuntimeAnchors.MUT_EFFECT_HASH_HEX
 
     /**
      * Erase Mut.mutate wrappers in every function. Returns a new map

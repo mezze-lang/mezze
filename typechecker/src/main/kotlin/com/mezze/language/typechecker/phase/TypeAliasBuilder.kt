@@ -14,13 +14,13 @@ import com.mezze.language.typechecker.module.ModuleImportContext
  * types, so every NewtypeType we construct must carry a `Declared(hash, name)`
  * stamped from the decl (exactly as records/variants do), not `Anonymous`. When it
  * was Anonymous, unification fell to bare-name matching and same-named cross-module
- * newtypes silently unified — a soundness hole. The hash is module-salted (see
- * ParsedDeclHasher.appendTypeDef / ParsedNewtypeDef) so the two `Id`s differ.
+ * newtypes silently unified — a soundness hole. The identity is salted with the
+ * declaring module's path (DeclIdentity, ParsedNewtypeDef) so the two `Id`s differ.
  */
 internal fun newtypeIdentity(typeDecl: ParsedTypeDecl): TypeIdentity =
     TypeIdentity.declared(
         typeDecl.name,
-        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+        typeDecl.identity
     )
 
 internal fun buildTypeAliasesFromParsedModule(
@@ -42,7 +42,7 @@ internal fun buildTypeAliasesFromParsedModule(
                     rowVar = if (def.isOpen) RowVar.fresh() else null,
                     identity = TypeIdentity.declared(
                         typeDecl.name,
-                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                        typeDecl.identity
                     )
                 )
             }
@@ -61,7 +61,7 @@ internal fun buildTypeAliasesFromParsedModule(
                     rowVar = if (def.isOpen) RowVar.userOpen() else null,
                     identity = TypeIdentity.declared(
                         typeDecl.name,
-                        typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+                        typeDecl.identity
                     )
                 )
             }

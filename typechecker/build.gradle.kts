@@ -25,48 +25,6 @@ dependencies {
     testImplementation(project(":langservice"))
 }
 
-// Resolvable classpath for the WellKnownHashGenerator main, declared in
-// this project (the consumer) rather than reaching across to :parser's /
-// :ast's runtimeClasspath. Gradle 9 forbids the old pattern as unsafe
-// configuration resolution (cross-project lock).
-val wellKnownHashGenClasspath: Configuration = configurations.create("wellKnownHashGenClasspath") {
-    isCanBeResolved = true
-    isCanBeConsumed = false
-}
-
-dependencies {
-    "wellKnownHashGenClasspath"(project(":parser"))
-    "wellKnownHashGenClasspath"(project(":ast"))
-}
-
-// Generate WellKnownHashConstants.kt at build time from stdlib source files.
-// Hashes are deterministic content hashes computed by ParsedDeclHasher.
-// No runtime filesystem access or lazy parsing needed.
-val generateWellKnownHashes by tasks.registering(JavaExec::class) {
-    group = "build"
-    description = "Generate well-known ability/effect hash constants from stdlib"
-
-    classpath = wellKnownHashGenClasspath
-
-    mainClass.set("com.mezze.language.parser.WellKnownHashGeneratorKt")
-
-    val outputFile = layout.buildDirectory.file("generated/sources/wellKnownHashes/com/mezze/language/typechecker/WellKnownHashConstants.kt")
-    val stdlibDir = rootProject.projectDir.resolve("stdlib")
-
-    args = listOf(outputFile.get().asFile.absolutePath, stdlibDir.absolutePath)
-    outputs.file(outputFile)
-    inputs.dir(stdlibDir.resolve("std"))
-}
-
-// Add generated sources to compilation
-sourceSets.main {
-    kotlin.srcDir(layout.buildDirectory.dir("generated/sources/wellKnownHashes"))
-}
-
-tasks.named("compileKotlin") {
-    dependsOn(generateWellKnownHashes)
-}
-
 tasks.test {
     useJUnitPlatform {
         excludeTags("benchmark")

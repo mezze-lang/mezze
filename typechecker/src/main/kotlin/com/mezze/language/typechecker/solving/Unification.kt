@@ -1531,7 +1531,7 @@ private fun declarationFor(
     val declaredHash = (typeApp.identity as? TypeIdentity.Declared)?.hash
     return registry.lookupType(typeApp.constructor, declaredHash)
         ?: ModuleResolver.lookupTypeDeclaration(typeApp.constructor)?.takeIf { d ->
-            declaredHash == null || (d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d)) == declaredHash
+            declaredHash == null || (d.identity) == declaredHash
         }
 }
 
@@ -1618,7 +1618,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     // (Declared), never Named. The shared expandContextBuilder has an empty decl
     // map and would leave the inner reference hashless.
     val expandConfig = TypeAnnotationConverter.ConversionConfig(
-        resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.contentHash ?: ParsedDeclHasher.hashTypeDecl(d) } },
+        resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } },
     )
     val constructors = variantDef.constructors.associate { constructor ->
         val dataType = constructor.dataType?.let { annotation ->
@@ -1642,7 +1642,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
         identity = TypeIdentity.declared(
             typeDecl.name,
-            typeDecl.contentHash ?: ParsedDeclHasher.hashTypeDecl(typeDecl)
+            typeDecl.identity
         )
     )
 }

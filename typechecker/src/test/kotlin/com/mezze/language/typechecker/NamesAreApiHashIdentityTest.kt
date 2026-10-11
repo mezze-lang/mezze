@@ -1,7 +1,10 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.parsedast.DeclIdentity
+import com.mezze.language.parsedast.IdentityScope
+import com.mezze.language.parsedast.identity
+
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.parsedast.ParsedDeclHasher
 import com.mezze.language.parsedast.ParsedLetDecl
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.typedast.Hash
@@ -10,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 /**
- * #319 decision pin: the AUTHORITATIVE definition-identity hash (`ParsedDeclHasher`)
+ * #319 decision pin: the AUTHORITATIVE definition-identity hash (`DeclIdentity`)
  * hashes names AS-WRITTEN — it is deliberately NOT alpha-normalized.
  *
  * Mezze is call-by-name: arguments are named record fields (`f { x = .., y = .. }`),
@@ -25,22 +28,22 @@ import kotlin.test.assertNotEquals
  * identity hasher to the alpha-normalized one would silently merge distinct public
  * APIs. These tests lock the observable difference so that regression is caught.
  *
- * See ParsedDeclHasher's header and docs/design/names-in-hash.md.
+ * See DeclIdentity's header.
  */
 class NamesAreApiHashIdentityTest {
 
     private val parser = MezzeParser()
 
     private fun letHash(source: String): Hash {
-        val decl = parser.parseParsedModule(source, "test.mz")
+        val decl = DeclIdentity.stamp(parser.parseParsedModule(source, "test.mz"), IdentityScope.NONE, "test")
             .decls.filterIsInstance<ParsedLetDecl>().first()
-        return ParsedDeclHasher.hashLetDecl(decl)
+        return decl.identity
     }
 
     private fun typeHash(source: String): Hash {
-        val decl = parser.parseParsedModule(source, "test.mz")
+        val decl = DeclIdentity.stamp(parser.parseParsedModule(source, "test.mz"), IdentityScope.NONE, "test")
             .decls.filterIsInstance<ParsedTypeDecl>().first()
-        return ParsedDeclHasher.hashTypeDecl(decl)
+        return decl.identity
     }
 
     @Test fun `renaming a record parameter changes the identity hash (params are API)`() {
