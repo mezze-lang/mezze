@@ -279,6 +279,17 @@ data class ProviderSection(
     /** Relative dir where installed packages land (under project root). */
     @SerialName("runtime_dir")
     val runtimeDir: String? = null,
+    /**
+     * Minimum `mez` toolchain version this provider's generated code needs,
+     * as `MAJOR.MINOR.PATCH` (e.g. the first release shipping `lift` / the
+     * bulk scalar-seq verbs / the ScalarSequence codec hooks). `mez sync`
+     * refuses to proceed when the running toolchain is an OLDER release, so a
+     * consumer on a stale `mez` fails loudly here instead of hitting confusing
+     * "no variant tag matched" / "Field 'encode_int_seq' not found" errors at
+     * run time. Omitted, or a dev (`nightly-*`) toolchain, skips the check.
+     */
+    @SerialName("min_toolchain")
+    val minToolchain: String? = null,
 )
 
 /**

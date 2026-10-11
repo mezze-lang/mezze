@@ -1,6 +1,7 @@
 package com.mezze.language.cli.commands
 
 import com.akuleshov7.ktoml.Toml
+import com.mezze.language.cli.BuildInfo
 import com.mezze.language.cli.`package`.*
 import java.io.File
 
@@ -921,6 +922,39 @@ class SyncCommand {
      * lines of stderr and the command that ran — the whole point of
      * the template is that install failures shouldn't be silent.
      */
+    /**
+     * The running toolchain version string IF the provider's [minToolchain]
+     * demands a newer RELEASE than we are, else null (satisfied, or the check
+     * doesn't apply). Reads [BuildInfo.VERSION]; the decision lives in
+     * [isOlderRelease].
+     */
+    internal fun toolchainTooOldFor(minToolchain: String): String? {
+        val current = BuildInfo.VERSION
+        return if (isOlderRelease(current, minToolchain)) current else null
+    }
+
+    /**
+     * True iff [current] and [min] are BOTH clean `MAJOR.MINOR.PATCH` releases
+     * and current < min. Any `nightly-*` / unparseable version on either side
+     * returns false — a dev build iterating on `main` is assumed current, and
+     * the handshake only guards released binaries consumed by users.
+     */
+    internal fun isOlderRelease(current: String, min: String): Boolean {
+        val cur = parseSemver(current) ?: return false
+        val m = parseSemver(min) ?: return false
+        return when {
+            cur.first != m.first -> cur.first < m.first
+            cur.second != m.second -> cur.second < m.second
+            else -> cur.third < m.third
+        }
+    }
+
+    private val semverRe = Regex("""^(\d+)\.(\d+)\.(\d+)""")
+    private fun parseSemver(s: String): Triple<Int, Int, Int>? {
+        val m = semverRe.find(s.trim()) ?: return null
+        return Triple(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
+    }
+
     private fun runProviderInstalls(
         projectRoot: File,
         rootToml: MezzeToml,
@@ -943,6 +977,22 @@ class SyncCommand {
             val install = p.install ?: continue
             val env = p.runtimeEnv ?: continue
             val dir = p.runtimeDir ?: continue
+            // Toolchain handshake: a provider may require a minimum `mez`
+            // version (the release that first shipped the stdlib surface its
+            // generated code calls). If the running toolchain is an older
+            // RELEASE, fail here with direction rather than letting the user
+            // hit opaque runtime errors. A dev (`nightly-*`) build, or a
+            // malformed version on either side, skips the check (see
+            // [toolchainTooOldFor]).
+            p.minToolchain?.let { min ->
+                toolchainTooOldFor(min)?.let { current ->
+                    println("  ${Glyphs.ERROR} [polyglot.$lang]: provider '${node.name}' needs mez >= $min, " +
+                        "but this toolchain is $current.")
+                    println("      Update mez (the provider's generated code relies on stdlib added in $min), " +
+                        "or pin an older '${node.name}' that targets $current.")
+                    failures.add("[polyglot.$lang] toolchain")
+                }
+            }
             val prefix = providerPrefix(projectRoot, node, storeRoot) ?: continue
             val existing = providers[lang]
             if (existing != null) {
