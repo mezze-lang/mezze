@@ -2787,6 +2787,19 @@ public final class NativeDispatch extends MezzeNode {
         // S-21: branch-covering draws — see `impl Sample for CoveringSample`.
         HANDLERS.put("__native_reset_covering_sample", (r, c) -> RandomNatives.resetCoveringSample(r));
         HANDLERS.put("__native_covering_choose", (r, c) -> RandomNatives.coveringChoose(r));
+        // SHRINK-1: the draws a property run made, recorded and replayed.
+        HANDLERS.put("__native_draw_log_reset",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.DrawLogNatives.reset(r));
+        HANDLERS.put("__native_draw_log_append",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.DrawLogNatives.append(r));
+        HANDLERS.put("__native_draw_log_replay",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.DrawLogNatives.replay(r));
+        HANDLERS.put("__native_draw_log",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.DrawLogNatives.drawn(r));
+        HANDLERS.put("__native_shrink_candidates",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.DrawLogNatives.candidates(r));
+        HANDLERS.put("__native_draws_simpler",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.DrawLogNatives.simpler(r));
         // SAMPLE-5: a scripted operation's next value, in call order.
         HANDLERS.put("__native_scripted_next",
             (r, c) -> com.mezze.interpreter.nodes.builtin.effects.ScriptNatives.next(r));
