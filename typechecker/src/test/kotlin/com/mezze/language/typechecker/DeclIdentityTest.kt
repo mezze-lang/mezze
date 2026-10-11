@@ -193,4 +193,63 @@ class DeclIdentityTest {
         assertEquals(first.let("is_even"), second.let("is_even"))
         assertEquals(first.let("is_odd"), second.let("is_odd"))
     }
+
+    @Test
+    fun `a reload after a change two imports away re-checks what lies between`() {
+        // main -> mid -> leaf. Only `leaf` changes, and only `leaf` is evicted —
+        // exactly what `mez dev` and the LSP do on a save. `mid`'s source is
+        // untouched, but what it calls changed, so its identity must too.
+        writeModule("leaf", "pub let base = {} -> 1")
+        writeModule("mid", """
+            use leaf::{ base }
+
+            pub let middle = {} -> base {}
+        """)
+        val main = """
+            use mid::{ middle }
+
+            let main = {} -> middle {}
+        """
+        writeModule("main", main)
+        val parse = { com.mezze.language.parser.MezzeParser().parseParsedModule(main.trimIndent(), "main.mz") }
+        val before = TypeChecker().typeCheck(parse(), tempDir).module("mid.mz").let("middle")
+
+        writeModule("leaf", "pub let base = {} -> 2")
+        ModuleResolver.invalidateModulePaths(listOf("leaf"))
+        com.mezze.language.typechecker.module.ModuleTypeChecker.invalidateModulePaths(listOf("leaf"))
+        val after = TypeChecker().typeCheck(parse(), tempDir).module("mid.mz").let("middle")
+
+        assertNotEquals(before, after, "`mid` was served from a cache keyed on its own source alone")
+    }
+
+    @Test
+    fun `a typed module read back from a store is reused only while its identities hold`() {
+        // `mez build` hydrates project modules from the store to skip checking
+        // them. One persisted before a dependency changed has the old identities.
+        writeModule("leaf", "pub let base = {} -> 1")
+        writeModule("mid", """
+            use leaf::{ base }
+
+            pub let middle = {} -> base {}
+        """)
+        val main = """
+            use mid::{ middle }
+
+            let main = {} -> middle {}
+        """
+        writeModule("main", main)
+        val parse = { com.mezze.language.parser.MezzeParser().parseParsedModule(main.trimIndent(), "main.mz") }
+        val first = TypeChecker().typeCheck(parse(), tempDir)
+        val persisted = first.module("mid.mz")
+        val before = persisted.let("middle")
+
+        writeModule("leaf", "pub let base = {} -> 2")
+        for (stored in listOf(persisted, persisted.copy(sourceIdentity = null))) {
+            setup()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.cacheTypedModule("mid", stored)
+            val after = TypeChecker().typeCheck(parse(), tempDir).module("mid.mz").let("middle")
+            assertNotEquals(before, after, "hydrated `mid` (sourceIdentity=${stored.sourceIdentity?.hex?.take(8)}) was reused stale")
+        }
+    }
 }
+

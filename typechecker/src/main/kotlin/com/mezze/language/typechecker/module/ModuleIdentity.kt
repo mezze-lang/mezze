@@ -125,7 +125,19 @@ internal object ModuleIdentity {
                 is ParsedPubUseDecl -> d.path to d.alias
                 else -> continue
             }
-            val target = loader.load(segments(path)) ?: continue
+            val target = loader.load(segments(path))
+            if (target == null) {
+                // `use pkg::{ a, b }` where `pkg` is a directory, not a module: the
+                // items are SUBMODULES, each imported qualified under its own name (#340).
+                if (path is ParsedUsePath.Selective) for (item in path.items) {
+                    val sub = loader.load(path.modulePath.segments + item.name) ?: continue
+                    val s = surface(sub, loader, group)
+                    imported.add(s)
+                    provideAll(s)
+                    qualified[item.alias ?: item.name] = s.names + s.brought
+                }
+                continue
+            }
             val s = surface(target, loader, group)
             imported.add(s)
             provideAll(s)
@@ -149,8 +161,11 @@ internal object ModuleIdentity {
 
         return object : IdentityScope {
             override fun resolve(kind: RefKind, qualifier: List<String>?, name: String): Referent? =
+                // A qualified name is looked up by its LAST segment, as the
+                // typechecker binds it: `std::int::add` and `int::add` both mean
+                // what `use std::int` names `int`.
                 if (qualifier == null) unqualified[kind to name]
-                else qualified[qualifier.joinToString("::")]?.get(kind to name)
+                else qualified[qualifier.last()]?.get(kind to name)
 
             override fun providers(name: String): Set<Referent> = providers[name].orEmpty()
         }
@@ -178,13 +193,21 @@ internal object ModuleIdentity {
         is ParsedUseDecl, is ParsedPubUseDecl -> null
     }
 
-    /** The module paths a module's identities depend on: its imports, then the prelude. */
+    /**
+     * The module paths a module's identities may depend on. A selective import's
+     * items are listed as submodules too (`use pkg::{ a }` may mean `pkg::a`);
+     * a candidate that is no module simply fails to load.
+     */
     fun dependencies(module: ParsedModule): List<List<String>> =
-        module.decls.mapNotNull { d ->
-            when (d) {
-                is ParsedUseDecl -> segments(d.path)
-                is ParsedPubUseDecl -> segments(d.path)
-                else -> null
+        module.decls.flatMap { d ->
+            val path = when (d) {
+                is ParsedUseDecl -> d.path
+                is ParsedPubUseDecl -> d.path
+                else -> return@flatMap emptyList()
+            }
+            listOf(segments(path)) + when (path) {
+                is ParsedUsePath.Selective -> path.items.map { path.modulePath.segments + it.name }
+                is ParsedUsePath.Module -> emptyList()
             }
         }
 

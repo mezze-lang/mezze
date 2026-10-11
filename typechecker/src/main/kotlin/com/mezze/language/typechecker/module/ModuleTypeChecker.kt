@@ -1,5 +1,7 @@
 package com.mezze.language.typechecker.module
 
+import com.mezze.language.ast.ModulePathConventions
+
 import com.mezze.language.ast.BindingKey
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.ModuleResolver
@@ -182,6 +184,7 @@ class ModuleTypeChecker(
             }
             val wrapper = TypedModuleResult(
                 modulePath = modulePath,
+                identity = typedModule.sourceIdentity,
                 // The checker-side ExportedItem is a different shape from the typed
                 // AST's ExportEntry, so exports cannot be carried across here.
                 exports = emptyMap(),
@@ -300,7 +303,16 @@ class ModuleTypeChecker(
         module: LoadedModule,
         importContext: ModuleImportContext = ModuleImportContext.empty()
     ): ModuleTypeCheckResult {
-        getFromGlobalCache(world, module.modulePath)?.let { cached ->
+        // Reused only while it was checked against what the module is NOW: a
+        // dependency's change re-stamps this module without touching its source.
+        // The precompiled stdlib carries no fingerprint and never changes.
+        getFromGlobalCache(world, module.modulePath)
+            ?.takeIf { cached ->
+                if (cached.identity != null) cached.identity == module.identity
+                // No fingerprint: only the precompiled stdlib, which never changes.
+                else ModulePathConventions.isStdlib(module.modulePath)
+            }
+            ?.let { cached ->
             val typeContext = cached.typeContext
             val cachedParsedModule = cached.parsedModule ?: module.parsedModule
             if (cachedParsedModule != null) {
@@ -345,11 +357,12 @@ class ModuleTypeChecker(
                         exports = updatedExports,
                         context = moduleContext,
                         substitution = result.substitution,
-                        typedModule = result.typedModule,
+                        typedModule = result.typedModule?.copy(sourceIdentity = module.identity),
                         parsedModule = resolvedModule,
                         typeContext = typeContext,
                         filePath = module.filePath,
                         sourceHash = module.sourceHash,
+                        identity = module.identity,
                     )
 
                     putInGlobalCache(world, module.modulePath, typedModule)

@@ -263,10 +263,13 @@ class TypeChecker(
         // Identities first: everything below keys declarations by them. A module
         // imported through the resolver arrives stamped; stamping again from the
         // same resolver gives the same answer, and an entry module arrives bare.
+        val identityResolver = ModuleResolver(currentPath, world)
+        val stamped = identityResolver.stampEntry(module, currentModulePath)
+        // What each name was resolved to when the identities were computed; emit
+        // checks its own bindings against it.
+        val identityNames = identityResolver.nameResolver(stamped, currentModulePath)
         @Suppress("NAME_SHADOWING")
-        val module = desugarPipesInParsedModule(
-            ModuleResolver(currentPath, world).stampEntry(module, currentModulePath)
-        )
+        val module = desugarPipesInParsedModule(stamped)
 
         clearUnificationCache()
         if (!TypeCheckCache.hasPersistence()) {
@@ -794,6 +797,7 @@ class TypeChecker(
                     solver = solver, loadedModules = loadedModules,
                     isStdlibModule = isStdlibModule,
                     currentModulePath = currentModulePath,
+                    identityNames = identityNames,
                 )
 
                 // S4.2 (#362): effect-conservation invariant — the emitted

@@ -31,7 +31,9 @@ data class LoadedModule(
     val dependencies: List<ModulePath>,
     val index: ProgramIndex = ProgramIndex.EMPTY,
     val sourceHash: Hash? = null,
-    val parsedModule: ParsedModule? = null
+    val parsedModule: ParsedModule? = null,
+    /** The resolver's fingerprint of this module's identities when it was loaded. */
+    val identity: Hash? = null,
 ) {
     val modulePath: String get() = path.fullPath
 }
@@ -185,6 +187,12 @@ data class TypedModuleResult(
     val typeContext: Map<String, MezzeType> = emptyMap(),
     val filePath: String? = null,
     val sourceHash: Hash? = null,
+    /**
+     * The resolver fingerprint this result was checked against. A module's
+     * identities include what its names resolve to, so unchanged source does not
+     * mean an unchanged module: when a dependency changes, the fingerprint does.
+     */
+    val identity: Hash? = null,
 )
 sealed class ImportResolutionResult {
     data class Success(

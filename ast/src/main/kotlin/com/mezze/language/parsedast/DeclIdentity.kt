@@ -214,6 +214,32 @@ object DeclIdentity {
         IdentityGroup(listOf(module)).stamp(listOf(scope), listOf(modulePath)).single()
 
     /**
+     * What a written value name resolves to in a STAMPED [module] seeing [scope] —
+     * the answer its identity was computed from. The typechecker binds names on
+     * its own; comparing the two is how a drift between them is caught instead of
+     * silently leaving an identity that does not cover what a declaration calls.
+     */
+    class NameResolver(private val module: ParsedModule, private val scope: IdentityScope) {
+        private val local = LocalNames(module.decls, 0)
+        private val identities = module.decls.map { identityOfDecl(it) }
+
+        /** The identity [name] means as a free identifier, or null when it means no declaration. */
+        fun identifier(qualifier: List<String>?, name: String): Hash? {
+            for (kind in LOOKUP_ORDER) {
+                if (qualifier == null) local.byName[kind to name]?.let { node ->
+                    return identities[node] ?: error("internal: ${module.path} is not stamped")
+                }
+                when (val r = scope.resolve(kind, qualifier, name)) {
+                    is Referent.Known -> return r.hash
+                    is Referent.Pending -> error("internal: a name resolver over a module that is still being stamped")
+                    null -> {}
+                }
+            }
+            return null
+        }
+    }
+
+    /**
      * Stamp a declaration the COMPILER writes — a derived impl, a builtin type —
      * as if it stood alone in a module seeing [scope]. Its names resolve the way
      * the module that receives it would resolve them.
@@ -801,3 +827,14 @@ val ParsedEffectDecl.identity: Hash get() = contentHash ?: unstamped("effect '$n
 val ParsedPerformerDecl.identity: Hash get() = contentHash ?: unstamped("performer '$performerName'", loc)
 val ParsedImplAbilityDecl.identity: Hash get() = contentHash ?: unstamped("impl", loc)
 val ParsedTopLevelExpr.identity: Hash get() = contentHash ?: unstamped("top-level expression", loc)
+
+private fun identityOfDecl(d: ParsedDecl): Hash? = when (d) {
+    is ParsedLetDecl -> d.contentHash
+    is ParsedTypeDecl -> d.contentHash
+    is ParsedAbilityDecl -> d.contentHash
+    is ParsedEffectDecl -> d.contentHash
+    is ParsedPerformerDecl -> d.contentHash
+    is ParsedImplAbilityDecl -> d.contentHash
+    is ParsedTopLevelExpr -> d.contentHash
+    is ParsedUseDecl, is ParsedPubUseDecl -> null
+}

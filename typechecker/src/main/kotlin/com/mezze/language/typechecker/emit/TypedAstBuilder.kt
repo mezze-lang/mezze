@@ -38,6 +38,8 @@ class TypedAstBuilder(
     internal val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, Hash>,
     private val implDeclarations: Map<String, ParsedPerformerDecl>,
+    /** What each written name resolved to when this module's identities were computed. */
+    private val identityNames: com.mezze.language.parsedast.DeclIdentity.NameResolver? = null,
 ) {
     internal val substitution: Substitution get() = solved.substitution
 
@@ -1016,7 +1018,7 @@ class TypedAstBuilder(
                     mustBeOpenRowVars,
                 )
 
-                val binding = resolveBinding(name, qualifier)
+                val binding = sourceBinding(name, qualifier)
 
                 TypedVar(name, binding, type, loc)
             }
@@ -1183,7 +1185,7 @@ class TypedAstBuilder(
                                 else buildExpr(entryValue, file)
                             } else {
                                 val type = resolveIdentifierType(entry.name, null)
-                                val binding = resolveBinding(entry.name, null)
+                                val binding = sourceBinding(entry.name, null)
                                 TypedVar(entry.name, binding, type, entry.loc)
                             }
                             TypedRecordEntry.Field(entry.name, fieldExpr, entry.loc)
@@ -1891,6 +1893,27 @@ class TypedAstBuilder(
         }
 
         return giveUp("identifier resolved nowhere and the position expects nothing")
+    }
+
+    /**
+     * A name as WRITTEN in source, bound. A declaration's identity was computed
+     * from what each of its names resolves to; if this binding names a different
+     * declaration, that identity does not cover what the code calls, and nothing
+     * downstream would notice. So it is checked here, where both answers exist.
+     */
+    private fun sourceBinding(name: String, qualifier: ParsedModulePath?): BindingRef {
+        val binding = resolveBinding(name, qualifier)
+        val names = identityNames ?: return binding
+        if (binding is BindingRef.ByHash) {
+            val expected = names.identifier(qualifier?.segments, name)
+            check(expected == binding.hash) {
+                val written = qualifier?.let { "$it::$name" } ?: name
+                "internal: `$written` is bound to ${binding.hash.hex.take(12)}, but its declaration's identity " +
+                    "was computed with it meaning ${expected?.hex?.take(12) ?: "no declaration"} — the identity " +
+                    "scope (ModuleIdentity) and the typechecker resolve this name differently"
+            }
+        }
+        return binding
     }
 
     private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {

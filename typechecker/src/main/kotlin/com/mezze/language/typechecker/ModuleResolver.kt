@@ -784,6 +784,15 @@ class ModuleResolver(
      */
     fun stampEntry(parsed: ParsedModule, modulePath: String?): ParsedModule {
         if (ModuleIdentity.isStamped(parsed)) return parsed
+        return DeclIdentity.stamp(parsed, scopeOf(parsed, modulePath), modulePath ?: "")
+    }
+
+    /** What each written name in a STAMPED module resolves to — see [DeclIdentity.NameResolver]. */
+    fun nameResolver(stamped: ParsedModule, modulePath: String?): DeclIdentity.NameResolver =
+        DeclIdentity.NameResolver(stamped, scopeOf(stamped, modulePath))
+
+    /** The scope a module sees once everything it imports is stamped and cached. */
+    private fun scopeOf(parsed: ParsedModule, modulePath: String?): IdentityScope {
         val loader = ModuleIdentity.Loader { segments ->
             // A module that will not load contributes no names; the typechecker
             // reports it when it processes the import.
@@ -792,7 +801,7 @@ class ModuleResolver(
         }
         val prelude = if (ModulePathConventions.isStdlib(modulePath)) emptyList()
             else PRELUDE_MODULES.mapNotNull { loader.load(it) }
-        return DeclIdentity.stamp(parsed, ModuleIdentity.scope(parsed, loader, prelude, null), modulePath ?: "")
+        return ModuleIdentity.scope(parsed, loader, prelude, null)
     }
 
     /** The resolver a module's own imports go through: rooted at its own project. */

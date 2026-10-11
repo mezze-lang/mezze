@@ -58,6 +58,7 @@ internal fun emitTypedModuleAndLower(
     loadedModules: Map<ModulePath, TypedModuleResult>,
     isStdlibModule: Boolean,
     currentModulePath: String?,
+    identityNames: com.mezze.language.parsedast.DeclIdentity.NameResolver,
 ): EmitResult {
     val substitution = solved.substitution
     var emittedTypedModule: TypedModule? = null
@@ -80,6 +81,7 @@ internal fun emitTypedModuleAndLower(
             importContext = importContext,
             identifierContentHashes = context.getContentHashes(),
             implDeclarations = buildResult.implDeclarations,
+            identityNames = identityNames,
         )
         val typed = builder.build(parsedModule)
 

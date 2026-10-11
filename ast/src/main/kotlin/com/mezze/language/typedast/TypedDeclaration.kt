@@ -27,7 +27,14 @@ data class TypedModule(
     val abilityImpls: List<TypedAbilityImpl>,         // Consumed by monomorphizer
     val effectDecls: List<TypedEffectDecl>,            // Passed through to interpreter
     val performerDecls: List<TypedPerformerDecl>,      // Passed through to interpreter
-    val dependencies: List<ModuleDependency>           // Which modules we depend on
+    val dependencies: List<ModuleDependency>,          // Which modules we depend on
+    /**
+     * The module resolver's fingerprint of the stamped source this was checked
+     * from. Persisted with the module, so a typed module read back from a store
+     * can be reused only while its source module still has those identities — a
+     * dependency's change re-stamps a module without touching its text.
+     */
+    val sourceIdentity: Hash? = null,
 )
 
 /**

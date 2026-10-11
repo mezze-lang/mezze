@@ -93,7 +93,8 @@ class ModuleLoader(
             dependencies = resolverModule.dependencies.map { ModulePath.parse(it.modulePath) },
             index = resolverModule.index,
             sourceHash = resolverModule.sourceHash,
-            parsedModule = parsedModule
+            parsedModule = parsedModule,
+            identity = resolverModule.identity,
         )
     }
 
