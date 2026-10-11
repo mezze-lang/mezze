@@ -136,7 +136,7 @@ object SampleBranches {
          * body with the literal, for the purposes of this analysis only, so every
          * reader of constants picks it up unchanged.
          */
-        evaluated: Map<com.mezze.language.typedast.Hash, Long> = emptyMap(),
+        evaluated: Map<com.mezze.language.typedast.Hash, Evaluated> = emptyMap(),
         /**
          * Results of SCRIPTED effect operations, as further row inputs: key →
          * (label, type). See [SampleScripts]. An operation's result is a hidden
@@ -163,7 +163,10 @@ object SampleBranches {
         val byHash = (imported + decls).associateBy { it.hash }.toMutableMap()
         for ((hash, value) in evaluated) {
             val d = byHash[hash] ?: continue
-            byHash[hash] = d.copy(value = TypedIntLit(value, MezzeType.IntType, d.loc))
+            byHash[hash] = d.copy(value = when (value) {
+                is Evaluated.IntValue -> TypedIntLit(value.value, MezzeType.IntType, d.loc)
+                is Evaluated.StrValue -> TypedStringLit(listOf(TypedStringPart.Literal(value.value)), MezzeType.StringType, d.loc)
+            })
         }
         val locals = blockLocals(decl.value, params.keys)
         contextLabels = context.mapValues { it.value.first }
@@ -231,17 +234,40 @@ object SampleBranches {
      * Only this module's constants: generated source refers to them by name, and a
      * name is unambiguous only in the module that declares it.
      */
-    fun unresolvedConstants(decl: TypedLetDecl, decls: List<TypedLetDecl>): List<TypedLetDecl> {
+    fun unresolvedConstants(
+        decl: TypedLetDecl,
+        decls: List<TypedLetDecl>,
+        /** Constants of imported modules, with the module each comes from — see [importedConstants]. */
+        imported: Map<com.mezze.language.typedast.Hash, Pair<TypedLetDecl, com.mezze.language.ast.ModulePath>> = emptyMap(),
+    ): List<Constant> {
         val local = decls.associateBy { it.hash }
-        val out = linkedMapOf<com.mezze.language.typedast.Hash, TypedLetDecl>()
+        val all = imported.mapValues { it.value.first } + local
+        val out = linkedMapOf<com.mezze.language.typedast.Hash, Constant>()
         walk(decl.value) { e ->
             val ref = ((e as? TypedVar)?.binding as? BindingRef.ByHash)?.hash ?: return@walk
-            val target = local[ref] ?: return@walk
-            if (target.scheme.type !is MezzeType.IntType) return@walk
-            if (knownValue(e, local) == null) out[ref] = target
+            val (target, module) = local[ref]?.let { it to null } ?: imported[ref] ?: return@walk
+            if (target.scheme.type !is MezzeType.IntType && target.scheme.type !is MezzeType.StringType) return@walk
+            if (knownValue(e, all) == null) out[ref] = Constant(target, module)
         }
         return out.values.toList()
     }
+
+    /** A constant to evaluate: [module] is where an imported one lives, null for the target's own. */
+    data class Constant(val decl: TypedLetDecl, val module: com.mezze.language.ast.ModulePath?)
+
+    /** An evaluated constant's value: what the program sees, read back from the interpreter. */
+    sealed interface Evaluated {
+        data class IntValue(val value: Long) : Evaluated
+        data class StrValue(val value: String) : Evaluated
+    }
+
+    /** Every constant of the loaded modules, by hash, with the module it is declared in. */
+    fun importedConstants(
+        loaded: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typedast.TypedModule?>,
+    ): Map<com.mezze.language.typedast.Hash, Pair<TypedLetDecl, com.mezze.language.ast.ModulePath>> =
+        loaded.flatMap { (path, module) ->
+            module?.decls.orEmpty().filterIsInstance<TypedLetDecl>().map { it.hash to (it to path) }
+        }.toMap()
 
     /**
      * Every requirement that decides [cond]: comparisons, emptiness, and a bare

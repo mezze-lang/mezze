@@ -176,17 +176,46 @@ class SampleCommand {
         target: SampleTarget.Result.Ready,
     ): SampleTarget.Result.Ready {
         if (target.unresolved.isEmpty()) return target
-        val expression = target.unresolved.indices.joinToString(", ", prefix = "{ ", postfix = " }") { i ->
-            "c$i = ${target.unresolved[i].name}"
+        val imports = mutableSetOf<String>()
+        val fields = target.unresolved.mapIndexed { i, constant ->
+            // A constant of another module is reached through an alias of its own:
+            // the target module may not import it under that name, or at all.
+            val ref = constant.module?.let { module ->
+                imports.add("use ${module.fullPath}::{ ${constant.decl.name} as ${CONST}_$i }")
+                "${CONST}_$i"
+            } ?: constant.decl.name
+            // A `Str` comes back as its character CODES: an Int is exact on the wire,
+            // where a string's text is the compiler's quoted rendering, which would
+            // have to be unescaped exactly as it was escaped.
+            val value = if (constant.decl.scheme.type is com.mezze.language.ast.MezzeType.StringType) {
+                imports.add("use std::str::{ chars as ${CONST}_chars }")
+                imports.add("use std::char::{ to_int as ${CONST}_code }")
+                "${CONST}_chars { s = $ref }.map { f = { x } -> ${CONST}_code { c = x } }"
+            } else ref
+            "c$i = $value"
         }
-        val compiled = EvalClosure.compile(currentDir, moduleFile, expression)
+        val compiled = EvalClosure.compile(currentDir, moduleFile, fields.joinToString(", ", "{ ", " }"), imports)
             as? EvalClosure.Result.Compiled ?: return target
-        val result = runExpression(currentDir, compiled, depth = 4, items = 64, timeoutMs = CONSTANT_TIMEOUT_MS)
-        val fields = (result?.value as? WireValue.Record)?.fields ?: return target
-        val evaluated = target.unresolved.mapIndexedNotNull { i, decl ->
-            val v = fields.firstOrNull { it.name == "c$i" }?.value as? WireValue.Scalar ?: return@mapIndexedNotNull null
-            if (v.kind != WireValue.Scalar.Kind.INT) return@mapIndexedNotNull null
-            v.text.toLongOrNull()?.let { decl.hash to it }
+        val result = runExpression(currentDir, compiled, depth = 4, items = 4096, timeoutMs = CONSTANT_TIMEOUT_MS)
+        val values = (result?.value as? WireValue.Record)?.fields ?: return target
+        val evaluated = target.unresolved.mapIndexedNotNull { i, constant ->
+            val v = values.firstOrNull { it.name == "c$i" }?.value ?: return@mapIndexedNotNull null
+            val read: SampleBranches.Evaluated = when (v) {
+                is WireValue.Scalar ->
+                    if (v.kind == WireValue.Scalar.Kind.INT) SampleBranches.Evaluated.IntValue(v.text.toLongOrNull() ?: return@mapIndexedNotNull null)
+                    else return@mapIndexedNotNull null
+                is WireValue.Sequence -> {
+                    val text = StringBuilder()
+                    for (code in v.items) {
+                        val c = (code as? WireValue.Scalar)?.takeIf { it.kind == WireValue.Scalar.Kind.INT }?.text?.toIntOrNull()
+                            ?: return@mapIndexedNotNull null
+                        text.appendCodePoint(c)
+                    }
+                    SampleBranches.Evaluated.StrValue(text.toString())
+                }
+                else -> return@mapIndexedNotNull null
+            }
+            constant.decl.hash to read
         }.toMap()
         if (evaluated.isEmpty()) return target
         return target.copy(branches = target.reanalyze(evaluated))
@@ -662,6 +691,9 @@ class SampleCommand {
          */
         /** Prefix for a row's drawn operation results — see [SampleScripts]. */
         const val CTX = "__mez_sample_ctx"
+
+        /** Prefix of the aliases an evaluated constant is reached through. */
+        const val CONST = "__mez_const"
         /** `SampleConfig` defaults — the same values as `std::effects::sample::default_config`. */
         /** Most rows one run draws. */
         const val MAX_COUNT = 100

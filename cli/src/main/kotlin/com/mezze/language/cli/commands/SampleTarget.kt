@@ -38,8 +38,8 @@ object SampleTarget {
              * to evaluate — and how to re-run the analysis once it has their values.
              * See [SampleBranches.unresolvedConstants].
              */
-            val unresolved: List<TypedLetDecl> = emptyList(),
-            val reanalyze: (Map<com.mezze.language.typedast.Hash, Long>) -> List<SampleBranches.Row> = { branches },
+            val unresolved: List<SampleBranches.Constant> = emptyList(),
+            val reanalyze: (Map<com.mezze.language.typedast.Hash, SampleBranches.Evaluated>) -> List<SampleBranches.Row> = { branches },
             /** Scripted performers for the effects nothing handles — see [SampleScripts]. */
             val scripts: List<SampleScripts.Script> = emptyList(),
         ) : Result {
@@ -170,7 +170,9 @@ object SampleTarget {
             declName,
             fields,
             SampleBranches.inventory(decl, fields, decls, imported, context = SampleScripts.context(scripts)),
-            unresolved = SampleBranches.unresolvedConstants(decl, decls),
+            unresolved = SampleBranches.unresolvedConstants(
+                decl, decls, SampleBranches.importedConstants(success.loadedModules.mapValues { it.value.typedModule }),
+            ),
             reanalyze = { evaluated ->
                 SampleBranches.inventory(decl, fields, decls, imported, evaluated, SampleScripts.context(scripts))
             },

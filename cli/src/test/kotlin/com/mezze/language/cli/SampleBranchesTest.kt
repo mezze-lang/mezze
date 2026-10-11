@@ -428,7 +428,7 @@ class SampleBranchesTest {
     @Test
     fun `a constant defined by a call is reported as needing evaluation`() {
         val (f, decls) = typed(viaCall)
-        assertEquals(listOf("limit"), SampleBranches.unresolvedConstants(f, decls).map { it.name })
+        assertEquals(listOf("limit"), SampleBranches.unresolvedConstants(f, decls).map { it.decl.name })
     }
 
     /** A foldable constant is NOT reported — no round-trip for what folding already knows. */
@@ -438,7 +438,7 @@ class SampleBranchesTest {
             let limit = 6 * 7
             pub let f = { n: Int } -> n > limit
         """)
-        assertEquals(emptyList<String>(), SampleBranches.unresolvedConstants(f, decls).map { it.name })
+        assertEquals(emptyList<String>(), SampleBranches.unresolvedConstants(f, decls).map { it.decl.name })
     }
 
     /** Given the evaluated value, the branch is pinned exactly as a literal would be. */
@@ -447,11 +447,51 @@ class SampleBranchesTest {
         val (f, decls) = typed(viaCall)
         val limit = decls.single { it.name == "limit" }
         val fields = ((f.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
-        val rows = SampleBranches.inventory(f, fields, decls, evaluated = mapOf(limit.hash to 42L))
+        val rows = SampleBranches.inventory(f, fields, decls, evaluated = mapOf(limit.hash to SampleBranches.Evaluated.IntValue(42L)))
         assertEquals(
             listOf("42 | if n > limit (= 42) — else", "43 | if n > limit (= 42) — then"),
             rows.map { r -> r.pins.getValue("n").let { "${it.source} | ${it.why}" } },
         )
+    }
+
+    /** A `Str` constant is evaluated too — and compared exactly as a literal is. */
+    @Test
+    fun `a string constant defined by a call is evaluated and pinned`() {
+        val (f, decls) = typed("""
+            let shout = { s: Str } -> s
+            let word = shout { s = "go" }
+            pub let f = { s: Str } -> s == word
+        """)
+        assertEquals(listOf("word"), SampleBranches.unresolvedConstants(f, decls).map { it.decl.name })
+        val word = decls.single { it.name == "word" }
+        val fields = ((f.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
+        val rows = SampleBranches.inventory(f, fields, decls, evaluated = mapOf(word.hash to SampleBranches.Evaluated.StrValue("go")))
+        val pinned = rows.map { it.pins.getValue("s").source }
+        assertTrue("\"go\"" in pinned, "the equal side is pinned: $pinned")
+        assertTrue(pinned.any { it != "\"go\"" }, "and a value that differs: $pinned")
+    }
+
+    /** A constant from ANOTHER module is reported with the module it comes from. */
+    @Test
+    fun `an imported constant is reported with its module`(@org.junit.jupiter.api.io.TempDir dir: java.nio.file.Path) {
+        val src = dir.resolve("src").also { java.nio.file.Files.createDirectories(it) }
+        java.nio.file.Files.writeString(src.resolve("lib.mz"), """
+            let compute = { x: Int } -> x * 2
+            pub let limit = compute { x = 21 }
+        """.trimIndent())
+        val main = """
+            use lib::{ limit }
+            pub let f = { n: Int } -> n > limit
+        """.trimIndent()
+        java.nio.file.Files.writeString(src.resolve("main.mz"), main)
+        com.mezze.language.typechecker.ModuleResolver.clearCache()
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
+        val success = TypeChecker().checkParsedModule(MezzeParser().parseParsedModule(main, "main.mz"), src, currentModulePath = null)
+            as TypeChecker.TypeCheckResult.Success
+        val decls = success.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
+        val imported = SampleBranches.importedConstants(success.loadedModules.mapValues { it.value.typedModule })
+        val found = SampleBranches.unresolvedConstants(decls.single { it.name == "f" }, decls, imported)
+        assertEquals(listOf("limit" to "lib"), found.map { it.decl.name to it.module?.fullPath })
     }
 
     // ── path constraints ──────────────────────────────────────────────────────
