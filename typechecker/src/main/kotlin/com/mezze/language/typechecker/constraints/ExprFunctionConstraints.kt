@@ -500,7 +500,14 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
             effects = bodyResult.effects,
             effectInstances = mergedEffectInstances,
             rowVar = bodyRowVar,
-            performed = bodyResult.performed
+            performed = bodyResult.performed,
+            // Each effect's identity, resolved the way an annotation's row resolves
+            // it. The body reports effects by name only; without this an INFERRED
+            // row could not say which `Clock` it meant, so nothing downstream (sample
+            // scripting one, for instance) could find its declaration.
+            effectHashes = bodyResult.effects.mapNotNull { name ->
+                registry?.resolveEffectHash(name)?.let { name to it }
+            }.toMap(),
         )
     } else {
         null

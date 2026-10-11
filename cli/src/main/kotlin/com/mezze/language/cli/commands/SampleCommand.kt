@@ -398,16 +398,20 @@ class SampleCommand {
         // argument, so it can be shown — the performer only hands it back.
         val valuedOps = target.scripts.flatMap { sc -> sc.ops.filter { it.valued }.map { sc to it } }
         val ctxNames = valuedOps.indices.map { k -> "${CTX}_${slot}_$k" }
+        // A SEQUENCE per operation, handed out in call order: the first result is
+        // pinned when the analysis found a branch on it, and the rest are drawn.
         val ctxLets = valuedOps.mapIndexed { k, (_, op) ->
             val sc = valuedOps[k].first
-            // Pinned when the analysis found a branch on this result; drawn otherwise.
-            val value = target.branches.getOrNull(row)?.pins?.get(sc.key(op))?.source ?: SampleGen.of(op.returnType)
-            "              let ${ctxNames[k]}: ${com.mezze.language.ast.prettyPrintType(op.returnType)} = $value"
+            val first = target.branches.getOrNull(row)?.pins?.get(sc.key(op))?.source ?: SampleGen.of(op.returnType)
+            val rest = (2..SampleScripts.CALLS).map { SampleGen.of(op.returnType) }
+            "              let ${ctxNames[k]}: [${com.mezze.language.ast.prettyPrintType(op.returnType)}] = " +
+                (listOf(first) + rest).joinToString(", ", prefix = "[", postfix = "]")
         }
         val call = target.scripts.joinToString("") { sc ->
             val mine = valuedOps.withIndex().filter { it.value.first === sc }
             val init = if (mine.isEmpty()) "" else
-                mine.joinToString(", ", prefix = " { ", postfix = " }") { (k, pair) -> "${sc.field(pair.second)} = ${ctxNames[k]}" }
+                (mine.map { (k, pair) -> "${sc.field(pair.second)} = ${ctxNames[k]}" } + "${SampleScripts.KEY} = $rowSeed")
+                    .joinToString(", ", prefix = " { ", postfix = " }")
             "perform ${sc.performer}$init in "
         } + "${target.name} { $forwarded }"
         // Only operations the function can REACH come back for display; the rest
@@ -453,7 +457,8 @@ class SampleCommand {
 
     /** Sample's own imports, plus a `use` for every scripted effect declared elsewhere. */
     internal fun imports(target: SampleTarget.Result.Ready): Set<String> =
-        EXTRA_IMPORTS + target.scripts.mapNotNull { it.importLine }
+        EXTRA_IMPORTS + target.scripts.mapNotNull { it.importLine } +
+            (if (target.scripts.any { sc -> sc.ops.any { it.valued } }) setOf(SampleScripts.IMPORT) else emptySet())
 
     private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
         // A pinned row says WHICH branch it was built to reach. Without it, a row

@@ -49,11 +49,28 @@ class SampleScriptsTest {
         val scripts = (plan(c, "f") as SampleScripts.Plan.Scripted).scripts
         assertEquals(listOf("Config"), scripts.map { it.effect })
         val impl = SampleScripts.implDecl(scripts.single()) { com.mezze.language.ast.prettyPrintType(it) }
-        // Values arrive as FIELDS, so the row draws them where it can show them.
-        assertTrue(impl.startsWith("impl Config for MezSampleScriptConfig { r_threshold: Int, r_mode: Mode } where {"), impl)
-        assertTrue("  threshold = {} -> r_threshold" in impl, impl)
+        // Values arrive as FIELDS, so the row draws them where it can show them — a
+        // sequence per operation, handed out in call order, under the row's key.
+        assertTrue(impl.startsWith(
+            "impl Config for MezSampleScriptConfig { r_threshold: [Int], r_mode: [Mode], mez_row_key: Int } where {"
+        ), impl)
+        assertTrue("  threshold = {} -> scripted { values = r_threshold, key = mez_row_key, op = 0 }" in impl, impl)
+        assertTrue("  mode = {} -> scripted { values = r_mode, key = mez_row_key, op = 1 }" in impl, impl)
         // An operation returning `{}` is answered with `{}` and gets no field.
         assertTrue("  note = { msg } -> {}" in impl, impl)
+    }
+
+    /**
+     * An INFERRED effect row names its effects by identity too. It used to carry
+     * names only, so an unannotated function — the usual way to write one — was
+     * refused with "its declaration could not be identified".
+     */
+    @Test
+    fun `an unannotated function's effects are scripted too`() {
+        val c = check("pub let f = { n: Int } -> n > Config.threshold {}")
+        val plan = plan(c, "f")
+        assertTrue(plan is SampleScripts.Plan.Scripted, "refused: $plan")
+        assertEquals(listOf("Config"), (plan as SampleScripts.Plan.Scripted).scripts.map { it.effect })
     }
 
     /** No type to draw at: a polymorphic operation is still refused, naming why. */

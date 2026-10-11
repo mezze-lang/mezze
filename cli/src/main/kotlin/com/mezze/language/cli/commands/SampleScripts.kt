@@ -32,9 +32,10 @@ import com.mezze.language.typedast.forEachChild
  *
  * An effect is scriptable when its declaration can be found by HASH (the row
  * carries one per effect), it has no associated types, and its operations are
- * monomorphic. Each operation then returns the same drawn value for the whole
- * row — per-call-site sequences are a later step. An operation returning `{}`
- * (`Log.log`) is answered with `{}` and gets no column.
+ * monomorphic. Each operation's results are a short sequence the row draws, handed
+ * out in call order (`std::effects::sample::scripted`) — so `let a = now {}; let
+ * b = now {}; b > a` can come out either way. The column shows the whole sequence.
+ * An operation returning `{}` (`Log.log`) is answered with `{}` and gets no column.
  *
  * Anything else is refused as before, naming the effect: a polymorphic operation
  * (`Exception.throw : … -> 'a`) has no type to draw at, and an associated type is
@@ -163,21 +164,35 @@ object SampleScripts {
     }
 
     /**
-     * `impl E for MezSampleScriptE { r_op: T, … } where { op = { a } -> r_op, … }`
+     * `impl E for MezSampleScriptE { r_op: [T], …, key: Int } where {
+     *    op = { a } -> scripted { values = r_op, key = key, op = 0 }, … }`
      *
      * The values are FIELDS so the row draws them where it can show them; the
-     * performer only hands them back.
+     * performer only hands them back, one per call. [key] is the row's, so no two
+     * rows share a position in a sequence.
      */
     fun implDecl(script: Script, render: (MezzeType) -> String): String {
         val valued = script.ops.filter { it.valued }
         val fields = if (valued.isEmpty()) "" else
-            valued.joinToString(", ", prefix = " { ", postfix = " }") { "${script.field(it)}: ${render(it.returnType)}" }
+            (valued.map { "${script.field(it)}: [${render(it.returnType)}]" } + "$KEY: Int")
+                .joinToString(", ", prefix = " { ", postfix = " }")
         val ops = script.ops.joinToString(",\n") { op ->
             val params = op.params.joinToString(", ", prefix = "{ ", postfix = " }").let { if (op.params.isEmpty()) "{}" else it }
-            "  ${op.name} = $params -> ${if (op.valued) script.field(op) else "{}"}"
+            val answer = if (!op.valued) "{}"
+                else "scripted { values = ${script.field(op)}, key = $KEY, op = ${valued.indexOf(op)} }"
+            "  ${op.name} = $params -> $answer"
         }
         return "impl ${script.effect} for ${script.performer}$fields where {\n$ops\n}"
     }
+
+    /** The field naming the row, so each row's sequences have their own positions. */
+    const val KEY = "mez_row_key"
+
+    /** How many results the row draws for each operation; calls beyond repeat them. */
+    const val CALLS = 4
+
+    /** What a scripted performer needs in scope. */
+    const val IMPORT = "use std::effects::sample::{ scripted }"
 
     /** Through `MezzeType.anyChild`, the one exhaustive child walker — no local `when`. */
     private fun mentionsTypeVar(t: MezzeType): Boolean =

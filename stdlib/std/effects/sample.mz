@@ -246,6 +246,13 @@ pub let size: {} -> Nat <Sample> = {} -> Sample.size {}
 pub let resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample> = { n, call } ->
   Sample.resize { n = n, call = call }
 
+## A scripted operation's next value: `values` in call order, repeating from the
+## start once used up. `key` names the row and `op` the operation, so each has its
+## own position. What `mez sample` hands a performer it generates for an effect
+## nothing handles — every value the function sees is one the row drew and shows.
+pub let scripted: { values: ['a], key: Int, op: Int } -> 'a = { values, key, op } ->
+  __native_scripted_next { values = values, key = key, op = op }
+
 # ---------------------------------------------------------------------------
 # Combinators — ordinary functions over `Sampler`, not operations.
 #
