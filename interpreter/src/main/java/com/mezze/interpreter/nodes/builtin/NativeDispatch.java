@@ -2787,6 +2787,10 @@ public final class NativeDispatch extends MezzeNode {
         // S-21: branch-covering draws — see `impl Sample for CoveringSample`.
         HANDLERS.put("__native_reset_covering_sample", (r, c) -> RandomNatives.resetCoveringSample(r));
         HANDLERS.put("__native_covering_choose", (r, c) -> RandomNatives.coveringChoose(r));
+        // S-23: branch-coverage hit. Reached only from IR the CLI instrumented —
+        // no surface syntax calls this, and an ordinary program never emits it.
+        HANDLERS.put("__native_observe_hit",
+            (r, c) -> com.mezze.interpreter.nodes.builtin.effects.CoverageNatives.observeHit(r));
     }
 
     // ==================== Filesystem (LocalDisk, #82) ====================

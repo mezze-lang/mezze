@@ -1080,6 +1080,9 @@ object RuntimeServer {
             result, printType, dbgStyle = true, maxDepth = maxDepth, maxItems = maxItems,
         ),
         elapsedMicros = elapsedMicros,
+        // S-23: drained, not peeked, so the next evaluation starts clean. Empty
+        // unless the client shipped instrumented IR — only `mez sample` does.
+        branchHits = com.mezze.interpreter.nodes.builtin.effects.CoverageNatives.takeHits(),
     ))
 
     private fun handleEval(eval: Eval, state: ServerState, send: (WireFrame) -> Unit) {
@@ -1163,6 +1166,10 @@ object RuntimeServer {
                 requestId = eval.requestId,
                 error = EvalError(kind, exitDetailFor(e)),
                 elapsedMicros = (System.nanoTime() - started) / 1_000,
+                // S-23: a crashed evaluation still REACHED the branches that led to
+                // the crash. Dropping them here would hide the path to it, which is
+                // the one thing a reader of a failing row most wants.
+                branchHits = com.mezze.interpreter.nodes.builtin.effects.CoverageNatives.takeHits(),
             )))
         } catch (e: com.mezze.interpreter.nodes.builtin.effects.InspectTree.ShapeMismatchException) {
             // The shape does not describe the value — a compiler bug, not the

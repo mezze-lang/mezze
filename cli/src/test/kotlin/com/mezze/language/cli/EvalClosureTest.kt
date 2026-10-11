@@ -368,4 +368,38 @@ class EvalClosureTest {
         )
         assertNull(StoreSerialization.deserializeEmbeddedAppMeta(bytes).resultPrintType)
     }
+
+    // ---- branch coverage (S-23) -------------------------------------------
+
+    private val branchy = """
+        let main: { x: Int } -> Int = { x } -> x
+
+        let classify = { n: Int } -> if n > 10 then "big" else "small"
+    """.trimIndent() + "\n"
+
+    @Test
+    fun `coverage sites name lines of the user's file, not of the compiled source`(@TempDir dir: Path) {
+        // Prepended imports push every line of the compiled source down; a site
+        // reported at the compiled line would point at the wrong code.
+        val (root, module) = project(dir, branchy)
+        val r = EvalClosure.compile(
+            root, module, "classify { n = 1 }",
+            extraImports = setOf("use std::collections::list", "use std::collections::set"),
+            coverageOf = "classify",
+        ) as EvalClosure.Result.Compiled
+        assertEquals(listOf(3, 3), r.sites.map { it.src.startLine }, "both branches of the `if` on line 3")
+    }
+
+    @Test
+    fun `no sites unless coverage is asked for`(@TempDir dir: Path) {
+        assertEquals(emptyList<Any>(), compiled(dir, branchy, "classify { n = 1 }").sites)
+    }
+
+    @Test
+    fun `asking for coverage of something the module does not declare is an error`(@TempDir dir: Path) {
+        val (root, module) = project(dir, branchy)
+        val r = EvalClosure.compile(root, module, "classify { n = 1 }", coverageOf = "nope")
+        assertTrue(r is EvalClosure.Result.Failed, "got $r")
+    }
 }
+

@@ -85,7 +85,7 @@ class SampleCommand {
         val expression = buildExpression(target, seed, count, config)
 
         when (val compiled = EvalClosure.compile(
-            currentDir, moduleFile, expression, imports(target), buildDecls(target),
+            currentDir, moduleFile, expression, imports(target), buildDecls(target), coverageOf = name,
         )) {
             is EvalClosure.Result.Failed -> {
                 // The diagnostic is about an expression THIS command wrote, so it
@@ -117,9 +117,13 @@ class SampleCommand {
                 // which produces identical values, because row `i`'s seed is
                 // `seed + i` either way (see buildRowExpression). The cost is paid
                 // only when something actually crashed.
+                // Which of `name`'s branches ran, over every row (S-23).
+                val reached = HashSet<Int>()
                 val rows: List<RowOutcome> =
-                    if (batch?.error == null && batch?.value != null) readRows(batch.value!!)
-                    else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs, config)
+                    if (batch?.error == null && batch?.value != null) {
+                        reached.addAll(batch.branchHits)
+                        readRows(batch.value!!)
+                    } else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs, config, reached)
 
                 if (rows.isEmpty()) {
                     System.err.println(
@@ -129,7 +133,12 @@ class SampleCommand {
                     kotlin.system.exitProcess(1)
                 }
 
-                if (json) println(sampleJson(name, seed, rows)) else printSample(target, seed, rows)
+                val unreached = compiled.sites.filter { it.id !in reached }
+                if (json) println(sampleJson(name, seed, rows, unreached, moduleFile))
+                else {
+                    printSample(target, seed, rows)
+                    SampleCoverageReport.lines(name, moduleFile.readLines(), compiled.sites, unreached).forEach { println(it) }
+                }
 
                 // A crashed row is a real failure of the function under test, so the
                 // exit code says so even though the table printed.
@@ -252,14 +261,17 @@ class SampleCommand {
         items: Int,
         timeoutMs: Long,
         config: Config = Config(),
+        reached: MutableSet<Int> = HashSet(),
     ): List<RowOutcome> = (0 until count).map { i ->
         when (val compiled = EvalClosure.compile(
             currentDir, moduleFile, buildRowExpression(target, seed, i, config), imports(target),
-            buildDecls(target),
+            buildDecls(target), coverageOf = target.name,
         )) {
             is EvalClosure.Result.Failed -> RowOutcome.Crashed("did not compile: ${compiled.message.lines().first()}")
             is EvalClosure.Result.Compiled -> {
                 val r = runExpression(currentDir, compiled, depth, items, timeoutMs)
+                // A crashed row still reached the branches that led to the crash.
+                r?.let { reached.addAll(it.branchHits) }
                 val err = r?.error
                 when {
                     r == null -> RowOutcome.Crashed("the runtime did not reply")
@@ -525,7 +537,13 @@ class SampleCommand {
      * — a consumer counting rows should see what was asked for, and the reason is the
      * finding.
      */
-    private fun sampleJson(name: String, seed: Int, rows: List<RowOutcome>): String {
+    private fun sampleJson(
+        name: String,
+        seed: Int,
+        rows: List<RowOutcome>,
+        unreached: List<com.mezze.language.truffleir.BranchCoverage.Site>,
+        moduleFile: File,
+    ): String {
         fun part(v: WireValue?): String =
             if (v == null) "null"
             else "{\"text\":${WireValueJson.quote(v.toText())},\"value\":${WireValueJson.tree(v)}}"
@@ -543,6 +561,14 @@ class SampleCommand {
                     is RowOutcome.Crashed ->
                         append("{\"crashed\":").append(WireValueJson.quote(outcome.reason)).append("}")
                 }
+            }
+            append("],\"unreached\":[")
+            unreached.forEachIndexed { i, site ->
+                if (i > 0) append(",")
+                append("{\"file\":").append(WireValueJson.quote(moduleFile.name))
+                    .append(",\"line\":").append(site.src.startLine)
+                    .append(",\"column\":").append(site.src.startCol)
+                    .append(",\"branch\":").append(WireValueJson.quote(SampleCoverageReport.branchName(site))).append("}")
             }
             append("]}")
         }

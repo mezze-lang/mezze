@@ -76,6 +76,8 @@ object EvalClosure {
             val resultPrintType: PrintType,
             /** Rendered `MezzeType` of the expression, for a caller that shows it. */
             val resultType: String,
+            /** The branch sites instrumented for coverage — empty unless asked for. */
+            val sites: List<com.mezze.language.truffleir.BranchCoverage.Site> = emptyList(),
         ) : Result
 
         /** Compilation failed; [message] is already formatted for a terminal. */
@@ -115,6 +117,11 @@ object EvalClosure {
          * bound-and-halve shape has to call itself.
          */
         extraDecls: List<String> = emptyList(),
+        /**
+         * A declaration of the module whose branches to record as they run (S-23):
+         * every `if` branch and `match` arm, reported back with each evaluation.
+         */
+        coverageOf: String? = null,
     ): Result {
         if (expression.isBlank()) return Result.Failed("nothing to evaluate")
 
@@ -234,7 +241,16 @@ object EvalClosure {
         // is fused exactly as it would be if the expression lived in the file.
         val closureMap = rawClosure.associateBy { it.hash }
         val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
-        val closure = rawClosure.map { canonicalized[it.hash] ?: it }
+        val canonical = rawClosure.map { canonicalized[it.hash] ?: it }
+        val coverage = coverageOf?.let { target ->
+            // The declaration the user named, in the module they named it in.
+            val hash = result.typedModule?.decls
+                ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                ?.singleOrNull { it.name == target }?.hash
+                ?: return Result.Failed("`$target` is not a declaration of ${moduleFile.name}")
+            com.mezze.language.truffleir.BranchCoverage.instrument(canonical, hash)
+        }
+        val closure = coverage?.functions ?: canonical
 
         val (fnBytes, metaBytes) = NativeBuildPath.packEmbeddedAppCbor(
             closure = closure,
@@ -253,6 +269,12 @@ object EvalClosure {
             // `TypeApplication(Seq …MezzeType$IntType@66c61024)` — which is not
             // something to show a user.
             resultType = com.mezze.language.ast.prettyPrintType(resultType),
+            // In the user's file, not the compiled source: the prepended imports
+            // pushed every line of the module down.
+            sites = coverage?.sites.orEmpty().map { site ->
+                val shift = prelude.count { it == '\n' }
+                site.copy(src = site.src.copy(startLine = site.src.startLine - shift, endLine = site.src.endLine - shift))
+            },
         )
     }
 

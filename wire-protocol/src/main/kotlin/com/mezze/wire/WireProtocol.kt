@@ -574,6 +574,25 @@ data class EvalResult(
     val value: WireValue? = null,
     val error: EvalError? = null,
     @SerialName("elapsed_micros") val elapsedMicros: Long = 0,
+    /**
+     * S-23: branch sites the expression actually REACHED, by id.
+     *
+     * Ids only. The labels stay with whoever instrumented the IR, because that is
+     * who knows what site 7 was; sending them would mean the runtime carrying
+     * strings it never reads and cannot check.
+     *
+     * Empty unless the client shipped INSTRUMENTED IR, which only `mez sample`
+     * does — an ordinary eval collects and sends nothing.
+     *
+     * Present even when [error] is set, and that is the point: a crashed row still
+     * reached the branches that led to the crash, and dropping them would hide the
+     * path to it.
+     *
+     * Hit ids rather than counts. "Was this reached" is the question a coverage
+     * report answers, and a count invites reading it as a profile — which the
+     * sampling order makes meaningless.
+     */
+    @SerialName("branch_hits") val branchHits: List<Int> = emptyList(),
 )
 
 /**
