@@ -43,6 +43,7 @@ class InMemoryMezzeStore : MezzeStore {
 
     override fun getBlob(hash: Hash): BlobRow? = blobs[hash.hex]
     override fun blobExists(hash: Hash): Boolean = hash.hex in blobs
+    override fun ownsBlob(hash: Hash): Boolean = hash.hex in blobs
     override fun blobsExist(hashes: Collection<Hash>): Set<Hash> = hashes.filterTo(HashSet()) { it.hex in blobs }
     override fun getIR(hash: Hash): ByteArray? = blobs[hash.hex]?.ir
 

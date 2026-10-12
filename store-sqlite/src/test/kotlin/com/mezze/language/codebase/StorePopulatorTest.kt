@@ -196,6 +196,50 @@ class StorePopulatorTest {
         assertEquals(EdgeKind.CALLS, edges[0].kind)
     }
 
+    /**
+     * A lowered function whose blob lives in the ATTACHED stdlib tier — a stdlib
+     * performer the user compile lowers again — is not this store's to describe.
+     * `edges.from_hash` references `main.blobs`, so recording its edges here broke
+     * the foreign key and failed every `mez build` of a project that pulled one in;
+     * its edges are the stdlib tier's, recorded when that tier was built.
+     */
+    @Test
+    fun `edges are recorded only for blobs this store owns`() {
+        val user = makeHash('a')
+        val stdlibFn = makeHash('c')
+        val leaf = makeHash('d')
+        val src = SourceInfo(0, 1, 1, 1, 10)
+        store.putBlob(leaf, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.executeRaw { conn ->
+            conn.prepareStatement(
+                "INSERT INTO stdlib.blobs (hash, kind, visibility, typed, ir) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, stdlibFn.hex)
+                stmt.setString(2, "PERFORMER")
+                stmt.setString(3, "PUBLIC")
+                stmt.setBytes(4, null)
+                stmt.setBytes(5, "stdlib-ir".toByteArray())
+                stmt.executeUpdate()
+            }
+        }
+        fun fn(hash: Hash, calls: Hash) = FunctionIR(
+            hash = hash, name = "f", qualifiedName = "mod::f",
+            paramSlots = emptyList(), paramNames = emptyList(),
+            localSlots = emptyList(), localNames = emptyList(),
+            captureSlots = emptyList(), captureNames = emptyList(),
+            body = CallDirectIR(calls, listOf(LongLitIR(1, src)), false, src),
+            sourceFile = "test.mz", sourceSection = src,
+        )
+
+        val result = TypeCheckResult(loweredFunctions = listOf(fn(user, stdlibFn), fn(stdlibFn, leaf)))
+        StorePopulator.populate(store, result, "mod", "test.mz", "hash")
+
+        assertEquals(listOf(stdlibFn), store.getEdgesFrom(user).map { it.toHash })
+        assertTrue(store.getEdgesFrom(stdlibFn).isEmpty(), "the stdlib tier's edges are not written into main")
+        assertTrue(store.ownsBlob(user))
+        assertFalse(store.ownsBlob(stdlibFn))
+    }
+
     @Test
     fun `populate stores ability impls with index`() {
         val implHash = makeHash('a')

@@ -702,7 +702,14 @@ object StorePopulator {
             // the entire stdlib, and a dead-code report named every private helper.
             //
             // Safe to repeat: an edge is a set member, so re-recording is a no-op.
-            recordEdges(store, fn)
+            //
+            // But only for a blob THIS store owns. A user compile also lowers some
+            // stdlib functions (performers, impl lambdas) whose blobs, IR and all,
+            // already live in the attached stdlib tier — so nothing is written above,
+            // and `edges.from_hash` references `main.blobs`: recording them here
+            // failed the foreign key and with it every `mez build` that reached one.
+            // Their edges are the stdlib tier's, recorded when it was built.
+            if (store.ownsBlob(fn.hash)) recordEdges(store, fn)
         }
     }
 

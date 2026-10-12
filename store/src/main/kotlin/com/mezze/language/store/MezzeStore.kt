@@ -29,6 +29,14 @@ interface MezzeStore : AutoCloseable {
     /** Check existence without loading data. */
     fun blobExists(hash: Hash): Boolean
 
+    /**
+     * True when [hash]'s blob is in THIS store's own writable tier — not one it
+     * only reads through (an attached stdlib or dependency layer, a chained
+     * fallback). [blobExists] answers across every tier; this answers who owns it.
+     * Facts about a blob, such as its edges, are recorded where the blob lives.
+     */
+    fun ownsBlob(hash: Hash): Boolean
+
     /** Bulk existence check — returns the subset of hashes already present. */
     fun blobsExist(hashes: Collection<Hash>): Set<Hash>
 

@@ -1220,6 +1220,16 @@ class SQLiteMezzeStore private constructor(
         return blobExistsStmt.executeQuery().use { it.next() }
     }
 
+    private val ownsBlobStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT 1 FROM main.blobs WHERE hash = ? LIMIT 1")
+    }
+
+    @Synchronized
+    override fun ownsBlob(hash: Hash): Boolean {
+        ownsBlobStmt.setString(1, hash.hex)
+        return ownsBlobStmt.executeQuery().use { it.next() }
+    }
+
     @Synchronized
     override fun blobsExist(hashes: Collection<Hash>): Set<Hash> {
         if (hashes.isEmpty()) return emptySet()

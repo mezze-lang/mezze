@@ -42,6 +42,7 @@ class ChainedMezzeStore(
     override fun getBlob(hash: Hash): BlobRow? = firstNonNull { it.getBlob(hash) }
     override fun getIR(hash: Hash): ByteArray? = firstNonNull { it.getIR(hash) }
     override fun blobExists(hash: Hash): Boolean = all.any { it.blobExists(hash) }
+    override fun ownsBlob(hash: Hash): Boolean = primary.ownsBlob(hash)
     override fun blobsExist(hashes: Collection<Hash>): Set<Hash> {
         val acc = mutableSetOf<Hash>()
         for (s in all) acc.addAll(s.blobsExist(hashes - acc))
