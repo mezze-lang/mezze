@@ -97,6 +97,16 @@ class EvalClosureTest {
         assertEquals(PrintType.Scalar(PrintType.ScalarKind.Str), meta(c).resultPrintType)
     }
 
+    @Test
+    fun `a stdlib newtype result gets its newtype shape`(@TempDir dir: Path) {
+        // `Nat` is declared in the stdlib, not in the module or anything it
+        // imported. EVAL used to collect type shapes from those alone, so this
+        // failed to compile — and with it every `mez sample` of a `Nat` function.
+        val c = compiled(dir, emptyModule, "3n + 4n")
+        val shape = meta(c).resultPrintType
+        assertTrue(shape is PrintType.Newtype && shape.name == "Nat", "expected Nat's newtype shape, got $shape")
+    }
+
     // ---- the module's scope really is in scope ------------------------------
 
     @Test

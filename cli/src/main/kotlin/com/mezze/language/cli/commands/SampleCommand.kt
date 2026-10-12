@@ -103,7 +103,12 @@ class SampleCommand {
             }
 
             is EvalClosure.Result.Compiled -> {
-                val batch = runExpression(currentDir, compiled, depth, items, timeoutMs)
+                // The function's own output is held back: if a row crashes, every row
+                // is re-run one at a time (below) and prints again, so the batch's
+                // partial output would appear twice. It is shown only when the batch
+                // stands.
+                val batchOut = java.io.ByteArrayOutputStream()
+                val batch = runExpression(currentDir, compiled, depth, items, timeoutMs, stdout = batchOut)
 
                 // The whole batch is one invocation, so ONE crashing row kills every
                 // other row with it — and a crash is a finding, not a tool
@@ -121,6 +126,7 @@ class SampleCommand {
                 val reached = HashSet<Int>()
                 val rows: List<RowOutcome> =
                     if (batch?.error == null && batch?.value != null) {
+                        System.out.write(batchOut.toByteArray()); System.out.flush()
                         reached.addAll(batch.branchHits)
                         readRows(batch.value!!)
                     } else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs, config, reached)
@@ -238,6 +244,7 @@ class SampleCommand {
         depth: Int,
         items: Int,
         timeoutMs: Long,
+        stdout: java.io.OutputStream = System.out,
     ): com.mezze.wire.EvalResult? {
         val runDir = com.mezze.language.store.ProjectLayout.runDir(currentDir)
         val (fnsFile, metaFile) = EvalClosure.writeTo(runDir, compiled)
@@ -251,6 +258,7 @@ class SampleCommand {
                 maxDepth = depth,
                 maxItems = items,
                 timeoutMs = timeoutMs,
+                stdout = stdout,
             )
         } finally {
             session.close()
@@ -475,11 +483,17 @@ class SampleCommand {
      *
      * Only a recursive variant produces one — it needs a helper that calls ITSELF,
      * and a `do`-block `let` is not recursive, so it cannot live in the expression.
-     * Identical across rows (it depends on the TYPE, not the seed), hence distinct.
+     *
+     * Read from an UNPINNED walk of the parameter types, because the helpers depend
+     * on the types alone. They used to be read from row 0, which S-21 pins to the
+     * function's first `match` arm; for a recursive variant that arm is usually the
+     * base case (`Leaf`), which draws nothing, so the walk never met the type and
+     * every later row called a helper nobody declared.
      */
     internal fun buildDecls(target: SampleTarget.Result.Ready): List<String> {
         val helpers = if (target.fields.isEmpty() && target.scripts.isEmpty()) emptyList()
-            else rowBinding(target, 0, 0, 0).decls.distinct()
+            else SampleGen.bindFields(target.fields, "__decls") { com.mezze.language.ast.prettyPrintType(it) }
+                .decls.distinct()
         val scripted = target.scripts.map { SampleScripts.implDecl(it) { t -> com.mezze.language.ast.prettyPrintType(t) } }
         return helpers + scripted
     }

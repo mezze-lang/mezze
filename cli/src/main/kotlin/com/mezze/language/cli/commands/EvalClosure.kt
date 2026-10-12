@@ -219,8 +219,7 @@ object EvalClosure {
 
         // Local declarations first so one shadows an imported type of the same
         // name, matching lowering.
-        val modules = listOfNotNull(result.typedModule) + result.loadedModules.values
-        val printTypes = PrintTypeDefs.collect(modules)
+        val printTypes = PrintTypeDefs.forModule(result.typedModule, result.loadedModules.values)
         val resultPrintType = try {
             PrintTypeBuilder(printTypes.defs).build(resultType)
         } catch (e: PrintTypeBuilder.NotAConcreteValueType) {

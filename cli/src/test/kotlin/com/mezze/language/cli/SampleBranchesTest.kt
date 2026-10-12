@@ -120,6 +120,45 @@ class SampleBranchesTest {
     }
 
     /** The match-arm pins from S-21 still come out, now with their reasons. */
+    /**
+     * A `match` on a seq pins one seq per pattern, of exactly the length it names.
+     * A drawn seq is rarely empty, so `[] -> d` used to stay unreached.
+     */
+    @Test
+    fun `seq patterns pin a seq of each pattern's length`() {
+        val got = pins("""
+            pub let first_or = { xs: [Int], d: Int } -> match xs is
+              [] -> d
+              [0, ...rest] -> 0
+              [h, ...rest] -> h
+        """, "first_or")["xs"]!!
+        assertEquals("[] | match xs — `[]` arm", got[0])
+        assertEquals("[0] | match xs — `[_, ...]` arm", got[1])
+        assertTrue(got[2].startsWith("[") && got[2].contains("arbitrary"), "a binding element is drawn: ${got[2]}")
+    }
+
+    /**
+     * A comparison on a STRING's size pins strings of the lengths either side of
+     * it, as it already did for a seq. `if name.size {} == 0` is the usual empty
+     * check, and a drawn string is rarely empty.
+     */
+    @Test
+    fun `a string size comparison pins strings either side`() {
+        val got = pins("""
+            pub let greet = { name: Str } -> if name.size {} == 0 then "nobody" else "hi"
+        """, "greet")["name"]!!
+        assertTrue(got.any { it.startsWith("\"\" |") }, "the empty string must be pinned: $got")
+        assertTrue(got.any { it.startsWith("\"a\" |") }, "a one-character string must be pinned: $got")
+    }
+
+    @Test
+    fun `is_empty on a string pins an empty and a non-empty one`() {
+        val got = pins("""
+            pub let blank = { s: Str } -> if s.is_empty {} then 0 else 1
+        """, "blank")["s"]!!
+        assertEquals(listOf("\"\"", "\"a\""), got.map { it.substringBefore(" |") })
+    }
+
     @Test
     fun `match arms still pin one constructor each`() {
         assertEquals(

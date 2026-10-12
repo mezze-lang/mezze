@@ -6,6 +6,7 @@ import com.mezze.language.typedast.TypedLetDecl
 import com.mezze.language.typedast.TypedMatch
 import com.mezze.language.typedast.TypedVar
 import com.mezze.language.typedast.TypedVariantPattern
+import com.mezze.language.typedast.TypedSeqPattern
 import com.mezze.language.typedast.TypedRecordPattern
 import com.mezze.language.typedast.TypedVarPattern
 import com.mezze.language.typedast.BindingRef
@@ -368,6 +369,7 @@ object SampleBranches {
     private fun matchArms(match: TypedMatch, params: Map<String, MezzeType>): List<Triple<Int, String, Pinned>> {
         // The scrutinee is a parameter, or a field path into one (`match p.shape`).
         val path = pathOf(match.scrutinee, params) ?: return emptyList()
+        seqElementType(match.scrutinee.type)?.let { elem -> return seqArms(match, path, params, elem) }
         val ctors = (match.scrutinee.type as? MezzeType.VariantType)?.constructors ?: return emptyList()
         val out = mutableListOf<Triple<Int, String, Pinned>>()
         for ((index, case) in match.cases.withIndex()) {
@@ -382,6 +384,54 @@ object SampleBranches {
             }
         }
         return out
+    }
+
+    /** The element type when [type] is a seq (`[Int]`), else null. */
+    private fun seqElementType(type: MezzeType): MezzeType? =
+        (type as? MezzeType.TypeApplication)
+            ?.takeIf { it.constructor == com.mezze.language.ast.BuiltinTypes.SEQ && it.args.size == 1 }
+            ?.args?.single()
+
+    /**
+     * A `match` on a seq: one value per SEQ PATTERN, of exactly the length the
+     * pattern names. `[]` is the empty seq; `[h, ...rest]` is a one-element seq,
+     * the shortest it accepts. A literal element pattern (`[0, ...rest]`) pins
+     * that literal; any other element is drawn.
+     *
+     * Without this the empty-seq arm was almost never reached: a drawn seq is
+     * rarely empty, so `[] -> d` stayed unreached in every short run.
+     */
+    private fun seqArms(
+        match: TypedMatch,
+        path: Path,
+        params: Map<String, MezzeType>,
+        elem: MezzeType,
+    ): List<Triple<Int, String, Pinned>> {
+        val out = mutableListOf<Triple<Int, String, Pinned>>()
+        for ((index, case) in match.cases.withIndex()) {
+            for (pattern in case.patterns) {
+                val seq = pattern as? TypedSeqPattern ?: continue
+                var draws = false
+                val items = seq.elements.map { el ->
+                    literalSource(el) ?: SampleGen.of(elem).also { draws = true }
+                }
+                val shape = if (seq.rest != null) "[${"_, ".repeat(seq.elements.size)}...]" else
+                    "[${List(seq.elements.size) { "_" }.joinToString(", ")}]"
+                val placed = placeAt(path, params, Pinned("[${items.joinToString(", ")}]", draws)) ?: continue
+                out.add(Triple(index, path.param, placed.copy(why = "match ${path.label} — `$shape` arm")))
+            }
+        }
+        return out
+    }
+
+    /** Source for a literal element pattern, or null for anything that binds. */
+    private fun literalSource(pattern: com.mezze.language.typedast.TypedPattern): String? {
+        val lit = (pattern as? com.mezze.language.typedast.TypedLiteralPattern)?.value ?: return null
+        return when (lit) {
+            is TypedIntLit -> lit.value.toString()
+            is com.mezze.language.typedast.TypedBoolLit -> if (lit.value) "True" else "False"
+            else -> null
+        }
     }
 
     /**
@@ -690,7 +740,8 @@ object SampleBranches {
                 ?.filterIsInstance<TypedRecordEntry.Field>()?.singleOrNull() ?: return null
             return pathOf(only.value, params)?.takeIf { isSeq(only.value.type) }
         }
-        if (fn is TypedFieldAccess && fn.field == method && isSeq(fn.record.type)) return pathOf(fn.record, params)
+        if (fn is TypedFieldAccess && fn.field == method && (isSeq(fn.record.type) || fn.record.type is MezzeType.StringType))
+            return pathOf(fn.record, params)
         return null
     }
 
@@ -715,14 +766,14 @@ object SampleBranches {
             ?: sizeOf(right, params, byHash)?.let { Triple(it, left, MIRROR.getValue(op)) }
             ?: return null
         val k = knownValue(other, byHash) as? Known.IntValue ?: return emptyList()
-        val elem = (typeAt(path, params) as? MezzeType.TypeApplication)?.args?.single() ?: return emptyList()
+        val sized = typeAt(path, params) ?: return emptyList()
         val where = "size(${path.label}) ${SYMBOL.getValue(effectiveOp)} ${k.describe()}"
         return intBoundary(k.value, effectiveOp)
             // A length is never negative, and one past MAX_PINNED_LENGTH is a value
             // nobody reads in a table — that branch is left to the draws.
             .filter { (n, _) -> n in 0..MAX_PINNED_LENGTH }
             .mapNotNull { (n, holds) ->
-                val leaf = seqOfLength(n.toInt(), elem)
+                val leaf = ofLength(n.toInt(), sized) ?: return@mapNotNull null
                 placeAt(path, params, leaf)?.copy(why = "if $where — ${verdict(holds)}", outcome = holds)
             }
             .map { mapOf(path.param to it) }
@@ -739,11 +790,21 @@ object SampleBranches {
         byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
     ): List<Map<String, Pinned>> {
         val path = sizeOf(expr, params, byHash, SEQ_IS_EMPTY, "is_empty") ?: return emptyList()
-        val elem = (typeAt(path, params) as? MezzeType.TypeApplication)?.args?.single() ?: return emptyList()
+        val sized = typeAt(path, params) ?: return emptyList()
         return listOf(0 to true, 1 to false).mapNotNull { (n, holds) ->
-            placeAt(path, params, seqOfLength(n, elem))
+            placeAt(path, params, ofLength(n, sized) ?: return@mapNotNull null)
                 ?.copy(why = "is_empty(${path.label}) — ${if (holds) "empty" else "not empty"}", outcome = holds)
         }.map { mapOf(path.param to it) }
+    }
+
+    /**
+     * A value of [type] with exactly [n] elements: a seq of drawn elements, or a
+     * string of `n` characters. Null for anything else.
+     */
+    private fun ofLength(n: Int, type: MezzeType): Pinned? = when {
+        type is MezzeType.StringType -> Pinned(strLiteral("a".repeat(n)), draws = false)
+        isSeq(type) -> seqOfLength(n, (type as MezzeType.TypeApplication).args.single())
+        else -> null
     }
 
     /** A sequence literal of exactly [n] drawn elements. */

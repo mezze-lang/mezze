@@ -127,21 +127,20 @@ class ArbitraryDerivationTest {
     }
 
     /**
-     * A RECURSIVE variant does NOT derive, and is rejected rather than generated.
+     * A RECURSIVE variant derives, its recursion bounded by coin flips.
      *
-     * Bounding the recursion needs the `Sample` size budget, and a generated body
-     * cannot name `Sample` — it must compile in modules that have never heard of
-     * sampling. Deriving without the bound would not produce a bad value, it would
-     * not terminate, so the honest answer is to decline and let the author write the
-     * impl that says where to stop. Asserted so the boundary is a decision on record
-     * rather than something that quietly starts hanging if the rule is relaxed.
+     * It used to decline: bounding seemed to need the `Sample` size budget, which a
+     * generated body cannot name. Flips suffice. A recursive constructor is taken
+     * only when enough flips agree that each node has fewer than one recursive child
+     * on average, so generation terminates with probability 1. A variant with NO base
+     * case still declines (RecursiveArbitraryDerivationTest).
      */
     @Test
-    fun `a recursive variant does not derive`() {
+    fun `a recursive variant derives and a draw terminates`() {
         val e = runCatching {
             draw("type Tree = | Leaf { v: Int }, Node { l: Tree, r: Tree } |", "Tree")
         }.exceptionOrNull()
-        assertTrue(e != null, "a recursive variant derived Arbitrary; it cannot be bounded")
+        assertTrue(e == null, "a recursive variant must derive a terminating Arbitrary: ${e?.message}")
     }
 
     /**

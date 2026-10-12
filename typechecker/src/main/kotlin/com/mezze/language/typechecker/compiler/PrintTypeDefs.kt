@@ -34,6 +34,17 @@ data class PrintTypeDefs(
         val EMPTY = PrintTypeDefs(emptyMap(), emptyMap())
 
         /**
+         * The tables for [module]: the module, then [imported], then the
+         * precompiled stdlib. Lowering and EVAL both call this, so they cannot
+         * disagree about which modules count. They did: EVAL left the stdlib out,
+         * so a stdlib newtype such as `Nat` could not be rendered and every
+         * `mez sample` of a `Nat`-taking function failed before running.
+         */
+        fun forModule(module: TypedModule?, imported: Collection<TypedModule>): PrintTypeDefs =
+            collect(listOfNotNull(module) + imported +
+                com.mezze.language.typechecker.PrecompiledStdlib.stdlibTypedModules.values)
+
+        /**
          * Collect from [modules], earliest wins.
          *
          * Order matters and the caller owns it: pass the module being compiled

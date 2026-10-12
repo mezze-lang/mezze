@@ -38,6 +38,7 @@ import com.mezze.language.parsedast.ParsedRecordDef
 import com.mezze.language.parsedast.ParsedRecordPattern
 import com.mezze.language.parsedast.ParsedRecordPatternEntry
 import com.mezze.language.parsedast.ParsedRecordType
+import com.mezze.language.parsedast.ParsedVariantType
 import com.mezze.language.parsedast.ParsedRecordTypeEntry
 import com.mezze.language.parsedast.ParsedTypeAliasDef
 import com.mezze.language.parsedast.ParsedSeqType
@@ -547,19 +548,65 @@ object DerivedImplGenerator {
      * Pick a constructor, then generate its payload — or null when the shape has no
      * derivable choice.
      *
-     * Null for a RECURSIVE variant. Bounding the recursion needs the `Sample` size
-     * budget, and a generated body cannot name `Sample`: it is an effect, effects are
-     * not built-in and the prelude deliberately does not propagate them, so the
-     * generated impl would depend on whether its host module happened to import one.
-     * The `Hash` generator hit the same wall and answered it by calling a native
-     * instead. Rather than emit a body that only compiles in some modules, a
-     * recursive variant does not derive and its author writes the impl that says how
-     * to stop — the same opt-in a newtype gets, for a related reason.
+     * A RECURSIVE variant derives too, bounded by the same coin flips. It used to be
+     * left underived, because bounding the recursion seemed to need the `Sample` size
+     * budget, which a generated body cannot name (effects are not built-in, and the
+     * host module may not import sampling). Its author then had to write the impl,
+     * and until they did `mez sample` could not touch a function over a tree.
+     *
+     * Flips are enough. A recursive constructor is picked only when `m` flips all
+     * come up true, with `2^m` at least twice the most self-references any
+     * constructor makes. Each node then has fewer than one recursive child on
+     * average (`refs / 2^m <= 1/2`), so generation is a subcritical branching
+     * process: it terminates with probability 1, and the expected size is small.
+     * `Tree { left, right }` recurses one time in four, a list-like type one time
+     * in two.
+     *
+     * Still null when EVERY constructor recurses: the type has no finite value to
+     * stop at.
      */
     private fun variantArbitrary(def: ParsedVariantDef, typeName: String): ParsedExpr? {
-        if (def.constructors.any { isRecursiveCtor(it, typeName) }) return null
-        return pickAmong(def.constructors)
+        val recursive = def.constructors.filter { isRecursiveCtor(it, typeName) }
+        if (recursive.isEmpty()) return pickAmong(def.constructors)
+        val base = def.constructors - recursive.toSet()
+        if (base.isEmpty()) return null
+        val refs = recursive.maxOf { selfReferences(it, typeName) }
+        var flips = 1
+        while ((1 shl flips) < 2 * refs) flips++
+        val bits = (0 until flips).map { "__arb_rec$it" }
+        return ParsedDo(
+            statements = bits.map { name ->
+                ParsedStatement.Let(
+                    pattern = ParsedVariablePattern(name, loc()),
+                    typeAnnotation = null,
+                    value = arbitraryCall(),
+                    loc = loc(),
+                )
+            },
+            result = ParsedIf(conjunction(bits.map { id(it) }), pickAmong(recursive), pickAmong(base), loc()),
+            loc = loc(),
+        )
     }
+
+    /** How many times [ctor]'s payload mentions [typeName] — its recursive children. */
+    private fun selfReferences(ctor: ParsedVariantCtorDef, typeName: String): Int =
+        ctor.dataType?.let { countMentions(it, typeName) } ?: 0
+
+    private fun countMentions(annotation: ParsedTypeAnnotation, typeName: String): Int = when (annotation) {
+        is ParsedNamedType -> if (annotation.name == typeName) 1 else 0
+        // A mention inside a container (`[Tree]`, `List Tree`, `Option Tree`) may
+        // stand for several children; counted as [CONTAINER_FANOUT], which only
+        // makes recursion rarer — the safe direction.
+        is ParsedTypeApp -> (if (annotation.constructor == typeName) 1 else 0) +
+            CONTAINER_FANOUT * annotation.args.sumOf { countMentions(it, typeName) }
+        is ParsedSeqType -> CONTAINER_FANOUT * countMentions(annotation.elementType, typeName)
+        is ParsedRecordType -> annotation.entries.sumOf { countMentions(it.type, typeName) }
+        is ParsedVariantType -> annotation.constructors.sumOf { c -> c.dataType?.let { countMentions(it, typeName) } ?: 0 }
+        else -> 0
+    }
+
+    /** Children one container-held mention may stand for, for the recursion bound. */
+    private const val CONTAINER_FANOUT = 8
 
     /**
      * Choose a constructor by COIN FLIPS, bisecting the list.
@@ -705,13 +752,8 @@ object DerivedImplGenerator {
     private fun isRecursiveCtor(ctor: ParsedVariantCtorDef, typeName: String): Boolean =
         ctor.dataType?.let { mentionsType(it, typeName) } ?: false
 
-    private fun mentionsType(annotation: ParsedTypeAnnotation, typeName: String): Boolean = when (annotation) {
-        is ParsedNamedType -> annotation.name == typeName
-        is ParsedTypeApp -> annotation.constructor == typeName ||
-            annotation.args.any { mentionsType(it, typeName) }
-        is ParsedRecordType -> annotation.entries.any { mentionsType(it.type, typeName) }
-        else -> false
-    }
+    private fun mentionsType(annotation: ParsedTypeAnnotation, typeName: String): Boolean =
+        countMentions(annotation, typeName) > 0
 
     private fun arbitraryCall(): ParsedExpr = ParsedFunctionCall(
         member(id(ARBITRARY_ABILITY), "arbitrary"),

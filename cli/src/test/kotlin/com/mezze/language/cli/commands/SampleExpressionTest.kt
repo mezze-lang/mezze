@@ -321,6 +321,34 @@ class SampleExpressionTest {
     }
 
     /**
+     * The helper is declared even when row 0 is pinned to a base case.
+     *
+     * Helpers were read from row 0's plan. S-21 pins row 0 to the function's first
+     * `match` arm, usually the base case (`Leaf`), which draws nothing, so that plan
+     * never met the type. Every later row called `__mez_sample_gen_Tree {}`, which was
+     * never declared: `mez sample` failed on every function over a tree.
+     */
+    @Test
+    fun `the helper is declared even when row 0 is pinned to a base case`() {
+        val tree = MezzeType.VariantType(
+            constructors = mapOf(
+                "Leaf" to null,
+                "Node" to MezzeType.RecordType(mapOf(
+                    "l" to MezzeType.TypeApplication("Tree", emptyList()),
+                    "r" to MezzeType.TypeApplication("Tree", emptyList()),
+                )),
+            ),
+            identity = com.mezze.language.ast.TypeIdentity.Declared(
+                hash = com.mezze.language.typedast.Hash("2".repeat(128)),
+                displayName = "Tree",
+            ),
+        )
+        val leafRow = SampleBranches.Row(mapOf("t" to SampleBranches.Pinned(source = "Leaf", draws = false)))
+        val target = SampleTarget.Result.Ready("depth", mapOf("t" to tree), branches = listOf(leafRow))
+        assertEquals(1, command.buildDecls(target).size, "row 0 is Leaf, and the helper went undeclared")
+    }
+
+    /**
      * A variant with NO base case cannot be generated — every constructor recurses,
      * so there is nothing to stop at. It falls back to dispatch, which reports an
      * ordinary missing-impl diagnostic naming the type, rather than emitting a

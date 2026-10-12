@@ -399,9 +399,7 @@ private fun compileModule(
     // modules (wrapTopLevel strips TypedTypeDecls from `wrapped`).
     // Local declarations first, so one shadows an imported type of the same name
     // rather than the reverse.
-    val printTypes = com.mezze.language.typechecker.compiler.PrintTypeDefs.collect(
-        listOf(typedModule) + importedModules + stdlibModulesForMono
-    )
+    val printTypes = com.mezze.language.typechecker.compiler.PrintTypeDefs.forModule(typedModule, importedModules)
     compiler.setPrintTypeDefs(printTypes.defs, printTypes.params)
 
     val result = compiler.compile(

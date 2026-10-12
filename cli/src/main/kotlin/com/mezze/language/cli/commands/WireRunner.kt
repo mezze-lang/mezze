@@ -678,7 +678,11 @@ internal class WireSession private constructor(
         maxDepth: Int,
         maxItems: Int,
         timeoutMs: Long,
+        /** Where the expression's own stdout goes. A caller that may run the same
+         *  code again (sample's row recovery) holds it back so nothing prints twice. */
+        stdout: java.io.OutputStream = System.out,
     ): com.mezze.wire.EvalResult? {
+        stdoutSink = stdout
         send(WireFrame.of(MessageType.EVAL, com.mezze.wire.Eval(
             requestId = requestId,
             fnsCborPath = fnsFile.absolutePath,
@@ -687,13 +691,17 @@ internal class WireSession private constructor(
             maxItems = maxItems,
             timeoutMs = timeoutMs,
         )))
-        return when (val drained = drain()) {
+        val drained = try { drain() } finally { stdoutSink = System.out }
+        return when (drained) {
             is Drained.Eval -> drained.result
             // The runtime died, or answered a run that was never started. Either
             // way there is no value; drain already reported why.
             is Drained.Run -> null
         }
     }
+
+    /** Where STDOUT_DATA goes; System.out except during an [evalOnce] that redirects it. */
+    private var stdoutSink: java.io.OutputStream = System.out
 
     /** Whichever terminal frame [drain] saw first. */
     private sealed interface Drained {
@@ -785,8 +793,8 @@ internal class WireSession private constructor(
                 MessageType.STARTED -> { /* ignore */ }
                 MessageType.STDOUT_DATA -> {
                     val d = frame.decode<StdoutData>()
-                    System.out.write(d.bytes)
-                    System.out.flush()
+                    stdoutSink.write(d.bytes)
+                    stdoutSink.flush()
                 }
                 MessageType.STDERR_DATA -> {
                     val d = frame.decode<StderrData>()
