@@ -3,7 +3,7 @@ int-negative	-7
 float	3.5
 str	"hi"
 str-empty	""
-str-with-escape	"a\nb"
+str-with-escape	"a\\nb"
 bool-true	True
 bool-false	False
 seq-empty	[]

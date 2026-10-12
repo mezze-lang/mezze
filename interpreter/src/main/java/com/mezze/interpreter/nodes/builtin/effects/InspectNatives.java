@@ -155,14 +155,49 @@ public final class InspectNatives {
                 char c = (value instanceof Character)
                     ? (Character) value
                     : ((String) value).charAt(0);
-                return "'" + c + "'";
+                return quoteChar(c);
             }
             case Str: {
                 String s = (String) value;
-                return dbgStyle ? "\"" + s + "\"" : s;
+                return dbgStyle ? quoteStr(s) : s;
             }
         }
         throw new NativeTypeMismatchException("Inspect: unhandled scalar kind " + kind);
+    }
+
+    /**
+     * A string as source would write it: quoted, with every character the lexer
+     * reads an escape for escaped — so a rendering pasted into source is the same
+     * string. `$` is escaped only before `(`, where it would start interpolation.
+     * Unquoted, `open "sesame"` rendered as `"open "sesame""` and a newline broke
+     * the rendering across lines.
+     */
+    public static String quoteStr(String s) {
+        return "\"" + escape(s, '"') + "\"";
+    }
+
+    /** A char, single-quoted and escaped like a string's characters. */
+    public static String quoteChar(char c) {
+        return "'" + escape(String.valueOf(c), '\'') + "'";
+    }
+
+    private static String escape(String s, char quote) {
+        StringBuilder out = new StringBuilder(s.length() + 2);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\' -> out.append("\\\\");
+                case '\n' -> out.append("\\n");
+                case '\t' -> out.append("\\t");
+                case '\r' -> out.append("\\r");
+                case '$' -> out.append(i + 1 < s.length() && s.charAt(i + 1) == '(' ? "\\$" : "$");
+                default -> {
+                    if (c == quote) out.append('\\');
+                    out.append(c);
+                }
+            }
+        }
+        return out.toString();
     }
 
     public static String renderFrac(Object value) {
@@ -310,10 +345,10 @@ public final class InspectNatives {
             return d.toString();
         }
         if (value instanceof Character c) {
-            return "'" + c + "'";  // Char renders single-quoted
+            return quoteChar(c);  // Char renders single-quoted
         }
         if (value instanceof String s) {
-            return "\"" + s + "\"";  // Include quotes for strings
+            return quoteStr(s);  // Include quotes for strings
         }
         if (value instanceof Boolean b) {
             return b ? "True" : "False";

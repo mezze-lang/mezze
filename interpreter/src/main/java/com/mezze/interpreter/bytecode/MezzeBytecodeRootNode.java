@@ -328,13 +328,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         public static String doChar(boolean dbgStyle, Object v) {
             char c = (Character) v;
-            return dbgStyle ? "'" + c + "'" : String.valueOf(c);
+            return dbgStyle ? com.mezze.interpreter.nodes.builtin.effects.InspectNatives.quoteChar(c) : String.valueOf(c);
         }
         @Specialization(guards = "isString(v)")
         @TruffleBoundary
         public static String doString(boolean dbgStyle, Object v) {
             String s = (String) v;
-            return dbgStyle ? "\"" + s + "\"" : s;
+            return dbgStyle ? com.mezze.interpreter.nodes.builtin.effects.InspectNatives.quoteStr(s) : s;
         }
         @Fallback
         @TruffleBoundary
