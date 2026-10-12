@@ -331,7 +331,7 @@ class MethodLevelAbilityConstraintTest {
 
             ability Container for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {elem: 'item} -> 'c,
+                put: {elem: 'item} -> 'c,
                 contains: {elem: 'item} with Same 'item -> Bool
             }
         """.trimIndent()

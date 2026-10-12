@@ -699,13 +699,13 @@ class InherentImplTest {
     fun `ability impl for local type with local ability is allowed`() {
         val source = """
             ability Hashable for 'a where {
-                hash: {} -> Int
+                digest: {} -> Int
             }
 
             type MyRecord = {x: Int, y: Int}
 
             impl Hashable for MyRecord where {
-                hash = {it} -> it.x + it.y
+                digest = {it} -> it.x + it.y
             }
         """.trimIndent()
 

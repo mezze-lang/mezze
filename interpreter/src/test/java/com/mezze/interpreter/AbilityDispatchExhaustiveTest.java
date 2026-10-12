@@ -82,22 +82,6 @@ class AbilityDispatchExhaustiveTest {
             "a.combine { other = \"z\" }"));
     }
 
-    @Test void sameOpNameAcrossTwoAbilitiesDispatchesByReceiver() {
-        // Both abilities declare `render`; the receiver's type picks the impl.
-        assertEquals("num:1|word:hi", run(
-            "ability RenderNum for 'a where { render: { it: 'a } -> Str }\n" +
-            "ability RenderWord for 'a where { render: { it: 'a } -> Str }\n" +
-            "type Num = { n: Str }\n" +
-            "type Word = { w: Str }\n" +
-            "impl RenderNum for Num where { render = { it } -> \"num:$(it.n)\" }\n" +
-            "impl RenderWord for Word where { render = { it } -> \"word:$(it.w)\" }\n" +
-            "let main = {} -> do\n" +
-            "  let a: Num = { n = \"1\" }\n" +
-            "  let b: Word = { w = \"hi\" }\n" +
-            "  \"$(a.render {})|$(b.render {})\"\n" +
-            "main {}"));
-    }
-
     @Test void abilityWithMultipleOps() {
         assertEquals("hi/HI", run(
             "ability Text for 'a where {\n" +

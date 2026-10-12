@@ -23,6 +23,11 @@ import kotlin.test.assertTrue
  *
  * Membership is decided by the declaration's content hash now, so a same-named
  * ability that is not the built-in one is caught by the rule it was escaping.
+ *
+ * Both are now caught one step earlier, at the DECLARATION: an operation name means
+ * one ability in a scope, and `eq` already means the prelude's `Eq`. A
+ * byte-for-byte redeclaration has the built-in's hash, so it is the same ability
+ * and no clash (the last test).
  */
 class OperatorAbilityIdentityTest {
 
@@ -46,8 +51,8 @@ class OperatorAbilityIdentityTest {
             """.trimIndent(),
         )
         assertTrue(
-            e?.contains("is a DIFFERENT ability that happens to share the name") == true,
-            "expected the divergent-redeclaration error; got: $e",
+            e?.contains("declares operation 'eq', which ability Eq in scope already declares") == true,
+            "expected the shared-operation-name error; got: $e",
         )
     }
 
@@ -65,8 +70,8 @@ class OperatorAbilityIdentityTest {
             """.trimIndent(),
         )
         assertTrue(
-            e?.contains("Rename the method to a name that is not a built-in operator") == true,
-            "expected the reserved-method-name error; got: $e",
+            e?.contains("Ability 'Weird' declares operation 'eq', which ability Eq in scope already declares") == true,
+            "expected the shared-operation-name error; got: $e",
         )
     }
 

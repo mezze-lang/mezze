@@ -576,28 +576,6 @@ class PatternBugProbeTest {
     // the registries stay consistent.
     // ========================================================================
 
-    @Test
-    fun `qualified ability call disambiguates from method-call inference`() {
-        // Two abilities with overlapping method names. Qualified call must pick
-        // the named one even when bare call would be ambiguous.
-        val code = """
-            ability A for 'a where { foo: {it: 'a} -> Int }
-            ability B for 'b where { foo: {it: 'b} -> Int }
-
-            impl A for Int where { foo = {it} -> 1 }
-            impl B for Str where { foo = {it} -> 2 }
-
-            let useA = {x} -> A.foo { it = x }
-            let useB = {x} -> B.foo { it = x }
-        """.trimIndent()
-        val result = typeCheck(code)
-        val ta = render(result.getVariableType("useA"))
-        val tb = render(result.getVariableType("useB"))
-        // useA should constrain by A, useB by B.
-        assertTrue(ta.contains("A"), "useA should mention A constraint, got: $ta")
-        assertTrue(tb.contains("B"), "useB should mention B constraint, got: $tb")
-    }
-
     // ========================================================================
     // PATTERN 10 — Eq/Inspect universal-availability vs explicit constraint
     //

@@ -400,6 +400,7 @@ class ContextBuilder {
 
         val localValidationRegistry = DeclarationRegistry.from(allParsedTypeDecls, abilityDecls, effectDecls)
         AbilityValidator.validateNameCollisions(localValidationRegistry)
+        AbilityValidator.validateNoSharedOperationNames(abilityDecls, importedAbilities)
 
         for (abilityDecl in abilityDecls.values) {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)

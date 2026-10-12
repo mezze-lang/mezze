@@ -6,18 +6,18 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Locks the `SizedMut` ability: the effectful sibling of `Sized` that gives the
- * mutable containers (`MutSeq`, `MutString`, `MutBytes`) uniform `.size {}` and
- * `.is_empty {}` dot-dispatch under the `<Mut>` effect.
+ * `.size {}` and `.is_empty {}` on the mutable containers (`MutSeq`, `MutString`,
+ * `MutBytes`), under `<Mut>`.
  *
- * These are runtime assertions, not just type-check: the interesting risk is
- * dispatch, not typing. `size`/`is_empty` are op names shared with the pure
- * `Sized` ability, so the checker must pick `SizedMut` for a mutable receiver
- * (the type that implements it), NOT `Sized` by import/load order. A regression
- * would either fail to compile ("MutSeq does not implement Sized") or dispatch
- * to the wrong impl and compute a wrong value.
+ * They are INHERENT methods of those types. They were an ability, `SizedMut`, that
+ * shared `size`/`is_empty` with the pure `Sized`, and dispatch had to tell the two
+ * apart by receiver. An operation name now means one ability in a scope, so the
+ * mutable containers own the methods directly (a mutable container cannot be
+ * `Sized`: reading its size performs `Mut`).
+ *
+ * Runtime assertions, because the risk is dispatch, not typing.
  */
-class SizedMutAbilityTest {
+class MutableContainerSizeTest {
 
     @BeforeEach
     fun setUp() {
@@ -27,7 +27,7 @@ class SizedMutAbilityTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test
-    fun `MutSeq size dispatches to SizedMut`() {
+    fun `MutSeq size is the inherent method`() {
         val result = eval(
             """
             use std::effects::mutation::{ LocalMut, seq_to_mut }
@@ -61,7 +61,7 @@ class SizedMutAbilityTest {
     }
 
     @Test
-    fun `MutString size dispatches to SizedMut`() {
+    fun `MutString size is the inherent method`() {
         val result = eval(
             """
             use std::effects::mutation::{ LocalMut, string_to_mut }
@@ -85,7 +85,7 @@ class SizedMutAbilityTest {
     }
 
     @Test
-    fun `MutBytes size dispatches to SizedMut`() {
+    fun `MutBytes size is the inherent method`() {
         val result = eval(
             """
             use std::effects::mutation::{ LocalMut, bytes_to_mut }

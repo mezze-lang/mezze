@@ -103,7 +103,7 @@ class AbilityEffectComprehensiveTest {
             val source = """
                 ability Container for 'a where {
                     first: {it: 'a} -> Option Int,
-                    size: {it: 'a} -> Int
+                    item_count: {it: 'a} -> Int
                 }
 
                 let x = 1

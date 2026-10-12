@@ -490,6 +490,41 @@ object AbilityValidator {
     // `with` clauses with P0119_ABILITY_LEVEL_CONSTRAINT — the
     // dependency cycle check is no longer reachable. Removed.
 
+    /**
+     * Two abilities in one scope may not declare the same operation name.
+     *
+     * `Weigh.rank` and `Price.rank` side by side made every `x.rank {}` ambiguous
+     * and every generic `with Weigh 'a, Price 'a` body depend on which dictionary a
+     * method name resolved to. That ambiguity was patched site by site (BUG 9);
+     * the rule removes it at the source: an operation name means one ability in a
+     * scope. The same ability reached twice — imported and re-exported, say — is
+     * one declaration (same hash), not a clash.
+     */
+    fun validateNoSharedOperationNames(
+        local: Map<String, ParsedAbilityDecl>,
+        imported: Map<String, ParsedAbilityDecl>,
+    ) {
+        val byOp = LinkedHashMap<String, MutableList<ParsedAbilityDecl>>()
+        val seen = HashSet<Any>()
+        for (decl in imported.values + local.values) {
+            if (!seen.add(decl.contentHash ?: decl)) continue
+            for (op in decl.operations) byOp.getOrPut(op.name) { mutableListOf() }.add(decl)
+        }
+        for ((op, decls) in byOp) {
+            if (decls.size < 2) continue
+            // Report where the user can act: a declaration in this module.
+            val at = decls.lastOrNull { it in local.values } ?: decls.last()
+            val others = decls.filter { it !== at }.joinToString(", ") { it.name }
+            throw TypeCheckError(
+                "Ability '${at.name}' declares operation '$op', which ability $others in scope " +
+                    "already declares. An operation name must mean one ability in a scope — rename one " +
+                    "of the operations, or do not import both abilities into this module.",
+                loc = at.loc,
+                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+            )
+        }
+    }
+
     fun validateNameCollisions(
         registry: DeclarationRegistry
     ) {

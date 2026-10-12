@@ -46,12 +46,12 @@ class AbilityConstraintAnnotationsTest {
         val code = """
             ability Container for 'c having 'item where {
                 fetch: {it: 'c, index: Int} -> (Option 'item),
-                size: {it: 'c} -> Int,
+                item_count: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
                 fetch = {it, index} -> Some { val = 0 },
-                size = {it} -> 0,
+                item_count = {it} -> 0,
             }
 
             let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Int) = {c} ->
@@ -72,12 +72,12 @@ class AbilityConstraintAnnotationsTest {
         val code = """
             ability Container for 'c having 'item where {
                 fetch: {it: 'c, index: Int} -> (Option 'item),
-                size: {it: 'c} -> Int,
+                item_count: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
                 fetch = {it, index} -> Some { val = 0 },
-                size = {it} -> 0,
+                item_count = {it} -> 0,
             }
 
             let getFirst: {c: 'c} with Container 'c -> (Option 'item) = {c} ->
@@ -95,12 +95,12 @@ class AbilityConstraintAnnotationsTest {
         val code = """
             ability Container for 'c having 'item where {
                 fetch: {it: 'c, index: Int} -> (Option 'item),
-                size: {it: 'c} -> Int,
+                item_count: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
                 fetch = {it, index} -> Some { val = 0 },
-                size = {it} -> 0,
+                item_count = {it} -> 0,
             }
 
             let arr: [Int] = [1, 2, 3]
@@ -121,7 +121,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test multiple ability constraints one with having one without`() {
         val code = """
             ability Container for 'c having 'item where {
-                size: {it: 'c} -> Int,
+                item_count: {it: 'c} -> Int,
             }
 
             ability Show for 'a where {
@@ -133,13 +133,13 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl Container for [Int] having 'item = Int where {
-                size = {it} -> 0,
+                item_count = {it} -> 0,
             }
 
             let showAndSize: {c: 'c, v: 'v} with Container 'c having 'item = Int, Show 'v -> Int = {c, v} ->
                 do
                     let s = v.show {}
-                    c.size {}
+                    c.item_count {}
         """.trimIndent()
 
         val program = typeCheck(code)

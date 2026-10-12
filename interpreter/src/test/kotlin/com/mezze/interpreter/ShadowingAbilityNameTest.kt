@@ -26,6 +26,10 @@ import kotlin.test.assertEquals
  * available, not the intended one. With static operations callable
  * ([StaticAbilityOpTest]) the question this suite exists to ask is answerable
  * directly: does the shadowing name reach the right impl?
+ *
+ * Its operations are `make`/`spare`, not `default`: an operation name means one
+ * ability in a scope, and `default` already means the prelude's `Default`. The
+ * question here is the ability NAME, which the rule leaves alone.
  */
 class ShadowingAbilityNameTest {
 
@@ -35,10 +39,10 @@ class ShadowingAbilityNameTest {
     }
 
     private fun program(abilityName: String) = """
-        ability $abilityName for 'a where { default: {} -> 'a, spare: {} -> 'a }
+        ability $abilityName for 'a where { make: {} -> 'a, spare: {} -> 'a }
         type P = { x: Int }
-        impl $abilityName for P where { default = {} -> { x = 7 }, spare = {} -> { x = 9 } }
-        let p: P = $abilityName.default {}
+        impl $abilityName for P where { make = {} -> { x = 7 }, spare = {} -> { x = 9 } }
+        let p: P = $abilityName.make {}
         p.x
     """.trimIndent()
 
@@ -60,9 +64,9 @@ class ShadowingAbilityNameTest {
             9L,
             MezzeTestHelper.run(
                 """
-                ability Default for 'a where { default: {} -> 'a, spare: {} -> 'a }
+                ability Default for 'a where { make: {} -> 'a, spare: {} -> 'a }
                 type P = { x: Int }
-                impl Default for P where { default = {} -> { x = 7 }, spare = {} -> { x = 9 } }
+                impl Default for P where { make = {} -> { x = 7 }, spare = {} -> { x = 9 } }
                 let p: P = { x = 1 }
                 (p.spare {}).x
                 """.trimIndent(),

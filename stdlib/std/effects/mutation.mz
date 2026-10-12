@@ -573,3 +573,23 @@ pub let for_range1
 ## Create a MutSeq with pre-allocated capacity.
 pub let seq_with_capacity: { capacity: Int } -> MutSeq 'a <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_mut_seq_with_capacity { capacity = capacity } }
+
+## `.size {}` and `.is_empty {}` on the mutable containers, under `Mut`.
+##
+## Inherent methods rather than an ability: the pure `Sized` already declares
+## `size` and `is_empty`, and one operation name means one ability in a scope.
+## A mutable container cannot implement `Sized` — reading its size performs `Mut`.
+impl MutSeq 'a where {
+  size = { it } -> size { seq = it },
+  is_empty = { it } -> size { seq = it } == 0,
+}
+
+impl MutString where {
+  size = { it } -> string_len { s = it },
+  is_empty = { it } -> string_is_empty { s = it },
+}
+
+impl MutBytes where {
+  size = { it } -> bytes_len { bytes = it },
+  is_empty = { it } -> bytes_len { bytes = it } == 0,
+}

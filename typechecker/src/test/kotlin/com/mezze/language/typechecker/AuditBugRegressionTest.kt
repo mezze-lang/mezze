@@ -279,7 +279,9 @@ class AuditBugRegressionTest {
     // unambiguous annotated call must CHECK.
     // EXPECTED-CORRECT: may be wrongly rejected (or wrongly dispatched) today
     // (ExprMethodConstraints.kt:288).
-    @Test fun `bug262_same_named_method_dispatches_by_annotation`() {
+    // An operation name means one ability in a scope: the clash itself is now the
+    // error, at the second ability's declaration, so dispatch never meets it.
+    @Test fun `bug262_two_abilities_sharing_an_operation_name_is_a_declaration_error`() {
         val m = err(
             """
             ability RenderA for 'a where {
@@ -289,24 +291,10 @@ class AuditBugRegressionTest {
             ability RenderB for 'a where {
               render: { it: 'a } -> Str
             }
-
-            impl RenderA for Int where {
-              render = { it } -> "A"
-            }
-
-            impl RenderB for Str where {
-              render = { it } -> "B"
-            }
-
-            # The receiver type is Int, so this must resolve to RenderA unambiguously.
-            let useIt: { n: Int } -> Str = { n } -> n.render {}
             """
         )
-        assertNull(
-            m,
-            "an unambiguous same-named method on a known receiver type must dispatch by type, " +
-                "not registration order",
-        )
+        assertTrue(m != null && m.contains("RenderB") && m.contains("RenderA") && m.contains("render"),
+            "the second ability must be rejected, naming both and the operation: $m")
     }
 
     // ── bug263 (audit #12): variant load-order candidate selection ─────────

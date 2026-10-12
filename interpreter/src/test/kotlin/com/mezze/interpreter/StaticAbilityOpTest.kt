@@ -31,10 +31,10 @@ class StaticAbilityOpTest {
 
     private val zero = """
         ability Zero for 'a where {
-          zero: {} -> 'a
+          nought: {} -> 'a
         }
         impl Zero for Int where {
-          zero = {} -> 0
+          nought = {} -> 0
         }
     """.trimIndent()
 
@@ -68,12 +68,12 @@ class StaticAbilityOpTest {
 
     @Test
     fun `a user ability's static operation is callable`() {
-        assertEquals(0L, MezzeTestHelper.run("$zero\nlet n: Int = Zero.zero {}\nn"))
+        assertEquals(0L, MezzeTestHelper.run("$zero\nlet n: Int = Zero.nought {}\nn"))
     }
 
     @Test
     fun `its result is an ordinary value`() {
-        assertEquals(1L, MezzeTestHelper.run("$zero\nlet n: Int = Zero.zero {}\nn + 1"))
+        assertEquals(1L, MezzeTestHelper.run("$zero\nlet n: Int = Zero.nought {}\nn + 1"))
     }
 
     @Test
@@ -98,7 +98,7 @@ class StaticAbilityOpTest {
     @Test
     fun `no impl for the produced type is an error that names both`() {
         val e = runCatching {
-            MezzeTestHelper.run("$zero\nlet s: Str = Zero.zero {}\ns")
+            MezzeTestHelper.run("$zero\nlet s: Str = Zero.nought {}\ns")
         }.exceptionOrNull()
         val message = e?.message ?: ""
         assertTrue(message.contains("Str"), "should name the produced type; got: $message")
@@ -109,7 +109,7 @@ class StaticAbilityOpTest {
     fun `a produced type nothing determines is a diagnostic, not silence`() {
         // The boundary of this feature, stated rather than discovered: the impl is
         // chosen from the type the call produces, so that type has to be known AT
-        // THE CALL. `let f = Zero.zero {}` followed by `f + 10` does not qualify —
+        // THE CALL. `let f = Zero.nought {}` followed by `f + 10` does not qualify —
         // the usage pins `f`, but the call's own type variable is still open when
         // the implementation must be picked.
         //
@@ -118,7 +118,7 @@ class StaticAbilityOpTest {
         // died at the runtime with "TruffleIR not produced by typechecker" — a
         // sentence no one can act on.
         val e = runCatching {
-            MezzeTestHelper.run("$zero\nlet f = Zero.zero {}\nf + 10")
+            MezzeTestHelper.run("$zero\nlet f = Zero.nought {}\nf + 10")
         }.exceptionOrNull()
         val message = e?.message ?: ""
         assertTrue(
@@ -140,14 +140,14 @@ class StaticAbilityOpTest {
         // variable) it wants directly and reads the same dictionary slot.
         assertEquals(
             0L,
-            MezzeTestHelper.run("$zero\nlet make: {} with Zero 'a -> 'a = {} -> Zero.zero {}\nlet n: Int = make {}\nn"),
+            MezzeTestHelper.run("$zero\nlet make: {} with Zero 'a -> 'a = {} -> Zero.nought {}\nlet n: Int = make {}\nn"),
         )
     }
 
     @Test
     fun `the same wrapper resolves at each type it is used at`() {
-        val src = "$zero\nimpl Zero for Str where {\n  zero = {} -> \"z\"\n}\n" +
-            "let make: {} with Zero 'a -> 'a = {} -> Zero.zero {}\n" +
+        val src = "$zero\nimpl Zero for Str where {\n  nought = {} -> \"z\"\n}\n" +
+            "let make: {} with Zero 'a -> 'a = {} -> Zero.nought {}\n" +
             "let s: Str = make {}\ns"
         assertEquals("z", MezzeTestHelper.run(src))
     }

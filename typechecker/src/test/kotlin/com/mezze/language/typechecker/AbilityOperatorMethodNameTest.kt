@@ -20,6 +20,11 @@ import java.nio.file.Paths
  * The rule is uniform: it applies to user modules, imported modules, and the stdlib
  * alike (the stdlib was cleaned up to obey it — no type has both an inherent and an
  * ability method of the same name).
+ *
+ * With the prelude in scope these are now rejected one step EARLIER, at the ability
+ * DECLARATION (V0701): an operation name means one ability in a scope, and `add`
+ * already means `NumAdd`. The impl-level V0420 check still guards a module without
+ * the prelude, where `.add` on a primitive is inlined all the same.
  */
 class AbilityOperatorMethodNameTest {
 
@@ -52,7 +57,7 @@ class AbilityOperatorMethodNameTest {
             impl Doubler for Int where { add = { it, r } -> 999 }
             """
         )
-        assertEquals(ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR, err.code)
+        assertEquals(ErrorCode.V0701_DUPLICATE_DECLARATION, err.code)
     }
 
     @Test fun `impl of user ability with eq is rejected`() {
@@ -62,7 +67,7 @@ class AbilityOperatorMethodNameTest {
             impl Same for Int where { eq = { it, r } -> True }
             """
         )
-        assertEquals(ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR, err.code)
+        assertEquals(ErrorCode.V0701_DUPLICATE_DECLARATION, err.code)
     }
 
     @Test fun `impl of user ability with lt is rejected`() {
@@ -72,12 +77,14 @@ class AbilityOperatorMethodNameTest {
             impl Ranked for Int where { lt = { it, r } -> True }
             """
         )
-        assertEquals(ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR, err.code)
+        assertEquals(ErrorCode.V0701_DUPLICATE_DECLARATION, err.code)
     }
 
-    @Test fun `declaring an ability with a builtin-operator method name is fine without an impl`() {
-        // The ability DECLARATION alone is harmless — the shadow only arises at the impl.
-        checks("ability Doubler for 'a where { add: { it: 'a, r: 'a } -> 'a }")
+    @Test fun `declaring an ability with a builtin-operator method name is rejected even without an impl`() {
+        // `add` already means `NumAdd` in every scope that has the prelude.
+        val err = errorFor("ability Doubler for 'a where { add: { it: 'a, r: 'a } -> 'a }")
+        assertEquals(ErrorCode.V0701_DUPLICATE_DECLARATION, err.code)
+        assertTrue(err.message!!.contains("NumAdd"), err.message)
     }
 
     // ── (b) a non-operator method name is fine even when impl'd for a primitive ──
@@ -103,6 +110,6 @@ class AbilityOperatorMethodNameTest {
             impl Doubler for Money where { add = { it, r } -> it }
             """
         )
-        assertEquals(ErrorCode.V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR, err.code)
+        assertEquals(ErrorCode.V0701_DUPLICATE_DECLARATION, err.code)
     }
 }

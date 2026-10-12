@@ -26,8 +26,8 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Collection for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {it: 'c, element: 'item} -> 'c,
-                size: {it: 'c} -> Int,
+                put: {it: 'c, element: 'item} -> 'c,
+                item_count: {it: 'c} -> Int,
             }
         """.trimIndent()
 
@@ -46,13 +46,13 @@ class AbilityAssociatedTypesTest {
             ability Collection for 'c having 'item where {
                 empty: {} -> 'c,
                 append: {it: 'c, element: 'item} -> 'c,
-                size: {it: 'c} -> Int,
+                item_count: {it: 'c} -> Int,
             }
 
             impl Collection for [Int] having 'item = Int where {
                 empty = {} -> [],
                 append = {it, element} -> it,
-                size = {it} -> 0,
+                item_count = {it} -> 0,
             }
         """.trimIndent()
 
@@ -70,7 +70,7 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Container for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {it: 'c, element: 'item} -> 'c,
+                put: {it: 'c, element: 'item} -> 'c,
                 contains: {it: 'c, element: 'item} -> Bool,
                 get: {it: 'c, index: Int} -> 'item,
                 toArray: {it: 'c} -> ['item],
@@ -162,9 +162,9 @@ class AbilityAssociatedTypesTest {
     fun `test ability operations can reference associated type multiple times`() {
         val source = """
             ability Transformable for 't having 'item where {
-                size: {it: 't} -> Int,
+                item_count: {it: 't} -> Int,
                 first: {it: 't} -> 'item,
-                add: {it: 't, item: 'item} -> 't,
+                put: {it: 't, item: 'item} -> 't,
             }
         """.trimIndent()
 
