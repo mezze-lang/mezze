@@ -370,6 +370,7 @@ object SampleBranches {
         // The scrutinee is a parameter, or a field path into one (`match p.shape`).
         val path = pathOf(match.scrutinee, params) ?: return emptyList()
         seqElementType(match.scrutinee.type)?.let { elem -> return seqArms(match, path, params, elem) }
+        if (isPrimitive(match.scrutinee.type)) return literalArms(match, path, params)
         val ctors = (match.scrutinee.type as? MezzeType.VariantType)?.constructors ?: return emptyList()
         val out = mutableListOf<Triple<Int, String, Pinned>>()
         for ((index, case) in match.cases.withIndex()) {
@@ -424,12 +425,38 @@ object SampleBranches {
         return out
     }
 
+    /**
+     * A `match` on a primitive with LITERAL arms (`"admin" -> …`, `0 -> …`): one row
+     * per literal, pinned to it. A drawn string or int essentially never equals a
+     * specific literal, so these arms went unreached; the catch-all arm is left to
+     * the draws, which reach it on nearly every row.
+     */
+    private fun literalArms(
+        match: TypedMatch,
+        path: Path,
+        params: Map<String, MezzeType>,
+    ): List<Triple<Int, String, Pinned>> {
+        val out = mutableListOf<Triple<Int, String, Pinned>>()
+        for ((index, case) in match.cases.withIndex()) {
+            for (pattern in case.patterns) {
+                val src = literalSource(pattern) ?: continue
+                val placed = placeAt(path, params, Pinned(src, draws = false)) ?: continue
+                out.add(Triple(index, path.param, placed.copy(why = "match ${path.label} — `$src` arm")))
+            }
+        }
+        return out
+    }
+
     /** Source for a literal element pattern, or null for anything that binds. */
     private fun literalSource(pattern: com.mezze.language.typedast.TypedPattern): String? {
         val lit = (pattern as? com.mezze.language.typedast.TypedLiteralPattern)?.value ?: return null
         return when (lit) {
             is TypedIntLit -> lit.value.toString()
             is com.mezze.language.typedast.TypedBoolLit -> if (lit.value) "True" else "False"
+            is TypedStringLit -> lit.parts.singleOrNull()
+                ?.let { (it as? TypedStringPart.Literal)?.value }
+                ?.let { strLiteral(it) }
+                ?: if (lit.parts.isEmpty()) strLiteral("") else null
             else -> null
         }
     }
@@ -579,11 +606,14 @@ object SampleBranches {
         val leaves = when (known) {
             is Known.IntValue -> intBoundary(known.value, effectiveOp)
                 .map { (v, holds) -> Pinned(v.toString(), draws = false, why = "if $where — ${verdict(holds)}", outcome = holds) }
+            is Known.FloatValue -> floatBoundary(known.value, effectiveOp)
+                .map { (v, holds) -> Pinned(floatLiteral(v), draws = false, why = "if $where — ${verdict(holds)}", outcome = holds) }
             is Known.StrValue -> strBoundary(known.value, effectiveOp)
                 .map { (v, holds) -> Pinned(strLiteral(v), draws = false, why = "if $where — ${verdict(holds)}", outcome = holds) }
         }
         val check: ((String) -> Boolean)? = if (path.fields.isNotEmpty()) null else when (known) {
             is Known.IntValue -> { src -> src.toLongOrNull()?.let { holds(it.compareTo(known.value), effectiveOp) } ?: false }
+            is Known.FloatValue -> { src -> src.toDoubleOrNull()?.let { holds(it.compareTo(known.value), effectiveOp) } ?: false }
             is Known.StrValue -> { src -> holds(if (src == strLiteral(known.value)) 0 else 1, effectiveOp) }
         }
         return leaves.mapNotNull { leaf ->
@@ -597,6 +627,9 @@ object SampleBranches {
         fun describe(): String
         data class IntValue(val value: Long, val via: String?) : Known {
             override fun describe() = if (via == null) "$value" else "$via (= $value)"
+        }
+        data class FloatValue(val value: Double, val via: String?) : Known {
+            override fun describe() = if (via == null) floatLiteral(value) else "$via (= ${floatLiteral(value)})"
         }
         data class StrValue(val value: String, val via: String?) : Known {
             override fun describe() = if (via == null) strLiteral(value) else "$via (= ${strLiteral(value)})"
@@ -622,6 +655,7 @@ object SampleBranches {
         if (depth > MAX_CONSTANT_CHAIN) return null
         return when (expr) {
             is TypedIntLit -> Known.IntValue(expr.value, via)
+            is com.mezze.language.typedast.TypedFloatLit -> Known.FloatValue(expr.value, via)
             is TypedStringLit -> {
                 val parts = expr.parts
                 if (parts.all { it is TypedStringPart.Literal }) {
@@ -689,6 +723,25 @@ object SampleBranches {
         }
         return listOfNotNull(lo, hi).map { it to holds(it.compareTo(k), op) }
     }
+
+    /**
+     * The two floats either side of where a comparison against [k] flips: `k`
+     * itself and the next representable value past it, so `score > 0.9` gets one
+     * row at `0.9` (else) and one just above (then).
+     */
+    private fun floatBoundary(k: Double, op: String): List<Pair<Double, Boolean>> {
+        if (k.isNaN() || k.isInfinite()) return emptyList()
+        val (lo, hi) = when (op) {
+            "gt", "le", "eq", "neq" -> k to Math.nextUp(k)
+            "ge", "lt" -> Math.nextDown(k) to k
+            else -> return emptyList()
+        }
+        return listOf(lo, hi).map { it to holds(it.compareTo(k), op) }
+    }
+
+    /** A float as Mezze source: plain decimal, never `1.0E-5`, which is not a literal. */
+    private fun floatLiteral(d: Double): String =
+        java.math.BigDecimal(d.toString()).toPlainString().let { if ('.' in it) it else "$it.0" }
 
     /** For a string only equality has a boundary worth naming: `k`, and not-`k`. */
     private fun strBoundary(k: String, op: String): List<Pair<String, Boolean>> =
@@ -1075,7 +1128,7 @@ object SampleBranches {
     }
 
     private fun isPrimitive(type: MezzeType): Boolean =
-        type is MezzeType.IntType || type is MezzeType.StringType
+        type is MezzeType.IntType || type is MezzeType.StringType || type is MezzeType.FloatType
 
     /**
      * A string as Mezze source. `$` is escaped because `$(` opens an

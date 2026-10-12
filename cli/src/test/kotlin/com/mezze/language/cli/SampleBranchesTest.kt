@@ -159,6 +159,31 @@ class SampleBranchesTest {
         assertEquals(listOf("\"\"", "\"a\""), got.map { it.substringBefore(" |") })
     }
 
+    /** Literal arms of a `match` on a primitive pin one row per literal. A drawn
+     *  string essentially never equals `"admin"`, so these arms went unreached. */
+    @Test
+    fun `literal match arms on a string pin each literal`() {
+        val got = pins("""
+            pub let kind = { s: Str } -> match s is
+              "admin" -> 1
+              "guest" -> 2
+              other -> 3
+        """, "kind")["s"]!!
+        assertEquals(listOf("\"admin\" | match s — `\"admin\"` arm", "\"guest\" | match s — `\"guest\"` arm"), got)
+    }
+
+    /** A Float comparison pins the threshold and the next float past it. */
+    @Test
+    fun `a float threshold pins both sides of it`() {
+        val got = pins("""
+            pub let tier = { score: Float } -> if score > 0.9 then "gold" else "other"
+        """, "tier")["score"]!!
+        assertEquals(listOf(
+            "0.9 | if score > 0.9 — else",
+            "0.9000000000000001 | if score > 0.9 — then",
+        ), got)
+    }
+
     @Test
     fun `match arms still pin one constructor each`() {
         assertEquals(

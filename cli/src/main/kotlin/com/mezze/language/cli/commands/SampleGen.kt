@@ -140,6 +140,16 @@ object SampleGen {
             }
         }
 
+        // A FUNCTION parameter: no `Arbitrary` for functions exists or can, so draw
+        // one value of the result type and return it whatever the arguments — a
+        // constant function. Pure, as the parameter's type almost always demands;
+        // drawing inside the body would perform `Sample` where none is allowed.
+        if (type is MezzeType.FunctionType) {
+            val params = (type.paramType as? MezzeType.RecordType)?.fields?.keys.orEmpty()
+            val binder = if (params.isEmpty()) "{}" else params.joinToString(", ", prefix = "{ ", postfix = " }")
+            return "({ __mez_sample_v } -> $binder -> __mez_sample_v) { __mez_sample_v = ${of(type.returnType, depth + 1, recursive)} }"
+        }
+
         return DISPATCH
     }
 

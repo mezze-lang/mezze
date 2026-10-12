@@ -320,6 +320,20 @@ class SampleExpressionTest {
         assertTrue("Arbitrary.arbitrary" !in out, "field still dispatches:\n$out")
     }
 
+    /** A function parameter is a constant function returning one drawn value: no
+     *  `Arbitrary` for functions exists, and drawing inside the body would perform
+     *  `Sample` where the parameter's type allows none. */
+    @Test
+    fun `a function parameter is generated as a constant function`() {
+        val fnType = MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(mapOf("x" to MezzeType.IntType)),
+            returnType = MezzeType.IntType,
+        )
+        val out = command.buildExpression(SampleTarget.Result.Ready("apply", mapOf("f" to fnType)), seed = 1)
+        assertTrue("({ __mez_sample_v } -> { x } -> __mez_sample_v) { __mez_sample_v = " in out,
+            "expected a constant function:\n$out")
+    }
+
     /**
      * The helper is declared even when row 0 is pinned to a base case.
      *

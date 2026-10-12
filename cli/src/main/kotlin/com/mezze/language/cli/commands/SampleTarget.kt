@@ -153,12 +153,20 @@ object SampleTarget {
         // write a call to, which is a real limit and said plainly rather than
         // guessed around.
         val param = fnType.paramType
-        val fields = (param as? MezzeType.RecordType)?.fields
+        val declaredFields = (param as? MezzeType.RecordType)?.fields
             ?: return Result.Refused(
                 "`$declName` takes ${com.mezze.language.ast.prettyPrintType(param)} rather than a " +
                     "record, so there are no named arguments to generate. Sample is for a function " +
                     "whose parameter is a record, which is how Mezze functions are normally written."
             )
+
+        // A generic function is sampled at Int: every type variable in its
+        // parameters becomes `Int`, as property testers conventionally do. Left as a
+        // variable, nothing chose the type to generate — `pick { xs: ['a] }` checked
+        // clean and every row died at run time asking for a dictionary for `'a`.
+        val freeVars = declaredFields.values.flatMap { com.mezze.language.ast.solving.collectFreeTypeVars(it) }.toSet()
+        val atInt = com.mezze.language.ast.solving.Substitution(freeVars.associateWith { MezzeType.IntType })
+        val fields = declaredFields.mapValues { (_, t) -> atInt.apply(t) }
 
         // S-21: the function's own `match` arms are the list of shapes worth
         // generating. Read here because this is where the typed declaration is in
