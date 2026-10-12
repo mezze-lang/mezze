@@ -4,7 +4,6 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.utilities.CyclicAssumption;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -155,11 +154,11 @@ public final class HandlerChainRegistry {
     // Handler-chain-stable assumptions.
     //
     // Three levels:
-    //   1. Per-effect CyclicAssumption — keyed by effect hash. Invalidated
+    //   1. Per-effect StabilityAssumption — keyed by effect hash. Invalidated
     //      only when a handler for THAT specific effect is pushed/popped.
     //      Used by PerformD and PerformMutMutateAct so that pushing a
     //      Console handler doesn't invalidate cached Mut specializations.
-    //   2. Global CyclicAssumption — invalidated on ANY handler push/pop.
+    //   2. Global StabilityAssumption — invalidated on ANY handler push/pop.
     //      Used by EffectBinding (resume/abort singletons depend on the
     //      entire chain being empty, not just one effect's handler).
     //   3. Single-threaded-effects Assumption — see below. Neither (1) nor
@@ -167,11 +166,12 @@ public final class HandlerChainRegistry {
     //      the caches they guard live on shared nodes.
     // ----------------------------------------------------------------
 
-    private static final CyclicAssumption HANDLER_CHAIN_STABLE =
-        new CyclicAssumption("handler-chain-stable");
+    // Both give up after repeated churn — see StabilityAssumption.
+    private static final StabilityAssumption HANDLER_CHAIN_STABLE =
+        new StabilityAssumption("handler-chain-stable");
 
     private static final java.util.concurrent.ConcurrentHashMap<
-            com.mezze.language.typedast.Hash, CyclicAssumption> EFFECT_ASSUMPTIONS =
+            com.mezze.language.typedast.Hash, StabilityAssumption> EFFECT_ASSUMPTIONS =
         new java.util.concurrent.ConcurrentHashMap<>();
 
     // ----------------------------------------------------------------
@@ -254,7 +254,7 @@ public final class HandlerChainRegistry {
      */
     @TruffleBoundary
     public static Assumption getHandlerChainStableAssumption() {
-        return HANDLER_CHAIN_STABLE.getAssumption();
+        return HANDLER_CHAIN_STABLE.get();
     }
 
     /**
@@ -265,15 +265,26 @@ public final class HandlerChainRegistry {
      */
     @TruffleBoundary
     public static Assumption getEffectStableAssumption(com.mezze.language.typedast.Hash effectHash) {
-        return getOrCreateEffectAssumption(effectHash).getAssumption();
+        return getOrCreateEffectAssumption(effectHash).get();
     }
 
-    private static CyclicAssumption getOrCreateEffectAssumption(
+    private static StabilityAssumption getOrCreateEffectAssumption(
             com.mezze.language.typedast.Hash effectHash) {
-        CyclicAssumption existing = EFFECT_ASSUMPTIONS.get(effectHash);
+        StabilityAssumption existing = EFFECT_ASSUMPTIONS.get(effectHash);
         if (existing != null) return existing;
         return EFFECT_ASSUMPTIONS.computeIfAbsent(effectHash,
-            h -> new CyclicAssumption("effect-stable-" + h.getHex().substring(0, 8)));
+            h -> new StabilityAssumption("effect-stable-" + h.getHex().substring(0, 8)));
+    }
+
+    /**
+     * Forget all churn, so cached dispatch is available again. For tests that
+     * exercise the cached path: the assumptions are process-global, and earlier
+     * tests in the same JVM can have pushed an effect past its churn limit.
+     */
+    @TruffleBoundary
+    public static void resetStabilityForTests() {
+        HANDLER_CHAIN_STABLE.reset();
+        for (StabilityAssumption a : EFFECT_ASSUMPTIONS.values()) a.reset();
     }
 
     /** Invalidate both per-effect and global assumptions. */
@@ -281,7 +292,7 @@ public final class HandlerChainRegistry {
         noteEffectStateThread();
         HANDLER_CHAIN_STABLE.invalidate();
         if (effectHash != null) {
-            CyclicAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
+            StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
             if (ea != null) ea.invalidate();
         }
     }

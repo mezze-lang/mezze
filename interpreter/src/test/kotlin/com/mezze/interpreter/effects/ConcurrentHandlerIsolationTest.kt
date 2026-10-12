@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 
@@ -31,6 +32,11 @@ import org.junit.jupiter.api.Timeout
  * path taken once it has fallen must resolve per thread.
  */
 class ConcurrentHandlerIsolationTest {
+
+    /** The cached path is what this file tests; earlier tests in the JVM may have
+     *  churned these effects past the point where it is still offered. */
+    @BeforeEach
+    fun resetStability() = HandlerChainRegistry.resetStabilityForTests()
 
     private val prelude = """
         use std::effects::async::{ Async, LoomAsync, await }
