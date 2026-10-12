@@ -187,11 +187,19 @@ object TypeAnnotationConverter {
 
             is ParsedFunctionType -> {
                 val effectRow = annotation.effects?.let { parsedRow ->
-                    config.validateEffects?.invoke(parsedRow)
+                    // A row stamped with what its names meant where it was written
+                    // (a type declaration, possibly imported) is resolved there, not
+                    // here. Only the names it does not cover are this scope's to check.
+                    val stamped = parsedRow.resolved.orEmpty()
+                    config.validateEffects?.invoke(parsedRow.copy(
+                        effects = parsedRow.effects.filter { it !in stamped },
+                        effectAnnotations = parsedRow.effectAnnotations.filter { it.name !in stamped },
+                    ))
                     val rowVar = if (parsedRow.isPolymorphic) {
                         sharedRowVar.getOrCreate()
                     } else null
-                    val hashes = config.resolveEffectHashes(parsedRow.effects.toSet())
+                    val hashes = config.resolveEffectHashes(parsedRow.effects.filter { it !in stamped }.toSet()) +
+                        stamped.filterKeys { it in parsedRow.effects }
                     if (config.convertEffectAnnotations) {
                         // Explicit `having` clauses first.
                         val annotated = parsedRow.effectAnnotations.map { ea ->

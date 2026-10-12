@@ -15,7 +15,7 @@ class PropertyCheckTest {
 
     private val head = """
         use std::property::{ check, Passed, Failed }
-        use std::effects::sample::{ Sample, Sampler }
+        use std::effects::sample::{ Sampler }
         use std::abilities::arbitrary::{ Arbitrary }
 
         let ints: Sampler Int = {} -> Arbitrary.arbitrary {}

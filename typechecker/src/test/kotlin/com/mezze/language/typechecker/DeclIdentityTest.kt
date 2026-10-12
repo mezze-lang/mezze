@@ -7,6 +7,7 @@ import com.mezze.language.typedast.TypedModule
 import com.mezze.language.typedast.TypedTypeDecl
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -251,5 +252,24 @@ class DeclIdentityTest {
             assertNotEquals(before, after, "hydrated `mid` (sourceIdentity=${stored.sourceIdentity?.hex?.take(8)}) was reused stale")
         }
     }
-}
 
+    @Test
+    fun `an imported alias means what its names meant where it was declared`() {
+        // `Ticker` mentions `Tick`, which the importer never imports. The alias's
+        // row must resolve `Tick` in `lib`, where it was written — it used to be
+        // looked up here and fail ("Effect `Tick` is not defined or not imported").
+        writeModule("lib", """
+            effect Tick where {
+              tick: {} -> Int <Tick>
+            }
+
+            pub type Ticker = {} -> Int <Tick>
+        """)
+        val result = check("""
+            use lib::{ Ticker }
+
+            pub let call_it = { f: Ticker } -> 1
+        """)
+        assertTrue(result.typedModule != null)
+    }
+}

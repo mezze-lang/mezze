@@ -112,8 +112,34 @@ class IdentityGroup(val modules: List<ParsedModule>) {
             }
         }
 
+        // A type declaration's effect rows record what their names mean HERE, so
+        // the declaration means the same thing wherever it is expanded.
+        fun effectIn(m: Int, written: String): Hash? {
+            val parts = written.split("::")
+            val qualifier = parts.dropLast(1).takeIf { it.isNotEmpty() }
+            val name = parts.last()
+            val own = if (qualifier == null) locals[m].byName[RefKind.EFFECT to name] else null
+            return when (val r = if (own != null) Referent.Pending(own) else scopes[m].resolve(RefKind.EFFECT, qualifier, name)) {
+                is Referent.Known -> r.hash
+                is Referent.Pending -> identity[r.node]
+                null -> null
+            }
+        }
+        fun stampRows(m: Int, t: ParsedTypeAnnotation): ParsedTypeAnnotation = t.transformDeep { node ->
+            val row = (node as? ParsedFunctionType)?.effects ?: return@transformDeep node
+            node.copy(effects = row.copy(resolved = row.allEffectNames.mapNotNull { n -> effectIn(m, n)?.let { n to it } }.toMap()))
+        }
+
         return modules.mapIndexed { m, mod ->
-            mod.copy(decls = mod.decls.mapIndexed { i, d -> withIdentity(d, identity[offsets[m] + i]) })
+            mod.copy(decls = mod.decls.mapIndexed { i, d ->
+                val withRows = if (d is ParsedTypeDecl) d.copy(definition = when (val def = d.definition) {
+                    is ParsedTypeAliasDef -> def.copy(aliasedType = stampRows(m, def.aliasedType))
+                    is ParsedNewtypeDef -> def.copy(wrappedType = stampRows(m, def.wrappedType))
+                    is ParsedRecordDef -> def.copy(fields = def.fields.map { it.copy(type = stampRows(m, it.type)) })
+                    is ParsedVariantDef -> def.copy(constructors = def.constructors.map { c -> c.copy(dataType = c.dataType?.let { stampRows(m, it) }) })
+                }) else d
+                withIdentity(withRows, identity[offsets[m] + i])
+            })
         }
     }
 

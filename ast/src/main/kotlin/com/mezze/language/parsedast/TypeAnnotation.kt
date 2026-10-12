@@ -148,7 +148,15 @@ data class ParsedEffectRow(
     val effectAnnotations: List<ParsedEffectAnnotation> = emptyList(),
     val isPolymorphic: Boolean = false,
     val isPerformed: Boolean = false,
-    val loc: Loc
+    val loc: Loc,
+    /**
+     * What each effect name meant WHERE THE ROW WAS WRITTEN, by identity — set
+     * when the row is part of a type declaration and its module is stamped
+     * (DeclIdentity). A type declaration is expanded wherever it is used, and
+     * `type Sampler 'a = {} -> 'a <Sample>` used from another module must still
+     * mean the declaring module's `Sample`. Null for a row nobody stamped.
+     */
+    val resolved: Map<String, com.mezze.language.typedast.Hash>? = null,
 ) {
     val allEffectNames: Set<String>
         get() = effects.toSet() + effectAnnotations.map { it.name }.toSet()
