@@ -8,7 +8,6 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.util.receiverTypeName as resolveReceiverTypeName
-import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 
 internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
     if (methodType !is MezzeType.FunctionType) return methodType
@@ -476,58 +475,12 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         fieldFilteredAbilities
     }
 
-    // Receiver-driven ability disambiguation: when two abilities share an op
-    // name (e.g. the pure `Sized.size` and the effectful `SizedMut.size`) the
-    // pick above still leaves both, and the consumer below would take
-    // `.first()` — i.e. dispatch by load order, then error because the
-    // receiver's type only implements the OTHER ability. Instead, when the
-    // receiver's concrete type name is known, keep only the abilities that
-    // actually have an impl targeting that type. Structural — keys on the
-    // impl registry's target types, never on the ability name. Only narrows
-    // when the survivor set is non-empty; if none match (receiver type has no
-    // impl for any candidate) we leave the set as-is so the downstream
-    // AbilityRequired constraint produces the normal "does not implement"
-    // error rather than silently vanishing.
-    var concreteReceiverForAmbiguity: MezzeType? = null
-    val implFilteredAbilities = if (filteredMatchingAbilities.size > 1) {
-        val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
-            ?.also { concreteReceiverForAmbiguity = it }
-        if (concreteReceiver != null) {
-            // NARROWS (never finalizes) a >1 ability candidate set by matching the
-            // receiver against each impl's target ANNOTATION, and only when the
-            // survivor set is non-empty — a downstream AbilityRequired constraint
-            // then validates.
-            //
-            // This used to test `receiverTypeName in it.targetTypes`, a membership
-            // check over RENDERED names, and it was the SAME bug as the one the
-            // post-solve pass carried: the renderings do not agree. A `Seq 'a`
-            // receiver names itself `Seq` while `impl Sized for Seq 'a` stores its
-            // target as `Seq_a`, so the check failed for EVERY candidate, the
-            // narrowing fell through to the unnarrowed set, and the consumer below
-            // took `.first()` — dispatch by LOAD ORDER between the pure
-            // `Sized.size` and the effectful `SizedMut.size`, on a receiver that
-            // cannot implement the second at all.
-            //
-            // MEASURED: 40 call sites reached this with >1 survivor; 33 of them
-            // were exactly `receiver=Seq, [Sized, SizedMut]` and narrow to `Sized`
-            // once the comparison can see the receiver. The remaining 7 have a
-            // polymorphic receiver and are left alone on purpose — there the
-            // signature's ability constraint is what decides, not this.
-            val implMatches = filteredMatchingAbilities.filter { (abilityName, _) ->
-                context.typingContext.getAbilityImpls(abilityName).any { impl ->
-                    val target = impl.targetTypeAnnotations?.firstOrNull() ?: return@any false
-                    TypeAnnotationMatcher.typeMatchesAnnotation(
-                        concreteReceiver, target, emptyMap(), impl.typeVars, mutableMapOf()
-                    )
-                }
-            }
-            if (implMatches.isNotEmpty()) implMatches else filteredMatchingAbilities
-        } else {
-            filteredMatchingAbilities
-        }
-    } else {
-        filteredMatchingAbilities
-    }
+    // At most one ability in scope declares an operation name — two are rejected at
+    // the second declaration (AbilityValidator.validateNoSharedOperationNames). The
+    // receiver-driven narrowing that used to choose between same-op abilities here
+    // was measured at ZERO firings across every suite once that rule landed, and is
+    // gone; more than one candidate is reported below, never resolved by order.
+    val implFilteredAbilities = filteredMatchingAbilities
 
     if (builtInMatches.size == 1 && implFilteredAbilities.isEmpty()) {
         val abilityName = builtInMatches.first()
@@ -556,34 +509,17 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             loc = expr.loc
         ))
     } else if (implFilteredAbilities.isNotEmpty()) {
-        // Two DISTINCT abilities declaring this method name, both with an impl for
-        // a receiver whose type is KNOWN, and nothing at the call site saying
-        // which. That is the author's ambiguity and there is no rule that resolves
-        // it: the consumer below takes `.first()`, which is the impl registry's
-        // iteration order — a different answer for the same program depending on
-        // load order.
-        //
-        // Only when the receiver is CONCRETE. A polymorphic receiver leaves
-        // several candidates on purpose: the narrowing above has nothing to match
-        // against yet, and the signature's own ability constraint is what decides.
-        // MEASURED: 40 call sites reached here with more than one survivor, 33 of
-        // them a name-rendering bug now fixed; the remaining 7 are all polymorphic
-        // receivers and must NOT error. On a concrete receiver the count is ZERO,
-        // so this rejects nothing that exists today — it closes the door rather
-        // than moving anyone out.
-        if (concreteReceiverForAmbiguity != null && implFilteredAbilities.size > 1) {
-            val names = implFilteredAbilities.map { it.first }.distinct()
-            if (names.size > 1) {
-                val receiverLabel = resolveReceiverTypeName(concreteReceiverForAmbiguity) ?: "this receiver"
-                throw TypeCheckError(
-                    message = "`$methodName` is declared by more than one ability that " +
-                        "`$receiverLabel` implements: ${names.joinToString(" and ")}. " +
-                        "Nothing here says which one you mean.",
-                    loc = expr.loc,
-                    code = ErrorCode.T0216_AMBIGUOUS_DISPATCH,
-                    hints = names.map { "write `$it.$methodName { it = … }` to pick $it" },
-                )
-            }
+        // More than one ability offering this method name cannot be declared in
+        // one scope; if it arrives anyway, say so rather than pick by load order.
+        val names = implFilteredAbilities.map { it.first }.distinct()
+        if (names.size > 1) {
+            throw TypeCheckError(
+                message = "`$methodName` is declared by more than one ability: ${names.joinToString(" and ")}. " +
+                    "Nothing here says which one you mean.",
+                loc = expr.loc,
+                code = ErrorCode.T0216_AMBIGUOUS_DISPATCH,
+                hints = names.map { "write `$it.$methodName { it = … }` to pick $it" },
+            )
         }
         val (abilityName, rawMethodType) = implFilteredAbilities.first()
         resolvedAbilityName = abilityName
@@ -802,10 +738,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     //      "rebuild post-solve" — moving the PICK gains no deletion (the #358
     //      finding), and the fresh-tyvar / constraint-graph context that produces
     //      the AbilityRequired constraints exists ONLY at gen time.
-    // Same-op ability collisions (e.g. Sized.size vs SizedMut.size) are decided by
-    // the call's EFFECT signature / annotation, NOT by receiver type identity —
-    // DispatchResolver.resolveBucket explicitly DEFERS them (records no Resolution)
-    // for exactly this reason. Keep this boundary.
     val methodCallTypeArgs: List<MezzeType> = listOf(receiverConstraintType)
     val methodCallInfo = ConstraintResult.MethodCallInfo(
         abilityName = resolvedAbilityName,
