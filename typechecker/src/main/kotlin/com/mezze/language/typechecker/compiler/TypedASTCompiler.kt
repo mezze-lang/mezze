@@ -239,6 +239,15 @@ class TypedASTCompiler(
      */
     private val localFnAliases = mutableMapOf<String, Hash>()
 
+    /**
+     * Do-block `let` name → hash of a LOCAL lambda whose own arrow carries `with`
+     * constraints. Such a lambda takes its dictionaries as PARAMETERS, like a
+     * top-level constrained function, and every call through the name injects
+     * them for that call's types (see [ownDictMethodsOf]). Scoped with the block
+     * like [localFnAliases].
+     */
+    private val localConstrainedLambdas = mutableMapOf<String, Hash>()
+
     private data class RecursiveLetInfo(
         val hash: Hash,
         val captureKinds: List<SlotKind>
@@ -1884,50 +1893,7 @@ class TypedASTCompiler(
                     // resolved ability op functions into the argument record.
                     val calleeDictMethods = dictMethodsForHash[calleeHash]
                     if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
-                        val rawFnType = fn.type as? FunctionType
-                        val rawConstraintTypeArgs = (rawFnType?.abilityConstraints
-                            ?.flatMap { it.typeArgs }
-                            ?.map { substitution.apply(it) }
-                            ?: emptyList())
-                            // KEY-constrained callees (min_by's `with Ord 'b` where 'b is
-                            // f's RETURN type): the constraint arg stays a generalized var
-                            // the module substitution can't solve. Bind it by unifying the
-                            // callee's param type against the actual arg type ('b -> K),
-                            // otherwise resolution falls to the arg types where the xs
-                            // container falsely matches the blanket `impl Ord for ['a]`.
-                            .let { bindConstraintArgsViaArg(rawFnType, expr.arg, it) }
-                            // …and from the RETURN, for a constraint variable the
-                            // parameters never mention (`{} with Zero 'a -> 'a`).
-                            .let { bindConstraintArgsViaReturn(rawFnType, expr.type, it) }
-                        val structuralConstraintTypes = structuralConstraintTypesFor(calleeHash, expr)
-                        val constraintTypes =
-                            if (structuralConstraintTypes.isNotEmpty()) structuralConstraintTypes
-                            else rawConstraintTypeArgs.filter { it !is VarType }
-                        // When ALL constraint type args are still VarType after substitution,
-                        // we're inside a generic function body calling another generic function.
-                        // In this case, prefer forwarding dicts from the caller over resolving
-                        // from concrete types (which may match a wrong blanket container impl).
-                        // A structural binding above is a concrete answer, so it overrides this.
-                        val calleeConstraintsAreGeneric = structuralConstraintTypes.isEmpty() &&
-                            rawConstraintTypeArgs.isNotEmpty() && rawConstraintTypeArgs.all { it is VarType }
-                        // Every callee type var → its type here: an impl op binds through
-                        // its instance head against the arg record's fields, a generic let
-                        // through its declared arrow against the actual arg type.
-                        val calleeVarBindings: Map<String, MezzeType> = run {
-                            val argTypes = (expr.arg as? TypedRecord)?.entries
-                                ?.filterIsInstance<TypedRecordEntry.Field>()
-                                ?.map { substitution.apply(it.value.type) } ?: emptyList()
-                            // S-3: a receiver-less op's arg record is `{}`, so there are no
-                            // argument types to bind through. Its PRODUCED type is the only
-                            // thing the instance head can match, same as above.
-                            val headTypes = argTypes.ifEmpty { listOf(substitution.apply(expr.type)) }
-                            val fromImpl = bindImplVarsForOp(calleeHash, headTypes)
-                            if (fromImpl.isNotEmpty()) return@run fromImpl
-                            val fromArrow = HashMap<String, MezzeType>()
-                            rawFnType?.let { harvestVarBindings(it.paramType, substitution.apply(expr.arg.type), fromArrow) }
-                            fromArrow
-                        }
-                        val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src, calleeVarBindings)
+                        val enrichedArgIR = dictEnrichedArg(calleeHash, fn, expr, argIR, calleeDictMethods, src)
                         census.byHashDictInject++
                         emitCallDirect(calleeHash, enrichedArgIR, expr.isTailCall, src)
                     } else if (isNonLambdaUserLet(calleeHash)) {
@@ -2019,6 +1985,15 @@ class TypedASTCompiler(
                     // CONSTRAINED callee would leak the op into a value slot at runtime.
                     // Route through the alias target's ByHash path (dict injection +
                     // mono rewrite) exactly like a direct call. See [localFnAliases].
+                    // A constrained LOCAL lambda: inject its dictionaries for this
+                    // call's types, then call the closure itself — its captures
+                    // live in the value, so a direct call by hash would drop them.
+                    localConstrainedLambdas[fn.name]?.let { ownHash ->
+                        val methods = dictMethodsForHash[ownHash]
+                            ?: throw IllegalStateException("constrained local lambda '${fn.name}' has no registered dictionaries")
+                        census.byHashDictInject++
+                        return emitCallIndirect(fnIR, dictEnrichedArg(ownHash, fn, expr, argIR, methods, src), expr.isTailCall, src)
+                    }
                     val aliasTargetHash = localFnAliases[fn.name]
                     val aliasDictMethods = aliasTargetHash?.let { dictMethodsForHash[it] }
                     if (aliasTargetHash != null && aliasDictMethods != null && aliasDictMethods.isNotEmpty()) {
@@ -2133,7 +2108,7 @@ class TypedASTCompiler(
      * Runs after the argument harvest and only fills variables it left unbound, so
      * no call site that already resolves changes what it resolves to.
      */
-    private fun bindConstraintArgsViaReturn(
+    internal fun bindConstraintArgsViaReturn(
         rawFnType: FunctionType?,
         callType: MezzeType,
         rawArgs: List<MezzeType>,
@@ -2152,7 +2127,7 @@ class TypedASTCompiler(
         }
     }
 
-    private fun bindConstraintArgsViaArg(
+    internal fun bindConstraintArgsViaArg(
         rawFnType: FunctionType?,
         argExpr: TypedExpr,
         rawArgs: List<MezzeType>
@@ -2281,7 +2256,7 @@ class TypedASTCompiler(
         }
     }
 
-    private fun injectDictFields(
+    internal fun injectDictFields(
         argIR: NodeIR,
         argExpr: TypedExpr,
         dictMethods: Set<String>,
@@ -3265,7 +3240,11 @@ class TypedASTCompiler(
      *  layout. Salting with the enclosing spec hash keeps every version distinct;
      *  outside spec compilation the plain hash is unchanged (stable stdlib
      *  prelowering, recursive-let self-references, closure keying). */
-    private fun saltedLambdaHash(expr: TypedExpr, dictCaptures: List<Pair<String, Int>> = emptyList()): Hash {
+    private fun saltedLambdaHash(
+        expr: TypedExpr,
+        dictCaptures: List<Pair<String, Int>> = emptyList(),
+        ownDicts: Set<String> = emptySet(),
+    ): Hash {
         val base = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
         val salt = specLambdaSalt
         // NOT salted by the enclosing function, though `sorted_set.mz` holds eight
@@ -3278,7 +3257,7 @@ class TypedASTCompiler(
         // rightly rejects. Tried for BUG 7 and reverted: it separated the eight
         // and changed no behaviour, so the collision is not what picks the wrong
         // comparator.
-        if (salt == null && dictCaptures.isEmpty()) return base
+        if (salt == null && dictCaptures.isEmpty() && ownDicts.isEmpty()) return base
         val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
         b.append("spec_lambda")
         b.append(base.hex)
@@ -3301,10 +3280,17 @@ class TypedASTCompiler(
         for ((name, _) in dictCaptures) {
             b.append(name)
         }
+        // Dictionary PARAMETERS change the function's arity, so they are part of
+        // its identity for the same reason: the hash is type-blind, and the same
+        // text unconstrained takes no such parameters.
+        if (ownDicts.isNotEmpty()) {
+            b.append("own_dict_params")
+            for (name in ownDicts.sorted()) b.append(name)
+        }
         return Hash(b.build().toFullHexString())
     }
 
-    private fun compileLambda(expr: TypedLambda, src: SourceInfo): NodeIR {
+    private fun compileLambda(expr: TypedLambda, src: SourceInfo, ownDicts: Set<String> = emptySet()): NodeIR {
         // Save parent's capture info BEFORE overwriting for the child.
         // This is needed to resolve captures from grandparent scope:
         // e.g., `outer = {a} -> middle = {b} -> inner = {} -> a`
@@ -3329,7 +3315,9 @@ class TypedASTCompiler(
         // lambda's own type AND whether the parent scope carries dicts.
         val parentHasDicts = currentParamNames.any { it.startsWith("__dict_") }
         val lambdaConstrained = parentHasDicts || arrowHasAbilityConstraint(expr.type)
-        scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
+        // A lambda with its OWN dictionary parameters captures none: its callers
+        // supply every dictionary it needs.
+        if (ownDicts.isEmpty()) scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
         // Only keep dicts the parent actually has — otherwise we'd try to
         // capture a slot that doesn't exist.
         val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
@@ -3380,7 +3368,8 @@ class TypedASTCompiler(
         currentCaptureNames = captureNameMap
 
         // Extract lambda as a separate FunctionIR
-        val lambdaHash = saltedLambdaHash(expr, dictsToCapture)
+        val lambdaHash = saltedLambdaHash(expr, dictsToCapture, ownDicts)
+        if (ownDicts.isNotEmpty()) dictMethodsForHash[lambdaHash] = ownDicts
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
             dictsToCapture.map { it.first to SlotKind.OBJECT }
         val fnIR = compileFunctionBody(
@@ -3455,6 +3444,7 @@ class TypedASTCompiler(
         val savedLocalMappings = localsByName.toMap()
         val savedRecursiveLets = recursiveLetLambdas.toMap()
         val savedFnAliases = localFnAliases.toMap()
+        val savedConstrainedLambdas = localConstrainedLambdas.toMap()
         val savedSlotConcreteTypes = slotConcreteTypes.toMap()
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
@@ -3472,8 +3462,16 @@ class TypedASTCompiler(
                     // RECURSIVE LET REGISTRATION: If this is a recursive let-bound lambda,
                     // pre-compute its hash and register so compileVar can resolve self-references
                     // to MakeLambdaIR(self_hash, self_captures) instead of ReadCaptureIR.
+                    // Registered BEFORE the body compiles, so a recursive call inside
+                    // it injects (forwards) its own dictionaries too.
+                    val ownDicts = ownDictMethodsOf(stmtValue)
+                    if (ownDicts.isNotEmpty()) {
+                        localConstrainedLambdas[stmt.name] = saltedLambdaHash(stmtValue, ownDicts = ownDicts)
+                    } else {
+                        localConstrainedLambdas.remove(stmt.name)
+                    }
                     if (stmt.isRecursive && stmtValue is TypedLambda) {
-                        val lambdaHash = saltedLambdaHash(stmtValue)
+                        val lambdaHash = saltedLambdaHash(stmtValue, ownDicts = ownDicts)
                         val captureKinds = stmtValue.captures.map { typeToSlotKind(it.type) }
                         recursiveLetLambdas[stmt.name] = RecursiveLetInfo(lambdaHash, captureKinds)
                     }
@@ -3517,7 +3515,7 @@ class TypedASTCompiler(
                             }
                             MakeLambdaIR(topLevelDecl.hash, captures, locToSourceInfo(stmt.loc))
                         } else {
-                            compileLambda(stmtValue, locToSourceInfo(stmt.loc))
+                            compileLambda(stmtValue, locToSourceInfo(stmt.loc), ownDicts)
                         }
                     } else {
                         compileExpr(stmtValue)
@@ -3534,6 +3532,8 @@ class TypedASTCompiler(
         recursiveLetLambdas.putAll(savedRecursiveLets)
         localFnAliases.clear()
         localFnAliases.putAll(savedFnAliases)
+        localConstrainedLambdas.clear()
+        localConstrainedLambdas.putAll(savedConstrainedLambdas)
         slotConcreteTypes.clear()
         slotConcreteTypes.putAll(savedSlotConcreteTypes)
         return BlockIR(stmts, resultIR, src)

@@ -275,7 +275,10 @@ internal fun TypedASTCompiler.scanExprForDictFunctionCalls(expr: TypedExpr, out:
         is TypedBlock -> {
             for (s in expr.statements) {
                 when (s) {
-                    is TypedStatement.Let -> scanExprForDictFunctionCalls(s.value, out)
+                    // A lambda with its own dictionary PARAMETERS is supplied by its
+                    // call sites; its needs are not the enclosing function's.
+                    is TypedStatement.Let ->
+                        if (ownDictMethodsOf(s.value).isEmpty()) scanExprForDictFunctionCalls(s.value, out)
                     is TypedStatement.Expr -> scanExprForDictFunctionCalls(s.expr, out)
                 }
             }
@@ -854,7 +857,10 @@ internal fun TypedASTCompiler.scanExprForVarTypeMethods(
         is TypedBlock -> {
             for (s in expr.statements) {
                 when (s) {
-                    is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out, arrowIsConstrained, paramEnv)
+                    // See scanExprForDictFunctionCalls: a lambda with its own
+                    // dictionary parameters is supplied by its call sites.
+                    is TypedStatement.Let ->
+                        if (ownDictMethodsOf(s.value).isEmpty()) scanExprForVarTypeMethods(s.value, out, arrowIsConstrained, paramEnv)
                     is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out, arrowIsConstrained, paramEnv)
                 }
             }
@@ -1008,4 +1014,93 @@ internal fun TypedASTCompiler.structuralConstraintTypesFor(calleeHash: Hash, exp
         bindings[name]?.takeIf { it !is VarType && !containsVarType(it) }
             ?: return emptyList()
     }
+}
+
+/**
+ * [argIR] with the dictionaries [calleeHash] needs injected, resolved for THIS
+ * call: constraint variables bound through the arguments, then the return,
+ * then structurally; forwarded from the caller when all of them are still the
+ * caller's own variables. One chain for every kind of callee — a top-level
+ * function called by hash and a constrained LOCAL lambda called through its
+ * closure resolve their dictionaries identically.
+ */
+internal fun TypedASTCompiler.dictEnrichedArg(
+    calleeHash: Hash,
+    fn: TypedExpr,
+    expr: TypedCall,
+    argIR: NodeIR,
+    calleeDictMethods: Set<String>,
+    src: SourceInfo,
+): NodeIR {
+    val rawFnType = fn.type as? MezzeType.FunctionType
+    val rawConstraintTypeArgs = (rawFnType?.abilityConstraints
+        ?.flatMap { it.typeArgs }
+        ?.map { substitution.apply(it) }
+        ?: emptyList())
+        // KEY-constrained callees (min_by's `with Ord 'b` where 'b is
+        // f's RETURN type): the constraint arg stays a generalized var
+        // the module substitution can't solve. Bind it by unifying the
+        // callee's param type against the actual arg type ('b -> K),
+        // otherwise resolution falls to the arg types where the xs
+        // container falsely matches the blanket `impl Ord for ['a]`.
+        .let { bindConstraintArgsViaArg(rawFnType, expr.arg, it) }
+        // …and from the RETURN, for a constraint variable the
+        // parameters never mention (`{} with Zero 'a -> 'a`).
+        .let { bindConstraintArgsViaReturn(rawFnType, expr.type, it) }
+    val structuralConstraintTypes = structuralConstraintTypesFor(calleeHash, expr)
+    val constraintTypes =
+        if (structuralConstraintTypes.isNotEmpty()) structuralConstraintTypes
+        else rawConstraintTypeArgs.filter { it !is MezzeType.VarType }
+    // When ALL constraint type args are still VarType after substitution,
+    // we're inside a generic function body calling another generic function.
+    // In this case, prefer forwarding dicts from the caller over resolving
+    // from concrete types (which may match a wrong blanket container impl).
+    // A structural binding above is a concrete answer, so it overrides this.
+    val calleeConstraintsAreGeneric = structuralConstraintTypes.isEmpty() &&
+        rawConstraintTypeArgs.isNotEmpty() && rawConstraintTypeArgs.all { it is MezzeType.VarType }
+    // Every callee type var → its type here: an impl op binds through
+    // its instance head against the arg record's fields, a generic let
+    // through its declared arrow against the actual arg type.
+    val calleeVarBindings: Map<String, MezzeType> = run {
+        val argTypes = (expr.arg as? TypedRecord)?.entries
+            ?.filterIsInstance<TypedRecordEntry.Field>()
+            ?.map { substitution.apply(it.value.type) } ?: emptyList()
+        // S-3: a receiver-less op's arg record is `{}`, so there are no
+        // argument types to bind through. Its PRODUCED type is the only
+        // thing the instance head can match, same as above.
+        val headTypes = argTypes.ifEmpty { listOf(substitution.apply(expr.type)) }
+        val fromImpl = bindImplVarsForOp(calleeHash, headTypes)
+        if (fromImpl.isNotEmpty()) return@run fromImpl
+        val fromArrow = HashMap<String, MezzeType>()
+        rawFnType?.let { harvestVarBindings(it.paramType, substitution.apply(expr.arg.type), fromArrow) }
+        fromArrow
+    }
+    return injectDictFields(argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src, calleeVarBindings)
+}
+
+/**
+ * The dictionaries a do-block-bound lambda takes as its OWN parameters, or
+ * empty when it takes none. Only a lambda whose arrow carries `with`
+ * constraints qualifies: it is generalized over them, so each call
+ * instantiates them anew — one slot captured from the enclosing function
+ * could serve only one instantiation, and that function's callers know
+ * nothing of it. Its needs are what its body asks for directly plus what
+ * its callees need forwarded, the same two sources a top-level function's
+ * come from.
+ */
+internal fun TypedASTCompiler.ownDictMethodsOf(value: TypedExpr): Set<String> {
+    if (value !is TypedLambda) return emptySet()
+    val arrow = value.type as? MezzeType.FunctionType ?: return emptySet()
+    // A constraint still holding a free variable is live — the test
+    // `declaredDictMethods` uses. `arrowHasAbilityConstraint` asks about the
+    // PARAMETER alone and so misses `{} with Default 'a -> 'a`, whose instance
+    // only the result decides. Matching the variable against the arrow's own
+    // param/result would be wrong too: the constraint carries the annotation's
+    // `'a` and the result the body's, two TypeVars the module substitution does
+    // not link for a generalized local. Over-reporting cannot add parameters:
+    // they come from what the body ASKS for, below.
+    val live = arrow.abilityConstraints.any { c -> c.typeArgs.any { containsVarTypeDeep(substitution.apply(it)) } }
+    if (!live) return emptySet()
+    return scanExprForVarTypeMethodCalls(value.body, arrowIsConstrained = true) +
+        scanExprForCallsToDictFunctions(value.body)
 }

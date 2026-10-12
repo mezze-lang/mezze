@@ -347,7 +347,7 @@ internal fun TypedAstBuilder.buildStaticAbilityOpCall(
     val classVar = methodInfo.typeArgs.firstOrNull()
         ?: unreachedPosition("receiver-less ability op with no class variable recorded")
     val dispatchType = substitution.apply(classVar)
-    if (abilityName != null) demandDictionary(abilityName, abilityHash, listOf(dispatchType), loc)
+    if (abilityName != null) demandDictionary(abilityName, abilityHash, listOf(dispatchType), loc, opName = methodInfo.methodName)
     val producedName = com.mezze.language.typechecker.util.receiverTypeName(dispatchType)
     val implEntry = if (abilityHash != null && producedName != null) {
         abilityImpls.entries.firstOrNull { (_, info) ->

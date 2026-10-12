@@ -138,13 +138,15 @@ class TypedAstBuilder(
         val calleeVars: Set<Int>,
         /** Variables the call's RESULT carries in its own arrows' constraints. */
         val carried: Set<Int>,
+        /** The operation, when the demand is a receiver-less op call itself. */
+        val opName: String?,
     )
     private val dictDemands = mutableListOf<DictDemand>()
 
     /**
      * Record that the call at [loc] needs [abilityName] at [args]. Judged when the
-     * outermost lambda finishes, once every enclosing lambda's type is known. A
-     * demand outside any lambda is a top-level VALUE, which nothing calls.
+     * outermost lambda (or top-level value, see [buildTopLevelValue]) finishes,
+     * once every enclosing lambda's type is known.
      */
     internal fun demandDictionary(
         abilityName: String,
@@ -153,19 +155,46 @@ class TypedAstBuilder(
         loc: Loc,
         calleeVars: Set<Int> = emptySet(),
         result: MezzeType? = null,
+        opName: String? = null,
     ) {
         val frame = dictFrame ?: return
         if (args.none { it.holdsTypeVar() }) return
         val carried = HashSet<Int>()
+        // Every arrow ANYWHERE in the result — `make_accumulator { base = 10 }`
+        // returns a RECORD of functions, each holding its own constraint.
         fun carriedBy(t: MezzeType) {
-            if (t !is MezzeType.FunctionType) return
-            t.abilityConstraints.forEach { c ->
-                c.typeArgs.forEach { a -> collectFreeTypeVars(substitution.apply(a)).mapTo(carried) { it.id } }
+            if (t is MezzeType.FunctionType) {
+                t.abilityConstraints.forEach { c ->
+                    c.typeArgs.forEach { a -> collectFreeTypeVars(substitution.apply(a)).mapTo(carried) { it.id } }
+                }
             }
-            carriedBy(substitution.apply(t.returnType))
+            t.anyChild { child -> carriedBy(substitution.apply(child)); false }
         }
         result?.let { carriedBy(substitution.apply(it)) }
-        dictDemands.add(DictDemand(abilityName, abilityHash, args.map { substitution.apply(it) }, loc, frame, calleeVars, carried))
+        dictDemands.add(DictDemand(abilityName, abilityHash, args.map { substitution.apply(it) }, loc, frame, calleeVars, carried, opName))
+    }
+
+    /**
+     * A top-level declaration's value. A lambda judges its own demands when it
+     * finishes; anything else is a VALUE — evaluated once, called by nobody — so
+     * it gets a root frame in which NOTHING is visible: no caller exists to
+     * supply a dictionary at any variable. Lambdas nested inside it chain onto
+     * that frame and are judged with it.
+     */
+    private fun buildTopLevelValue(value: ParsedExpr, file: String, type: MezzeType): TypedExpr {
+        if (value is ParsedLambda) return buildExpr(value, file, type)
+        val frame = DictFrame(null)
+        dictFrame = frame
+        val built = try {
+            buildExpr(value, file, type)
+        } catch (e: Throwable) {
+            dictFrame = null
+            dictDemands.clear()
+            throw e
+        }
+        dictFrame = null
+        judgeDictDemands()
+        return built
     }
 
     private fun implsForDemand(name: String, hash: Hash?): List<TypingContext.AbilityImplInfo> =
@@ -206,10 +235,17 @@ class TypedAstBuilder(
                 )
             ) continue
             val shown = d.args.joinToString(" ") { com.mezze.language.ast.prettyPrintType(it) }
+            // The wording the compiler's own refusal (`abilityOpDictSlot`) and the
+            // static-op emit path already use, so one situation reads one way.
+            val what = d.opName?.let {
+                "'${d.abilityName}.$it' takes no receiver, so the type it produces is what chooses " +
+                    "the implementation — and nothing here determines that type"
+            } ?: "'${d.abilityName}' is needed at `$shown`, and nothing here determines that type"
             throw com.mezze.language.typechecker.TypeCheckError(
-                message = "'${d.abilityName}' is needed at `$shown`, and nothing decides what its " +
-                    "type variable is: it appears in neither the parameters nor the result of any " +
-                    "enclosing function, so no caller can supply the implementation.",
+                message = "$what: `$shown` holds a type variable that appears in neither the parameters " +
+                    "nor the result of any enclosing function, so no caller can supply the implementation. " +
+                    "Say what the call produces (`let x: <Type> = …`), or declare the constraint on the " +
+                    "enclosing function so the caller supplies it (`{ … } with <Ability> 'a -> …`).",
                 loc = d.loc,
                 errorType = com.mezze.language.typechecker.ErrorType.CONSTRAINT_VIOLATION,
                 code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0215_AMBIGUOUS_ABILITY_TYPE,
@@ -473,7 +509,7 @@ class TypedAstBuilder(
                         "runs only on a module that type-checked, so it has one."
                 )
             val type = closeGeneratedRowVars(rawType)
-            val value = buildExpr(decl.value, file, type)
+            val value = buildTopLevelValue(decl.value, file, type)
 
             val destrHash = decl.identity
             val scheme = TypeScheme(emptyList(), emptyList(), type)
@@ -505,7 +541,7 @@ class TypedAstBuilder(
         val type = (closedType as? MezzeType.RecordType)
             ?.let { com.mezze.language.ast.adoptRecordAlias(it, closedRecordAliases) } ?: closedType
 
-        val value = buildExpr(decl.value, file, type)
+        val value = buildTopLevelValue(decl.value, file, type)
 
         identifierContext[name] = type
 

@@ -2,7 +2,6 @@ package com.mezze.interpreter
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 
 /**
@@ -32,7 +31,7 @@ class AmbiguousTypeVarDictTest {
         val message = runCatching { run(body) }.exceptionOrNull()?.message
             ?: "<returned a value instead of failing>"
         assertTrue(
-            "nothing decides what" in message,
+            "nothing here determines that type" in message,
             "$label: expected the check-time ambiguity error, got: $message",
         )
         assertTrue(
@@ -96,14 +95,7 @@ class AmbiguousTypeVarDictTest {
     /**
      * A helper generalized INSIDE a body owns its variable: each use instantiates
      * it, so the enclosing function's type need not mention it.
-     *
-     * The ambiguity rule gets this right — it does not reject. The program still
-     * fails at run time for a different, pre-existing reason: a LOCAL lambda gets
-     * no dictionary parameters of its own (`prescanForDictMethods` scans top-level
-     * declarations and impl operations only), and a call through a `Local`
-     * binding never injects one.
      */
-    @Disabled("open: local `with`-constrained lambdas are never passed a dictionary")
     @Test
     fun `a local generalized helper keeps its own variable`() = assertEquals(
         7L,
@@ -129,6 +121,37 @@ class AmbiguousTypeVarDictTest {
               xs.size {}
             count {}
         """),
+    )
+
+    /**
+     * A top-level VALUE is evaluated once and called by nobody, so no variable in
+     * it can ever be given a dictionary — not even one its own type mentions.
+     */
+    @Test
+    fun `a top-level value at an undetermined type is rejected`() {
+        val message = runCatching {
+            MezzeTestHelper.run(
+                """
+                use std::abilities::default::{ Default }
+                let z: 'a = Default.default {}
+                let main = {} -> 7
+                main {}
+                """.trimIndent(),
+            )
+        }.exceptionOrNull()?.message ?: "<returned a value instead of failing>"
+        assertTrue("nothing here determines that type" in message, "expected the ambiguity error, got: $message")
+    }
+
+    @Test
+    fun `a top-level value at a concrete type is untouched`() = assertEquals(
+        0L,
+        MezzeTestHelper.run(
+            """
+            use std::abilities::default::{ Default }
+            let z: Int = Default.default {}
+            z
+            """.trimIndent(),
+        ),
     )
 
     /** The rule must not touch a variable the CALLER decides. */

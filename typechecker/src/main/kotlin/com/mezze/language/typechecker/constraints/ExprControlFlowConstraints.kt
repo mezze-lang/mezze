@@ -609,6 +609,39 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     }
                 }
 
+                // A GENERALIZED local owns the obligations of its own value that sit on
+                // its quantified variables: they travel in its scheme, and every use
+                // instantiates and re-demands them ("Polymorphic instantiation of …").
+                // Left in the enclosing body as well, they leaked onto the ENCLOSING
+                // function's signature — `{} with Default 'a -> Str`, a constraint no
+                // caller can satisfy — and mono then "specialized" that function at
+                // the first use's type, so a second use at another type ran the
+                // first one's impl. Removed only where the scheme carries the same
+                // ability on that variable, so no obligation can be lost here.
+                if (letResult != null && localSolve != null) {
+                    val owned = letResult.contextBindings.values
+                        .filterIsInstance<TypingContext.Binding.Polymorphic>()
+                        .map { it.scheme }
+                        .filter { it.constraints.isNotEmpty() }
+                    if (owned.isNotEmpty()) {
+                        val localSubst = localSolve.solveResult.substitution
+                        val fromThisValue = exprResult.abilityConstraints.toHashSet()
+                        collector.abilityConstraints.removeAll { c ->
+                            if (c !in fromThisValue) return@removeAll false
+                            val v = (localSubst.apply(MezzeType.VarType(c.typeVar)) as? MezzeType.VarType)?.variable
+                                ?: return@removeAll false
+                            owned.any { scheme ->
+                                scheme.quantifiedVars.any { it.id == v.id } &&
+                                    scheme.constraints.any { sc ->
+                                        sc.typeParam == v.name &&
+                                            if (sc.abilityHash != null && c.abilityHash != null) sc.abilityHash == c.abilityHash
+                                            else sc.abilityName == c.abilityName
+                                    }
+                            }
+                        }
+                    }
+                }
+
                 val contextBindings = letResult?.contextBindings
                     ?: patternResult.bindings.map { (name, type) ->
                         val rawBound = if (stmt.pattern is ParsedVariablePattern) {
