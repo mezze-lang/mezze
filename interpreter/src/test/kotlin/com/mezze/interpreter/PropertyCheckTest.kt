@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test
 class PropertyCheckTest {
 
     private val head = """
-        use std::property::{ check, Passed, Failed }
+        use std::property::{ check, check_from, Passed, Failed }
         use std::effects::sample::{ Sampler }
         use std::abilities::arbitrary::{ Arbitrary }
 
@@ -98,5 +98,28 @@ class PropertyCheckTest {
         """)
         assertEquals("9223372036854775807", out)
     }
-}
 
+    @Test
+    fun `pinned inputs are checked first and a failure among them is reported as given`() {
+        // Fails only at 7 — a value no run of 50 seeded draws is likely to hit,
+        // and exactly the kind a branch plan pins.
+        val out = run("""
+            let main = {} -> match check_from { first = [0, 7, 100], gen = ints, holds = { x } -> x != 7, runs = 50, seed = 3 } is
+                Passed { runs } -> "passed $(runs.to_str {})"
+                Failed { input, original, shrinks } -> "failed at $(input.to_str {}) after $(shrinks.to_str {}) shrinks"
+            main {}
+        """)
+        assertEquals("failed at 7 after 0 shrinks", out)
+    }
+
+    @Test
+    fun `when every pinned input holds the drawn runs follow and the count includes both`() {
+        val out = run("""
+            let main = {} -> match check_from { first = [1, 2], gen = ints, holds = { x } -> x == x, runs = 50, seed = 3 } is
+                Passed { runs } -> "passed $(runs.to_str {})"
+                Failed { input, original, shrinks } -> "failed"
+            main {}
+        """)
+        assertEquals("passed 52", out)
+    }
+}

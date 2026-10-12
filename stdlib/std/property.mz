@@ -77,6 +77,23 @@ impl Sample for ReplayAt { draws: [Int], key: Int, size: Nat } where {
 pub let check: { gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
   { gen, holds, runs, seed } -> run_from { gen = gen, holds = holds, runs = runs, seed = seed, i = 0 }
 
+## [check], but first on each of `first`, in order: the values already known to
+## matter — one per branch of the code under test, say, as `mez sample` pins its
+## leading rows. A failure among them is reported as given, unshrunk: it was
+## chosen, not drawn, so there are no draws to simplify. A pass counts them.
+pub let check_from: { first: ['a], gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
+  { first, gen, holds, runs, seed } -> first_then_draw { first = first, gen = gen, holds = holds, runs = runs, seed = seed, i = 0 }
+
+let first_then_draw: { first: ['a], gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
+  { first, gen, holds, runs, seed, i } ->
+    match __native_seq_get { xs = first, i = i } is
+      Some { val } ->
+        if holds { x = val } then first_then_draw { first = first, gen = gen, holds = holds, runs = runs, seed = seed, i = i + 1 }
+        else Failed { input = val, original = val, shrinks = 0 }
+      None -> match check { gen = gen, holds = holds, runs = runs, seed = seed } is
+        Passed { runs = drawn } -> Passed { runs = drawn + i }
+        Failed { input, original, shrinks } -> Failed { input = input, original = original, shrinks = shrinks }
+
 let run_from: { gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
   { gen, holds, runs, seed, i } ->
     if i >= runs then Passed { runs = runs }

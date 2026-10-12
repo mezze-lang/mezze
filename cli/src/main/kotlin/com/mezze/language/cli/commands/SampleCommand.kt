@@ -134,7 +134,7 @@ class SampleCommand {
                 }
 
                 val unreached = compiled.sites.filter { it.id !in reached }
-                if (json) println(sampleJson(name, seed, rows, unreached, moduleFile))
+                if (json) println(sampleJson(name, seed, rows, unreached, moduleFile) { i -> target.branches.getOrNull(i)?.why })
                 else {
                     printSample(target, seed, rows)
                     SampleCoverageReport.lines(name, moduleFile.readLines(), compiled.sites, unreached).forEach { println(it) }
@@ -571,12 +571,15 @@ class SampleCommand {
      * — a consumer counting rows should see what was asked for, and the reason is the
      * finding.
      */
-    private fun sampleJson(
+    internal fun sampleJson(
         name: String,
         seed: Int,
         rows: List<RowOutcome>,
         unreached: List<com.mezze.language.truffleir.BranchCoverage.Site>,
         moduleFile: File,
+        /** Why row `i` exists — the branch it was pinned to reach — or null for a
+         *  drawn row. The table shows it; the data has to carry it too. */
+        whyOf: (Int) -> String?,
     ): String {
         fun part(v: WireValue?): String =
             if (v == null) "null"
@@ -588,12 +591,15 @@ class SampleCommand {
             append(",\"rows\":[")
             rows.forEachIndexed { i, outcome ->
                 if (i > 0) append(",")
+                val why = whyOf(i)?.takeIf { it.isNotBlank() }?.let { WireValueJson.quote(it) } ?: "null"
                 when (outcome) {
                     is RowOutcome.Ran ->
                         append("{\"args\":").append(part(outcome.args))
-                            .append(",\"result\":").append(part(outcome.result)).append("}")
+                            .append(",\"result\":").append(part(outcome.result))
+                            .append(",\"why\":").append(why).append("}")
                     is RowOutcome.Crashed ->
-                        append("{\"crashed\":").append(WireValueJson.quote(outcome.reason)).append("}")
+                        append("{\"crashed\":").append(WireValueJson.quote(outcome.reason))
+                            .append(",\"why\":").append(why).append("}")
                 }
             }
             append("],\"unreached\":[")
