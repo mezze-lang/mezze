@@ -312,7 +312,7 @@ public final class NativeDispatch extends MezzeNode {
             return n >= 0 ? MezzeVariant.some(n) : MezzeVariant.none();
         });
         HANDLERS.put("__native_int_pow", (r, c) ->
-            intPow(getLong(r, "base"), getLong(r, "exp")));
+            PrimitiveNatives.intPow(getLong(r, "base"), getLong(r, "exp")));
         HANDLERS.put("__native_int_gcd", (r, c) ->
             intGcd(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_lcm", (r, c) ->
@@ -331,19 +331,6 @@ public final class NativeDispatch extends MezzeNode {
         } catch (NumberFormatException e) {
             return MezzeVariant.none();
         }
-    }
-
-    private static long intPow(long base, long exp) {
-        if (exp < 0) return 0;
-        long result = 1;
-        while (exp > 0) {
-            if ((exp & 1) == 1) {
-                result = Math.multiplyExact(result, base);
-            }
-            base = Math.multiplyExact(base, base);
-            exp >>= 1;
-        }
-        return result;
     }
 
     private static long intGcd(long a, long b) {

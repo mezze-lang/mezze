@@ -67,7 +67,7 @@ object IntOps {
 
     private val POW = NativeOp("__native_int_pow",
         listOf(Param("base", SlotKind.LONG), Param("exp", SlotKind.LONG)), SlotKind.LONG, pure = true,
-    ) { args -> NativeHelpers.intPow(args.long(0), args.long(1)) }
+    ) { args -> PrimitiveNatives.intPow(args.long(0), args.long(1)) }
 
     private val GCD = NativeOp("__native_int_gcd",
         listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG, pure = true,
@@ -165,7 +165,7 @@ object IntOps {
         TypedNativeHandlers.registerLLL("__native_int_modulo", PrimitiveNatives::intModulo)
         TypedNativeHandlers.registerLLL("__native_int_min", PrimitiveNatives::intMin)
         TypedNativeHandlers.registerLLL("__native_int_max", PrimitiveNatives::intMax)
-        TypedNativeHandlers.registerLLL("__native_int_pow", NativeHelpers::intPow)
+        TypedNativeHandlers.registerLLL("__native_int_pow", PrimitiveNatives::intPow)
         TypedNativeHandlers.registerLLL("__native_int_gcd", NativeHelpers::intGcd)
         TypedNativeHandlers.registerLLL("__native_int_lcm", NativeHelpers::intLcm)
 

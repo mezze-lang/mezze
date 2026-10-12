@@ -82,6 +82,27 @@ public final class PrimitiveNatives {
         return l % r;
     }
 
+    // Guarded like intMultiply: overflow is the guest error, never a host
+    // ArithmeticException. The ONE Int pow — NativeDispatch and the DSL op both call it.
+    public static long intPow(long base, long exp) {
+        if (exp < 0) return 0;
+        long b = base, e = exp, result = 1;
+        try {
+            while (e > 0) {
+                if ((e & 1) == 1) {
+                    result = Math.multiplyExact(result, b);
+                }
+                e >>= 1;
+                // Square only while another bit needs it — squaring past the last bit
+                // can overflow even though the answer itself fits.
+                if (e > 0) b = Math.multiplyExact(b, b);
+            }
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.arithmeticOverflow("Power", base, exp);
+        }
+        return result;
+    }
+
     public static long intNegate(long n) {
         return -n;
     }
@@ -396,19 +417,33 @@ public final class PrimitiveNatives {
     // ==================== Nat Operations ====================
     // Nat is represented as long, same as Int but non-negative
 
+    // Guarded like the Int twins above, and for the same reason. `Nat` is erased to
+    // a long, so an unguarded `+` WRAPPED a large Nat to a negative one — a natural
+    // number below zero, the one thing the type rules out. Sum and product of two
+    // non-negative longs can only leave range upward, so the exact ops suffice.
     public static long natAdd(long l, long r) {
-        return l + r;
+        try {
+            return Math.addExact(l, r);
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.natOverflow("Addition", l, r);
+        }
     }
 
     public static long natMultiply(long l, long r) {
-        return l * r;
+        try {
+            return Math.multiplyExact(l, r);
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.natOverflow("Multiplication", l, r);
+        }
     }
 
     public static long natDivide(long l, long r) {
+        if (r == 0) throw MezzeGuestException.dividingByZero("Division");
         return l / r;
     }
 
     public static long natModulo(long l, long r) {
+        if (r == 0) throw MezzeGuestException.dividingByZero("Modulo");
         return l % r;
     }
 

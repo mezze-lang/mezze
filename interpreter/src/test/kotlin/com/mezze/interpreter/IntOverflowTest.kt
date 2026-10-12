@@ -68,6 +68,22 @@ class IntOverflowTest {
     fun `subtraction past the minimum overflows`() =
         assertOverflows("min - 1", "($min) - 1", "Subtraction")
 
+    /** `pow` leaked a host `ArithmeticException` instead of the guest error. */
+    @Test
+    fun `power past the maximum overflows`() =
+        assertOverflows("2^63", "use std::math::core\nstd::math::core::pow_int { base = 2, exp = 63 }", "Power")
+
+    /**
+     * The largest power that FITS must not fail: `pow` squared the base once more
+     * after the last exponent bit, so 2^62 overflowed computing an unused 2^64.
+     */
+    @Test
+    fun `the largest fitting power succeeds`() =
+        assertEquals(
+            4611686018427387904L,
+            MezzeTestHelper.run("use std::math::core\nstd::math::core::pow_int { base = 2, exp = 62 }"),
+        )
+
     /** The one unary case: the minimum has no positive counterpart. */
     @Test
     fun `negating the minimum overflows`() =

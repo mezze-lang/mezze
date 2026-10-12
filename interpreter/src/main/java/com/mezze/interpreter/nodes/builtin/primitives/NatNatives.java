@@ -68,13 +68,19 @@ public final class NatNatives {
         if (exp < 0) {
             return 0;
         }
-        long result = 1;
-        while (exp > 0) {
-            if ((exp & 1) == 1) {
-                result = Math.multiplyExact(result, base);
+        long b = base, e = exp, result = 1;
+        try {
+            while (e > 0) {
+                if ((e & 1) == 1) {
+                    result = Math.multiplyExact(result, b);
+                }
+                e >>= 1;
+                // Square only while another bit needs it: squaring past the last bit
+                // can overflow even though the answer itself fits.
+                if (e > 0) b = Math.multiplyExact(b, b);
             }
-            base = Math.multiplyExact(base, base);
-            exp >>= 1;
+        } catch (ArithmeticException overflow) {
+            throw MezzeGuestException.natOverflow("Power", base, exp);
         }
         return result;
     }

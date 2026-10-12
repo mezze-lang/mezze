@@ -262,21 +262,9 @@ object NativeHelpers {
         return s.matches(regex.toString().toRegex())
     }
 
-    // ==================== Int helpers (pow / gcd / lcm) ====================
-    // Mirror NativeDispatch's private versions; also used by IntOps.
-
-    fun intPow(base0: Long, exp0: Long): Long {
-        if (exp0 < 0) return 0
-        var result = 1L
-        var b = base0
-        var e = exp0
-        while (e > 0) {
-            if ((e and 1L) == 1L) result = Math.multiplyExact(result, b)
-            b = Math.multiplyExact(b, b)
-            e = e shr 1
-        }
-        return result
-    }
+    // ==================== Int helpers (gcd / lcm) ====================
+    // Mirror NativeDispatch's private versions; also used by IntOps. Pow lives in
+    // PrimitiveNatives.intPow — a second copy here kept a bug the first had lost.
 
     fun intGcd(a0: Long, b0: Long): Long {
         var a = Math.abs(a0); var b = Math.abs(b0)

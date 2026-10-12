@@ -97,6 +97,19 @@ public final class MezzeGuestException extends AbstractTruffleException {
                 + " (Int is 64-bit signed, so the result has no representable value)");
     }
 
+    /**
+     * [arithmeticOverflow] for `Nat`. Named separately so the message names the type
+     * the author wrote: `Nat` erases to the same long as `Int`, so the bound is the
+     * same, but "overflowed Int" on a `Nat` expression would send them looking for
+     * an `Int` that is not in their code.
+     */
+    @TruffleBoundary
+    public static MezzeGuestException natOverflow(String operation, long left, long right) {
+        return new MezzeGuestException(
+            operation + " overflowed Nat: " + left + " and " + right
+                + " (Nat is stored as a 64-bit signed Int, so the result has no representable value)");
+    }
+
     /** Unary overflow — only `negate` of `Int`'s minimum, which has no positive. */
     @TruffleBoundary
     public static MezzeGuestException arithmeticOverflow(String operation, long operand) {

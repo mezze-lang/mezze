@@ -125,6 +125,12 @@ object StdlibIdentities {
     }
 
     private fun stampAll() {
+        // The snapshot carries the table complete, so a miss restores it rather than
+        // stamping from sources. The native binary has NO stdlib sources and no
+        // manifest: stamping there failed every `mez sample` with "MANIFEST.txt is
+        // not on the classpath", because sample asks before PrecompiledStdlib has
+        // restored the table itself.
+        StdlibSnapshotData.identities?.let { restore(it); return }
         val manifest = StdlibIdentities::class.java.classLoader.getResourceAsStream("std/MANIFEST.txt")
             ?.bufferedReader()?.use { it.readLines() }
             ?: error("Compiler internal error: std/MANIFEST.txt is not on the classpath — rebuild :stdlib")
