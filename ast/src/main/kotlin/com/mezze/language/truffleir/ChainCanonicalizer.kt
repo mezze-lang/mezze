@@ -322,7 +322,20 @@ object ChainCanonicalizer {
                 && (body.function as ReadFieldIR).record is ReadLocalIR
                 && body.arg is MakeRecordIR
                 && (body.arg as MakeRecordIR).fields.size == 2
+        // Pattern 4: a native over the two params — what a mono-specialised
+        // folder reduces to once its call to the Int `add` impl is inlined
+        // (`{acc, x} -> __native_int_add { l = acc, r = x }`). Whether the native
+        // IS an arithmetic op is known only to the interpreter's registry, so the
+        // emitter decides, exactly as for Pattern 3; rejected, the fallback runs.
+        is CallNativeIR -> nativeOperands(body)?.all { it is ReadLocalIR } == true
         else -> false
+    }
+
+    /** The two operands of a binary native call, in either ABI; null otherwise. */
+    private fun nativeOperands(call: CallNativeIR): List<NodeIR>? {
+        val operands = if (call.isScalarABI) call.args
+            else (call.arg as? MakeRecordIR)?.fields?.map { it.value } ?: return null
+        return operands.takeIf { it.size == 2 }
     }
 
     /** Check if [node] is a unary expression over a single ReadLocal param —
@@ -1899,12 +1912,19 @@ internal class ChainHofClassifier private constructor(
                 params.size == 1 && name == NativeHofNames.OP_PRODUCT_FLOAT -> HofKind.PRODUCT_FLOAT
 
                 // ── Catch-all: least specific patterns LAST ──
-                // sum(src [, dict]) — no p1 constraint
-                params.size in 1..2
-                    && (name == NativeHofNames.OP_SUM || name.isEmpty()) -> HofKind.SUM
-                // from_seq(xs) — 1 param, no ambiguity
-                params.size == 1
-                    && (name == NativeHofNames.OP_FROM_SEQ || name.isEmpty()) -> HofKind.FROM_SEQ
+                // sum(src [, dict]) and from_seq(xs). A NAMED function says what it
+                // is; a mono specialisation has no name, and its param layout alone
+                // says nothing — `(it, r)` is just as much `Eq.eq` on a seq, which
+                // was classified SUM here and, once its source peeled to a real seq,
+                // fused `[1,2,3].reverse {} == [3,2,1]` into a sum: 6, not True. So
+                // an unnamed one is classified by the native its body calls, like
+                // the predicate and callback kinds above.
+                params.size in 1..2 && name == NativeHofNames.OP_SUM -> HofKind.SUM
+                params.size in 1..2 && name.isEmpty()
+                    && classifyByBody(fn, mapOf(NativeHofNames.OP_SUM to HofKind.SUM), null) == HofKind.SUM -> HofKind.SUM
+                params.size == 1 && name == NativeHofNames.OP_FROM_SEQ -> HofKind.FROM_SEQ
+                params.size == 1 && name.isEmpty()
+                    && classifyByBody(fn, mapOf(NativeHofNames.OP_FROM_SEQ to HofKind.FROM_SEQ), null) == HofKind.FROM_SEQ -> HofKind.FROM_SEQ
                 else -> null
             }
         }

@@ -1,10 +1,5 @@
-## list_fold_init_1m: list_fold_1m with a NON-ZERO init. A zero-init sum has its
-## own builtin; any other plain Int fold over a list relies on the folder's slot
-## kinds to reach the long pipeline (#194).
-##
-## `time_fold` is annotated on purpose: unannotated, it generalises over the
-## element type, its fold is never fused, and it runs ~10x slower than either
-## fused route — which is what list_fold_1m, unannotated, measures today.
+## list_fold_init_1m: list_fold_1m with a NON-ZERO init: the fold must reach the long
+## pipeline through its folder's Int slots, not through a zero-init sum (#194).
 use std::effects::log::{println, Console}
 use std::effects::time::{Time, SystemTime, monotonic}
 use std::datetime::{duration_to_nanos, sub_duration}
@@ -14,7 +9,7 @@ let build_list : {n: Int, acc: List Int} -> List Int = {n, acc} -> if n == 0
     then acc
     else build_list {n = n - 1, acc = list::cons {head = n, tail = acc}}
 
-let time_fold: {xs: List Int} -> {r: Int, ns: Int} <*> = {xs} -> perform SystemTime in do
+let time_fold = {xs} -> perform SystemTime in do
     let t0 = monotonic {}
     let s = list::fold_left {xs = xs, init = 10, f = {acc, x} -> acc + x}
     let t1 = monotonic {}

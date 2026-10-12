@@ -2615,6 +2615,57 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 long takeLimit,
                 @Bind Node node,
                 @Cached InlinedLoopConditionProfile loopProfile) {
+            com.mezze.datastructures.seq.LongSeqStorage ls =
+                    (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
+            return run(config, ls.getArray(), ls.size(), null,
+                    mapOperand, filterPreRhs, filterCmpRhs, sinkPredPreRhs,
+                    sinkPredCmpRhs, foldInit, takeLimit, node, loopProfile);
+        }
+
+        /**
+         * A List of Ints, walked cell by cell. Converting it to a long-backed Seq
+         * first (ListToLongSeq) copied every element into a fresh array, and that
+         * copy cost more than the whole fold: measured natively on 1M elements,
+         * ~12ms through the copy against ~6ms for the generic loop over the cells.
+         * Walking the cells here keeps the AOT-compiled numeric loop — fast from
+         * the first call, with no JIT warmup — and drops the copy.
+         */
+        @Specialization
+        public static Object doList(
+                int config,
+                com.mezze.datastructures.list.MezzeList<?> list,
+                long mapOperand, long filterPreRhs,
+                long filterCmpRhs, long sinkPredPreRhs,
+                long sinkPredCmpRhs, long foldInit,
+                long takeLimit,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            boolean hasTake = (config & (1 << 30)) != 0;
+            int sinkKind = config & 0xF;
+            boolean materializes = sinkKind == FLP_SINK_TO_SEQ || sinkKind == FLP_SINK_TO_LIST;
+            // A list's length is a walk; only a materializing sink needs it up front.
+            int n = materializes ? list.size() : Integer.MAX_VALUE;
+            if (hasTake) n = (int) Math.min(n, takeLimit);
+            return run(config, null, n, list,
+                    mapOperand, filterPreRhs, filterCmpRhs, sinkPredPreRhs,
+                    sinkPredCmpRhs, foldInit, takeLimit, node, loopProfile);
+        }
+
+        /**
+         * The pipeline over ONE of two sources: {@code data[0, n)} when
+         * {@code cells} is null, else the cells of {@code cells}, at most
+         * {@code n} of them. Each specialization passes a constant null for
+         * the source it is not, so the source test folds away; the per-element
+         * stages and sinks below are written once for both.
+         */
+        private static Object run(
+                int config, long[] data, int n,
+                com.mezze.datastructures.list.MezzeList<?> cells,
+                long mapOperand, long filterPreRhs,
+                long filterCmpRhs, long sinkPredPreRhs,
+                long sinkPredCmpRhs, long foldInit,
+                long takeLimit,
+                Node node, InlinedLoopConditionProfile loopProfile) {
             // Unpack config — each field is PE-constant.
             int sinkKind      = config & 0xF;
             int mapOp         = ((config >> 4) & 0xF) - 1;
@@ -2624,21 +2675,18 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             int sinkPredCmpOp = ((config >> 20) & 0xF) - 1;
             int foldOp        = ((config >> 24) & 0xF) - 1;
             boolean selfMap   = (config & (1 << 28)) != 0;
-
-            com.mezze.datastructures.seq.LongSeqStorage ls =
-                    (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
-            long[] data = ls.getArray();
-            int n = ls.size();
+            boolean fromArray = cells == null;
 
             // Take stage: clamp iteration count to takeLimit.
             boolean hasTake = (config & (1 << 30)) != 0;
-            if (hasTake) n = (int) Math.min(n, takeLimit);
+            if (fromArray && hasTake) n = (int) Math.min(n, takeLimit);
 
             boolean filterFirst = (config & (1 << 29)) != 0;
 
             // ── SIMD fast path for SUM/COUNT/REDUCE on materialized long[] ──
             // Gated off on SVM and when jdk.incubator.vector is absent.
-            if (FlpSimd.AVAILABLE
+            if (fromArray
+                    && FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
                         || sinkKind == FLP_SINK_REDUCE)
@@ -2655,7 +2703,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
             // Reduce sink: init from first post-filter/map element inside the loop.
             boolean reduceNeedInit = sinkKind == FLP_SINK_REDUCE;
-            if (reduceNeedInit && n == 0) return flpResultReduceEmpty();
+            if (reduceNeedInit && fromArray && n == 0) return flpResultReduceEmpty();
 
             // Materialize sinks: pre-allocate to source size, fill, trim.
             long[] matData = null;
@@ -2664,9 +2712,26 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 matData = new long[n > 0 ? n : 0];
             }
 
-            loopProfile.profileCounted(node, n);
-            for (int i = 0; loopProfile.inject(node, i < n); i++) {
-                long v = data[i];
+            if (fromArray) loopProfile.profileCounted(node, n);
+            com.mezze.datastructures.list.MezzeList<?> cursor = cells;
+            int i = 0;
+            while (true) {
+                long v;
+                if (fromArray) {
+                    if (!loopProfile.inject(node, i < n)) break;
+                    v = data[i];
+                } else {
+                    if (i >= n) break;
+                    if (cursor instanceof com.mezze.datastructures.list.MezzeLongCons cell) {
+                        v = cell.headLong();
+                        cursor = cell.tail();
+                    } else if (cursor instanceof com.mezze.datastructures.list.MezzeNil<?>) {
+                        break;
+                    } else {
+                        throw notLongCells(cursor);
+                    }
+                }
+                i++;
 
                 // ── Filter-first path ──
                 if (filterFirst && filterCmpOp >= 0) {
@@ -2732,7 +2797,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             }
 
             // Report loop iterations to Truffle — drives PE on SVM native.
-            LoopNode.reportLoopCount(node, n);
+            LoopNode.reportLoopCount(node, i);
 
             // ── Post-loop result ──
             if (sinkKind == FLP_SINK_REDUCE && reduceNeedInit) {
@@ -2744,6 +2809,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 return FusedLongRangePipeline.flpResultToList(matData, matCount);
             }
             return flpResult(sinkKind, acc, found, foundVal);
+        }
+
+        /** A non-long cell reached the long pipeline: a ROUTING defect — the
+         *  emitter admits a list only on evidence its elements are Int, and every
+         *  Int list is long-backed. Named here rather than truncating the walk. */
+        @TruffleBoundary
+        private static IllegalStateException notLongCells(Object cursor) {
+            return new IllegalStateException("FusedLongPipeline: a list cell of "
+                    + cursor.getClass().getSimpleName()
+                    + " reached the long pipeline, which only walks MezzeLongCons cells");
         }
 
         @Specialization(guards = "!isLongStorage(seq)")
@@ -2886,6 +2961,33 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     // ── Fused Long Range Pipeline: range(start, end) with inline ops, no seq allocation ──
+
+    /**
+     * Whether a collection stores its elements as longs: a List of
+     * {@code MezzeLongCons} cells (or the empty list), or a Seq with long storage.
+     * The run-time half of admitting a fold to {@link FusedLongPipeline} when the
+     * element type is a variable — the value proves what the type could not.
+     * Anything else answers false and takes the generic loop.
+     */
+    @Operation
+    public static final class IsLongBacked {
+        @Specialization
+        public static boolean doLongCons(com.mezze.datastructures.list.MezzeLongCons list) {
+            return true;
+        }
+        @Specialization
+        public static boolean doNil(com.mezze.datastructures.list.MezzeNil<?> list) {
+            return true;
+        }
+        @Specialization
+        public static boolean doSeq(MezzeSeq<?> seq) {
+            return FusedLongPipeline.isLongStorage(seq);
+        }
+        @Fallback
+        public static boolean doOther(Object other) {
+            return false;
+        }
+    }
 
     /**
      * Tight loop over a range [start, end) applying inline map/filter/fold
@@ -3219,43 +3321,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
-    /**
-     * Convert a MezzeList of longs to a MezzeSeq backed by LongSeqStorage.
-     * Used to route list sources through FusedLongPipeline for scalar-fast
-     * fold/sum/count/any/all/find/to_seq/to_list. The conversion is O(n)
-     * with pointer-chasing, but the subsequent FLP iteration is O(n) with
-     * contiguous long[] access — net win over cons-cell traversal with
-     * boxing per element.
-     *
-     * Falls back to the empty seq for nil.
-     *
-     * DELIBERATELY PARTIAL over {@code MezzeList}'s four backings, and the two
-     * missing cases are a feature. FLP's loop reads every element as
-     * {@code ((Number) raw).longValue()}, so a {@code MezzeCons} of strings or a
-     * {@code MezzeDoubleCons} has no business reaching it; what keeps them out is
-     * the emit guard in {@code BytecodeCompiler} (see S-12), not a specialization
-     * here. Generalising this to {@code MezzeList<?>} via
-     * {@code MezzeSeq.fromArray(list.toArray())} was tried and is WORSE: it turns a
-     * routing defect that fails here, naming the operation and the backing, into a
-     * {@code ClassCastException: String cannot be cast to Number} from inside the
-     * pipeline loop. Fail where the wrong decision was made.
-     *
-     * The general conversion does exist, for the route that wants it:
-     * {@code ListNatives.toSeq} is total over all four backings.
-     */
-    @Operation
-    public static final class ListToLongSeq {
-        @Specialization
-        @TruffleBoundary
-        public static MezzeSeq<?> doLongList(com.mezze.datastructures.list.MezzeLongCons list) {
-            return MezzeSeq.fromLongs(list.toLongArray());
-        }
-        @Specialization
-        public static MezzeSeq<?> doNil(com.mezze.datastructures.list.MezzeNil<?> list) {
-            return MezzeSeq.empty();
-        }
-    }
-
     // ===== Cons-cell traversal ops for list-source fused loops =====
     // These avoid the O(n) ListToArray conversion by walking the list
     // in place: cursor = list; while (!isEmpty(cursor)) { x = head(cursor); cursor = tail(cursor); }
@@ -3263,7 +3328,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /** Test whether a MezzeList cursor is empty (Nil).
      *  Specialized on Cons → constant false for JIT devirtualization.
      *
-     *  TOTAL over the four backings, unlike {@link ListToLongSeq}: this and
+     *  TOTAL over the four backings: this and
      *  {@link ListHead} are the GENERIC traversal, so they answer for whatever the
      *  list is made of. {@code MezzeDoubleCons} was missing from both until S-12,
      *  which made a `List Float` untraversable — the generic fused loop, the very

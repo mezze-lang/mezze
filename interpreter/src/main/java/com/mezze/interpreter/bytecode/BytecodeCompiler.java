@@ -4375,7 +4375,7 @@ public final class BytecodeCompiler {
         }
     }
 
-    private static final class FolderShape {
+    static final class FolderShape {  // package-visible for FolderClassificationTest
         final InlineOp op;
         final int leftSlot;
         final int rightSlot;
@@ -4395,7 +4395,7 @@ public final class BytecodeCompiler {
         }
     }
 
-    private static FolderShape classifyFolderBody(NodeIR body) {
+    static FolderShape classifyFolderBody(NodeIR body) {  // package-visible for FolderClassificationTest
         if (body instanceof InlineBinaryOpIR bin) {
             if (bin.getLeft() instanceof ReadLocalIR l && bin.getRight() instanceof ReadLocalIR r) {
                 return new FolderShape(bin.getOp(), l.getSlot(), r.getSlot());
@@ -4420,6 +4420,31 @@ public final class BytecodeCompiler {
                 }
             }
             return null;
+        }
+        // A native with an inline-op twin over the two params: a mono-specialised
+        // folder `{acc, x} -> add(acc, x)` with its Int `add` impl inlined into it.
+        // The compiler cannot collapse this itself — the registry that says
+        // `__native_int_add` IS `ADD` belongs to the interpreter — so it is
+        // recognised here, where the registry is loaded. Operands are taken in the
+        // signature's declared order, which is the op's operand order.
+        if (body instanceof CallNativeIR nat) {
+            var sig = com.mezze.language.truffleir.NativeSignatures.INSTANCE.signatureOf(nat.getName());
+            if (sig == null || sig.getInlineOp() == null || sig.getParams().size() != 2) return null;
+            NodeIR[] operands = new NodeIR[2];
+            if (nat.isScalarABI()) {
+                if (nat.getArgs().size() != 2) return null;
+                operands[0] = nat.getArgs().get(0);
+                operands[1] = nat.getArgs().get(1);
+            } else {
+                if (!(nat.getArg() instanceof MakeRecordIR rec)) return null;
+                for (var fld : rec.getFields()) {
+                    int at = sig.indexOf(fld.getName());
+                    if (at < 0) return null;
+                    operands[at] = fld.getValue();
+                }
+            }
+            if (!(operands[0] instanceof ReadLocalIR l) || !(operands[1] instanceof ReadLocalIR r)) return null;
+            return new FolderShape(sig.getInlineOp(), l.getSlot(), r.getSlot());
         }
         if (body instanceof CallDirectIR call) {
             if (!call.isScalarABI()) return null;
@@ -4725,28 +4750,13 @@ public final class BytecodeCompiler {
                 if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
                 return true;
             }
-            // Sum over RawList with no stages → ListToLongSeq + BuiltinSumLongSeq.
-            // SAME GUARD as the RawSeq branch above, and it was missing here: the
-            // sink ignores the fold's `init`, so without `longZeroInit` a List fold
-            // with a non-zero init silently dropped it —
-            //     list::fold_left { xs = [1,2,3], init = 10, f = acc + x }  =>  6
-            // where the Seq twin of the same fold correctly gave 16. A wrong answer
-            // with no error, and the only difference between the two was this
-            // condition. See S-12.
-            if (rawListExpr != null && isSumSink && !hasStages && longZeroInit) {
-                b.beginBuiltinSumLongSeq();
-                  b.beginListToLongSeq();
-                    emitNode(rawListExpr, b, argCount, localMap);
-                  b.endListToLongSeq();
-                b.endBuiltinSumLongSeq();
-                if (dbg) System.err.println("[chain-canon-emit] emitted ListToLongSeq+BuiltinSumLongSeq");
-                return true;
-            }
+            // No RawList twin of the branch above: BuiltinSumLongSeq takes a Seq,
+            // and converting a List to one (ListToLongSeq) copied every element —
+            // slower than the fold it served. A zero-init Int fold over a List takes
+            // FusedLongPipeline below, which walks the cells.
         }
 
         // ── Phase 4d-fast: try FusedLongPipeline / FusedLongRangePipeline ──
-        // For no-stages cases (plain fold), also allow FLP for list sources
-        // since ListToLongSeq+FLP outperforms cons-cell traversal.
         // Also enter FLP when the fold body has a compound element transform
         // (e.g. acc + x*x) — the element op is injected as a virtual map stage.
         boolean hasFoldElemTransform = sinkMode instanceof FusedSinkMode.Accumulate a2
@@ -4791,19 +4801,18 @@ public final class BytecodeCompiler {
         // folder: the compiler gives each lambda parameter the slot kind of its
         // solved type, so a folder whose two parameters are both LONG proves the
         // accumulator and the element are both Int — and every Int list is
-        // long-backed, which is what ListToLongSeq takes. That is what keeps a
-        // no-stages fold over a list on FLP (#194); without it the fold ran the
-        // cons-cell loop, as it does for a Float, record or variable element.
+        // long-backed — MezzeLongCons cells, which FLP walks in place. That is
+        // what keeps a no-stages fold over a list on FLP (#194); without it the
+        // fold ran the generic loop, as it does for a Float, record or variable
+        // element.
         //
-        // MEASURED (native, 1M-element Int list, per fold): this route is a steady
-        // ~12ms, nearly all of it ListToLongSeq's copy. The cons-cell loop it
-        // replaces is ~3-7ms when it is the FIRST such loop a program warms, and
-        // ~45ms for every one after — a state-dependent slowdown in the generic
-        // loop, not its real cost. This route is chosen for being steady; a long
-        // pipeline that walks the cons cells without the copy would beat both.
-        boolean hasListSource = rawListExpr != null
-                && (hasStages || folderProvesLongElements(chain.getSink()));
-        if (hasStages || hasListSource || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
+        // The same evidence admits a plain Int fold over a SEQ, which otherwise ran
+        // the generic loop too — JIT-compiled, so its first call over 1M elements
+        // took ~40-75ms where this pipeline is fast from the start.
+        boolean foldOverInts = folderProvesLongElements(chain.getSink());
+        boolean hasListSource = rawListExpr != null && (hasStages || foldOverInts);
+        boolean seqFoldOverInts = rawXsExpr != null && foldOverInts;
+        if (hasStages || hasListSource || seqFoldOverInts || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
                 if (rangeStart != null && rangeStep == null) {
@@ -4824,42 +4833,53 @@ public final class BytecodeCompiler {
                     return true;
                 } else if (rawXsExpr != null) {
                     // Seq source → FusedLongPipeline (existing path)
-                    b.beginFusedLongPipeline(flp.config);
-                      emitNode(rawXsExpr, b, argCount, localMap);              // child 0: seq
-                      emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
-                      emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
-                      emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);
-                      emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
-                      emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
-                      emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
-                      emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
-                    b.endFusedLongPipeline();
+                    emitFLP(flp, rawXsExpr, b, argCount, localMap);
+                    recordFusedEmit("FusedLongPipeline(Seq)");
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
                 } else if (rawListExpr != null) {
-                    // List source → ListToLongSeq + FusedLongPipeline.
-                    // Convert MezzeList to MezzeSeq (long-backed) first, then
-                    // run FLP for scalar-fast fold/sum/count. The O(n) conversion
-                    // pays for itself: FLP iteration over contiguous long[] is
-                    // much faster than cons-cell traversal with boxing.
-                    b.beginFusedLongPipeline(flp.config);
-                      b.beginListToLongSeq();
-                        emitNode(rawListExpr, b, argCount, localMap);
-                      b.endListToLongSeq();
-                      emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
-                      emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
-                      emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);
-                      emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
-                      emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
-                      emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
-                      emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
-                    b.endFusedLongPipeline();
-                    recordFusedEmit("ListToLongSeq+FusedLongPipeline");
-                    if (dbg) System.err.println("[chain-canon-emit] emitted ListToLongSeq+FusedLongPipeline ("
+                    // List source → FusedLongPipeline over the cells themselves.
+                    // It used to convert to a long-backed Seq first; that copy
+                    // cost more than the fold (1M Ints, native: ~12ms through the
+                    // copy, ~6ms for the generic loop, less again walking cells).
+                    emitFLP(flp, rawListExpr, b, argCount, localMap);
+                    recordFusedEmit("FusedLongPipeline(List)");
+                    if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongPipeline(List) ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
                 }
+            }
+        }
+
+        // ── Phase 4c-runtime: element kind known only at run time ──
+        // A plain fold whose accumulator is statically an Int, over elements whose
+        // type is still a variable: `{ xs } -> list::fold_left { xs = xs, init = 10,
+        // f = {acc, x} -> acc + x }` generalises x over every 'a with
+        // `NumAdd 'a for Int having 'out = Int` — Int and Nat today, and any type an
+        // impl added later in another module. The type cannot say the elements are
+        // longs; the value can. So test the VALUE: a long-backed list or seq takes
+        // the long pipeline, anything else the generic loop. Only for a source that
+        // is a plain read, so testing it and then iterating it reads it twice for
+        // free. Unannotated, such a fold used to run ~10x slower than annotated.
+        NodeIR checkedSrc = rawListExpr != null ? rawListExpr : rawXsExpr;
+        if (!hasStages && checkedSrc != null && isPlainRead(checkedSrc)
+                && chain.getSink() instanceof SinkIR.Fold
+                && sinkMode instanceof FusedSinkMode.Accumulate acc
+                && !acc.ignoreElement() && isStaticallyLong(acc.initExpr())) {
+            var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
+            if (flp != null) {
+                b.beginConditional();
+                  b.beginIsLongBacked();
+                    emitNode(checkedSrc, b, argCount, localMap);
+                  b.endIsLongBacked();
+                  emitFLP(flp, checkedSrc, b, argCount, localMap);
+                  emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rangeStep, rawXsExpr,
+                          rawListExpr, sinkMode, b, argCount, localMap);
+                b.endConditional();
+                recordFusedEmit("IsLongBacked?FusedLongPipeline:FusedLoop");
+                if (dbg) System.err.println("[chain-canon-emit] emitted IsLongBacked ? FusedLongPipeline : fused loop");
+                return true;
             }
         }
 
@@ -5761,6 +5781,34 @@ public final class BytecodeCompiler {
             if (kind != SlotKind.LONG) return false;
         }
         return true;
+    }
+
+    /** FusedLongPipeline over [src] — a long-backed seq or a list of long cells. */
+    private void emitFLP(FLPSpec flp, NodeIR src,
+                         MezzeBytecodeRootNodeGen.Builder b, int argCount,
+                         com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
+        b.beginFusedLongPipeline(flp.config);
+          emitNode(src, b, argCount, localMap);                        // child 0: source
+          emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
+          emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
+          emitFLPOperand(flp.filterCmpLit, flp.filterCmpNode, b, argCount, localMap);
+          emitFLPOperand(flp.sinkPredPreLit, flp.sinkPredPreNode, b, argCount, localMap);
+          emitFLPOperand(flp.sinkPredCmpLit, flp.sinkPredCmpNode, b, argCount, localMap);
+          emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
+          emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
+        b.endFusedLongPipeline();
+    }
+
+    /** A read of a local or argument: no effects, and the same value each time. */
+    private static boolean isPlainRead(NodeIR node) {
+        return node instanceof ReadLocalIR || node instanceof ReadArgIR;
+    }
+
+    /** An expression the compiler already typed as Int: a literal or a LONG slot. */
+    private static boolean isStaticallyLong(NodeIR node) {
+        return node instanceof LongLitIR
+                || (node instanceof ReadLocalIR rl && rl.getKind() == SlotKind.LONG)
+                || (node instanceof ReadArgIR ra && ra.getKind() == SlotKind.LONG);
     }
 
     /** Test seam: when a test sets a list for its thread, each fused-chain emission
