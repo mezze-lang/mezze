@@ -1052,24 +1052,6 @@ class ConstraintGenerator(
         results: MutableMap<String, ConstraintResult>,
     ): TypingContext {
         var currentContext = context
-        val targetTypeName = item.targetTypes.firstOrNull()?.let { ann ->
-            when (ann) {
-                is ParsedNamedType -> ann.name
-                is ParsedTypeApp -> ann.constructor
-                else -> null
-            }
-        }
-        // BUG 1: for `impl Result PyF IErr`, `targetTypeName` is the bare
-        // CONSTRUCTOR ("Result"), so its decl hash is the same for every
-        // per-argument impl — this lookup returned whichever provider happened to
-        // land in the index last, and was benign only because the two providers'
-        // signatures happen to match. Mint the APPLIED hash from the converted
-        // target, the same key ContextBuilder files the impl under.
-        val targetTypeHash = item.targetTypes.firstOrNull()
-            ?.let { ann -> runCatching { convertTypeAnnotation(ann) }.getOrNull() }
-            ?.let { converted -> com.mezze.language.typechecker.util.appliedHashOf(converted) }
-            ?: targetTypeName?.let { registry.typeDeclarations[it]?.contentHash }
-
         for (op in item.operations) {
             val targetType = if (item.targetTypes.isNotEmpty()) {
                 convertTypeAnnotation(item.targetTypes.first())
@@ -1080,12 +1062,9 @@ class ConstraintGenerator(
             if (op.implementation !is ParsedLambda) continue
             val lambda = op.implementation as ParsedLambda
 
-            val methodInfo = if (targetTypeHash != null) {
-                currentContext.findAnonymousMethodByHash(targetTypeHash, op.name)
-                    ?: targetTypeName?.let { currentContext.findAnonymousMethod(it, op.name) }
-            } else if (targetTypeName != null) {
-                currentContext.findAnonymousMethod(targetTypeName, op.name)
-            } else null
+            // This impl's OWN method — by the impl's identity, never by its target,
+            // which two impls of one constructor share.
+            val methodInfo = item.contentHash?.let { currentContext.findMethodOfImpl(it, op.name) }
 
             val paramNames = when (val params = lambda.params) {
                 is ParsedLambdaParams.Untyped -> params.names

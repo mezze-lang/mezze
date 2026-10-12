@@ -369,6 +369,13 @@ object DispatchResolver {
             }
         }
         if (matches.isEmpty()) return null
+        // Several impls of one constructor (`impl Box Int`, `impl Box Str`): the
+        // receiver's structure decides, exactly as pickByReceiverHash does for the
+        // other ladders — all of them must agree.
+        val narrowed = if (matches.map { it.opHash }.distinct().size >= 2) {
+            com.mezze.language.typechecker.util.pickByStructure(solvedReceiver, matches) { it.targetType }
+        } else null
+        if (narrowed != null) return narrowed
         val distinctOps = matches.map { it.opHash }.distinct()
         if (distinctOps.size >= 2) {
             throw DispatchAmbiguityException(
@@ -468,7 +475,7 @@ object DispatchResolver {
             // BUG 1: applied hash before constructor hash, matching the other
             // three ladders — all four must agree or the S2.3 invariant fires.
             val picked = com.mezze.language.typechecker.util
-                .pickByReceiverHash(solvedReceiver, info.candidateImpls) { it.targetTypeHash }
+                .pickByReceiverHash(solvedReceiver, info.candidateImpls, { it.targetType }) { it.targetTypeHash }
                 ?: run {
                     // Names in SPECIFICITY order: `Result_Response_HttpError`
                     // wins over `Result` when the receiver's args are concrete.

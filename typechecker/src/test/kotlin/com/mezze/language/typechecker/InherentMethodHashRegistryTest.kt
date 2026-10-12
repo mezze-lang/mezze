@@ -46,18 +46,31 @@ class InherentMethodHashRegistryTest {
         val byName = ctx.findAnonymousMethodsByName("describe")
         assertEquals(2, byName.size, "both same-named impls must survive; got ${byName.map { it.targetTypeHash }}")
 
-        // Hash lookup selects the right one.
-        val a = ctx.findAnonymousMethodByHash(hashA, "describe")
-        val b = ctx.findAnonymousMethodByHash(hashB, "describe")
+        // Each impl's own method is found by the impl's identity.
+        val a = ctx.findMethodOfImpl(Hash("1111"), "describe")
+        val b = ctx.findMethodOfImpl(Hash("2222"), "describe")
         assertNotNull(a); assertNotNull(b)
         assertEquals(MezzeType.IntType, (a!!.methodType as MezzeType.FunctionType).returnType, "hashA → Int-returning impl")
         assertEquals(MezzeType.StringType, (b!!.methodType as MezzeType.FunctionType).returnType, "hashB → Str-returning impl")
     }
 
     @Test
-    fun `a hash with no impl finds nothing`() {
+    fun `an impl hash with no method finds nothing`() {
         val ctx = TypingContext.empty.extendWithAnonymousMethod(info(Hash("aaaa"), MezzeType.IntType))
-        assertNull(ctx.findAnonymousMethodByHash(Hash("cccc"), "describe"))
+        assertNull(ctx.findMethodOfImpl(Hash("cccc"), "describe"))
+    }
+
+    @Test
+    fun `two impls of one target hash both survive`() {
+        // `impl Box Int` and `impl Box Str`: one constructor, so one target hash.
+        // Keyed by target, the second overwrote the first.
+        val box = Hash("aaaa")
+        val ctx = TypingContext.empty
+            .extendWithAnonymousMethod(info(box, MezzeType.IntType))
+            .extendWithAnonymousMethod(info(box, MezzeType.StringType))
+        assertEquals(2, ctx.findAnonymousMethodsByName("describe").size)
+        assertEquals(MezzeType.IntType,
+            (ctx.findMethodOfImpl(Hash("1111"), "describe")!!.methodType as MezzeType.FunctionType).returnType)
     }
 
     @Test

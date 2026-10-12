@@ -271,9 +271,14 @@ data class TypingContext(
         return parent?.findAnonymousMethod(typeName, methodName)
     }
 
-    fun findAnonymousMethodByHash(typeHash: Hash, methodName: String): InherentMethodInfo? {
-        val key = Hash.computeOpHash(typeHash, methodName)
-        return anonymousImplMethodsByHash[key] ?: parent?.findAnonymousMethodByHash(typeHash, methodName)
+    /** The method [methodName] of the impl [implHash] itself — an impl's OWN
+     *  signature, by the impl's identity. Keyed by the target type instead, two
+     *  impls of one constructor (`impl Box Int`, `impl Box Str`; two providers'
+     *  `impl Result <Lang> IErr`) shared a key and one impl was checked against
+     *  the other's signature. */
+    fun findMethodOfImpl(implHash: Hash, methodName: String): InherentMethodInfo? {
+        val key = Hash.computeOpHash(implHash, methodName)
+        return anonymousImplMethodsByHash[key] ?: parent?.findMethodOfImpl(implHash, methodName)
     }
 
     fun findAnonymousMethodsByName(methodName: String): List<InherentMethodInfo> {
@@ -304,15 +309,14 @@ data class TypingContext(
         // (`appliedHashOf`: constructor ⊕ argument identities), which is distinct
         // per full type application on its own — so the name is gone from the key
         // and dispatch is keyed on structure end to end.
-        val keyType = info.targetTypeHash?.hex ?: info.targetTypeName
-        val key = "$keyType::${info.methodName}"
+        // Keyed by the IMPL, which is what is unique: two impls of one
+        // constructor share a target hash (`impl Box Int`, `impl Box Str` — a
+        // record alias's applied target expands to the record), and the second
+        // overwrote the first. Lookups by target scan the infos' own fields.
+        val key = "${info.implContentHash.hex}::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
-        val newHashIndex = if (info.targetTypeHash != null) {
-            val hashKey = Hash.computeOpHash(info.targetTypeHash, info.methodName)
-            anonymousImplMethodsByHash + (hashKey to info)
-        } else {
-            anonymousImplMethodsByHash
-        }
+        val newHashIndex =
+            anonymousImplMethodsByHash + (Hash.computeOpHash(info.implContentHash, info.methodName) to info)
         return copy(
             anonymousImplMethods = anonymousImplMethods + (key to info),
             anonymousImplMethodsByType = anonymousImplMethodsByType + (info.targetTypeName to (existingMethods + info.methodName)),

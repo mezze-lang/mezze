@@ -119,11 +119,72 @@ fun receiverMatchesHash(receiver: MezzeType, candidateHash: Hash): Boolean =
  * a licence to fall back to a name (a differently-hashed same-name impl is a
  * different declaration; that veto is the whole point of hashing).
  */
-fun <T> pickByReceiverHash(receiver: MezzeType, candidates: List<T>, hashOf: (T) -> Hash?): T? {
+fun <T> pickByReceiverHash(
+    receiver: MezzeType,
+    candidates: List<T>,
+    targetOf: ((T) -> MezzeType?)? = null,
+    hashOf: (T) -> Hash?,
+): T? {
     for (hash in receiverDispatchHashes(receiver)) {
-        candidates.firstOrNull { hashOf(it) == hash }?.let { return it }
+        val sameHash = candidates.filter { hashOf(it) == hash }
+        if (sameHash.isEmpty()) continue
+        if (sameHash.size == 1 || targetOf == null) return sameHash.first()
+        // Several impls of ONE constructor. Taking the first, as this did, ran a
+        // `Box Str` value through the `Box Int` impl.
+        return pickByStructure(receiver, sameHash, targetOf)
     }
     return null
+}
+
+/**
+ * Of several impls of ONE constructor (`impl Box Int`, `impl Box Str`), the one
+ * [receiver] means. A record alias's receiver carries its arguments only in its
+ * fields, so no hash tells them apart — the structure does. Keeps those whose
+ * target this receiver can be, prefers one with no type variables over a generic
+ * catch-all, and decides nothing (null) when that still leaves a tie.
+ */
+fun <T> pickByStructure(receiver: MezzeType, candidates: List<T>, targetOf: (T) -> MezzeType?): T? {
+    val admitted = candidates.filter { c -> targetOf(c)?.let { admits(it, receiver) } ?: true }
+    val concrete = admitted.filter { c -> targetOf(c)?.let { !hasTypeVars(it) } ?: false }
+    return when {
+        admitted.size == 1 -> admitted.first()
+        concrete.size == 1 -> concrete.first()
+        else -> null
+    }
+}
+
+/**
+ * True when a value of [receiver] could be a [target]: the two agree wherever
+ * both are known, a type variable on either side agreeing with anything.
+ * Conservative — it never says no to a type it cannot tell apart — and pure.
+ */
+fun admits(target: MezzeType, receiver: MezzeType): Boolean = when {
+    target is MezzeType.VarType || receiver is MezzeType.VarType -> true
+    target is MezzeType.RecordType && receiver is MezzeType.RecordType ->
+        target.fields.keys == receiver.fields.keys &&
+            target.fields.all { (k, t) -> admits(t, receiver.fields.getValue(k)) }
+    target is MezzeType.TypeApplication && receiver is MezzeType.TypeApplication ->
+        constructorIdentityOf(target) == constructorIdentityOf(receiver) &&
+            target.args.size == receiver.args.size &&
+            target.args.zip(receiver.args).all { (t, r) -> admits(t, r) }
+    target is MezzeType.VariantType && receiver is MezzeType.VariantType ->
+        target.constructors.keys == receiver.constructors.keys &&
+            target.constructors.all { (k, t) ->
+                val r = receiver.constructors.getValue(k)
+                if (t == null || r == null) t == r else admits(t, r)
+            }
+    target is MezzeType.FunctionType && receiver is MezzeType.FunctionType ->
+        admits(target.paramType, receiver.paramType) && admits(target.returnType, receiver.returnType)
+    else -> constructorIdentityOf(target)?.let { it == constructorIdentityOf(receiver) } ?: (target == receiver)
+}
+
+private fun hasTypeVars(type: MezzeType): Boolean = when (type) {
+    is MezzeType.VarType -> true
+    is MezzeType.RecordType -> type.fields.values.any { hasTypeVars(it) }
+    is MezzeType.TypeApplication -> type.args.any { hasTypeVars(it) }
+    is MezzeType.VariantType -> type.constructors.values.any { it != null && hasTypeVars(it) }
+    is MezzeType.FunctionType -> hasTypeVars(type.paramType) || hasTypeVars(type.returnType)
+    else -> false
 }
 
 /**

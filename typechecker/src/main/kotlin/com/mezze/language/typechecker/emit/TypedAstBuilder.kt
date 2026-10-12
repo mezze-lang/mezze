@@ -136,7 +136,7 @@ class TypedAstBuilder(
         // of `Result PyForeign IErr` before the bare `Result` constructor hash —
         // so two same-constructor impls resolve without a name comparison.
         val byHash = com.mezze.language.typechecker.util
-            .pickByReceiverHash(solvedReceiver, methodInfo.candidateImpls) { it.targetTypeHash }
+            .pickByReceiverHash(solvedReceiver, methodInfo.candidateImpls, { it.targetType }) { it.targetTypeHash }
             ?.implContentHash
         return byHash ?: run {
             // Try the receiver's names in SPECIFICITY order — mangled form first

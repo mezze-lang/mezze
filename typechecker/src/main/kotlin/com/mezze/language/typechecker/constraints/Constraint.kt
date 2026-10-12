@@ -243,6 +243,8 @@ sealed interface Constraint {
         // module-distinct) rather than by bare `targetTypeName`. `null` for
         // builtins with no hash — selection falls back to the name then.
         val targetTypeHash: Hash? = null,
+        /** The impl's target as a type — decides between same-hash candidates. */
+        val targetType: MezzeType? = null,
     )
 
     /**
@@ -335,6 +337,8 @@ data class ResolutionCandidate(
     val kind: ResolutionKind,
     val targetTypeIdentity: TypeIdentity? = null,
     val displayName: String? = null,
+    /** An inherent candidate's target as a type — decides between same-identity impls. */
+    val targetType: MezzeType? = null,
 )
 
 /**
@@ -521,6 +525,8 @@ data class ConstraintResult(
         // by the SOLVED receiver's hash (rename-safe, module-distinct) rather than
         // by bare `targetTypeName`. `null` for builtins — falls back to name.
         val targetTypeHash: Hash? = null,
+        /** The impl's target as a type — decides between same-hash candidates. */
+        val targetType: MezzeType? = null,
     )
     data class UndefinedVariable(
         val name: String,

@@ -198,6 +198,13 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             val genReceiverType = generate(memberAccess.receiver, context.notInTailPosition()).type
             val effectiveReceiverType = genReceiverType
             if (effectiveReceiverType !is MezzeType.VarType) {
+                // Identity, then structure, BEFORE any name: a record alias's
+                // receiver names only its constructor (`Box`), so a name filter
+                // landed on the generic `impl Box 'a` even for a `Box Int` that a
+                // specific `impl Box Int` serves — and disagreed with the resolver.
+                com.mezze.language.typechecker.util
+                    .pickByReceiverHash(effectiveReceiverType, inherentMethods, { it.targetType }) { it.targetTypeHash }
+                    ?.let { picked -> return generateInherentMethodCall(expr, memberAccess, listOf(picked), context) }
                 // Prefer the SPECIFICITY-ordered names (`Result_PyForeign_InteropError`
                 // before `Result`): candidates are registered under their FULLY-MANGLED
                 // `targetTypeName`, so a bare-constructor name from `candidateTypeNames`
@@ -972,6 +979,7 @@ internal fun ExpressionConstraintGenerator.recordMethodResolveBucket(
                 kind = ResolutionKind.Inherent,
                 targetTypeIdentity = mi.targetTypeHash?.let { TypeIdentity.declared(mi.targetTypeName, it) },
                 displayName = mi.targetTypeName,
+                targetType = mi.targetType,
             )
         )
     }
@@ -1240,7 +1248,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         // (`Result PyForeign IErr`) before the bare constructor hash (`Result`) —
         // so a per-provider impl wins over a generic `impl Result 'a 'e` without
         // any name being compared.
-        com.mezze.language.typechecker.util.pickByReceiverHash(receiverType, inherentMethods) { it.targetTypeHash }
+        com.mezze.language.typechecker.util.pickByReceiverHash(receiverType, inherentMethods, { it.targetType }) { it.targetTypeHash }
     } else if (receiverTypeName != null) {
         // Hashless receiver (builtins / pre-hash): name is the only identity we
         // have, so a name match is the correct fallback here. This arm is guarded by
@@ -1392,7 +1400,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // receiver type.
             candidateImpls = if (deferImplByReceiver) {
                 inherentMethods.map {
-                    ConstraintResult.InherentImplCandidate(it.targetTypeName, it.implContentHash, it.targetTypeHash)
+                    ConstraintResult.InherentImplCandidate(it.targetTypeName, it.implContentHash, it.targetTypeHash, it.targetType)
                 }
             } else emptyList(),
         )
@@ -1499,6 +1507,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
                     methodType = fnType,
                     implContentHash = mi.implContentHash,
                     targetTypeHash = mi.targetTypeHash,
+                    targetType = mi.targetType,
                 )
             },
             argsType = argumentResult.type,
@@ -1565,7 +1574,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
         implSourceFile = resolvedCandidates.first().first.implSourceFile,
         methodFunctionType = syntheticFnType,
         candidateImpls = resolvedCandidates.map { (mi, _) ->
-            ConstraintResult.InherentImplCandidate(mi.targetTypeName, mi.implContentHash, mi.targetTypeHash)
+            ConstraintResult.InherentImplCandidate(mi.targetTypeName, mi.implContentHash, mi.targetTypeHash, mi.targetType)
         },
     )
 

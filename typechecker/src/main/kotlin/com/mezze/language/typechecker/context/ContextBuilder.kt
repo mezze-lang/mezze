@@ -1024,6 +1024,14 @@ class ContextBuilder {
                     // reachable exactly as before.
                     com.mezze.language.typechecker.util.appliedHashOf(converted)
                         ?: com.mezze.language.typechecker.util.declaredHashOf(converted)
+                // An applied record or variant ALIAS (`impl Box Int` for
+                // `type Box 'a = { v: 'a }`) converts to the expanded record,
+                // its arguments folded into the fields. File it under the
+                // constructor's hash, like the receiver's; which `Box` impl a
+                // receiver means is then decided by structure (pickByReceiverHash).
+                else if (converted !is MezzeType.TypeApplication &&
+                    implDecl.targetTypes.first() is com.mezze.language.parsedast.ParsedTypeApp)
+                    com.mezze.language.typechecker.util.declaredHashOf(converted)
                 else null
             }
 

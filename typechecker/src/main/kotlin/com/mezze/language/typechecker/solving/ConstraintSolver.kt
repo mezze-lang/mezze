@@ -992,7 +992,7 @@ class ConstraintSolver(
         // `impl Result PyForeign IErr` outranks a generic `impl Result 'a 'e`
         // structurally instead of via the mangled-name ladder below.
         val picked = com.mezze.language.typechecker.util
-            .pickByReceiverHash(receiver, constraint.candidates) { it.targetTypeHash }
+            .pickByReceiverHash(receiver, constraint.candidates, { it.targetType }) { it.targetTypeHash }
             ?: run {
                 // Specificity ladder: mangled name first (`Result_A_B` for a
                 // concrete-arg TypeApplication), constructor-only fallback second
