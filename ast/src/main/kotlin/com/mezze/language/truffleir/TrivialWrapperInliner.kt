@@ -121,14 +121,14 @@ object TrivialWrapperInliner {
             changedThisPass = 0
             val out = HashMap<Hash, FunctionIR>(current.size)
             for ((hash, fn) in current) {
-                // Don't recursively inline a wrapper's body into itself —
-                // the wrapper IS the trivial body. Other functions are fair
-                // game (they may or may not call into wrappers).
-                val newBody = if (wrappers.containsKey(hash) && hash in current) {
-                    fn.body
-                } else {
-                    rewrite(fn.body, wrappers, stats)
-                }
+                // Every body is rewritten, a wrapper's included — only a call
+                // to the function ITSELF is left alone. Skipping wrappers'
+                // bodies wholesale left a wrapper-to-wrapper chain unflattened
+                // wherever the outer wrapper is used as a VALUE rather than
+                // called: a mono-specialised folder `{acc, x} -> add(acc, x)`
+                // passed to a fold kept its call to the Int `add` impl, so the
+                // fold's body never reduced to an inline op and never fused.
+                val newBody = rewrite(fn.body, wrappers, stats, hash)
                 if (newBody === fn.body) {
                     out[hash] = fn
                 } else {
@@ -278,6 +278,17 @@ object TrivialWrapperInliner {
     }
 
     /**
+     * True when [node] can be skipped without changing what the program does:
+     * evaluating it has no effect. A param the wrapper never reads drops its
+     * argument, so only such an argument may be dropped.
+     */
+    private fun isPureToDrop(node: NodeIR): Boolean = when (node) {
+        is MakeLambdaIR -> true
+        is MakeRecordIR -> node.fields.all { isPureToDrop(it.value) }
+        else -> isCheapToDuplicate(node)
+    }
+
+    /**
      * Recursively count `ReadLocalIR(slot=paramStart..<paramEnd)`
      * occurrences in [node]. Returns false on any node shape that
      * indicates non-trivial control flow (match, perform, lambda,
@@ -405,15 +416,15 @@ object TrivialWrapperInliner {
      * inside it. Walks the whole tree (not just the top level) so calls
      * nested inside another non-trivial body still get the speedup.
      */
-    private fun rewrite(node: NodeIR, wrappers: Map<Hash, FunctionIR>, stats: InlineStats): NodeIR {
+    private fun rewrite(node: NodeIR, wrappers: Map<Hash, FunctionIR>, stats: InlineStats, self: Hash): NodeIR {
         // Top-level case: this node is itself a wrappable call.
         if (node is CallDirectIR && node.isScalarABI) {
-            val wrapper = wrappers[node.targetHash]
+            val wrapper = if (node.targetHash == self) null else wrappers[node.targetHash]
             if (wrapper != null && wrapper.paramSlots.size == node.args.size) {
                 // Recursively rewrite the args first (the caller's
                 // arguments may themselves contain wrappable calls), so
                 // we don't have to re-walk after substitution.
-                val rewrittenArgs = node.args.map { rewrite(it, wrappers, stats) }
+                val rewrittenArgs = node.args.map { rewrite(it, wrappers, stats, self) }
                 // Closure-capture gate: a `MakeLambdaIR` arg that captures values
                 // (`__dict_<m>` closures like a `cmp = {a,b}-> a<b`) reads those from
                 // the CALLER's frame slots. Substituting it into the wrapper body
@@ -440,6 +451,11 @@ object TrivialWrapperInliner {
                         if (counts[i] > 1 && !isCheapToDuplicate(rewrittenArgs[i])) {
                             ok = false; break
                         }
+                        // A param the wrapper never reads drops its argument —
+                        // only allowed when evaluating it could do nothing.
+                        if (counts[i] == 0 && !isPureToDrop(rewrittenArgs[i])) {
+                            ok = false; break
+                        }
                     }
                     if (ok) {
                         val substituted = untail(
@@ -452,7 +468,7 @@ object TrivialWrapperInliner {
                         val collapsed = maybeCollapseInlineOp(substituted)
                         // Recurse in case the wrapper body referenced
                         // another wrapper (chain of trivial forwarders).
-                        return rewrite(collapsed, wrappers, stats)
+                        return rewrite(collapsed, wrappers, stats, self)
                     } else {
                         stats.sitesSkippedHeavyArg++
                     }
@@ -465,7 +481,7 @@ object TrivialWrapperInliner {
                 return node
             }
         }
-        return recurseChildren(node) { rewrite(it, wrappers, stats) }
+        return recurseChildren(node) { rewrite(it, wrappers, stats, self) }
     }
 
     /**
