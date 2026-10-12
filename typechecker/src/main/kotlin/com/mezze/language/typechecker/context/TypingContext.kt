@@ -81,6 +81,9 @@ data class TypingContext(
         val implContentHash: Hash,
         val sourceModule: String? = null,
         val targetTypeHash: Hash? = null,
+        /** The impl's target as a type — what a receiver's constructor is compared
+         *  against. Null only for a target that does not convert. */
+        val targetType: MezzeType? = null,
         val implStartLine: Int = 0,
         val implStartCol: Int = 0,
         val implSourceFile: String = "",

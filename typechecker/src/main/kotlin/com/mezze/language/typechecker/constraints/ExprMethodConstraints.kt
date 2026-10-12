@@ -1270,8 +1270,20 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     // This keeps the rejection to genuine type mismatches and never fires on the
     // legitimate container-impl dispatch (`ps.race {}` on a Promise seq).
     val candidatesArePlain = inherentMethods.all { !it.targetTypeName.contains('_') }
-    if (methodInfo == null && !deferImplByReceiver &&
-        recvIsPlainNominal(receiverType) && candidatesArePlain && inherentMethods.isNotEmpty()) {
+    // The same mistake on a CONTAINER receiver, decided by constructor identity
+    // rather than by name: `seq.to_seq {}` against `impl List`, `impl Set`, … —
+    // none of which can ever be a Seq — was accepted and crashed at run time with
+    // "Expected record for field 'to_seq', got: MezzeSeq". A `Seq_Promise` impl
+    // shares the receiver's `Seq` constructor, so it is never rejected here; only a
+    // receiver no candidate could match at any arguments is.
+    val receiverConstructor = com.mezze.language.typechecker.util.constructorIdentityOf(receiverType)
+    val noCandidateCanMatch = receiverConstructor != null && inherentMethods.isNotEmpty() &&
+        inherentMethods.all { cand ->
+            val target = cand.targetType?.let { com.mezze.language.typechecker.util.constructorIdentityOf(it) }
+            target != null && target != receiverConstructor
+        }
+    if (methodInfo == null && !deferImplByReceiver && (noCandidateCanMatch ||
+        (recvIsPlainNominal(receiverType) && candidatesArePlain && inherentMethods.isNotEmpty()))) {
         val recvName = receiverTypeName ?: prettyPrintType(receiverType)
         throw TypeCheckError(
             "No inherent method '$methodName' for type '$recvName'. " +

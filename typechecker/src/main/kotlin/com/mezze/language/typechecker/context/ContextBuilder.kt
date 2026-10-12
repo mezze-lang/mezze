@@ -832,6 +832,7 @@ class ContextBuilder {
         // [implTargetDeclaredHash].
         val targetTypeHash = currentTypeDecls[targetTypeName]?.contentHash
             ?: implTargetDeclaredHash(implDecl)
+        val implTargetType = implDecl.targetTypes.firstOrNull()?.let { convertParsedTypeAnnotation(it) }
 
         var result = ctx
         for (op in implDecl.operations) {
@@ -854,6 +855,7 @@ class ContextBuilder {
                 // (name stays the fallback for builtins with no decl hash). Additive —
                 // the name-keyed maps are unchanged. project_classparam_runtime_dispatch_tuple.
                 targetTypeHash = targetTypeHash,
+                targetType = implTargetType,
                 implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file
             ))
@@ -962,6 +964,7 @@ class ContextBuilder {
                 // See addAnonymousImpl — populate the target type's content hash for
                 // hash-preferring dispatch (currentTypeDecls covers imported types).
                 targetTypeHash = targetTypeHash,
+                targetType = implTargetType,
                 implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file, isImported = true
             ))

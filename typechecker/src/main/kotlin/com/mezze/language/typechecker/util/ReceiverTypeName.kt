@@ -20,6 +20,24 @@ import com.mezze.language.typedast.Hash
  * named record types in different modules cross-dispatched). Covering all three
  * nominal shapes here fixes every consumer at once.
  */
+/**
+ * The identity of [type]'s CONSTRUCTOR — what two types must share for one to be
+ * the other at some arguments: `Seq Int` and `Seq (Promise 'a)` share `Seq`;
+ * `Seq Int` and `List 'a` never can. A declared type's hash, a builtin's reserved
+ * name (its canonical identity — there is one of each), or the scalar itself.
+ * Null when there is nothing to compare yet: a type variable, a function, an
+ * anonymous record or variant.
+ */
+fun constructorIdentityOf(type: MezzeType): Any? = when (type) {
+    is MezzeType.TypeApplication -> type.identity.takeUnless { it is TypeIdentity.Anonymous }
+    is MezzeType.RecordType -> type.identity.takeUnless { it is TypeIdentity.Anonymous }
+    is MezzeType.VariantType -> type.identity.takeUnless { it is TypeIdentity.Anonymous }
+    is MezzeType.NewtypeType -> type.identity.takeUnless { it is TypeIdentity.Anonymous }
+    MezzeType.IntType, MezzeType.FloatType, MezzeType.StringType,
+    MezzeType.FracType, MezzeType.CharType, MezzeType.BytesType -> type
+    else -> null
+}
+
 fun declaredHashOf(type: MezzeType): Hash? = when (type) {
     is MezzeType.VariantType -> (type.identity as? TypeIdentity.Declared)?.hash
     is MezzeType.TypeApplication -> (type.identity as? TypeIdentity.Declared)?.hash
