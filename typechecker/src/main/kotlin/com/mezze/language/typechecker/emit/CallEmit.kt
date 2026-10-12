@@ -199,6 +199,33 @@ internal fun TypedAstBuilder.buildFunctionCall(expr: ParsedFunctionCall, file: S
         else -> {
             val declared = calleeType as? MezzeType.FunctionType
             if (declared == null || !declared.holdsTypeVar()) fn else {
+                // The callee's own `with` constraints, at THIS call's types. A
+                // dict-keyed variable is deliberately left un-renamed below, so the
+                // instantiation is harvested separately here, in full.
+                if (declared.abilityConstraints.isNotEmpty()) {
+                    val instantiated = mutableMapOf<TypeVar, MezzeType>()
+                    if (!argExpr.type.holdsUnknownPlaceholder()) harvestVarBindings(declared.paramType, argExpr.type, instantiated)
+                    if (!callType.holdsUnknownPlaceholder()) harvestVarBindings(declared.returnType, callType, instantiated)
+                    for (c in declared.abilityConstraints) {
+                        // Only a constraint this call INSTANTIATES. A call fixes the
+                        // callee's variables through its parameters and its result and
+                        // nowhere else, so a constraint variable the harvest did not
+                        // bind has no value at this call to judge — measured: a
+                        // recursive `fib`'s emitted type keeps a `NumAdd 'a 'a` from
+                        // generalization that mentions neither.
+                        val vars = HashSet<TypeVar>()
+                        c.typeArgs.forEach { com.mezze.language.ast.collectTypeVariables(it, vars) }
+                        if (!instantiated.keys.containsAll(vars)) continue
+                        demandDictionary(
+                            c.abilityName, c.abilityHash, c.typeArgs.map { substituteTypeVars(it, instantiated) }, loc,
+                            calleeVars = vars.mapTo(HashSet()) { it.id },
+                            // The DECLARED return, instantiated: the call's solved type
+                            // can drop the arrow's constraint (measured on
+                            // `make_adder { x = 10 }`), the declaration does not.
+                            result = substituteTypeVars(declared.returnType, instantiated),
+                        )
+                    }
+                }
                 val bindings = mutableMapOf<TypeVar, MezzeType>()
                 if (!argExpr.type.holdsUnknownPlaceholder()) {
                     harvestVarBindings(declared.paramType, argExpr.type, bindings)
@@ -320,6 +347,7 @@ internal fun TypedAstBuilder.buildStaticAbilityOpCall(
     val classVar = methodInfo.typeArgs.firstOrNull()
         ?: unreachedPosition("receiver-less ability op with no class variable recorded")
     val dispatchType = substitution.apply(classVar)
+    if (abilityName != null) demandDictionary(abilityName, abilityHash, listOf(dispatchType), loc)
     val producedName = com.mezze.language.typechecker.util.receiverTypeName(dispatchType)
     val implEntry = if (abilityHash != null && producedName != null) {
         abilityImpls.entries.firstOrNull { (_, info) ->

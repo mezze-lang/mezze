@@ -22,6 +22,7 @@ import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typechecker.util.receiverTypeName
 import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.solving.closeGeneratedRowVars
+import com.mezze.language.ast.solving.collectFreeTypeVars
 
 class TypedAstBuilder(
     // S5.2 (#365): the SINGLE immutable solver→emit hand-off. Emit reads every
@@ -111,6 +112,114 @@ class TypedAstBuilder(
     // holds the whole row (not just names) so a rider can copy the arrow's
     // associated-type binding (`Exception having 'error = Str`) verbatim.
     private val enclosingArrowEffects = ArrayDeque<MezzeType.EffectRow?>()
+
+    /**
+     * One per lambda being built. A dictionary reaches a function from its caller,
+     * by instantiating the function's type, so a dictionary needed at a type
+     * variable has a source only if some enclosing lambda's type mentions that
+     * variable. [visible] is filled when the lambda finishes — from its context
+     * type AND its built type, because one written `'a` can be two TypeVars
+     * (scheme vs body) and either may be the one a demand carries.
+     */
+    internal class DictFrame(val parent: DictFrame?) {
+        val visible = HashSet<Int>()
+        fun allVisible(): Set<Int> = generateSequence(this) { it.parent }.flatMapTo(HashSet()) { it.visible }
+    }
+    private var dictFrame: DictFrame? = null
+
+    /** A dictionary this emit committed to needing: [abilityName] at [args]. */
+    private class DictDemand(
+        val abilityName: String,
+        val abilityHash: Hash?,
+        val args: List<MezzeType>,
+        val loc: Loc,
+        val frame: DictFrame,
+        /** The CALLEE's own declared variables, when the demand is a callee's `with`. */
+        val calleeVars: Set<Int>,
+        /** Variables the call's RESULT carries in its own arrows' constraints. */
+        val carried: Set<Int>,
+    )
+    private val dictDemands = mutableListOf<DictDemand>()
+
+    /**
+     * Record that the call at [loc] needs [abilityName] at [args]. Judged when the
+     * outermost lambda finishes, once every enclosing lambda's type is known. A
+     * demand outside any lambda is a top-level VALUE, which nothing calls.
+     */
+    internal fun demandDictionary(
+        abilityName: String,
+        abilityHash: Hash?,
+        args: List<MezzeType>,
+        loc: Loc,
+        calleeVars: Set<Int> = emptySet(),
+        result: MezzeType? = null,
+    ) {
+        val frame = dictFrame ?: return
+        if (args.none { it.holdsTypeVar() }) return
+        val carried = HashSet<Int>()
+        fun carriedBy(t: MezzeType) {
+            if (t !is MezzeType.FunctionType) return
+            t.abilityConstraints.forEach { c ->
+                c.typeArgs.forEach { a -> collectFreeTypeVars(substitution.apply(a)).mapTo(carried) { it.id } }
+            }
+            carriedBy(substitution.apply(t.returnType))
+        }
+        result?.let { carriedBy(substitution.apply(it)) }
+        dictDemands.add(DictDemand(abilityName, abilityHash, args.map { substitution.apply(it) }, loc, frame, calleeVars, carried))
+    }
+
+    private fun implsForDemand(name: String, hash: Hash?): List<TypingContext.AbilityImplInfo> =
+        abilityImpls.values.filter { info ->
+            if (hash != null && info.abilityDeclHash != null) info.abilityDeclHash == hash
+            else info.abilityName == name
+        }
+
+    /**
+     * Reject a demand no caller can satisfy: its type holds a variable no
+     * enclosing lambda mentions, and the ability's provider at that type
+     * actually asks that variable for the ability ([requirementReachesHiddenVar]).
+     *
+     * Without this the compiler gave the function a dictionary PARAMETER of its
+     * own for the demand — its body asked for one — that no call site would ever
+     * fill, since the function's type does not carry the constraint. The empty
+     * slot reached `DictFallbackRootNode` at run time: "no dictionary was
+     * supplied … This is a compiler defect".
+     */
+    private fun judgeDictDemands() {
+        val demands = dictDemands.toList()
+        dictDemands.clear()
+        for (d in demands) {
+            val visible = d.frame.allVisible()
+            // RECURSION: the callee's own variables are in scope, so the callee is a
+            // function being built right here and its `with` is the enclosing
+            // function's own — supplied by that function's caller. Instantiating
+            // it would map the function's variables onto each other.
+            if (d.calleeVars.any { it in visible }) continue
+            // CARRIED: the call returns a function whose own arrow still holds the
+            // constraint, so each call OF that function demands it again, at the
+            // types that call supplies (`let add10 = make_adder { x = 10 }`).
+            val hidden = d.args.flatMap { collectFreeTypeVars(it) }.filter { it.id !in visible && it.id !in d.carried }
+            if (hidden.isEmpty()) continue
+            val hiddenIds = hidden.map { it.id }.toSet()
+            if (!com.mezze.language.typechecker.derive.requirementReachesHiddenVar(
+                    d.abilityName, d.abilityHash, d.args, hiddenIds, registry, ::implsForDemand,
+                )
+            ) continue
+            val shown = d.args.joinToString(" ") { com.mezze.language.ast.prettyPrintType(it) }
+            throw com.mezze.language.typechecker.TypeCheckError(
+                message = "'${d.abilityName}' is needed at `$shown`, and nothing decides what its " +
+                    "type variable is: it appears in neither the parameters nor the result of any " +
+                    "enclosing function, so no caller can supply the implementation.",
+                loc = d.loc,
+                errorType = com.mezze.language.typechecker.ErrorType.CONSTRAINT_VIOLATION,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0215_AMBIGUOUS_ABILITY_TYPE,
+                hints = listOf(
+                    "write the concrete type where the variable is (e.g. `[Int]` rather than `['a]`)",
+                    "or put the variable in the function's own type and declare `with ${d.abilityName} 'a`, so the caller chooses it",
+                ),
+            )
+        }
+    }
 
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
@@ -1043,6 +1152,9 @@ class TypedAstBuilder(
 
                 pushScope(params.map { it.name }.toMutableList(), isLambdaBoundary = true)
 
+                val frame = DictFrame(dictFrame)
+                dictFrame = frame
+
                 val appliedCtx = contextType?.let { substitution.apply(it) }
                 val returnType = when (appliedCtx) {
                     is MezzeType.FunctionType -> substitution.apply(appliedCtx.returnType)
@@ -1058,6 +1170,13 @@ class TypedAstBuilder(
                 enclosingArrowEffects.addLast(arrowRow)
                 val body = try {
                     buildExpr(expr.body, file, returnType)
+                } catch (e: Throwable) {
+                    // An aborted lambda leaves no frame behind: the partial-module
+                    // builder carries on to the next declaration, which must not
+                    // chain onto this one or inherit its demands.
+                    dictFrame = frame.parent
+                    if (frame.parent == null) dictDemands.clear()
+                    throw e
                 } finally {
                     enclosingArrowEffects.removeLast()
                 }
@@ -1113,6 +1232,15 @@ class TypedAstBuilder(
                 )
 
                 val captures = collectCaptures(body, params.map { it.name }.toSet())
+
+                for (t in listOfNotNull(appliedCtx, substitution.apply(funcType)) + params.map { substitution.apply(it.type) }) {
+                    collectFreeTypeVars(t).mapTo(frame.visible) { it.id }
+                    (t as? MezzeType.FunctionType)?.abilityConstraints?.forEach { c ->
+                        c.typeArgs.forEach { a -> collectFreeTypeVars(substitution.apply(a)).mapTo(frame.visible) { it.id } }
+                    }
+                }
+                dictFrame = frame.parent
+                if (frame.parent == null) judgeDictDemands()
 
                 TypedLambda(
                     params = params,
