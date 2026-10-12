@@ -3,6 +3,6 @@ use std::collections::iter
 
 ## Count test - crashes
 let main = {} -> perform Console in do
-    let r = iter::count { it = iter::range { start = 0, end = 100 }, p = {x} -> x < 50 }
+    let r = iter::count { it = iter::filter { it = iter::range { start = 0, end = 100 }, p = {x} -> x < 50 } }
     println { msg = r.to_str{} }
     {}

@@ -8,7 +8,7 @@ path = "src/app.mz"
 entry = "main"
 
 [dependencies]
-mezze-js = "github:mezze-lang/mezze-js@0.2.1"
+mezze-js = "github:mezze-lang/mezze-js@0.5.1"
 
 [dev-dependencies]
 

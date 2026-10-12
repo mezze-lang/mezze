@@ -70,27 +70,26 @@ let iters = 4000000
 let eval_iters = 20000
 
 ## ---- member read, DOT-CHAIN spelling ----
-## `.property{...}.as_int{}` threads the Result implicitly, dispatching the
-## second step through `impl Result JsForeign InteropError`.
+## `.property{...}.int{}` — the read yields the foreign value, and `.int` is the
+## one crossing that can fail, so it alone returns a Result.
 let read_chain: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
   { obj, n, acc } ->
     if n <= 0 then acc
     else do
-      let got = match obj.property { name = "v" }.as_int {} is
+      let got = match obj.property { name = "v" }.int {} is
         Ok { val = i } -> i
         Err { error = _ } -> 0
       read_chain { obj = obj, n = n - 1, acc = acc + got }
 
 ## ---- member read, MATCHED spelling ----
-## Same two messages, destructured between them instead of chained.
+## Same two messages, bound between them instead of chained.
 let read_matched: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
   { obj, n, acc } ->
     if n <= 0 then acc
     else do
-      let got = match obj.property { name = "v" } is
-        Ok { val = f } -> match f.as_int {} is
-          Ok { val = i } -> i
-          Err { error = _ } -> 0
+      let f = obj.property { name = "v" }
+      let got = match f.int {} is
+        Ok { val = i } -> i
         Err { error = _ } -> 0
       read_matched { obj = obj, n = n - 1, acc = acc + got }
 
@@ -100,7 +99,7 @@ let invoke_loop: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
   { obj, n, acc } ->
     if n <= 0 then acc
     else do
-      let got = match obj.method { name = "get", args = [] }.as_int {} is
+      let got = match obj.method { name = "get", args = [] }.int {} is
         Ok { val = i } -> i
         Err { error = _ } -> 0
       invoke_loop { obj = obj, n = n - 1, acc = acc + got }
@@ -115,7 +114,7 @@ let index_loop: { arr: JsForeign, i: Int, n: Int, acc: Int } -> Int <Js> =
   { arr, i, n, acc } ->
     if i >= n then acc
     else do
-      let got = match arr.index { i = i % 1000 }.as_int {} is
+      let got = match arr.index { i = i % 1000 }.int {} is
         Ok { val = v } -> v
         Err { error = _ } -> 0
       index_loop { arr = arr, i = i + 1, n = n, acc = acc + got }

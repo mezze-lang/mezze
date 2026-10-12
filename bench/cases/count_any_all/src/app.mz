@@ -3,7 +3,7 @@ use std::collections::iter
 
 ## count with predicate: number of even numbers in 0..n
 let compute_count = {n: Int} ->
-    iter::count { it = iter::range { start = 0, end = n }, p = {x: Int} -> x % 2 == 0 }
+    iter::count { it = iter::filter { it = iter::range { start = 0, end = n }, p = {x: Int} -> x % 2 == 0 } }
 
 ## any: is there any element > 50 in 0..n?
 let compute_any = {n: Int} ->
