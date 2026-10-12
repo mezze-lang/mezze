@@ -15,7 +15,7 @@ let time_fold = {xs} -> perform SystemTime in do
     let t1 = monotonic {}
     { r = s, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
 
-let loop_iters : {xs: List Int, k: Int, i: Int, warmup: Bool} -> Int = {xs, k, i, warmup} -> perform Console in perform SystemTime in
+let loop_iters : {xs: List Int, k: Int, i: Int, warmup: Bool} -> Int <*> = {xs, k, i, warmup} -> perform Console in perform SystemTime in
     if i == k
         then 0
         else do

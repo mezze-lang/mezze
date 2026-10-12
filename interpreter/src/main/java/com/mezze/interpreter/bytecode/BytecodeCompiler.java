@@ -25,6 +25,7 @@ import com.mezze.language.truffleir.FusedChainIR;
 import com.mezze.language.truffleir.SourceIR;
 import com.mezze.language.truffleir.StageIR;
 import com.mezze.language.truffleir.SinkIR;
+import com.mezze.language.truffleir.SlotKind;
 import com.mezze.language.truffleir.LongLitIR;
 import com.mezze.language.truffleir.CaptureIR;
 import com.mezze.language.truffleir.CaseIR;
@@ -4786,13 +4787,22 @@ public final class BytecodeCompiler {
         // tried and is where this went wrong twice — Materialize was excluded and
         // Count walked in, because neither reads an element at all.
         //
-        // PERF NOTE: this gives up FLP for a no-stages plain fold over a list, which
-        // the comment above claimed as a win over cons-cell traversal. The dominant
-        // case of that shape — a zero-init sum — is still fast via the
-        // BuiltinSumLongSeq branch above, which keeps its own guard. Recovering the
-        // rest needs the element kind carried on the IR rather than guessed from the
-        // source, which is the real fix and is not this one.
-        boolean hasListSource = rawListExpr != null && hasStages;
+        // The other evidence is the element TYPE, which a plain fold carries on its
+        // folder: the compiler gives each lambda parameter the slot kind of its
+        // solved type, so a folder whose two parameters are both LONG proves the
+        // accumulator and the element are both Int — and every Int list is
+        // long-backed, which is what ListToLongSeq takes. That is what keeps a
+        // no-stages fold over a list on FLP (#194); without it the fold ran the
+        // cons-cell loop, as it does for a Float, record or variable element.
+        //
+        // MEASURED (native, 1M-element Int list, per fold): this route is a steady
+        // ~12ms, nearly all of it ListToLongSeq's copy. The cons-cell loop it
+        // replaces is ~3-7ms when it is the FIRST such loop a program warms, and
+        // ~45ms for every one after — a state-dependent slowdown in the generic
+        // loop, not its real cost. This route is chosen for being steady; a long
+        // pipeline that walks the cons cells without the copy would beat both.
+        boolean hasListSource = rawListExpr != null
+                && (hasStages || folderProvesLongElements(chain.getSink()));
         if (hasStages || hasListSource || hasFoldElemTransform || hasShortCircuitSink || hasReduceSink || hasMaterializeSink) {
             var flp = tryBuildFusedLongPipeline(classifiedStages, sinkMode);
             if (flp != null) {
@@ -4845,6 +4855,7 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
                       emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
                     b.endFusedLongPipeline();
+                    recordFusedEmit("ListToLongSeq+FusedLongPipeline");
                     if (dbg) System.err.println("[chain-canon-emit] emitted ListToLongSeq+FusedLongPipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
@@ -4855,6 +4866,7 @@ public final class BytecodeCompiler {
         // ── Phase 4d: emit the generic fused loop (fallback) ──
         emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rangeStep, rawXsExpr,
                 rawListExpr, sinkMode, b, argCount, localMap);
+        recordFusedEmit("FusedLoop");
         if (dbg) System.err.println("[chain-canon-emit] emitted fused loop ("
                 + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
         return true;
@@ -5732,6 +5744,33 @@ public final class BytecodeCompiler {
         if (dbg) System.err.println("[chain-canon-emit] reject: unsupported sink: "
                 + chain.getSink().getClass().getSimpleName());
         return null;
+    }
+
+    /**
+     * True when [sink] is a fold whose folder's parameters are all LONG — i.e. the
+     * solved types of its accumulator and element are both Int (or a newtype over
+     * it). The slot kinds come from {@code TypedASTCompiler.typeToSlotKind}, so this
+     * reads the compiler's decision rather than guessing one: a Float, record or
+     * still-generic element gives a non-LONG slot and the answer is false.
+     */
+    private boolean folderProvesLongElements(SinkIR sink) {
+        if (!(sink instanceof SinkIR.Fold fold) || language == null) return false;
+        var ir = language.lookupFunctionIR(fold.getF().getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 2) return false;
+        for (var kind : ir.getParamSlots()) {
+            if (kind != SlotKind.LONG) return false;
+        }
+        return true;
+    }
+
+    /** Test seam: when a test sets a list for its thread, each fused-chain emission
+     *  that tests need to tell apart is appended to it. Per thread because suites
+     *  run test classes in parallel. Null — the production state — records nothing. */
+    static final ThreadLocal<java.util.List<String>> FUSED_EMITS = new ThreadLocal<>();
+
+    private static void recordFusedEmit(String what) {
+        var into = FUSED_EMITS.get();
+        if (into != null) into.add(what);
     }
 
     /** Shared classification for Fold and Reduce combining functions. */

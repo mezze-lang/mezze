@@ -1,0 +1,12 @@
+[package]
+name = "bench_list_fold_init_1m"
+version = "0.1.0"
+
+[[app]]
+name = "bench_list_fold_init_1m"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
