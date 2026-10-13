@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.langservice.sample.SampleBranches
 import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue

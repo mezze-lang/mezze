@@ -1,5 +1,7 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.langservice.sample.SampleBranches
+import com.mezze.language.langservice.sample.SampleGen
 import com.mezze.language.cli.`package`.MezzeToml
 import com.mezze.wire.WireProtocol
 import com.mezze.wire.WireValue

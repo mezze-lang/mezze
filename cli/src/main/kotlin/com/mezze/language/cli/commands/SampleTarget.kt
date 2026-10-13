@@ -1,5 +1,7 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.langservice.sample.SampleBranches
+import com.mezze.language.langservice.sample.SampleGen
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker

@@ -1,4 +1,4 @@
-package com.mezze.language.cli.commands
+package com.mezze.language.langservice.sample
 
 import com.mezze.language.ast.MezzeType
 

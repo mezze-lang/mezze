@@ -1,4 +1,4 @@
-package com.mezze.language.cli.commands
+package com.mezze.language.langservice.sample
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.typedast.TypedExpr
@@ -67,6 +67,12 @@ import com.mezze.language.typedast.forEachChild
  * than claiming to cover it.
  */
 object SampleBranches {
+
+    /**
+     * The key a scripted effect operation's result is known by — to this analysis,
+     * which pins it like a parameter, and to the row that scripts it.
+     */
+    fun contextKey(effectHash: com.mezze.language.typedast.Hash, op: String): String = "ctx:${effectHash.hex}/$op"
 
     /** A constructor to build, and the payload record it needs (null when empty). */
     data class Arm(val tag: String, val payload: MezzeType?)
@@ -140,11 +146,25 @@ object SampleBranches {
         evaluated: Map<com.mezze.language.typedast.Hash, Evaluated> = emptyMap(),
         /**
          * Results of SCRIPTED effect operations, as further row inputs: key →
-         * (label, type). See [SampleScripts]. An operation's result is a hidden
+         * (label, type), built by the CLI's `SampleScripts`. An operation's result is a hidden
          * input like any argument, so `n > Config.threshold {}` is a comparison
          * between two inputs and is read exactly like `a < b`.
          */
         context: Map<String, Pair<String, MezzeType>> = emptyMap(),
+    ): List<Row> = try {
+        inventoryOnThisThread(decl, params, decls, imported, evaluated, context)
+    } finally {
+        contextLabelsTL.remove()
+        contextLocalsTL.remove()
+    }
+
+    private fun inventoryOnThisThread(
+        decl: TypedLetDecl,
+        params: Map<String, MezzeType>,
+        decls: List<TypedLetDecl>,
+        imported: List<TypedLetDecl>,
+        evaluated: Map<com.mezze.language.typedast.Hash, Evaluated>,
+        context: Map<String, Pair<String, MezzeType>>,
     ): List<Row> {
         val wanted = mutableListOf<Map<String, Pinned>>()
         fun want(req: Map<String, Pinned>) {
@@ -170,11 +190,11 @@ object SampleBranches {
             })
         }
         val locals = blockLocals(decl.value, params.keys)
-        contextLabels = context.mapValues { it.value.first }
-        contextLocals = locals.mapNotNull { (name, def) ->
-            (def as? TypedPerformOp)?.let { SampleScripts.contextKey(it.effectHash, it.operationName) }
+        contextLabelsTL.set(context.mapValues { it.value.first })
+        contextLocalsTL.set(locals.mapNotNull { (name, def) ->
+            (def as? TypedPerformOp)?.let { contextKey(it.effectHash, it.operationName) }
                 ?.takeIf { it in context }?.let { name to it }
-        }.toMap()
+        }.toMap())
         @Suppress("NAME_SHADOWING")
         val params = params + context.mapValues { it.value.second }
 
@@ -1064,11 +1084,17 @@ object SampleBranches {
     /**
      * Per-inventory context for [pathOf]: the label of each scripted operation's
      * result, and the block-local names bound directly to one (`let t =
-     * Config.threshold {}`). Set at the start of [inventory]; the CLI is
-     * single-threaded and an inventory runs to completion before the next.
+     * Config.threshold {}`). Set at the start of [inventory] and cleared when it
+     * returns; read only while it runs.
+     *
+     * Per THREAD, because this analysis is shared: the language server runs it
+     * for several documents at once, and a plain field on this singleton would let
+     * one document's labels name another's paths.
      */
-    private var contextLabels: Map<String, String> = emptyMap()
-    private var contextLocals: Map<String, String> = emptyMap()
+    private val contextLabelsTL = ThreadLocal.withInitial { emptyMap<String, String>() }
+    private val contextLocalsTL = ThreadLocal.withInitial { emptyMap<String, String>() }
+    private val contextLabels: Map<String, String> get() = contextLabelsTL.get()
+    private val contextLocals: Map<String, String> get() = contextLocalsTL.get()
 
     /**
      * The parameter path [expr] reads, if it reads one: a bare parameter, or a
@@ -1084,7 +1110,7 @@ object SampleBranches {
             else -> contextLocals[expr.name]?.takeIf { it in params }?.let { Path(it, emptyList()) }
         }
         // `Config.threshold {}` used inline.
-        is TypedPerformOp -> SampleScripts.contextKey(expr.effectHash, expr.operationName)
+        is TypedPerformOp -> contextKey(expr.effectHash, expr.operationName)
             .takeIf { it in params }?.let { Path(it, emptyList()) }
         is TypedFieldAccess -> pathOf(expr.record, params)?.let { it.copy(fields = it.fields + expr.field) }
         else -> null

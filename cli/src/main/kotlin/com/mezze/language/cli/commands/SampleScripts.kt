@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.language.langservice.sample.SampleBranches
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.ModulePath
 import com.mezze.language.typedast.TypedEffectDecl
@@ -75,11 +76,8 @@ object SampleScripts {
         fun field(op: Op): String = "r_${op.name}"
         fun label(op: Op): String = "⟨$effect.${op.name}⟩"
         /** Identity of this operation's result as a row input: effect HASH and operation. */
-        fun key(op: Op): String = contextKey(hash, op.name)
+        fun key(op: Op): String = SampleBranches.contextKey(hash, op.name)
     }
-
-    /** The key an operation's result is known by, to the analysis and to the row. */
-    fun contextKey(effectHash: com.mezze.language.typedast.Hash, op: String): String = "ctx:${effectHash.hex}/$op"
 
     /** Every valued operation of [scripts] as analysis context: key → (label, type). */
     fun context(scripts: List<Script>): Map<String, Pair<String, MezzeType>> =
@@ -102,7 +100,7 @@ object SampleScripts {
             if (!seen.add(d.hash)) continue
             fun walk(e: com.mezze.language.typedast.TypedExpr) {
                 when (e) {
-                    is com.mezze.language.typedast.TypedPerformOp -> keys.add(contextKey(e.effectHash, e.operationName))
+                    is com.mezze.language.typedast.TypedPerformOp -> keys.add(SampleBranches.contextKey(e.effectHash, e.operationName))
                     is com.mezze.language.typedast.TypedVar ->
                         (e.binding as? com.mezze.language.typedast.BindingRef.ByHash)?.let { ref -> decls[ref.hash]?.let { pending.add(it) } }
                     else -> Unit
