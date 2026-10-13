@@ -28,6 +28,17 @@ class EmitFileSizeRatchetTest {
     private fun lines(relative: String): Int {
         val root = System.getProperty("mezze.project.root")
             ?: error("mezze.project.root is not set; the build sets it for the test task")
+        // Fail LOUDLY and clearly if the root is set but is not the mezze repo —
+        // e.g. a stale copy served from gradle cache / an old daemon (a wrong
+        // `/tmp/...` staging dir once produced a cryptic "file not found" here).
+        // A sentinel that has always existed at the root turns that into a
+        // self-explanatory message instead of a confusing per-file failure.
+        assertTrue(
+            File(root, "settings.gradle.kts").exists(),
+            "mezze.project.root='$root' does not look like the mezze repo " +
+                "(no settings.gradle.kts there) — likely a stale cached root from a " +
+                "prior run under a different directory; re-run with --no-daemon from a clean checkout.",
+        )
         val f = File(root, relative)
         assertTrue(f.exists(), "expected $relative at ${f.absolutePath}")
         return f.readLines().size
