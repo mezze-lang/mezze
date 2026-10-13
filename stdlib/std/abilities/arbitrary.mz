@@ -90,28 +90,63 @@ pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitra
 ## weighted equal to their count. A 50/50 split, 10% per special, and the random
 ## half spans the FULL range.
 ##
-## Three corrections that came from reading it rather than guessing:
+## ## …but only when the SIZE asks for it
 ##
-##  - the special set is only the canonical five. An earlier thirteen (2, -2, 3, 4,
-##    10, -10, ±100) diluted the ones that matter without adding a case anyone's
-##    code distinguishes.
-##  - the random half must be WIDE. It was [-1000, 1000], which cannot find an
-##    overflow in arithmetic — the thing a big random Int is for.
-##  - 50/50, not 70/30. Over-weighting the table starves the random half, which is
-##    what finds the bugs no table anticipated.
-pub let interesting_percent: Int = 50
+## That table is right for a property test hunting overflows and wrong for a person
+## reading a sample: `int_max` one draw in ten, and the rest uniform over 63 bits —
+## so effectively never a number below a million — turned every `mez sample` row
+## into `n = 4776357352858102767`, and crashed any function that multiplies.
+##
+## One generator serves both, and the `Sample` SIZE budget is the dial, as in
+## QuickCheck. Below [stress_size] a draw is human-sized: the readable specials
+## only, at [everyday_percent], and magnitudes capped by [magnitude_bits]. From
+## [stress_size] up it is the table above, extremes included. `mez sample` runs at
+## `default_size`; `std::property.check` grows the size across its runs, so a
+## property test still reaches every extreme — in its later runs.
+##
+## The random half draws its WIDTH first and then a magnitude within it, so small
+## numbers stay as common as large widths: uniform over the full range is
+## overwhelmingly ~10^18, and a table cannot cover the middle. Draw 0 gives width
+## 0, so a failure shrinks toward small magnitudes on its own.
+
+## The size from which draws include each type's extremes.
+pub let stress_size: Int = 50
+## How often a draw comes from a type's special table, at and above [stress_size]…
+pub let stress_percent: Int = 50
+## …and below it, where the table holds only the readable specials.
+pub let everyday_percent: Int = 25
 
 ## `0 - max - 1` because the bare literal for the minimum is one past the largest
 ## POSITIVE literal the lexer accepts.
 pub let int_max: Int = 9223372036854775807
 pub let int_min: Int = 0 - 9223372036854775807 - 1
 
+let current_size: {} -> Int <Sample> = {} -> int::from_nat { n = Sample.size {} }
+let at_stress: {} -> Bool <Sample> = {} -> current_size {} >= stress_size
+
 ## The table when the draw is HIGH: draw 0 takes the wide random branch, so all-zero
 ## draws give 0 and a failure found among random values shrinks along its magnitude
 ## (std::property). Shrinking only lowers draws, so it cannot cross from the table
 ## into the random branch — a failure first met in the table shrinks to the
-## simplest table value that fails. The split is still `interesting_percent`.
-let take_interesting: {} -> Bool <Sample> = {} -> choose { bound = 100 } >= 100 - interesting_percent
+## simplest table value that fails.
+let take_interesting: {} -> Bool <Sample> = {} -> do
+  let percent = if at_stress {} then stress_percent else everyday_percent
+  choose { bound = 100 } >= 100 - percent
+
+## The widest magnitude, in bits, the current size allows: three per size step —
+## 15 bits (under 33 000) at the default size of 5 — and all 63 from [stress_size].
+let magnitude_bits: {} -> Int <Sample> = {} -> do
+  let s = current_size {}
+  if s >= stress_size then 63 else int::min { l = 3 * s, r = 62 }
+
+## A non-negative magnitude whose WIDTH is drawn uniformly up to `max_bits`.
+## `choose` draws `[0, bound)` and a full 64-bit bound does not fit, so the widest
+## case draws below `int_max` — whose own value is in the stress table.
+let draw_magnitude: { max_bits: Int } -> Int <Sample> = { max_bits } -> do
+  let bits = choose { bound = max_bits + 1 }
+  if bits >= 63 then choose { bound = int_max }
+  else if bits == 0 then 0
+  else choose { bound = core::pow_int { base = 2, exp = bits } }
 
 ## A sign, drawn separately so the magnitude draw stays non-negative.
 let negate_sometimes: { n: Int } -> Int <Sample> = { n } ->
@@ -133,13 +168,12 @@ let arbitrary_int: {} -> Int <Sample> = {} ->
     ## Zero first: draw 0 must give the SIMPLEST value, because shrinking a failure
     ## (std::property) works by pushing draws toward 0. Order is free — `one_of`
     ## is uniform — so the simplest value goes where the simplest draw lands.
-    then one_of { xs = [0, 1, 0 - 1, int_min, int_max], def = 0 }
-    ## The widest magnitude one `choose` can express, with a sign on top.
-    ## `choose` draws `[0, bound)`, so a genuinely full-range draw would need the
-    ## bound to be 2^64 — which does not fit. Magnitude-plus-sign reaches
-    ## ±(2^63 - 2), and the two values it cannot produce are `int_min` and
-    ## `int_max`, which are in the table above.
-    else negate_sometimes { n = choose { bound = int_max } }
+    then if at_stress {}
+      then one_of { xs = [0, 1, 0 - 1, int_min, int_max], def = 0 }
+      else one_of { xs = [0, 1, 0 - 1], def = 0 }
+    ## Magnitude-plus-sign reaches ±(2^63 - 2) at full width; the two values it
+    ## cannot produce, `int_min` and `int_max`, are in the stress table.
+    else negate_sometimes { n = draw_magnitude { max_bits = magnitude_bits {} } }
 
 ## ## Float spans EXPONENTS, not a narrow band
 ##
@@ -151,12 +185,19 @@ let arbitrary_int: {} -> Int <Sample> = {} ->
 ## That is the part that matters. The previous `(unit {} * 200.0) - 100.0` could only
 ## ever produce a mid-range float — never 1e-18, never 1e18 — so it could not find a
 ## precision loss, an underflow, or a comparison that only fails at scale.
+##
+## Scaled by size like `Int`: the mantissa gets two bits and the exponent one step
+## per size step, so the default size gives values like `12.375` or `-301.0`, and
+## [stress_size] gives the full [-60, 60] spread above.
 let arbitrary_float: {} -> Float <Sample> = {} ->
   if take_interesting {}
     then one_of { xs = [0.0, 1.0, 0.0 - 1.0, 0.5, 0.0 - 0.5], def = 0.0 }
     else do
-      let mantissa = float::from_int { n = negate_sometimes { n = choose { bound = 1000000 } } }
-      let exponent = float::from_int { n = choose { bound = 121 } - 60 }
+      let s = current_size {}
+      let mantissa_bits = if s >= stress_size then 20 else int::min { l = 2 * s, r = 20 }
+      let reach = if s >= stress_size then 60 else int::min { l = s, r = 60 }
+      let mantissa = float::from_int { n = negate_sometimes { n = draw_magnitude { max_bits = mantissa_bits } } }
+      let exponent = float::from_int { n = choose { bound = 2 * reach + 1 } - reach }
       mantissa * core::pow { base = 2.0, exp = exponent }
 
 let arbitrary_bool: {} -> Bool <Sample> = {} -> choose { bound = 2 } == 1
@@ -175,9 +216,10 @@ let arbitrary_bool: {} -> Bool <Sample> = {} -> choose { bound = 2 } == 1
 let arbitrary_frac: {} -> Frac <Sample> = {} ->
   if take_interesting {}
     then one_of { xs = [0//1, 1//1, -1//1, 1//2, -1//2, 1//3, 2//3, 1//6, 22//7], def = 0//1 }
+    ## Sized like `Int`, capped at a million over a thousand at every size.
     else frac::make {
-      numerator = negate_sometimes { n = choose { bound = 1000000 } },
-      denominator = choose { bound = 1000 } + 1,
+      numerator = negate_sometimes { n = draw_magnitude { max_bits = int::min { l = magnitude_bits {}, r = 20 } } },
+      denominator = draw_magnitude { max_bits = int::min { l = magnitude_bits {}, r = 10 } } + 1,
     }
 
 ## ## `Char`'s alphabet comes from the COMPILER, because Mezze cannot write one
@@ -213,14 +255,19 @@ let arbitrary_frac: {} -> Frac <Sample> = {} ->
 ## alphabets are non-empty by construction; it is required because `one_of` is
 ## total, and the compiler passes a plain letter so that a future caller handing in
 ## an empty alphabet degrades to something readable instead of crashing.
+##
+## The awkward characters come in at [stress_size], as every type's extremes do.
 let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char <Sample> =
-  { letters, awkward, def } -> frequency {
-    choices = [
-      { weight = 85, gen = {} -> one_of { xs = letters, def = def } },
-      { weight = 15, gen = {} -> one_of { xs = awkward, def = def } },
-    ],
-    def = def,
-  }
+  { letters, awkward, def } ->
+    if at_stress {}
+      then frequency {
+        choices = [
+          { weight = 85, gen = {} -> one_of { xs = letters, def = def } },
+          { weight = 15, gen = {} -> one_of { xs = awkward, def = def } },
+        ],
+        def = def,
+      }
+      else one_of { xs = letters, def = def }
 
 ## ## Readable usually, pathological often enough
 ##
@@ -235,7 +282,22 @@ let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char
 ## Weighting serves both. At 15%, a hundred-case property run sees roughly fifteen
 ## pathological inputs — ample — while a single sample reads as an ordinary word
 ## about two times in three.
-let arbitrary_str: {} -> Str <Sample> = {} -> frequency {
+##
+## Below [stress_size] only the readable part: words, and the empty string — the
+## one boundary a reader also expects to see. The hostile set comes in with every
+## type's extremes.
+let arbitrary_str: {} -> Str <Sample> = {} ->
+  if at_stress {} then hostile_str {}
+  else frequency {
+    choices = [
+      { weight = 15, gen = {} -> one_of { xs = ["", "a"], def = "" } },
+      { weight = 85, gen = {} ->
+        one_of { xs = ["alpha", "beta", "gamma", "mezze", "sample", "hello", "world"], def = "" } },
+    ],
+    def = "",
+  }
+
+let hostile_str: {} -> Str <Sample> = {} -> frequency {
   ## The boundaries FIRST, `""` first among them: draw 0 must give the simplest
   ## value, because shrinking (std::property) pushes draws toward 0. The weights,
   ## not the order, decide how often each branch is taken.
@@ -410,12 +472,16 @@ impl Arbitrary for NonEmptyList 'a where {
 impl Arbitrary for Nat where {
   arbitrary = {} ->
     if take_interesting {}
-      then one_of { xs = [0n, 1n], def = 0n }
+      then if at_stress {}
+        then match nat::from_int { n = int_max } is
+          Some { val } -> one_of { xs = [0n, 1n, val], def = 0n }
+          None -> 0n
+        else one_of { xs = [0n, 1n], def = 0n }
       ## Matched rather than `get_or`'d so this module does not depend on
       ## `std::option` — see the note in `sample.mz`'s `one_of`. The `None` arm is
       ## unreachable because the draw starts at zero, which is why it answers `0n`
       ## rather than branching on something that cannot happen.
-      else match nat::from_int { n = choose { bound = int_max } } is
+      else match nat::from_int { n = draw_magnitude { max_bits = magnitude_bits {} } } is
         Some { val } -> val
         None -> 0n
 }

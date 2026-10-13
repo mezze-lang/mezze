@@ -685,7 +685,7 @@ class SampleCommand {
         System.err.println("  --count=N    how many rows to draw (default $DEFAULT_COUNT, max $MAX_COUNT)")
         System.err.println("  --seed=N     reproduce an earlier run (the seed is printed every time)")
         System.err.println("  --json       the sample as data")
-        System.err.println("  --size=N     generation budget: collection length and recursion depth (default $DEFAULT_SIZE)")
+        System.err.println("  --size=N     generation budget: collection length, recursion depth and how large values get (default $DEFAULT_SIZE; 50+ adds extremes like int_max)")
         System.err.println("  --enumerate=N  leading choices steered across rows before drawing randomly (default $DEFAULT_ENUMERATE)")
         System.err.println("")
         System.err.println("  Printing only — these do not change what is generated:")

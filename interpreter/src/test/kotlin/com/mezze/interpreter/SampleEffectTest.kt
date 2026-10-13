@@ -185,8 +185,12 @@ class SampleEffectTest {
         // Counted in MEZZE and returned as three Ints, rather than shipping 200
         // values across and folding them here — the host side has no seq accessor
         // and does not need one for a question this shape.
+        // At a STRESS size: below `stress_size` an Int is human-sized on purpose —
+        // no extremes, nothing past 15 bits — and ArbitrarySizeTest holds that side.
+        // This is the property-testing distribution, which a check reaches as its
+        // runs grow.
         val rec = MezzeTestHelper.asRecord(eval("""
-            perform SeededSample { seed = 20260101 } in do
+            perform SeededSampleWith { seed = 20260101, config = { size = 100n, enumerate = 12n } } in do
               let vs: [Int] = seq::map { xs = seq::range { start = 0, end = 200 }, f = { x } -> arbitrary {} }
               {
                 specials = seq::count { xs = vs, p = { x } ->

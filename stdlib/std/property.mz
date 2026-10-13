@@ -23,6 +23,8 @@
 ## order). Shrinking cannot cycle, and stops after a fixed number of steps anyway.
 
 use std::int
+use std::nat::{ Nat }
+use std::nat
 use std::effects::sample::{ Sample, Sampler, default_size }
 
 ## What a check found.
@@ -31,8 +33,21 @@ pub type Verdict 'a = | Passed { runs: Int }, Failed { input: 'a, original: 'a, 
 ## The most simplifications a failure is given.
 pub let max_shrinks = 500
 
+## The size budget of a check's LAST run. Runs grow from 0 to this, as in
+## QuickCheck: early inputs are small and readable, and the later ones reach every
+## type's extremes — `int_max`, the hostile strings — which `Arbitrary` keeps for
+## sizes from `stress_size` up. So a check still hunts overflows, just not on
+## every other run, and a sample (which stays at the default size) reads normally.
+pub let max_check_size: Int = 100
+
+## The size of run `i` of `runs`: evenly from 0 to [max_check_size].
+let size_of_run: { i: Int, runs: Int } -> Nat = { i, runs } ->
+  match nat::from_int { n = (i * max_check_size) / int::max { l = runs - 1, r = 1 } } is
+    Some { val } -> val
+    None -> default_size
+
 ## Draw from the seeded stream, recording each draw under `key`.
-impl Sample for Recording { seed: Int, key: Int } where {
+impl Sample for Recording { seed: Int, key: Int, size: Nat } where {
   initialize_scope = {} -> do
     __native_reset_seeded_random { seed = seed }
     __native_draw_log_reset { key = key }
@@ -41,7 +56,7 @@ impl Sample for Recording { seed: Int, key: Int } where {
   choose = { bound } ->
     if bound <= 1 then __native_draw_log_append { key = key, value = 0 }
     else __native_draw_log_append { key = key, value = __native_seeded_random_int { seed = seed, min = 0, max = bound - 1 } },
-  size = {} -> default_size,
+  size = {} -> size,
   resize = { n, call } -> perform RecordingAt { seed = seed, key = key, size = n } in call {},
 }
 
@@ -55,13 +70,13 @@ impl Sample for RecordingAt { seed: Int, key: Int, size: Nat } where {
 }
 
 ## Answer each draw from `draws`, in order — recording what was answered.
-impl Sample for Replay { draws: [Int], key: Int } where {
+impl Sample for Replay { draws: [Int], key: Int, size: Nat } where {
   initialize_scope = {} -> do
     __native_draw_log_reset { key = key }
     {},
   finalize_scope = {} -> {},
   choose = { bound } -> __native_draw_log_replay { draws = draws, key = key, bound = bound },
-  size = {} -> default_size,
+  size = {} -> size,
   resize = { n, call } -> perform ReplayAt { draws = draws, key = key, size = n } in call {},
 }
 
@@ -98,28 +113,32 @@ let run_from: { gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int,
   { gen, holds, runs, seed, i } ->
     if i >= runs then Passed { runs = runs }
     else do
-      let x = perform Recording { seed = seed + i, key = 0 } in gen {}
+      let size = size_of_run { i = i, runs = runs }
+      let x = perform Recording { seed = seed + i, key = 0, size = size } in gen {}
       if holds { x = x } then run_from { gen = gen, holds = holds, runs = runs, seed = seed, i = i + 1 }
-      else shrink { gen = gen, holds = holds, draws = __native_draw_log { key = 0 }, best = x, original = x, steps = 0 }
+      ## Shrinking replays at the SAME size: the size shapes how draws are read
+      ## (a length's range, a magnitude's width), so the draws only mean the
+      ## failing input under the size they were made at.
+      else shrink { gen = gen, holds = holds, size = size, draws = __native_draw_log { key = 0 }, best = x, original = x, steps = 0 }
 
 ## Keep taking the first simpler sequence that still fails, until none does.
-let shrink: { gen: Sampler 'a, holds: { x: 'a } -> Bool, draws: [Int], best: 'a, original: 'a, steps: Int } -> Verdict 'a <*> =
-  { gen, holds, draws, best, original, steps } ->
+let shrink: { gen: Sampler 'a, holds: { x: 'a } -> Bool, size: Nat, draws: [Int], best: 'a, original: 'a, steps: Int } -> Verdict 'a <*> =
+  { gen, holds, size, draws, best, original, steps } ->
     if steps >= max_shrinks then Failed { input = best, original = original, shrinks = steps }
-    else match simpler_failure { gen = gen, holds = holds, current = draws, candidates = __native_shrink_candidates { draws = draws }, i = 0 } is
-      Some { val } -> shrink { gen = gen, holds = holds, draws = val.draws, best = val.x, original = original, steps = steps + 1 }
+    else match simpler_failure { gen = gen, holds = holds, size = size, current = draws, candidates = __native_shrink_candidates { draws = draws }, i = 0 } is
+      Some { val } -> shrink { gen = gen, holds = holds, size = size, draws = val.draws, best = val.x, original = original, steps = steps + 1 }
       None -> Failed { input = best, original = original, shrinks = steps }
 
 ## The first candidate whose replay still fails AND is strictly simpler than
 ## `current` — the second condition is what makes shrinking terminate.
-let simpler_failure: { gen: Sampler 'a, holds: { x: 'a } -> Bool, current: [Int], candidates: [[Int]], i: Int } -> Option { draws: [Int], x: 'a } <*> =
-  { gen, holds, current, candidates, i } ->
+let simpler_failure: { gen: Sampler 'a, holds: { x: 'a } -> Bool, size: Nat, current: [Int], candidates: [[Int]], i: Int } -> Option { draws: [Int], x: 'a } <*> =
+  { gen, holds, size, current, candidates, i } ->
     match __native_seq_get { xs = candidates, i = i } is
       None -> None
       Some { val = draws } -> do
-        let x = perform Replay { draws = draws, key = 1 } in gen {}
+        let x = perform Replay { draws = draws, key = 1, size = size } in gen {}
         let answered = __native_draw_log { key = 1 }
-        let next = { } -> simpler_failure { gen = gen, holds = holds, current = current, candidates = candidates, i = i + 1 }
+        let next = { } -> simpler_failure { gen = gen, holds = holds, size = size, current = current, candidates = candidates, i = i + 1 }
         if holds { x = x } then next {}
         else if __native_draws_simpler { a = answered, b = current } then Some { val = { draws = answered, x = x } }
         else next {}

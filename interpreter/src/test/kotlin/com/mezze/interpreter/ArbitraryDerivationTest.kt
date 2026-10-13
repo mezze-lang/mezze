@@ -21,18 +21,18 @@ class ArbitraryDerivationTest {
     }
 
     private val imports = """
-        use std::effects::sample::{ Sample, SeededSample }
+        use std::effects::sample::{ Sample, SeededSample, SeededSampleWith }
         use std::abilities::arbitrary::{ Arbitrary }
     """.trimIndent()
 
     private fun eval(body: String): Any? = MezzeTestHelper.run("$imports\n\n$body")
 
     /** Draw one value of [type] under a seeded sampler, with [decls] in scope. */
-    private fun draw(decls: String, type: String, seed: Int = 3, body: String = "v"): Any? = eval(
+    private fun draw(decls: String, type: String, seed: Int = 3, body: String = "v", size: Int? = null): Any? = eval(
         """
         $decls
 
-        perform SeededSample { seed = $seed } in do
+        ${if (size == null) "perform SeededSample { seed = $seed }" else "perform SeededSampleWith { seed = $seed, config = { size = ${size}n, enumerate = 12n } }"} in do
           let v: $type = Arbitrary.arbitrary {}
           $body
         """.trimIndent()
@@ -180,17 +180,25 @@ class ArbitraryDerivationTest {
     /**
      * Both weighted groups are reachable — the only claim worth making about the
      * distribution here. The 85/15 split is the stdlib's, and asserting the ratio
-     * would be a flake.
+     * would be a flake. At a STRESS size: below `stress_size` a `Char` is readable
+     * only, by design, and the next test holds that side.
      *
      * Thirty seeds rather than a handful: at 15%, five seeds miss the awkward group
      * about one run in two, thirty about one in a hundred and forty thousand.
      */
     @Test
     fun `a Char reaches both the readable and the awkward group`() {
-        val drawn = (1..30).map { drawCharStr(seed = it) }
+        val drawn = (1..30).map { drawCharStr(seed = it, size = 100) }
         assertTrue(drawn.all { it in CHAR_ALPHABET }, "outside the alphabet: $drawn")
         assertTrue(drawn.any { it in CHAR_READABLE }, "never readable across 30 seeds: $drawn")
         assertTrue(drawn.any { it in CHAR_AWKWARD }, "never awkward across 30 seeds: $drawn")
+    }
+
+    /** Below `stress_size` — what `mez sample` shows — a `Char` is always readable. */
+    @Test
+    fun `a Char at the default size is always readable`() {
+        val drawn = (1..30).map { drawCharStr(seed = it) }
+        assertTrue(drawn.all { it in CHAR_READABLE }, "awkward at the default size: $drawn")
     }
 
     @Test
@@ -198,8 +206,8 @@ class ArbitraryDerivationTest {
         assertEquals(drawCharStr(seed = 11), drawCharStr(seed = 11), "same seed produced different Chars")
 
     /** One drawn `Char`, as the one-character string `char::to_str` gives back. */
-    private fun drawCharStr(seed: Int): String =
-        draw("use std::char", "Char", seed, body = "char::to_str { c = v }") as String
+    private fun drawCharStr(seed: Int, size: Int? = null): String =
+        draw("use std::char", "Char", seed, body = "char::to_str { c = v }", size = size) as String
 
     @Test
     fun `the same seed replays a derived record identically`() {
