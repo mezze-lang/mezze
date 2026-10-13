@@ -36,9 +36,11 @@ pub let max_shrinks = 500
 ## The size budget of a check's LAST run. Runs grow from 0 to this, as in
 ## QuickCheck: early inputs are small and readable, and the later ones reach every
 ## type's extremes — `int_max`, the hostile strings — which `Arbitrary` keeps for
-## sizes from `stress_size` up. So a check still hunts overflows, just not on
+## sizes from `stress_size` up. Twice the stress size twice over, because a
+## container draws its elements at half its own size: an `Int` inside a list
+## reaches its extremes from run size 100, an `Int` inside a list of lists from 200. So a check still hunts overflows, just not on
 ## every other run, and a sample (which stays at the default size) reads normally.
-pub let max_check_size: Int = 100
+pub let max_check_size: Int = 200
 
 ## The size of run `i` of `runs`: evenly from 0 to [max_check_size].
 let size_of_run: { i: Int, runs: Int } -> Nat = { i, runs } ->

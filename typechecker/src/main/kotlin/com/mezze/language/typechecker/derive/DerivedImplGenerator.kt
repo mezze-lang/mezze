@@ -172,6 +172,7 @@ object DerivedImplGenerator {
         PrimitiveTypes.STR to "arbitrary_str",
         PrimitiveTypes.FRAC to "arbitrary_frac",
         PrimitiveTypes.CHAR to "arbitrary_char_from",
+        PrimitiveTypes.BYTES to "arbitrary_bytes",
     )
 
     /**

@@ -19,6 +19,8 @@ use std::collections::deque
 use std::collections::sorted_set
 use std::collections::sorted_map
 use std::collections::nonemptylist
+use std::collections::bytes
+use std::str
 
 ## A type that can be generated.
 ##
@@ -152,6 +154,19 @@ let draw_magnitude: { max_bits: Int } -> Int <Sample> = { max_bits } -> do
 let negate_sometimes: { n: Int } -> Int <Sample> = { n } ->
   if choose { bound = 2 } == 0 then n else 0 - n
 
+## One-character strings for [random_str]. Strings rather than `Char`s because
+## Mezze has no character literal (see `arbitrary_char_from`), and a string is what
+## is being built anyway.
+let str_readable: [Str] = str::split { s = "a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9", delimiter = " " }
+let str_awkward: [Str] = [" ", "\t", "\n", "\"", "'", "\\", "/", ".", ",", ";", ":", "-", "_", "=", "+", "(", ")", "[", "]", "{", "}", "<", ">", "!", "?", "@", "#", "%", "&", "*", "|", "~", "é", "ü", "ñ", "ß", "Ω", "中", "→"]
+
+## A string of up to `size` characters, 85% readable, 15% awkward.
+let random_str: {} -> Str <Sample> = {} -> do
+  let n = choose { bound = current_size {} + 1 }
+  let pieces = seq::map { xs = seq::range { start = 0, end = n }, f = { x } ->
+    if choose { bound = 100 } < 85 then one_of { xs = str_readable, def = "a" } else one_of { xs = str_awkward, def = " " } }
+  str::join { strings = pieces, separator = "" }
+
 ## The DRAW for an `Int`, with no `impl` around it.
 ##
 ## The instance is written by the compiler, exactly as `impl Eq for Int` is — a
@@ -201,6 +216,17 @@ let arbitrary_float: {} -> Float <Sample> = {} ->
       mantissa * core::pow { base = 2.0, exp = exponent }
 
 let arbitrary_bool: {} -> Bool <Sample> = {} -> choose { bound = 2 } == 1
+
+## `Bytes`: up to `size` of them, each a full 0..255 draw. From [stress_size] the
+## edge bytes — 0, 255 and the sign boundary 127/128 — are drawn on purpose, the
+## same way `int_max` is.
+let arbitrary_bytes: {} -> Bytes <Sample> = {} -> do
+  let n = choose { bound = current_size {} + 1 }
+  let one = {} ->
+    if at_stress {} then
+      (if take_interesting {} then one_of { xs = [0, 255, 127, 128], def = 0 } else choose { bound = 256 })
+    else choose { bound = 256 }
+  bytes::from_seq { arr = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> one {} } }
 
 ## ## `Frac` is exact, so its interesting values are the ones exactness is FOR
 ##
@@ -303,13 +329,18 @@ let hostile_str: {} -> Str <Sample> = {} -> frequency {
   ## not the order, decide how often each branch is taken.
   choices = [
     ## The boundaries. Cheap to produce, and the ones most code forgets.
-    { weight = 20, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
-    ## Short and alphabetic: what a person reading one sample wants to see.
-    { weight = 65, gen = {} ->
+    { weight = 15, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
+    ## Short and alphabetic.
+    { weight = 25, gen = {} ->
       one_of { xs = ["alpha", "beta", "gamma", "mezze", "sample", "hello", "world"], def = "" } },
-    ## The genuinely hostile set, kept rare rather than removed.
+    ## The hand-picked hostile set.
     { weight = 15, gen = {} ->
       one_of { xs = ["\"", "\n", "\t", "ünïcödé", "  padded  ", "a,b;c"], def = "" } },
+    ## LONG and RANDOM: a table alone never produces either, so the longest string
+    ## a check could see was ten characters and every value was one somebody
+    ## typed. Length up to the size, mostly readable characters with the awkward
+    ## ones mixed IN — a quote in the middle of a word, not only on its own.
+    { weight = 45, gen = {} -> random_str {} },
   ],
   def = "",
 }
@@ -441,26 +472,10 @@ impl Arbitrary for NonEmptyList 'a where {
     }
 }
 
-## NO `Arbitrary for Option` / `for Result`, and the reason is a RULE collision
-## rather than a missing feature.
-##
-## Both would work — the dictionary fix that made `['a]` work covers them, measured.
-## But the coherence rule refuses a hand-written impl for any type that is
-## STRUCTURALLY derivable, and a variant is; while the thing that would derive it
-## never runs, because `std::option` and `std::result` cannot import `Arbitrary`
-## (the prelude is built from them). So the type gets NEITHER instance: refused a
-## written one, never given a generated one.
-##
-## `['a]` escapes only by accident — it has no declaration, so
-## `coherenceReceiverName` returns null for it and the rule does not apply.
-##
-## The honest rule is "refuse a second instance", and for that the question is
-## whether derivation WILL produce one — structural derivability AND the ability
-## being nameable where the type is declared — not whether it could in principle.
-## Weakening it to "an instance already exists" was tried and is WRONG: derivation
-## deliberately steps aside when an explicit impl is present, so that condition is
-## false in precisely the case the rule must catch, and three coherence tests said
-## so. See S-4.
+## No impl for `Option` or `Result` is written here: the compiler derives their
+## instance where it is used, as for any declared variant shape, so both
+## constructors are drawn with the deriver's weighting. `ArbitraryCoverageTest`
+## holds that they keep working.
 
 ## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
 ## exactly as it does for `Embeddable`.

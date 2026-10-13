@@ -282,13 +282,16 @@ pub let one_of: { xs: ['a], def: 'a } -> 'a <Sample> = { xs, def } ->
 ## The empty list is in range on purpose: it is the case most code forgets, the
 ## same reason the empty string leads `Arbitrary for Str`.
 ##
-## The length comes from the size BUDGET rather than a fixed bound, which is what
-## makes nesting terminate — a list of lists halves its budget per level through
-## `resize`, instead of multiplying out.
+## The length comes from the size BUDGET rather than a fixed bound, and the
+## elements are drawn at HALF of it, through `resize` — the rule a recursive type
+## already follows. Without the halving a list of lists multiplied out: one
+## `[[[Int]]]` at size 100 held 127 746 ints. It costs an element's own reach
+## nothing that matters: a property check's sizes run high enough that elements
+## still get their extremes (`std::property.max_check_size`).
 pub let list_of: { g: Sampler 'a } -> ['a] <Sample> = { g } -> do
-  let budget = int::from_nat { n = Sample.size {} }
-  let n = Sample.choose { bound = budget + 1 }
-  seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> g {} }
+  let budget = Sample.size {}
+  let n = Sample.choose { bound = int::from_nat { n = budget } + 1 }
+  Sample.resize { n = budget / 2n, call = {} -> seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> g {} } }
 
 ## One of `choices`, each picked in proportion to its `weight`.
 ##
