@@ -54,17 +54,26 @@ jobs:
           repository: mezze-lang/mezze-wasm
           path: providers/mezze-wasm
 
+      # MEZ_CONFORMANCE_BEHAVIOURAL=1 runs the `mez dev` round-trips too, not just
+      # the type-level `mez check` — so value-level regressions (e.g. the python
+      # None-vs-module eval bug, the len crash) are caught in CI, not only locally.
+      # Each provider's `mez sync` fetches its guest-language jars (GraalJS /
+      # GraalPy / GraalWasm) from maven, and the setup-graalvm JDK runs the wire
+      # child.
       - name: Conformance — mezze-js
         env:
           MEZ: ${{ github.workspace }}/cli/build/install/mez/bin/mez
+          MEZ_CONFORMANCE_BEHAVIOURAL: '1'
         run: providers/mezze-js/conformance/check.sh
 
       - name: Conformance — mezze-python
         env:
           MEZ: ${{ github.workspace }}/cli/build/install/mez/bin/mez
+          MEZ_CONFORMANCE_BEHAVIOURAL: '1'
         run: providers/mezze-python/conformance/check.sh
 
       - name: Conformance — mezze-wasm
         env:
           MEZ: ${{ github.workspace }}/cli/build/install/mez/bin/mez
+          MEZ_CONFORMANCE_BEHAVIOURAL: '1'
         run: providers/mezze-wasm/conformance/check.sh
