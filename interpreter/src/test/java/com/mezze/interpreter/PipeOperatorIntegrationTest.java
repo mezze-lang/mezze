@@ -2,6 +2,7 @@ package com.mezze.interpreter;
 
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeRecord;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -15,10 +16,30 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class PipeOperatorIntegrationTest {
 
+    private String priorStrict;
+
     @BeforeEach
     void setUp() {
         // Disable strict validation for pipe operator tests due to complex type inference issues
+        priorStrict = System.getProperty("mezze.typecheck.strict");
         System.setProperty("mezze.typecheck.strict", "false");
+    }
+
+    /**
+     * Put it back. A system property is process-global and this module runs with
+     * `maxParallelForks = 1`, so leaving `strict=false` behind relaxed
+     * typechecking for EVERY test that ran after this class in the one shared
+     * JVM — silently, and deterministically rather than flakily.
+     *
+     * The typechecker module guards its whole `mezze.*` namespace with a JUnit
+     * extension (MezzeSystemPropertyIsolation). There is no shared test module to
+     * put that in, and this is the only site in this module, so it restores by
+     * hand — the pattern SoundnessSweepTest uses.
+     */
+    @AfterEach
+    void tearDown() {
+        if (priorStrict == null) System.clearProperty("mezze.typecheck.strict");
+        else System.setProperty("mezze.typecheck.strict", priorStrict);
     }
 
     private Map<String, Object> runAndGetContext(String source) {
