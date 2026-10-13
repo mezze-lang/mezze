@@ -62,7 +62,10 @@ class SampleCommand {
         // a single sample shows what it returned, several show what it DOES — which
         // arguments matter, where the output turns over, whether an edge case breaks
         // it. The seed covers the whole batch, so `--seed` reproduces every row.
-        val count = (intFlag(flags, "--count") ?: 1).coerceIn(1, MAX_COUNT)
+        // Three by default: enough to show a function's shape — and the leading rows
+        // are the PINNED ones, so a `match` or an `if` usually shows both sides — while
+        // still fitting on a screen without asking.
+        val count = (intFlag(flags, "--count") ?: DEFAULT_COUNT).coerceIn(1, MAX_COUNT)
         val depth = intFlag(flags, "--depth") ?: WireProtocol.DEFAULT_EVAL_MAX_DEPTH
         val items = intFlag(flags, "--items") ?: WireProtocol.DEFAULT_EVAL_MAX_ITEMS
         // GENERATION knobs, carried into each row's `SampleConfig`. Not to be
@@ -679,7 +682,7 @@ class SampleCommand {
         System.err.println()
         System.err.println("Generate arguments for a function, run it, and show both.")
         System.err.println()
-        System.err.println("  --count=N    how many rows to draw (default 1, max 100)")
+        System.err.println("  --count=N    how many rows to draw (default $DEFAULT_COUNT, max $MAX_COUNT)")
         System.err.println("  --seed=N     reproduce an earlier run (the seed is printed every time)")
         System.err.println("  --json       the sample as data")
         System.err.println("  --size=N     generation budget: collection length and recursion depth (default $DEFAULT_SIZE)")
@@ -716,9 +719,11 @@ class SampleCommand {
 
         /** Prefix of the aliases an evaluated constant is reached through. */
         const val CONST = "__mez_const"
-        /** `SampleConfig` defaults — the same values as `std::effects::sample::default_config`. */
         /** Most rows one run draws. */
         const val MAX_COUNT = 100
+        /** Rows drawn when `--count` is not given. */
+        const val DEFAULT_COUNT = 3
+        /** `SampleConfig` defaults — the same values as `std::effects::sample::default_config`. */
         const val DEFAULT_SIZE = 5
         const val DEFAULT_ENUMERATE = 12
         val EXTRA_IMPORTS = SampleGen.IMPORTS
