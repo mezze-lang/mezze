@@ -102,7 +102,7 @@ internal fun TypedASTCompiler.prescanForDictMethods(modules: List<TypedModule>) 
                 val value = decl.value
                 if (value is TypedLambda) {
                     val constrained = arrowHasAbilityConstraint(value.type)
-                    val methods = scanExprForVarTypeMethodCalls(value.body, constrained)
+                    val methods = scanExprForVarTypeMethodCalls(value.body, constrained, value.type)
                     if (methods.isNotEmpty()) {
                         dictMethodsForHash[decl.hash] = methods
                     }
@@ -136,7 +136,7 @@ internal fun TypedASTCompiler.prescanForDictMethods(modules: List<TypedModule>) 
             implOpBodies.add(opHash to bodyExpr)
             declaredOpTypeByHash[opHash] = opBody.type
             val constrained = arrowHasAbilityConstraint(opBody.type)
-            val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained)
+            val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained, opBody.type)
             if (methods.isNotEmpty()) {
                 dictMethodsForHash[opHash] = methods
             }
@@ -352,10 +352,13 @@ internal fun TypedASTCompiler.scanExprForDictFunctionCalls(expr: TypedExpr, out:
  */
 internal fun TypedASTCompiler.scanExprForVarTypeMethodCalls(
     expr: TypedExpr,
-    arrowIsConstrained: Boolean = false
+    arrowIsConstrained: Boolean = false,
+    /** The enclosing arrow. Needed because an ability can dispatch on a type
+     *  argument that is NOT the receiver — see the `Decode` case below. */
+    arrowType: MezzeType? = null,
 ): Set<String> {
     val result = mutableSetOf<String>()
-    scanExprForVarTypeMethods(expr, result, arrowIsConstrained)
+    scanExprForVarTypeMethods(expr, result, arrowIsConstrained, arrowType)
     return normalizeDictKeys(result)
 }
 
@@ -686,6 +689,7 @@ internal fun TypedASTCompiler.scanExprForVarTypeMethods(
     expr: TypedExpr,
     out: MutableSet<String>,
     arrowIsConstrained: Boolean = false,
+    arrowType: MezzeType? = null,
     // Concrete types of lambda params in scope (from their ANNOTATIONS, e.g.
     // `{ x: Rt } -> …`). Used to recover an op receiver's concrete type when the
     // node's own type was laundered to VarType(unknown) — see the field-recovery
@@ -775,6 +779,51 @@ internal fun TypedASTCompiler.scanExprForVarTypeMethods(
                     // it can still be the element `'a` that needs the dict.
                     baseAnn !is VarType && !containsVarType(baseAnn)
                 }
+                // The receiver being CONCRETE says nothing about whether the op
+                // resolves statically. This scan asks "is the receiver a
+                // variable?", which is right for an ability that dispatches on
+                // its receiver and wrong for one that does not:
+                //
+                //     ability Decode 'config 'a for 'in
+                //     impl FromJson 'a for Str where {
+                //       from_json: { it: Str } with Decode JsonC 'a -> … = { it } ->
+                //         match parse_str { s = it } is
+                //           Ok { val } -> val.decode { config = json_default }
+                //
+                // `decode` dispatches on the decode TARGET `'a`; the receiver
+                // `'in` is the concrete `Json` the parse just produced. So the op
+                // needs a dictionary while the receiver needs nothing, and keying
+                // the decision on the receiver misses it — `from_json` compiled
+                // with NO dict param at all and its `.decode` degraded to a
+                // name-based field read (CallIndirect on [MezzeRecord, Object[]]).
+                //
+                // Narrow on purpose. A spurious dict param is not harmless: the
+                // comments above record closure frames built without a slot the
+                // emitted read then runs off the end of. So this fires only when
+                // the ENCLOSING ARROW is constrained by an ability that declares
+                // this very operation AND that constraint still carries a type
+                // variable after substitution. "Constrained at all" is too broad
+                // to risk.
+                val concreteReceiverStillNeedsDict = receiverType !is VarType &&
+                    (arrowType as? MezzeType.FunctionType)?.abilityConstraints?.any { c ->
+                        val ops = c.abilityHash?.let { abilityOpNames[it] }
+                        ops != null && methodName in ops &&
+                            c.typeArgs.any { containsVarType(substitution.apply(it)) }
+                    } == true
+                if (concreteReceiverStillNeedsDict &&
+                    shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
+                    // No receiver variable to qualify with, and none is wanted:
+                    // the two decode targets are told apart by the two GENERATED
+                    // impls and by what each call site injects, not by the slot
+                    // name. `normalizeDictKeys` collapses a single-variable key to
+                    // this same plain shape, so the param name is byte-identical
+                    // to the working receiver-variable path.
+                    val ability = fn.abilityHash?.hex?.take(12)
+                    out.add(
+                        if (ability == null) methodName
+                        else "$methodName${com.mezze.language.ast.MagicParams.ABILITY_SEP}$ability"
+                    )
+                }
                 if (receiverType is VarType && !recoveredConcrete &&
                     shouldDictDispatchVarTypeOp(methodName, arrowIsConstrained)) {
                     // BUG 9 / C.2: include the ABILITY the emitted node carries.
@@ -789,11 +838,11 @@ internal fun TypedASTCompiler.scanExprForVarTypeMethods(
                         ),
                     )
                 }
-                scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, paramEnv)
+                scanExprForVarTypeMethods(fn.record, out, arrowIsConstrained, arrowType, paramEnv)
             } else {
-                scanExprForVarTypeMethods(fn, out, arrowIsConstrained, paramEnv)
+                scanExprForVarTypeMethods(fn, out, arrowIsConstrained, arrowType, paramEnv)
             }
-            scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, arrowType, paramEnv)
         }
         is TypedLambda -> {
             // #195 B2: descend into nested lambdas. When the inner body calls
@@ -810,67 +859,67 @@ internal fun TypedASTCompiler.scanExprForVarTypeMethods(
             // Extend the param env with THIS lambda's params (their annotated
             // types), so a nested `x.field` op can recover x's concrete type.
             val innerParamEnv = paramEnv + expr.params.associate { it.name to it.type }
-            scanExprForVarTypeMethods(expr.body, out, innerConstrained, innerParamEnv)
+            scanExprForVarTypeMethods(expr.body, out, innerConstrained, arrowType, innerParamEnv)
         }
         is TypedBlock -> {
             for (s in expr.statements) {
                 when (s) {
-                    is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out, arrowIsConstrained, paramEnv)
-                    is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out, arrowIsConstrained, paramEnv)
+                    is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out, arrowIsConstrained, arrowType, paramEnv)
+                    is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out, arrowIsConstrained, arrowType, paramEnv)
                 }
             }
-            scanExprForVarTypeMethods(expr.result, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.result, out, arrowIsConstrained, arrowType, paramEnv)
         }
         is TypedIf -> {
-            scanExprForVarTypeMethods(expr.condition, out, arrowIsConstrained, paramEnv)
-            scanExprForVarTypeMethods(expr.thenBranch, out, arrowIsConstrained, paramEnv)
-            scanExprForVarTypeMethods(expr.elseBranch, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.condition, out, arrowIsConstrained, arrowType, paramEnv)
+            scanExprForVarTypeMethods(expr.thenBranch, out, arrowIsConstrained, arrowType, paramEnv)
+            scanExprForVarTypeMethods(expr.elseBranch, out, arrowIsConstrained, arrowType, paramEnv)
         }
         is TypedMatch -> {
-            scanExprForVarTypeMethods(expr.scrutinee, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.scrutinee, out, arrowIsConstrained, arrowType, paramEnv)
             for (c in expr.cases) {
-                c.guard?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
-                scanExprForVarTypeMethods(c.body, out, arrowIsConstrained, paramEnv)
+                c.guard?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, arrowType, paramEnv) }
+                scanExprForVarTypeMethods(c.body, out, arrowIsConstrained, arrowType, paramEnv)
             }
         }
         is TypedRecord -> {
             for (e in expr.entries) {
                 when (e) {
-                    is TypedRecordEntry.Field -> scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, paramEnv)
-                    is TypedRecordEntry.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, paramEnv)
+                    is TypedRecordEntry.Field -> scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, arrowType, paramEnv)
+                    is TypedRecordEntry.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, arrowType, paramEnv)
                 }
             }
         }
-        is TypedFieldAccess -> scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained, paramEnv)
-        is TypedVariantConstruct -> expr.payload?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
+        is TypedFieldAccess -> scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained, arrowType, paramEnv)
+        is TypedVariantConstruct -> expr.payload?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, arrowType, paramEnv) }
         is TypedRecordUpdate -> {
-            scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.record, out, arrowIsConstrained, arrowType, paramEnv)
             for (e in expr.updates) {
-                if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, paramEnv)
+                if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out, arrowIsConstrained, arrowType, paramEnv)
             }
         }
         is TypedPerform -> {
             for (h in expr.handlers) {
-                h.params?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, paramEnv) }
+                h.params?.let { scanExprForVarTypeMethods(it, out, arrowIsConstrained, arrowType, paramEnv) }
             }
-            scanExprForVarTypeMethods(expr.body, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.body, out, arrowIsConstrained, arrowType, paramEnv)
         }
-        is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, paramEnv)
+        is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out, arrowIsConstrained, arrowType, paramEnv)
         is TypedPipe -> {
-            scanExprForVarTypeMethods(expr.left, out, arrowIsConstrained, paramEnv)
-            scanExprForVarTypeMethods(expr.right, out, arrowIsConstrained, paramEnv)
+            scanExprForVarTypeMethods(expr.left, out, arrowIsConstrained, arrowType, paramEnv)
+            scanExprForVarTypeMethods(expr.right, out, arrowIsConstrained, arrowType, paramEnv)
         }
         is TypedSeq -> {
             for (e in expr.elements) {
                 when (e) {
-                    is TypedSeqElement.Regular -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, paramEnv)
-                    is TypedSeqElement.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, paramEnv)
+                    is TypedSeqElement.Regular -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, arrowType, paramEnv)
+                    is TypedSeqElement.Spread -> scanExprForVarTypeMethods(e.expr, out, arrowIsConstrained, arrowType, paramEnv)
                 }
             }
         }
         is TypedStringLit -> {
             for (p in expr.parts) {
-                if (p is TypedStringPart.Interpolation) scanExprForVarTypeMethods(p.expr, out, arrowIsConstrained, paramEnv)
+                if (p is TypedStringPart.Interpolation) scanExprForVarTypeMethods(p.expr, out, arrowIsConstrained, arrowType, paramEnv)
             }
         }
         // Leaf nodes: no children

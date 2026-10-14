@@ -69,28 +69,34 @@ internal fun TypedAstBuilder.buildMatchCase(
     // pattern against the scrutinee's declared shape (`Wrap { p = l }` on a
     // `W` scrutinee binds `l : P`). Untyped bindings made every `==` on a
     // payload inside an impl body fall to the structural default.
-    // A.2, MEASURED: ungating this (dropping `!typingImplOpBody`) recovers 101
-    // of the 125 elaboration misses the census counts — and breaks exactly
-    // four codec tests (JsonDecodeExhaustiveTest x3, UserDecodeAbilityTest),
-    // the same four A.1 hit. Codec decode bodies depend on these bindings
-    // being FRESH VARIABLES; preferring ground types, preferring the declared
-    // shape, and a strictly-additive merge were all tried during A.1 and all
-    // broke them. The dependency goes away when codec impls are generated
-    // into the resolved module like derived impls, so this half of A.2 is
-    // blocked on A.3 — not on a better heuristic here.
-    // Two distinct uses of the scrutinee's declared shape, with two rules.
+    // A.3, LANDED: this read is no longer gated to impl-op bodies.
     //
-    // FILL — supply a binder the solver never mentioned. Only inside an impl op
-    // body. Widening it was measured and does not work: the codec decode
-    // bodies depend on such binders staying FRESH VARIABLES (a dict slot is
-    // keyed on the receiver BEING a variable — per-var slots, C.2 — so a binder
-    // that stops being one loses its slot, the call degrades to a name-based
-    // field read, and CallIndirect dies on [MezzeRecord, Object[]]).
-    // JsonDecodeExhaustiveTest x3 and UserDecodeAbilityTest fail that way for
-    // every widening tried: unconditional, "prefer ground types", "prefer the
-    // declared shape", strictly-additive merge, and concrete-scrutinee-only.
+    // It used to be, and the reason was real but mis-stated. The comment here
+    // said "codec decode bodies depend on these bindings being FRESH
+    // VARIABLES", which reads as a quirk of those bodies. It was not. Typing
+    // the binder made `val` in
+    //
+    //     impl FromJson 'a for Str where {
+    //       from_json: { it: Str } with Decode JsonC 'a -> … = { it } ->
+    //         match parse_str { s = it } is
+    //           Ok { val } -> val.decode { config = json_default }
+    //
+    // concrete (`Json`), and the dict PRESCAN decided a call needs a dictionary
+    // by asking whether its RECEIVER was a type variable. `decode` dispatches on
+    // the decode TARGET `'a`, not on the receiver — so a concrete receiver made
+    // the prescan skip it, `from_json` compiled with NO dict param at all, and
+    // its `.decode` degraded to a name-based field read (CallIndirect on
+    // [MezzeRecord, Object[]]). Five tests failed, all of them about telling two
+    // decode shapes apart.
+    //
+    // Fixed where the mistake was, in `DictEvidence.scanExprForVarTypeMethods`:
+    // a concrete receiver also raises a dict request when the enclosing arrow is
+    // constrained by an ability that declares the operation and that constraint
+    // still carries a type variable. With that, this gate protects nothing — the
+    // typechecker suite was already green with it dropped, so it never guarded
+    // typechecking behaviour at all, only the prescan's blind spot.
     val structuralBindings: Map<String, MezzeType> =
-        if (scrutineeType == null || !typingImplOpBody) emptyMap()
+        if (scrutineeType == null) emptyMap()
         else case.patterns.fold(emptyMap()) { acc, p -> acc + patternBindingTypes(p, scrutineeType) }
 
     // OVERRIDE — replace a solver binding that resolved to nothing. When the
@@ -198,13 +204,12 @@ internal fun TypedAstBuilder.patternBindingTypes(pattern: ParsedPattern, type: M
         // inner pattern entirely and leaving `x` untyped — the same
         // one-sidedness the seq arm below was hardened against.
         //
-        // HONESTLY: this changed no observed behaviour. BUG 11's repro does
-        // not reach here (it arrives with `typingImplOpBody = false`, so the
-        // structural read is skipped altogether). Kept anyway, unlike other
-        // no-op experiments in this effort, because it has no downside — it
-        // only ADDS a type where there was none, on a path gated to impl
-        // bodies — and dropping a sub-pattern outright is a plain omission
-        // rather than a judgement call.
+        // When written, this changed no observed behaviour: BUG 11's repro did
+        // not reach here, because the structural read was gated to impl-op
+        // bodies and skipped altogether. That gate is gone (A.3), so this arm
+        // now runs on every match — which is the reason it was kept rather than
+        // reverted as a no-op experiment: it only ADDS a type where there was
+        // none, and dropping a sub-pattern outright is a plain omission.
         is ParsedNewtypePattern -> {
             // `B.(x)` binds `x` to what B WRAPS. `declaredShape` opens a
             // newtype into a VARIANT with one constructor — NOT a
