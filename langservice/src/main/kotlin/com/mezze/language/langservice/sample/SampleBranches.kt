@@ -151,11 +151,15 @@ object SampleBranches {
          * between two inputs and is read exactly like `a < b`.
          */
         context: Map<String, Pair<String, MezzeType>> = emptyMap(),
+        /** Newtypes the command draws from their representation — see [SampleGen.Unwrap]. */
+        unwrap: SampleGen.Unwrap = SampleGen.Unwrap.NONE,
     ): List<Row> = try {
+        unwrapTL.set(unwrap)
         inventoryOnThisThread(decl, params, decls, imported, evaluated, context)
     } finally {
         contextLabelsTL.remove()
         contextLocalsTL.remove()
+        unwrapTL.remove()
     }
 
     private fun inventoryOnThisThread(
@@ -434,7 +438,7 @@ object SampleBranches {
                 val seq = pattern as? TypedSeqPattern ?: continue
                 var draws = false
                 val items = seq.elements.map { el ->
-                    literalSource(el) ?: SampleGen.of(elem).also { draws = true }
+                    literalSource(el) ?: gen(elem).also { draws = true }
                 }
                 val shape = if (seq.rest != null) "[${"_, ".repeat(seq.elements.size)}...]" else
                     "[${List(seq.elements.size) { "_" }.joinToString(", ")}]"
@@ -526,7 +530,7 @@ object SampleBranches {
                             val src = payload.fields.entries.joinToString(", ", prefix = "${pattern.tag} { ", postfix = " }") { (f, t) ->
                                 val pin = byField[f]
                                 if (pin == null || pin.draws) draws = true
-                                "$f = ${pin?.source ?: SampleGen.of(t)}"
+                                "$f = ${pin?.source ?: gen(t)}"
                             }
                             val why = req.values.map { it.why }.distinct().joinToString("; ")
                             val placed = placeAt(path, params, Pinned(src, draws)) ?: continue
@@ -577,7 +581,7 @@ object SampleBranches {
             ?: return Pinned(arm.tag, draws = false)
         if (fields.isEmpty()) return Pinned("${arm.tag} {}", draws = false)
         val source = fields.entries.joinToString(", ", prefix = "${arm.tag} { ", postfix = " }") { (name, type) ->
-            "$name = ${SampleGen.of(type)}"
+            "$name = ${gen(type)}"
         }
         return Pinned(source, draws = true)
     }
@@ -883,7 +887,7 @@ object SampleBranches {
     /** A sequence literal of exactly [n] drawn elements. */
     private fun seqOfLength(n: Int, elem: MezzeType): Pinned =
         if (n == 0) Pinned("[]", draws = false)
-        else Pinned((1..n).joinToString(", ", prefix = "[", postfix = "]") { SampleGen.of(elem) }, draws = true)
+        else Pinned((1..n).joinToString(", ", prefix = "[", postfix = "]") { gen(elem) }, draws = true)
 
     /** The type at [path] within its parameter. */
     private fun typeAt(path: Path, params: Map<String, MezzeType>): MezzeType? {
@@ -1094,6 +1098,9 @@ object SampleBranches {
     private val contextLabelsTL = ThreadLocal.withInitial { emptyMap<String, String>() }
     private val contextLocalsTL = ThreadLocal.withInitial { emptyMap<String, String>() }
     private val contextLabels: Map<String, String> get() = contextLabelsTL.get()
+    private val unwrapTL = ThreadLocal.withInitial { SampleGen.Unwrap.NONE }
+    /** A pinned row's drawn parts are generated as the row's own arguments are. */
+    private fun gen(type: MezzeType): String = SampleGen.of(type, unwrap = unwrapTL.get())
     private val contextLocals: Map<String, String> get() = contextLocalsTL.get()
 
     /**
@@ -1143,7 +1150,7 @@ object SampleBranches {
             val sub = leaves.filter { it.first.first() == name }.map { it.first.drop(1) to it.second }
             if (sub.isEmpty()) {
                 draws = true
-                "$name = ${SampleGen.of(fieldType)}"
+                "$name = ${gen(fieldType)}"
             } else {
                 val inner = placeAll(fieldType, sub) ?: return null
                 if (inner.draws) draws = true

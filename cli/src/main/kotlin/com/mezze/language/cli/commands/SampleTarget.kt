@@ -44,7 +44,16 @@ object SampleTarget {
             val reanalyze: (Map<com.mezze.language.typedast.Hash, SampleBranches.Evaluated>) -> List<SampleBranches.Row> = { branches },
             /** Scripted performers for the effects nothing handles — see [SampleScripts]. */
             val scripts: List<SampleScripts.Script> = emptyList(),
+            /**
+             * Newtypes in the parameters with NO `Arbitrary` anywhere in scope. The
+             * command draws each from its representation through a sample-local impl
+             * and says so — see [SampleGen.Unwrap].
+             */
+            val unwrapped: List<com.mezze.language.ast.MezzeType.NewtypeType> = emptyList(),
         ) : Result {
+            /** [unwrapped], keyed for generation. */
+            val unwrap: SampleGen.Unwrap
+                get() = SampleGen.Unwrap(unwrapped.mapNotNull { n -> SampleGen.Unwrap.declaredHash(n)?.let { it to n } }.toMap())
             val fieldNames: List<String> get() = fields.keys.toList()
             /** Rows that can be pinned to an arm — the longest arm list. */
             val pinnableRows: Int get() = branches.size
@@ -176,18 +185,88 @@ object SampleTarget {
         val imported = success.loadedModules.values
             .flatMap { it.typedModule?.decls.orEmpty() }
             .filterIsInstance<TypedLetDecl>()
+        val missing = newtypesWithoutArbitrary(fields, success, projectRoot)
+        // Only a newtype declared HERE can be drawn from its representation: a
+        // newtype's constructor is private to the module that defines it — that is
+        // its encapsulation, and sample does not get around it. One from elsewhere
+        // is refused, saying where its impl belongs.
+        val localHashes = success.typedModule?.decls.orEmpty()
+            .filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>().map { it.hash }.toSet()
+        val (unwrapped, foreign) = missing.partition { SampleGen.Unwrap.declaredHash(it) in localHashes }
+        if (foreign.isNotEmpty()) {
+            val homes = success.loadedModules.entries.associate { (path, m) ->
+                path.fullPath to m.typedModule?.decls.orEmpty()
+                    .filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>().map { it.hash }.toSet()
+            }
+            return Result.Refused(foreign.joinToString("\n") { n ->
+                val home = homes.entries.firstOrNull { SampleGen.Unwrap.declaredHash(n) in it.value }?.key ?: "its module"
+                "${Glyphs.CROSS} `$declName`'s arguments could not be generated: `${n.name}` has no " +
+                    "`Arbitrary`, and its constructor is private to `$home`, so sample cannot build one.\n" +
+                    "  Write `impl Arbitrary for ${n.name}` in `$home` to say which values are valid."
+            })
+        }
+        val unwrap = SampleGen.Unwrap(unwrapped.mapNotNull { n -> SampleGen.Unwrap.declaredHash(n)?.let { it to n } }.toMap())
         return Result.Ready(
             declName,
             fields,
-            SampleBranches.inventory(decl, fields, decls, imported, context = SampleScripts.context(scripts)),
+            SampleBranches.inventory(decl, fields, decls, imported, context = SampleScripts.context(scripts), unwrap = unwrap),
             unresolved = SampleBranches.unresolvedConstants(
                 decl, decls, SampleBranches.importedConstants(success.loadedModules.mapValues { it.value.typedModule }),
             ),
             reanalyze = { evaluated ->
-                SampleBranches.inventory(decl, fields, decls, imported, evaluated, SampleScripts.context(scripts))
+                SampleBranches.inventory(decl, fields, decls, imported, evaluated, SampleScripts.context(scripts), unwrap)
             },
             scripts = scripts,
+            unwrapped = unwrapped,
         )
+    }
+
+    /**
+     * The newtypes in [fields] that no loaded module gives an `Arbitrary` — matched
+     * by the newtype's declared IDENTITY, never by its name, so a same-named newtype
+     * elsewhere cannot answer for this one.
+     */
+    private fun newtypesWithoutArbitrary(
+        fields: Map<String, com.mezze.language.ast.MezzeType>,
+        success: TypeChecker.TypeCheckResult.Success,
+        projectRoot: File,
+    ): List<com.mezze.language.ast.MezzeType.NewtypeType> {
+        val modules = listOfNotNull(success.typedModule) + success.loadedModules.values.mapNotNull { it.typedModule } +
+            arbitraryModules(projectRoot)
+        // Every newtype declaration in scope, by IDENTITY.
+        val newtypes = modules.flatMap { it.decls }
+            .filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
+            .filter { it.typeParams.isEmpty() }
+            .mapNotNull { d ->
+                val def = d.definition as? com.mezze.language.typedast.TypedNewtypeDef ?: return@mapNotNull null
+                d.hash to com.mezze.language.ast.MezzeType.NewtypeType(
+                    d.name, def.constructor, def.wrappedType, com.mezze.language.ast.TypeIdentity.Declared(d.hash, d.name),
+                )
+            }.toMap()
+        fun declaredHash(t: com.mezze.language.ast.MezzeType) = SampleGen.Unwrap.declaredHash(t)
+        val reachable = fields.values
+            .flatMap { f -> SampleGen.newtypesIn(f) { app -> declaredHash(app)?.let { newtypes[it] } } }
+            .distinctBy { declaredHash(it) ?: it.name }
+        if (reachable.isEmpty()) return emptyList()
+        val implemented = modules.flatMap { it.abilityImpls }
+            .filter { com.mezze.language.typechecker.WellKnownHashConstants.isArbitrary(it.abilityHash) }
+            .mapNotNull { impl -> impl.targetTypes.firstOrNull()?.let(::declaredHash) }
+            .toSet()
+        return reachable.filter { declaredHash(it) !in implemented }
+    }
+
+    /**
+     * The modules the generated program sees that the user's may not: the one that
+     * DECLARES `Arbitrary`, with the impls it carries (`Nat`'s among them). The
+     * command imports it into every expression it writes, so an impl there is one
+     * the expression will find — a newtype it covers must keep it, not be drawn
+     * from its representation (`Nat` would come out negative).
+     */
+    private fun arbitraryModules(projectRoot: File): List<com.mezze.language.typedast.TypedModule> {
+        val probe = MezzeParser().parseParsedModule(SampleGen.IMPORTS.joinToString("\n") + "\n", "__mez_sample_imports.mz")
+        val result = TypeChecker().checkParsedModule(probe, projectRoot.toPath(), enablePrelude = true)
+            as? TypeChecker.TypeCheckResult.Success ?: return emptyList()
+        return listOfNotNull(result.typedModule) + result.loadedModules.values.mapNotNull { it.typedModule }
     }
 
     /**

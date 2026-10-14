@@ -99,6 +99,17 @@ class SampleCommand {
                 System.err.println(
                     "${Glyphs.CROSS} `$name`'s arguments could not be generated.\n"
                 )
+                // The component that blocks it, by path — the compiler names only the
+                // outermost type (`User does not implement …`), which sends the reader
+                // to the wrong declaration.
+                val blockers = target.fields.flatMap { (f, t) -> SampleGen.blockers(f, t) }
+                if (blockers.isNotEmpty()) {
+                    blockers.forEach { System.err.println("  because $it") }
+                    System.err.println()
+                }
+                // Its location is in the code sample wrote (printed below), not in the
+                // user's file — said, so `app.mz:29` on a 17-line file is not a puzzle.
+                System.err.println("The compiler's report, located in the generated code shown at the end:\n")
                 System.err.println(compiled.message)
                 System.err.println(
                     "\n${Glyphs.TIP} This is the generated call, which sample wrote:\n" +
@@ -145,7 +156,7 @@ class SampleCommand {
                 }
 
                 val unreached = compiled.sites.filter { it.id !in reached }
-                if (json) println(sampleJson(name, seed, rows, unreached, moduleFile) { i -> target.branches.getOrNull(i)?.why })
+                if (json) println(sampleJson(name, seed, rows, unreached, moduleFile, target.unwrapped.map { it.name }) { i -> target.branches.getOrNull(i)?.why })
                 else {
                     printSample(target, seed, rows)
                     SampleCoverageReport.lines(name, moduleFile.readLines(), compiled.sites, unreached).forEach { println(it) }
@@ -428,6 +439,7 @@ class SampleCommand {
             target.fields,
             args,
             pin = { field -> target.branches.getOrNull(row)?.pins?.get(field) },
+            unwrap = target.unwrap,
         ) {
             com.mezze.language.ast.prettyPrintType(it)
         }
@@ -444,8 +456,8 @@ class SampleCommand {
         // pinned when the analysis found a branch on it, and the rest are drawn.
         val ctxLets = valuedOps.mapIndexed { k, (_, op) ->
             val sc = valuedOps[k].first
-            val first = target.branches.getOrNull(row)?.pins?.get(sc.key(op))?.source ?: SampleGen.of(op.returnType)
-            val rest = (2..SampleScripts.CALLS).map { SampleGen.of(op.returnType) }
+            val first = target.branches.getOrNull(row)?.pins?.get(sc.key(op))?.source ?: SampleGen.of(op.returnType, unwrap = target.unwrap)
+            val rest = (2..SampleScripts.CALLS).map { SampleGen.of(op.returnType, unwrap = target.unwrap) }
             "              let ${ctxNames[k]}: [${com.mezze.language.ast.prettyPrintType(op.returnType)}] = " +
                 (listOf(first) + rest).joinToString(", ", prefix = "[", postfix = "]")
         }
@@ -563,8 +575,22 @@ class SampleCommand {
             println("  ${Glyphs.WARN} $pinned branch rows found, ${rows.size} shown$cap — " +
                 "rerun with --count=${minOf(pinned, MAX_COUNT)} to see them")
         }
+        unwrappedNote(target).forEach { println(it) }
         println("  seed $seed — rerun with: mez sample ${target.name} --seed=$seed")
     }
+
+    /**
+     * Said ONCE per run, for each newtype drawn from its representation: the
+     * values in those columns are any `Int` (or whatever it wraps), not values the
+     * author has said are valid. Printed rather than hidden, so a surprising row
+     * reads as "sample did not know" instead of "the function accepts this".
+     */
+    internal fun unwrappedNote(target: SampleTarget.Result.Ready): List<String> =
+        target.unwrapped.map { n ->
+            val rep = com.mezze.language.ast.prettyPrintType(n.wrappedType)
+            "  ${Glyphs.WARN} `${n.name}` has no `Arbitrary`, so sample drew its `$rep` representation — " +
+                "values may not be valid `${n.name}`s. Write `impl Arbitrary for ${n.name}` to choose which are."
+        }
 
     /**
      * The reason without its trailing explanatory clause.
@@ -596,6 +622,8 @@ class SampleCommand {
         rows: List<RowOutcome>,
         unreached: List<com.mezze.language.truffleir.BranchCoverage.Site>,
         moduleFile: File,
+        /** Newtypes drawn from their representation — see [unwrappedNote]. */
+        unwrapped: List<String> = emptyList(),
         /** Why row `i` exists — the branch it was pinned to reach — or null for a
          *  drawn row. The table shows it; the data has to carry it too. */
         whyOf: (Int) -> String?,
@@ -629,6 +657,8 @@ class SampleCommand {
                     .append(",\"column\":").append(site.src.startCol)
                     .append(",\"branch\":").append(WireValueJson.quote(SampleCoverageReport.branchName(site))).append("}")
             }
+            append("],\"unchecked_newtypes\":[")
+            append(unwrapped.joinToString(",") { WireValueJson.quote(it) })
             append("]}")
         }
     }
