@@ -19,25 +19,37 @@ import kotlin.test.assertTrue
  * today would fail every existing miss at once, so this measures first and holds
  * the line — the 0.2 ratchet's shape: measure, ratchet, then enforce.
  *
- * MEASURED, so the next person does not have to rediscover it:
+ * IT IS NOW ZERO, and this is therefore an INVARIANT rather than a ratchet.
  *
- *  - 125 distinct sites, all in the stdlib (async.mz, json.mz, jvm.mz, stm.mz,
- *    http.mz, channel.mz), each a match-case binding.
- *  - Ungating the structural read (dropping the `typingImplOpBody` condition in
- *    `TypedAstBuilder`) recovers 101 of them — and breaks exactly four codec
- *    tests: JsonDecodeExhaustiveTest x3 and UserDecodeAbilityTest. Those are the
- *    same four A.1 hit, because codec decode bodies depend on these bindings
- *    being fresh variables. Preferring ground types, preferring the declared
- *    shape, and a strictly-additive merge were all tried during A.1 and all
- *    broke them.
+ * The history, because the numbers in it were wrong in a way worth recording.
+ * This file used to say:
  *
- * So the remaining 101 are blocked on **A.3** (generate codec impls into the
- * resolved module, like derived impls), which removes the dependency — not on a
- * cleverer heuristic at the binding site.
+ *   - 125 distinct sites, all in the stdlib, each a match-case binding.
+ *   - Ungating the structural read recovers 101 of them and breaks exactly FOUR
+ *     codec tests, because "codec decode bodies depend on these bindings being
+ *     fresh variables".
+ *   - So the rest are blocked on A.3: generate codec impls into the resolved
+ *     module, like derived impls.
  *
- * This test asserts only that the count does not GROW. It runs the census over a
- * program that exercises the stdlib; the absolute number depends on what a run
- * compiles, so the bound is deliberately loose and the value is the direction.
+ * Three corrections. It was FIVE tests, not four — DecodeConstraintAtCallSiteTest
+ * postdated the note. Nothing ever depended on the bindings being fresh
+ * variables: the dict prescan decided a call needed evidence by asking whether
+ * its RECEIVER was a variable, and `decode` dispatches on the decode TARGET, so a
+ * typed binder made the receiver concrete and the call was skipped — the
+ * enclosing `from_json` compiled with no dictionary at all. And A.3 was not
+ * needed: codec generation never had to move phase. The two decoders already
+ * existed as separate generated impls and each call site already injected the
+ * right one; one impl simply never got its slot.
+ *
+ * Fixed one layer down, in `DictEvidence.scanExprForVarTypeMethods`. The gate and
+ * the `matchCaseBindings` exclusion both came out with it, and the count went to
+ * zero — not to 24.
+ *
+ * The lesson for the next person is the one that cost three attempts here: the
+ * comment named the binding site, so every fix tried to preserve freshness
+ * instead of asking why freshness mattered. It mattered only by accident — a
+ * variable receiver happened to satisfy a check that was never about the
+ * receiver.
  */
 class ElaborationMissRatchetTest {
 
@@ -74,23 +86,27 @@ class ElaborationMissRatchetTest {
         println(ElaborationMissCensus.report())
         assertTrue(
             total <= BASELINE,
-            "The builder is guessing binding types MORE often than the recorded " +
-                "baseline ($total > $BASELINE). Each of these mints a fresh type " +
-                "variable that downstream cannot distinguish from real polymorphism " +
-                "— see known-bugs.md BUG 11 for what that costs. Either supply the " +
-                "type where the new site needs it, or, if the growth is genuinely " +
-                "justified, re-measure and move the baseline in the same commit.\n\n" +
+            "The builder guessed a binding type $total time(s); the bound is " +
+                "$BASELINE. Each guess mints a fresh type variable that downstream " +
+                "cannot distinguish from real polymorphism — see known-bugs.md BUG 11 " +
+                "for what that costs. This reached ZERO once, so a new miss is a " +
+                "regression with a cause, not a population to re-baseline: find what " +
+                "stopped supplying the type. Raising the bound is the last resort and " +
+                "belongs in the same commit as the reason.\n\n" +
                 ElaborationMissCensus.report(),
         )
     }
 
     private companion object {
         /**
-         * Measured 2026-09-16 for THIS test's program — a tight bound is a real
-         * ratchet, where the full-stdlib figure (125 sites) would leave room for
-         * six-fold growth to pass unnoticed. Lower is better; never raise it
-         * silently.
+         * ZERO, measured after the dict-prescan fix. Was 19 for this program
+         * (125 across a full stdlib compile) while the structural read was gated
+         * to impl-op bodies.
+         *
+         * At zero the bound stops being a ratchet and becomes the property A.2
+         * names as its endpoint: elaboration finishes knowing every type. Keep it
+         * at zero — a non-zero count now has a specific cause to find.
          */
-        const val BASELINE = 19
+        const val BASELINE = 0
     }
 }
