@@ -584,10 +584,12 @@ class AbilityChecker internal constructor(
         typeArgs: List<MezzeType>,
         abilityHash: Hash? = null,
         loc: com.mezze.language.parsedast.Loc? = null,
+        /** Types already on the derivation path — see [canDeriveOrHasImpl]. */
+        seen: MutableSet<Any> = mutableSetOf(),
     ): Boolean {
         val effectiveHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
         if (typeArgs.size == 1) {
-            if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash)) {
+            if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash, seen)) {
                 registerDerivedShapeImpl(effectiveHash, typeArgs.first())
                 return true
             }
@@ -1023,6 +1025,8 @@ class AbilityChecker internal constructor(
         abilityHash: Hash? = null,
         seen: MutableSet<Any> = mutableSetOf(),
     ): Boolean {
+        // The ANCESTORS of this type, before the attempt below adds its own visits.
+        val onPath = HashSet(seen)
         if (canDeriveAbility(abilityName, type, abilityHash, seen)) return true
         // The retry WITHOUT the hash is load-bearing and must stay until the demand
         // side is fixed. Making the hash answer final was tried and reverted: it
@@ -1031,8 +1035,19 @@ class AbilityChecker internal constructor(
         // registered under, and the by-name retry is what currently repairs that.
         // The hash is only trustworthy once `DeclarationRegistry` stops keying
         // abilities by name — see AbilityIdentityCrossModuleTest.
-        if (abilityHash != null && checkAbilityImplementation(abilityName, listOf(type), abilityHash)) return true
-        return checkAbilityImplementation(abilityName, listOf(type))
+        // The fallback continues the SAME path. Restarting it with an empty set forgot
+        // which types were already being derived: a recursive variant whose payload
+        // holds a component with no instance (`Node { left: Tree, age: Age }`) failed,
+        // fell back, re-entered `Tree` as if new, reached the same payload, and
+        // recursed until the stack overflowed — T0214 on plain
+        // `Node { left = Leaf, age = Age.(3), right = Leaf }`.
+        //
+        // The ancestors only — not what the failed attempt added. `seen` is a visit
+        // set that is never unwound, so after trying `Age` it contains `Age`, and
+        // handing THAT to the fallback answered "already on the path, so derivable"
+        // for the very type that just failed.
+        if (abilityHash != null && checkAbilityImplementation(abilityName, listOf(type), abilityHash, seen = HashSet(onPath))) return true
+        return checkAbilityImplementation(abilityName, listOf(type), seen = HashSet(onPath))
     }
 
     /**

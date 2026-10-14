@@ -452,9 +452,7 @@ class ContextBuilder {
                 if (isImported) return result
                 typeVarCache.clear()
                 val wrappedMezzeType = convertParsedTypeAnnotationInternal(definition.wrappedType)
-                val typeArgs = typeDecl.typeParams.map { param ->
-                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
-                }
+                val typeArgs = typeDecl.typeParams.map { param -> typeParamVar(param) }
                 val newtypeResult = WellKnownTypeApp.of(
                     typeDecl.name, typeArgs,
                     typeHash = typeDecl.identity
@@ -500,9 +498,7 @@ class ContextBuilder {
         } else {
             WellKnownTypeApp.of(
                 constructor = typeDecl.name,
-                args = typeDecl.typeParams.map { param ->
-                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
-                },
+                args = typeDecl.typeParams.map { param -> typeParamVar(param) },
                 typeHash = typeDecl.identity
             )
         }
@@ -1067,6 +1063,19 @@ class ContextBuilder {
             annotation, buildConversionConfig(), typeVarCache, sharedRowVar
         )
     }
+
+    /**
+     * The variable a declaration's type parameter [param] stands for, through the
+     * SAME converter, and so the same cache key, its body's annotations use.
+     *
+     * Looked up by the parameter's declared spelling, `'a` became TWO variables:
+     * the converter keys `a` (it strips the tick), the lookup keyed `'a`. A
+     * constructor was then `{ ['g] } -> Box 'h` — its result's argument unrelated
+     * to its payload — so `Box.(["s"])` checked as a `Box Int`.
+     */
+    private fun typeParamVar(param: String): MezzeType = convertParsedTypeAnnotationInternal(
+        ParsedNamedType(if (param.startsWith("'")) param else "'$param", Loc("<type-param>", 0, 0, 0, 0)),
+    )
 
     fun convertParsedTypeAnnotationInternal(annotation: ParsedTypeAnnotation): MezzeType {
         return TypeAnnotationConverter.convertWith(
