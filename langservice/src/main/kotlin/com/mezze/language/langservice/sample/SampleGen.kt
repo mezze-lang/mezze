@@ -199,8 +199,33 @@ object SampleGen {
      * tests still refuse — that is where "only the author knows what is valid"
      * matters, and here it is a convenience for looking at a function.
      */
-    class Unwrap(val byHash: Map<com.mezze.language.typedast.Hash, MezzeType.NewtypeType>) {
-        fun newtypeOf(type: MezzeType): MezzeType.NewtypeType? = declaredHash(type)?.let { byHash[it] }
+    class Unwrap(
+        val byHash: Map<com.mezze.language.typedast.Hash, MezzeType.NewtypeType>,
+        /** A GENERIC newtype's type parameters, in order, by its identity. */
+        val params: Map<com.mezze.language.typedast.Hash, List<String>> = emptyMap(),
+        /**
+         * Recursive variants the command declares a size-bounded helper for. A
+         * reference to one — a pinned arm's `left: Tree` — calls the helper rather
+         * than dispatching: a variant holding an unwrapped newtype has no derived
+         * instance to dispatch to.
+         */
+        val helpers: Set<String> = emptySet(),
+    ) {
+        /**
+         * The newtype [type] names, its wrapped type INSTANTIATED at the
+         * application's arguments — `Box Int` unwraps to `[Int]`, not `['a]`.
+         */
+        fun newtypeOf(type: MezzeType): MezzeType.NewtypeType? {
+            val hash = declaredHash(type) ?: return null
+            val template = byHash[hash] ?: return null
+            val names = params[hash].orEmpty()
+            val args = (type as? MezzeType.TypeApplication)?.args.orEmpty()
+            if (names.isEmpty() || names.size != args.size) return template
+            val at = names.map { it.removePrefix("'") }.zip(args).toMap()
+            fun subst(t: MezzeType): MezzeType =
+                if (t is MezzeType.VarType) at[t.variable.name.removePrefix("'")] ?: t else t.transformChildren(::subst)
+            return template.copy(wrappedType = subst(template.wrappedType))
+        }
         /** Whether [type] holds one of these anywhere inside, so dispatch would fail on it. */
         fun reaches(type: MezzeType): Boolean = byHash.isNotEmpty() && newtypesIn(type) { newtypeOf(it) }.isNotEmpty()
         companion object {
@@ -228,13 +253,9 @@ object SampleGen {
     ): String {
         if (depth > MAX_DEPTH) return DISPATCH
 
-        // A newtype with no instance, or anything holding one: built here, since
-        // dispatch would ask for the instance that does not exist. See [Unwrap].
-        if (unwrap.reaches(type)) structural(type, depth, recursive, unwrap)?.let { return it }
-
         // A recursive reference INSIDE a helper being generated: call the helper.
         // Reached before anything else, since the name is all there is to go on.
-        if (type is MezzeType.TypeApplication && type.constructor in recursive) {
+        if (type is MezzeType.TypeApplication && (type.constructor in recursive || type.constructor in unwrap.helpers)) {
             return "${helperName(type.constructor)} {}"
         }
 
@@ -248,6 +269,12 @@ object SampleGen {
             recursive[name] = type as MezzeType.VariantType
             return "${helperName(name)} {}"
         }
+
+        // A newtype with no instance, or anything holding one: built here, since
+        // dispatch would ask for the instance that does not exist. See [Unwrap].
+        // After the recursive cases, so a recursive variant keeps its size-bounded
+        // helper — whose payloads come back here with the same [unwrap].
+        if (unwrap.reaches(type)) structural(type, depth, recursive, unwrap)?.let { return it }
 
         // NO arm for a sequence, an `Option` or a `Result`, and their absence is
         // the point. Each was here because dispatch could not reach the type:
@@ -324,6 +351,8 @@ object SampleGen {
          * emit the `perform` at all.
          */
         val draws: Boolean = true,
+        /** Recursive variants given a helper in [decls] — see [Unwrap.helpers]. */
+        val helpers: Set<String> = emptySet(),
     )
 
     fun bindFields(
@@ -360,9 +389,9 @@ object SampleGen {
         while (true) {
             val next = recursive.keys.firstOrNull { it !in done } ?: break
             done.add(next)
-            helperDecl(next, recursive.getValue(next), recursive)?.let { decls.add(it) }
+            helperDecl(next, recursive.getValue(next), recursive, unwrap)?.let { decls.add(it) }
         }
-        return Plan(decls, lets, record, draws)
+        return Plan(decls, lets, record, draws, helpers = done)
     }
 
     private fun recursiveVariantName(type: MezzeType): String? {
@@ -412,6 +441,7 @@ object SampleGen {
         name: String,
         variant: MezzeType.VariantType,
         recursive: MutableMap<String, MezzeType.VariantType>,
+        unwrap: Unwrap = Unwrap.NONE,
     ): String? {
         val ctors = variant.constructors.entries.toList()
         val base = ctors.filterNot { (_, payload) -> payload != null && mentions(payload, name) }
@@ -419,7 +449,7 @@ object SampleGen {
 
         fun construct(ctor: Map.Entry<String, MezzeType?>): String {
             val payload = ctor.value ?: return ctor.key
-            return "${ctor.key} ${of(payload, 1, recursive)}"
+            return "${ctor.key} ${of(payload, 1, recursive, unwrap)}"
         }
 
         fun pick(among: List<Map.Entry<String, MezzeType?>>): String {

@@ -509,7 +509,7 @@ class SampleCommand {
      */
     internal fun buildDecls(target: SampleTarget.Result.Ready): List<String> {
         val helpers = if (target.fields.isEmpty() && target.scripts.isEmpty()) emptyList()
-            else SampleGen.bindFields(target.fields, "__decls") { com.mezze.language.ast.prettyPrintType(it) }
+            else SampleGen.bindFields(target.fields, "__decls", unwrap = target.unwrap) { com.mezze.language.ast.prettyPrintType(it) }
                 .decls.distinct()
         val scripted = target.scripts.map { SampleScripts.implDecl(it) { t -> com.mezze.language.ast.prettyPrintType(t) } }
         return helpers + scripted

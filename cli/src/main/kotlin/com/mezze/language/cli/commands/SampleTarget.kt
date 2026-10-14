@@ -50,10 +50,9 @@ object SampleTarget {
              * and says so — see [SampleGen.Unwrap].
              */
             val unwrapped: List<com.mezze.language.ast.MezzeType.NewtypeType> = emptyList(),
+            /** [unwrapped], keyed for generation — generic ones with their parameters. */
+            val unwrap: SampleGen.Unwrap = SampleGen.Unwrap.NONE,
         ) : Result {
-            /** [unwrapped], keyed for generation. */
-            val unwrap: SampleGen.Unwrap
-                get() = SampleGen.Unwrap(unwrapped.mapNotNull { n -> SampleGen.Unwrap.declaredHash(n)?.let { it to n } }.toMap())
             val fieldNames: List<String> get() = fields.keys.toList()
             /** Rows that can be pinned to an arm — the longest arm list. */
             val pinnableRows: Int get() = branches.size
@@ -203,7 +202,13 @@ object SampleTarget {
                     "  Write `impl Arbitrary for ${n.name}` in `$home` to say which values are valid."
             })
         }
-        val unwrap = SampleGen.Unwrap(unwrapped.mapNotNull { n -> SampleGen.Unwrap.declaredHash(n)?.let { it to n } }.toMap())
+        val byHash = unwrapped.mapNotNull { n -> SampleGen.Unwrap.declaredHash(n)?.let { it to n } }.toMap()
+        val params = newtypeParams(success)
+        // The recursive variants the command will declare helpers for — the same
+        // binding pass `buildDecls` runs — so every generator can reach them.
+        val helpers = if (byHash.isEmpty()) emptySet()
+            else SampleGen.bindFields(fields, "__decls", unwrap = SampleGen.Unwrap(byHash, params)) { "_" }.helpers
+        val unwrap = SampleGen.Unwrap(byHash, params, helpers)
         return Result.Ready(
             declName,
             fields,
@@ -216,6 +221,7 @@ object SampleTarget {
             },
             scripts = scripts,
             unwrapped = unwrapped,
+            unwrap = unwrap,
         )
     }
 
@@ -234,7 +240,6 @@ object SampleTarget {
         // Every newtype declaration in scope, by IDENTITY.
         val newtypes = modules.flatMap { it.decls }
             .filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
-            .filter { it.typeParams.isEmpty() }
             .mapNotNull { d ->
                 val def = d.definition as? com.mezze.language.typedast.TypedNewtypeDef ?: return@mapNotNull null
                 d.hash to com.mezze.language.ast.MezzeType.NewtypeType(
@@ -242,16 +247,29 @@ object SampleTarget {
                 )
             }.toMap()
         fun declaredHash(t: com.mezze.language.ast.MezzeType) = SampleGen.Unwrap.declaredHash(t)
+        val all = SampleGen.Unwrap(newtypes, newtypeParams(success))
         val reachable = fields.values
-            .flatMap { f -> SampleGen.newtypesIn(f) { app -> declaredHash(app)?.let { newtypes[it] } } }
+            .flatMap { f -> SampleGen.newtypesIn(f) { app -> all.newtypeOf(app) } }
             .distinctBy { declaredHash(it) ?: it.name }
         if (reachable.isEmpty()) return emptyList()
         val implemented = modules.flatMap { it.abilityImpls }
             .filter { com.mezze.language.typechecker.WellKnownHashConstants.isArbitrary(it.abilityHash) }
             .mapNotNull { impl -> impl.targetTypes.firstOrNull()?.let(::declaredHash) }
             .toSet()
-        return reachable.filter { declaredHash(it) !in implemented }
+        // The TEMPLATES, not the instantiations `reachable` holds: a generic newtype
+        // is instantiated at each use (`Box Int`, `Box Str`) by [SampleGen.Unwrap].
+        return reachable.mapNotNull { declaredHash(it) }.distinct()
+            .filter { it !in implemented }
+            .mapNotNull { newtypes[it] }
     }
+
+    /** Every GENERIC newtype declaration's type parameters, by identity. */
+    private fun newtypeParams(success: TypeChecker.TypeCheckResult.Success): Map<com.mezze.language.typedast.Hash, List<String>> =
+        (listOfNotNull(success.typedModule) + success.loadedModules.values.mapNotNull { it.typedModule })
+            .flatMap { it.decls }
+            .filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
+            .filter { it.definition is com.mezze.language.typedast.TypedNewtypeDef && it.typeParams.isNotEmpty() }
+            .associate { it.hash to it.typeParams.map { p -> p.name } }
 
     /**
      * The modules the generated program sees that the user's may not: the one that

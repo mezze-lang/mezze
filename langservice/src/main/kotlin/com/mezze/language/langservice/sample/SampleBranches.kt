@@ -45,23 +45,26 @@ import com.mezze.language.typedast.forEachChild
  *
  * ## What is read
  *
- *  - a `match` on a parameter: one value per constructor arm, payload still drawn;
- *  - a comparison of a parameter against a value KNOWN AT COMPILE TIME: the two
- *    values either side of where it flips. "Known" means a literal, a top-level
- *    constant (resolved by HASH, never by name), a chain of them, or `Int`
- *    arithmetic over them. A top-level value cannot perform effects (V0502), so
- *    this needs nothing to run and is the same on every run.
+ *  - a `match` on a parameter or on a field of one: one value per constructor arm,
+ *    literal arm and sequence shape, payload still drawn — and its GUARDS, read
+ *    with the same machinery as a body;
+ *  - a comparison against a value KNOWN AT COMPILE TIME — a literal, a top-level
+ *    constant (resolved by HASH, never by name), a chain of them, or arithmetic
+ *    over them: the two values either side of where it flips. A top-level value
+ *    cannot perform effects (V0502), so this needs nothing to run;
+ *  - the compared side may be DERIVED through `let`s: `Int` or `Float` arithmetic
+ *    with known values (`let half = x / 2.0`), a sum or difference of several
+ *    parameters (solved for one, the others held at 0), a `Bool` bound to a
+ *    comparison, and a size (`let l = str::size { s }`, `xs.size {}`);
+ *  - a comparison between two parameters, emptiness tests, and the results of
+ *    scripted effect operations, which are inputs like any argument.
  *
- * ## What is deliberately not read, yet
+ * ## What is deliberately not read
  *
- *  - a comparison against a constant defined by a FUNCTION CALL — evaluating it
- *    needs the compile-time evaluator, not folding; it is left unpinned rather
- *    than guessed;
- *  - a `match` or comparison on a FIELD of a parameter, or on a value derived from
- *    one through `let`s;
- *  - comparisons between two parameters, sizes, and branches on what an EFFECT
- *    returns (which a scripted performer, not an input, would reach);
- *  - guards.
+ *  - a constant defined by a FUNCTION CALL is evaluated by the command (it runs
+ *    code); the editor, which runs nothing, leaves it unpinned and says so;
+ *  - arithmetic that is not linear (`n * m`, `k / x`), and transformations whose
+ *    inverse is not obvious (`s.to_lower {} == "admin"`).
  *
  * An unread branch still gets ordinary draws: this narrows what is missed rather
  * than claiming to cover it.
@@ -660,9 +663,10 @@ object SampleBranches {
         val (path, other, effectiveOp) = when {
             leftPath != null -> Triple(leftPath, right, op)
             rightPath != null -> Triple(rightPath, left, MIRROR.getValue(op))
-            else -> return sizeComparison(left, right, op, params, byHash)
+            else -> return sizeComparison(left, right, op, params, byHash, locals)
                 ?: derivedComparison(left, right, op, params, byHash, locals)
-                    ?.let { (param, pins) -> pins.map { mapOf(param to it) } } ?: emptyList()
+                ?: floatDerivedComparison(left, right, op, params, byHash, locals)
+                ?: emptyList()
         }
         val known = knownValue(other, byHash) ?: return emptyList()
         val shown = known.describe()
@@ -852,10 +856,14 @@ object SampleBranches {
         val fn = call.function
         if (fn is TypedVar) {
             val ref = fn.binding as? BindingRef.ByHash ?: return null
-            if (!wrapsNative(byHash[ref.hash] ?: return null, native)) return null
+            val callee = byHash[ref.hash] ?: return null
             val only = (call.arg as? TypedRecord)?.entries
                 ?.filterIsInstance<TypedRecordEntry.Field>()?.singleOrNull() ?: return null
-            return pathOf(only.value, params)?.takeIf { isSeq(only.value.type) }
+            // `seq::size { xs }`, and — for the size question only — `str::size { s }`,
+            // which the method form `s.size {}` already counted.
+            val sized = (wrapsNative(callee, native) && isSeq(only.value.type)) ||
+                (native == SEQ_SIZE && wrapsNative(callee, STRING_SIZE) && only.value.type is MezzeType.StringType)
+            return if (sized) pathOf(only.value, params) else null
         }
         if (fn is TypedFieldAccess && fn.field == method && (isSeq(fn.record.type) || fn.record.type is MezzeType.StringType))
             return pathOf(fn.record, params)
@@ -873,12 +881,19 @@ object SampleBranches {
 
     /** `size(xs) <op> k`: sequences of the lengths either side of the flip. */
     private fun sizeComparison(
-        left: TypedExpr,
-        right: TypedExpr,
+        left0: TypedExpr,
+        right0: TypedExpr,
         op: String,
         params: Map<String, MezzeType>,
         byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr> = emptyMap(),
     ): List<Map<String, Pinned>>? {
+        // A size bound to a local first — `let l = str::size { s }` then `l > 3` —
+        // is read through it, as the linear reader reads a derived value.
+        fun throughLocal(e: TypedExpr): TypedExpr =
+            (e as? TypedVar)?.takeIf { it.binding is BindingRef.Local }?.let { locals[it.name] } ?: e
+        val left = throughLocal(left0)
+        val right = throughLocal(right0)
         val (path, other, effectiveOp) = sizeOf(left, params, byHash)?.let { Triple(it, right, op) }
             ?: sizeOf(right, params, byHash)?.let { Triple(it, left, MIRROR.getValue(op)) }
             ?: return null
@@ -986,7 +1001,14 @@ object SampleBranches {
      * reduces to when it is computed FROM a parameter — `let m = n * 2` then
      * `m > 10` — rather than being the parameter itself.
      */
-    private data class Linear(val path: Path, val a: Long, val b: Long, val shown: String) {
+    private data class Linear(
+        val path: Path,
+        val a: Long,
+        val b: Long,
+        val shown: String,
+        /** Other parameters the value also depends on, HELD at 0 so it is linear in [path]. */
+        val held: Set<Path> = emptySet(),
+    ) {
         fun at(x: Long): Long? = try { Math.addExact(Math.multiplyExact(a, x), b) } catch (_: ArithmeticException) { null }
     }
 
@@ -1050,7 +1072,15 @@ object SampleBranches {
                     else -> if (lk == 0L) null
                         else Linear(rl.path, Math.multiplyExact(rl.a, lk), Math.multiplyExact(rl.b, lk), "$lk $sym ${grouped(rl.shown)}")
                 }
-                // Two parameter-dependent sides, or nothing known: not linear in ONE path.
+                // Two parameter-dependent sides of a SUM or DIFFERENCE: linear in the
+                // left one with the right one HELD at 0 — the row pins both, so `a + b
+                // > 100` is reached by `a = 101, b = 0`. The same path twice (`n + n`)
+                // simply adds its coefficients.
+                ll != null && rl != null && op != "mul" -> {
+                    val sign = if (op == "add") 1L else -1L
+                    if (ll.path == rl.path) Linear(ll.path, Math.addExact(ll.a, sign * rl.a), Math.addExact(ll.b, sign * rl.b), "${ll.shown} $sym ${grouped(rl.shown)}", ll.held + rl.held)
+                    else Linear(ll.path, ll.a, Math.addExact(ll.b, sign * rl.b), "${ll.shown} $sym ${grouped(rl.shown)}", ll.held + rl.held + rl.path)
+                }
                 else -> null
             }
         } catch (_: ArithmeticException) {
@@ -1075,7 +1105,7 @@ object SampleBranches {
         params: Map<String, MezzeType>,
         byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
         locals: Map<String, TypedExpr>,
-    ): Pair<String, List<Pinned>>? {
+    ): List<Map<String, Pinned>>? {
         val (lin, other, effectiveOp, sideLabel) = run {
             val l = linearOf(left, params, byHash, locals)
             if (l != null) return@run Quad(l, right, op, describeSide(left).takeIf { it != "…" } ?: l.shown)
@@ -1103,8 +1133,95 @@ object SampleBranches {
         } else {
             results.firstOrNull()?.let { (x, h) -> listOfNotNull(pin(x, h)) } ?: emptyList()
         }
-        return lin.path.param to pins
+        // Every HELD parameter at 0 in the same row, with the same reason.
+        return pins.map { p ->
+            mapOf(lin.path.param to p) + lin.held.mapNotNull { h ->
+                placeAt(h, params, Pinned("0", draws = false))?.copy(why = p.why, outcome = p.outcome)?.let { h.param to it }
+            }
+        }
     }
+
+    /** [Linear] over `Float`: through `+ - * /` with known values and through locals. */
+    private data class FloatLinear(val path: Path, val a: Double, val b: Double, val shown: String)
+
+    private fun floatLinearOf(
+        expr: TypedExpr,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+        depth: Int = 0,
+    ): FloatLinear? {
+        if (depth > MAX_CONSTANT_CHAIN || expr.type !is MezzeType.FloatType) return null
+        pathOf(expr, params)?.let { return FloatLinear(it, 1.0, 0.0, it.label) }
+        if (expr is TypedVar && expr.binding is BindingRef.Local) {
+            return floatLinearOf(locals[expr.name] ?: return null, params, byHash, locals, depth + 1)
+        }
+        val call = expr as? TypedCall ?: return null
+        val op = (call.function as? TypedFieldAccess)?.field ?: return null
+        val sym = mapOf("add" to "+", "sub" to "-", "mul" to "*", "div" to "/")[op] ?: return null
+        val args = (call.arg as? TypedRecord)?.entries
+            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return null
+        val l = args["it"] ?: return null
+        val r = args["r"] ?: return null
+        val ll = floatLinearOf(l, params, byHash, locals, depth + 1)
+        val rk = (knownValue(r, byHash) as? Known.FloatValue)?.value
+        val rl = floatLinearOf(r, params, byHash, locals, depth + 1)
+        val lk = (knownValue(l, byHash) as? Known.FloatValue)?.value
+        val out = when {
+            ll != null && rk != null -> when (op) {
+                "add" -> FloatLinear(ll.path, ll.a, ll.b + rk, "${ll.shown} $sym ${floatLiteral(rk)}")
+                "sub" -> FloatLinear(ll.path, ll.a, ll.b - rk, "${ll.shown} $sym ${floatLiteral(rk)}")
+                "mul" -> FloatLinear(ll.path, ll.a * rk, ll.b * rk, "${grouped(ll.shown)} $sym ${floatLiteral(rk)}")
+                else -> if (rk == 0.0) null else FloatLinear(ll.path, ll.a / rk, ll.b / rk, "${grouped(ll.shown)} $sym ${floatLiteral(rk)}")
+            }
+            rl != null && lk != null -> when (op) {
+                "add" -> FloatLinear(rl.path, rl.a, rl.b + lk, "${floatLiteral(lk)} $sym ${rl.shown}")
+                "sub" -> FloatLinear(rl.path, -rl.a, lk - rl.b, "${floatLiteral(lk)} $sym ${grouped(rl.shown)}")
+                "mul" -> FloatLinear(rl.path, rl.a * lk, rl.b * lk, "${floatLiteral(lk)} $sym ${grouped(rl.shown)}")
+                else -> null // `k / x` is not linear in x
+            }
+            else -> null
+        }
+        return out?.takeIf { it.a.isFinite() && it.b.isFinite() && it.a != 0.0 }
+    }
+
+    /**
+     * [derivedComparison] for `Float`: the parameter value where the derived side
+     * meets the threshold, and the neighbouring float on the other side of it —
+     * the same pair a direct comparison on the parameter pins.
+     */
+    private fun floatDerivedComparison(
+        left: TypedExpr,
+        right: TypedExpr,
+        op: String,
+        params: Map<String, MezzeType>,
+        byHash: Map<com.mezze.language.typedast.Hash, TypedLetDecl>,
+        locals: Map<String, TypedExpr>,
+    ): List<Map<String, Pinned>>? {
+        val (lin, other, effectiveOp, sideLabel) = run {
+            val l = floatLinearOf(left, params, byHash, locals)
+            if (l != null) return@run Triple(l, right, op).let { (a, b, c) -> FQuad(a, b, c, describeSide(left).takeIf { it != "…" } ?: a.shown) }
+            val r = floatLinearOf(right, params, byHash, locals) ?: return null
+            FQuad(r, left, MIRROR.getValue(op), describeSide(right).takeIf { it != "…" } ?: r.shown)
+        }
+        val k = (knownValue(other, byHash) as? Known.FloatValue) ?: return null
+        val center = (k.value - lin.b) / lin.a
+        if (!center.isFinite()) return null
+        val xs = listOf(Math.nextDown(center), center, Math.nextUp(center))
+        val results = xs.map { x -> x to holds((lin.a * x + lin.b).compareTo(k.value), effectiveOp) }
+        val where = "$sideLabel ${SYMBOL.getValue(effectiveOp)} ${k.describe()}"
+        val via = if (sideLabel == lin.shown) "" else " ($sideLabel = ${lin.shown})"
+        fun pin(x: Double, h: Boolean): Map<String, Pinned>? =
+            placeAt(lin.path, params, Pinned(floatLiteral(x), draws = false))
+                ?.copy(why = "if $where — ${verdict(h)}$via", outcome = h)
+                ?.let { mapOf(lin.path.param to it) }
+        // The threshold itself, and the first neighbour on the OTHER side of it.
+        val (cx, ch) = results[1]
+        val across = listOf(results[2], results[0]).firstOrNull { it.second != ch }
+        return listOfNotNull(pin(cx, ch), across?.let { pin(it.first, it.second) })
+    }
+
+    private data class FQuad(val lin: FloatLinear, val other: TypedExpr, val op: String, val label: String)
 
     /** Parenthesise a shown sum before multiplying or subtracting it, so the text means what was computed. */
     private fun grouped(shown: String): String = if (" + " in shown || " - " in shown) "($shown)" else shown
@@ -1223,6 +1340,7 @@ object SampleBranches {
     private val COMPARISONS = setOf("gt", "ge", "lt", "le", "eq", "neq")
     private val ARITHMETIC = setOf("add", "sub", "mul", "div")
     private const val SEQ_SIZE = "__native_seq_size"
+    private const val STRING_SIZE = "__native_string_size"
     private const val SEQ_IS_EMPTY = "__native_seq_is_empty"
 
     /** Longest sequence written out as a pinned row — past it, a row is unreadable. */

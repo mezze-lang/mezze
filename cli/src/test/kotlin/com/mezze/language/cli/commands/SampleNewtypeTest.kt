@@ -111,6 +111,31 @@ class SampleNewtypeTest {
         assertTrue(r is EvalClosure.Result.Compiled, (r as? EvalClosure.Result.Failed)?.message ?: "")
     }
 
+    /**
+     * A GENERIC newtype, used at two instantiations, and a RECURSIVE variant holding
+     * a newtype — the recursive helper's payloads go through the same unwrapping.
+     */
+    @Test
+    fun `generic newtypes and recursive variants holding a newtype compile`(@TempDir dir: Path) {
+        val root = dir.toFile()
+        val module = File(File(root, "src").apply { mkdirs() }, "app.mz").apply { writeText("""
+            newtype Age = Int
+            newtype Box 'a = ['a]
+            type Tree = | Leaf, Node { left: Tree, age: Age, right: Tree } |
+            pub let boxes = { a: Box Int, b: Box Str } -> 1
+            pub let depth = { t: Tree } -> match t is
+              Leaf -> 0
+              Node { left, age, right } -> 1
+        """.trimIndent()) }
+        val cmd = SampleCommand()
+        for ((fn, expected) in listOf("boxes" to listOf("Box"), "depth" to listOf("Age"))) {
+            val t = SampleTarget.resolve(root, module, fn) as SampleTarget.Result.Ready
+            assertEquals(expected, t.unwrapped.map { it.name }, fn)
+            val r = EvalClosure.compile(root, module, cmd.buildExpression(t, seed = 1, count = 3), cmd.imports(t), cmd.buildDecls(t))
+            assertTrue(r is EvalClosure.Result.Compiled, "$fn: " + ((r as? EvalClosure.Result.Failed)?.message ?: ""))
+        }
+    }
+
     @Test
     fun `the note names the newtype and its representation`(@TempDir dir: Path) {
         val note = SampleCommand().unwrappedNote(target(dir, "direct")).single()

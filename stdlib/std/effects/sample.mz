@@ -198,10 +198,12 @@ impl Sample for SeededSampleWith { seed: Int, config: SampleConfig } where {
 ## the seeded stream — deep payloads are what random draws are good at, and
 ## enumerating them would only make every row share a long prefix.
 ##
-## `resize` hands off to [SeededSampleWith] rather than to itself: a nested draw
+## `resize` hands off to [CoveringSampleAt] rather than to itself: a nested draw
 ## must CONTINUE the row, and re-entering this performer would restart the
 ## enumeration at position 0 and make every subtree identical — the same trap
-## [SeededSampleWith]'s own note describes.
+## [SeededSampleWith]'s own note describes. It used to hand off to the SEEDED
+## performer, which continued the row but stopped covering it: once containers
+## drew their elements through `resize`, no element was enumerated at all.
 impl Sample for CoveringSample { seed: Int, run: Int } where {
   ## Resets the enumeration position and the seeded stream once, at entry, for the
   ## reason [SeededSample] gives: a reset per draw hands back the same answer every
@@ -215,14 +217,15 @@ impl Sample for CoveringSample { seed: Int, run: Int } where {
     else __native_covering_choose { seed = seed, bound = bound },
   size = {} -> default_size,
   resize = { n, call } ->
-    perform SeededSampleWith { seed = seed, config = { size = n, enumerate = default_config.enumerate } } in call {},
+    perform CoveringSampleAt { seed = seed, config = { size = n, enumerate = default_config.enumerate } } in call {},
 }
 
 ## [CoveringSample] with a [SampleConfig] you choose — `enumerate` sets how many
 ## leading choices are steered, `size` the budget.
 ##
-## `resize` hands off to [SeededSampleWith] carrying the SAME config with only
-## `size` lowered, so a nested draw continues the row with your settings.
+## `resize` hands off to [CoveringSampleAt] carrying the SAME config with only
+## `size` lowered, so a nested draw continues the row — and its enumeration —
+## with your settings.
 impl Sample for CoveringSampleWith { seed: Int, run: Int, config: SampleConfig } where {
   initialize_scope = {} -> do
     __native_reset_covering_sample { seed = seed, run = run, depth = config.enumerate }
@@ -233,7 +236,20 @@ impl Sample for CoveringSampleWith { seed: Int, run: Int, config: SampleConfig }
     else __native_covering_choose { seed = seed, bound = bound },
   size = {} -> config.size,
   resize = { n, call } ->
-    perform SeededSampleWith { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
+    perform CoveringSampleAt { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
+}
+
+## A covering run CONTINUED inside a resized draw: no `initialize_scope`, so the
+## enumeration carries on from where the enclosing draw left it, only the size
+## lowered. Not for direct use — [CoveringSample] or [CoveringSampleWith] start a
+## row; this is what their `resize` installs.
+impl Sample for CoveringSampleAt { seed: Int, config: SampleConfig } where {
+  choose = { bound } ->
+    if bound <= 1 then 0
+    else __native_covering_choose { seed = seed, bound = bound },
+  size = {} -> config.size,
+  resize = { n, call } ->
+    perform CoveringSampleAt { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
 ## A non-negative Int below `bound`.

@@ -502,12 +502,25 @@ object HoverInfo {
         val decls = result.typedModule?.decls.orEmpty().filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
         val imported = result.loadedModules.values.flatMap { it.decls }
             .filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-        val rows = com.mezze.language.langservice.sample.SampleBranches.forFunction(decl, decls, imported)
+        val branches = com.mezze.language.langservice.sample.SampleBranches
+        val rows = branches.forFunction(decl, decls, imported)
             ?.filter { it.display.isNotEmpty() }
             .orEmpty()
-        if (rows.isEmpty()) return ""
+        // Constants computed by a FUNCTION CALL: `mez sample` evaluates them, the
+        // editor runs nothing — so their branches are named rather than silently
+        // missing from the list.
+        val unresolved = if (branches.paramFields(decl) == null) emptyList()
+            else branches.unresolvedConstants(decl, decls, branches.importedConstants(result.loadedModules))
+                .map { it.decl.name }.distinct()
+        if (rows.isEmpty() && unresolved.isEmpty()) return ""
         val lines = rows.joinToString("\n") { r -> "- `${r.display}` — ${r.why}" }
-        return "\n\n---\n**Branch inputs** (${rows.size}) — what `mez sample ${decl.name}` pins:\n$lines"
+        val note = if (unresolved.isEmpty()) "" else
+            "\n\n_Not pinned here:_ " + unresolved.joinToString(", ") { "`$it`" } +
+                " ${if (unresolved.size == 1) "is" else "are"} computed by a function call — `mez sample ${decl.name}` evaluates " +
+                "${if (unresolved.size == 1) "it" else "them"} and pins those branches too."
+        val head = if (rows.isEmpty()) "\n\n---\n**Branch inputs**" else
+            "\n\n---\n**Branch inputs** (${rows.size}) — what `mez sample ${decl.name}` pins:\n$lines"
+        return head + note
     }
 
     private fun renderAbilityMethodHover(

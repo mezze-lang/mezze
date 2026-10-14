@@ -628,4 +628,44 @@ class SampleBranchesTest {
         assertTrue("n = 11 | if n > 10 — then; if n < 5 — else" in s, "got $s")
         assertTrue(s.none { it.contains("n < 5 — then") }, "got $s")
     }
+
+    // ── values computed through lets ──────────────────────────────────────────
+
+    /** A size taken by the FUNCTION form, through a local: `str::size` is a string's size too. */
+    @Test
+    fun `a size through a let is read`() {
+        val p = pins("""
+            use std::str
+            pub let f = { s: Str } -> do
+              let l = str::size { s = s }
+              if l > 3 then "long" else "short"
+        """, "f")
+        assertEquals(2, p["s"]?.size, "got $p")
+        assertTrue(p.getValue("s").any { it.endsWith("if size(s) > 3 — then") }, "got $p")
+    }
+
+    /** Float arithmetic through a local: the threshold, and the next float past it. */
+    @Test
+    fun `float arithmetic through a let is read`() {
+        val p = pins("""
+            pub let f = { x: Float } -> do
+              let half = x / 2.0
+              if half > 1.5 then "big" else "small"
+        """, "f")
+        val xs = p.getValue("x")
+        assertTrue(xs.any { it.startsWith("3.0 |") && it.contains("— else") }, "got $p")
+        assertTrue(xs.any { it.contains("— then") }, "got $p")
+    }
+
+    /** Two parameters summed: solved for one, the other held at 0, and the row says so. */
+    @Test
+    fun `a sum of two parameters is read`() {
+        val r = rows("""
+            pub let f = { a: Int, b: Int } -> do
+              let total = a + b
+              if total > 100 then "big" else "small"
+        """, "f")
+        assertTrue(r.any { "a = 100" in it && "b = 0" in it && "— else" in it }, "got $r")
+        assertTrue(r.any { "a = 101" in it && "b = 0" in it && "— then" in it }, "got $r")
+    }
 }

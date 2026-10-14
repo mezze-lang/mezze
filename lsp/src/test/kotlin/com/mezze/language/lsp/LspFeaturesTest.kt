@@ -1589,6 +1589,18 @@ class LspFeaturesTest {
         assertTrue("`n = 101` — if n > max_value (= 100) — then" in content, content)
     }
 
+    /** A constant computed by a call is evaluated only by the command, and the hover says so. */
+    @Test
+    fun `hover names a constant the editor cannot pin`() {
+        val (uri, _) = openSingleFile("""
+            let compute = { x: Int } -> x * 2
+            let limit = compute { x = 21 }
+            let big = { n: Int } -> if n > limit then 1 else 0
+        """.trimIndent())
+        val content = hoverText(hoverAt(uri, line = 2, character = 4)!!)
+        assertTrue("_Not pinned here:_ `limit` is computed by a function call" in content, content)
+    }
+
     @Test
     fun `hover on a call site lists the callee's branch inputs too`() {
         val (uri, _) = openSingleFile("""
