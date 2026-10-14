@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as net from 'net';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as vscode from 'vscode';
 import {
     LanguageClient,
@@ -155,7 +156,23 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('mezze.showImplementations', (uri, pos) =>
             peek(uri, pos, 'vscode.executeImplementationProvider', 'implementations')),
         vscode.commands.registerCommand('mezze.showPerformers', (uri, pos) =>
-            peek(uri, pos, 'vscode.executeImplementationProvider', 'performers'))
+            peek(uri, pos, 'vscode.executeImplementationProvider', 'performers')),
+        // The "N branch inputs · sample" lens: run `mez sample <fn>` in a terminal,
+        // from the project the file belongs to. Only on a click — the lens itself
+        // runs nothing; its count comes from reading the function's code.
+        vscode.commands.registerCommand('mezze.sample', async (uriArg: any, fn: string) => {
+            const file = vscode.Uri.parse(String(uriArg)).fsPath;
+            let dir = path.dirname(file);
+            while (!fs.existsSync(path.join(dir, 'Mezze.toml')) && path.dirname(dir) !== dir) {
+                dir = path.dirname(dir);
+            }
+            const root = fs.existsSync(path.join(dir, 'Mezze.toml')) ? dir : path.dirname(file);
+            const name = 'mez sample';
+            const terminal = vscode.window.terminals.find(t => t.name === name)
+                ?? vscode.window.createTerminal({ name, cwd: root });
+            terminal.show(true);
+            terminal.sendText(`cd ${JSON.stringify(root)} && ${JSON.stringify(resolveMezPath())} sample ${fn}`);
+        })
     );
 
     // Surface a server crash instead of silently losing all features. The

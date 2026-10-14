@@ -2510,6 +2510,23 @@ class MezzeTextDocumentService(
                 lensAt(decl.loc, decl.name, count, "reference", "references", "mezze.showReferences")
             }
 
+            // "N branch inputs · sample" over each function whose branches the
+            // analysis can read — the rows `mez sample` pins, from the function's
+            // own code, nothing run. The command runs `mez sample` in a terminal,
+            // only when clicked (the client's `mezze.sample`).
+            val result = state.typeCheckResult ?: lastSuccessfulResult[uri]
+            val lets = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            val imported = result?.loadedModules?.values.orEmpty()
+                .flatMap { it.decls }.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            for (decl in lets) {
+                val rows = com.mezze.language.langservice.sample.SampleBranches.forFunction(decl, lets, imported)
+                    ?.filter { it.display.isNotEmpty() }.orEmpty()
+                if (rows.isEmpty()) continue
+                val at = Position(decl.loc.startLine - 1, (decl.loc.startCol - 1).coerceAtLeast(0))
+                val title = if (rows.size == 1) "1 branch input · sample" else "${rows.size} branch inputs · sample"
+                lenses.add(CodeLens(Range(at, at), Command(title, "mezze.sample", listOf(uri, decl.name)), null))
+            }
+
             // "N implementations" over each ability declaration.
             val implsByAbility = typedModule.abilityImpls.groupingBy { it.abilityHash }.eachCount()
             for (ability in typedModule.abilityDecls) {

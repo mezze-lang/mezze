@@ -370,6 +370,46 @@ object SampleBranches {
      */
     data class Row(val pins: Map<String, Pinned>) {
         val why: String get() = pins.values.map { it.why }.filter { it.isNotEmpty() }.distinct().joinToString("; ")
+
+        /**
+         * The row for a READER — `n = 101` — rather than the generator source the
+         * command compiles: a part still to be drawn shows as `_`, and a scripted
+         * operation's result (`ctx:…` keys) is left out, being an effect's answer
+         * rather than an argument.
+         */
+        val display: String
+            get() = pins.entries.filterNot { it.key.startsWith("ctx:") }
+                .joinToString(", ") { (param, pin) -> "$param = ${SampleGen.displaySource(pin.source)}" }
+    }
+
+    /**
+     * A top-level function's parameter record, as the analysis reads it: generic
+     * variables at `Int`, as property testers conventionally do (`pick { xs: ['a] }`
+     * is read at `[Int]`). Null for a value, or a function whose parameter is not
+     * a record — there are then no named arguments to pin.
+     */
+    fun paramFields(decl: TypedLetDecl): Map<String, MezzeType>? {
+        val fn = decl.scheme.type as? MezzeType.FunctionType ?: return null
+        val declared = (fn.paramType as? MezzeType.RecordType)?.fields ?: return null
+        return atInt(declared)
+    }
+
+    /** Every free type variable in [fields] set to `Int`. */
+    fun atInt(fields: Map<String, MezzeType>): Map<String, MezzeType> {
+        val free = fields.values.flatMap { com.mezze.language.ast.solving.collectFreeTypeVars(it) }.toSet()
+        val sub = com.mezze.language.ast.solving.Substitution(free.associateWith { MezzeType.IntType })
+        return fields.mapValues { (_, t) -> sub.apply(t) }
+    }
+
+    /**
+     * The branch rows of [decl] — what `mez sample` pins its leading rows to and
+     * what the editor shows — or null when it is not a function of one record.
+     * Constants the analysis cannot fold are left unpinned here: only the command
+     * evaluates them (it runs code; this does not).
+     */
+    fun forFunction(decl: TypedLetDecl, decls: List<TypedLetDecl>, imported: List<TypedLetDecl>): List<Row>? {
+        val fields = paramFields(decl) ?: return null
+        return try { inventory(decl, fields, decls, imported) } catch (_: Exception) { null }
     }
 
     /**

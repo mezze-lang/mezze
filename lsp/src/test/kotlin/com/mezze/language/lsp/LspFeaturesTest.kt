@@ -1553,6 +1553,53 @@ class LspFeaturesTest {
         assertTrue(lenses.size >= 2, "expected a lens per top-level function, got ${lenses.size}: $titles")
     }
 
+    /**
+     * The branch analysis `mez sample` uses, in the editor: a lens counting the
+     * inputs that reach each branch, read from the function's code. Clicking runs
+     * the client's `mezze.sample` with the function's name; nothing runs otherwise.
+     */
+    @Test
+    fun `code lens counts branch inputs and offers sample`() {
+        val (uri, _) = openSingleFile("""
+            let max_value = 100
+            let clamp = { n: Int } -> if n > max_value then max_value else n
+            let flat = { n: Int } -> n
+        """.trimIndent())
+
+        val lenses = server.textDocumentService.codeLens(CodeLensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val sample = lenses.filter { it.command?.command == "mezze.sample" }
+        assertEquals(1, sample.size, "one sample lens — over `clamp` only, `flat` has no branch: ${lenses.map { it.command?.title }}")
+        assertEquals("2 branch inputs · sample", sample.single().command.title)
+        assertEquals("clamp", sample.single().command.arguments[1].toString().trim('"'))
+        assertEquals(1, sample.single().range.start.line, "on `clamp`'s line")
+    }
+
+    @Test
+    fun `hover on a function lists the inputs that reach each branch`() {
+        val (uri, _) = openSingleFile("""
+            let max_value = 100
+            let clamp = { n: Int } -> if n > max_value then max_value else n
+        """.trimIndent())
+        val content = hoverText(hoverAt(uri, line = 1, character = 4)!!)
+        assertTrue("Branch inputs" in content, content)
+        assertTrue("`n = 100` — if n > max_value (= 100) — else" in content, content)
+        assertTrue("`n = 101` — if n > max_value (= 100) — then" in content, content)
+    }
+
+    @Test
+    fun `hover on a call site lists the callee's branch inputs too`() {
+        val (uri, _) = openSingleFile("""
+            let max_value = 100
+            let clamp = { n: Int } -> if n > max_value then max_value else n
+            let use_it = {} -> clamp { n = 5 }
+        """.trimIndent())
+        val content = hoverText(hoverAt(uri, line = 2, character = 20)!!)
+        assertTrue("`n = 101` — if n > max_value (= 100) — then" in content, content)
+    }
+
     @Test
     fun `code lens omits a zero-reference lens and counts in-file uses`() {
         // Regression (#128): the reference count was store-only, so in

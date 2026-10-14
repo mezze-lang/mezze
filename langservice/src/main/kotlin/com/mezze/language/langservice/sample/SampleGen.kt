@@ -441,6 +441,9 @@ object SampleGen {
 
     private const val DISPATCH = "Arbitrary.arbitrary {}"
 
+    /** [source] for a reader: every part still to be drawn shown as `_`. */
+    fun displaySource(source: String): String = source.replace(DISPATCH, "_")
+
     /**
      * Deep enough for any type a person writes, and a bound rather than none because
      * a cycle here would hang the COMMAND rather than produce a diagnostic.
