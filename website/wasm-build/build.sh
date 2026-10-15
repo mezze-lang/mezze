@@ -123,9 +123,18 @@ printf '%s\n' "$runtime_cp" \
 
 # Fail loudly here rather than shipping an image with no stdlib: the build
 # succeeds either way, and the breakage only shows up in the browser.
+#
+# Read each listing into a variable before matching it. Piping `unzip -l`
+# straight into `grep -q` lets grep close the pipe on its first match, which
+# SIGPIPEs unzip; under `set -o pipefail` the pipeline then reports 141 and the
+# `if` reads it as "not found" — so a jar that DOES carry the snapshot is
+# rejected and the build dies claiming the classpath has none. Same hazard as
+# the `ls | grep | head` and `gradle | tail -1` cases above, and it only
+# started firing here once the cli jar grew its 43MB native-classpath.zip.
 snapshot_jar=""
 for j in "$STAGE"/*.jar; do
-  if unzip -l "$j" 2>/dev/null | grep -q 'stdlib-snapshot\.cbor'; then
+  listing="$(unzip -l "$j" 2>/dev/null || true)"
+  if grep -q 'stdlib-snapshot\.cbor' <<<"$listing"; then
     snapshot_jar="$j"
     break
   fi
