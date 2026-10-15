@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.solving
 
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.ast.*
+import com.mezze.language.typechecker.codec.Tier2Shape
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.*
@@ -840,51 +841,43 @@ class AbilityChecker internal constructor(
             return if (hit) null else MissingTier2(abilityName, path)
         }
 
-        // Bool-variant (`| True, False |`) folds into the scalar bool hook,
-        // per PrimitiveTypes.isBoolVariant — treat it as scalar, not variant.
-        if (com.mezze.language.ast.PrimitiveTypes.isBoolVariant(dataType)) {
-            return require("${prefix}Scalar")
-        }
+        // The top-level shape → Tier-2 family decision is the ONE place that
+        // must agree with CodecGenerator's emit; it lives in Tier2Classifier
+        // (see Tier2Shape.kt). A null family is a type with no Tier-2 call at
+        // this level — VarType / FunctionType / EffectRow / a non-Nat newtype
+        // (not auto-derivable; the missing user impl surfaces as a normal
+        // unresolved-ability error) / a user Declared app expanded elsewhere.
+        val shape = com.mezze.language.typechecker.codec.Tier2Classifier.of(dataType)
+            ?: return null
 
-        // `Nat` is a builtin scalar spelled as a newtype — the emitter routes it to
-        // encode_nat/decode_nat (Scalar), so the capability check must demand Scalar,
-        // not fall through to the newtype no-op below. Keyed on the reserved name, as
-        // the rest of the compiler is; catches both the NewtypeType and TypeApplication
-        // spellings `Nat` can arrive in.
-        val isNat = (dataType is MezzeType.NewtypeType && dataType.name == BuiltinTypes.NAT) ||
-            (dataType is MezzeType.TypeApplication && dataType.constructor == BuiltinTypes.NAT)
-        if (isNat) return require("${prefix}Scalar")
+        return when (shape) {
+            Tier2Shape.SCALAR -> require("${prefix}Scalar")
 
-        // An Option spelled structurally (`| Some { val }, None |`) needs the same
-        // Option hook its `TypeApplication` spelling does, NOT the variant hook —
-        // exactly as CodecGenerator now emits for it. The two must agree: when this
-        // demanded ...Variant while the emit called encode_option, a format carrying
-        // both got a value encoded as a tagged variant and read back as an option.
-        if (BuiltinTypes.isOptionVariant(dataType)) {
-            return require("${prefix}Option") ?: run {
-                val inner = (dataType as MezzeType.VariantType).typeArgs.firstOrNull()
-                    ?: (dataType.constructors[BuiltinTypes.SOME] as? MezzeType.RecordType)
-                        ?.fields?.get(BuiltinTypes.VAL_FIELD)
-                    ?: return@run null
+            Tier2Shape.OPTION -> require("${prefix}Option") ?: run {
+                // Inner element: structural `| Some { val }, None |` reads it off
+                // the Some payload; the `Option 'a` type-application off its arg.
+                val inner = when (dataType) {
+                    is MezzeType.VariantType -> dataType.typeArgs.firstOrNull()
+                        ?: (dataType.constructors[BuiltinTypes.SOME] as? MezzeType.RecordType)
+                            ?.fields?.get(BuiltinTypes.VAL_FIELD)
+                    is MezzeType.TypeApplication -> dataType.args.firstOrNull()
+                    else -> null
+                } ?: return@run null
                 walkTier2Capabilities(inner, configType, isEncode, path + "?")
             }
-        }
 
-        return when (dataType) {
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.FracType, is MezzeType.CharType,
-            is MezzeType.BytesType -> require("${prefix}Scalar")
-
-            is MezzeType.RecordType -> require("${prefix}Record") ?: run {
-                for ((fieldName, fieldType) in dataType.fields) {
+            Tier2Shape.RECORD -> require("${prefix}Record") ?: run {
+                val rec = dataType as? MezzeType.RecordType ?: return@run null
+                for ((fieldName, fieldType) in rec.fields) {
                     val nested = walkTier2Capabilities(fieldType, configType, isEncode, path + fieldName)
                     if (nested != null) return nested
                 }
                 null
             }
 
-            is MezzeType.VariantType -> require("${prefix}Variant") ?: run {
-                for ((ctorName, payload) in dataType.constructors) {
+            Tier2Shape.VARIANT -> require("${prefix}Variant") ?: run {
+                val v = dataType as? MezzeType.VariantType ?: return@run null
+                for ((ctorName, payload) in v.constructors) {
                     if (payload != null) {
                         val nested = walkTier2Capabilities(payload, configType, isEncode, path + ctorName)
                         if (nested != null) return nested
@@ -893,48 +886,26 @@ class AbilityChecker internal constructor(
                 null
             }
 
-
-
-            is MezzeType.TypeApplication -> when (dataType.constructor) {
-                BuiltinTypes.OPTION -> require("${prefix}Option") ?: run {
-                    val inner = dataType.args.firstOrNull() ?: return@run null
-                    walkTier2Capabilities(inner, configType, isEncode, path + "?")
+            Tier2Shape.SEQUENCE -> require("${prefix}Sequence") ?: run {
+                val app = dataType as? MezzeType.TypeApplication ?: return@run null
+                // Set/SortedSet use the `{}` path label; List/Seq use `[]`.
+                val label = if (app.constructor == BuiltinTypes.SET ||
+                    app.constructor == BuiltinTypes.SORTED_SET) "{}" else "[]"
+                app.args.firstOrNull()?.let {
+                    walkTier2Capabilities(it, configType, isEncode, path + label)
                 }
-                // Builtin collection type-applications: some contexts produce
-                // `TypeApplication("Map"|"List"|"Seq"|"Set"|…, args)` rather than
-                // the structural `MezzeType.MapType`/`ListType`/… — the two are
-                // interchangeable identity-wise (see BuiltinTypes.getGenericName).
-                // All linear containers share the one Sequence wire shape; all maps
-                // share the one Mapping wire shape (the ability is keyed on the shape,
-                // the specific container is rebuilt by the walker).
-                BuiltinTypes.LIST, BuiltinTypes.SEQ ->
-                    require("${prefix}Sequence") ?: dataType.args.firstOrNull()?.let {
-                        walkTier2Capabilities(it, configType, isEncode, path + "[]")
-                    }
-                BuiltinTypes.SET, BuiltinTypes.SORTED_SET ->
-                    require("${prefix}Sequence") ?: dataType.args.firstOrNull()?.let {
-                        walkTier2Capabilities(it, configType, isEncode, path + "{}")
-                    }
-                BuiltinTypes.MAP, BuiltinTypes.SORTED_MAP ->
-                    require("${prefix}Mapping") ?: run {
-                        val k = dataType.args.getOrNull(0)?.let {
-                            walkTier2Capabilities(it, configType, isEncode, path + "key")
-                        }
-                        if (k != null) return k
-                        dataType.args.getOrNull(1)?.let {
-                            walkTier2Capabilities(it, configType, isEncode, path + "value")
-                        }
-                    }
-                else -> null
             }
 
-            // VarType / FunctionType / EffectRow — the walker doesn't emit a Tier-2
-            // call for these. A non-Nat NewtypeType also reaches here: it is NOT
-            // auto-derivable (isSerializable declines it), so there is nothing to
-            // check — the missing user impl surfaces as a normal unresolved-ability
-            // error. (Nat was already handled as a Scalar above.) VarType is filtered
-            // by the containsVarType gate above.
-            else -> null
+            Tier2Shape.MAPPING -> require("${prefix}Mapping") ?: run {
+                val app = dataType as? MezzeType.TypeApplication ?: return@run null
+                val k = app.args.getOrNull(0)?.let {
+                    walkTier2Capabilities(it, configType, isEncode, path + "key")
+                }
+                if (k != null) return k
+                app.args.getOrNull(1)?.let {
+                    walkTier2Capabilities(it, configType, isEncode, path + "value")
+                }
+            }
         }
     }
 

@@ -1,0 +1,79 @@
+# Provider conformance gate (toolchain side).
+#
+# Runs in the (private) mezze toolchain repo rather than in each provider,
+# because the providers are PUBLIC but mezze is PRIVATE: a provider's
+# repo-scoped GITHUB_TOKEN cannot check out mezze (it comes back "not found"),
+# whereas this repo can trivially check out the public providers. Inverting the
+# dependency also means we build `mez` ONCE and gate all three providers.
+#
+# For each provider it runs conformance/check.sh — the runtime-free `mez check`
+# gate: the full <Lang>Foreign verb surface + the Result mirror must compile
+# against the mez built from this commit (backed by the #22 foreign-kind gate).
+# Behavioural round-trips (mez dev, need the guest languages) stay opt-in inside
+# check.sh via MEZ_CONFORMANCE_BEHAVIOURAL=1.
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the toolchain
+        uses: actions/checkout@v4
+
+      - name: Set up GraalVM CE 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the mez toolchain
+        run: ./gradlew --no-daemon :cli:installDist :cli:installRuntime
+
+      - name: Check out mezze-js
+        uses: actions/checkout@v4
+        with:
+          repository: mezze-lang/mezze-js
+          path: providers/mezze-js
+
+      - name: Check out mezze-python
+        uses: actions/checkout@v4
+        with:
+          repository: mezze-lang/mezze-python
+          path: providers/mezze-python
+
+      - name: Check out mezze-wasm
+        uses: actions/checkout@v4
+        with:
+          repository: mezze-lang/mezze-wasm
+          path: providers/mezze-wasm
+
+      # MEZ_CONFORMANCE_BEHAVIOURAL=1 runs the `mez dev` round-trips too, not just
+      # the type-level `mez check` — so value-level regressions (e.g. the python
+      # None-vs-module eval bug, the len crash) are caught in CI, not only locally.
+      # Each provider's `mez sync` fetches its guest-language jars (GraalJS /
+      # GraalPy / GraalWasm) from maven, and the setup-graalvm JDK runs the wire
+      # child.
+      - name: Conformance — mezze-js
+        env:
+          MEZ: ${{ github.workspace }}/cli/build/install/mez/bin/mez
+          MEZ_CONFORMANCE_BEHAVIOURAL: '1'
+        run: providers/mezze-js/conformance/check.sh
+
+      - name: Conformance — mezze-python
+        env:
+          MEZ: ${{ github.workspace }}/cli/build/install/mez/bin/mez
+          MEZ_CONFORMANCE_BEHAVIOURAL: '1'
+        run: providers/mezze-python/conformance/check.sh
+
+      - name: Conformance — mezze-wasm
+        env:
+          MEZ: ${{ github.workspace }}/cli/build/install/mez/bin/mez
+          MEZ_CONFORMANCE_BEHAVIOURAL: '1'
+        run: providers/mezze-wasm/conformance/check.sh

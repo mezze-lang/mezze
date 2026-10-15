@@ -55,6 +55,13 @@ internal fun TypedASTCompiler.compileMatch(expr: TypedMatch, src: SourceInfo): N
             // Push a new scope for this match case's bindings
             val caseScope = mutableMapOf<String, Int>()
             val savedSlotConcreteTypesInCase = slotConcreteTypes.toMap()
+            // A match-arm binding uses `forceAllocLocal`, which OVERWRITES
+            // `localsByName[name]`. Snapshot it here and restore it when the arm
+            // closes — otherwise the arm's slot leaks past the match and shadows
+            // an outer `let` of the same name (wrong runtime value / a value of
+            // the arm's type landing in the outer slot). Mirrors `scopeStack` and
+            // `slotConcreteTypes`, which are already arm-scoped below.
+            val savedLocalsInCase = localsByName.toMap()
 
             // Allocate slots for pattern bindings (always fresh)
             val bindings = case.bindings.map { b ->
@@ -299,6 +306,13 @@ internal fun TypedASTCompiler.compileMatch(expr: TypedMatch, src: SourceInfo): N
             scopeStack.removeLast()
             slotConcreteTypes.clear()
             slotConcreteTypes.putAll(savedSlotConcreteTypesInCase)
+            // Restore the name→slot map to its pre-arm state: drop this arm's
+            // bindings and un-shadow any outer name the arm overwrote. The arm's
+            // body IR is already compiled (it holds slot indices, not names), so
+            // this cannot disturb it. Without this, a later reference to a name
+            // the arm bound would resolve to the arm's slot. [match_arm_scope_leak]
+            localsByName.clear()
+            localsByName.putAll(savedLocalsInCase)
 
             CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
         }

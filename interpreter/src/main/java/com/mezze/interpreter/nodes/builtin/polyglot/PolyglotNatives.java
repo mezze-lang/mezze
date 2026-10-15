@@ -107,9 +107,32 @@ public final class PolyglotNatives {
         String cn = t.getClass().getName();
         String msg = t.getMessage() == null ? cn : t.getMessage();
         if (cn.equals("org.graalvm.polyglot.PolyglotException")) {
-            return errorGuestError(msg, extractGuestStack(t));
+            return errorGuestError(withSandboxHint(msg), extractGuestStack(t));
         }
-        return errorGuestError(msg, extractGuestStack(t));
+        return errorGuestError(withSandboxHint(msg), extractGuestStack(t));
+    }
+
+    /**
+     * When the engine reports that a guest language could not even start —
+     * "Access to language 'X' is not permitted" — the cause is almost always an
+     * over-restrictive {@code GraalXWith { config = ... }} sandbox, yet that
+     * message never mentions the knob the user flipped. Append a one-line,
+     * actionable hint pointing back at the config fields so the denial is
+     * self-explanatory. Diagnostic only: this augments the error TEXT, it does
+     * not change control flow or dispatch on the string. Match is narrowed to
+     * Graal's language-access phrasing so ordinary guest errors are untouched.
+     */
+    @TruffleBoundary
+    private static String withSandboxHint(String msg) {
+        if (msg == null) return null;
+        boolean accessDenied = msg.contains("is not permitted")
+            && (msg.contains("Access to language") || msg.contains("language "));
+        if (!accessDenied) return msg;
+        return msg + " (hint: this is a sandbox-config denial — a GraalXWith "
+            + "handler's config is too restrictive. Booting a guest language "
+            + "needs allow_polyglot_access = True, and some engines also need "
+            + "allow_io = True; spread the provider's <lang>_defaults and only "
+            + "override what you mean to restrict.)";
     }
 
     @TruffleBoundary

@@ -657,24 +657,24 @@ class TypeChecker(
                 val resultsForAggregation = if (ElaborationFlags.carryImplOpSolves) {
                     constraintResults + programConstraintResult.implOpSolutions
                         .mapIndexed { index, sol ->
-                            // matchCaseBindings is EXCLUDED, and the reason is
-                            // measured rather than assumed. It is the one table
-                            // whose merge breaks the codec decode bodies, which
-                            // depend on their match bindings arriving as fresh
-                            // variables: bisecting the merge, everything else
-                            // together passes, and this table alone fails
-                            // JsonDecodeExhaustiveTest and UserDecodeAbilityTest
-                            // with a CallIndirect on a record. Supplying the
-                            // binding's real type — even only where the structural
-                            // read had nothing — routes the decoder wiring
-                            // differently. That dependency on an absence is the
-                            // hack A.3 removes by generating codec impls into the
-                            // resolved module like derived ones; this line comes
-                            // out with it. (The isolated solve also returns some
-                            // types in the OTHER representation —
-                            // `TypeApplication("Nat")` against the declared nominal
-                            // `Nat` — which is disease 2, and B.1's job.)
-                            "__impl_op_$index" to sol.result.copy(matchCaseBindings = emptyMap())
+                            // A.3: `matchCaseBindings` used to be EXCLUDED here. It
+                            // was the one table whose merge broke the codec decode
+                            // bodies — supplying a binding's real type where the
+                            // structural read had nothing made them fail with a
+                            // CallIndirect on a record.
+                            //
+                            // The note here predicted its own removal, and had the
+                            // mechanism wrong: it said the dependency goes away once
+                            // codec impls are generated into the resolved module.
+                            // Generation never had to move. The decode bodies did not
+                            // depend on their bindings being fresh VARIABLES; the dict
+                            // PRESCAN decided a call needed evidence by asking whether
+                            // its RECEIVER was a variable, and `decode` dispatches on
+                            // the decode TARGET. A typed binder made the receiver
+                            // concrete and the prescan skipped the call. Fixed in
+                            // DictEvidence.scanExprForVarTypeMethods, so this table
+                            // now merges like every other one.
+                            "__impl_op_$index" to sol.result
                         }
                 } else constraintResults
                 val aggregated = aggregateConstraintResults(resultsForAggregation, substitution)

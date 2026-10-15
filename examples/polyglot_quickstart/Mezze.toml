@@ -1,0 +1,18 @@
+[package]
+name = "polyglot_quickstart"
+version = "0.1.0"
+
+[[app]]
+name = "polyglot_quickstart"
+path = "src/app.mz"
+entry = "main"
+
+# The whole setup: depend on a provider and turn its language on. `mez sync`
+# fetches the GraalJS jars; nothing else to configure.
+[dependencies]
+mezze-js = "github:mezze-lang/mezze-js@0.5.1"
+
+# Presence alone opts this project in to GraalJS. No options needed — the
+# ambient `GraalJs` handler runs with full, permissive capabilities so a
+# program does useful work out of the box.
+[polyglot.js]

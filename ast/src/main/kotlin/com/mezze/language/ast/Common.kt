@@ -156,6 +156,15 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
          *  the `~` cannot appear in a source type variable, so it never collides. */
         const val FOREIGN_KIND_NAME = "'~foreign"
 
+        /** The stdlib effect whose associated type IS the foreign boundary:
+         *  `std::polyglot::core`'s `Polyglot`. Its binding is minted
+         *  foreign-kinded (see [foreignKinded]) because the handler's
+         *  `having 'f = 'g` binding is abstract — there is no structural signal
+         *  to key on, so the effect NAME is the key. Named here (not a bare
+         *  literal in ContextBuilder) so the compiler↔stdlib contract is
+         *  explicit and greppable. */
+        const val POLYGLOT_EFFECT_NAME = "Polyglot"
+
         /** A fresh foreign-kinded variable — the `Polyglot` effect's associated
          *  type at a handler binding / call site. Flexible for inference but gated
          *  against structural types in unification. */

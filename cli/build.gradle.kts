@@ -127,6 +127,14 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.10.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // TEST-ONLY: the CLI deliberately does NOT compile against :interpreter
+    // (see the NOTE above — it is referenced by string literal at run time).
+    // PolyglotConfigContractTest is the one place that imports both the CLI's
+    // `PolyglotResolver.Resolved` and the interpreter's `ResolvedPolyglot` to
+    // prove the two hand-synced manifest parsers agree on the same Mezze.toml.
+    // This never reaches the production/shadowJar classpath.
+    testImplementation(project(":interpreter"))
 }
 
 tasks.named<Test>("test") {

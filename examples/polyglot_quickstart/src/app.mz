@@ -1,0 +1,21 @@
+# The smallest Mezze × JavaScript program — the zero-config on-ramp.
+#
+# Setup is two lines of Mezze.toml (a provider dependency + `[polyglot.js]`),
+# then `mez sync`. At runtime the ambient `GraalJs` handler is fully permissive,
+# so there is nothing to configure: `perform GraalJs in do ...` and go.
+#
+# From here, see examples/polyglot_js for the full feature tour, or swap
+# mezze-js → mezze-python / mezze-wasm (and `GraalJs` → `GraalPy` / `GraalWasm`)
+# for the other languages — the verb surface reads the same across all of them.
+#
+# Run:  mez dev --no-watch
+use std::effects::log::{ println, Console, Log }
+use mezze_js::js::{ Js, GraalJs }
+use std::int
+
+let main = {} -> perform Console in perform GraalJs in do
+  # Evaluate JavaScript, then cross the result back into a Mezze Int. `.int {}`
+  # yields a `Result`, so any guest error surfaces as `Err` instead of crashing.
+  match Js.eval { source = "6 * 7" }.int {} is
+    Ok  { val = n }   -> println { msg = "JavaScript says 6 * 7 = $(int::to_str { n = n })" }
+    Err { error = _ } -> println { msg = "JavaScript evaluation failed" }

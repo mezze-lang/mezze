@@ -16,7 +16,6 @@ class TestMinimalResult {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
-        System.setProperty("mezze.project.root", "/tmp/test_std")
     }
 
     @Test

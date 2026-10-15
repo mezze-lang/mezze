@@ -56,7 +56,6 @@ class TypedAstBuilder(
      *  solver never produced entries for these bodies. Everywhere else the solver's
      *  loc-keyed bindings are authoritative and a structural guess must not
      *  override an absence the compiler already relies on (codec bodies). */
-    internal var typingImplOpBody: Boolean = false
     private val tailCallLocations: Set<Loc> get() = solved.tailCallLocations
     private val mustBeOpenRowVars: Set<RowVar> get() = solved.mustBeOpenRowVars
     internal val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo>
@@ -894,12 +893,9 @@ class TypedAstBuilder(
             if (seedThisOp) {
                 pendingOpParamTypes = (seedFrom as? MezzeType.RecordType)?.fields
             }
-            val prevTypingImplOpBody = typingImplOpBody
-            typingImplOpBody = seedThisOp
             val opExpr = try {
                 buildExpr(op.implementation, file, ctxType)
             } finally {
-                typingImplOpBody = prevTypingImplOpBody
                 pendingOpParamTypes = null
             }
             // LAYER 1: carry the op's own `with <Ability> 'a` constraints onto its

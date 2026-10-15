@@ -1,0 +1,84 @@
+# Cut a mez toolchain release.
+#
+# Trigger: push a tag like `v0.1.0` (or run manually with a version). Produces
+# the full ~/.mezze toolchain layout via `installNative` — the versioned native
+# binary under toolchains/<ver>/ (stdlib embedded, so `mez check`/`fmt`/`init`
+# run with no JVM), its `mezze-runtime.jar` (used by `mez dev`/`build` on the
+# user's own GraalVM), the stdlib sources, a PATH proxy at bin/mez, and a
+# settings.toml defaulting to this version — then tars it and attaches the
+# tarball to a GitHub Release.
+#
+# Consumers install with:
+#   mkdir -p ~/.mezze && tar -xzf mez-<ver>-linux-x64.tar.gz -C ~/.mezze
+#   export PATH="$HOME/.mezze/bin:$PATH"
+# `check`/`fmt`/`init` work immediately; `dev`/`build` light up once GraalVM is
+# installed (mez detects it and prompts if missing).
+#
+# The whole build + tar + extract + run flow was verified locally end-to-end
+# against this commit (proxy runs, `mez --version` reports the -Pversion, `mez
+# check` passes from a freshly-extracted home). Once a release exists, the
+# conformance workflow can DOWNLOAD this tarball instead of building from source.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 0.1.0), without a leading v'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # create the Release and upload assets
+    steps:
+      - name: Check out the toolchain
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up GraalVM CE 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # installNative targets ${user.home}/.mezze; point user.home at a staging
+      # dir so the real runner home stays clean and the tarball holds exactly the
+      # install layout. -Pversion flows into the toolchain version + BuildInfo.
+      - name: Build the toolchain (installNative into a staging home)
+        run: |
+          STAGING="${{ runner.temp }}/relstage"
+          mkdir -p "$STAGING"
+          ./gradlew --no-daemon -Pversion=${{ steps.v.outputs.version }} \
+            -Duser.home="$STAGING" :cli:installNative
+          echo "STAGING=$STAGING" >> "$GITHUB_ENV"
+
+      - name: Assemble + smoke-test the install tarball
+        run: |
+          ver=${{ steps.v.outputs.version }}
+          tarball="mez-$ver-linux-x64.tar.gz"
+          tar -czf "$tarball" -C "$STAGING/.mezze" .
+          echo "built $tarball ($(du -h "$tarball" | cut -f1))"
+          # Smoke test: extract into a fresh home and run the proxy standalone.
+          FRESH="${{ runner.temp }}/fresh/.mezze"
+          mkdir -p "$FRESH"
+          tar -xzf "$tarball" -C "$FRESH"
+          MEZZE_HOME="$FRESH" "$FRESH/bin/mez" --version
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mez-*-linux-x64.tar.gz
+          generate_release_notes: true
