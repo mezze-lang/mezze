@@ -329,7 +329,10 @@ macro sql: {tokens: TokenStream} -> Expr (SqlQuery <>) = {tokens} -> …
 essentially become parsers and AST generators" is not a proposal — it is the
 existing design, at expression scope.
 
-So there is one mechanism at three scopes, and only the first exists:
+So there is one mechanism at three scopes, and only the first exists. (Refined
+since: the contract is a single `{tokens: TokenStream} -> [Decl]` for every scope,
+and in-file language extensions are a further shape — see `mechanics.md` §4 and
+§7. The table below is the original framing.)
 
 | scope | invocation | contract | state |
 |---|---|---|---|

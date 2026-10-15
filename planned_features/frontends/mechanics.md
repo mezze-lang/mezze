@@ -218,9 +218,12 @@ use custom_html_preprocessor::{ html }
 let page = html!(<div>…</div>)                    # one expression
 ```
 
-The parsing logic is written once. The two uses differ in signature — expression
-scope returns `Expr`, file scope returns declarations — so a package exposes two
-thin entry points over one parser rather than literally one function.
+The parsing logic is written once, and since the contract settled on
+`{tokens: TokenStream} -> [Decl]` (below), it is **literally one function**: the
+file glob hands it the whole file's tokens, `html!(…)` hands it the tokens
+between the parentheses, and an expression comes back as a one-element list
+holding a `ParsedTopLevelExpr`, unwrapped at the call site. An earlier version of
+this paragraph said the two uses needed two entry points; that is superseded.
 
 ### Macros should return declarations, and derives are why
 
@@ -633,8 +636,14 @@ frontend mechanism later.
 
 ### Declaration syntax: the `macro` keyword, not metadata
 
-Invocation is `macro_name!()` — the `!()` expansion operator. Declaration stays
-the `macro` keyword from `../macros/`.
+Invocation is `macro_name!()` — the `!()` expansion operator.
+
+How a macro is DECLARED is still open between two answers, both recorded above:
+the `macro` keyword from `../macros/`, or no keyword at all — "the type is the
+marker": `name!()` is valid exactly when `name` has type
+`{tokens: TokenStream} -> [Decl]`. The second is one fewer keyword and makes "a
+macro is a preprocessor function" literally true; the first makes a macro
+findable by reading the declaration alone. Either way it is not metadata:
 
 One alternative gets floated and should be recorded as rejected: declaring a
 macro via metadata, `#{ macro: True }`. It breaks metadata's own contract.
@@ -848,3 +857,108 @@ Concrete versions of the questions `README.md` left abstract:
   since `Loc` is `(file, line, col, line, col)` — but a plugin that emits
   nonsense locations produces diagnostics that point nowhere. Worth validating
   at the boundary.
+
+## 7. Language extensions — new syntax inside ordinary `.mz` files
+
+> Status: proposal. Raised after the rest of this document was agreed; it
+> builds on the same contract and adds no new kind of plugin.
+
+### What it is, and why it is not one of the two existing scopes
+
+The two agreed scopes are:
+
+| scope | the user writes | the parser |
+|---|---|---|
+| file | a `*.sql.mz` / `*.mz.html` file | a frontend replaces Mezze's parser for the whole file |
+| expression / declaration | `name!(…)` in a `.mz` file | Mezze parses, the macro handles what is inside `!( )` |
+
+A **language extension** is the third shape: the file is ordinary Mezze, and new
+syntax appears **inside it with no marker** — Babel's syntax plugins, Haskell's
+`{-# LANGUAGE … #-}`, Rust's nightly feature gates. Examples of what it is for:
+
+- markup literals written directly as expressions (`let page = <div>{name}</div>`)
+  rather than `html!(…)`;
+- literal forms with units (`5km`, `30s`) or new numeric/string literal kinds;
+- an operator or sugar being trialled before it becomes core syntax;
+- the language's own **syntax versions** (`README.md`, "syntax versions in one
+  project"): an edition is a named set of extensions.
+
+A frontend could do all of this by re-implementing the whole Mezze grammar plus
+its additions, and that is exactly the cost to avoid: every extension would be a
+fork of the Mezze parser, and two extensions could never be combined in one file.
+
+### Mechanism: the Mezze parser as a library, plus hook points
+
+Two pieces, neither of them a new plugin type — an extension is still a Mezze
+function over Mezze AST types, from an ordinary package.
+
+**1. The Mezze parser is callable from Mezze.** `std::syntax` exposes the parser
+the compiler uses, over the same `TokenStream`: `parse_decls`, `parse_expr`,
+`parse_type`, `parse_pattern`. This is useful on its own — a macro that accepts
+"a Mezze expression, then a keyword, then…" needs it — and it is what lets an
+extension handle only its own forms and delegate everything else.
+
+**2. The parser consults extensions at fixed hook points**, rather than
+extensions wrapping the parser. A hook is a grammar position where new syntax
+may begin:
+
+| hook | example trigger |
+|---|---|
+| expression start | `<` followed by an identifier (markup) |
+| literal suffix | a number followed by `km` |
+| declaration start | a new leading keyword |
+| type position | a new type form |
+| infix operator | a new operator token |
+
+An extension registers, per hook, a **trigger** and a parse function returning
+the node it built and the tokens it did not consume. When the base parser reaches
+a hook and the next tokens match a registered trigger, it hands over; otherwise
+it parses as normal.
+
+**Why hooks and not wrapping.** Wrapping is how Babel plugins work, and its
+signature cost is **plugin ordering**: the result depends on the order plugins
+run in, and users configure that order. With hooks, extensions do not run in
+sequence at all — each owns its triggers. Two extensions claiming the same
+trigger at the same hook is a **configuration error reported up front**, not an
+ordering question at parse time. Combining extensions becomes a set, not a list.
+
+The output contract is unchanged: plain AST, typechecked after expansion like
+everything else (§4, "Phase order"), with `Loc`s into the user's own file, so
+diagnostics need no source maps.
+
+### Enabling one
+
+Configuration, consistent with §3's reasoning that a pulled file must not be
+able to change how it is parsed:
+
+```toml
+[extensions]
+"src/**/*.mz"   = ["mezze_markup::markup", "mezze_units::literals"]
+"src/legacy/**" = []                        # this part of the tree opts out
+```
+
+The right-hand side is a list of qualified Mezze references, resolved and type-
+checked like `[frontends]` entries. An edition is the same thing under a name:
+`edition = "2027"` stands for a list the toolchain ships.
+
+### Open questions
+
+1. **Per-file opt-in.** Haskell's per-file `LANGUAGE` pragmas are liked because
+   a file *says* what it uses. §3 rejected in-file directives for frontends on
+   supply-chain grounds, and §4 ruled out metadata for anything semantic. A
+   middle answer: a file may *declare* the extensions it relies on as a check
+   that they are enabled by configuration, never as the thing that enables them.
+2. **Exact hook set.** The table above is a starting set. Every hook is a
+   permanent promise about where new syntax can appear; too few and extensions
+   cannot express real needs, too many and the base grammar cannot evolve.
+3. **Formatting.** `mez fmt` cannot print syntax it does not know. Either an
+   extension supplies a printer for its nodes, or the formatter leaves extension
+   regions as written. (`README.md` §5 asks the same question for frontends.)
+4. **Highlighting.** Tree-sitter grammars cannot know project-configured syntax.
+   The LSP's semantic tokens already sit on top of a token-only base grammar, so
+   extension syntax would be coloured from the LSP — but editors without LSP see
+   it uncoloured.
+5. **Relationship to macros.** A markup extension and an `html!(…)` macro can be
+   the same parser; the extension only removes the `!( )`. Whether a package
+   should be able to offer both from one function is worth deciding together
+   with the hook signatures.
