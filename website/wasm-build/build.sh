@@ -30,9 +30,17 @@ say() { printf '\033[1m▸ %s\033[0m\n' "$*"; }
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 
 if [[ "$FORCE" != "--force" && -f "$OUT/mezze.js.wasm" ]]; then
+  # No `| sort -rn | head -1` here, for the reason this file keeps rediscovering:
+  # head exits after one line, the closed pipe SIGPIPEs sort, and under
+  # `set -o pipefail` the command substitution yields 141 -- which `set -e`
+  # turns into a silent exit before the first `say`, so the build appears to do
+  # nothing at all. It stayed hidden until public/wasm existed, since this
+  # branch only runs once there is an output to compare against. awk reads its
+  # whole input and needs no sort.
   newest_src=$(find "$HERE/src" "$REPO/interpreter/src" "$REPO/typechecker/src" \
                  \( -name '*.java' -o -name '*.kt' \) 2>/dev/null |
-               while read -r f; do mtime "$f"; done | sort -rn | head -1)
+               while read -r f; do mtime "$f"; done |
+               awk '$1 > newest { newest = $1 } END { print newest + 0 }')
   built=$(mtime "$OUT/mezze.js.wasm")
   if [[ "${newest_src:-0}" -lt "$built" ]]; then
     say "public/wasm is up to date (use --force to rebuild)"
@@ -179,7 +187,7 @@ docker run --rm \
       -H:+UnlockExperimentalVMOptions \
       -J-Dpolyglotimpl.DisableVersionChecks=true \
       -H:+EnableFallbackCompilation \
-      -H:IncludeResources='.*\.mz\$|.*stdlib-snapshot\.cbor\$' \
+      -H:IncludeResources='.*\.mz\$' \
       --initialize-at-build-time=com.mezze,kotlin,kotlinx \
       -cp \"\$(cat '$IMAGE_CP_FILE'):/tmp/classes\" \
       -H:WasmAsPath=$BINARYEN/bin/wasm-as \
