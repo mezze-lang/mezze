@@ -17,8 +17,10 @@
 # The linux-x64 build + tar + extract + run flow was verified locally end-to-end.
 # The macOS and linux-arm64 jobs follow the same steps on their runners (not
 # exercised here); native-image for macOS is already configured in
-# cli/build.gradle (system C compiler / SDK). Windows is not covered yet — the
-# toolchain's PATH proxy + install are unix-shaped.
+# cli/build.gradle (system C compiler / SDK). Windows (build-windows job) is the
+# least-proven platform: it uses PowerShell + a .zip and relies on setup-graalvm
+# configuring MSVC — expect the first real run to need iteration. It is
+# best-effort: `release` publishes linux + macOS even if Windows fails.
 name: release
 
 on:
@@ -91,16 +93,72 @@ jobs:
           path: mez-*-${{ matrix.asset }}.tar.gz
           if-no-files-found: error
 
+  # Windows is a separate job: PowerShell (not bash), a .zip (not .tar.gz), and
+  # native-image needs the MSVC toolchain — graalvm/setup-graalvm configures the
+  # Visual Studio build environment on windows runners. This is the least-proven
+  # platform; expect the first real run to need iteration.
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the toolchain
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.version }}"
+          if (-not $v) { $v = "${{ github.ref_name }}" -replace '^v','' }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Set up GraalVM CE 25 (configures MSVC on Windows)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the toolchain (installNative into a staging home)
+        shell: pwsh
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP 'relstage'
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          .\gradlew.bat --no-daemon "-Pversion=${{ steps.v.outputs.version }}" "-Duser.home=$staging" :cli:installNative
+          "STAGING=$staging" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Assemble + smoke-test the install zip
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.v.outputs.version }}"
+          $zip = "mez-$ver-windows-x64.zip"
+          Compress-Archive -Path (Join-Path $env:STAGING '.mezze\*') -DestinationPath $zip -Force
+          Write-Host "built $zip"
+          $fresh = Join-Path $env:RUNNER_TEMP 'fresh\.mezze'
+          New-Item -ItemType Directory -Force -Path $fresh | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $fresh -Force
+          $env:MEZZE_HOME = $fresh
+          & (Join-Path $fresh 'bin\mez.exe') --version
+
+      - name: Upload the Windows zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: mez-windows-x64
+          path: mez-*-windows-x64.zip
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, build-windows]
+    # Publish as long as the (verified) unix builds succeeded; Windows is
+    # best-effort, so a Windows failure still releases linux + macOS.
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # create the Release and upload assets
     steps:
-      - name: Check out (for install.sh)
+      - name: Check out (for install scripts)
         uses: actions/checkout@v4
 
-      - name: Download all platform tarballs
+      - name: Download all platform archives
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -110,6 +168,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.tar.gz
+            dist/mez-*
             install.sh
+            install.ps1
           generate_release_notes: true
