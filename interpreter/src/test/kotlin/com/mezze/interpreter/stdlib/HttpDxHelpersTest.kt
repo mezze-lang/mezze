@@ -24,7 +24,7 @@ class HttpDxHelpersTest {
     @Test
     fun `mock_get plus text_or collapses the fetch to one expression`() {
         val result = eval("""
-            use std::effects::http::{ Http, MockHttpClient, mock_get, request }
+            use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request }
 
             let fetch = { url } -> request { url }.send {}.text_or { def = "offline" }
 
@@ -37,7 +37,7 @@ class HttpDxHelpersTest {
     @Test
     fun `text_or returns the default on an Err (no matching rule)`() {
         val result = eval("""
-            use std::effects::http::{ Http, MockHttpClient, request }
+            use std::effects::http::{ HttpClient, MockHttpClient, request }
 
             perform MockHttpClient { rules = [] } in
               request { url = "https://nope" }.send {}.text_or { def = "offline" }
@@ -48,7 +48,7 @@ class HttpDxHelpersTest {
     @Test
     fun `mock_status builds an arbitrary-status rule and text_or reads its body`() {
         val result = eval("""
-            use std::effects::http::{ Http, MockHttpClient, mock_status, request, Get }
+            use std::effects::http::{ HttpClient, MockHttpClient, mock_status, request, Get }
 
             perform MockHttpClient { rules = [ mock_status { url = "*", methods = [Get], code = 404, body = "missing" } ] } in
               request { url = "https://x" }.send {}.text_or { def = "?" }

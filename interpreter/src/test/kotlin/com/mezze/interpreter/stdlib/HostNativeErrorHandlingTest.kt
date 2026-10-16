@@ -94,7 +94,7 @@ class HostNativeErrorHandlingTest {
         // SimpleHttpClient performs a real request; a syntactically bad
         // URL must map to InvalidUrl at the native boundary (no network).
         val code = """
-            use std::effects::http::{ Http, SimpleHttpClient, request }
+            use std::effects::http::{ HttpClient, SimpleHttpClient, request }
             perform SimpleHttpClient in
               match request { url = "://bad" }.send {} is
                 Ok { val } -> "unexpected-ok"
@@ -121,7 +121,7 @@ class HostNativeErrorHandlingTest {
         // A short connect timeout keeps the test fast even if the OS
         // does not refuse instantly. The point: a Mezze Err, not a throw.
         val code = """
-            use std::effects::http::{ Http, SimpleHttpClient, request, default_http_config }
+            use std::effects::http::{ HttpClient, SimpleHttpClient, request, default_http_config }
             perform SimpleHttpClient in
               match request { url = "http://127.0.0.1:1" }.send_with {
                 config = { ...default_http_config, timeout_ms = 500, connect_timeout_ms = 500 }

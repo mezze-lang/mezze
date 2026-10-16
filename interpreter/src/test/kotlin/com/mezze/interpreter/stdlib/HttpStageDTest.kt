@@ -145,7 +145,7 @@ class HttpStageDTest {
     @Test
     fun `ensure_ok passes through 2xx responses`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request, ensure_ok}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request, ensure_ok}
             use std::collections::map
             use std::collections::bytes
 
@@ -171,7 +171,7 @@ class HttpStageDTest {
         // injects the request URL into the Ok-wrapped Response so
         // downstream code can identify the source.
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -194,7 +194,7 @@ class HttpStageDTest {
     @Test
     fun `ensure_ok promotes 404 to RequestFailed`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
             use std::collections::map
             use std::collections::bytes
 
@@ -222,7 +222,7 @@ class HttpStageDTest {
         // ensure_ok can build a RequestFailed { url, ... } that identifies
         // the source. Verifies #179-followup.
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
             use std::collections::map
             use std::collections::bytes
 
@@ -247,7 +247,7 @@ class HttpStageDTest {
     @Test
     fun `ensure_ok preserves existing Err`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, ensure_ok}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, ensure_ok}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = Cancelled } }
@@ -266,7 +266,7 @@ class HttpStageDTest {
     @Test
     fun `Response ensure_ok method on Ok value`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -297,7 +297,7 @@ class HttpStageDTest {
     @Test
     fun `retry returns immediately on first Ok`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request, retry}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request, retry}
             use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
             use std::collections::map
@@ -324,7 +324,7 @@ class HttpStageDTest {
     @Test
     fun `retry stops on non-retryable Err`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
             use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
 
@@ -347,7 +347,7 @@ class HttpStageDTest {
     @Test
     fun `retry exhausts attempts on persistent retryable Err`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
             use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
 

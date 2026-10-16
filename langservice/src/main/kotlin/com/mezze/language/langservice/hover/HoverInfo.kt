@@ -705,7 +705,7 @@ object HoverInfo {
      * A handler declaration carries two things the header used to drop, both
      * of which the reader needs at the point they are looking:
      *
-     *   `impl Http for MockHttpClient { rules: [MockRule] } where { … }`
+     *   `impl HttpClient for MockHttpClient { rules: [MockRule] } where { … }`
      *   `impl Exception for ExceptionToResult having 'error = 'e where { … }`
      *
      * The parameters are what a caller supplies at the `perform` site, so a

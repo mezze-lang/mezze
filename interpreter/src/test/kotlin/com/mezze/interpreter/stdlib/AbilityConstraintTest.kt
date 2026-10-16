@@ -59,14 +59,14 @@ class AbilityConstraintTest {
         // Verifies an Encode-constrained helper can encode an arbitrary value
         // and ship it through the chainable HTTP request surface.
         val error = typeCheck("""
-            use std::effects::http::{Http, HttpClient, Method, request}
+            use std::effects::http::{HttpClient, PooledHttpClient, Method, request}
             use std::codec::core::{Encode}
             use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
 
             type User = { name: Str, age: Int }
 
-            let post_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <Http> = { url, body } -> do
+            let post_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <HttpClient> = { url, body } -> do
                 let encoded: Json = body.encode { config = json_default }
                 let body_bytes = bytes::from_str { s = to_str { json = encoded } }
                 request { url = url }
@@ -77,7 +77,7 @@ class AbilityConstraintTest {
 
             let test = {} -> do
                 let user: User = { name = "Alice", age = 30 }
-                perform HttpClient in
+                perform PooledHttpClient in
                     post_encoded { url = "https://example.com/users", body = user }
         """)
         assertNull(error, "Expected type check to succeed but got: ${'$'}error")
@@ -86,14 +86,14 @@ class AbilityConstraintTest {
     @Test
     fun `put with json body and ability constraint compiles`() {
         val error = typeCheck("""
-            use std::effects::http::{Http, HttpClient, Method, request}
+            use std::effects::http::{HttpClient, PooledHttpClient, Method, request}
             use std::codec::core::{Encode}
             use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
 
             type User = { name: Str, age: Int }
 
-            let put_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <Http> = { url, body } -> do
+            let put_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <HttpClient> = { url, body } -> do
                 let encoded: Json = body.encode { config = json_default }
                 let body_bytes = bytes::from_str { s = to_str { json = encoded } }
                 request { url = url }
@@ -104,7 +104,7 @@ class AbilityConstraintTest {
 
             let test = {} -> do
                 let user: User = { name = "Alice", age = 30 }
-                perform HttpClient in
+                perform PooledHttpClient in
                     put_encoded { url = "https://example.com/users/1", body = user }
         """)
         assertNull(error, "Expected type check to succeed but got: ${'$'}error")
@@ -113,14 +113,14 @@ class AbilityConstraintTest {
     @Test
     fun `patch with json body and ability constraint compiles`() {
         val error = typeCheck("""
-            use std::effects::http::{Http, HttpClient, Method, request}
+            use std::effects::http::{HttpClient, PooledHttpClient, Method, request}
             use std::codec::core::{Encode}
             use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
 
             type UserPatch = { name: Option Str }
 
-            let patch_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <Http> = { url, body } -> do
+            let patch_encoded: { url: Str, body: 'a } with Encode JsonC 'a -> { } <HttpClient> = { url, body } -> do
                 let encoded: Json = body.encode { config = json_default }
                 let body_bytes = bytes::from_str { s = to_str { json = encoded } }
                 request { url = url }
@@ -131,7 +131,7 @@ class AbilityConstraintTest {
 
             let test = {} -> do
                 let patch: UserPatch = { name = Some { val = "Bob" } }
-                perform HttpClient in
+                perform PooledHttpClient in
                     patch_encoded { url = "https://example.com/users/1", body = patch }
         """)
         assertNull(error, "Expected type check to succeed but got: ${'$'}error")

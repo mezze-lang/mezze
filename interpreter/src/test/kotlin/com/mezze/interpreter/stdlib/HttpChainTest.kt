@@ -33,7 +33,7 @@ class HttpChainTest {
     @Test
     fun `request builder chains and sends`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -62,7 +62,7 @@ class HttpChainTest {
     @Test
     fun `request with_json sets body and Content-Type`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::codec::json::{Json}
             use std::collections::map
             use std::collections::bytes
@@ -93,7 +93,7 @@ class HttpChainTest {
     @Test
     fun `request with_text sets body from string`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -120,7 +120,7 @@ class HttpChainTest {
     @Test
     fun `request with_timeout and with_auth`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -151,7 +151,7 @@ class HttpChainTest {
     @Test
     fun `response is_ok and is_success`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -175,7 +175,7 @@ class HttpChainTest {
     @Test
     fun `response is_client_err and is_server_err`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -199,7 +199,7 @@ class HttpChainTest {
     @Test
     fun `response text decodes body as UTF-8`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -225,7 +225,7 @@ class HttpChainTest {
     @Test
     fun `response header lookup is case-insensitive`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
             use std::option
@@ -259,7 +259,7 @@ class HttpChainTest {
     @Test
     fun `client get yields a pre-filled Request`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
             use std::collections::map
             use std::collections::bytes
 
@@ -286,7 +286,7 @@ class HttpChainTest {
         // No `.send` — this is a pure builder check. Inspect the
         // Authorization header directly on the constructed request.
         val result = eval("""
-            use std::effects::http::{Http, client, Bearer}
+            use std::effects::http::{HttpClient, client, Bearer}
             use std::collections::map
 
             let api = client { base_url = "https://api.acme.com" }
@@ -303,7 +303,7 @@ class HttpChainTest {
     @Test
     fun `client post chained with with_json`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
             use std::codec::json::{Json}
             use std::collections::map
             use std::collections::bytes
@@ -332,7 +332,7 @@ class HttpChainTest {
     fun `client base_url joins paths correctly`() {
         // No `.send` — pure URL-building check, no perform needed.
         val result = eval("""
-            use std::effects::http::{Http, client}
+            use std::effects::http::{HttpClient, client}
 
             let api = client { base_url = "https://api.acme.com" }
             let r = api.get { path = "/v1/users" }
@@ -345,7 +345,7 @@ class HttpChainTest {
     fun `client base_url empty falls back to absolute path`() {
         // No `.send` — pure URL-building check, no perform needed.
         val result = eval("""
-            use std::effects::http::{Http, client}
+            use std::effects::http::{HttpClient, client}
 
             let api = client { base_url = "" }
             let r = api.get { path = "https://other.com/foo" }
@@ -365,7 +365,7 @@ class HttpChainTest {
     // language impls" collision the polyglot providers ship
     // (`impl PyForeign` + `impl Result PyForeign InteropError`).
     //
-    // Before the fix, `Http.request{...}.text{}` (receiver is an
+    // Before the fix, `HttpClient.request{...}.text{}` (receiver is an
     // effect-op call, NOT a named local) failed to dispatch:
     //   - constraint gen's "homogeneous fast path" picked whichever
     //     subset of candidates happened to share a return-type
@@ -390,7 +390,7 @@ class HttpChainTest {
     @Test
     fun `inline effect-op chain on Result Response HttpError dispatches Result impl`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, default_http_config, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, default_http_config, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -400,14 +400,14 @@ class HttpChainTest {
                     body = bytes::from_str { s = "the-body" }, url = "" } } }
             ] } in do
               let req = request { url = "http://test.com/x" }
-              # Inline chain: `Http.request{...}` is a TypedPerformOp receiver
+              # Inline chain: `HttpClient.request{...}` is a TypedPerformOp receiver
               # with declared return `Result Response HttpError`, and `.text{}`
               # is defined on BOTH `impl Response` AND `impl Result Response
               # HttpError`. Must dispatch to the Result impl (which delegates to
               # `text_result` and yields `Result Str HttpError`), NOT the
               # Response impl (which yields the raw `Result Str Str` from
               # `body_str`).
-              let result_text = Http.request { req = req, config = default_http_config }.text {}
+              let result_text = HttpClient.request { req = req, config = default_http_config }.text {}
               match result_text is
                 Ok  { val = s } -> s
                 Err { error = _ } -> "ERR"

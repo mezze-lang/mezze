@@ -31,7 +31,7 @@ class HttpDecodeMethodTest {
     @Test
     fun `from_json method on http response yields typed record`() {
         val out = eval("""
-            use std::effects::http::{ Http, request, mock_get, MockHttpClient, HttpError }
+            use std::effects::http::{ HttpClient, request, mock_get, MockHttpClient, HttpError }
             perform MockHttpClient { rules = [ mock_get { url = "*", body = "{\"name\": \"Ada\"}" } ] } in do
               let r: Result { name: Str } HttpError = request { url = "u" }.send {}.from_json {}
               match r is

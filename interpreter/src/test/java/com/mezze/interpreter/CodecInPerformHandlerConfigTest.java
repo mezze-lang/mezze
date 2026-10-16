@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * The performer's {@code PerformerTypeInfo} is what lets its handler-config
  * record be type-checked, and building it needs the effect decl in scope. When
  * the user imports only the performer (`use …::{ MockHttpClient }`) and not its
- * effect (`Http`), the effect decl used to be absent, so `addEffectPerformer`
+ * effect (`HttpClient`), the effect decl used to be absent, so `addEffectPerformer`
  * bailed and the whole config subtree went unchecked — including any codec
  * obligation inside it. It therefore type-checked clean, but the auto-derived
  * codec was never registered, and the program died at runtime with
@@ -33,7 +33,7 @@ class CodecInPerformHandlerConfigTest {
     }
 
     /**
-     * The regression case: `.to_json {}` inside the mock body, `Http` NOT
+     * The regression case: `.to_json {}` inside the mock body, `HttpClient` NOT
      * imported. Before the fix this threw `Field not found: encode`.
      */
     @Test
@@ -92,7 +92,7 @@ class CodecInPerformHandlerConfigTest {
     @Test
     void stillWorksWhenEffectIsImported() {
         Object r = MezzeTestHelper.run("""
-            use std::effects::http::{ Http, MockHttpClient, mock_get, request, body_str }
+            use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request, body_str }
             use std::codec::json::{ ToJson, to_str }
 
             let fetch = {} ->

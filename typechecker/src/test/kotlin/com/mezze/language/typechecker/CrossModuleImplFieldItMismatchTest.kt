@@ -106,7 +106,7 @@ class CrossModuleImplFieldItMismatchTest {
     @Test
     fun `cross-module impl method chain - return type from method not receiver`(@TempDir tempDir: Path) {
         // Closer mimicry of Stage B http.mz Client/Request/Response: an
-        // Http effect with a request op, MockHttpClient impl, plus
+        // HttpClient effect with a request op, MockHttpClient impl, plus
         // impl Client where { get } and impl Request where { send }.
         // The test imports the lib and chains `c.get { path }.send {}`
         // inside a perform block then matches on the Result.
@@ -135,7 +135,7 @@ class CrossModuleImplFieldItMismatchTest {
             pub type Client = { base: Str, default_timeout: Int, default_headers: Map Str Str }
 
             ## MyHttp effect with a `request` op that consumes Req and
-            ## returns Result Resp Err — mirrors http.mz's Http effect.
+            ## returns Result Resp Err — mirrors http.mz's HttpClient effect.
             effect MyHttp where {
               request: { req: Req } -> Result Resp Err <MyHttp>
             }
@@ -319,7 +319,7 @@ class CrossModuleImplFieldItMismatchTest {
     @Test
     fun `stdlib http chain - api dot get dot send`(@TempDir tempDir: Path) {
         val userSource = """
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
             use std::collections::map
             use std::collections::bytes
 

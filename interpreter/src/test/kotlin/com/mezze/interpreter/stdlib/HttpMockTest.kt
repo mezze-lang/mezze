@@ -26,7 +26,7 @@ class HttpMockTest {
     @Test
     fun `mock returns configured response for exact match`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -53,7 +53,7 @@ class HttpMockTest {
     @Test
     fun `mock returns error response`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
                 { methods = [Get], url = Glob { pattern = "/error" }, response = Err { error = ConnectionFailed { url = "/error", reason = "mock error" } } }
@@ -77,7 +77,7 @@ class HttpMockTest {
     @Test
     fun `mock matches specific GET method`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -101,7 +101,7 @@ class HttpMockTest {
     @Test
     fun `mock matches specific POST method`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -128,7 +128,7 @@ class HttpMockTest {
     @Test
     fun `mock with empty methods array matches any method`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -168,7 +168,7 @@ class HttpMockTest {
     @Test
     fun `mock matches star pattern for single segment`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -190,7 +190,7 @@ class HttpMockTest {
     @Test
     fun `mock star pattern does not match nested paths`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -216,7 +216,7 @@ class HttpMockTest {
     @Test
     fun `mock matches doublestar for nested paths`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -238,7 +238,7 @@ class HttpMockTest {
     @Test
     fun `mock doublestar catch-all`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -264,7 +264,7 @@ class HttpMockTest {
     @Test
     fun `mock uses first matching rule`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -292,7 +292,7 @@ class HttpMockTest {
     @Test
     fun `mock response body is preserved`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -325,7 +325,7 @@ class HttpMockTest {
     @Test
     fun `mock response headers are preserved`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -359,7 +359,7 @@ class HttpMockTest {
     @Test
     fun `mock Timeout error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = Timeout { url = "/slow", ms = 5000 } } }
@@ -379,7 +379,7 @@ class HttpMockTest {
     @Test
     fun `mock Cancelled error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = Cancelled } }
@@ -403,7 +403,7 @@ class HttpMockTest {
     @Test
     fun `mock returns error when no rule matches`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -425,7 +425,7 @@ class HttpMockTest {
     @Test
     fun `mock with empty rules returns error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Method, request}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Method, request}
 
             let rules: [MockRule] = []
 
@@ -458,7 +458,7 @@ class HttpMockTest {
     @Test
     fun `body_str on a mock response decodes the body`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request, body_str}
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request, body_str}
             use std::result::{ get_or }
             use std::collections::map
             use std::collections::bytes

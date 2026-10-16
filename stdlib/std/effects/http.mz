@@ -77,13 +77,13 @@ pub type MockRule = {
 }
 
 ## HTTP client effect.
-effect Http where {
+effect HttpClient where {
   ## Send an HTTP request with the given config.
-  request: { req: Request, config: HttpConfig } -> Result Response HttpError <Http>
+  request: { req: Request, config: HttpConfig } -> Result Response HttpError <HttpClient>
 }
 
 ## Connection-pooling HTTP client (scoped -- creates/closes client per handler).
-impl Http for HttpClient where {
+impl HttpClient for PooledHttpClient where {
   initialize_scope = {} -> do
     let client = __native_http_client_create {}
     { client = client },
@@ -95,7 +95,7 @@ impl Http for HttpClient where {
 }
 
 ## Connection-pooling HTTP client with a fixed config override.
-impl Http for HttpClientWith { config: HttpConfig } where {
+impl HttpClient for PooledHttpClientWith { config: HttpConfig } where {
   initialize_scope = {} -> do
     let client = __native_http_client_create {}
     { client = client },
@@ -107,7 +107,7 @@ impl Http for HttpClientWith { config: HttpConfig } where {
 }
 
 ## Simple HTTP client that creates a new connection per request.
-impl Http for SimpleHttpClient where {
+impl HttpClient for SimpleHttpClient where {
   request = { req, config } -> do
     let client = __native_http_client_create {}
     let result = __native_http_request { req = req, config = config, client = client }
@@ -116,7 +116,7 @@ impl Http for SimpleHttpClient where {
 }
 
 ## Simple HTTP client with a fixed config override.
-impl Http for SimpleHttpClientWith { config: HttpConfig } where {
+impl HttpClient for SimpleHttpClientWith { config: HttpConfig } where {
   request = { req, config } -> do
     let client = __native_http_client_create {}
     let result = __native_http_request { req = req, config = config, client = client }
@@ -125,7 +125,7 @@ impl Http for SimpleHttpClientWith { config: HttpConfig } where {
 }
 
 ## Mock HTTP client for testing with canned responses.
-impl Http for MockHttpClient { rules: [MockRule] } where {
+impl HttpClient for MockHttpClient { rules: [MockRule] } where {
   request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
 }
 
@@ -443,10 +443,10 @@ impl Request where {
   with_api_key = { it: 'it, name: Str, val: Str } -> with_api_key { req = it, name = name, val = val },
   with_content_type = { it: 'it, val: Str } -> with_content_type { req = it, content_type = val },
   with_accept = { it: 'it, val: Str } -> with_accept { req = it, accept = val },
-  ## Terminal — perform the request via the ambient Http handler.
-  send = { it } -> Http.request { req = it, config = default_http_config },
+  ## Terminal — perform the request via the ambient HttpClient handler.
+  send = { it } -> HttpClient.request { req = it, config = default_http_config },
   ## Terminal with config override.
-  send_with = { it: 'it, config: HttpConfig } -> Http.request { req = it, config = config },
+  send_with = { it: 'it, config: HttpConfig } -> HttpClient.request { req = it, config = config },
 
   ## dot-chain parity: inherent method for every receiver-taking free
   ## function not already covered by an ability, so `x.op {}` works.
@@ -644,9 +644,9 @@ use std::effects::time::{ Time }
 ## doesn't bind nested `let` names to themselves.
 let retry_loop
   : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int }
-  -> Result Response HttpError <Http, Async, Time>
+  -> Result Response HttpError <HttpClient, Async, Time>
   = { req, attempt, max_attempts, backoff_ms } -> do
-    let resp = Http.request { req = req, config = default_http_config }
+    let resp = HttpClient.request { req = req, config = default_http_config }
     match resp is
       Ok { val } -> resp
       Err { error } -> if attempt >= max_attempts || (is_retryable { err = error }).not {} then resp else do
@@ -674,7 +674,7 @@ let retry_loop
 ## initial attempt — `max_attempts = 1` is a single shot with no retry.
 pub let retry
   : { req: Request, max_attempts: Int, backoff_ms: Int }
-  -> Result Response HttpError <Http, Async, Time>
+  -> Result Response HttpError <HttpClient, Async, Time>
   = { req, max_attempts, backoff_ms } ->
     retry_loop {
       req = req,
@@ -688,7 +688,7 @@ pub let retry
 ## `par_map` returns `[Result Response AsyncError]` per spawn; we collapse
 ## each AsyncError into a single HTTP-level ConnectionFailed so callers
 ## see a uniform `[Result Response HttpError]`.
-pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <Http, Async> = { urls } ->
+pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <HttpClient, Async> = { urls } ->
   seq::map {
     xs = par_map { xs = urls, f = { x } -> request { url = x }.send {} },
     f = { x } -> match x is
@@ -700,7 +700,7 @@ pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <Http, Async> 
   }
 
 ## Fetch multiple URLs concurrently, failing on the first error.
-pub let fetch_all_ok: { urls: [Str] } -> Result [Response] HttpError <Http, Async> = { urls } ->
+pub let fetch_all_ok: { urls: [Str] } -> Result [Response] HttpError <HttpClient, Async> = { urls } ->
   do
     let results = fetch_all { urls = urls }
     collect_results { results = results }
