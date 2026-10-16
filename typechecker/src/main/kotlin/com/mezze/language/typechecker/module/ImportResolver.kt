@@ -264,6 +264,14 @@ class ImportResolver(
                 val reexportedAbilitiesByHash = mutableMapOf<Hash, ParsedAbilityDecl>()
                 val reexportedEffectsByHash = mutableMapOf<Hash, ParsedEffectDecl>()
                 val reexportedAbilityImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
+                // A PERFORMER is not an export. `ExportedItemType` has no PERFORMER
+                // case, so a performer never appears in `module.exports` and the
+                // export-keyed re-export lookup below cannot see one. It reaches a
+                // DIRECT importer through a separate channel (`importedImpls`,
+                // built from `index.performersByName`), and that channel had no
+                // re-export equivalent — so a facade carried the effect and
+                // silently dropped its performers.
+                val reexportedPerformers = mutableMapOf<String, ParsedPerformerDecl>()
 
                 for (item in path.items) {
                     if (!module.exports.containsKey(item.name)) {
@@ -283,6 +291,32 @@ class ImportResolver(
                             // an ability, every impl the origin knows) into the context
                             // so its operations dispatch downstream.
                             val originModule = loader.getModule(originModulePath)
+                            // A PERFORMER is exported as `ExportedItemType.FUNCTION`
+                            // (there is no PERFORMER kind), so the `when` below cannot
+                            // recognise one and dropped it through `else -> {}`. The
+                            // consequence was silent and far away: a facade carried the
+                            // effect, lost its performers, and `perform X` then failed
+                            // at the consumer with "the body performs <E> but the
+                            // annotation doesn't allow it" — pointing at the annotation
+                            // rather than at the missing performer.
+                            //
+                            // Ask the ORIGIN whether the name is a performer instead of
+                            // asking the export what kind it is.
+                            originModule?.index?.performersByName?.get(export.originalName)?.let { perf ->
+                                reexportedPerformers[localName] = perf
+                                // Register the performer's EFFECT by hash, not by name,
+                                // so `perform X { field = … }` can type-check its config
+                                // record while the effect stays un-referenceable without
+                                // its own import. Same reason the direct path gives:
+                                // without it the config subtree is skipped, no codec is
+                                // derived, and it fails at runtime with
+                                // `Field not found: encode`.
+                                originModule.index.effectDeclarations[perf.effect.localName]?.let { eff ->
+                                    eff.contentHash?.let { h ->
+                                        if (h !in reexportedEffectsByHash) reexportedEffectsByHash[h] = eff
+                                    }
+                                }
+                            }
                             when (export.type) {
                                 ExportedItemType.ABILITY -> {
                                     originModule?.index?.abilityDeclarations?.get(export.originalName)?.let { ab ->
@@ -297,6 +331,16 @@ class ImportResolver(
                                     originModule?.index?.effectDeclarations?.get(export.originalName)?.let { eff ->
                                         reexportedEffects[localName] = eff
                                         eff.contentHash?.let { reexportedEffectsByHash[it] = eff }
+                                        // Importing an effect carries every performer OF
+                                        // that effect — the same rule the direct path
+                                        // applies via `index.performersByEffect`. Without
+                                        // it `perform SomePerformer` through a facade does
+                                        // not discharge, and the failure surfaces far away
+                                        // as "the body performs <E> but the annotation
+                                        // doesn't allow it".
+                                        for (perf in originModule.index.performersByEffect[eff.name] ?: emptyList()) {
+                                            reexportedPerformers[perf.performerName] = perf
+                                        }
                                     }
                                 }
                                 // A CONSTRUCTOR export is the same case: a variant whose
@@ -345,7 +389,8 @@ class ImportResolver(
                 }
 
                 if (reexportedBindings.isNotEmpty() || reexportedAbilities.isNotEmpty() ||
-                    reexportedEffects.isNotEmpty() || reexportedTypes.isNotEmpty()
+                    reexportedEffects.isNotEmpty() || reexportedTypes.isNotEmpty() ||
+                    reexportedPerformers.isNotEmpty()
                 ) {
                     context = context.merge(
                         ModuleImportContext.empty().copy(
@@ -360,6 +405,7 @@ class ImportResolver(
                             importedAbilityImpls = reexportedAbilityImpls + reexportedInherentImpls,
                             abilitiesByHash = reexportedAbilitiesByHash,
                             effectsByHash = reexportedEffectsByHash,
+                            importedImpls = reexportedPerformers,
                         )
                     )
                 }

@@ -802,6 +802,91 @@ class ModuleSystemTest {
      * EFFECT's decls but nothing for a TYPE, so the consumer got a name with no
      * declaration behind it.
      */
+    /**
+     * An EFFECT and its PERFORMER, re-exported through a facade.
+     *
+     * The http core/client split puts the shared vocabulary in one module and
+     * the effect plus its performers in another, with `http` itself as the
+     * facade both arrive through. Effects were already known to re-export (see
+     * the comment above — their decls were carried while a TYPE's was not), but
+     * a PERFORMER is introduced by an `impl`, not by a declaration of its own,
+     * so it travels by a different route and was never covered.
+     *
+     * Without this, the facade silently resolves the effect and loses the
+     * performer, and `perform` fails at the consumer with no obvious cause.
+     */
+    @Test
+    fun `pub use re-export carries an effect and its performer`() {
+        writeModule(
+            "pinner",
+            """
+            effect Ping where { ping: {} -> Int <Ping> }
+            impl Ping for Pinger where { ping = {} -> 7 }
+            """,
+        )
+        writeModule("pmid", "pub use pinner::{ Ping, Pinger }")
+
+        // CONTROL first: the same program importing DIRECTLY. If this fails too,
+        // the fault is the program, not the re-export.
+        val direct = """
+            use pinner::{ Ping, Pinger }
+            let go: {} -> Int <*> = {} -> perform Pinger in Ping.ping {}
+            go {}
+        """
+        writeModule("main", direct)
+        typeChecker.typeCheck(parser.parseParsedModule(direct.trimIndent(), "test.mz"), tempDir)
+
+        ModuleResolver.clearCache(); TypeChecker.clearCache()
+        val viaFacade = """
+            use pmid::{ Ping, Pinger }
+            let go: {} -> Int <*> = {} -> perform Pinger in Ping.ping {}
+            go {}
+        """
+        writeModule("main", viaFacade)
+        assertNotNull(
+            typeChecker.typeCheck(parser.parseParsedModule(viaFacade.trimIndent(), "test.mz"), tempDir),
+            "a facade must carry BOTH the effect and the performer — losing the performer " +
+                "makes `perform` fail at the consumer with no obvious cause",
+        )
+    }
+
+    /**
+     * A performer re-exported WITHOUT its effect.
+     *
+     * The pattern is real and used: CodecInPerformHandlerConfigTest imports
+     * `MockHttpClient` and not `HttpClient`. A performer is not an export —
+     * `ExportedItemType` has no PERFORMER case — so the export-keyed re-export
+     * walk is blind to it and needs its own.
+     */
+    @Test
+    fun `pub use re-export carries a performer imported without its effect`() {
+        writeModule(
+            "qinner",
+            """
+            effect Pong where { pong: {} -> Int <Pong> }
+            impl Pong for Ponger where { pong = {} -> 9 }
+            pub let ring: {} -> Int <Pong> = {} -> Pong.pong {}
+            """,
+        )
+        writeModule("qmid", "pub use qinner::{ Ponger, ring }")
+        // The EFFECT NAME never enters this module. An earlier version of this
+        // test also wrote `use qinner::{ Pong }`, and importing an effect carries
+        // every performer OF that effect — so `Ponger` arrived by the DIRECT path
+        // and the test passed with the re-export fix disabled. It proved nothing.
+        // `ring` raises the effect inside the origin instead, so the only route
+        // `Ponger` can take is the facade.
+        val main = """
+            use qmid::{ Ponger, ring }
+            let go: {} -> Int <*> = {} -> perform Ponger in ring {}
+            go {}
+        """
+        writeModule("main", main)
+        assertNotNull(
+            typeChecker.typeCheck(parser.parseParsedModule(main.trimIndent(), "test.mz"), tempDir),
+            "a performer must survive a `pub use` that names only the performer",
+        )
+    }
+
     @Test
     fun `pub use re-export carries the type declaration`() {
         writeModule("tinner", "pub type Color = | Red, Green |")
