@@ -253,7 +253,13 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     // `Field not found: encode`. Same expression anywhere else worked, which is
     // what made this look like an interaction with `from_json`.
     val handlerParamConstraints = mutableListOf<Constraint>()
-    val handlerParamAbilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+    // The whole result per handler-parameter record, not a hand-picked field or
+    // two. `{ rules = rules }` references `rules`, and that reference lives in
+    // `usedVariables` — which this site dropped, so the #84 linter reported a
+    // variable used by the very next line as unused. `referencedBindings` and
+    // `undefinedVariables` went the same way. See the merge contract in
+    // ExpressionConstraints and `mergeOf`, which covers all 26 fields.
+    val handlerParamResults = mutableListOf<ConstraintResult>()
     var performResultType: MezzeType = exprResult.type
 
     for (handler in expr.handlers) {
@@ -267,7 +273,10 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
                 val actualParamsResult = generate(handlerParams, context)
                 val actualParamsType = actualParamsResult.type
                 handlerParamConstraints.addAll(actualParamsResult.constraints)
-                handlerParamAbilityConstraints.addAll(actualParamsResult.abilityConstraints)
+                // operandOf strips tailCalls: a call inside a performer argument
+                // is never in tail position, and keeping it would let emit compile
+                // a self-tail-loop for it.
+                handlerParamResults.add(ConstraintResult.operandOf(actualParamsResult))
 
                 continuationConstraints.add(
                     Constraint.Equality(
@@ -418,7 +427,24 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     // be threaded through this return or it is lost" — and the list still lost
     // seven of them. `copy` carries every table by construction, leaving only the
     // fields a perform genuinely CHANGES to be spelled out.
-    return exprResult.copy(
+    // Base for the return: the body's result with every handler-parameter result
+    // merged in. A performer argument is an ordinary expression -- it can
+    // reference names, resolve methods, carry ability constraints -- and this
+    // site used to typecheck it and then keep only `constraints` and
+    // `abilityConstraints`, discarding the other 24 tables. `mergeOf` covers all
+    // of them, so nothing is picked by hand.
+    //
+    // Constraints are passed empty and overridden below with `allConstraints`,
+    // which already folds in handlerParamConstraints.
+    val base = if (handlerParamResults.isEmpty()) {
+        exprResult
+    } else {
+        ConstraintResult.mergeOf(
+            exprResult.type, emptyList(), exprResult, *handlerParamResults.toTypedArray(),
+        )
+    }
+
+    return base.copy(
         type = resultType,
         constraints = allConstraints,
         effects = remainingEffects,
@@ -444,8 +470,21 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         pendingClosureArgEffects = exprResult.pendingClosureArgEffects.map {
             it.copy(caughtByOp = it.caughtByOp + handledEffects)
         },
-        abilityConstraints = exprResult.abilityConstraints + handlerParamAbilityConstraints,
-        callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
+        // `methodCallResolutions` and `callReturnTypes` are a matched PAIR, and
+        // mixing their sources is what the obvious version of this gets wrong.
+        // The resolutions are what make emit treat a position as a method call
+        // at all (CallEmit); having done so it reads `callReturnTypes[loc]` for
+        // the solver's pinned return at that same position. Taking the
+        // resolutions from the merge while rebuilding callReturnTypes from
+        // `exprResult` alone leaves a resolution with no return, and emit dies
+        // with "method call with no solved return, no method arrow and no
+        // context". MEASURED: that is exactly how std::property failed, on
+        // `perform RecordingAt { seed = seed, key = key, size = n } in call {}`
+        // where the field values are themselves resolved calls.
+        //
+        // So read it off `base` (merged, so it includes the arguments') and put
+        // the perform's own entry LAST, to win at its own loc.
+        callReturnTypes = base.callReturnTypes + (expr.loc to resultType),
         performFullyDischarged = exprResult.performFullyDischarged + (expr.loc to fullyDischargedHere),
         // BUG 3: a nested perform's dead handlers must be unioned, not replaced.
         unusedHandlers = exprResult.unusedHandlers + deadHandlers,
