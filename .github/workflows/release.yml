@@ -1,23 +1,24 @@
-# Cut a mez toolchain release.
+# Cut a mez toolchain release — multi-platform.
 #
-# Trigger: push a tag like `v0.1.0` (or run manually with a version). Produces
-# the full ~/.mezze toolchain layout via `installNative` — the versioned native
-# binary under toolchains/<ver>/ (stdlib embedded, so `mez check`/`fmt`/`init`
-# run with no JVM), its `mezze-runtime.jar` (used by `mez dev`/`build` on the
-# user's own GraalVM), the stdlib sources, a PATH proxy at bin/mez, and a
-# settings.toml defaulting to this version — then tars it and attaches the
-# tarball to a GitHub Release.
+# Trigger: push a tag like `v0.1.0` (or run manually with a version). For each
+# platform it builds the full ~/.mezze toolchain via `installNative` — the
+# versioned native binary under toolchains/<ver>/ (stdlib embedded, so
+# `mez check`/`fmt`/`init` run with no JVM), its `mezze-runtime.jar` (used by
+# `mez dev`/`build` on the user's own GraalVM), the stdlib sources, a PATH proxy
+# at bin/mez, and a settings.toml defaulting to this version — then tars it as
+# `mez-<ver>-<platform>.tar.gz`. A final job attaches every tarball + the
+# install script to one GitHub Release.
 #
-# Consumers install with:
-#   mkdir -p ~/.mezze && tar -xzf mez-<ver>-linux-x64.tar.gz -C ~/.mezze
-#   export PATH="$HOME/.mezze/bin:$PATH"
-# `check`/`fmt`/`init` work immediately; `dev`/`build` light up once GraalVM is
-# installed (mez detects it and prompts if missing).
+# Install (see install.sh): `curl -fsSL <release-or-raw>/install.sh | sh`, or
+# unpack a tarball yourself into ~/.mezze and put ~/.mezze/bin on PATH. Anonymous
+# install needs the release assets to be PUBLIC (public repo, or a public
+# releases repo); a private repo needs a token.
 #
-# The whole build + tar + extract + run flow was verified locally end-to-end
-# against this commit (proxy runs, `mez --version` reports the -Pversion, `mez
-# check` passes from a freshly-extracted home). Once a release exists, the
-# conformance workflow can DOWNLOAD this tarball instead of building from source.
+# The linux-x64 build + tar + extract + run flow was verified locally end-to-end.
+# The macOS and linux-arm64 jobs follow the same steps on their runners (not
+# exercised here); native-image for macOS is already configured in
+# cli/build.gradle (system C compiler / SDK). Windows is not covered yet — the
+# toolchain's PATH proxy + install are unix-shaped.
 name: release
 
 on:
@@ -30,10 +31,16 @@ on:
         required: true
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write          # create the Release and upload assets
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    asset: linux-x64 }
+          - { runner: ubuntu-24.04-arm, asset: linux-arm64 }   # public-repo ARM runner
+          - { runner: macos-13,         asset: darwin-x64 }    # Intel
+          - { runner: macos-14,         asset: darwin-arm64 }  # Apple Silicon
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out the toolchain
         uses: actions/checkout@v4
@@ -55,7 +62,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # installNative targets ${user.home}/.mezze; point user.home at a staging
-      # dir so the real runner home stays clean and the tarball holds exactly the
+      # dir so the runner home stays clean and the tarball holds exactly the
       # install layout. -Pversion flows into the toolchain version + BuildInfo.
       - name: Build the toolchain (installNative into a staging home)
         run: |
@@ -68,7 +75,7 @@ jobs:
       - name: Assemble + smoke-test the install tarball
         run: |
           ver=${{ steps.v.outputs.version }}
-          tarball="mez-$ver-linux-x64.tar.gz"
+          tarball="mez-$ver-${{ matrix.asset }}.tar.gz"
           tar -czf "$tarball" -C "$STAGING/.mezze" .
           echo "built $tarball ($(du -h "$tarball" | cut -f1))"
           # Smoke test: extract into a fresh home and run the proxy standalone.
@@ -77,8 +84,32 @@ jobs:
           tar -xzf "$tarball" -C "$FRESH"
           MEZZE_HOME="$FRESH" "$FRESH/bin/mez" --version
 
+      - name: Upload the platform tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: mez-${{ matrix.asset }}
+          path: mez-*-${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # create the Release and upload assets
+    steps:
+      - name: Check out (for install.sh)
+        uses: actions/checkout@v4
+
+      - name: Download all platform tarballs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: mez-*-linux-x64.tar.gz
+          files: |
+            dist/*.tar.gz
+            install.sh
           generate_release_notes: true
