@@ -1,52 +1,94 @@
 {
-  description = "Mezze — the mez toolchain: a build shell + a prebuilt-tarball installer";
+  # Install the mez toolchain with nix:
+  #
+  #   nix run   github:mezze-lang/mezze -- --version
+  #   nix profile install github:mezze-lang/mezze
+  #
+  # This fetches the prebuilt release binary for your system (it does NOT build
+  # the toolchain from source — native-image needs a full GraalVM). It installs
+  # the versioned toolchain binary as $out/bin/mez, which self-locates its own
+  # lib/ in the store; writable state (caches, synced deps) still lives under
+  # ~/.mezze, so nothing is written into the read-only store.
+  #
+  # Per release: bump `version` and fill `hashes` with the real values —
+  # `nix build` prints the correct hash on a mismatch (start from lib.fakeHash).
+  description = "The Mezze toolchain (mez) — prebuilt binary install";
 
-  # GraalVM CE 25 (JDK 25 + native-image) lives in nixpkgs-unstable; the
-  # Truffle/polyglot deps pin to 25.0.x to match. Same choice as devenv.nix.
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs = { self, nixpkgs }:
     let
-      systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
-      forAll = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs { inherit system; }));
-    in
-    {
-      # `nix develop` — everything needed to BUILD the toolchain from source, then
-      # `./gradlew -Pversion=<v> :cli:installNative` (installs into ~/.mezze). This is
-      # the nix/devenv-based install path: build in the shell, install to ~/.mezze.
-      devShells = forAll (pkgs:
-        let graalvm = pkgs.graalvmPackages.graalvm-ce;
-        in {
-          default = pkgs.mkShell {
-            packages = [ graalvm pkgs.kotlin pkgs.gradle pkgs.just pkgs.zlib pkgs.nodejs_24 pkgs.tree-sitter ]
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.gcc ];
-            JAVA_HOME = "${graalvm}";
-            JAVA_OPTS = "--enable-native-access=ALL-UNNAMED";
-            LIBRARY_PATH = "${pkgs.zlib}/lib";
-            shellHook = ''
-              echo "🍽  Mezze build shell (nix)."
-              echo "   build + install a toolchain:  ./gradlew -Pversion=0.1.0 :cli:installNative"
-              echo "   then put ~/.mezze/bin on PATH. Manage versions with:  mez toolchain"
-            '';
-          };
-        });
+      version = "0.1.0";
+      repo = "mezze-lang/mezze";
 
-      # `nix run github:mezze-lang/mezze#install -- <tarball|url> [--default]`
-      # installs a PREBUILT toolchain into ~/.mezze (honoring MEZZE_HOME) and wires
-      # the PATH proxy — no build, no GraalVM needed. Wraps scripts/install-mez.sh
-      # with its runtime deps pinned so it works on a bare machine.
-      apps = forAll (pkgs: {
-        install = {
-          type = "app";
-          program = "${pkgs.writeShellApplication {
-            name = "mez-install";
-            runtimeInputs = [ pkgs.bash pkgs.curl pkgs.gnutar pkgs.gzip pkgs.coreutils ];
-            text = ''exec bash ${self}/scripts/install-mez.sh "$@"'';
-          }}/bin/mez-install";
+      # nix system -> release asset platform + its tarball sha256.
+      targets = {
+        "x86_64-linux"  = { platform = "linux-x64";    hash = nixpkgs.lib.fakeHash; };
+        "aarch64-linux" = { platform = "linux-arm64";  hash = nixpkgs.lib.fakeHash; };
+        "x86_64-darwin" = { platform = "darwin-x64";   hash = nixpkgs.lib.fakeHash; };
+        "aarch64-darwin"= { platform = "darwin-arm64"; hash = nixpkgs.lib.fakeHash; };
+      };
+
+      forAll = f: nixpkgs.lib.genAttrs (builtins.attrNames targets)
+        (system: f system nixpkgs.legacyPackages.${system});
+
+      mkMez = system: pkgs:
+        let t = targets.${system};
+        in pkgs.stdenv.mkDerivation {
+          pname = "mez";
+          inherit version;
+
+          src = pkgs.fetchurl {
+            url = "https://github.com/${repo}/releases/download/v${version}/mez-${version}-${t.platform}.tar.gz";
+            sha256 = t.hash;
+          };
+
+          sourceRoot = ".";
+
+          # Prebuilt GraalVM native-image binary: on Linux it needs its ELF
+          # interpreter + rpath fixed up to the nix store's libs.
+          nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            pkgs.stdenv.cc.cc.lib  # libstdc++ / libgcc_s
+            pkgs.zlib
+          ];
+
+          installPhase = ''
+            runHook preInstall
+            # The tarball is the ~/.mezze layout. Install the VERSIONED toolchain
+            # binary (not the PATH proxy): it self-locates its lib next to it, so
+            # it needs no settings.toml / MEZZE_HOME, and caches go to ~/.mezze.
+            tc=$(echo toolchains/*/)
+            mkdir -p "$out/bin" "$out/lib"
+            cp "$tc/bin/mez" "$out/bin/mez"
+            cp -r "$tc/lib/." "$out/lib/"
+            chmod +x "$out/bin/mez"
+            runHook postInstall
+          '';
+
+          # The binary is already a self-contained native image; don't let nix
+          # strip/mangle it beyond the autoPatchelf fixups above.
+          dontStrip = true;
+
+          meta = with pkgs.lib; {
+            description = "The Mezze toolchain (mez): check/fmt/init standalone; dev/build use your GraalVM";
+            homepage = "https://github.com/${repo}";
+            platforms = builtins.attrNames targets;
+            mainProgram = "mez";
+          };
         };
-        default = self.apps.${pkgs.system}.install;
+    in {
+      packages = forAll (system: pkgs: rec {
+        mez = mkMez system pkgs;
+        default = mez;
       });
 
-      formatter = forAll (pkgs: pkgs.nixpkgs-fmt);
+      apps = forAll (system: pkgs: rec {
+        mez = {
+          type = "app";
+          program = "${self.packages.${system}.mez}/bin/mez";
+        };
+        default = mez;
+      });
     };
 }
