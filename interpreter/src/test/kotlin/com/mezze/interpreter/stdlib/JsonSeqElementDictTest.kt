@@ -95,7 +95,7 @@ class JsonSeqElementDictTest {
     // ── The bug ──
 
     @Test
-    @Disabled("BUG 25: the Encode dictionary slot gets the receiver when the element type came from an ability-constrained lambda")
+    @Disabled("BUG 25: the ToJson demand never reaches the ability checker for a non-identifier receiver")
     fun `a mapped seq encodes without being bound first`() =
         assertEquals("[2,4,6]",
             jsonOf("seq::map { xs = seq::range { start = 1, end = 4 }, f = { x } -> x * 2 }.to_json {}"))
