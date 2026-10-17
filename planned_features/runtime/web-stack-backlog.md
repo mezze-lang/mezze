@@ -62,10 +62,19 @@ with an effect row it never discharges? Options are in
 `concurrency-and-context-bugs.md` (option 4 was the preferred one). Needs the
 owner's call before any code.
 
-### W-C4 — C3's correctness half is unproven
+### W-C4 — CLOSED, resolved by construction: C3's correctness half
 
-Carried in `concurrency-and-context-bugs.md`. Either demonstrate the failure it
-describes or close the ticket as unreproducible. Do not leave it asserted.
+The claim was that `MezzeLanguage`'s CallTarget caches are never cleared on
+`disposeContext`, so a target compiled against one Context's IR could be handed
+to the next Context on the same Engine. `disposeContext` now clears
+`importedCallTargetCache` and `userStubCache` — the two holding USER targets —
+and the only survivor, `stdlibCallTargetCache`, is populated exclusively from
+the stdlib snapshot with user hashes explicitly excluded, so it holds nothing
+Context-specific.
+
+No failing case was ever produced, and the one failure that resembled it was
+the `PromiseNatives` statics, fixed separately. Details and the reopen
+conditions are in `concurrency-and-context-bugs.md`.
 
 ---
 

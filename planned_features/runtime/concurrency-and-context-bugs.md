@@ -136,7 +136,30 @@ The CORRECTNESS half below is a separate claim and remains unproven. Note the
 suite already works around it with `mezze.test.isolation`, and production runs
 one Context per Engine, so there is nothing to cross there.
 
-### The correctness claim — still unproven, structure only
+### The correctness claim — CLOSED 2026-10-17, resolved by construction
+
+The claim's premise is no longer true. It said those caches are "cleared only by
+`invalidateDebugShapeCaches` … never in `disposeContext`". `disposeContext` now
+clears `importedCallTargetCache` and `userStubCache` — the two that held USER
+CallTargets — as part of the leak fix above, so a target compiled against a dead
+Context's IR cannot be handed to the next Context on that Engine.
+
+The one survivor, `stdlibCallTargetCache`, cannot carry anything
+Context-specific: it is populated ONLY from
+`StdlibRuntimeData.getPreloweredFunctions()` and from snapshot IR bytes, and the
+eager-compile path explicitly skips `userHashes`
+(`MezzeLanguage` ~line 959). Stdlib targets are identical in every Context,
+which is why they are kept.
+
+No failing case was ever produced for this — which is what the ticket demanded
+before any fix — and the single failure that looked like it (8 `PromiseFromTest`
+failures, 2026-10-17) was the `PromiseNatives` static CallTargets, fixed
+separately.
+
+**What would reopen it:** a USER CallTarget reachable from `MezzeLanguage` after
+`disposeContext`, or anything putting a user hash into `stdlibCallTargetCache`.
+
+### The original claim, for the record — structure only
 
 `stdlibCallTargetCache`, `importedCallTargetCache` and `userStubCache` live on
 `MezzeLanguage` (one per sharing layer) and are cleared only by
