@@ -61,7 +61,7 @@ pub type JsonC = {
 }
 
 ## JSON config — direct-to-bytes path. Same knobs, different output shape
-## (`Bytes` — see `impl Format for JsonUtf8C having 'out = Bytes`). Carries
+## (`Bytes` at the entry point — see `impl ToJsonUtf8`). Carries
 ## a distinct `emits_bytes: Bool` marker field: Mezze records are structural,
 ## so JsonC and JsonUtf8C would otherwise be the same type — that would
 ## break format-dispatch on `'config`.
@@ -123,7 +123,7 @@ pub let json_utf8_camel: JsonUtf8C = {
 impl Format for JsonC having 'out = Json where {
 }
 
-impl Format for JsonUtf8C having 'out = Bytes where {
+impl Format for JsonUtf8C having 'out = Json where {
 }
 
 ## ---- Native primitives (format-neutral) --------------------------------
@@ -437,31 +437,81 @@ impl DecodeOption for JsonC having 'in = Json where {
     _ -> Ok { val = Some { val = val } },
 }
 
-## ---- Tier 2: JsonUtf8C — bytes path via variant intermediate -----------
+## ---- Tier 2: JsonUtf8C — the tree, then one serialize ------------------
 ##
-## Unspecialized bytes path: encode-shape impls first build a `Json` value
-## and then serialize once at the top-level `Encode` synthesis. That keeps
-## the format-author boilerplate small; a native-writer perf path is Path C
-## and additive per `docs/codec/redesign-2026-09.md` §Performance.
+## Same `'out = Json` as `JsonC`: build the tree, and serialize ONCE at the
+## entry point. `JsonUtf8C` differs from `JsonC` in what it HANDS BACK (bytes,
+## not text), not in how it gets there.
 ##
-## The Path-B impls below let the compiler auto-derive `Encode JsonUtf8C 'a`
-## by walking value shape and calling per-shape encoders whose output is
-## already `Bytes` — a `JsonC`-produced intermediate is serialized on the
-## fly per node. This is slower than a real streaming writer but
-## structurally correct and unblocks Tier 4.
+## Only `EncodeScalar` used to exist here, so `record.to_json_utf8 {}` did not
+## compile — "format lacks EncodeRecord" — and nothing but a scalar could be
+## encoded to UTF-8 at all. These six impls close that.
+##
+## <h2>Why not stream straight to bytes</h2>
+##
+## Skipping the tree is the obvious idea and it is SLOWER. Both shapes were built
+## and measured on the same 949-byte payload, 20 records, at saturation:
+##
+##   tree + one native serialize     235.8k req/s    26.1k per core
+##   bytes concatenated per node     199.6k req/s    21.1k per core
+##   a writer closure per node       149.2k req/s    15.5k per core
+##
+## The tree wins because the expensive part is not the intermediate — it is
+## per-node work in GUEST code. A tree hands one finished structure to a single
+## tight native walk; every streaming shape pays guest dispatch per node instead,
+## and pays it to avoid an allocation the JIT was already handling. The writer
+## shape was worst of all: `'out` as a function allocates a closure per node and
+## every child is an indirect call, which also took p99 from 7.4ms to 44.8ms.
+##
+## So: one internal representation, serialized once.
 
-let json_to_bytes: { j: Json } -> Bytes = { j } ->
-  __native_json_serialize_bytes { json = j, pretty = False }
+impl EncodeScalar for JsonUtf8C having 'out = Json where {
+  encode_int   = { it, val, ctx } -> JInt    { val = val },
+  encode_float = { it, val, ctx } -> JFloat  { val = val },
+  encode_str   = { it, val, ctx } -> JString { val = val },
+  encode_bool  = { it, val, ctx } -> JBool   { val = val },
+  encode_frac  = { it, val, ctx } -> JFloat  { val = __native_frac_to_float { n = val } },
+  encode_bytes = { it, val, ctx } -> JString { val = bytes::to_base64 { b = val } },
+  encode_char  = { it, val, ctx } -> JString { val = char::to_str { c = val } },
+  encode_nat   = { it, val, ctx } -> JInt    { val = nat::to_int { n = val } },
+}
 
-impl EncodeScalar for JsonUtf8C having 'out = Bytes where {
-  encode_int   = { it, val, ctx } -> json_to_bytes { j = JInt   { val = val } },
-  encode_float = { it, val, ctx } -> json_to_bytes { j = JFloat { val = val } },
-  encode_str   = { it, val, ctx } -> json_to_bytes { j = JString   { val = val } },
-  encode_bool  = { it, val, ctx } -> json_to_bytes { j = JBool  { val = val } },
-  encode_frac  = { it, val, ctx } -> json_to_bytes { j = JFloat { val = __native_frac_to_float { n = val } } },
-  encode_bytes = { it, val, ctx } -> json_to_bytes { j = JString   { val = bytes::to_base64 { b = val } } },
-  encode_char  = { it, val, ctx } -> json_to_bytes { j = JString   { val = char::to_str { c = val } } },
-  encode_nat   = { it, val, ctx } -> json_to_bytes { j = JInt   { val = nat::to_int { n = val } } },
+impl EncodeRecord for JsonUtf8C having 'out = Json where {
+  encode_record = { it, fields, ctx } -> JObject { fields = fields },
+}
+
+impl EncodeVariant for JsonUtf8C having 'out = Json where {
+  encode_variant = { it, tag, payload, ctx } -> match payload is
+    Some { val = p } -> JObject {
+      fields = [
+        { key = "tag", value = JString { val = tag } },
+        { key = "value", value = p },
+      ],
+    }
+    None -> JObject {
+      fields = [{ key = "tag", value = JString { val = tag } }],
+    },
+}
+
+impl EncodeSequence for JsonUtf8C having 'out = Json where {
+  encode_sequence = { it, elems, ctx } -> JArray { items = elems },
+}
+
+impl EncodeMapping for JsonUtf8C having 'out = Json where {
+  encode_mapping = { it, entries, ctx } -> JArray {
+    items = seq::map { xs = entries, f = { x } -> JObject {
+      fields = [
+        { key = "key", value = x.key },
+        { key = "value", value = x.value },
+      ],
+    } },
+  },
+}
+
+impl EncodeOption for JsonUtf8C having 'out = Json where {
+  encode_option = { it, val, ctx } -> match val is
+    None -> JNull
+    Some { val = v } -> v,
 }
 
 ## ---- Tier 4: sugar abilities + blankets --------------------------------
@@ -488,8 +538,8 @@ ability ToJsonUtf8 for 'a where {
 }
 
 impl ToJsonUtf8 for 'a where {
-  to_json_utf8:      { it: 'a }                    with Encode JsonUtf8C 'a -> Bytes = { it }         -> it.encode { config = json_utf8_default },
-  to_json_utf8_with: { it: 'a, config: JsonUtf8C } with Encode JsonUtf8C 'a -> Bytes = { it, config } -> it.encode { config = config },
+  to_json_utf8:      { it: 'a }                    with Encode JsonUtf8C 'a -> Bytes = { it }         -> to_bytes { json = it.encode { config = json_utf8_default } },
+  to_json_utf8_with: { it: 'a, config: JsonUtf8C } with Encode JsonUtf8C 'a -> Bytes = { it, config } -> to_bytes { json = it.encode { config = config } },
 }
 
 ## Decode a value from a `Json` tree via `Type.from_json{}` inherent syntax.
