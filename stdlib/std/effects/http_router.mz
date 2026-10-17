@@ -98,21 +98,61 @@ pub let query_of: { url: Str } -> Str = { url } ->
 ## Returns `None` when the lengths differ or a literal segment disagrees. A
 ## `:name` segment always matches and binds.
 pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } ->
-  match_split { ps = segments { path = pattern }, url = path }
+  match_prepared { pat = prepare { pattern = pattern }, url = path }
 
-## `match_path` with the pattern ALREADY split into segments.
+## A pattern taken apart once, when the route table is built.
+##
+## `segs` serves the binding path. `literal` is the pattern's slash-trimmed form,
+## present ONLY when the pattern binds no `:name` — and then matching is one
+## STRING COMPARISON instead of splitting the request path into a seq, filtering
+## it, zipping it against the pattern and folding a map that comes back empty.
+## For a static route that was 5.3% of throughput.
+let prepare: { pattern: Str } -> { segs: [Str], literal: Option Str } = { pattern } -> do
+  let segs = segments { path = pattern }
+  let binds = seq::any { xs = segs, p = { x } -> str::starts_with { s = x, prefix = ":" } }
+  {
+    segs = segs,
+    literal = if binds then None else Some { val = trim_slashes { s = pattern } },
+  }
+
+## Drop one leading and one trailing `/`, so `/users` and `users/` agree the way
+## `segments` makes them agree. `"/"` trims to `""`, which is the root's zero
+## segments.
+let trim_slashes: { s: Str } -> Str = { s } -> do
+  let n = str::size { s = s }
+  let start = if str::starts_with { s = s, prefix = "/" } then 1 else 0
+  let end = if n > start then (if str::ends_with { s = s, suffix = "/" } then n - 1 else n) else n
+  str::substring { s = s, start = start, end = end }
+
+let match_prepared
+  : { pat: { segs: [Str], literal: Option Str }, url: Str }
+  -> Option (Map Str Str)
+  = { pat, url } -> do
+    let path = path_of { url = url }
+    match pat.literal is
+      None -> match_on_path { ps = pat.segs, path = path }
+      Some { val = lit } ->
+        ## `//` inside the path makes a comparison disagree with `segments`,
+        ## which drops empty pieces — so that case takes the segment path. It is
+        ## the only shape where the two could differ.
+        if str::contains { s = path, substring = "//" } then
+          match_on_path { ps = pat.segs, path = path }
+        else
+          if trim_slashes { s = path } == lit then Some { val = map::empty {} } else None
+
+## Bind a prepared pattern's segments against an already-extracted path.
 ##
 ## A pattern cannot change between requests, so splitting it again on every one
 ## is work that can only produce the same answer. `route` splits its pattern
 ## when the table is BUILT and calls this; doing it per request cost 7% of
 ## throughput on a two-segment route.
 ##
-## Measured and NOT worth it: precomputing whether the pattern binds any
-## `:name` at all, to skip the zip and the parameter map for a static route.
-## The static route came out the same (457.5k -> 457.3k req/s), so the JIT is
-## already removing that work and the extra field earned only complexity.
-let match_split: { ps: [Str], url: Str } -> Option (Map Str Str) = { ps, url } -> do
-  let xs = segments { path = path_of { url = url } }
+## Measured and NOT worth it on its own: skipping just the zip and the parameter
+## map for a static route, while still SPLITTING the path (457.5k -> 457.3k). The
+## split is the expensive half, which is why `prepare`'s `literal` avoids it
+## entirely rather than only the fold.
+let match_on_path: { ps: [Str], path: Str } -> Option (Map Str Str) = { ps, path } -> do
+  let xs = segments { path = path }
   if seq::size { xs = ps } != seq::size { xs = xs } then None
   else
     ## `iter`, not `seq`: this walks the pattern and the path TOGETHER once and
@@ -142,12 +182,12 @@ let match_split: { ps: [Str], url: Str } -> Option (Map Str Str) = { ps, url } -
 ## parameters.
 pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response <...> } -> Routes =
   { method, path, handler } -> do
-    ## Split once, here, not on every request.
-    let ps = segments { path = path }
+    ## Taken apart once, here, not on every request.
+    let pat = prepare { pattern = path }
     {
       run = { req } ->
         if req.method != method then None
-        else match match_split { ps = ps, url = req.url } is
+        else match match_prepared { pat = pat, url = req.url } is
           None -> None
           Some { val = params } ->
             Some { val = handler { m = { req = req, params = params } } },

@@ -220,22 +220,42 @@ starve an IO-bound route — a worse failure than a 0.3ms tail. The whole table 
 that reasoning now sit on `DEFAULT_WORKERS`, where someone choosing a
 `ServerConfig` will find them.
 
-### W-P4 — headers, 5.5% (only with real headers)
+### W-P4 — CLOSED: ~2%, not 5.5%, and the fix is disproportionate
 
-14 realistic headers: 310.9k with the guest map built vs 329.0k skipped. At
-wrk's default 4 headers it is FREE, which is why a default benchmark hides it.
-The cost is the n persistent `MezzeMap.put`s plus `toLowerCase`, so recovering
-it needs a LAZY `MezzeMap` — invasive in a module everything depends on.
-MEASURED AND NOT IT: building the guest map directly instead of via an
-intermediate `HashMap` (320.1k vs 317.7k, same build).
+Re-measured with the interleaved harness (the 5.5% was a single run):
 
-### W-P5 — the router's remaining ~5%
+| headers on the request | cost of building the guest map |
+|---|---|
+| ~7 | +1.6% |
+| ~14 | +1.9% |
 
-482.3k no-router → 457.5k routed, after the pattern hoist took 426.3k → 457.5k.
-What is left is `path_of`, `segments`, and the parameter map.
-MEASURED AND NOT IT: precomputing whether a pattern binds any `:name` so a
-static route skips the zip/fold/map (457.5k → 457.3k; the JIT already removes
-it).
+So it is about 2% for a realistic request, and it scales with header count rather
+than being free below some threshold. Recovering it needs a LAZY `MezzeMap`
+(`MapStorage` is the seam) in a module everything depends on — disproportionate
+for 2%. Also measured and NOT it: building the guest map directly instead of via
+an intermediate `HashMap` (320.1k vs 317.7k, same build).
+
+### W-P5 — LANDED: a static route matches by comparison, 5.3% -> 2.3%
+
+The router's overhead over no router at all, same harness either side:
+
+    before   no-router 484.7k   routed 458.9k   -5.3%
+    after    no-router 492.2k   routed 480.7k   -2.3%
+
+Routed throughput 458.9k -> 480.7k, +4.8%. The param route is unaffected
+(417.7k), because a pattern that binds still takes the segment walk.
+
+A pattern with no `:name` now carries its slash-trimmed form and matches by ONE
+STRING COMPARISON — no `str::split`, no `filter`, no zip, no parameter map.
+
+Why the earlier attempt failed, which is the useful part: it skipped only the zip
+and the map for a static route while STILL SPLITTING the path, and measured as
+noise (457.5k -> 457.3k). The split is the expensive half, so skipping the fold
+alone bought nothing. Avoiding the split is what pays.
+
+A `//` in the path falls back to the segment walk, because `segments` drops empty
+pieces and so `//health` must match `/health` where a comparison would not.
+`HttpRouterTest` pins both halves of that branch and the root route.
 
 ### W-P6 — native is ~2× behind the JVM
 
