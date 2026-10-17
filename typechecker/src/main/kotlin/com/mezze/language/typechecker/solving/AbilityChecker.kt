@@ -12,6 +12,7 @@ import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
@@ -79,7 +80,27 @@ class AbilityChecker internal constructor(
     fun getDeferredInference(): Map<TypeVar, MezzeType> = deferredInference
     fun getAssociatedTypeResolutionConstraints(): Map<TypeVar, MutableList<Constraint.AssociatedTypeResolution>> = associatedTypeResolutionConstraints
 
-    internal fun validateAbilityConstraints(substitution: Substitution): Pair<String, Loc?>? {
+    /**
+     * One ability obligation that could not be met, with the advice that goes
+     * with it.
+     *
+     * Was a `Pair<String, Loc?>`, which had room for the message and nowhere to
+     * put the hint — so the deferred re-check, the path most ability failures
+     * actually come out of, reported the message and silently dropped the fix.
+     */
+    internal data class AbilityFailure(
+        val message: String,
+        val loc: Loc?,
+        val hints: List<String> = emptyList(),
+        val fixHints: List<FixHint> = emptyList(),
+    )
+
+    private fun abilityFailure(abilityName: String, typeArgs: List<MezzeType>, loc: Loc?): AbilityFailure {
+        val (hints, fixes) = abilityImportAdvice(abilityName, typeArgs, loc)
+        return AbilityFailure(generateAbilityErrorMessage(abilityName, typeArgs, loc), loc, hints, fixes)
+    }
+
+    internal fun validateAbilityConstraints(substitution: Substitution): AbilityFailure? {
         for ((typeVar, abilityConstraints) in typeVarAbilityConstraints) {
             val varType = MezzeType.VarType(typeVar)
             val boundType = substitution.apply(varType)
@@ -122,7 +143,7 @@ class AbilityChecker internal constructor(
                     // `allConcrete` gate below into the defer/absorb branch and the
                     // obligation evaporates unchecked (the class-param fn-operand hole).
                     if (functionOperandHasNoImpl(abilityName, closedTypeArgs, tracked.abilityHash)) {
-                        return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
+                        return abilityFailure(abilityName, closedTypeArgs, errorLoc)
                     }
 
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
@@ -133,7 +154,7 @@ class AbilityChecker internal constructor(
                             if (deferExistingAbilityImpls && abilityImplExistsForType(abilityName, closedTypeArgs)) {
                                 continue
                             }
-                            return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
+                            return abilityFailure(abilityName, closedTypeArgs, errorLoc)
                         }
                     } else {
                         val inferredSubst = tryBidirectionalInference(abilityName, closedTypeArgs, tracked.abilityHash)
@@ -206,9 +227,12 @@ class AbilityChecker internal constructor(
                     return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
                 }
                 val errorMessage = generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc)
+                val (hints, fixes) = abilityImportAdvice(abilityName, trackingArgs, constraint.loc)
                 return ConstraintSolver.ConstraintResult.Failure(
                     errorMessage,
                     code = ErrorCode.V0408_NO_IMPLEMENTATION,
+                    hints = hints,
+                    fixHints = fixes,
                 )
             }
 
@@ -219,9 +243,12 @@ class AbilityChecker internal constructor(
             // than deferring into the finalize absorb path (the class-param fn-operand
             // hole). See functionOperandHasNoImpl.
             if (functionOperandHasNoImpl(abilityName, trackingArgs, constraint.abilityHash)) {
+                val (hints, fixes) = abilityImportAdvice(abilityName, trackingArgs, constraint.loc)
                 return ConstraintSolver.ConstraintResult.Failure(
                     generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc),
                     code = ErrorCode.V0408_NO_IMPLEMENTATION,
+                    hints = hints,
+                    fixHints = fixes,
                 )
             }
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
@@ -1116,6 +1143,33 @@ class AbilityChecker internal constructor(
         return null
     }
 
+    /**
+     * The advice that goes with [generateAbilityErrorMessage] when the ability is
+     * only missing an import: a `= hint:` line each, plus an `Import` fix hint so
+     * an editor can offer one click.
+     *
+     * Separate from the message on purpose. A message says what went wrong, in one
+     * line, in the reader's own terms; a hint says what to do about it. Merging the
+     * two gave a sentence nobody could read to the end of.
+     */
+    internal fun abilityImportAdvice(
+        abilityName: String,
+        typeArgs: List<MezzeType>,
+        loc: Loc?,
+    ): Pair<List<String>, List<FixHint>> {
+        if (abilityImpls(abilityName).isNotEmpty()) return emptyList<String>() to emptyList()
+        val home = blanketImplHome(abilityName) ?: return emptyList<String>() to emptyList()
+        val typeNames = typeArgs.map { prettyPrintType(it) }.joinToString(", ")
+        val hints = listOf(
+            "`${home.modulePath}` implements `$abilityName` for every type, " +
+                "so `$typeNames` needs no impl of its own",
+            "add `use ${home.modulePath}::{ $abilityName }` at the top of this file",
+        )
+        val fixes = if (loc == null) emptyList()
+            else listOf(FixHint.Import(loc, abilityName, listOf(home.modulePath)))
+        return hints to fixes
+    }
+
     internal fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: Loc? = null): String {
         val hasFunctionType = typeArgs.any { it is MezzeType.FunctionType }
         val typeNames = typeArgs.map { prettyPrintType(it) }.joinToString(", ")
@@ -1184,11 +1238,7 @@ class AbilityChecker internal constructor(
                 // check whether one already exists and is merely unimported.
                 val home = if (abilityImpls(abilityName).isEmpty()) blanketImplHome(abilityName) else null
                 if (home != null) {
-                    "$typeNames does not implement '$abilityName'. An `impl $abilityName for " +
-                        "${home.implTarget}` exists in `${home.modulePath}` but is not visible here — " +
-                        "an impl is matched where the constraint is DISCHARGED, which is this call " +
-                        "site, not where the constrained function was written. Add " +
-                        "`use ${home.modulePath}::{ $abilityName }`."
+                    "`$abilityName` isn't imported here, so `$typeNames` can't use it"
                 } else {
                     "$typeNames does not implement '$abilityName'. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
                 }

@@ -90,13 +90,16 @@ internal fun classifyConstraintError(
         }
     }
 
+    // The failing SITE's own advice leads: it knew a fact this classifier
+    // cannot re-derive — which module holds the impl, say — so its hint is
+    // more specific than anything keyed off the error's shape.
     return TypeChecker.TypeCheckError(
         phase = "Constraint Solving",
         message = error.message,
         loc = error.constraint.loc,
         code = code,
-        hints = hints,
-        fixHints = solverFixHints,
+        hints = error.hints + hints,
+        fixHints = error.fixHints + solverFixHints,
     )
 }
 

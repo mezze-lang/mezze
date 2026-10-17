@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.printing.ErrorMessageBuilder
 import com.mezze.language.typechecker.util.StringDistance
@@ -262,6 +263,7 @@ class ConstraintSolver(
         val code: ErrorCode,
         val context: String? = null,
         val hints: List<String> = emptyList(),
+        val fixHints: List<FixHint> = emptyList(),
     )
 
     fun solve(rawConstraints: List<Constraint>): SolveResult {
@@ -400,7 +402,9 @@ class ConstraintSolver(
                             message = result.message,
                             constraint = appliedConstraint,
                             code = result.code,
-                            context = appliedConstraint.context
+                            context = appliedConstraint.context,
+                            hints = result.hints,
+                            fixHints = result.fixHints,
                         ))
                         // Poison so later HasField/worklist constraints on the
                         // same unresolved var don't re-report the same failure.
@@ -467,7 +471,9 @@ class ConstraintSolver(
                                     // typed code, and without one this failure was
                                     // dropped there and the program ran.
                                     code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
-                                    context = appliedConstraint.context
+                                    context = appliedConstraint.context,
+                                    hints = result.hints,
+                                    fixHints = result.fixHints,
                                 ))
                                 poison(constraint)
                             }
@@ -670,7 +676,9 @@ class ConstraintSolver(
                                 message = result.message,
                                 constraint = appliedConstraint,
                                 code = result.code,
-                                context = appliedConstraint.context
+                                context = appliedConstraint.context,
+                                hints = result.hints,
+                                fixHints = result.fixHints,
                             ))
                             poison(constraint)
                         }
@@ -704,7 +712,9 @@ class ConstraintSolver(
                     // or context (see ConstraintGenerator's top-level-expr filter).
                     code = if (appliedConstraint is Constraint.AbilityRequired)
                         ErrorCode.V0402_ABILITY_NOT_SATISFIED else ErrorCode.UNCATEGORIZED,
-                    context = appliedConstraint.context
+                    context = appliedConstraint.context,
+                    hints = result.hints,
+                    fixHints = result.fixHints,
                 ))
                 poison(constraint)
             } else if (result is ConstraintResult.Deferred &&
@@ -820,16 +830,19 @@ class ConstraintSolver(
 
         val validationResult = abilityChecker.validateAbilityConstraints(substitution)
         if (validationResult != null) {
-            val (validationError, errorLoc) = validationResult
             errors.add(ConstraintError(
-                message = validationError,
+                message = validationResult.message,
                 // The deferred re-check has no single AbilityRequired constraint to
                 // attach (it validates the accumulated set), so it carries a
                 // placeholder Equality. The typed code — NOT the constraint shape or
                 // context string — is what callers discriminate on.
-                constraint = Constraint.Equality(MezzeType.IntType, MezzeType.IntType, loc = errorLoc),
+                constraint = Constraint.Equality(
+                    MezzeType.IntType, MezzeType.IntType, loc = validationResult.loc,
+                ),
                 code = ErrorCode.V0402_ABILITY_NOT_SATISFIED,
-                context = "ability constraint validation"
+                context = "ability constraint validation",
+                hints = validationResult.hints,
+                fixHints = validationResult.fixHints,
             ))
         }
 
@@ -944,6 +957,15 @@ class ConstraintSolver(
             val message: String,
             val code: ErrorCode,
             val terminal: Boolean = false,
+            /**
+             * "What to do next", from the site that knows. The message says what
+             * went wrong; a hint says how to fix it, and only the solver site has
+             * the facts — which module holds the impl, which performer handles the
+             * effect. Rendered as `= hint:` lines under the snippet.
+             */
+            val hints: List<String> = emptyList(),
+            /** The same advice, machine-actionable, for an editor quick fix. */
+            val fixHints: List<FixHint> = emptyList(),
         ) : ConstraintResult()
 
         data class Deferred(val reason: String) : ConstraintResult()
