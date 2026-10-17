@@ -1,0 +1,181 @@
+## The DATABASE effect: three operations, and a query that is a plain value.
+##
+## Shaped after `std::effects::http_server`, which came out well for the same
+## reason: the effect stays small and everything expressive is a VALUE.
+## `HttpServer` has exactly ONE operation and routing is not part of it — a route
+## table folds into one handler — so the effect never grew an operation per
+## routing feature. A query here is the same: `Query` is built by pure code and
+## only `run`/`apply` touch the effect, so adding joins, pagination or a typed
+## builder later adds no operations.
+##
+## THREE operations, and what each is for:
+##
+##   run    — a read. Answers `Rows`.
+##   apply  — a write. Answers how many rows changed.
+##   tx     — scopes a body so its writes commit together or not at all.
+##
+## PARAMETERS ARE VALUES, NEVER TEXT. `Query` carries `[DbValue]` and the driver
+## binds them, so a query cannot be assembled out of user input: there is no
+## string concatenation to get wrong. That is why `DbValue` exists rather than
+## letting callers interpolate.
+##
+## FAILURE IS A VALUE. Every operation answers `Result _ DbError`. The
+## alternative is what `json::to_bytes` used to do — swallow the error and
+## answer empty — which made a handler reply 200 with a zero-byte body and say
+## nothing.
+##
+## THE TEST SEAM IS A PLAIN VALUE. A `Query` can be built and inspected with no
+## database at all, and `MockDb` answers from a table, so a route's data path is
+## testable without a driver, a file or a server. That mirrors a handler being
+## callable with no socket.
+
+use std::collections::seq
+use std::str
+
+## A single bound parameter or column value.
+##
+## A closed variant rather than `Str`: the driver binds each one at its own type,
+## so `DbInt { val = 7 }` reaches the database as an integer and a string
+## containing `'); drop table users; --` reaches it as a string.
+pub type DbValue = | DbNull, DbInt { val: Int }, DbStr { val: Str }, DbFloat { val: Float }, DbBool { val: Bool }, DbBytes { val: Bytes } |
+
+## A query: the text, and the values to bind to its placeholders.
+##
+## Pure data. Build it, pass it around, inspect it in a test; nothing happens
+## until an operation runs it.
+pub type Query = {
+  sql: Str,
+  params: [DbValue],
+}
+
+## A result set: the column names ONCE, and each row's values positionally.
+##
+## Not a map per row. A result set is rectangular, so the names belong to the set
+## rather than to every row, and a decoder resolves a field to a column index one
+## time instead of hashing a string per row per field. This is also the WIRE
+## SHAPE the row codec will key on (W-D2).
+pub type Rows = {
+  cols: [Str],
+  rows: [[DbValue]],
+}
+
+## What went wrong, as data.
+##
+## Separated by what a caller can DO about it: `Unavailable` and `Timeout` are
+## worth retrying, `Rejected` means the query is wrong and never will not be,
+## `Conflict` means retry the transaction, `Decode` means the rows did not fit
+## the shape asked for.
+pub type DbError = | Unavailable { msg: Str }, Rejected { sql: Str, msg: Str }, Conflict { msg: Str }, Timeout { ms: Int }, Decode { msg: Str } |
+
+## Run queries.
+##
+## `tx`'s body row is `<...>`, and that is load-bearing for the same reason the
+## server handler's is: a body may perform whatever the surrounding program
+## installed — `Log`, `Time`, another `Db` — and those effects escape through
+## `tx` to whoever installed them rather than being swallowed here.
+effect Db where {
+  run:   { q: Query } -> Result Rows DbError <Db>,
+  apply: { q: Query } -> Result { changed: Int } DbError <Db>,
+  tx:    { body: {} -> Result 'a DbError <...> } -> Result 'a DbError <Db>,
+}
+
+## ── Building a query ────────────────────────────────────────────────────────
+
+## A query with no parameters.
+pub let sql: { text: Str } -> Query = { text } -> { sql = text, params = [] }
+
+## Append one bound parameter. Dot-chains:
+##
+##   sql { text = "select * from users where id = ? and active = ?" }
+##     .bind { v = DbInt { val = 7 } }
+##     .bind { v = DbBool { val = True } }
+pub let bind: { q: Query, v: DbValue } -> Query = { q, v } ->
+  { sql = q.sql, params = seq::push { xs = q.params, x = v } }
+
+## Append several parameters, in order.
+pub let bind_all: { q: Query, vs: [DbValue] } -> Query = { q, vs } ->
+  { sql = q.sql, params = seq::concat { xs = q.params, ys = vs } }
+
+## ── Reading a result set ────────────────────────────────────────────────────
+
+## How many rows came back.
+pub let row_count: { rows: Rows } -> Int = { rows } -> seq::size { xs = rows.rows }
+
+## True when nothing came back — the common "not found" check.
+pub let is_empty: { rows: Rows } -> Bool = { rows } -> row_count { rows = rows } == 0
+
+## The index of a column, by name. `None` when the result set has no such column.
+##
+## Resolve this ONCE and index rows with it; that is the whole reason `Rows`
+## keeps its column names separately.
+pub let col_index: { rows: Rows, name: Str } -> Option Int = { rows, name } ->
+  seq::find_index { xs = rows.cols, p = { x } -> x == name }
+
+## One value, by row and column index. `None` when either is out of range.
+pub let value_at: { rows: Rows, row: Int, col: Int } -> Option DbValue = { rows, row, col } ->
+  match seq::get { xs = rows.rows, i = row } is
+    None -> None
+    Some { val = r } -> seq::get { xs = r, i = col }
+
+## An empty result set with no columns — what a write answers with, and what a
+## mock with nothing to say returns.
+pub let no_rows: {} -> Rows = {} -> { cols = [], rows = [] }
+
+## ── Dot-chain parity ───────────────────────────────────────────────────────
+
+## Inherent methods so every receiver-taking free function above also reads as
+## `q.bind {…}`, the way `Request` does for `req.with_header {…}`. Each one
+## delegates to the free function; the block is ergonomics, not a second
+## implementation.
+impl Query where {
+  bind = { it: 'it, v: DbValue } -> bind { q = it, v = v },
+  bind_all = { it: 'it, vs: [DbValue] } -> bind_all { q = it, vs = vs },
+}
+
+impl Rows where {
+  row_count = { it } -> row_count { rows = it },
+  is_empty = { it } -> is_empty { rows = it },
+  col_index = { it: 'it, name: Str } -> col_index { rows = it, name = name },
+  value_at = { it: 'it, row: Int, col: Int } -> value_at { rows = it, row = row, col = col },
+}
+
+## ── A database that is not a database ──────────────────────────────────────
+
+## Answers every query with no rows, and accepts every write.
+##
+## For a test that exercises a route's SHAPE rather than its data: the handler
+## runs, the query is built and passed, and nothing needs a driver. `tx` runs its
+## body, so a transactional path is still exercised.
+impl Db for MockDb where {
+  run   = { q } -> Ok { val = no_rows {} },
+  apply = { q } -> Ok { val = { changed = 0 } },
+  tx    = { body } -> body {},
+}
+
+## `MockDb` with answers, matched on the query text.
+##
+## The first entry whose `sql` is a substring of the query's text answers it; a
+## query matching nothing gets no rows. Substring rather than equality so a test
+## can key on the distinguishing fragment (`"from users"`) instead of restating
+## the whole statement and breaking when a column is added.
+##
+## Matching on TEXT is right here and nowhere else: this is test data keyed by
+## what the test wrote, not a dispatch decision about a type.
+impl Db for MockDbWith { answers: [{ sql: Str, rows: Rows }] } where {
+  run = { q } -> match seq::find { xs = answers, p = { x } -> str::contains { s = q.sql, substring = x.sql } } is
+    Some { val = hit } -> Ok { val = hit.rows }
+    None -> Ok { val = no_rows {} },
+  apply = { q } -> Ok { val = { changed = 0 } },
+  tx    = { body } -> body {},
+}
+
+## A database that refuses, for the path nobody tests.
+##
+## An error path is as much a behaviour as a success path, and it is the one that
+## is usually only discovered in production. This makes it a one-line performer
+## swap.
+impl Db for FailingDb { error: DbError } where {
+  run   = { q } -> Err { error = error },
+  apply = { q } -> Err { error = error },
+  tx    = { body } -> Err { error = error },
+}
