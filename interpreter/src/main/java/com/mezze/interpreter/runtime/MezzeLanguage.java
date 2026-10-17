@@ -988,6 +988,35 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         importedCallTargetCache.put(hash, ct);
     }
 
+    // ── Per-language AST cache ──────────────────────────────────────────
+    //
+    // A CallTarget belongs to the SHARING LAYER it was built in, and a
+    // TruffleLanguage instance is one per sharing layer. So anything that caches
+    // a CallTarget — or any AST node — must hang off the language, never off a
+    // static field.
+    //
+    // `promise_from`'s three capability bodies (`complete`, `fail`, `on_cancel`)
+    // were `private static final RootCallTarget`, built at CLASS init from
+    // `MezzeLanguage.get(null)`. The first Context to load the class won; the
+    // next Context in a different layer to call `promise_from` got Truffle's own
+    // "Invalid sharing of AST nodes detected ... CallTargets that are reused
+    // across different contexts in an invalid way", surfacing as a guest-visible
+    // `AsyncFailed` out of `await`. Order-dependent, so it looked like a flake,
+    // and it reaches any host that runs two Contexts on one Engine.
+    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> builtinAstCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Get or build a CallTarget for a builtin body, scoped to THIS language —
+     * i.e. to this sharing layer. [build] receives the language to construct the
+     * root node with, and runs at most once per key per layer.
+     */
+    public CallTarget builtinCallTarget(
+            String key,
+            java.util.function.Function<MezzeLanguage, CallTarget> build) {
+        return builtinAstCache.computeIfAbsent(key, k -> build.apply(this));
+    }
+
     // ── Dict fallback cache ─────────────────────────────────────────────
     // Intrinsic dict functions for primitive-type operations. Used by
     // TrampolineRootNode when a polymorphic function with dict params is
@@ -1075,6 +1104,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     @Override
     protected void disposeContext(MezzeContext context) {
+        // Sockets and thread pools a native started for this context, before
+        // anything else — they can still be running guest code.
+        context.closeRegisteredResources();
         com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives
                 .resetPerThreadStmState();
         // #392 — SlotTable is per-Engine but its entries are populated by

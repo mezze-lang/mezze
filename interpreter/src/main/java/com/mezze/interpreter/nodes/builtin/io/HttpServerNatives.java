@@ -93,7 +93,7 @@ public final class HttpServerNatives {
      * A running server. Opaque to the guest: the stdlib only ever passes it back
      * to {@code __native_http_server_port} / {@code __native_http_server_stop}.
      */
-    public static final class RunningServer {
+    public static final class RunningServer implements AutoCloseable {
         private final WebServer server;
         private final BlockingQueue<Job> queue;
         private final List<Thread> workers;
@@ -113,6 +113,19 @@ public final class HttpServerNatives {
 
         public boolean isStopped() {
             return stopped;
+        }
+
+        /**
+         * Release the socket and the workers.
+         *
+         * Registered with the context so a guest that never calls `stop` — a
+         * crash, an interrupted `mez dev`, a test that forgot — does not leave a
+         * bound port and a pool of parked workers behind. `stop` and this are the
+         * same operation; both are idempotent.
+         */
+        @Override
+        public void close() {
+            stopServer(this);
         }
     }
 
@@ -189,7 +202,12 @@ public final class HttpServerNatives {
             worker.start();
         }
         server.start();
-        return new RunningServer(server, queue, workers, server.port());
+        RunningServer running = new RunningServer(server, queue, workers, server.port());
+        // The guest gets a `stop`, and may never call it. The context closing is
+        // the backstop: a listening socket must not outlive the program that
+        // opened it.
+        context.registerForDispose(running);
+        return running;
     }
 
     /** The bound port. Interesting when the caller asked for 0. */
@@ -201,9 +219,14 @@ public final class HttpServerNatives {
     /** Stop the listener, then retire the workers. Idempotent. */
     @TruffleBoundary
     public static MezzeRecord httpServerStop(MezzeRecord args) {
-        RunningServer running = server(args);
+        stopServer(server(args));
+        return MezzeRecord.empty();
+    }
+
+    /** The one shutdown path, shared by `stop` and by context dispose. */
+    private static void stopServer(RunningServer running) {
         if (running.stopped) {
-            return MezzeRecord.empty();
+            return;
         }
         running.stopped = true;
         // Listener first: no new job can be queued once it is down, so the
@@ -223,7 +246,6 @@ public final class HttpServerNatives {
         for (Thread worker : running.workers) {
             worker.interrupt();
         }
-        return MezzeRecord.empty();
     }
 
     private static RunningServer server(MezzeRecord args) {

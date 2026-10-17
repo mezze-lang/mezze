@@ -37,6 +37,42 @@ public final class MezzeContext {
     // Content hash → compiled CallTarget (for caching)
     private final ConcurrentHashMap<Hash, CallTarget> callTargetCache = new ConcurrentHashMap<>();
 
+    // ── Things to shut down when this context goes away ─────────────────
+    //
+    // A native that starts something which OUTLIVES the call — a listening
+    // socket, a pool of threads parked on a queue — has to give it back, or it
+    // keeps running after the context that asked for it is gone. `HttpServer`
+    // hands the guest a `stop`, and a guest that never calls it (a crash, a
+    // `mez dev` interrupted, a test that forgot) left a bound port and a pool of
+    // parked workers behind.
+    //
+    // Registered in start order and closed in reverse, because a later resource
+    // may be built on an earlier one.
+    private final java.util.Deque<AutoCloseable> onDispose = new java.util.concurrent.ConcurrentLinkedDeque<>();
+
+    /** Register something to close when this context is disposed. */
+    public void registerForDispose(AutoCloseable resource) {
+        onDispose.addFirst(resource);
+    }
+
+    /**
+     * Close everything registered, newest first. A failure to close one does not
+     * stop the rest — a half-torn-down context is worse than a noisy one — but it
+     * is reported, because silence here is how a leak survives.
+     */
+    @TruffleBoundary
+    public void closeRegisteredResources() {
+        AutoCloseable resource;
+        while ((resource = onDispose.pollFirst()) != null) {
+            try {
+                resource.close();
+            } catch (Exception e) {
+                System.err.println("[mezze] failed to release " + resource.getClass().getSimpleName()
+                    + " on context dispose: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getName()));
+            }
+        }
+    }
+
     // Per-context closure cache — replaces the static evaluatedClosureCache in HashModuleLoaderNode.
     // Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers)
     private final ConcurrentHashMap<Hash, Object> closureCache = new ConcurrentHashMap<>();

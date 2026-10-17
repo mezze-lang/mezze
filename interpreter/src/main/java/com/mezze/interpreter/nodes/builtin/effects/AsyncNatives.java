@@ -539,6 +539,26 @@ public final class AsyncNatives {
         private final ConcurrentLinkedQueue<MezzePromise> promises = new ConcurrentLinkedQueue<>();
         private final AtomicBoolean finalized = new AtomicBoolean(false);
 
+        /**
+         * This scope's concurrency limits, by permit count.
+         *
+         * The limit belongs to the SCOPE that declared it. It used to live in a
+         * `static ConcurrentHashMap<Integer, Semaphore>` keyed only on the
+         * number, so every `max_concurrent = 4` in the process shared one
+         * semaphore — a different scope, or a different Context on the same
+         * Engine, throttled against each other, and `max_concurrent` did not
+         * mean what it said. The map never cleared either, so a permit leaked by
+         * a task that died before its release throttled every future scope that
+         * picked the same number, for the life of the process.
+         *
+         * Per-tracker, these are created with the scope and collected with it.
+         */
+        private final ConcurrentHashMap<Integer, Semaphore> limits = new ConcurrentHashMap<>();
+
+        Semaphore limit(int permits) {
+            return limits.computeIfAbsent(permits, Semaphore::new);
+        }
+
         public void track(MezzePromise promise) {
             if (!finalized.get()) {
                 promises.add(promise);
@@ -601,6 +621,22 @@ public final class AsyncNatives {
     }
 
     /**
+     * This scope's concurrency limit, or null when none was asked for.
+     *
+     * No tracker and a limit asked for means the stdlib wired the call without a
+     * scope, and silently dropping the limit is the worst of the options.
+     */
+    private static Semaphore limitForScope(Object trackerObj, long maxConcurrent) {
+        if (maxConcurrent <= 0) return null;
+        if (!(trackerObj instanceof PromiseTracker limitOwner)) {
+            throw new NativeTypeMismatchException(
+                "spawn_tracked asked for max_concurrent=" + maxConcurrent
+                + " but got no scope tracker to own the limit");
+        }
+        return limitOwner.limit((int) maxConcurrent);
+    }
+
+    /**
      * Spawn with tracking - registers promise with tracker for cleanup.
      */
     @TruffleBoundary
@@ -609,9 +645,10 @@ public final class AsyncNatives {
         long maxConcurrent = getLong(args, "max_concurrent");
         Object trackerObj = getFieldValue(args, "tracker");
 
-        Semaphore semaphore = maxConcurrent > 0
-            ? SEMAPHORE_CACHE.computeIfAbsent((int) maxConcurrent, Semaphore::new)
-            : null;
+        // The limit is the SCOPE's, so it comes off the scope's tracker. No
+        // tracker and a limit asked for means the stdlib wired this call without
+        // a scope, and silently dropping the limit is the worst of the options.
+        final Semaphore semaphore = limitForScope(trackerObj, maxConcurrent);
 
         Object[] closureValues = f.getClosureValues();
         var callTarget = f.getCallTarget();
@@ -707,9 +744,6 @@ public final class AsyncNatives {
 
         return promise;
     }
-
-    // Semaphore cache for concurrency limiting
-    private static final ConcurrentHashMap<Integer, Semaphore> SEMAPHORE_CACHE = new ConcurrentHashMap<>();
 
     // ==================== OPTIMIZATION: Sampled Completion Time Tracking ====================
     //

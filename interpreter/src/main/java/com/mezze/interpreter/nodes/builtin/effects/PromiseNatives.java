@@ -71,10 +71,14 @@ public final class PromiseNatives {
     private static final String NAME_FAIL      = "fail";
     private static final String NAME_ON_CANCEL = "on_cancel";
 
-    // Built once at class init.
-    private static final RootCallTarget COMPLETE_TARGET  = buildResolveTarget(true);
-    private static final RootCallTarget FAIL_TARGET      = buildResolveTarget(false);
-    private static final RootCallTarget ON_CANCEL_TARGET = buildOnCancelTarget();
+    // Built once PER LANGUAGE INSTANCE — see MezzeLanguage.builtinCallTarget.
+    // These used to be `static final`, built at class init, and a CallTarget
+    // belongs to the sharing layer it was created in: the second Context on an
+    // Engine to call `promise_from` then failed with Truffle's "Invalid sharing
+    // of AST nodes detected", as an `AsyncFailed` out of `await`.
+    private static final String KEY_COMPLETE  = "promise.complete";
+    private static final String KEY_FAIL      = "promise.fail";
+    private static final String KEY_ON_CANCEL = "promise.on_cancel";
 
     /**
      * Build the {@link RootCallTarget} for a resolve capability
@@ -86,7 +90,7 @@ public final class PromiseNatives {
      * {@link MezzePromise#complete(Object)} or {@link MezzePromise#fail(Object)}.
      */
     @TruffleBoundary
-    private static RootCallTarget buildResolveTarget(boolean isComplete) {
+    private static RootCallTarget buildResolveTarget(MezzeLanguage language, boolean isComplete) {
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode body = new MezzeNode() {
             @Override
@@ -108,7 +112,7 @@ public final class PromiseNatives {
             }
         };
         return new MezzeRootNode(
-            MezzeLanguage.get(null),
+            language,
             fd,
             body,
             isComplete ? NAME_COMPLETE : NAME_FAIL,
@@ -138,7 +142,7 @@ public final class PromiseNatives {
      * across the potentially-cross-thread boundary.
      */
     @TruffleBoundary
-    private static RootCallTarget buildOnCancelTarget() {
+    private static RootCallTarget buildOnCancelTarget(MezzeLanguage language) {
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode body = new MezzeNode() {
             @Override
@@ -153,7 +157,7 @@ public final class PromiseNatives {
             }
         };
         return new MezzeRootNode(
-            MezzeLanguage.get(null),
+            language,
             fd,
             body,
             NAME_ON_CANCEL,
@@ -201,12 +205,18 @@ public final class PromiseNatives {
 
         MezzePromise promise = new MezzePromise(null, null);
 
+        // Resolved against the language of the CALLING context, so each sharing
+        // layer gets its own three bodies.
+        MezzeLanguage language = MezzeLanguage.get(contextNode);
         MezzeFunction complete = new MezzeFunction(
-            COMPLETE_TARGET, NAME_COMPLETE, new Object[]{promise});
+            language.builtinCallTarget(KEY_COMPLETE, l -> buildResolveTarget(l, true)),
+            NAME_COMPLETE, new Object[]{promise});
         MezzeFunction fail = new MezzeFunction(
-            FAIL_TARGET, NAME_FAIL, new Object[]{promise});
+            language.builtinCallTarget(KEY_FAIL, l -> buildResolveTarget(l, false)),
+            NAME_FAIL, new Object[]{promise});
         MezzeFunction onCancel = new MezzeFunction(
-            ON_CANCEL_TARGET, NAME_ON_CANCEL, new Object[]{promise});
+            language.builtinCallTarget(KEY_ON_CANCEL, PromiseNatives::buildOnCancelTarget),
+            NAME_ON_CANCEL, new Object[]{promise});
 
         MezzeRecord capabilities = MezzeRecord.wrapCompleteFailOnCancel(complete, fail, onCancel);
 
