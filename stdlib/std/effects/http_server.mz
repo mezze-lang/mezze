@@ -1,9 +1,16 @@
-## The HTTP SERVER effect, a server handle, and a test performer.
+## The HTTP SERVER effect, a server handle, and two performers.
 ##
 ## ONE operation, `serve`, which receives a HANDLER and runs it. The handler is
 ## a function from `Request` to `Response`; routing is not part of the effect.
-## A route table is pure code that FOLDS into one handler (see `router.mz`), so
-## the effect never grows an operation per routing feature.
+## A route table is pure code that FOLDS into one handler (see
+## `std::effects::http_router`), so the effect never grows an operation per
+## routing feature.
+##
+## Two performers answer it. `MockHttpServer` binds no socket and does not call
+## the handler — a test calls the handler itself, because a handler is a plain
+## function. `HelidonHttpServer` binds a real socket and runs the handler on
+## every request that arrives. Swapping one for the other changes the `perform`
+## line and nothing else.
 ##
 ## This mirrors the client exactly, inverted. The client's `request` is a
 ## function you CALL; the server's `serve` takes a function you PROVIDE. Both
@@ -15,6 +22,11 @@
 ## the row stays residual and the TEST supplies its own async:
 ##
 ##   perform LoomAsync in perform MockHttpServer in serve { handler = h }
+##
+## `HelidonHttpServer` runs the handler on a worker thread, carrying the handler
+## chain that was in force at `serve`. So the performers a handler finds are the
+## ones the surrounding program installed — which is what makes the row more
+## than a formality.
 ##
 ## Effects other than async always escape through `serve` to whoever installed
 ## the server.
@@ -32,7 +44,7 @@ pub type ServerHandle = {
 
 ## Run a handler as a server.
 effect HttpServer where {
-  serve: { handler: { req: Request } -> Response } -> ServerHandle <HttpServer>
+  serve: { handler: { req: Request } -> Response <...> } -> ServerHandle <HttpServer>
 }
 
 ## A server that never binds a socket.
@@ -61,3 +73,62 @@ pub let incoming: { method: Method, url: Str } -> Request = { method, url } -> {
 ## `incoming` for a GET, which is most of what tests want.
 pub let get_request: { url: Str } -> Request = { url } ->
   incoming { method = Get, url = url }
+
+## ── A server that binds a socket ────────────────────────────────────────────
+
+## What a real server needs to know before it binds.
+##
+## `port = 0` lets the OS choose, and the chosen port is readable from the
+## handle afterwards — which is how a test talks to a server without reserving
+## a port number nobody else may use.
+##
+## `workers = 0` means "pick a sensible number". A worker is a virtual thread
+## that runs handlers, so the default is wide rather than core-count-sized: a
+## handler that performs a request of its own occupies its worker while it
+## waits.
+pub type ServerConfig = {
+  port: Int,
+  host: Str,
+  workers: Int,
+}
+
+## Port 8080 on the loopback address, with the default worker count.
+##
+## Loopback and not `0.0.0.0`: a server reachable from the network is a
+## decision, and a default should not make it for you.
+pub let default_server_config: ServerConfig = {
+  port = 8080,
+  host = "127.0.0.1",
+  workers = 0,
+}
+
+## Bind the socket, start the workers, hand back the handle.
+let start_socket
+  : { handler: { req: Request } -> Response <...>, config: ServerConfig }
+  -> ServerHandle
+  = { handler, config } -> do
+    let s = __native_http_server_start {
+      handler = handler,
+      port = config.port,
+      host = config.host,
+      workers = config.workers,
+    }
+    {
+      stop = {} -> __native_http_server_stop { server = s },
+      port = __native_http_server_port { server = s },
+    }
+
+## A server on a real socket, backed by Helidon.
+##
+## The handler runs on a worker thread that Truffle owns, carrying the handler
+## chain that was in force at `serve`. So a handler may perform the effects the
+## surrounding program installed — `Time`, `Log`, `HttpClient` — and finds the
+## same performers it would find anywhere else in that scope.
+impl HttpServer for HelidonHttpServer where {
+  serve = { handler } -> start_socket { handler = handler, config = default_server_config },
+}
+
+## `HelidonHttpServer` with a config. `port = 0` is what a test wants.
+impl HttpServer for HelidonHttpServerWith { config: ServerConfig } where {
+  serve = { handler } -> start_socket { handler = handler, config = config },
+}

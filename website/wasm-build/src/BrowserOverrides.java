@@ -35,6 +35,7 @@ public final class BrowserOverrides {
         deny("__native_async_",     "LoomAsync");
         deny("__native_parallel_",  "LoomParallel");
         deny("__native_time_sleep", "SystemTime.sleep");
+        deny("__native_http_server_", "HelidonHttpServer");
     }
 
     /** Deny every registered native starting with {@code prefix}. */

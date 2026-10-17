@@ -31,6 +31,12 @@ import java.io.File
  * - Dependency graph edges
  */
 fun main(args: Array<String>) {
+    // FIRST, before any typechecker class can initialise: this process BUILDS the
+    // stdlib snapshot, so it must not read one. Set below too (where the reason for
+    // the slow path is explained), but that is already too late if anything above
+    // touches StdlibSnapshotData, whose `object` init reads the classpath once.
+    System.setProperty("mezze.stdlib.force-recompile", "1")
+
     // Populate the NativeOp DSL registry before triggering PrecompiledStdlib
     // init. Without this, native calls in stdlib lower as record-ABI; once
     // the precompiled snapshot is baked into the native binary, every
@@ -63,6 +69,7 @@ fun main(args: Array<String>) {
     // loadedModules for the v7-row scatter below. Without this, an
     // existing ~/.mezze/cache/stdlib.sqlite would let the fast path win
     // and clear those maps to emptyMap() before we get to walk them.
+    // Also set at the top of main, which is what actually takes effect.
     System.setProperty("mezze.stdlib.force-recompile", "1")
 
     val startTime = System.nanoTime()

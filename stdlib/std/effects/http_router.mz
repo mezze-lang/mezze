@@ -22,6 +22,9 @@ use std::collections::map
 use std::collections::seq
 use std::collections::bytes
 use std::str
+## `path_of` does index arithmetic, and `+` on Int needs int's `NumAdd` impl in
+## scope — an impl arrives with its module, not with the prelude.
+use std::int
 
 ## What a matched route hands its handler: the request, plus the path
 ## parameters the pattern bound.
@@ -32,8 +35,13 @@ pub type Matched = {
 
 ## A route table. `run` is the only thing a consumer needs; the variants exist
 ## so `or` can build a chain without a mutable list.
+##
+## The row on `run` is open, so the HANDLERS a table carries may perform effects
+## even though the routing around them performs none. A route that reads a
+## database or a clock is the normal case, not an exception, and the row that
+## says so travels with the table rather than being discharged by it.
 pub type Routes = {
-  run: { req: Request } -> Option Response,
+  run: { req: Request } -> Option Response <...>,
 }
 
 ## Split a path into segments, dropping the empty pieces a leading or trailing
@@ -41,13 +49,54 @@ pub type Routes = {
 pub let segments: { path: Str } -> [Str] = { path } ->
   seq::filter { xs = str::split { s = path, delimiter = "/" }, p = { x } -> x != "" }
 
+## ── Request targets ─────────────────────────────────────────────────────────
+
+## Drop a query string, if there is one.
+let strip_query: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "?" } is
+    None -> s
+    Some { val = q } -> str::substring { s = s, start = 0, end = q }
+
+## The path of an authority-relative remainder: everything from its first
+## slash. A URL with no path at all (`https://host`) means the root.
+let slash_onward: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "/" } is
+    None -> "/"
+    Some { val = j } -> str::substring { s = s, start = j, end = str::size { s = s } }
+
+## Drop a `scheme://authority` prefix, if there is one.
+let strip_authority: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "://" } is
+    None -> s
+    Some { val = i } ->
+      slash_onward { s = str::substring { s = s, start = i + 3, end = str::size { s = s } } }
+
+## The path part of a request target: no scheme, no authority, no query.
+##
+## The two sides of the web story spell a target differently. A server hands the
+## handler what arrived on the wire — `/users/7?page=2`. A client's `Request.url`
+## is absolute — `https://api.example.com/users/7`. Routing cares about neither
+## the authority nor the query, so both reduce to `/users/7` here and ONE route
+## table matches requests from either side.
+pub let path_of: { url: Str } -> Str = { url } ->
+  strip_query { s = strip_authority { s = url } }
+
+## The raw query string of a request target, or `""` when it carries none.
+##
+## Raw: still percent-encoded, still `&`-joined. Turning it into typed values is
+## the query codec's job, not the router's.
+pub let query_of: { url: Str } -> Str = { url } ->
+  match str::index_of { s = url, sub = "?" } is
+    None -> ""
+    Some { val = q } -> str::substring { s = url, start = q + 1, end = str::size { s = url } }
+
 ## Match one pattern against one path, returning the bound parameters.
 ##
 ## Returns `None` when the lengths differ or a literal segment disagrees. A
 ## `:name` segment always matches and binds.
 pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } -> do
   let ps = segments { path = pattern }
-  let xs = segments { path = path }
+  let xs = segments { path = path_of { url = path } }
   if seq::size { xs = ps } != seq::size { xs = xs } then None
   else
     seq::fold {
@@ -68,7 +117,7 @@ pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { patt
 
 ## One route: a method, a path pattern, and a handler that receives the bound
 ## parameters.
-pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response } -> Routes =
+pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response <...> } -> Routes =
   { method, path, handler } -> {
     run = { req } ->
       if req.method != method then None
@@ -92,7 +141,10 @@ pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
 ##
 ## The result is a plain function, which is exactly what `HttpServer.serve`
 ## takes — the route table has disappeared by this point.
-pub let otherwise: { routes: Routes, fallback: { req: Request } -> Response } -> { req: Request } -> Response =
+pub let otherwise
+  : { routes: Routes, fallback: { req: Request } -> Response <...> }
+  -> { req: Request } -> Response <...>
+  =
   { routes, fallback } -> { req } -> match routes.run { req = req } is
     Some { val } -> val
     None -> fallback { req = req }
@@ -114,7 +166,7 @@ impl Routes where {
   ## Try this table, then `b`. First match wins.
   or_else = { it: 'it, b: Routes } -> or_else { a = it, b = b },
   ## Close the table with a fallback, producing the handler `serve` takes.
-  otherwise = { it: 'it, fallback: { req: Request } -> Response } ->
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
     otherwise { routes = it, fallback = fallback },
 }
 

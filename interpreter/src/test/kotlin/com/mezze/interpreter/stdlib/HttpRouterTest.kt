@@ -125,4 +125,81 @@ class HttpRouterTest {
         """.trimIndent())
         assertEquals(404L, r, "segment counts must agree")
     }
+    // ── Request targets ────────────────────────────────────────────────────
+    //
+    // `path_of` is what lets ONE route table serve both sides of the story: a
+    // server's target (`/users/7?page=2`) and a client's absolute url
+    // (`https://host/users/7`) reduce to the same path.
+
+    @Test
+    fun `path_of drops a query string`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ path_of, query_of }
+            path_of { url = "/users/7?page=2&sort=name" }
+        """.trimIndent())
+        assertEquals("/users/7", r)
+    }
+
+    @Test
+    fun `path_of drops a scheme and authority`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ path_of, query_of }
+            path_of { url = "https://api.example.com/users/7?page=2" }
+        """.trimIndent())
+        assertEquals("/users/7", r, "an absolute client url and a server target must agree on the path")
+    }
+
+    @Test
+    fun `path_of calls a url with no path at all the root`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ path_of, query_of }
+            path_of { url = "https://api.example.com" }
+        """.trimIndent())
+        assertEquals("/", r)
+    }
+
+    @Test
+    fun `path_of leaves a plain path alone`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ path_of, query_of }
+            path_of { url = "/users/7" }
+        """.trimIndent())
+        assertEquals("/users/7", r)
+    }
+
+    @Test
+    fun `query_of gives the raw query, or an empty string`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ path_of, query_of }
+            use std::str
+            str::concat {
+              l = query_of { url = "/users/7?page=2&sort=name" },
+              r = query_of { url = "/users/7" },
+            }
+        """.trimIndent())
+        assertEquals("page=2&sort=name", r, "no query means the empty string, not a crash")
+    }
+
+    @Test
+    fun `a query string does not stop a route from matching`() {
+        // The bite: before `path_of`, `segments` split `7?page=2` into one
+        // segment and the `:id` binding carried the query with it.
+        val r = MezzeTestHelper.run("""
+            $head
+            let app = otherwise {
+              routes = route { method = Get, path = "/users/:id", handler = { m } ->
+                reply { code = 200, text = match map::get { m = m.params, k = "id" } is
+                  Some { val } -> val
+                  None -> "?", url = m.req.url } },
+              fallback = not_found,
+            }
+            body_of { resp = app { req = get_request { url = "/users/7?page=2" } } }
+        """.trimIndent())
+        assertEquals("7", r, "the query belongs to the target, not to the path segment")
+    }
 }

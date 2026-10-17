@@ -89,6 +89,13 @@ dependencies {
     // fiber).
     implementation("io.helidon.webclient:helidon-webclient:4.4.1")
 
+    // HTTP server — Helidon WebServer, the same stack inverted. One virtual
+    // thread per connection, no Netty, and the same `io.helidon.http` types
+    // the client half already speaks, so a Request/Response crosses the two
+    // sides without a second vocabulary. Backs `HelidonHttpServer` in
+    // std::effects::http_server.
+    implementation("io.helidon.webserver:helidon-webserver:4.4.1")
+
     // DSL-JSON - high performance JSON library (byte-level, no reflection, GraalVM native-image compatible)
     implementation("com.dslplatform:dsl-json:2.0.2")
 

@@ -3191,6 +3191,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_client_create", (r, c) -> IONatives.httpClientCreate(r));
         HANDLERS.put("__native_http_client_close", (r, c) -> IONatives.httpClientClose(r));
         HANDLERS.put("__native_http_request", (r, c) -> IONatives.httpRequest(r));
+
+        // === HTTP Server ===
+        HANDLERS.put("__native_http_server_start", (r, c) -> HttpServerNatives.httpServerStart(r));
+        HANDLERS.put("__native_http_server_port", (r, c) -> HttpServerNatives.httpServerPort(r));
+        HANDLERS.put("__native_http_server_stop", (r, c) -> HttpServerNatives.httpServerStop(r));
     }
 
     // ==================== Mutation Operations ====================

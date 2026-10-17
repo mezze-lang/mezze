@@ -130,7 +130,19 @@ object StdlibIdentities {
         // manifest: stamping there failed every `mez sample` with "MANIFEST.txt is
         // not on the classpath", because sample asks before PrecompiledStdlib has
         // restored the table itself.
-        StdlibSnapshotData.identities?.let { restore(it); return }
+        //
+        // Unless this process is BUILDING the snapshot. StdlibPrecompiler sets
+        // -Dmezze.stdlib.force-recompile=1, and PrecompiledStdlib already honors it by
+        // not loading the snapshot — but THIS path read it anyway, out of
+        // `cli/build/resources/main`, which carries the PREVIOUS build's copy and sits
+        // on the precompiler's own classpath. Last build's identities were then held
+        // against this build's freshly stamped sources, so changing an existing stdlib
+        // effect, ability or public type failed with "two identities for stdlib effect
+        // '...'" — a message that accuses the compiler of a bug when the fault is a
+        // stale artifact. Changing `HttpServer.serve` is what found it.
+        if (System.getProperty("mezze.stdlib.force-recompile") != "1") {
+            StdlibSnapshotData.identities?.let { restore(it); return }
+        }
         val manifest = StdlibIdentities::class.java.classLoader.getResourceAsStream("std/MANIFEST.txt")
             ?.bufferedReader()?.use { it.readLines() }
             ?: error("Compiler internal error: std/MANIFEST.txt is not on the classpath — rebuild :stdlib")
