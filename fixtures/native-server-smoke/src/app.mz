@@ -1,0 +1,68 @@
+# Native-image smoke test for the WEB story.
+#
+# A server binds a real socket, a route matches a path parameter, the query
+# decodes into a typed record, and the client in the same process fetches it.
+# Every piece has to survive native-image: Helidon WebServer's service
+# registry, the Truffle-owned worker threads, and the codec's derived impls.
+#
+# Run:  mez build --native && ./.build/server_smoke-native
+
+use std::effects::log::{ println, Console }
+use std::effects::http::{
+    HttpClient, SimpleHttpClient, Request, Response, Get,
+    request, format_error, body_str, with_query, ToQuery
+}
+use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
+use std::effects::http_router::{ route, otherwise, Matched, FromQuery }
+use std::codec::core::{ DecodeError }
+use std::collections::map
+use std::collections::bytes
+use std::int
+
+let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } -> {
+    status = code,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = url,
+}
+
+let not_found: { req: Request } -> Response = { req } ->
+    reply { code = 404, text = "nope", url = req.url }
+
+let app = otherwise {
+    routes = route { method = Get, path = "/hello/:name", handler = { m } -> do
+        let who = m.param_or { name = "name", default = "?" }
+        let q: Result { times: Int } DecodeError = m.query_as {}
+        match q is
+            Ok { val } -> reply {
+                code = 200,
+                text = "hi $(who) x$(int::to_str { n = val.times })",
+                url = m.req.url,
+            }
+            Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url }
+    },
+    fallback = not_found,
+}
+
+let fetch: { url: Str } -> Str <HttpClient> = { url } ->
+    match request { url = url }.send {} is
+        Ok { val } -> match body_str { resp = val } is
+            Ok { val = s } -> s
+            Err { error = e } -> format_error { err = e }
+        Err { error = e } -> format_error { err = e }
+
+let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
+
+let main = {} -> perform Console in
+    perform HelidonHttpServerWith { config = any_port } in
+        perform SimpleHttpClient in do
+            let h = HttpServer.serve { handler = app }
+            let base = "http://127.0.0.1:$(int::to_str { n = h.port })"
+            let hit = fetch {
+                url = request { url = "$(base)/hello/world" }
+                    .with_query { params = { times = 3 } }
+                    .url,
+            }
+            let missed = fetch { url = "$(base)/nothing" }
+            h.stop {}
+            println { msg = "server-smoke: port>0=$(if h.port > 0 then "yes" else "no") hit=$(hit) missed=$(missed)" }

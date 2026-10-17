@@ -70,6 +70,21 @@
 # harmless no-op (Netty falls back to JDK TLS).
 --initialize-at-run-time=io.netty.handler.ssl.BouncyCastleAlpnSslUtils
 
+# Helidon's service registry must NOT be initialized at build time, even
+# though `io.helidon` as a whole is (see the [init-at-build-time] note on
+# TypeStash below — the webclient needs it). `GlobalServiceRegistry` holds a
+# ReentrantReadWriteLock, and a lock records its `exclusiveOwnerThread`: the
+# BUILD JVM's ForkJoinWorkerThread. The heap scanner then rejects the image
+# with "An object of type ForkJoinWorkerThread$InnocuousForkJoinWorkerThread
+# was found in the image heap", pointing at
+# `GlobalServiceRegistry.registry()`.
+#
+# It only became reachable when helidon-webserver arrived — the webserver
+# discovers its protocols through the registry, the webclient never did. A
+# registry is runtime state in any case; freezing one into an image was never
+# the intent of the package-level entry.
+--initialize-at-run-time=io.helidon.service.registry.GlobalServiceRegistry
+
 [init-at-build-time]
 # Packages whose static state is safe to freeze into the image heap.
 # Order doesn't matter; native-image handles dependency closure itself.

@@ -1,0 +1,12 @@
+[package]
+name = "server_smoke"
+version = "0.1.0"
+
+[[app]]
+name = "server_smoke"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

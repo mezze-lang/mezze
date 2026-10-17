@@ -109,6 +109,45 @@ native-test:
     ./.build/native_smoke-native
     echo "✓ native-test passed"
 
+# The WEB story as a native binary: a real socket, a routed path parameter, a
+# typed query decode, a 404 fallback. Helidon WebServer discovers its protocols
+# through a service registry and the handler runs on Truffle-owned threads —
+# neither of which the JVM gates can say anything about.
+#
+# Runs the INSTALLED toolchain (`~/.mezze/bin/mez`), not the in-tree binary that
+# `native-test` uses, and that is deliberate: a `mez` run from inside the repo
+# resolves the whole gradle runtime classpath, polyglot provider jars included,
+# and that configuration fails native-image with a few hundred Truffle
+# compilation-blocklist violations before it reaches anything web-related.
+# `native-test` fails the same way for the same reason and has nothing to do
+# with serving. `~/.mezze/bin/mez` is what a user runs, so it is what this
+# guards. Install it with `./gradlew :cli:installNative`.
+[group('test')]
+native-server-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    MEZ="${MEZ:-$HOME/.mezze/bin/mez}"
+    if [ ! -x "$MEZ" ]; then
+        echo "No installed mez at $MEZ — run './gradlew :cli:installNative' first."
+        exit 1
+    fi
+    WORKDIR=$(mktemp -d)
+    trap 'rm -rf "$WORKDIR"' EXIT
+    cp -r fixtures/native-server-smoke/* "$WORKDIR/"
+    cd "$WORKDIR"
+    echo "Building native-server-smoke with --native…"
+    "$MEZ" build --native
+    echo "Running native binary…"
+    OUT=$(./.build/server_smoke-native 2>/dev/null | tail -1)
+    echo "$OUT"
+    EXPECTED="server-smoke: port>0=yes hit=hi world x3 missed=nope"
+    if [ "$OUT" != "$EXPECTED" ]; then
+        echo "FAIL: expected"
+        echo "  $EXPECTED"
+        exit 1
+    fi
+    echo "✓ native-server-test passed"
+
 # gradle clean (compiler build outputs)
 [group('mez')]
 clean:
