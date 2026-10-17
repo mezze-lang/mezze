@@ -2503,7 +2503,7 @@ Landed as `8c48b063d`, `a56dd6eb2`, `598150eeb`, `a944475e5`.
   throughout. There is now a fixture with a jdk-activated profile, and it fails
   without the fix.
 
-## BUG 25 — OPEN: `.to_json {}` on a mapped seq crashes at run time
+## BUG 25 — FIXED: ability validation ran BEFORE the rounds that resolve its types
 
 Found 2026-10-17 while benchmarking the JSON codec against Java.
 
@@ -2542,7 +2542,21 @@ which is why binding the same expression works. It travels with the value, too:
 seq::reverse { xs = seq::map { xs = [3,2,1], f = { x } -> x * 2 } }.to_json {}   # same crash
 ```
 
-### Diagnosis (2026-10-17, instrumented — start here)
+### Fix
+
+`finalizeDeferredAbilities` validated ability constraints FIRST, then composed
+deferred inference, then ran the associated-type rounds to fixpoint. Validation
+SKIPS a constraint whose type is not yet resolved — and resolving is exactly
+what those later rounds do. A SECOND validation pass now runs after the
+fixpoint.
+
+The first pass cannot simply be moved there: it also INFERS, and the rounds
+consume what it infers. Moving it broke `AbilityMethodCallTest` and
+`AbilityCombinationMatrixTest`, which then saw a `VarType` where a concrete type
+belonged. So the second pass is additive, and reports only when the first found
+nothing, so one failure is never reported twice.
+
+### Diagnosis (2026-10-17, instrumented)
 
 Traced by probing the compiler and the ability checker on the failing and the
 working program. The two differ in ONE place and it is not where it looks:

@@ -926,6 +926,46 @@ class ConstraintSolver(
             assocProgress
         }
 
+        // A SECOND validation pass, now that deferred inference is composed and the
+        // associated-type rounds above have converged. This is BUG 25's fix.
+        //
+        // Validation SKIPS a constraint whose type is not yet resolved, and
+        // resolving is exactly what the work above does. `xs.to_json {}` whose
+        // element came from `{ x } -> x * 2` reached the first pass as
+        // `ToJson (Seq 'w49)` — outer concrete, element still a variable, because
+        // `'w49` is `NumMul`'s associated `'out` and only the rounds above settle
+        // it. Skipped there, `checkAbilityImplementation` never ran, so its SIDE
+        // EFFECT — synthesising the auto-derived codec impl — never happened. The
+        // compiler then saw a fully concrete `Seq Int`, asked for an `Encode`
+        // dictionary nobody had generated, and emitted a name-based field read: the
+        // program compiled and then died with "Expected record for field 'encode',
+        // got: MezzeSeq". Written as `let rows = …` it worked, only because the let
+        // settled the element early enough for the first pass to see it.
+        //
+        // The first pass CANNOT simply be moved here: it also INFERS, and the
+        // rounds above consume what it infers (moving it broke
+        // `AbilityMethodCallTest` and `AbilityCombinationMatrixTest`, which then
+        // saw a `VarType` where a concrete type belonged). So this is additive, and
+        // reports only when the first pass found nothing — one failure must not be
+        // reported twice.
+        val lateValidation = abilityChecker.validateAbilityConstraints(substitution)
+        if (lateValidation != null && validationResult == null) {
+            errors.add(ConstraintError(
+                message = lateValidation.message,
+                constraint = Constraint.Equality(
+                    MezzeType.IntType, MezzeType.IntType, loc = lateValidation.loc,
+                ),
+                code = ErrorCode.V0402_ABILITY_NOT_SATISFIED,
+                context = "ability constraint validation",
+                hints = lateValidation.hints,
+                fixHints = lateValidation.fixHints,
+            ))
+        }
+        val lateInference = abilityChecker.getDeferredInference()
+        if (lateInference.isNotEmpty()) {
+            substitution = Substitution(lateInference.toMap()).compose(substitution)
+        }
+
         return substitution
     }
 

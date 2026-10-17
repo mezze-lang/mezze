@@ -1,7 +1,6 @@
 package com.mezze.interpreter.stdlib
 
 import com.mezze.interpreter.MezzeTestHelper
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
@@ -95,13 +94,11 @@ class JsonSeqElementDictTest {
     // ── The bug ──
 
     @Test
-    @Disabled("BUG 25: the ToJson demand never reaches the ability checker for a non-identifier receiver")
     fun `a mapped seq encodes without being bound first`() =
         assertEquals("[2,4,6]",
             jsonOf("seq::map { xs = seq::range { start = 1, end = 4 }, f = { x } -> x * 2 }.to_json {}"))
 
     @Test
-    @Disabled("BUG 25: same cause, reached through an intervening call")
     fun `a mapped seq encodes after passing through another call`() =
         assertEquals("[2,4,6]",
             jsonOf("seq::reverse { xs = seq::map { xs = [3, 2, 1], f = { x } -> x * 2 } }.to_json {}"))
