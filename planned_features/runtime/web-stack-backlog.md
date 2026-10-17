@@ -17,39 +17,30 @@ Node; ~74% of Java, and 89% of Java's per-core efficiency at the floor.
 
 ## Part 1 — Correctness (do these first)
 
-### W-C1 — `abilityObligationAtCallSite` drops an all-concrete obligation
+### W-C1 — CLOSED, NOT A BUG: an all-concrete obligation is self-discharging
 
-`AbilityObligation.kt`:
+`AbilityObligation.kt` raises a `with` obligation only when one of its type args
+is still a type VARIABLE (`varIndex < 0 → return null`). That reads like BUG 25's
+inversion — a call site that knows MORE being checked LESS — and it is not.
 
-```kotlin
-val varIndex = constraint.typeArgs.indexOfFirst { it is MezzeType.VarType }
-if (varIndex < 0) return null          // every type arg concrete → DROPPED
-```
+An all-concrete obligation discharges ITSELF. Concrete in the caller means
+concrete in the callee, so if the callee's body uses the ability, that body
+raises its own demand with the same concrete type and the impl is derived there;
+if the body does not use it, there is nothing to discharge. Only a VARIABLE
+obligation needs the caller to supply a dictionary, and that case has
+`varIndex >= 0` and is raised normally.
 
-An obligation is raised only when one of its type args is still a type
-VARIABLE. When the call site already knows every type, the obligation is thrown
-away — so a call site that knows MORE gets checked LESS. That is the same
-inversion as BUG 25, one layer up.
+Two things made this look like a bug, and both were misread:
 
-Suspected repro — a user function forwarding a codec obligation, called with a
-concrete type:
+ - The obvious repro does not reach the arm at all. Where a caller passes a
+   concrete argument to `{ x: 'a } with Encode JsonC 'a`, `'a` is still a FRESH
+   variable when the obligation is built — the argument binds it later by
+   unification. Only an obligation written concretely in the SOURCE
+   (`with Encode JsonC { a: Int }`) has no variable at any position.
+ - A fix was implemented and measured to change NO observable behaviour. That
+   was evidence it was not a bug; I read it as a missing test.
 
-```mezze
-let enc: { x: 'a } -> Json with Encode JsonC 'a = { x } -> x.encode { config = json_default }
-let main = {} -> enc { x = { a = 1 } }    ## 'a is concrete HERE
-```
-
-If the obligation is dropped, nothing derives `Encode JsonC { a: Int }` and the
-compiler then asks for a dictionary nobody generated.
-
-**Status.** The fix is known and was already written once: bind a fresh variable
-to the head arg, emit `Equality(fresh, head)`, raise the obligation on the fresh
-variable — the solver then walks the same path it walks when the type is not yet
-known. It compiled cleanly, changed no observable behaviour, and was REVERTED
-rather than left in the tree unproven. It needs a test that fails without it.
-
-**Done when** a test demonstrates the hole, the fresh-var fix closes it, and
-both gates pass.
+`ConcreteObligationTest` pins all four shapes so nobody "fixes" this later.
 
 ### W-C2 — 302 native-image blocklist violations (C5 remainder)
 
