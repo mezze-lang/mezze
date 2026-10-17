@@ -2503,6 +2503,53 @@ Landed as `8c48b063d`, `a56dd6eb2`, `598150eeb`, `a944475e5`.
   throughout. There is now a fixture with a jdk-activated profile, and it fails
   without the fix.
 
+## BUG 25 — OPEN: `.to_json {}` on a mapped seq crashes at run time
+
+Found 2026-10-17 while benchmarking the JSON codec against Java.
+
+```mezze
+seq::map { xs = seq::range { start = 1, end = 4 }, f = { x } -> x * 2 }.to_json {}
+# RuntimeException: Expected record for field 'encode', got: MezzeSeq
+```
+
+It compiles. The `Encode` dictionary slot receives the RECEIVER instead of a
+dictionary — the "dictionary not arriving" shape, and the same symptom BUG 13
+had in a different position.
+
+### What it is NOT
+
+Almost every neighbouring shape works, which is the useful part:
+
+```mezze
+seq::range { start = 1, end = 4 }.to_json {}                      # works — a call receiver is fine
+[1, 2, 3].to_json {}                                              # works
+{ a = 1 }.to_json {}                                              # works
+seq::filter { xs = [1,2,3], p = { x } -> x > 1 }.to_json {}       # works — a HOF is fine
+seq::map { xs = [1,2,3], f = { x } -> x }.to_json {}              # works — identity lambda
+let rows = seq::map { … f = { x } -> x * 2 }   rows.to_json {}    # works — bound first
+```
+
+So it is neither "call-expression receiver" nor "higher-order function".
+
+### The trigger
+
+An element type produced by a lambda whose body uses an ABILITY operation
+(`x * 2` → `NumMul`), so the element is still a type variable with a pending
+constraint when the `Encode` dictionary is chosen. A `let` resolves it first,
+which is why binding the same expression works. It travels with the value, too:
+
+```mezze
+seq::reverse { xs = seq::map { xs = [3,2,1], f = { x } -> x * 2 } }.to_json {}   # same crash
+```
+
+### Acceptance
+
+`JsonSeqElementDictTest` — 6 neighbouring shapes enabled and passing so a fix
+cannot break them, plus the 2 failing cases `@Disabled` naming BUG 25.
+Remove the `@Disabled` to land it.
+
+---
+
 Guarantee after Track 2: every ability use is resolved to one instance or a
 dictionary parameter AT ELABORATION TIME, the compiler only reads evidence, a
 gap is a compile error, and the runtime never decides equality/ordering/hashing
