@@ -19,6 +19,7 @@
 
 use std::effects::http::{ Method, Request, Response }
 use std::collections::map
+use std::collections::iter
 use std::collections::seq
 use std::collections::bytes
 use std::str
@@ -114,8 +115,15 @@ let match_split: { ps: [Str], url: Str } -> Option (Map Str Str) = { ps, url } -
   let xs = segments { path = path_of { url = url } }
   if seq::size { xs = ps } != seq::size { xs = xs } then None
   else
-    seq::fold {
-      xs = seq::zip { xs = ps, ys = xs },
+    ## `iter`, not `seq`: this walks the pattern and the path TOGETHER once and
+    ## keeps only the bindings. `seq::zip` would materialise a whole seq of pairs
+    ## for the fold to consume and discard — a lazy pipeline has no business
+    ## allocating one. Zipping lazily, nothing exists but the accumulator.
+    iter::fold {
+      it = iter::zip {
+        a = iter::from_seq { xs = ps },
+        b = iter::from_seq { xs = xs },
+      },
       init = Some { val = map::empty {} },
       f = { acc, x } -> match acc is
         None -> None
@@ -178,9 +186,12 @@ pub let otherwise
 ## A fragment with no `=` is a key with one empty value, which is how a flag
 ## like `?debug` arrives. Keys and values are percent-decoded.
 pub let query_params: { url: Str } -> Map Str [Str] = { url } ->
-  seq::fold {
-    xs = seq::filter {
-      xs = str::split { s = query_of { url = url }, delimiter = "&" },
+  ## `iter`, not `seq`: the fold is the only consumer, so the filtered fragments
+  ## never need to exist as a collection. Filtering eagerly built one for the
+  ## fold to walk once and drop.
+  iter::fold {
+    it = iter::filter {
+      it = iter::from_seq { xs = str::split { s = query_of { url = url }, delimiter = "&" } },
       p = { x } -> x != "",
     },
     init = map::empty {},

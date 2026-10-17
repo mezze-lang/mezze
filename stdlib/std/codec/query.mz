@@ -33,6 +33,7 @@ use std::codec::core::{
   CodecCtx, SharedConfig, FieldTransform, DecodeError
 }
 use std::codec::url::{ url_encode_component, url_decode_component }
+use std::collections::iter
 use std::collections::seq
 use std::int
 use std::float
@@ -119,9 +120,16 @@ pub let render_pairs: { pairs: [{ k: Str, v: Str }] } -> Str = { pairs } ->
 ## A fragment with no `=` is a key with an empty value, which is how a flag like
 ## `debug` arrives. Empty fragments are dropped, so a trailing `&` is harmless.
 pub let parse_pairs: { s: Str } -> [{ k: Str, v: Str }] = { s } ->
-  seq::map {
-    xs = seq::filter { xs = str::split { s = s, delimiter = "&" }, p = { x } -> x != "" },
-    f = { x } -> match str::index_of { s = x, sub = "=" } is
+  ## The RESULT is a seq, but the filtered fragments in between are not: only
+  ## the map reads them. Staged through `iter`, the filter allocates nothing and
+  ## just the pairs are materialised.
+  iter::to_seq {
+    it = iter::map {
+      it = iter::filter {
+        it = iter::from_seq { xs = str::split { s = s, delimiter = "&" } },
+        p = { x } -> x != "",
+      },
+      f = { x } -> match str::index_of { s = x, sub = "=" } is
       None -> { k = url_decode_component { s = x }, v = "" }
       Some { val = i } -> {
         k = url_decode_component { s = str::substring { s = x, start = 0, end = i } },
@@ -129,6 +137,7 @@ pub let parse_pairs: { s: Str } -> [{ k: Str, v: Str }] = { s } ->
           s = str::substring { s = x, start = i + 1, end = str::size { s = x } },
         },
       },
+    },
   }
 
 ## ---- Tier 2: encode ----------------------------------------------------

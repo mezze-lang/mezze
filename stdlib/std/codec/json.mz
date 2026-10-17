@@ -141,22 +141,22 @@ pub let parse_str
   = { s } -> __native_json_parse { s = s }
 
 ## Serialize a `Json` tree back to a string.
+## Serialize a `Json` tree to text.
+##
+## No `Result`: a well-formed `Json` tree is always serializable — the writer is
+## an in-memory buffer, so there is nothing to fail. This used to answer `""` on
+## an error it could not report, which turned a bad encode into a 200 with an
+## EMPTY BODY and no word of explanation.
 pub let to_str: { json: Json } -> Str = { json } ->
-  match __native_json_serialize { json = json, pretty = False } is
-    Ok { val } -> val
-    Err { error } -> ""
+  __native_json_serialize { json = json, pretty = False }
 
 ## Serialize a `Json` tree honouring the config's `pretty` flag.
 pub let serialize_to_str: { json: Json, config: JsonC } -> Str = { json, config } ->
-  match __native_json_serialize { json = json, pretty = config.pretty } is
-    Ok { val } -> val
-    Err { error } -> ""
+  __native_json_serialize { json = json, pretty = config.pretty }
 
 ## Serialize a `Json` tree straight to UTF-8 bytes.
 pub let to_bytes: { json: Json } -> Bytes = { json } ->
-  match __native_json_serialize_bytes { json = json, pretty = False } is
-    Ok { val } -> val
-    Err { error } -> bytes::empty {}
+  __native_json_serialize_bytes { json = json, pretty = False }
 
 ## ---- Internal helpers --------------------------------------------------
 
@@ -451,9 +451,7 @@ impl DecodeOption for JsonC having 'in = Json where {
 ## structurally correct and unblocks Tier 4.
 
 let json_to_bytes: { j: Json } -> Bytes = { j } ->
-  match __native_json_serialize_bytes { json = j, pretty = False } is
-    Ok { val } -> val
-    Err { error } -> bytes::empty {}
+  __native_json_serialize_bytes { json = j, pretty = False }
 
 impl EncodeScalar for JsonUtf8C having 'out = Bytes where {
   encode_int   = { it, val, ctx } -> json_to_bytes { j = JInt   { val = val } },

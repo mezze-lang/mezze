@@ -309,56 +309,68 @@ public final class IONatives {
     /**
      * Serialize a Json variant type to a JSON string.
      * Takes: {json: Json, pretty: Bool}
-     * Returns: Result String Error (Ok {val = string} or Err {error = {...}})
+     * Returns: the string. NOT a Result — see below.
      *
      * Uses DSL-JSON for high-performance byte-level serialization.
+     *
+     * <h2>Why this has no error channel</h2>
+     *
+     * A well-formed `Json` tree is ALWAYS serializable. The writer is an
+     * in-memory buffer, so there is no IO to fail, and the only throw in
+     * {@link DslJsonCodec#serializeValue} is its `default` arm — reached only by
+     * a value that is not a `Json` variant at all, which is a contract
+     * violation, not a datum the caller could handle.
+     *
+     * It used to return `Result`, and the catch swallowed even the
+     * NativeTypeMismatchException it had just thrown itself. The stdlib then had
+     * nowhere to put the error — `to_str`'s signature returns `Str` — so it
+     * answered `""`, and `to_bytes` answered empty bytes. A handler encoding a
+     * bad value therefore replied 200 with a ZERO-BYTE body and said nothing,
+     * which is exactly the silent wrong answer a Result is supposed to prevent.
+     * Being unable to fail is what lets the signature say so.
      */
     @TruffleBoundary
-    public static MezzeVariant jsonSerialize(MezzeRecord args) {
+    public static String jsonSerialize(MezzeRecord args) {
         Object jsonValue = getField(args, "json");
         Object prettyObj = getField(args, "pretty");
         boolean pretty = prettyObj instanceof Boolean b && b;
 
+        if (!(jsonValue instanceof MezzeVariant json)) {
+            throw new NativeTypeMismatchException(
+                "Expected 'json' to be a Json variant, got: " +
+                (jsonValue == null ? "null" : jsonValue.getClass().getSimpleName()));
+        }
         try {
-            if (!(jsonValue instanceof MezzeVariant json)) {
-                throw new NativeTypeMismatchException("Expected Json variant");
-            }
-            String result = DslJsonCodec.serializeToString(json, pretty);
-            return MezzeVariant.ok(result);
-        } catch (Exception e) {
-            MezzeRecord error = MezzeRecord.fromFields(
-                new String[]{"path", "message"},
-                new Object[]{MezzeList.empty(), "JSON serialize error: " + e.getMessage()}
-            );
-            return MezzeVariant.err(error);
+            return DslJsonCodec.serializeToString(json, pretty);
+        } catch (java.io.IOException e) {
+            // Only DslJsonCodec's `default` arm reaches here: the tree holds a
+            // constructor that is not part of `Json`. Name it rather than hide it.
+            throw new NativeTypeMismatchException("Cannot serialize as JSON: " + e.getMessage());
         }
     }
 
     /**
      * Serialize a Json variant to bytes.
      * Takes: {json: Json, pretty: Bool}
-     * Returns: Result Bytes Error
+     * Returns: the bytes. No error channel — see {@link #jsonSerialize}.
      *
      * Uses DSL-JSON for high-performance byte-level serialization.
      */
     @TruffleBoundary
-    public static MezzeVariant jsonSerializeBytes(MezzeRecord args) {
+    public static BytesNatives.MezzeBytes jsonSerializeBytes(MezzeRecord args) {
         Object jsonValue = getField(args, "json");
         Object prettyObj = getField(args, "pretty");
         boolean pretty = prettyObj instanceof Boolean b && b;
 
+        if (!(jsonValue instanceof MezzeVariant json)) {
+            throw new NativeTypeMismatchException(
+                "Expected 'json' to be a Json variant, got: " +
+                (jsonValue == null ? "null" : jsonValue.getClass().getSimpleName()));
+        }
         try {
-            if (!(jsonValue instanceof MezzeVariant json)) {
-                throw new NativeTypeMismatchException("Expected Json variant");
-            }
-            byte[] result = DslJsonCodec.serializeToBytes(json, pretty);
-            return MezzeVariant.ok(new BytesNatives.MezzeBytes(result));
-        } catch (Exception e) {
-            MezzeRecord error = MezzeRecord.fromFields(
-                new String[]{"path", "message"},
-                new Object[]{MezzeList.empty(), "JSON serialize error: " + e.getMessage()}
-            );
-            return MezzeVariant.err(error);
+            return new BytesNatives.MezzeBytes(DslJsonCodec.serializeToBytes(json, pretty));
+        } catch (java.io.IOException e) {
+            throw new NativeTypeMismatchException("Cannot serialize as JSON: " + e.getMessage());
         }
     }
 
