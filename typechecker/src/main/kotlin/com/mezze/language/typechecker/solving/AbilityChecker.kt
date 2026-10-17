@@ -7,6 +7,7 @@ import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.PrecompiledStdlib
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
@@ -1074,6 +1075,47 @@ class AbilityChecker internal constructor(
         return "$head$having$body"
     }
 
+    /** Where a blanket impl lives, and what it targets — for an import hint. */
+    private data class AbilityHome(val modulePath: String, val implTarget: String)
+
+    /**
+     * The module holding a BLANKET impl of [abilityName] — `impl X for 'a`, which
+     * covers every type — when nothing here implements it.
+     *
+     * A blanket impl is matched where the constraint is DISCHARGED: the call site,
+     * not where the function carrying the constraint was written. So a caller of
+     * `with_query`, which is constrained on `ToQuery`, was told "`{ q: Str }` does
+     * not implement 'ToQuery'. To enable this, implement: impl ToQuery for
+     * { q: Str }". Every word true, and the advice points the wrong way — the impl
+     * exists, it is simply not imported, and writing a second one is the last
+     * thing anybody should do.
+     *
+     * Only a BLANKET impl earns this message. For `Ord`, where impls are written
+     * per type, a type with no impl really does need one, and saying "import
+     * std::abilities::compare" would send the reader somewhere useless. The
+     * blanket case is the only one where "your type is already covered" is
+     * provable, and it is exactly the case the old message got wrong.
+     *
+     * Read off the resolver's parsed modules, keyed by module path, because the
+     * answer has to come from OUTSIDE the visible context by definition of the
+     * problem — and because that map is the only complete one:
+     * `PrecompiledStdlib.stdlibAbilityImpls` holds the 203 impls derivation needs
+     * and no codec Tier-4 sugar at all, and `stdlibTypedModules` has 27 of the 75.
+     */
+    private fun blanketImplHome(abilityName: String): AbilityHome? {
+        for ((modulePath, module) in ModuleResolver.getAllParsedModules()) {
+            for (decl in module.decls) {
+                if (decl !is ParsedImplAbilityDecl || decl.derived) continue
+                val target = decl.target
+                if (target !is ParsedImplTarget.Named || target.ability.localName != abilityName) continue
+                val receiver = decl.targetTypes.lastOrNull() ?: continue
+                if (receiver !is ParsedNamedType || !receiver.name.startsWith("'")) continue
+                return AbilityHome(modulePath, renderAnnotation(receiver))
+            }
+        }
+        return null
+    }
+
     internal fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: Loc? = null): String {
         val hasFunctionType = typeArgs.any { it is MezzeType.FunctionType }
         val typeNames = typeArgs.map { prettyPrintType(it) }.joinToString(", ")
@@ -1138,7 +1180,18 @@ class AbilityChecker internal constructor(
             else -> {
                 val classArgsRendered = typeArgs.drop(1).map { prettyPrintType(it) }
                 val skeleton = renderImplSkeleton(abilityName, primaryType, classArgsRendered)
-                "$typeNames does not implement '$abilityName'. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
+                // Nothing visible implements it: before saying "write an impl",
+                // check whether one already exists and is merely unimported.
+                val home = if (abilityImpls(abilityName).isEmpty()) blanketImplHome(abilityName) else null
+                if (home != null) {
+                    "$typeNames does not implement '$abilityName'. An `impl $abilityName for " +
+                        "${home.implTarget}` exists in `${home.modulePath}` but is not visible here — " +
+                        "an impl is matched where the constraint is DISCHARGED, which is this call " +
+                        "site, not where the constrained function was written. Add " +
+                        "`use ${home.modulePath}::{ $abilityName }`."
+                } else {
+                    "$typeNames does not implement '$abilityName'. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
+                }
             }
         }
     }
