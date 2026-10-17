@@ -31,9 +31,16 @@ on:
       version:
         description: 'Version to build (e.g. 0.1.0), without a leading v'
         required: true
+      only:
+        description: 'Limit a verify run to one platform group: windows | unix | (blank = all)'
+        required: false
+        default: ''
 
 jobs:
   build:
+    # The linux + macOS matrix. Skipped when a verify dispatch targets only
+    # Windows; always runs on a tag push (inputs.only is empty there).
+    if: github.event.inputs.only != 'windows'
     strategy:
       fail-fast: false
       matrix:
@@ -98,6 +105,8 @@ jobs:
   # Visual Studio build environment on windows runners. This is the least-proven
   # platform; expect the first real run to need iteration.
   build-windows:
+    # Skipped when a verify dispatch targets only unix; always runs on a tag push.
+    if: github.event.inputs.only != 'unix'
     runs-on: windows-latest
     steps:
       - name: Check out the toolchain
