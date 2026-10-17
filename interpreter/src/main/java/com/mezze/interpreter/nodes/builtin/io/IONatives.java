@@ -833,18 +833,42 @@ public final class IONatives {
         }
     }
 
+    /**
+     * Build a client from an `HttpConfig`.
+     *
+     * Six of `HttpConfig`'s seven fields are client-level in Helidon and used to
+     * be ignored here: the builder hardcoded a 10s connect timeout, redirects on,
+     * ten of them, and nothing else. A config that is accepted and then dropped
+     * is worse than one that is not offered, so all seven are honoured now —
+     * `timeout_ms` is the read timeout, applied per request where a request may
+     * still override it.
+     *
+     * `config` is optional. Absent, the defaults match `default_http_config`.
+     */
     @TruffleBoundary
     public static Object httpClientCreate(MezzeRecord args) {
-        // Sensible defaults at client level; per-request fields can
-        // override timeout. follow_redirects / max_redirects could also
-        // be made client-level but for now match the per-request style
-        // of the prior native.
-        WebClient client = WebClient.builder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(true)
-            .maxRedirects(10)
-            .build();
-        return new HttpClient(client);
+        Object configObj = getField(args, "config");
+        MezzeRecord config = (configObj instanceof MezzeRecord c) ? c : MezzeRecord.empty();
+
+        var builder = WebClient.builder()
+            .connectTimeout(Duration.ofMillis(getIntOrDefault(config, "connect_timeout_ms", 10000)))
+            .followRedirects(getBoolOrDefault(config, "follow_redirects", true))
+            .maxRedirects(getIntOrDefault(config, "max_redirects", 10))
+            .keepAlive(getBoolOrDefault(config, "keep_alive", true));
+
+        if (!getBoolOrDefault(config, "verify_ssl", true)) {
+            // Deliberately insecure, and only on request: a self-signed
+            // development endpoint is the case this exists for.
+            builder.tls(io.helidon.common.tls.Tls.builder().trustAll(true).build());
+        }
+        if (!getBoolOrDefault(config, "auto_decompress", true)) {
+            // Discovered content encoders are what decompress a response body;
+            // without them the body arrives exactly as it was sent.
+            builder.contentEncoding(io.helidon.http.encoding.ContentEncodingContext.builder()
+                .contentEncodingsDiscoverServices(false)
+                .build());
+        }
+        return new HttpClient(builder.build());
     }
 
     @TruffleBoundary

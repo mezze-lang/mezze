@@ -85,7 +85,7 @@ effect HttpClient where {
 ## Connection-pooling HTTP client (scoped -- creates/closes client per handler).
 impl HttpClient for PooledHttpClient where {
   initialize_scope = {} -> do
-    let client = __native_http_client_create {}
+    let client = __native_http_client_create { config = default_http_config }
     { client = client },
   finalize_scope = {} -> do
     __native_http_client_close { client = scope.client }
@@ -95,31 +95,40 @@ impl HttpClient for PooledHttpClient where {
 }
 
 ## Connection-pooling HTTP client with a fixed config override.
-impl HttpClient for PooledHttpClientWith { config: HttpConfig } where {
+##
+## The field is `overrides`, not `config`. The operation's own parameter is
+## named `config`, and inside the operation body that parameter SHADOWS a
+## performer field of the same name — so a field called `config` was dead and
+## the override silently did not happen. The name also says what the value
+## does: these WIN over whatever the call site passed, which is the point of
+## fixing a config on the performer. A call site that wants to decide per
+## request uses `PooledHttpClient` and `send_with`.
+impl HttpClient for PooledHttpClientWith { overrides: HttpConfig } where {
   initialize_scope = {} -> do
-    let client = __native_http_client_create {}
+    let client = __native_http_client_create { config = overrides }
     { client = client },
   finalize_scope = {} -> do
     __native_http_client_close { client = scope.client }
     {},
   request = { req, config } ->
-    __native_http_request { req = req, config = config, client = scope.client },
+    __native_http_request { req = req, config = overrides, client = scope.client },
 }
 
 ## Simple HTTP client that creates a new connection per request.
 impl HttpClient for SimpleHttpClient where {
   request = { req, config } -> do
-    let client = __native_http_client_create {}
+    let client = __native_http_client_create { config = config }
     let result = __native_http_request { req = req, config = config, client = client }
     __native_http_client_close { client = client }
     result
 }
 
-## Simple HTTP client with a fixed config override.
-impl HttpClient for SimpleHttpClientWith { config: HttpConfig } where {
+## Simple HTTP client with a fixed config override. See
+## `PooledHttpClientWith` for why the field is `overrides`.
+impl HttpClient for SimpleHttpClientWith { overrides: HttpConfig } where {
   request = { req, config } -> do
-    let client = __native_http_client_create {}
-    let result = __native_http_request { req = req, config = config, client = client }
+    let client = __native_http_client_create { config = overrides }
+    let result = __native_http_request { req = req, config = overrides, client = client }
     __native_http_client_close { client = client }
     result
 }
