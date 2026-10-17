@@ -9,8 +9,14 @@ import kotlin.test.assertTrue
  *
  * `serve` hands the guest a `stop`, and a guest may never call it — a crash, an
  * interrupted `mez dev`, a test that forgot. Without the context-dispose
- * backstop that leaves a bound port and a pool of workers parked on a queue, and
- * nothing in the suite would notice until something ran out of threads.
+ * backstop that leaves a listener holding a port for as long as the process
+ * lives, and nothing in the suite would notice.
+ *
+ * The handler used to run on a pool of Truffle-owned workers, and this file
+ * asserted the pool was retired. It now runs on Helidon's own connection
+ * threads, so there is no pool and that assertion would pass whatever the code
+ * did. What still has to hold — and is what mattered all along — is that the
+ * SOCKET is released, so that is what is checked here.
  */
 class HttpServerLifecycleTest {
 
@@ -26,14 +32,8 @@ class HttpServerLifecycleTest {
         let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
     """.trimIndent()
 
-    @Test
-    fun `a server nobody stops does not leak its workers past the context`() {
-        // Each run starts a server and walks away without stopping it. The
-        // worker threads are named by Truffle and parked on the queue; if the
-        // context's dispose hook did not retire them, this would pile up two per
-        // iteration and the count would climb monotonically.
-        val before = Thread.getAllStackTraces().size
-        repeat(12) {
+    private fun serveAndWalkAway(): Int =
+        (
             MezzeTestHelper.run(
                 """
                 $head
@@ -43,15 +43,43 @@ class HttpServerLifecycleTest {
                     h.port
                 go {}
                 """.trimIndent(),
-            )
+            ) as Long
+            ).toInt()
+
+    @Test
+    fun `a server nobody stops releases its port when the context goes`() {
+        val port = serveAndWalkAway()
+        assertTrue(port > 0, "the OS should have chosen a port, got $port")
+
+        // Closing a listener is not instant, so retry briefly rather than
+        // racing it. If dispose never closed it, no amount of waiting helps.
+        var reclaimed = false
+        for (attempt in 1..40) {
+            try {
+                java.net.ServerSocket(port).close()
+                reclaimed = true
+                break
+            } catch (_: java.io.IOException) {
+                Thread.sleep(50)
+            }
         }
-        // Give the interrupts a moment to land; thread teardown is not instant.
+        assertTrue(
+            reclaimed,
+            "port $port was still bound 2s after the context that opened it was disposed",
+        )
+    }
+
+    @Test
+    fun `repeated unstopped servers do not pile up threads`() {
+        // Helidon starts threads of its own per server. Twelve servers nobody
+        // stops should not leave twelve servers' worth of them behind.
+        val before = Thread.getAllStackTraces().size
+        repeat(12) { serveAndWalkAway() }
         Thread.sleep(500)
         val after = Thread.getAllStackTraces().size
         assertTrue(
             after - before < 24,
-            "12 unstopped servers at 2 workers each should not leave 24 threads behind; " +
-                "threads went $before -> $after",
+            "12 unstopped servers should not leave 24 threads behind; threads went $before -> $after",
         )
     }
 }

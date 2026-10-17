@@ -11,7 +11,8 @@ import kotlin.test.assertTrue
  * Everything else in the server story is exercised without one — routing and
  * handlers are pure, so a `Request` value is the whole test seam. These tests
  * cover the one part that a value cannot stand in for: a request that arrives
- * over TCP, is answered by guest code on a worker thread, and comes back.
+ * over TCP, is answered by guest code on the connection's own thread, and comes
+ * back.
  *
  * Each test binds port 0 and reads the chosen port off the handle, so no test
  * reserves a port another one might want.
@@ -75,6 +76,39 @@ class HelidonHttpServerTest {
             """.trimIndent(),
         )
         assertEquals("42", r, "the path parameter made it through the socket and back")
+    }
+
+    @Test
+    fun `a one-handler-at-a-time server answers request after request`() {
+        // `workers = 1` means a single in-flight permit, taken before the
+        // handler runs and returned after. If it were ever not returned, the
+        // second request would wait out the admission timeout and come back a
+        // 503 instead of its body — so four in a row passing is what says the
+        // permit is balanced.
+        val r = MezzeTestHelper.run(
+            """
+            $head
+            $fetch
+            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1 }
+            let app = otherwise {
+              routes = route { method = Get, path = "/users/:id",
+                handler = { m } -> reply { code = 200, text = m.param_or { name = "id", default = "?" }, url = m.req.url } },
+              fallback = not_found,
+            }
+            let go: {} -> Str <*> = {} ->
+              perform HelidonHttpServerWith { config = one_at_a_time } in
+                perform SimpleHttpClient in do
+                  let h = HttpServer.serve { handler = app }
+                  let a = fetch { url = ${url("/users/1")} }
+                  let b = fetch { url = ${url("/users/2")} }
+                  let c = fetch { url = ${url("/users/3")} }
+                  let d = fetch { url = ${url("/users/4")} }
+                  h.stop {}
+                  "$(a)$(b)$(c)$(d)"
+            go {}
+            """.trimIndent(),
+        )
+        assertEquals("1234", r, "every request got its own body back, so the permit came back each time")
     }
 
     @Test

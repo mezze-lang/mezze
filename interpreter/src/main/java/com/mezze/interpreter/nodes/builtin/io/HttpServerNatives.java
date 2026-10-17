@@ -9,6 +9,7 @@ import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.TruffleContext;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
@@ -17,13 +18,9 @@ import io.helidon.webserver.http.ServerRequest;
 import io.helidon.webserver.http.ServerResponse;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -32,39 +29,54 @@ import java.util.concurrent.TimeUnit;
  * Backed by Helidon WebServer 4 (Níma): the same stack the client half already
  * uses, Loom-native, one virtual thread per connection, no Netty.
  *
- * <h2>Why a queue and a worker pool</h2>
+ * <h2>The handler runs on Helidon's own thread</h2>
  *
- * Helidon owns the threads that accept connections and read requests. Those
- * threads are NOT entered into the Truffle context, so guest code must not run
- * on them — and nor may a guest VALUE be built there. So the two worlds are kept
- * strictly apart:
+ * Helidon owns the threads that accept connections and read requests, and it
+ * gives one virtual thread per CONNECTION — measured: 2,033,444 requests across
+ * exactly 64 threads under a 64-connection load. So each of those threads serves
+ * tens of thousands of requests, which is what makes it worth entering the
+ * Truffle context on them: {@code isThreadAccessAllowed} admits every thread,
+ * and the per-thread costs (registering the thread, installing the handler
+ * chain) are paid once per connection and amortise to nothing.
+ *
+ * The handler therefore runs inline: enter the context, build the Mezze
+ * {@code Request}, call the guest handler, read the {@code Response} back out,
+ * leave, write the reply.
+ *
+ * <h2>What this replaced, and what it was worth</h2>
+ *
+ * Every request used to be copied into a plain-Java {@code Job}, pushed onto a
+ * bounded queue and picked up by one of a pool of Truffle-owned workers, while
+ * the Helidon thread parked on a {@code CompletableFuture} waiting for the
+ * reply. That bought a simple invariant — no guest value on a thread Truffle
+ * does not own — at the cost of two context switches, four allocations and
+ * three copies of the request headers per request.
+ *
+ * It was the single largest cost in the server. The same Java program with and
+ * without that handoff measured 545.9k vs 444.7k req/s, and removing it here
+ * was worth, at 8 threads and 256 connections:
  *
  * <ul>
- *   <li>A Helidon thread reads the request into {@link Job} — plain Java only:
- *       strings, a {@code Map<String,String>}, a {@code byte[]} — hands it to a
- *       queue, and parks on the job's future until a reply comes back.</li>
- *   <li>A worker thread, created through {@code Env.newTruffleThreadBuilder}
- *       and therefore owned by Truffle, takes the job, builds the Mezze
- *       {@code Request} record, calls the guest handler, reads the
- *       {@code Response} back out into plain Java, and completes the future.</li>
+ *   <li>throughput 333k -> 391k req/s (+17.5%)</li>
+ *   <li>median latency 500us -> 333us (-33%)</li>
+ *   <li>43.5k -> 55.6k req/s per core (+28%), on fewer cores</li>
+ *   <li>p99 3.8ms -> 5.1ms: the one regression, see below</li>
  * </ul>
  *
- * No guest object ever crosses a thread Truffle does not own. That is the whole
- * invariant, and it is why this does not need {@code TruffleContext.enter} on a
- * foreign thread.
+ * <h2>Why there is still a concurrency bound</h2>
  *
- * <h2>Why a pool rather than a thread per request</h2>
+ * {@code workers} bounds how many handlers run at once. The pool enforced that
+ * by having exactly that many threads; inline there is no pool, so the bound is
+ * a permit count instead. It is not optional: without it all 256 connections ran
+ * handlers simultaneously and p99 went to 9.2ms, while capping it brought the
+ * tail back to 5.1ms at no cost to throughput. A lower bound trades throughput
+ * for tail — 16 permits measured 395k req/s at p99 4.6ms — so the knob is the
+ * same one it always was, and still means what its documentation says.
  *
- * A worker is a VIRTUAL thread parked on {@code queue.take()}, so an idle one
- * costs almost nothing and the pool can be large. The pool exists to pay the
- * Truffle thread-registration and context-entry cost once per worker instead of
- * once per request. A handler that blocks — one that performs an HTTP request of
- * its own, say — occupies its worker for the duration, which is why the default
- * pool is wide rather than core-count-sized.
+ * A request waits up to {@link #ADMIT_WAIT_MS} for a permit, because a burst
+ * should queue the way it used to. Sustained overload still gets a 503 the
+ * client can see rather than a hang nobody can diagnose.
  *
- * When the queue is full the request is refused with 503 instead of parking the
- * Helidon thread indefinitely: backpressure that a client can see beats a hang
- * nobody can diagnose.
  */
 public final class HttpServerNatives {
 
@@ -75,11 +87,8 @@ public final class HttpServerNatives {
     private static final int DEFAULT_WORKERS =
         Math.max(16, 2 * Runtime.getRuntime().availableProcessors());
 
-    /** Queued jobs per worker before new requests are refused with 503. */
-    private static final int QUEUE_PER_WORKER = 64;
-
-    /** How long a Helidon thread waits for a worker's reply before giving up. */
-    private static final long REPLY_TIMEOUT_MS = 120_000L;
+    /** How long a request waits for an in-flight slot before it is refused. */
+    private static final long ADMIT_WAIT_MS = 10_000L;
 
     /** Tag for the `Method` constructors — the same name-hash the guest uses.
      *  Computed lazily per name; the set is small and fixed. */
@@ -95,15 +104,11 @@ public final class HttpServerNatives {
      */
     public static final class RunningServer implements AutoCloseable {
         private final WebServer server;
-        private final BlockingQueue<Job> queue;
-        private final List<Thread> workers;
         private final int port;
         private volatile boolean stopped;
 
-        RunningServer(WebServer server, BlockingQueue<Job> queue, List<Thread> workers, int port) {
+        RunningServer(WebServer server, int port) {
             this.server = server;
-            this.queue = queue;
-            this.workers = workers;
             this.port = port;
         }
 
@@ -116,12 +121,12 @@ public final class HttpServerNatives {
         }
 
         /**
-         * Release the socket and the workers.
+         * Release the socket.
          *
          * Registered with the context so a guest that never calls `stop` — a
          * crash, an interrupted `mez dev`, a test that forgot — does not leave a
-         * bound port and a pool of parked workers behind. `stop` and this are the
-         * same operation; both are idempotent.
+         * bound port behind. `stop` and this are the same operation; both are
+         * idempotent.
          */
         @Override
         public void close() {
@@ -129,28 +134,9 @@ public final class HttpServerNatives {
         }
     }
 
-    /** One in-flight request. Plain Java by construction — see the class note. */
-    private static final class Job {
-        final String method;
-        final String target;
-        final Map<String, String> headers;
-        final byte[] body;
-        final CompletableFuture<Reply> reply = new CompletableFuture<>();
-
-        Job(String method, String target, Map<String, String> headers, byte[] body) {
-            this.method = method;
-            this.target = target;
-            this.headers = headers;
-            this.body = body;
-        }
-    }
-
     /** One handler result, on its way back to a Helidon thread. */
     private record Reply(int status, Map<String, String> headers, byte[] body) {
     }
-
-    /** The poison pill: a worker that takes this exits its loop. */
-    private static final Job STOP = new Job("", "", Map.of(), new byte[0]);
 
     // ==================== Natives ====================
 
@@ -182,27 +168,18 @@ public final class HttpServerNatives {
         HandlerChainEntry[] chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         Object scope = HandlerChainRegistry.lookupScopeVar();
 
-        BlockingQueue<Job> queue = new ArrayBlockingQueue<>(workerCount * QUEUE_PER_WORKER);
-
-        List<Thread> workers = new ArrayList<>(workerCount);
-        for (int i = 0; i < workerCount; i++) {
-            Thread worker = env.newTruffleThreadBuilder(() -> workerLoop(queue, handler, chain, scope))
-                .virtual(true)
-                .build();
-            workers.add(worker);
-        }
+        TruffleContext truffleCtx = env.getContext();
+        Semaphore inFlight = new Semaphore(workerCount);
 
         WebServer server = WebServer.builder()
             .host(host)
             .port(port)
-            .routing(rules -> rules.any((req, res) -> dispatch(queue, req, res)))
+            .routing(rules -> rules.any((req, res) ->
+                dispatch(truffleCtx, handler, chain, scope, inFlight, req, res)))
             .build();
 
-        for (Thread worker : workers) {
-            worker.start();
-        }
         server.start();
-        RunningServer running = new RunningServer(server, queue, workers, server.port());
+        RunningServer running = new RunningServer(server, server.port());
         // The guest gets a `stop`, and may never call it. The context closing is
         // the backstop: a listening socket must not outlive the program that
         // opened it.
@@ -216,7 +193,7 @@ public final class HttpServerNatives {
         return server(args).port;
     }
 
-    /** Stop the listener, then retire the workers. Idempotent. */
+    /** Stop the listener. Idempotent. */
     @TruffleBoundary
     public static MezzeRecord httpServerStop(MezzeRecord args) {
         stopServer(server(args));
@@ -229,22 +206,12 @@ public final class HttpServerNatives {
             return;
         }
         running.stopped = true;
-        // Listener first: no new job can be queued once it is down, so the
-        // poison pills below cannot be overtaken by real work.
+        // The handlers run on Helidon's own threads, so stopping the listener is
+        // the whole shutdown: there is no pool left to retire.
         try {
             running.server.stop();
         } catch (RuntimeException ignored) {
             // A server that is already down is a stop that already happened.
-        }
-        for (int i = 0; i < running.workers.size(); i++) {
-            if (!running.queue.offer(STOP)) {
-                // Queue full of work nobody will now read: interrupting is the
-                // only way left to retire the worker.
-                break;
-            }
-        }
-        for (Thread worker : running.workers) {
-            worker.interrupt();
         }
     }
 
@@ -254,54 +221,58 @@ public final class HttpServerNatives {
         throw new NativeTypeMismatchException("Expected 'server' to be a running HTTP server");
     }
 
-    // ==================== Helidon side (no guest values here) ====================
+    /** Set once per connection thread: the chain whose entries are installed
+     *  on it. Identity, not a flag, so a second server on the same thread
+     *  installs its own chain rather than inheriting the first one's. */
+    private static final ThreadLocal<HandlerChainEntry[]> INSTALLED_CHAIN = new ThreadLocal<>();
 
     /**
-     * Read one request into plain Java, queue it, wait for the reply.
+     * Run the guest handler on the calling Helidon thread.
      *
-     * Runs on a Helidon thread. Everything it touches is Java; the Mezze
-     * handler is somebody else's problem, by design.
+     * The thread is not one Truffle created, so the context is entered here.
+     * {@code isThreadAccessAllowed} admits every thread, and Helidon gives one
+     * virtual thread per CONNECTION — measured: 2,033,444 requests across 64
+     * threads — so the per-thread costs (registration, installing the handler
+     * chain) are paid once per connection and amortise to nothing, while the
+     * queue, the future and two context switches per request all disappear.
      */
-    /** Runs on a Helidon thread and is never partially evaluated. Without the
-     *  boundary, SVM analyses it as runtime-compilable and its queue and map
-     *  calls land on the blocklist, failing every user `mez build --native`. */
     @TruffleBoundary
-    private static void dispatch(BlockingQueue<Job> queue, ServerRequest req, ServerResponse res) {
-        String method = req.prologue().method().text();
-        String target = requestTarget(req);
-
-        Map<String, String> headers = new HashMap<>();
-        req.headers().forEach(h -> headers.put(h.name().toLowerCase(), h.get()));
-
-        byte[] body;
+    private static void dispatch(
+        TruffleContext truffleCtx,
+        MezzeFunction handler,
+        HandlerChainEntry[] chain,
+        Object scope,
+        Semaphore inFlight,
+        ServerRequest req,
+        ServerResponse res
+    ) {
+        // Wait for a slot rather than refusing at once: a burst should queue,
+        // which is what the job queue used to do. Sustained overload still gets
+        // a 503 the client can see instead of a hang nobody can diagnose.
         try {
-            body = req.content().hasEntity() ? req.content().as(byte[].class) : new byte[0];
-            if (body == null) body = new byte[0];
-        } catch (RuntimeException e) {
-            res.status(400).send("Could not read the request body: " + message(e));
-            return;
-        }
-
-        Job job = new Job(method, target, headers, body);
-        if (!queue.offer(job)) {
-            // Every worker is busy and the backlog is full. Say so, rather than
-            // parking this thread on a queue that is not draining.
-            res.status(503).send("The server is at capacity");
-            return;
-        }
-
-        Reply reply;
-        try {
-            reply = job.reply.get(REPLY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (!inFlight.tryAcquire(ADMIT_WAIT_MS, TimeUnit.MILLISECONDS)) {
+                res.status(503).send("The server is at capacity");
+                return;
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             res.status(503).send("The server is shutting down");
             return;
-        } catch (Exception e) {
-            res.status(500).send("The handler did not reply: " + message(e));
-            return;
         }
 
+        Object prev = truffleCtx.enter(null);
+        Reply reply;
+        try {
+            if (INSTALLED_CHAIN.get() != chain) {
+                if (scope != null) HandlerChainRegistry.restoreScopeVar(scope);
+                if (chain.length > 0) HandlerChainRegistry.installHandlerChainEntries(chain);
+                INSTALLED_CHAIN.set(chain);
+            }
+            reply = runHandler(handler, req);
+        } finally {
+            truffleCtx.leave(null, prev);
+            inFlight.release();
+        }
         res.status(reply.status());
         for (Map.Entry<String, String> h : reply.headers().entrySet()) {
             res.header(h.getKey(), h.getValue());
@@ -309,67 +280,11 @@ public final class HttpServerNatives {
         res.send(reply.body());
     }
 
-    /**
-     * The request target as the guest sees it: path, plus `?query` when there is
-     * one. Not an absolute URL — a server receives a target, not a URL, and the
-     * router's `path_of` is written for exactly this shape.
-     */
-    private static String requestTarget(ServerRequest req) {
-        String path = req.prologue().uriPath().path();
-        var query = req.prologue().query();
-        if (query.isEmpty()) return path;
-        String raw = query.rawValue();
-        return (raw == null || raw.isEmpty()) ? path : path + "?" + raw;
-    }
-
-    // ==================== Worker side (guest values live here) ====================
-
-    /**
-     * Take jobs and run the guest handler on each, until stopped.
-     *
-     * Runs on a Truffle-owned virtual thread, so calling guest code and
-     * allocating guest values are both legal here.
-     */
-    /** A worker's whole life, on a thread of its own. Same blocklist reason as
-     *  `dispatch`. */
-    @TruffleBoundary
-    private static void workerLoop(
-        BlockingQueue<Job> queue,
-        MezzeFunction handler,
-        HandlerChainEntry[] chain,
-        Object scope
-    ) {
-        boolean installed = false;
+    /** One guest handler call straight off a {@link ServerRequest}. */
+    private static Reply runHandler(MezzeFunction handler, ServerRequest req) {
         try {
-            if (scope != null) HandlerChainRegistry.restoreScopeVar(scope);
-            if (chain.length > 0) {
-                HandlerChainRegistry.installHandlerChainEntries(chain);
-                installed = true;
-            }
-            IndirectCallNode callNode = IndirectCallNode.getUncached();
-            while (true) {
-                Job job = queue.take();
-                if (job == STOP) return;
-                job.reply.complete(runHandler(handler, callNode, job));
-            }
-        } catch (InterruptedException e) {
-            // Shutdown. Nothing to report: `stop` interrupts on purpose.
-        } finally {
-            if (installed) HandlerChainRegistry.clearHandlerChain();
-        }
-    }
-
-    /**
-     * One guest handler call, in and out.
-     *
-     * A handler that raises gets a 500 carrying the message. A server that dies
-     * because one route threw is worse than a server that says what went wrong:
-     * the next request still gets served, and the message is in the response
-     * rather than only in a log the caller cannot see.
-     */
-    private static Reply runHandler(MezzeFunction handler, IndirectCallNode callNode, Job job) {
-        try {
-            Object result = callOneArg(handler, callNode, requestRecord(job));
+            Object result = callOneArg(handler, IndirectCallNode.getUncached(),
+                                       requestRecord(req));
             if (!(result instanceof MezzeRecord response)) {
                 return new Reply(500,
                     Map.of("content-type", "text/plain"),
@@ -383,22 +298,50 @@ public final class HttpServerNatives {
         }
     }
 
-    /** Build the guest `Request` for one job. */
-    private static MezzeRecord requestRecord(Job job) {
-        Map<Object, Object> headers = new HashMap<>(job.headers);
-        Object body = job.body.length == 0
+    /**
+     * The guest `Request`, built straight from Helidon.
+     *
+     * The queued path copies the headers three times — into a {@code HashMap}
+     * on the Helidon thread, into a second one in {@code requestRecord}, then
+     * into a {@code MezzeMap}. This builds the guest map once.
+     */
+    private static MezzeRecord requestRecord(ServerRequest req) {
+        Map<Object, Object> headers = new HashMap<>();
+        req.headers().forEach(h -> headers.put(h.name().toLowerCase(), h.get()));
+
+        byte[] raw;
+        try {
+            raw = req.content().hasEntity() ? req.content().as(byte[].class) : null;
+        } catch (RuntimeException e) {
+            raw = null;
+        }
+        Object body = (raw == null || raw.length == 0)
             ? MezzeVariant.none()
-            : MezzeVariant.some(new BytesNatives.MezzeBytes(job.body));
+            : MezzeVariant.some(new BytesNatives.MezzeBytes(raw));
+
         return MezzeRecord.fromFields(
             new String[]{"method", "url", "headers", "body", "timeout_ms"},
             new Object[]{
-                methodVariant(job.method),
-                job.target,
+                methodVariant(req.prologue().method().text()),
+                requestTarget(req),
                 MezzeMap.fromJavaMap(headers),
                 body,
                 MezzeVariant.none(),
             }
         );
+    }
+
+    /**
+     * The request target as the guest sees it: path, plus `?query` when there is
+     * one. Not an absolute URL — a server receives a target, not a URL, and the
+     * router's `path_of` is written for exactly this shape.
+     */
+    private static String requestTarget(ServerRequest req) {
+        String path = req.prologue().uriPath().path();
+        var query = req.prologue().query();
+        if (query.isEmpty()) return path;
+        String raw = query.rawValue();
+        return (raw == null || raw.isEmpty()) ? path : path + "?" + raw;
     }
 
     /**
