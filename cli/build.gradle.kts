@@ -477,23 +477,31 @@ graalvmNative {
                 "-O2"
             )
 
-            // Tell native-image to use the system C compiler (resolves macOS SDK
-            // headers in nix environments where cc is a clang wrapper with sysroot).
-            val resolvedCc = try {
-                ProcessBuilder("which", System.getenv("CC") ?: "cc")
-                    .start().inputStream.bufferedReader().readLine()?.trim()
-            } catch (_: Exception) { null }
-            if (resolvedCc != null) {
-                args.add("-H:CCompilerPath=$resolvedCc")
-            }
+            // C-compiler override + linker search paths are for unix/nix toolchains
+            // ONLY. On Windows, native-image must detect MSVC (cl.exe) itself — and
+            // `which cc` on a GitHub Windows runner returns the MSYS `/c/mingw64/bin/cc`,
+            // which forcing via -H:CCompilerPath makes native-image reject ("does not
+            // specify a path to an executable"). So skip the whole block on Windows.
+            val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+            if (!isWindows) {
+                // Tell native-image to use the system C compiler (resolves macOS SDK
+                // headers in nix environments where cc is a clang wrapper with sysroot).
+                val resolvedCc = try {
+                    ProcessBuilder("which", System.getenv("CC") ?: "cc")
+                        .start().inputStream.bufferedReader().readLine()?.trim()
+                } catch (_: Exception) { null }
+                if (resolvedCc != null) {
+                    args.add("-H:CCompilerPath=$resolvedCc")
+                }
 
-            // Pass library search paths to the linker (nix stores zlib etc. in /nix/store).
-            val libPaths = listOfNotNull(
-                zlibLibPath.ifEmpty { null },
-                *System.getenv("LIBRARY_PATH")?.split(":")?.filter { it.isNotEmpty() }?.toTypedArray() ?: emptyArray()
-            ).distinct()
-            for (libDir in libPaths) {
-                args.add("-H:NativeLinkerOption=-L$libDir")
+                // Pass library search paths to the linker (nix stores zlib etc. in /nix/store).
+                val libPaths = listOfNotNull(
+                    zlibLibPath.ifEmpty { null },
+                    *System.getenv("LIBRARY_PATH")?.split(":")?.filter { it.isNotEmpty() }?.toTypedArray() ?: emptyArray()
+                ).distinct()
+                for (libDir in libPaths) {
+                    args.add("-H:NativeLinkerOption=-L$libDir")
+                }
             }
 
             // Check for PGO profile file
