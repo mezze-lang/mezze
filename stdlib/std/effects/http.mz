@@ -257,12 +257,24 @@ pub let with_api_key: { req: Request, name: Str, val: Str } -> Request =
     with_auth { req = req, auth = ApiKey { name = name, val = val } }
 
 ## Decode response body as a UTF-8 string.
-pub let body_str: { resp: Response } -> Result Str Str = { resp } ->
-  bytes::to_str { b = resp.body }
+##
+## The error is an `HttpError.DecodeError`, not a bare `Str`. Every other
+## failure in this module is an `HttpError`, and this one odd `Result Str Str`
+## forced a `map_err` at each site that wanted to keep the error channel, while
+## `format_error` could not name it at all. The url it carries is the
+## response's own — the only thing that identifies which body failed to decode.
+pub let body_str: { resp: Response } -> Result Str HttpError = { resp } ->
+  map_err {
+    result = bytes::to_str { b = resp.body },
+    f = { error } -> DecodeError { url = resp.url, message = error },
+  }
 
 ## Decode response body as JSON.
+## `body_json` reads the bytes directly rather than through `body_str`: it needs
+## the raw decode message for its own `CodecDecodeError`, and `body_str` now
+## wraps that message in an `HttpError`.
 pub let body_json: { resp: Response } -> Result Json CodecDecodeError = { resp } -> do
-  match body_str { resp = resp } is
+  match bytes::to_str { b = resp.body } is
     Ok { val } -> match parse_str { s = val } is
       Ok { val = j } -> Ok { val = j }
       Err { error } -> Err {
@@ -956,11 +968,7 @@ pub let on_err
 ##
 ##   request { url }.send {}.text {}    # Result Str HttpError
 pub let text_result: { resp: Result Response HttpError } -> Result Str HttpError = { resp } ->
-  match resp is
-    Ok { val } -> match body_str { resp = val } is
-      Ok { val = s } -> Ok { val = s }
-      Err { error = msg } -> Err { error = DecodeError { url = val.url, message = msg } }
-    Err { error } -> Err { error = error }
+  flat_map { result = resp, f = { val } -> body_str { resp = val } }
 
 
 ## Decode the Ok Response body as JSON, staying inside `Result`. A network `Err`
@@ -987,24 +995,22 @@ pub let json_result: { resp: Result Response HttpError } -> Result Json HttpErro
 ##   let user: Result { name: Str } HttpError =
 ##     request { url }.send {}.from_json {}
 pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
-  # Everything flows through the generic result combinators — NEVER a
-  # hand-written `Ok { val = d } -> Ok { val = d }` re-wrap in this function. A
-  # re-wrap here drops the target-directed decode's runtime dispatch (it crashes
-  # with UnsupportedSpecialization); map_err / flat_map do the Ok pass-through
-  # inside separately-compiled generic functions where the target threads.
-  flat_map {
-    result = flat_map {
-      result = resp,
-      f = { val } -> map_err {
-        result = body_str { resp = val },
-        f = { error } -> DecodeError { url = val.url, message = error },
-      },
-    },
-    f = { val } -> map_err {
-      result = val.from_json {},
-      f = { error } -> DecodeError { url = "", message = error.message },
-    },
-  }
+  # This used to be three nested `flat_map`/`map_err` calls, under a comment
+  # forbidding a hand-written `Ok { val = d } -> Ok { val = d }` re-wrap: a
+  # re-wrap dropped the target-directed decode's dictionary and crashed with
+  # UnsupportedSpecialization, and the generic combinators threaded it because
+  # they are separately compiled. The dictionary-evidence fix settled that —
+  # need is now decided by the operation's unresolved dispatch rather than by
+  # its receiver — so the plain form works, and `HttpChainTest` runs it both
+  # ways round to say so. The combinators also had nowhere to get the url from
+  # and reported the decode failure against `""`.
+  match resp is
+    Err { error } -> Err { error = error }
+    Ok { val } -> match body_str { resp = val } is
+      Err { error } -> Err { error = error }
+      Ok { val = s } -> match s.from_json {} is
+        Ok { val = d } -> Ok { val = d }
+        Err { error } -> Err { error = DecodeError { url = val.url, message = error.message } }
 
 
 ## Chainable finishers on the `Result Response HttpError` from `.send {}`.

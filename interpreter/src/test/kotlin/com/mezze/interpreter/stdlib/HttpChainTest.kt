@@ -354,6 +354,62 @@ class HttpChainTest {
         assertEquals("https://other.com/foo", result)
     }
 
+    // =========================================================================
+    // `.from_json {}` on the Result a send returns
+    // =========================================================================
+    //
+    // `from_json_result` had no test at all. It carried a comment forbidding a
+    // hand-written `Ok { val = d } -> Ok { val = d }` re-wrap, because that
+    // used to drop the target-directed decode's runtime dispatch and crash
+    // with UnsupportedSpecialization. A rule nobody runs is a rule nobody can
+    // check, so these run it: the target type comes only from the annotation on
+    // the `let`, and reaching it at all means the dictionary threaded.
+
+    @Test
+    fun `from_json decodes the body into the type the use site asks for`() {
+        val result = eval("""
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, HttpError, request, format_error}
+            use std::collections::map
+            use std::collections::bytes
+
+            perform MockHttpClient { rules = [
+                { methods = [], url = Glob { pattern = "**" },
+                  response = Ok { val = { status = 200, headers = map::empty {},
+                    body = bytes::from_str { s = "{\"name\":\"Ada\",\"age\":36}" }, url = "http://test.com/u" } } }
+            ] } in do
+              let u: Result { name: Str, age: Int } HttpError =
+                request { url = "http://test.com/u" }.send {}.from_json {}
+              match u is
+                Ok { val } -> val.name
+                Err { error = e } -> format_error { err = e }
+        """)
+        assertEquals("Ada", result)
+    }
+
+    @Test
+    fun `from_json turns a body that is not JSON into a DecodeError naming the url`() {
+        val result = eval("""
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, HttpError, request, format_error}
+            use std::collections::map
+            use std::collections::bytes
+
+            perform MockHttpClient { rules = [
+                { methods = [], url = Glob { pattern = "**" },
+                  response = Ok { val = { status = 200, headers = map::empty {},
+                    body = bytes::from_str { s = "not json at all" }, url = "http://test.com/u" } } }
+            ] } in do
+              let u: Result { name: Str } HttpError =
+                request { url = "http://test.com/u" }.send {}.from_json {}
+              match u is
+                Ok { val } -> val.name
+                Err { error = e } -> format_error { err = e }
+        """)
+        assertTrue(
+            (result as String).contains("http://test.com/u"),
+            "a decode failure must name the url it failed on; got: ${'$'}result",
+        )
+    }
+
     // ===============================================================
     // Inline effect-op chain on `Result <T> <Err>` — static dispatch
     // ===============================================================
@@ -413,5 +469,37 @@ class HttpChainTest {
                 Err { error = _ } -> "ERR"
         """)
         assertEquals("the-body", result)
+    }
+
+    @Test
+    fun `inline chain on Result Response HttpError passes a network Err through`() {
+        // The test above used to distinguish the two impls BY TYPE: the Result
+        // impl yielded `Result Str HttpError` and the Response impl the bare
+        // `Result Str Str` that `body_str` once returned. `body_str` now
+        // returns `Result Str HttpError` too, so that distinction is gone and
+        // the test above would pass under either dispatch.
+        //
+        // This one distinguishes them by BEHAVIOUR, which does not depend on
+        // the two happening to disagree about a type. Only `impl Result
+        // Response HttpError.text` can be applied to an Err at all, and only it
+        // passes the network failure through untouched — `impl Response.text`
+        // needs a Response and has none to work with.
+        val result = eval("""
+            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, default_http_config, request, format_error}
+            use std::collections::map
+            use std::collections::bytes
+
+            perform MockHttpClient { rules = [
+                { methods = [], url = Glob { pattern = "**" },
+                  response = Err { error = ConnectionFailed { url = "http://test.com/x", reason = "refused" } } }
+            ] } in do
+              let req = request { url = "http://test.com/x" }
+              let result_text = HttpClient.request { req = req, config = default_http_config }.text {}
+              match result_text is
+                Ok  { val = s } -> s
+                Err { error = e } -> format_error { err = e }
+        """)
+        assertEquals("Connection failed to http://test.com/x: refused", result,
+            "the Result impl passes a network Err through; the Response impl could not have produced this")
     }
 }
