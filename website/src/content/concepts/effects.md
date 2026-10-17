@@ -8,7 +8,7 @@ a string: none of them carries an effect. A function arrow does, and it means
 "calling me does this".
 
 <!--mezze-code
-{ url: Str } -> Str <Http>
+{ url: Str } -> Str <HttpClient>
 -->
 
 Read that as: give me a URL, I give you a `Str`, and getting it reaches the
@@ -23,7 +23,7 @@ Bind an effectful call to a name and the name has the plain type:
 let page = fetch { url = "https://example.com" }   # page : Str
 -->
 
-`page` is a `Str`, not a `Str` carrying a network request. The `<Http>` has
+`page` is a `Str`, not a `Str` carrying a network request. The `<HttpClient>` has
 gone somewhere else, and where it goes is the whole model.
 
 ## Effects raise to the enclosing arrow
@@ -35,7 +35,7 @@ raises it again to its caller, until something handles it.
 use std::effects::log::{ Console, println }
 use std::effects::http::{ MockHttpClient, mock_get, request }
 
-# fetch reaches the network. Its arrow says so: <Http>.
+# fetch reaches the network. Its arrow says so: <HttpClient>.
 let fetch = { url } -> request { url }.send {}.text_or { def = "offline" }
 
 # The effect raises to each enclosing arrow, and to every caller.
@@ -50,7 +50,7 @@ let main = {} -> perform Console in println { msg = handled {} }
 -->
 
 Hover the four names in that editor. `inner` and `outer` both read
-`{} -> Str <Http>`, though neither mentions the network in its body: `inner`
+`{} -> Str <HttpClient>`, though neither mentions the network in its body: `inner`
 inherited the effect by calling `fetch`, and `outer` by calling `inner`. That
 is what "effects at the function boundary" means, and it is why an effect
 cannot hide. It is on every arrow between the operation and its handler.
@@ -73,7 +73,7 @@ risen to the enclosing function. There is nothing left for a handler to catch,
 and the compiler says so rather than silently doing nothing:
 
 <!--mezze-error
-error[V0510]: Handler 'MockHttpClient' handles 'Http',
+error[V0510]: Handler 'MockHttpClient' handles 'HttpClient',
 but the `perform` body performs no effect.
 -->
 
@@ -83,7 +83,7 @@ Handle an effect and the arrow keeps a mark: `<*>`. It means "effects were
 performed here, and handled here".
 
 <!--mezze-code
-let fetch   = { url } -> …            # <Http>    performs, unhandled
+let fetch   = { url } -> …            # <HttpClient>    performs, unhandled
 let handled = {} -> perform … in …    # <*>       performed and handled
 let double  = { x } -> x * 2          #           no row at all
 -->
@@ -141,7 +141,7 @@ ordinary code, and it stays honest about what is left.
 Because the handler is chosen by the caller and not by the function, the same
 code runs against different worlds. `MockHttpClient` above answers from a
 canned rule and never touches a socket, which is what makes the example
-runnable on this page. Swap it for `HttpClient` and the identical `fetch` goes
+runnable on this page. Swap it for `PooledHttpClient` and the identical `fetch` goes
 to the network.
 
 That is the practical payoff: a test supplies a different handler, not
@@ -180,7 +180,7 @@ they name and leave the rest to rise further.
 Note what the mocks buy here. `MemoryFS` holds the file in memory, so the
 example writes and reads a real file without touching your disk, and
 `MockHttpClient` answers without a socket. The same `cache` runs against
-`LocalDisk` and `HttpClient` unchanged.
+`LocalDisk` and `PooledHttpClient` unchanged.
 
 ## Your own effects
 

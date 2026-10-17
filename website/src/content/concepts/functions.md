@@ -195,7 +195,7 @@ A function's type is not only what goes in and what comes out. It also records
 what calling it *does*:
 
 <!--mezze-code
-{ url: Str } -> Str <Http>
+{ url: Str } -> Str <HttpClient>
 -->
 
 The part in angle brackets is the effect row, and it belongs to the arrow
@@ -209,13 +209,13 @@ calling it raises the effect again to the caller:
 let outer = {} -> do
   let inner = {} -> do
     fetch { url = "https://example.com" }   # performs Http, not handled here
-  # inner : {} -> Str <Http>                  raised to inner's arrow
+  # inner : {} -> Str <HttpClient>                  raised to inner's arrow
   inner {}                                  # calling inner incurs it
-# outer : {} -> Str <Http>                    raised again to outer's arrow
+# outer : {} -> Str <HttpClient>                    raised again to outer's arrow
 -->
 
 Neither `inner` nor `outer` mentions the network, and both types say
-`<Http>`. That is the guarantee: between the operation and the handler that
+`<HttpClient>`. That is the guarantee: between the operation and the handler that
 catches it, every arrow in the chain declares it.
 
 A function that performs nothing has no row at all, and that absence is worth
