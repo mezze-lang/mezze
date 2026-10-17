@@ -47,9 +47,20 @@ jobs:
         include:
           - { runner: ubuntu-latest,    asset: linux-x64 }
           - { runner: ubuntu-24.04-arm, asset: linux-arm64 }   # public-repo ARM runner
-          - { runner: macos-13,         asset: darwin-x64 }    # Intel
+          # macos-13 was RETIRED on 2025-12-04, along with -large and -xlarge.
+          # A job asking for a dead label does not fail — it queues forever, so
+          # this sat at "Waiting for a runner to pick up this job" for 4h46m and
+          # blocked `publish`, which gates on the unix builds. macos-15-intel is
+          # the replacement, and the LAST x86_64 macOS image GitHub will publish:
+          # supported to August 2027, after which hosted Intel macOS is gone and
+          # darwin-x64 needs a self-hosted box or dropping.
+          - { runner: macos-15-intel,   asset: darwin-x64 }    # Intel
           - { runner: macos-14,         asset: darwin-arm64 }  # Apple Silicon
     runs-on: ${{ matrix.runner }}
+    # A dead runner label, a hung child or a stalled download otherwise burns
+    # GitHub's 6-hour default before anyone looks. Native-image builds here take
+    # ~5 minutes; 45 is generous and still fails fast.
+    timeout-minutes: 45
     steps:
       - name: Check out the toolchain
         uses: actions/checkout@v4
@@ -108,6 +119,7 @@ jobs:
     # Skipped when a verify dispatch targets only unix; always runs on a tag push.
     if: github.event.inputs.only != 'unix'
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - name: Check out the toolchain
         uses: actions/checkout@v4
@@ -164,6 +176,7 @@ jobs:
     # verify the whole matrix on a private repo before going public.
     if: always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write          # create the Release and upload assets
     steps:
