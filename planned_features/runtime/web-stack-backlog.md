@@ -88,64 +88,64 @@ conditions are in `concurrency-and-context-bugs.md`.
 
 ## Part 2 — Performance (measured, ranked by size)
 
-### W-P1 — the JSON derivation walker, ~20%
+### W-P1 — CAUSE FOUND: an ability op on a NON-CONSTANT receiver does not inline
 
-The biggest remaining guest-side cost, on the shape most web handlers have.
-Fair comparison (both build the records first, then encode in a second pass):
+The walker's gap is **15.5%** (not 20% — that figure came from a harness that
+could not resolve it). It is now fully accounted for, and it is NOT about codecs
+at all: **an ability-method call whose receiver is a compile-time constant folds
+away; the same call on a non-constant receiver costs ~0.11% per call.** Across
+the 101 per-node calls of a 20-record payload that is 11.6%.
 
-| | req/s | per core |
+This took seven hypotheses because the harness could not see a 2% effect. Fixing
+the harness FIRST (`bench.sh`, `compare.sh` — interleaved A/B, medians, AppCDS
+untouched) brought sample spread from 3-4% down to ~1% and the answer fell out
+in six measurements.
+
+#### The ladder, each step one change, interleaved A/B
+
+| variant | req/s | delta |
 |---|---|---|
-| derived walker (`rows.to_json {}`) | 234.1k | 25.9k |
-| hand-written encode, same two passes | 281.8k | 34.1k |
+| hand-written encode, two-pass, no calls | 276.8k | — |
+| + 100 per-node calls to top-level fns | 279.9k | +1.1% (free) |
+| + a non-constant `cfg` threaded through those calls | 276.1k | −0.7% (free) |
+| + those calls as ABILITY IMPL OPS on a CONSTANT receiver | 276.9k | −0.7% (free) |
+| + the same ability ops on a PARAMETER receiver | **243.9k** | **−11.6%** |
+| the real derived walker | 233.7k | −4.2% |
 
-**Five causes DISPROVED — do not re-derive them.** Each was built as a server
-variant and measured:
+So: per-node calls are free. Threading a non-constant value through them is free.
+Ability dispatch is free WHEN THE RECEIVER IS CONSTANT. Only the combination —
+ability op + non-constant receiver — costs, and it is 3/4 of the whole gap. The
+last 4.2% is everything else in the generated body together (ctx, field
+transform, the `{it, val, ctx}` shape, Tier-3 entry), each of which measured free
+on its own.
 
-1. Per-node calls are FREE (101 calls/request: 292.1k vs 293.7k for direct
-   construction). Truffle inlines them.
-2. The field-transform match is FREE — two field reads plus a 5-way `match
-   config.shared.field_transform` per field (80/request) measured 241.2k vs
-   238.7k when replaced by the literal.
-3. The intermediate records are not it — the fair two-pass comparison above
-   still shows the gap.
-4. Wide argument records and `ctx` threading are FREE — giving hand-written
-   calls the walker's exact `{ it, val, ctx }` shape measured 285.6k.
-5. Not a fusion difference — `MEZZE_CHAIN_CANON_EMIT_DEBUG` output is IDENTICAL
-   for the walker and the hand-written version.
+#### What it is NOT (measured, do not re-derive)
 
-And three REPRESENTATION changes were measured and all lost (949-byte payload):
-tree + one native serialize **235.8k**, bytes concatenated per node 199.6k, a
-writer closure per node 149.2k (p99 44.8ms). So the gap is NOT the data shape.
+Per-node calls; the 5-way field-transform match (+0.3%); intermediate records;
+wide argument records and `ctx` (+1.4%); fusion differences (identical
+`CHAIN_CANON_EMIT_DEBUG`); the `ToJson` blanket layer (+0.1%); the encode living
+in its own function (−1.4%); dictionary indirection — that one WAS real and is
+fixed (`config` was a bare type variable; it now reads through a type-annotated
+local and resolves `opHash=DIRECT`), and fixing it changed throughput by nothing.
 
-**The lead was TESTED and is a SIXTH disproved cause.** It was real: inside the
-generated body `config` was typed as a bare type VARIABLE, not the concrete
-`JsonC`, so every `config.encode_*` went through DICTIONARY indirection — about
-101 indirect, non-inlinable calls per request. The reason is that an impl's
-`abilityTypeArgs` do not substitute into the op's declared parameter types when
-its body is typed (annotating the op's `paramType` does not help either; that
-field is validated against the ability's declared signature rather than used to
-type the body).
+#### Where to look next
 
-Fixed in `CodecGenerator` by reading the config through a type-ANNOTATED local,
-so the whole walk resolves statically — verified: `receiver=TypeApplication(JsonC)
-opHash=DIRECT` for `encode_int`/`encode_str`/`encode_record`/`encode_sequence`,
-where it had been `VarType(config) → NULL(dict path)`.
+Both call shapes emit the SAME IR node: `emitCallDirect(opHash, MakeRecordIR(…))`
+for the ability op, and a plain `CallDirect` for a top-level function. The
+typechecker resolves both to `opHash=DIRECT` for a constant AND a parameter
+receiver — verified by probe. So the difference is in the CALLEE's compiled form,
+not the call site: an impl op's target is apparently not inlined through the way
+a plain `let` function's is, and a constant receiver hides that by folding the
+call earlier.
 
-**It changed throughput by nothing.** 238.7k vs 234-236k before; per core 26.2k
-vs 25.9-26.1k. Kept for the structural reason (a generated body that cannot see
-its own config's type is a latent dictionary hazard, and static resolution is the
-direction the rest of the compiler goes), NOT as a performance fix.
+Next step is Truffle-level, not language-level: dump the compilation
+(`--engine.TraceInlining`, `--engine.TraceCompilation`) for the two shapes and
+find why a `CallDirect` to an impl op is not inlined with a non-constant
+receiver. Suspect a lazy stub between the caller and the op body
+(cf. `LazyStubRootNode`).
 
-**So the 20% is still unexplained after six hypotheses.** Every individual layer
-that was removed — the calls, the dispatch, the field transform, the argument
-width, the intermediate, the representation — turned out to be free. The
-remaining shape of the thing is that no SINGLE layer accounts for it, which
-points at the inlining budget across the whole chain (handler → to_json → encode
-→ generated impl → seq_map lambda → encode_record → encode_str). Testing that
-needs a harness that holds the AppCDS archive constant: dropping
-`-XX:SharedArchiveFile` alone moved this benchmark 238.7k → 196.3k, which is
-larger than the effect being measured, and is what made a first attempt
-unreadable.
+**This is a LANGUAGE-WIDE finding, not a codec one.** Any hot loop calling
+ability methods on a non-constant receiver pays it — which is most generic code.
 
 ### W-P2 — CLOSED: ~4% spread thin, and the 11.7% figure was partly drift
 
