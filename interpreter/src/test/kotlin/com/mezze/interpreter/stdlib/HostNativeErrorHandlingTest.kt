@@ -33,7 +33,7 @@ class HostNativeErrorHandlingTest {
     fun setUp() {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.language.typechecker.TypeChecker.clearCache()
-        com.mezze.interpreter.nodes.builtin.effects.MemoryFilesystemNatives.clear()
+        // MemoryFS is per context now; a fresh program starts empty.
     }
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)

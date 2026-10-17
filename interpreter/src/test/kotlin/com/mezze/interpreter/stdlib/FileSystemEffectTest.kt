@@ -19,10 +19,11 @@ class FileSystemEffectTest {
     fun setUp() {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.language.typechecker.TypeChecker.clearCache()
-        // Clear MemoryFS state between tests — go straight to the Java
-        // native (the __native_memfs_clear op has no stdlib wrapper since
-        // it exists only for test isolation).
-        com.mezze.interpreter.nodes.builtin.effects.MemoryFilesystemNatives.clear()
+        // MemoryFS state needs no clearing between tests: it is per CONTEXT
+        // now, and every `MezzeTestHelper.run` is its own context, so each
+        // program starts with an empty filesystem. The old call went straight
+        // to the Java native from JUnit's thread, which no longer has a
+        // context to clear.
     }
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)

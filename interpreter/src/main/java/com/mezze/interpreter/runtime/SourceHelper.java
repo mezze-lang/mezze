@@ -28,6 +28,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * are VM-level and context-independent, so sharing them across Contexts is
  * what Truffle already does internally when two builders agree.
  *
+ * <p>So this cache is one of the FEW statics in the runtime that is meant to be
+ * one: the 2026-10 sweep that moved the in-memory filesystem, the HTTP mock
+ * table, the draw log and the inner polyglot contexts onto
+ * {@code MezzeContext.nativeState} deliberately left it alone. Per-context
+ * Sources would give each Context its own identity for the same file, which is
+ * precisely the defect described above, with the debugger as the casualty. The
+ * cache is bounded by the number of distinct paths a program touches.
+ *
  * #391 — enables TruffleCompiler.kt deletion.
  */
 public final class SourceHelper {

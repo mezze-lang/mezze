@@ -36,24 +36,62 @@ public final class MemoryFilesystemNatives {
         }
     }
 
-    private static final ConcurrentHashMap<String, Entry> files = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories = new ConcurrentHashMap<>();
+    /**
+     * One in-memory filesystem PER CONTEXT.
+     *
+     * These were static, so every Context on the Engine shared one filesystem:
+     * two programs that never heard of each other saw each other's writes, and
+     * nothing ever freed the bytes. A filesystem belongs to the program that
+     * writes to it.
+     */
+    private static final class State {
+        final ConcurrentHashMap<String, Entry> files = new ConcurrentHashMap<>();
+        final ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories =
+            new ConcurrentHashMap<>();
+        /** Mock clock, also per context — a test that advances time must not
+         *  move another program's clock. */
+        final AtomicLong nowMs = new AtomicLong(0);
 
-    private static final AtomicLong nowMs = new AtomicLong(0);
+        State() {
+            // `directories`, not `directories()`: this IS the state being built,
+            // and the accessor would come straight back here for it.
+            directories.put("/", ConcurrentHashMap.newKeySet());
+        }
+    }
 
-    static {
-        directories.put("/", ConcurrentHashMap.newKeySet());
+    private static State state() {
+        return com.mezze.interpreter.runtime.MezzeContext.get(null)
+            .nativeState(State.class, State::new);
+    }
+
+    private static ConcurrentHashMap<String, Entry> files() {
+        return state().files;
+    }
+
+    private static ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories() {
+        return state().directories;
+    }
+
+    private static AtomicLong nowMs() {
+        return state().nowMs;
     }
 
     /**
-     * Clear the in-memory filesystem — used by tests for isolation.
-     * Registered as {@code __native_memfs_clear} in NativeDispatch.
+     * Clear THIS context's in-memory filesystem. Registered as
+     * {@code __native_memfs_clear} in NativeDispatch.
+     *
+     * Tests used to call this from their `setUp`, straight to the Java method,
+     * because the filesystem was static and one test's files were every test's
+     * files. The state is per context now, so a fresh program starts empty and
+     * that call is both unnecessary and impossible — there is no context to
+     * clear from JUnit's own thread, and asking for one there fails loudly
+     * rather than silently clearing nothing.
      */
     @TruffleBoundary
     public static void clear() {
-        files.clear();
-        directories.clear();
-        directories.put("/", ConcurrentHashMap.newKeySet());
+        files().clear();
+        directories().clear();
+        directories().put("/", ConcurrentHashMap.newKeySet());
     }
 
     // ==================== Path normalization ====================
@@ -79,8 +117,8 @@ public final class MemoryFilesystemNatives {
         return path.substring(i + 1);
     }
 
-    private static boolean isFile(String p) { return files.containsKey(p); }
-    private static boolean isDir(String p)  { return directories.containsKey(p); }
+    private static boolean isFile(String p) { return files().containsKey(p); }
+    private static boolean isDir(String p)  { return directories().containsKey(p); }
 
     // ==================== FileHandle (in-memory) ====================
 
@@ -110,7 +148,7 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object readBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        Entry e = files.get(path);
+        Entry e = files().get(path);
         if (e == null) {
             return isDir(path) ? errIO(path, "Is a directory") : errNotFound(path);
         }
@@ -124,8 +162,8 @@ public final class MemoryFilesystemNatives {
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
         if (isDir(path)) return errIO(path, "Is a directory");
-        files.put(path, new Entry(bytes.getData()));
-        directories.get(parent).add(basenameOf(path));
+        files().put(path, new Entry(bytes.getData()));
+        directories().get(parent).add(basenameOf(path));
         return ok(MezzeRecord.empty());
     }
 
@@ -137,7 +175,7 @@ public final class MemoryFilesystemNatives {
         if (isDir(path)) {
             return ok(fileStatRecord("Directory", 0L, 0L));
         }
-        Entry e = files.get(path);
+        Entry e = files().get(path);
         if (e == null) {
             return ok(fileStatRecord("NotFound", 0L, 0L));
         }
@@ -147,7 +185,7 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object list(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        var children = directories.get(path);
+        var children = directories().get(path);
         if (children == null) {
             return isFile(path) ? errNotADirectory(path) : errNotFound(path);
         }
@@ -158,7 +196,7 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object listWithStat(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        var children = directories.get(path);
+        var children = directories().get(path);
         if (children == null) {
             return isFile(path) ? errNotADirectory(path) : errNotFound(path);
         }
@@ -169,7 +207,7 @@ public final class MemoryFilesystemNatives {
             if (isDir(childPath)) {
                 stat = fileStatRecord("Directory", 0L, 0L);
             } else {
-                Entry e = files.get(childPath);
+                Entry e = files().get(childPath);
                 if (e == null) continue;  // race with delete; skip
                 stat = fileStatRecord("File", (long) e.bytes.length, e.modifiedMs);
             }
@@ -184,16 +222,16 @@ public final class MemoryFilesystemNatives {
     public static Object delete(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
         if (isDir(path)) {
-            var children = directories.get(path);
+            var children = directories().get(path);
             if (children != null && !children.isEmpty()) return errNotEmpty(path);
-            directories.remove(path);
+            directories().remove(path);
         } else if (isFile(path)) {
-            files.remove(path);
+            files().remove(path);
         } else {
             return errNotFound(path);
         }
         String parent = parentOf(path);
-        var parentChildren = directories.get(parent);
+        var parentChildren = directories().get(parent);
         if (parentChildren != null) {
             parentChildren.remove(basenameOf(path));
         }
@@ -206,8 +244,8 @@ public final class MemoryFilesystemNatives {
         if (isDir(path) || isFile(path)) return errAlreadyExists(path);
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
-        directories.put(path, ConcurrentHashMap.newKeySet());
-        directories.get(parent).add(basenameOf(path));
+        directories().put(path, ConcurrentHashMap.newKeySet());
+        directories().get(parent).add(basenameOf(path));
         return ok(MezzeRecord.empty());
     }
 
@@ -215,7 +253,7 @@ public final class MemoryFilesystemNatives {
     public static Object copyFile(MezzeRecord args) {
         String src = normalize(getString(args, "src"));
         String dest = normalize(getString(args, "dest"));
-        Entry srcEntry = files.get(src);
+        Entry srcEntry = files().get(src);
         if (srcEntry == null) {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
@@ -225,8 +263,8 @@ public final class MemoryFilesystemNatives {
         // MemoryFS is a byte-array copy — no kernel path, but still
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
-        files.put(dest, new Entry(srcEntry.bytes.clone()));
-        directories.get(destParent).add(basenameOf(dest));
+        files().put(dest, new Entry(srcEntry.bytes.clone()));
+        directories().get(destParent).add(basenameOf(dest));
         return ok(MezzeRecord.empty());
     }
 
@@ -234,18 +272,18 @@ public final class MemoryFilesystemNatives {
     public static Object moveFile(MezzeRecord args) {
         String src = normalize(getString(args, "src"));
         String dest = normalize(getString(args, "dest"));
-        Entry srcEntry = files.get(src);
+        Entry srcEntry = files().get(src);
         if (srcEntry == null) {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
         if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
         if (!isDir(destParent)) return errNotFound(destParent);
-        files.put(dest, srcEntry);
-        files.remove(src);
+        files().put(dest, srcEntry);
+        files().remove(src);
         String srcParent = parentOf(src);
-        directories.get(srcParent).remove(basenameOf(src));
-        directories.get(destParent).add(basenameOf(dest));
+        directories().get(srcParent).remove(basenameOf(src));
+        directories().get(destParent).add(basenameOf(dest));
         return ok(MezzeRecord.empty());
     }
 
@@ -272,7 +310,7 @@ public final class MemoryFilesystemNatives {
                 String parentA = parentOf(path);
                 if (!isDir(parentA)) return errNotFound(parentA);
                 h.writeBuf = new ByteArrayOutputStream();
-                Entry existing = files.get(path);
+                Entry existing = files().get(path);
                 if (existing != null) {
                     try {
                         h.writeBuf.write(existing.bytes);
@@ -292,7 +330,7 @@ public final class MemoryFilesystemNatives {
         long maxBytes = getLong(args, "max_bytes");
         if (h.closed.get()) return errClosedHandle(h.path);
         if (!"Read".equals(h.mode)) return errIO(h.path, "Handle not opened for reading");
-        Entry e = files.get(h.path);
+        Entry e = files().get(h.path);
         if (e == null) return errNotFound(h.path);
         if (h.pos >= e.bytes.length) return ok(new MezzeBytes(new byte[0]));
         int cap = (int) Math.min(maxBytes, e.bytes.length - h.pos);
@@ -326,8 +364,8 @@ public final class MemoryFilesystemNatives {
             byte[] finalBytes = h.writeBuf.toByteArray();
             String parent = parentOf(h.path);
             if (isDir(parent)) {
-                files.put(h.path, new Entry(finalBytes));
-                directories.get(parent).add(basenameOf(h.path));
+                files().put(h.path, new Entry(finalBytes));
+                directories().get(parent).add(basenameOf(h.path));
             }
         }
         return ok(MezzeRecord.empty());

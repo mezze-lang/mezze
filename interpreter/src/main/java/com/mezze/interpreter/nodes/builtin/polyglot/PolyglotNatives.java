@@ -292,10 +292,40 @@ public final class PolyglotNatives {
     // guest object is bound to the inner context and would die on close, so scalar
     // return is the proven path here; a persistent-context foreign-returning verb
     // set is layered on separately.
-    private static final java.util.concurrent.ConcurrentHashMap<Long, com.oracle.truffle.api.TruffleContext>
-        INNER_CONTEXTS = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final java.util.concurrent.atomic.AtomicLong INNER_CTX_IDS =
-        new java.util.concurrent.atomic.AtomicLong(1);
+    //
+    // The registry is PER CONTEXT and closes what is left in it when that context
+    // is disposed. It used to be static: an inner context whose `close_context`
+    // never ran — a guest that raised, a scope torn down early — stayed open for
+    // the life of the process, holding a whole language context, and its id was
+    // visible to every other Context on the Engine. A context opened by one
+    // program is that program's to close.
+    private static final class InnerContexts implements AutoCloseable {
+        final java.util.concurrent.ConcurrentHashMap<Long, com.oracle.truffle.api.TruffleContext> byId =
+            new java.util.concurrent.ConcurrentHashMap<>();
+        final java.util.concurrent.atomic.AtomicLong nextId =
+            new java.util.concurrent.atomic.AtomicLong(1);
+
+        /** Close every inner context the guest left open. */
+        @Override
+        public void close() {
+            for (java.util.Iterator<com.oracle.truffle.api.TruffleContext> it = byId.values().iterator();
+                    it.hasNext();) {
+                com.oracle.truffle.api.TruffleContext ctx = it.next();
+                it.remove();
+                try {
+                    ctx.close();
+                } catch (Throwable t) {
+                    // One stuck inner context must not strand the others.
+                    System.err.println("[mezze] inner polyglot context did not close: "
+                        + (t.getMessage() != null ? t.getMessage() : t.getClass().getName()));
+                }
+            }
+        }
+    }
+
+    private static InnerContexts innerContexts() {
+        return MezzeContext.get(null).nativeState(InnerContexts.class, InnerContexts::new);
+    }
 
     private static MezzePolyglotSupport.ExecConfig execConfigOf(MezzeRecord args) {
         return new MezzePolyglotSupport.ExecConfig(
@@ -312,8 +342,8 @@ public final class PolyglotNatives {
         try {
             MezzePolyglotSupport support = MezzeContext.get(currentNode).getPolyglotSupport();
             com.oracle.truffle.api.TruffleContext ctx = support.openContext(lang, execConfigOf(args));
-            long id = INNER_CTX_IDS.getAndIncrement();
-            INNER_CONTEXTS.put(id, ctx);
+            long id = innerContexts().nextId.getAndIncrement();
+            innerContexts().byId.put(id, ctx);
             return new MezzeForeign(Long.valueOf(id), lang);
         } catch (Throwable t) {
             return MezzeForeign.errored(translateException(t), lang);
@@ -335,7 +365,7 @@ public final class PolyglotNatives {
         String source = getString(args, "source");
         String lang = handle.getSourceLanguage();
         Long cid = (Long) handle.getDelegate();
-        com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get(cid);
+        com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.get(cid);
         if (ctx == null) return MezzeForeign.errored(errorTypeError("eval_in: context is closed or invalid"), lang);
         try {
             // evalPublic enters `ctx` itself; the raw guest result is tagged with `cid`
@@ -361,7 +391,7 @@ public final class PolyglotNatives {
         byte[] data = getBytes(args, "bytes");
         String lang = handle.getSourceLanguage();
         Long cid = (Long) handle.getDelegate();
-        com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get(cid);
+        com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.get(cid);
         if (ctx == null) return MezzeForeign.errored(errorTypeError("eval_bytes_in: context is closed or invalid"), lang);
         try {
             MezzePolyglotSupport support = MezzeContext.get(currentNode).getPolyglotSupport();
@@ -398,7 +428,7 @@ public final class PolyglotNatives {
         MezzeForeign recv = peekForeign(args);
         Long cid = recv == null ? null : recv.getInnerContextId();
         if (cid == null) return op.run();
-        com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.get(cid);
+        com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.get(cid);
         if (ctx == null) return op.run();
         Object prev = ctx.enter(node);
         try {
@@ -414,7 +444,7 @@ public final class PolyglotNatives {
     public static MezzeVariant closeContext(MezzeRecord args) {
         MezzeForeign handle = asForeign(args);
         try {
-            com.oracle.truffle.api.TruffleContext ctx = INNER_CONTEXTS.remove((Long) handle.getDelegate());
+            com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.remove((Long) handle.getDelegate());
             if (ctx != null) ctx.close();
             return MezzeVariant.ok(MezzeRecord.empty());
         } catch (Throwable t) {

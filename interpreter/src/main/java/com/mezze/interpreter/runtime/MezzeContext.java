@@ -55,6 +55,42 @@ public final class MezzeContext {
         onDispose.addFirst(resource);
     }
 
+    // ── Per-context state for natives ───────────────────────────────────
+    //
+    // A native is a static method, so its state used to be static too — and the
+    // interpreter runs many Contexts on one Engine, so that state crossed them.
+    // An in-memory filesystem shared by every program, HTTP mock responses from
+    // one test answering another's request, a draw log that only ever grew.
+    // Worse than the growth is the ISOLATION: two programs that never heard of
+    // each other saw each other's writes.
+    //
+    // This gives a native one state object per context, created on first use. If
+    // that object is AutoCloseable it is registered for dispose as well, so a
+    // native holding something live — an inner polyglot context, a socket — hands
+    // it back without a second registration step to forget.
+    private final ConcurrentHashMap<Class<?>, Object> nativeState = new ConcurrentHashMap<>();
+
+    /**
+     * Deliberately NOT `computeIfAbsent`: [create] runs OUTSIDE the map, because
+     * a state object's own constructor may well reach back for its state —
+     * MemoryFS's does, to seed the root directory — and ConcurrentHashMap
+     * answers a mapping function that touches the same map with "Recursive
+     * update". Losing the race is cheap: the loser's object is simply dropped,
+     * never registered, never seen.
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T nativeState(Class<T> key, java.util.function.Supplier<T> create) {
+        Object existing = nativeState.get(key);
+        if (existing != null) return (T) existing;
+        T made = create.get();
+        Object winner = nativeState.putIfAbsent(key, made);
+        if (winner != null) return (T) winner;
+        if (made instanceof AutoCloseable closeable) {
+            registerForDispose(closeable);
+        }
+        return made;
+    }
+
     /**
      * Close everything registered, newest first. A failure to close one does not
      * stop the rest — a half-torn-down context is worse than a noisy one — but it

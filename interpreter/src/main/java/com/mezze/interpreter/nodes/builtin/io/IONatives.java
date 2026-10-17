@@ -427,7 +427,22 @@ public final class IONatives {
 
     // ==================== HTTP Mock ====================
 
-    private static final Map<String, Object> mockResponses = new ConcurrentHashMap<>();
+    /**
+     * The mock response table, PER CONTEXT.
+     *
+     * It was static, and the values are guest `Response` records — so one
+     * program's mock answered another program's request, and the records were
+     * held for the life of the process. A mock belongs to the program that set
+     * it up.
+     */
+    private static final class MockState {
+        final Map<String, Object> responses = new ConcurrentHashMap<>();
+    }
+
+    private static Map<String, Object> mockResponses() {
+        return com.mezze.interpreter.runtime.MezzeContext.get(null)
+            .nativeState(MockState.class, MockState::new).responses;
+    }
 
     @TruffleBoundary
     public static Object httpMockRequest(MezzeRecord args) {
@@ -497,7 +512,7 @@ public final class IONatives {
 
     private static Object httpMockRequestByMethodUrl(String method, String url) {
         String key = method + ":" + url;
-        Object mockResponse = mockResponses.get(key);
+        Object mockResponse = mockResponses().get(key);
         if (mockResponse != null) {
             return createOk(mockResponse);
         }
@@ -711,13 +726,13 @@ public final class IONatives {
         String method = getString(args, "method");
         String url = getString(args, "url");
         Object response = getField(args, "response");
-        mockResponses.put(method + ":" + url, response);
+        mockResponses().put(method + ":" + url, response);
         return MezzeRecord.empty();
     }
 
     @TruffleBoundary
     public static MezzeRecord httpMockClear(MezzeRecord args) {
-        mockResponses.clear();
+        mockResponses().clear();
         return MezzeRecord.empty();
     }
 

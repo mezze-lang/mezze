@@ -25,16 +25,30 @@ public final class DrawLogNatives {
 
     private DrawLogNatives() {}
 
-    private static final ConcurrentHashMap<Long, List<Long>> LOGS = new ConcurrentHashMap<>();
+    /**
+     * Draw logs PER CONTEXT.
+     *
+     * Static, keyed by run id, and never cleared: every shrink of every property
+     * in the process accumulated here, and two Contexts picking the same run id
+     * appended to one list. A run's log belongs to the run's context.
+     */
+    private static final class State {
+        final ConcurrentHashMap<Long, List<Long>> logs = new ConcurrentHashMap<>();
+    }
+
+    private static ConcurrentHashMap<Long, List<Long>> logs() {
+        return com.mezze.interpreter.runtime.MezzeContext.get(null)
+            .nativeState(State.class, State::new).logs;
+    }
 
     private static List<Long> log(long key) {
-        return LOGS.computeIfAbsent(key, k -> new ArrayList<>());
+        return logs().computeIfAbsent(key, k -> new ArrayList<>());
     }
 
     /** Start run [key] with an empty log. */
     @TruffleBoundary
     public static Object reset(MezzeRecord args) {
-        LOGS.put(integer(args, "key"), new ArrayList<>());
+        logs().put(integer(args, "key"), new ArrayList<>());
         return MezzeRecord.empty();
     }
 

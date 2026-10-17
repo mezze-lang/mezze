@@ -27,9 +27,38 @@ public final class RandomNatives {
     private static final ThreadLocal<Random> THREAD_LOCAL_RANDOM =
         ThreadLocal.withInitial(Random::new);
 
-    // Seeded random generators for deterministic behavior
-    private static final ConcurrentHashMap<Long, Random> SEEDED_RANDOMS =
-        new ConcurrentHashMap<>();
+    /**
+     * Seeded generators and covering-draw state, PER CONTEXT.
+     *
+     * These were static and keyed by SEED alone, so two programs that chose the
+     * same seed shared one `Random`. Per context now, for the same reason as the
+     * rest of this sweep: a seed is a promise of reproducibility, and a
+     * generator reachable by another program cannot keep it.
+     *
+     * NOT a demonstrated failure. Entering `perform SeededRandom { seed }`
+     * re-seeds, which masks the sequential case entirely, and four threads
+     * drawing the same seed concurrently did not interleave enough to break the
+     * sequence either. So this is a consistency move on a sharp edge, not a fix
+     * for a case anybody has reproduced. Keyed by seed WITHIN a context stays
+     * right: `mez sample` already gives every row its own seed.
+     */
+    private static final class State {
+        final ConcurrentHashMap<Long, Random> seeded = new ConcurrentHashMap<>();
+        final ConcurrentHashMap<Long, long[]> covering = new ConcurrentHashMap<>();
+    }
+
+    private static State state() {
+        return com.mezze.interpreter.runtime.MezzeContext.get(null)
+            .nativeState(State.class, State::new);
+    }
+
+    private static ConcurrentHashMap<Long, Random> seededRandoms() {
+        return state().seeded;
+    }
+
+    private static ConcurrentHashMap<Long, long[]> coveringDraws() {
+        return state().covering;
+    }
 
     /**
      * S-21 branch-covering draw state, keyed by the row's seed.
@@ -40,8 +69,6 @@ public final class RandomNatives {
      * Keyed by SEED alone because `mez sample` already gives every row its own
      * seed (`seed + i`), so no two rows share an entry.
      */
-    private static final ConcurrentHashMap<Long, long[]> COVERING_DRAWS =
-        new ConcurrentHashMap<>();
 
     // How many leading choices are enumerated now arrives as `depth` from the
     // performer's `SampleConfig.enumerate` (default 12): constructor selection
@@ -109,7 +136,7 @@ public final class RandomNatives {
 
     /** A `Random` for [seed], keyed by the seed the PROGRAM used, scrambled inside. */
     private static Random seededRandom(long seed) {
-        return SEEDED_RANDOMS.computeIfAbsent(seed, s -> new Random(scrambleSeed(s)));
+        return seededRandoms().computeIfAbsent(seed, s -> new Random(scrambleSeed(s)));
     }
 
     /**
@@ -137,7 +164,7 @@ public final class RandomNatives {
         long seed = getLong(args, "seed");
         // Scrambled the same way as the lazy path, or a reset and a first use of the
         // same seed would hand back different streams.
-        SEEDED_RANDOMS.put(seed, new Random(scrambleSeed(seed)));
+        seededRandoms().put(seed, new Random(scrambleSeed(seed)));
         return MezzeRecord.empty();
     }
 
@@ -150,8 +177,8 @@ public final class RandomNatives {
         long seed = getLong(args, "seed");
         long run = getLong(args, "run");
         long depth = getLong(args, "depth");
-        SEEDED_RANDOMS.put(seed, new Random(scrambleSeed(seed)));
-        COVERING_DRAWS.put(seed, new long[]{ run, 0, depth });
+        seededRandoms().put(seed, new Random(scrambleSeed(seed)));
+        coveringDraws().put(seed, new long[]{ run, 0, depth });
         return MezzeRecord.empty();
     }
 
@@ -180,7 +207,7 @@ public final class RandomNatives {
         // `bound <= 1` has exactly one legal answer; asking for [0, -1] asks for
         // something that does not exist. Same guard the stdlib performers apply.
         if (bound <= 1) return 0;
-        long[] state = COVERING_DRAWS.get(seed);
+        long[] state = coveringDraws().get(seed);
         if (state != null && state[1] < state[2] && state[0] > 0) {
             long digit = state[0] % bound;
             state[0] /= bound;
@@ -215,7 +242,7 @@ public final class RandomNatives {
     public static Object updateSeed(MezzeRecord args) {
         long oldSeed = getLong(args, "old_seed");
         long newSeed = getLong(args, "new_seed");
-        SEEDED_RANDOMS.put(oldSeed, new Random(scrambleSeed(newSeed)));
+        seededRandoms().put(oldSeed, new Random(scrambleSeed(newSeed)));
         return MezzeRecord.empty();
     }
 

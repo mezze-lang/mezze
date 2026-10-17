@@ -24,7 +24,18 @@ public final class ScriptNatives {
 
     private ScriptNatives() {}
 
-    private static final ConcurrentHashMap<String, AtomicLong> CURSORS = new ConcurrentHashMap<>();
+    /**
+     * Read cursors PER CONTEXT. Static, they were shared by key across every
+     * program on the Engine: one program's reads advanced another's position.
+     */
+    private static final class State {
+        final ConcurrentHashMap<String, AtomicLong> cursors = new ConcurrentHashMap<>();
+    }
+
+    private static ConcurrentHashMap<String, AtomicLong> cursors() {
+        return com.mezze.interpreter.runtime.MezzeContext.get(null)
+            .nativeState(State.class, State::new).cursors;
+    }
 
     @TruffleBoundary
     public static Object next(MezzeRecord args) {
@@ -35,7 +46,7 @@ public final class ScriptNatives {
         if (n == 0) {
             throw new NativeTypeMismatchException("a scripted operation was given no values to hand out");
         }
-        long call = CURSORS.computeIfAbsent(key + "/" + op, k -> new AtomicLong()).getAndIncrement();
+        long call = cursors().computeIfAbsent(key + "/" + op, k -> new AtomicLong()).getAndIncrement();
         return values.get((int) (call % n));
     }
 
