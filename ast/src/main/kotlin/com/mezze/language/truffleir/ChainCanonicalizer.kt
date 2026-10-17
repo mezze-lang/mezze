@@ -272,18 +272,25 @@ object ChainCanonicalizer {
      * compilation. This mirrors the emitter's classification so we only
      * create fusable Fold/Reduce chains.
      *
-     * Accepted fold-body shapes (must have 0 captures, 2 params, 0 locals):
+     * Accepted fold-body shapes (must have 2 params, 0 locals):
      * 1. InlineBinaryOpIR(ReadLocalIR, ReadLocalIR)
      * 2. CallDirectIR scalar-ABI, 2 ReadLocalIR args (known arith)
      * 3. CallIndirectIR(ReadFieldIR(ReadLocalIR, _), MakeRecordIR{2 fields})
+     *
+     * Captures are allowed. The emitter fuses a captured folder only when the
+     * capture is the element transform's right-hand side (`acc + x * mul`),
+     * which it lifts to the enclosing frame; it refuses any other captured
+     * shape, and FusedChainIR's fallback then runs the unfused folder. Refusing
+     * captures outright HERE instead cost a real fold 19% of its throughput,
+     * because a chain that never canonicalizes can never be fused.
      */
     private fun isFoldLambdaEmittable(
         fLambda: MakeLambdaIR,
         allFunctions: Map<Hash, FunctionIR>,
     ): Boolean {
-        if (fLambda.captures.isNotEmpty()) return false
         val fn = allFunctions[fLambda.functionHash] ?: return false
-        if (fn.captureSlots.isNotEmpty() || fn.paramSlots.size != 2 || fn.localSlots.isNotEmpty()) return false
+        if (fn.captureSlots.size != fLambda.captures.size) return false
+        if (fn.paramSlots.size != 2 || fn.localSlots.isNotEmpty()) return false
         return isFoldBodyEmittable(fn.body)
     }
 
@@ -344,7 +351,9 @@ object ChainCanonicalizer {
     private fun isUnaryExpr(node: NodeIR): Boolean = when (node) {
         is InlineBinaryOpIR -> {
             val l = node.left; val r = node.right
-            (l is ReadLocalIR && (r is ReadLocalIR || r is LongLitIR))
+            // ReadCaptureIR on the right is `x * mul` with `mul` captured; the
+            // emitter lifts it to the enclosing frame.
+            (l is ReadLocalIR && (r is ReadLocalIR || r is LongLitIR || r is ReadCaptureIR))
                     || (l is LongLitIR && r is ReadLocalIR)
         }
         else -> false

@@ -36,7 +36,7 @@ class FolderClassificationTest {
 
     @Test
     fun `a native add over the two params is an ADD folder`() {
-        val shape = BytecodeCompiler.classifyFolderBody(native("__native_int_add", "l" to 0, "r" to 1))
+        val shape = BytecodeCompiler.classifyFolderBody(native("__native_int_add", "l" to 0, "r" to 1), 0, 1)
         assertEquals(InlineOp.ADD, shape?.op)
         assertEquals(0, shape?.leftSlot)
         assertEquals(1, shape?.rightSlot)
@@ -44,7 +44,7 @@ class FolderClassificationTest {
 
     @Test
     fun `operands follow the signature, not the record's field order`() {
-        val shape = BytecodeCompiler.classifyFolderBody(native("__native_int_subtract", "r" to 1, "l" to 0))
+        val shape = BytecodeCompiler.classifyFolderBody(native("__native_int_subtract", "r" to 1, "l" to 0), 0, 1)
         assertEquals(InlineOp.SUB, shape?.op)
         assertEquals(0, shape?.leftSlot)
         assertEquals(1, shape?.rightSlot)
@@ -52,6 +52,6 @@ class FolderClassificationTest {
 
     @Test
     fun `a native with no inline op is not a folder`() {
-        assertNull(BytecodeCompiler.classifyFolderBody(native("__native_int_sign", "n" to 0)))
+        assertNull(BytecodeCompiler.classifyFolderBody(native("__native_int_sign", "n" to 0), 0, 1))
     }
 }
