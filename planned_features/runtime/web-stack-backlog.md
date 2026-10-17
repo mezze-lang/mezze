@@ -128,21 +128,46 @@ in its own function (−1.4%); dictionary indirection — that one WAS real and 
 fixed (`config` was a bare type variable; it now reads through a type-annotated
 local and resolves `opHash=DIRECT`), and fixing it changed throughput by nothing.
 
+#### NARROWED to a minimal repro — `bench/cases/ability-captured-receiver`
+
+Three programs, same answer, same work. The cost needs an ability op AND a
+receiver the LAMBDA CAPTURES:
+
+| program | the lambda calls | median |
+|---|---|---|
+| `lamplain` | a PLAIN function, receiver captured | 1045 ms |
+| `lamc` | an ABILITY OP, receiver from a GLOBAL | 1078 ms |
+| `lamp` | an ABILITY OP, receiver CAPTURED | **1181 ms** (+13%) |
+
+**It does not reproduce without a lambda.** A tail-recursive loop calling the
+same op on a parameter receiver is exactly as fast as on a global — measured with
+one trivial op (1796-1895 vs 1822-1954 ms) and with four allocating ops
+(2164-2278 vs 2133-2186 ms). So the earlier claim that this is a general
+"ability op on a non-constant receiver" cost was WRONG, and is corrected here: it
+takes the call being inside a lambda whose capture is the receiver.
+
+#### Also ruled out: the lazy stub (eighth disproved cause)
+
+`LazyStubRootNode` forwards through a `DirectCallNode`, costs an extra frame, and
+`MEZZE_TRACE_COMPILATION` shows it compiling as its own target with
+`Inlined 0Y 1N` — so it looked exactly like the answer. A caller-side bypass was
+implemented (unwrap an inflated stub when the function captures nothing, the same
+way `resolveScalarTarget` unwraps a trampoline), VERIFIED to fire — 17 unwraps,
+all successful — and changed nothing. Reverted rather than kept.
+
 #### Where to look next
 
-Both call shapes emit the SAME IR node: `emitCallDirect(opHash, MakeRecordIR(…))`
-for the ability op, and a plain `CallDirect` for a top-level function. The
-typechecker resolves both to `opHash=DIRECT` for a constant AND a parameter
-receiver — verified by probe. So the difference is in the CALLEE's compiled form,
-not the call site: an impl op's target is apparently not inlined through the way
-a plain `let` function's is, and a constant receiver hides that by folding the
-call earlier.
+The IR is IDENTICAL except the receiver read (`ReadCaptureIR` vs
+`ReadGlobalByHashIR`), both a `CallDirect` with the same two-field record, and
+dispatch resolves `opHash=DIRECT` for constant, parameter and captured receivers
+alike — all probed. So the difference is not in what Mezze emits; it is in what
+Graal does with it.
 
-Next step is Truffle-level, not language-level: dump the compilation
-(`--engine.TraceInlining`, `--engine.TraceCompilation`) for the two shapes and
-find why a `CallDirect` to an impl op is not inlined with a non-constant
-receiver. Suspect a lazy stub between the caller and the op body
-(cf. `LazyStubRootNode`).
+That makes the next step Graal-level, not Mezze-level: dump both compilations
+(`--engine.TraceCompilationDetails`, IGV) and compare the two call sites. The one
+remaining difference between `lamp` and `lamplain` is the CALLEE's kind — an
+ability-impl operation versus a top-level `let`. Bisecting Mezze programs has
+reached its limit; eight hypotheses in, the instrument needs to change.
 
 **This is a LANGUAGE-WIDE finding, not a codec one.** Any hot loop calling
 ability methods on a non-constant receiver pays it — which is most generic code.

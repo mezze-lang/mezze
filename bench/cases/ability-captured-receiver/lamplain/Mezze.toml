@@ -1,0 +1,12 @@
+[package]
+name = "lamplain"
+version = "0.1.0"
+
+[[app]]
+name = "lamplain"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

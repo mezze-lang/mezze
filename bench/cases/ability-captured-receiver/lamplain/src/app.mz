@@ -1,0 +1,27 @@
+## A lambda that CAPTURES the config, but calls a PLAIN FUNCTION with it instead
+## of an ability op. Same capture, same call count, same allocation.
+use std::effects::log::{ println, Console }
+use std::collections::seq
+use std::int
+
+type Cfg = { tag: Int }
+type Box = | B1 { v: Int } |
+
+let e_a: { it: Cfg, v: Int } -> Box = { it, v } -> B1 { v = v }
+
+let cfg: Cfg = { tag = 1 }
+let unbox: { b: Box } -> Int = { b } -> match b is
+  B1 { v } -> v
+
+let once: { xs: [Int], c: Cfg } -> Int = { xs, c } ->
+  seq::fold {
+    xs = seq::map { xs = xs, f = { x } -> unbox { b = e_a { it = c, v = x } } },
+    init = 0,
+    f = { acc, x } -> acc + x,
+  }
+
+let spin: { n: Int, acc: Int, xs: [Int] } -> Int = { n, acc, xs } ->
+  if n <= 0 then acc else spin { n = n - 1, acc = acc + once { xs = xs, c = cfg }, xs = xs }
+
+let main = {} -> perform Console in
+  println { msg = int::to_str { n = spin { n = 400000, acc = 0, xs = seq::range { start = 1, end = 21 } } } }

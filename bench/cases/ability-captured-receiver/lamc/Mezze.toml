@@ -1,0 +1,12 @@
+[package]
+name = "lamc"
+version = "0.1.0"
+
+[[app]]
+name = "lamc"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

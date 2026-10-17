@@ -1,0 +1,27 @@
+## Ability op inside a seq::map LAMBDA, receiver read from a GLOBAL (no capture).
+use std::effects::log::{ println, Console }
+use std::collections::seq
+use std::int
+
+type Cfg = { tag: Int }
+type Box = | B1 { v: Int } |
+
+ability NodeEnc for 'c where { e_a: { it: 'c, v: Int } -> Box }
+impl NodeEnc for Cfg where { e_a = { it, v } -> B1 { v = v } }
+
+let cfg: Cfg = { tag = 1 }
+let unbox: { b: Box } -> Int = { b } -> match b is
+  B1 { v } -> v
+
+let once: { xs: [Int] } -> Int = { xs } ->
+  seq::fold {
+    xs = seq::map { xs = xs, f = { x } -> unbox { b = cfg.e_a { v = x } } },
+    init = 0,
+    f = { acc, x } -> acc + x,
+  }
+
+let spin: { n: Int, acc: Int, xs: [Int] } -> Int = { n, acc, xs } ->
+  if n <= 0 then acc else spin { n = n - 1, acc = acc + once { xs = xs }, xs = xs }
+
+let main = {} -> perform Console in
+  println { msg = int::to_str { n = spin { n = 400000, acc = 0, xs = seq::range { start = 1, end = 21 } } } }
