@@ -291,6 +291,48 @@ class HttpRouterTest {
     }
 
     @Test
+    fun `a handler decodes the whole query into a typed record`() {
+        // The mirror of the client's `with_query`: one record shape goes out as
+        // a query and the same shape comes back. The target type is named only
+        // by the annotation on the `let`.
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ FromQuery }
+            use std::codec::core::{ DecodeError }
+            use std::int
+            let app = otherwise {
+              routes = route { method = Get, path = "/search", handler = { m } -> do
+                let q: Result { q: Str, page: Int } DecodeError = m.query_as {}
+                match q is
+                  Ok { val } -> reply { code = 200, text = "$(val.q)/$(int::to_str { n = val.page })", url = m.req.url }
+                  Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url } },
+              fallback = not_found,
+            }
+            body_of { resp = app { req = get_request { url = "/search?q=mezze&page=3" } } }
+        """.trimIndent())
+        assertEquals("mezze/3", r)
+    }
+
+    @Test
+    fun `a query that does not fit the asked-for type is a 400, not a crash`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ FromQuery }
+            use std::codec::core::{ DecodeError }
+            let app = otherwise {
+              routes = route { method = Get, path = "/search", handler = { m } -> do
+                let q: Result { page: Int } DecodeError = m.query_as {}
+                match q is
+                  Ok { val } -> reply { code = 200, text = "decoded", url = m.req.url }
+                  Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url } },
+              fallback = not_found,
+            }
+            app { req = get_request { url = "/search?page=soon" } }.status
+        """.trimIndent())
+        assertEquals(400L, r, "a handler can answer a bad query; it does not have to survive one")
+    }
+
+    @Test
     fun `a handler reads the query off its Matched`() {
         // The chainable form, which is what a route handler actually writes.
         val r = MezzeTestHelper.run("""

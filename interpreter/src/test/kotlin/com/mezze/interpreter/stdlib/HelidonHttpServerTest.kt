@@ -219,7 +219,7 @@ class HelidonHttpServerTest {
         val r = MezzeTestHelper.run(
             """
             $head
-            use std::effects::http::{ QList, with_query }
+            use std::effects::http::{ with_query, ToQuery }
             use std::str
             let app = otherwise {
               routes = route { method = Get, path = "/q",
@@ -232,8 +232,9 @@ class HelidonHttpServerTest {
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
                   let h = HttpServer.serve { handler = app }
-                  let params = map::insert { m = map::empty {}, k = "tags", v = QList { xs = ["a", "b"] } }
-                  let sent = request { url = ${url("/q")} }.with_query { params = params }.send {}
+                  let sent = request { url = ${url("/q")} }
+                    .with_query { params = { tags = ["a", "b"] } }
+                    .send {}
                   let out = match sent is
                     Ok { val } -> text_of { resp = val }
                     Err { error = e } -> format_error { err = e }
@@ -243,6 +244,45 @@ class HelidonHttpServerTest {
             """.trimIndent(),
         )
         assertEquals("a-b", r, "the client's repeated key is what the server's query_all collects")
+    }
+
+    @Test
+    fun `a record goes out as a query and comes back as the same record`() {
+        // The whole story in one test: the client encodes a record into the
+        // query, Helidon carries it, the router hands the handler the target,
+        // and the handler decodes it back into a record of the same shape. The
+        // only thing naming that shape is the annotation on the `let`.
+        val r = MezzeTestHelper.run(
+            """
+            $head
+            use std::effects::http::{ with_query, ToQuery }
+            use std::effects::http_router::{ FromQuery }
+            use std::codec::core::{ DecodeError }
+            let app = otherwise {
+              routes = route { method = Get, path = "/search", handler = { m } -> do
+                let q: Result { q: Str, page: Int } DecodeError = m.query_as {}
+                match q is
+                  Ok { val } -> reply { code = 200,
+                    text = "$(val.q)/$(int::to_str { n = val.page })", url = m.req.url }
+                  Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url } },
+              fallback = not_found,
+            }
+            let go: {} -> Str <*> = {} ->
+              perform HelidonHttpServerWith { config = listen_on_any_port } in
+                perform SimpleHttpClient in do
+                  let h = HttpServer.serve { handler = app }
+                  let sent = request { url = ${url("/search")} }
+                    .with_query { params = { q = "mezze", page = 3 } }
+                    .send {}
+                  let out = match sent is
+                    Ok { val } -> text_of { resp = val }
+                    Err { error = e } -> format_error { err = e }
+                  h.stop {}
+                  out
+            go {}
+            """.trimIndent(),
+        )
+        assertEquals("mezze/3", r, "one record shape, encoded by the client and decoded by the server")
     }
 
     @Test

@@ -1,0 +1,331 @@
+## Query codec — a record to a URL query, and back.
+##
+## `UrlC` encodes ONE query value. This encodes the whole query: a record goes
+## to `?page=2&tags=a&tags=b`, and a query comes back as a typed record. The
+## format's representation is a flat list of pairs, which is what a query string
+## IS — the pair list is the thing, and rendering it to text is one `join`.
+##
+## THE KEY RULE, and everything follows from it. A pair's `k` is the key RELATIVE
+## to wherever it currently sits, so a scalar — which has no name of its own —
+## produces `k = ""`. A record names its children: a child pair with `k = ""`
+## takes the field's name, and a child that already has a name becomes
+## `field[name]`. Applied bottom-up, that gives the two conventions a server
+## expects without either being written down anywhere:
+##
+##   { page = 2 }                   -> page=2
+##   { tags = ["a", "b"] }          -> tags=a&tags=b
+##   { user = { name = "ada" } }    -> user[name]=ada
+##
+## A sequence just concatenates its elements' pairs. Each element kept `k = ""`,
+## so the enclosing record stamps the same name on all of them — a repeated key,
+## which is the encoding the widest range of servers parse and the one
+## `std::effects::http_router`'s `query_all` collects.
+##
+## Values are NOT percent-encoded here, exactly as in `UrlC`: escaping belongs
+## to whoever places the pairs, because a value bound for a query is escaped
+## differently from one bound for a path segment. `query_string` escapes,
+## because at that point the destination is known.
+use std::codec::core::{
+  Format,
+  EncodeScalar, EncodeRecord, EncodeSequence, EncodeMapping, EncodeVariant, EncodeOption,
+  DecodeScalar, DecodeRecord, DecodeSequence, DecodeMapping, DecodeVariant, DecodeOption,
+  Encode, Decode,
+  CodecCtx, SharedConfig, FieldTransform, DecodeError
+}
+use std::codec::url::{ url_encode_component, url_decode_component }
+use std::collections::seq
+use std::int
+use std::float
+use std::nat
+use std::char
+use std::str
+use std::bool
+
+## ---- Config ------------------------------------------------------------
+
+## Query config. Output and input are both `[{ k: Str, v: Str }]`.
+pub type QueryC = {
+  shared: SharedConfig,
+}
+
+pub let query_default: QueryC = {
+  shared = { field_transform = Identity },
+}
+
+impl Format for QueryC having 'out = [{ k: Str, v: Str }] where {
+}
+
+## ---- Pair helpers ------------------------------------------------------
+
+## One nameless pair — what a scalar encodes to.
+let bare: { v: Str } -> [{ k: Str, v: Str }] = { v } -> [{ k = "", v = v }]
+
+## Give `field` to every pair of a child's output.
+##
+## A nameless child takes the field's name; a named one is nested under it in
+## brackets. This is the one place the bracket convention is decided.
+let under: { field: Str, pairs: [{ k: Str, v: Str }] } -> [{ k: Str, v: Str }] =
+  { field, pairs } -> seq::map {
+    xs = pairs,
+    f = { x } -> if x.k == "" then { k = field, v = x.v }
+      else { k = "$(field)[$(x.k)]", v = x.v },
+  }
+
+## The pairs belonging to `field`, with the field's own name removed.
+##
+## The inverse of `under`. `field=v` gives back a nameless pair; `field[rest]=v`
+## gives back one named `rest`, so a nested record decodes by the same descent
+## the encode side built.
+let within: { field: Str, pairs: [{ k: Str, v: Str }] } -> [{ k: Str, v: Str }] =
+  { field, pairs } -> seq::flat_map {
+    xs = pairs,
+    f = { x } ->
+      if x.k == field then [{ k = "", v = x.v }]
+      else if str::starts_with { s = x.k, prefix = "$(field)[" } && str::ends_with { s = x.k, suffix = "]" }
+        then [{
+          k = str::substring {
+            s = x.k,
+            start = str::size { s = field } + 1,
+            end = str::size { s = x.k } - 1,
+          },
+          v = x.v,
+        }]
+        else [],
+  }
+
+## The first value in a pair list, for a scalar decode.
+let one: { pairs: [{ k: Str, v: Str }], ctx: CodecCtx, expected: Str } -> Result Str DecodeError =
+  { pairs, ctx, expected } -> match seq::first { xs = pairs } is
+    Some { val } -> Ok { val = val.v }
+    None -> Err { error = {
+      path = ctx.path,
+      message = "The query carried no value here",
+      expected = expected,
+      found = None,
+    } }
+
+## Render pairs to a query string, percent-encoding both halves.
+pub let render_pairs: { pairs: [{ k: Str, v: Str }] } -> Str = { pairs } ->
+  str::join {
+    strings = seq::map {
+      xs = pairs,
+      f = { x } -> "$(url_encode_component { s = x.k })=$(url_encode_component { s = x.v })",
+    },
+    separator = "&",
+  }
+
+## Parse a query string into pairs, percent-decoding both halves.
+##
+## A fragment with no `=` is a key with an empty value, which is how a flag like
+## `debug` arrives. Empty fragments are dropped, so a trailing `&` is harmless.
+pub let parse_pairs: { s: Str } -> [{ k: Str, v: Str }] = { s } ->
+  seq::map {
+    xs = seq::filter { xs = str::split { s = s, delimiter = "&" }, p = { x } -> x != "" },
+    f = { x } -> match str::index_of { s = x, sub = "=" } is
+      None -> { k = url_decode_component { s = x }, v = "" }
+      Some { val = i } -> {
+        k = url_decode_component { s = str::substring { s = x, start = 0, end = i } },
+        v = url_decode_component {
+          s = str::substring { s = x, start = i + 1, end = str::size { s = x } },
+        },
+      },
+  }
+
+## ---- Tier 2: encode ----------------------------------------------------
+
+impl EncodeScalar for QueryC having 'out = [{ k: Str, v: Str }] where {
+  encode_int   = { it, val, ctx } -> bare { v = int::to_str { n = val } },
+  encode_float = { it, val, ctx } -> bare { v = float::to_str { n = val } },
+  encode_str   = { it, val, ctx } -> bare { v = val },
+  encode_bool  = { it, val, ctx } -> bare { v = if val then "true" else "false" },
+  encode_frac  = { it, val, ctx } -> bare { v = float::to_str { n = __native_frac_to_float { n = val } } },
+  encode_bytes = { it, val, ctx } -> bare { v = "" },
+  encode_char  = { it, val, ctx } -> bare { v = char::to_str { c = val } },
+  encode_nat   = { it, val, ctx } -> bare { v = nat::to_str { n = val } },
+}
+
+impl EncodeRecord for QueryC having 'out = [{ k: Str, v: Str }] where {
+  encode_record = { it, fields, ctx } -> seq::flat_map {
+    xs = fields,
+    f = { x } -> under { field = x.key, pairs = x.value },
+  },
+}
+
+impl EncodeSequence for QueryC having 'out = [{ k: Str, v: Str }] where {
+  ## Concatenation, and nothing else: every element kept `k = ""`, so the
+  ## enclosing record gives them all the same name and the query repeats it.
+  encode_sequence = { it, elems, ctx } -> seq::flat_map { xs = elems, f = { x } -> x },
+}
+
+impl EncodeMapping for QueryC having 'out = [{ k: Str, v: Str }] where {
+  ## A map is a record whose field names are values. The entry's key encoded to
+  ## pairs of its own, and the only part of that a query key can carry is the
+  ## value, so that is what names the entry.
+  encode_mapping = { it, entries, ctx } -> seq::flat_map {
+    xs = entries,
+    f = { x } -> match seq::first { xs = x.key } is
+      Some { val } -> under { field = val.v, pairs = x.value }
+      None -> [],
+  },
+}
+
+impl EncodeVariant for QueryC having 'out = [{ k: Str, v: Str }] where {
+  ## The tag alone, as in `UrlC`: a query value has nowhere to put a payload.
+  encode_variant = { it, tag, payload, ctx } -> bare { v = tag },
+}
+
+impl EncodeOption for QueryC having 'out = [{ k: Str, v: Str }] where {
+  ## `None` emits NOTHING rather than an empty value, so an absent field is
+  ## absent from the query — which is what a server reads back as `None`.
+  encode_option = { it, val, ctx } -> match val is
+    Some { val = inner } -> inner
+    None -> [],
+}
+
+## ---- Tier 2: decode ----------------------------------------------------
+
+impl DecodeScalar for QueryC having 'in = [{ k: Str, v: Str }] where {
+  decode_int = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Int" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> match int::from_str { s = s } is
+      Some { val = n } -> Ok { val = n }
+      None -> Err { error = {
+        path = ctx.path, message = "Expected integer", expected = "Int",
+        found = Some { val = s },
+      } },
+  decode_float = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Float" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> match float::from_str { s = s } is
+      Some { val = f } -> Ok { val = f }
+      None -> Err { error = {
+        path = ctx.path, message = "Expected float", expected = "Float",
+        found = Some { val = s },
+      } },
+  decode_str = { it, val, ctx } -> one { pairs = val, ctx = ctx, expected = "Str" },
+  decode_bool = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Bool" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> match s is
+      "true" -> Ok { val = True }
+      "false" -> Ok { val = False }
+      "1" -> Ok { val = True }
+      "0" -> Ok { val = False }
+      _ -> Err { error = {
+        path = ctx.path, message = "Expected boolean", expected = "Bool",
+        found = Some { val = s },
+      } },
+  decode_frac = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Frac" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> match float::from_str { s = s } is
+      Some { val = f } -> Ok { val = __native_float_to_frac { f = f } }
+      None -> Err { error = {
+        path = ctx.path, message = "Expected fraction (number)", expected = "Frac",
+        found = Some { val = s },
+      } },
+  decode_bytes = { it, val, ctx } -> Err { error = {
+    path = ctx.path,
+    message = "Bytes can't be decoded from a query parameter",
+    expected = "Bytes",
+    found = None,
+  } },
+  decode_char = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Char" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> match char::from_str { s = s } is
+      Some { val = c } -> Ok { val = c }
+      None -> Err { error = {
+        path = ctx.path, message = "Expected single character", expected = "Char",
+        found = Some { val = s },
+      } },
+  decode_nat = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Nat" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> match nat::from_str { s = s } is
+      Some { val = n } -> Ok { val = n }
+      None -> Err { error = {
+        path = ctx.path, message = "Expected non-negative integer", expected = "Nat",
+        found = Some { val = s },
+      } },
+}
+
+impl DecodeRecord for QueryC having 'in = [{ k: Str, v: Str }] where {
+  ## `within` is the exact inverse of the encode side's `under`, so a record
+  ## descends by undoing one level of naming. A field the query never mentioned
+  ## yields the empty pair list, which `decode_option` reads as `None` and every
+  ## other decoder reports as missing.
+  decode_record_field = { it, val, key, ctx } -> Ok { val = within { field = key, pairs = val } },
+}
+
+impl DecodeSequence for QueryC having 'in = [{ k: Str, v: Str }] where {
+  ## One element per pair. A repeated key arrived as several pairs under the same
+  ## name, and `within` has already stripped that name off all of them.
+  decode_sequence = { it, val, ctx } ->
+    Ok { val = seq::map { xs = val, f = { x } -> [x] } },
+}
+
+impl DecodeMapping for QueryC having 'in = [{ k: Str, v: Str }] where {
+  ## Each remaining name is an entry key, and what is left under it is the
+  ## entry's value.
+  decode_mapping = { it, val, ctx } -> Ok { val = seq::map {
+    xs = val,
+    f = { x } -> { key = [{ k = "", v = x.k }], value = [{ k = "", v = x.v }] },
+  } },
+}
+
+impl DecodeVariant for QueryC having 'in = [{ k: Str, v: Str }] where {
+  decode_variant = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "variant tag" } is
+    Err { error } -> Err { error = error }
+    Ok { val = s } -> Ok { val = { tag = s, payload = None } },
+}
+
+impl DecodeOption for QueryC having 'in = [{ k: Str, v: Str }] where {
+  ## ABSENT, not empty. A query that never mentioned the field gives no pairs,
+  ## and that is the only honest `None` — `field=` did mention it, and means the
+  ## empty string.
+  decode_option = { it, val, ctx } ->
+    if seq::is_empty { xs = val } then Ok { val = None } else Ok { val = Some { val = val } },
+}
+
+## ---- Tier 4: sugar -----------------------------------------------------
+
+## Allow a target taken straight off the wire, `?` and all.
+let strip_leading_question: { s: Str } -> Str = { s } ->
+  if str::starts_with { s = s, prefix = "?" }
+    then str::substring { s = s, start = 1, end = str::size { s = s } }
+    else s
+
+## Render any encodable value as query pairs, or as a query string.
+ability ToQuery for 'a where {
+  to_query: { it: 'a } -> [{ k: Str, v: Str }],
+  to_query_with: { it: 'a, config: QueryC } -> [{ k: Str, v: Str }],
+  query_string: { it: 'a } -> Str,
+}
+
+impl ToQuery for 'a where {
+  to_query: { it: 'a } with Encode QueryC 'a -> [{ k: Str, v: Str }] =
+    { it } -> it.encode { config = query_default },
+  to_query_with: { it: 'a, config: QueryC } with Encode QueryC 'a -> [{ k: Str, v: Str }] =
+    { it, config } -> it.encode { config = config },
+  query_string: { it: 'a } with Encode QueryC 'a -> Str =
+    { it } -> render_pairs { pairs = it.encode { config = query_default } },
+}
+
+## Decode a typed value out of a query. Target-directed, like every other
+## `from_*`: the type comes from the use site.
+ability FromQuery 'a for 'in where {
+  from_query: { it: 'in } -> Result 'a DecodeError,
+  from_query_with: { it: 'in, config: QueryC } -> Result 'a DecodeError,
+}
+
+impl FromQuery 'a for [{ k: Str, v: Str }] where {
+  from_query: { it: [{ k: Str, v: Str }] } with Decode QueryC 'a -> Result 'a DecodeError =
+    { it } -> it.decode { config = query_default },
+  from_query_with: { it: [{ k: Str, v: Str }], config: QueryC } with Decode QueryC 'a -> Result 'a DecodeError =
+    { it, config } -> it.decode { config = config },
+}
+
+## A query STRING decodes too, by parsing it to pairs first. `?` is allowed at
+## the front, so a target taken straight off the wire works.
+impl FromQuery 'a for Str where {
+  from_query: { it: Str } with Decode QueryC 'a -> Result 'a DecodeError =
+    { it } -> parse_pairs { s = strip_leading_question { s = it } }.decode { config = query_default },
+  from_query_with: { it: Str, config: QueryC } with Decode QueryC 'a -> Result 'a DecodeError =
+    { it, config } -> parse_pairs { s = strip_leading_question { s = it } }.decode { config = config },
+}

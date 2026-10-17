@@ -1,6 +1,10 @@
 use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
 use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
-use std::codec::url::{ url_encode_component }
+## Re-exported, not merely imported: `with_query` is constrained on `ToQuery`,
+## and that constraint is resolved at the CALL SITE, so the blanket impl has to
+## be in scope wherever someone adds a query parameter. Nobody adding `?page=2`
+## should have to know which codec module makes that work.
+pub use std::codec::query::{ ToQuery }
 use std::collections::map
 use std::collections::seq
 use std::collections::bytes
@@ -363,57 +367,37 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
     timeout_ms = req.timeout_ms,
   }
 
-## A query-parameter value: a string, an integer, or a repeated list.
+## Append `?k1=v1&k2=v2&...` (or `&...` if the URL already has a query) from
+## ANY value the query codec can encode — in practice a record.
 ##
-## `UrlC` (see `std::codec::url`) is a partial-capability format — it
-## encodes scalars, not records or lists — so query values are modelled
-## explicitly here rather than by codec derivation over an arbitrary type.
-## A `QList` expands to a repeated key (`?tags=a&tags=b`), the encoding
-## parsed by the widest range of servers.
-pub type QueryValue =
-  | QStr { s: Str },
-    QInt { n: Int },
-    QList { xs: [Str] } |
-
-## Render one `key`/`QueryValue` pair to its `k=v` fragments. A scalar
-## yields one fragment; a `QList` yields one per element (repeated key).
-## Keys and values are percent-encoded per RFC 3986.
-pub let query_pairs: { key: Str, value: QueryValue } -> [Str] = { key, value } -> do
-  let ek = url_encode_component { s = key }
-  let pair = { v: Str } -> str::concat {
-    l = ek,
-    r = str::concat { l = "=", r = url_encode_component { s = v } },
-  }
-  match value is
-    QStr { s } -> [pair { v = s }]
-    QInt { n } -> [pair { v = int::to_str { n = n } }]
-    QList { xs } -> seq::map { xs = xs, f = { x } -> pair { v = x } }
-
-## Append `?k1=v1&k2=v2&...` (or `&...` if the URL already has a query)
-## from a `Map Str QueryValue`. Scalar values render as one parameter each;
-## a `QList` renders as a repeated key. Keys and values are percent-encoded
-## per RFC 3986. Empty map is a no-op.
-##
-##   let p0 = map::insert { m = map::empty {}, k = "page", v = QInt { n = 2 } }
-##   let p = map::insert { m = p0, k = "tags", v = QList { xs = ["a", "b"] } }
-##   req.with_query { params = p }
+##   req.with_query { params = { page = 2, tags = ["a", "b"] } }
 ##   -- ?page=2&tags=a&tags=b
-pub let with_query: { req: Request, params: Map Str QueryValue } -> Request = { req, params } ->
-  do
-    let entries = map::to_seq { m = params }
-    if seq::is_empty { xs = entries } then req else do
-      let pairs = seq::flat_map { xs = entries, f = { x } ->
-        query_pairs { key = x.k, value = x.v } }
-      let qs = str::join { strings = pairs, separator = "&" }
-      let sep = if str::contains { s = req.url, substring = "?" } then "&" else "?"
-      let new_url = str::concat { l = req.url, r = str::concat { l = sep, r = qs } }
-      {
-        method = req.method,
-        url = new_url,
-        headers = req.headers,
-        body = req.body,
-        timeout_ms = req.timeout_ms,
-      }
+##
+## This used to take a `Map Str QueryValue`, where `QueryValue` was a
+## three-constructor variant — `QStr`, `QInt`, `QList` — that existed only
+## because no format could encode a structured query. `std::codec::query` is
+## that format now, so the variant is gone: a record says `{ page = 2 }`
+## instead of `map::insert { m = map::empty {}, k = "page", v = QInt { n = 2 } }`,
+## nests, and decodes back on the server with `from_query`.
+##
+## Keys and values are percent-encoded. A value that encodes to nothing — an
+## empty record, a `None` — is a no-op.
+##
+## `ToQuery` must be in scope at the CALL SITE, which is where the constraint
+## is discharged; it is re-exported from this module so one import covers it:
+##
+##   use std::effects::http::{ request, ToQuery }
+pub let with_query: { req: Request, params: 'a } with ToQuery 'a -> Request = { req, params } -> do
+  let qs = params.query_string {}
+  if str::is_empty { s = qs } then req else do
+    let sep = if str::contains { s = req.url, substring = "?" } then "&" else "?"
+    {
+      method = req.method,
+      url = str::concat { l = req.url, r = str::concat { l = sep, r = qs } },
+      headers = req.headers,
+      body = req.body,
+      timeout_ms = req.timeout_ms,
+    }
 
 ## Promote a non-2xx Response to an HttpError. Used to short-circuit
 ## chains that want to treat any failure (transport OR status) as an
@@ -456,7 +440,7 @@ impl Request where {
   with_body = { it: 'it, val: Bytes } -> with_body { req = it, body = val },
   with_text = { it: 'it, val: Str } -> with_text { req = it, val = val },
   with_json = { it: 'it, val: Json } -> with_json { req = it, val = val },
-  with_query = { it: 'it, params: Map Str QueryValue } -> with_query { req = it, params = params },
+  with_query = { it, params } -> with_query { req = it, params = params },
   with_timeout = { it: 'it, ms: Int } -> with_timeout { req = it, ms = ms },
   with_auth = { it: 'it, auth: Auth } -> with_auth { req = it, auth = auth },
   with_bearer = { it: 'it, token: Str } -> with_bearer { req = it, token = token },

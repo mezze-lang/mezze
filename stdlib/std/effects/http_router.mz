@@ -23,6 +23,7 @@ use std::collections::seq
 use std::collections::bytes
 use std::str
 use std::codec::url::{ url_decode_component }
+pub use std::codec::query::{ FromQuery }
 ## `path_of` does index arithmetic, and `+` on Int needs int's `NumAdd` impl in
 ## scope — an impl arrives with its module, not with the prelude.
 use std::int
@@ -198,6 +199,18 @@ pub let query_all: { url: Str, name: Str } -> [Str] = { url, name } ->
 pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
   seq::first { xs = query_all { url = url, name = name } }
 
+## The query, decoded into whatever the use site asks for.
+##
+## The exact mirror of the client's `with_query`: a record goes out as a query,
+## and the same record shape comes back here. Target-directed, so the type
+## comes from the annotation at the use site and no schema is declared.
+##
+##   let page: Result { q: Str, page: Int } DecodeError = query_decoded { url = req.url }
+##
+## `FromQuery` has to be in scope where this is called, because that is where
+## the constraint is discharged; it is re-exported from this module.
+pub let query_decoded = { url: Str } -> query_of { url = url }.from_query {}
+
 ## ── Dot-chaining surface ──────────────────────────────────────────────────
 ##
 ## Inherent impls on the two types this module declares, so a route table reads
@@ -231,6 +244,8 @@ impl Matched where {
       None -> default,
   ## Every value the query gave for `name`.
   query_all = { it: 'it, name: Str } -> query_all { url = it.req.url, name = name },
+  ## The query, decoded into whatever the use site asks for.
+  query_as = { it } -> query_decoded { url = it.req.url },
   ## A bound path parameter, or `default` when the pattern bound none.
   ##
   ## Most handlers want this: a `:name` in the pattern always binds, so the
