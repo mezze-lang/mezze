@@ -147,11 +147,40 @@ needs a harness that holds the AppCDS archive constant: dropping
 larger than the effect being measured, and is what made a first attempt
 unreadable.
 
-### W-P2 — request/response construction, 11.7%
+### W-P2 — CLOSED: ~4% spread thin, and the 11.7% figure was partly drift
 
-Java-with-our-handoff 444.7k → Mezze no-router 482.3k is the only step left at
-the floor: building the guest `Request` record and decoding the `Response`.
-Not yet broken down further.
+Measured by gating the dispatch into cumulative stages (permit → context
+enter/leave → guest Request/Response) and running each on the no-router floor
+server, `-t8 -c256`:
+
+| stage | req/s |
+|---|---|
+| 1. Helidon write only — no permit, no context, no guest | 526.8k, 509.7k |
+| 2. + take/release the in-flight permit | 519.6k |
+| 3. + `TruffleContext.enter`/`leave` per request | 511.0k |
+| 4. + build the guest `Request`, call the handler, decode the `Response` | 498.7k, 495.5k |
+
+**The per-stage deltas are NOT resolvable.** Repeating stage 1 gave 526.8k and
+509.7k — a 3.3% spread, LARGER than the 1.4% and 1.7% steps it was supposed to
+separate. Only the total survives: everything Mezze does per request beyond the
+Helidon write costs about **4%** (≈518k → ≈497k).
+
+**And W-P2's own 11.7% was overstated.** It came from Java-direct 545.9k against
+Mezze-no-router 482.3k measured in different sessions; today the same floor
+server measures 495-499k. So part of that gap was cross-session drift and part is
+a Helidon-side difference between `JavaSrv`'s routing and ours — not request or
+response construction.
+
+So there is no lever here worth invasive work: no single layer reaches 3%, and
+the three candidates (permit, context crossing, guest record building) are each
+at or below this harness's noise floor. Hoisting `enter` to once per connection —
+which thread-per-connection would permit — is bounded above by about 1.7% and is
+not worth the risk.
+
+**If this is ever reopened,** the harness needs to be fixed first: hold
+`-XX:SharedArchiveFile` constant (dropping it alone moved a benchmark 238.7k →
+196.3k) and take medians of several runs, because single runs vary by 3-4% —
+which is the size of the entire effect being hunted.
 
 ### W-P3 — CLOSED as a documented trade-off: the p99 cost of dropping the queue
 
