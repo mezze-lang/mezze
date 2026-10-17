@@ -185,12 +185,43 @@ public final class AsyncNatives {
             this.cancelHook = hook;
         }
 
+        /**
+         * Park this task on an op no handler could discharge.
+         *
+         * The promise is then COMPLETED carrying the op, because this is how the
+         * effect reaches the awaiter: `await` re-dispatches it in the awaiting
+         * context. Nothing else does — so if nobody awaits, the effect simply
+         * never happens, silently. The counter is what makes that audible at
+         * context dispose; see {@link SuspendedOps}.
+         */
         public void setUnhandledOpCall(OpCall op) {
             this.unhandledOpCall = op;
+            suspendedOps().stashed(op.opName());
         }
 
+            /** The stashed op, without claiming it. For `inspect`, which must not. */
         public OpCall getUnhandledOpCall() {
             return unhandledOpCall;
+        }
+
+        /**
+         * Claim the stashed op: hand it over and clear it, exactly once.
+         *
+         * Every site that DISPATCHES the op goes through here, so "still holding
+         * one at dispose" means precisely "nobody ever collected it". The lock is
+         * on the cold path only — it is reached when an op was stashed at all —
+         * and it is what makes the once-only exact with two awaiters racing.
+         */
+        public OpCall takeUnhandledOpCall() {
+            if (unhandledOpCall == null) return null;
+            OpCall op;
+            synchronized (this) {
+                op = unhandledOpCall;
+                if (op == null) return null;
+                unhandledOpCall = null;
+            }
+            suspendedOps().taken();
+            return op;
         }
 
         // ==================== Terminal transitions ====================
@@ -203,6 +234,15 @@ public final class AsyncNatives {
 
         public boolean complete(Object value) {
             if (OUTCOME.compareAndSet(this, PENDING_SENTINEL, new CompletedOutcome(value))) {
+                // A suspended result is not an answer, it is an obligation: the
+                // task ran into an effect its own chain could not discharge and
+                // `await` has to finish it. Counted here, at the one place a
+                // promise can take one on, and uncounted when somebody forces
+                // it — so a positive count at dispose means an effect that
+                // never happened and nobody was told.
+                if (value instanceof MezzeSuspend suspended) {
+                    suspendedOps().stashed(effectIds(suspended));
+                }
                 unparkWaiter();
                 return true;
             }
@@ -529,6 +569,27 @@ public final class AsyncNatives {
      */
     private static final ThreadLocal<MezzeScope> CURRENT_SCOPE = new ThreadLocal<>();
 
+    /**
+     * Drop this thread's hold on a guest scope. Called from
+     * {@code MezzeLanguage.disposeThread}, next to the STM reset.
+     *
+     * Every `set` of CURRENT_SCOPE is restored in a `finally`, so the ordinary
+     * paths — including a body that raises — balance. What this covers is the
+     * path that does not run finally blocks: a thread killed or unwound by an
+     * Error. There the ThreadLocal pins a `MezzeScope`, and with it the scope's
+     * child promises, on a thread that outlives the context — a carrier thread,
+     * usually, so for the life of the process.
+     *
+     * `disposeThread` is the hook, not `disposeContext`, and that is what makes
+     * this complete instead of best-effort: Truffle calls it for EVERY thread
+     * that entered the context, each on that thread, so every slot is cleared.
+     * A ThreadLocal cannot be reset from another thread, so a context-level
+     * hook could only ever have cleared the closing thread's.
+     */
+    public static void resetPerThreadScope() {
+        CURRENT_SCOPE.remove();
+    }
+
     // ==================== Promise Tracker (for scoped effects) ====================
 
     /**
@@ -618,6 +679,94 @@ public final class AsyncNatives {
             tracker.clear();
         }
         return MezzeRecord.empty();
+    }
+
+    /**
+     * Spawned tasks parked on an op nobody handled, counted per context.
+     *
+     * A task that performs an operation no handler can discharge does not fail:
+     * it is marked COMPLETED with the op stashed, and `await` re-raises it in the
+     * awaiting context. That is a feature — a spawned task may perform the
+     * parent's effects. The hole is what happens when nobody awaits: the op is
+     * never dispatched and the effect never happens, with nothing said.
+     *
+     * This does not change that. It makes it audible: stashes minus claims, and
+     * a line on stderr at dispose if the difference is positive. A COUNT and a
+     * few op NAMES, never the promises — a diagnostic that retains what it
+     * reports on would be its own leak.
+     *
+     * Two awaiters racing to claim one op could in principle under-report,
+     * which is why `takeUnhandledOpCall` serialises the claim.
+     */
+    static final class SuspendedOps implements AutoCloseable {
+        /** Enough names to recognise the effect, few enough to never grow. */
+        private static final int NAME_CAP = 8;
+
+        private final AtomicLong outstanding = new AtomicLong();
+        private final ConcurrentLinkedQueue<String> names = new ConcurrentLinkedQueue<>();
+        private final AtomicInteger named = new AtomicInteger();
+
+        void stashed(String opName) {
+            outstanding.incrementAndGet();
+            if (named.get() < NAME_CAP && named.incrementAndGet() <= NAME_CAP) {
+                names.add(opName);
+            }
+        }
+
+        void taken() {
+            outstanding.decrementAndGet();
+        }
+
+        @Override
+        public void close() {
+            long left = outstanding.get();
+            if (left <= 0) return;
+            System.err.println("[mezze] " + left + " spawned task(s) performed an effect that no "
+                + "handler could discharge and were never awaited, so those effects never "
+                + "happened (effects " + String.join(", ", names) + "). `await` is what "
+                + "finishes such a task — it forces the suspended computation or re-raises the "
+                + "operation — and nothing else collects it.");
+        }
+    }
+
+    /**
+     * Is this COMPLETED promise actually still unfinished?
+     *
+     * Two shapes mean the same thing — the task ran into an effect that no
+     * handler in its own chain could discharge, and somebody has to finish it:
+     *
+     * - a `MezzeSuspend` RESULT: the common case by far. `sleep` in a spawned
+     *   task with no `Time` performer completes with one of these, and the guest
+     *   saw `Completed { val = {} }` for a task that had done nothing.
+     * - a stashed `OpCall`: the BDSL path's equivalent, re-dispatched by await.
+     *
+     * Either way `await` is what finishes it — it forces the suspend or
+     * re-raises the op — so a poller must hear Pending. Measured: the result is
+     * a `MezzeSuspend` and the stashed op is null, which is why a first version
+     * of this check that only looked at the op missed the case entirely.
+     */
+    /**
+     * The effects a suspended task is waiting on, as short hashes.
+     *
+     * Hashes rather than names because that is what a `MezzeSuspend` carries,
+     * and a hash is at least greppable — `Time`'s is the same everywhere. A
+     * name would need a hash→effect lookup the runtime does not have here.
+     */
+    private static String effectIds(MezzeSuspend suspended) {
+        StringBuilder sb = new StringBuilder();
+        for (Hash h : suspended.getUnhandledEffects()) {
+            if (sb.length() > 0) sb.append('+');
+            sb.append(h.getHex().substring(0, Math.min(8, h.getHex().length())));
+        }
+        return sb.length() == 0 ? "unknown effect" : sb.toString();
+    }
+
+    private static boolean isSuspended(MezzePromise p) {
+        return p.getUnhandledOpCall() != null || p.snapshotResult() instanceof MezzeSuspend;
+    }
+
+    private static SuspendedOps suspendedOps() {
+        return MezzeContext.get(null).nativeState(SuspendedOps.class, SuspendedOps::new);
     }
 
     /**
@@ -1245,7 +1394,7 @@ public final class AsyncNatives {
         // finished and produced a value; await forces it on the way out. That is
         // a representation detail, not an unmet obligation, so the promise really
         // is complete and a poller should hear so.
-        if (state == MezzePromise.COMPLETED && p.getUnhandledOpCall() != null) {
+        if (state == MezzePromise.COMPLETED && isSuspended(p)) {
             return promiseStatePending();
         }
         return switch (state) {
@@ -1317,11 +1466,12 @@ public final class AsyncNatives {
             Object value = p.snapshotResult();
             // Effect propagation: MezzeSuspend forcing
             if (value instanceof MezzeSuspend suspended) {
+                suspendedOps().taken();
                 Object forced = suspended.force(IndirectCallNode.getUncached());
                 return MezzeVariant.ok(forced);
             }
             // Effect propagation: unhandled op-call re-raise
-            OpCall pending = p.getUnhandledOpCall();
+            OpCall pending = p.takeUnhandledOpCall();
             if (pending != null) {
                 return dispatchUnhandledOp(pending);
             }
@@ -1360,10 +1510,11 @@ public final class AsyncNatives {
         }
         // Effect propagation
         if (value instanceof MezzeSuspend suspended) {
+            suspendedOps().taken();
             Object forced = suspended.force(IndirectCallNode.getUncached());
             return MezzeVariant.ok(forced);
         }
-        OpCall pending = p.getUnhandledOpCall();
+        OpCall pending = p.takeUnhandledOpCall();
         if (pending != null) {
             return dispatchUnhandledOp(pending);
         }
@@ -1514,6 +1665,7 @@ public final class AsyncNatives {
         //    op-call dispatches on the parent fiber. This handles the
         //    common `perform ExceptionToResult in spawn (raise)` case.
         if (result instanceof MezzeSuspend suspended) {
+            suspendedOps().taken();
             return suspended.force(IndirectCallNode.getUncached());
         }
         // 2. If the task ran via the captured handler chain and an op-call
@@ -1527,7 +1679,7 @@ public final class AsyncNatives {
         //       so the surrounding runPromiseTask / runBatchTask catches
         //       it and propagates one level further up.
         //    c) Neither: nowhere to send the op. Wrap as RuntimeException.
-        OpCall pending = promise.getUnhandledOpCall();
+        OpCall pending = promise.takeUnhandledOpCall();
         if (pending != null) {
             if (HandlerChainRegistry.handlerChainDepth() > 0) {
                 // The outer BDSL Handle @Operation installed its handler

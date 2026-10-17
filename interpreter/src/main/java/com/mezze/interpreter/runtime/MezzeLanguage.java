@@ -1094,6 +1094,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     protected void disposeThread(MezzeContext context, Thread thread) {
         com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives
                 .resetPerThreadStmState();
+        // Same reason, and the same hook is why this is COMPLETE rather than
+        // best-effort: Truffle calls disposeThread for every thread that was in
+        // the context, so every slot gets cleared, not just the closing thread's.
+        com.mezze.interpreter.nodes.builtin.effects.AsyncNatives
+                .resetPerThreadScope();
     }
 
     /**
