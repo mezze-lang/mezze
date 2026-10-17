@@ -148,9 +148,12 @@ jobs:
 
   release:
     needs: [build, build-windows]
-    # Publish as long as the (verified) unix builds succeeded; Windows is
-    # best-effort, so a Windows failure still releases linux + macOS.
-    if: always() && needs.build.result == 'success'
+    # Publish only on a real tag push, and only if the (verified) unix builds
+    # succeeded — Windows is best-effort, so its failure still ships linux+macOS.
+    # A manual `workflow_dispatch` therefore just BUILDS every platform (artifacts
+    # are downloadable from the run) without creating a Release — a safe way to
+    # verify the whole matrix on a private repo before going public.
+    if: always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write          # create the Release and upload assets
