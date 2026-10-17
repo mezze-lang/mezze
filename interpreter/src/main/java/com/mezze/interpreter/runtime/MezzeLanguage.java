@@ -1121,6 +1121,23 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // disposeContext to keep eager slots Context-scoped in effect,
         // while still amortizing the SlotTable Map allocation.
         if (slotTable != null) slotTable.clear();
+
+        // USER CallTargets were compiled against the IR of the Context that is
+        // going away, and keeping them past its dispose retains that whole AST.
+        // Keyed by content hash, so the growth is bounded by distinct FUNCTIONS
+        // rather than by runs — which bounds nothing for a long-lived Engine
+        // whose code changes: a `mez dev` session reloading on every save mints
+        // fresh hashes each time and nothing ever dropped the old ones. It is a
+        // correctness hazard too, which `mezze.test.isolation` was added to work
+        // around in the suite: a cached caller can hold a lazy stub pointing at
+        // IR only the dead Context registered.
+        //
+        // The STDLIB cache deliberately stays. Those targets come from the
+        // precompiled snapshot, are identical in every Context, and are the
+        // expensive ones to rebuild — dropping them would make every new Context
+        // pay for stdlib warm-up to fix a leak they are not part of.
+        importedCallTargetCache.clear();
+        userStubCache.clear();
     }
 
     /**

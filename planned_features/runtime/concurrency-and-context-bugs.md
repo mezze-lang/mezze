@@ -118,9 +118,25 @@ closing thread's, which is what made the limitation look inherent.
 
 ---
 
-## C3 — per-language CallTarget caches survive context dispose
+## C3 — FIXED as a leak: user CallTargets no longer survive context dispose
 
-**UNPROVEN — structure only.**
+`disposeContext` clears `importedCallTargetCache` and `userStubCache`. Those
+hold USER CallTargets, compiled against the IR of the Context being disposed,
+and keeping them retains that whole AST. Keyed by content hash, so growth is
+bounded by distinct FUNCTIONS rather than runs — which bounds nothing on a
+long-lived Engine whose code changes: a `mez dev` session reloading on each save
+mints fresh hashes every time and nothing dropped the old ones.
+
+`stdlibCallTargetCache` deliberately stays. Those come from the precompiled
+snapshot, are identical in every Context, and are the expensive ones to rebuild;
+dropping them would make every new Context pay stdlib warm-up to fix a leak they
+are not part of.
+
+The CORRECTNESS half below is a separate claim and remains unproven. Note the
+suite already works around it with `mezze.test.isolation`, and production runs
+one Context per Engine, so there is nothing to cross there.
+
+### The correctness claim — still unproven, structure only
 
 `stdlibCallTargetCache`, `importedCallTargetCache` and `userStubCache` live on
 `MezzeLanguage` (one per sharing layer) and are cleared only by
@@ -212,11 +228,27 @@ violations remain for the native-smoke fixture, and every trace goes through
 one of two places:
 
 - `MezzeBytecodeRootNodeGen$InstructionImpl.getArguments`, reached from Truffle's
-  own `Instruction.toString` → `Instruction.formatInstruction` → `Formatter`.
-  That is the Bytecode DSL's DEBUG PRINTING being reachable for runtime
-  compilation. It is generated code, so the fix is a reachability exclusion
-  rather than an annotation.
+  own `Instruction.toString` → `formatInstruction` → `Formatter.format` →
+  `String.format` → **`Preconditions.outOfBoundsMessage`**. Read that chain
+  backwards and the real cause is ours: runtime-compiled code does an index
+  operation whose bounds-failure path calls `String.format`, and once `Formatter`
+  is reachable the analysis must assume the `%s` could be any object with a
+  `toString` — the Bytecode DSL's `Instruction` among them. The Bytecode DSL is
+  not the problem and annotating generated code is not the fix.
 - `EmbeddedExec.executeWithTruffle$lambda$24`.
+
+**There is no shortcut.** GraalVM 25.0.3 has no `-H:` option to ignore or
+whitelist blocklist violations — checked `--expert-options-all`; the only
+Truffle options are host-inlining and trusted-cast knobs. The lever is
+reachability and nothing else.
+
+**So the work is:** keep `Formatter`/`String.format` off the runtime-compiled
+surface by routing bounds failures through a `@TruffleBoundary` helper instead of
+letting `Preconditions` format them inline. That is per-index-site interpreter
+work — the "interpreter-level work tightens dispatch" that `NativeBuildPath`'s
+own comments on #184/#401 anticipate — and it is too large to bolt onto a
+session about something else. `-H:+PrintRuntimeCompilationCallTree` is the tool
+for finding the sites.
 
 **Diagnosis order that works** (the one above does not): dump the classpath with
 `MEZZE_DEBUG_NATIVE_CP=1`, then group the violation traces by the `com.mezze.`
