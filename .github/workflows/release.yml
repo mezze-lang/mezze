@@ -197,3 +197,11 @@ jobs:
             install.sh
             install.ps1
           generate_release_notes: true
+          # Anything with a hyphen in the tag — v0.0.0-alpha, -rc1, -beta2 — is a
+          # prerelease. Without this a 0.0.0-alpha publishes as the LATEST
+          # stable, which is also what install.sh resolves when MEZ_VERSION is
+          # unset, so a first-time installer would get an alpha as the release
+          # build. Derived from the tag rather than hardcoded, so it flips by
+          # itself on the first clean v0.1.0 with no edit here. The flag is read
+          # at publish time: fixing it afterwards means deleting the Release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
