@@ -1,0 +1,63 @@
+## The HTTP SERVER effect, a server handle, and a test performer.
+##
+## ONE operation, `serve`, which receives a HANDLER and runs it. The handler is
+## a function from `Request` to `Response`; routing is not part of the effect.
+## A route table is pure code that FOLDS into one handler (see `router.mz`), so
+## the effect never grows an operation per routing feature.
+##
+## This mirrors the client exactly, inverted. The client's `request` is a
+## function you CALL; the server's `serve` takes a function you PROVIDE. Both
+## speak the same `Request`/`Response` vocabulary.
+##
+## ASYNC. The handler's effect row is polymorphic (`<...>`), and that is
+## load-bearing. A performer MAY install an async performer around the handler
+## call, which discharges the handler's `<Async>`; `MockHttpServer` does not, so
+## the row stays residual and the TEST supplies its own async:
+##
+##   perform LoomAsync in perform MockHttpServer in serve { handler = h }
+##
+## Effects other than async always escape through `serve` to whoever installed
+## the server.
+
+use std::effects::http::{ Method, Get, Request, Response }
+use std::collections::map
+use std::str
+
+## A running server. `stop` shuts it down; `port` is the bound port, which
+## matters when a test binds port 0 and the OS chooses.
+pub type ServerHandle = {
+  stop: {} -> {},
+  port: Int,
+}
+
+## Run a handler as a server.
+effect HttpServer where {
+  serve: { handler: { req: Request } -> Response } -> ServerHandle <HttpServer>
+}
+
+## A server that never binds a socket.
+##
+## `serve` returns a handle whose `stop` does nothing and whose `port` is 0. The
+## handler is NOT called here — a test calls it directly, which is the whole
+## point: a handler is a plain function and needs no server to exercise.
+##
+## It installs NO async performer, so a handler's `<Async>` escapes to the test.
+impl HttpServer for MockHttpServer where {
+  serve = { handler } -> { stop = {} -> {}, port = 0 }
+}
+
+## Build a `Request` for a handler, without a server.
+##
+## This is the test seam. A router is pure and a handler is pure, so the whole
+## request path is exercised by passing one of these in.
+pub let incoming: { method: Method, url: Str } -> Request = { method, url } -> {
+  method = method,
+  url = url,
+  headers = map::empty {},
+  body = None,
+  timeout_ms = None,
+}
+
+## `incoming` for a GET, which is most of what tests want.
+pub let get_request: { url: Str } -> Request = { url } ->
+  incoming { method = Get, url = url }

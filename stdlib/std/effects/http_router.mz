@@ -1,0 +1,97 @@
+## Routing — PURE code that folds a route table into ONE handler.
+##
+## Nothing here performs an effect. A `Route` matches a method and a path; `or`
+## joins two routes; `otherwise` supplies the fallback and closes the table into
+## a plain `{ req: Request } -> Response`. That function is what `serve` takes,
+## so routing never appears in the `HttpServer` effect and never grows an
+## operation.
+##
+## Because it is pure, a route table is tested by calling it with a `Request`.
+## No server, no mock, no socket.
+##
+## Calls here are QUALIFIED (`seq::size`, `str::starts_with`) rather than
+## method-style. A stdlib inherent method needs its ability in scope at the use
+## site, and this module should not impose that on its consumers.
+##
+## PATH PARAMETERS. A segment written `:name` matches any one segment and binds
+## it. `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
+## receives the bindings as a `Map Str Str` alongside the request.
+
+use std::effects::http::{ Method, Request, Response }
+use std::collections::map
+use std::collections::seq
+use std::str
+
+## What a matched route hands its handler: the request, plus the path
+## parameters the pattern bound.
+pub type Matched = {
+  req: Request,
+  params: Map Str Str,
+}
+
+## A route table. `run` is the only thing a consumer needs; the variants exist
+## so `or` can build a chain without a mutable list.
+pub type Routes = {
+  run: { req: Request } -> Option Response,
+}
+
+## Split a path into segments, dropping the empty pieces a leading or trailing
+## slash produces, so `/users/7/` and `users/7` agree.
+pub let segments: { path: Str } -> [Str] = { path } ->
+  seq::filter { xs = str::split { s = path, delimiter = "/" }, p = { x } -> x != "" }
+
+## Match one pattern against one path, returning the bound parameters.
+##
+## Returns `None` when the lengths differ or a literal segment disagrees. A
+## `:name` segment always matches and binds.
+pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } -> do
+  let ps = segments { path = pattern }
+  let xs = segments { path = path }
+  if seq::size { xs = ps } != seq::size { xs = xs } then None
+  else
+    seq::fold {
+      xs = seq::zip { xs = ps, ys = xs },
+      init = Some { val = map::empty {} },
+      f = { acc, x } -> match acc is
+        None -> None
+        Some { val = bound } ->
+          if str::starts_with { s = x.fst, prefix = ":" } then
+            Some { val = map::insert {
+              m = bound,
+              k = str::substring { s = x.fst, start = 1, end = str::size { s = x.fst } },
+              v = x.snd,
+            } }
+          else
+            if x.fst == x.snd then Some { val = bound } else None
+    }
+
+## One route: a method, a path pattern, and a handler that receives the bound
+## parameters.
+pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response } -> Routes =
+  { method, path, handler } -> {
+    run = { req } ->
+      if req.method != method then None
+      else match match_path { pattern = path, path = req.url } is
+        None -> None
+        Some { val = params } ->
+          Some { val = handler { m = { req = req, params = params } } },
+  }
+
+## Try `a`, then `b`. First match wins, so declaration order is the priority.
+##
+## Named `or_else`, not `or`: `or` is the infix boolean operator's name and the
+## parser does not take it as a plain identifier here.
+pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
+  run = { req } -> match a.run { req = req } is
+    Some { val } -> Some { val = val }
+    None -> b.run { req = req },
+}
+
+## Close the table: everything unmatched goes to `fallback`.
+##
+## The result is a plain function, which is exactly what `HttpServer.serve`
+## takes — the route table has disappeared by this point.
+pub let otherwise: { routes: Routes, fallback: { req: Request } -> Response } -> { req: Request } -> Response =
+  { routes, fallback } -> { req } -> match routes.run { req = req } is
+    Some { val } -> val
+    None -> fallback { req = req }
