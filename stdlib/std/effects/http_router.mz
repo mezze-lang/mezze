@@ -22,6 +22,7 @@ use std::collections::map
 use std::collections::seq
 use std::collections::bytes
 use std::str
+use std::codec::url::{ url_decode_component }
 ## `path_of` does index arithmetic, and `+` on Int needs int's `NumAdd` impl in
 ## scope — an impl arrives with its module, not with the prelude.
 use std::int
@@ -149,6 +150,54 @@ pub let otherwise
     Some { val } -> val
     None -> fallback { req = req }
 
+## ── Query parameters ────────────────────────────────────────────────────────
+
+## Parse a request target's query into its parameters.
+##
+## Repeated keys COLLECT: `?tags=a&tags=b` gives `tags` two values. That is the
+## encoding `with_query`'s `QList` produces and the one the widest range of
+## servers parse, so the two halves of the story agree on it.
+##
+## A fragment with no `=` is a key with one empty value, which is how a flag
+## like `?debug` arrives. Keys and values are percent-decoded.
+pub let query_params: { url: Str } -> Map Str [Str] = { url } ->
+  seq::fold {
+    xs = seq::filter {
+      xs = str::split { s = query_of { url = url }, delimiter = "&" },
+      p = { x } -> x != "",
+    },
+    init = map::empty {},
+    f = { acc, x } -> do
+      let cut = str::index_of { s = x, sub = "=" }
+      let k = match cut is
+        None -> url_decode_component { s = x }
+        Some { val = i } -> url_decode_component { s = str::substring { s = x, start = 0, end = i } }
+      let v = match cut is
+        None -> ""
+        Some { val = i } ->
+          url_decode_component { s = str::substring { s = x, start = i + 1, end = str::size { s = x } } }
+      let prior = match map::get { m = acc, k = k } is
+        Some { val } -> val
+        None -> []
+      map::insert { m = acc, k = k, v = seq::push { xs = prior, x = v } },
+  }
+
+## Every value a query gave for `name`, in the order they appeared. No such key
+## is the empty sequence, not an error — a parameter nobody sent and a
+## parameter sent zero times are the same thing to a handler.
+pub let query_all: { url: Str, name: Str } -> [Str] = { url, name } ->
+  match map::get { m = query_params { url = url }, k = name } is
+    Some { val } -> val
+    None -> []
+
+## The FIRST value a query gave for `name`.
+##
+## First, not last, and not an error on a repeat: a handler that wants one
+## value should not have to care that a client sent two, and the first is what
+## a reader of the URL would say it is.
+pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
+  seq::first { xs = query_all { url = url, name = name } }
+
 ## ── Dot-chaining surface ──────────────────────────────────────────────────
 ##
 ## Inherent impls on the two types this module declares, so a route table reads
@@ -173,6 +222,15 @@ impl Routes where {
 impl Matched where {
   ## A bound path parameter, if the pattern bound one by that name.
   param = { it: 'it, name: Str } -> map::get { m = it.params, k = name },
+  ## The first value the query gave for `name`.
+  query = { it: 'it, name: Str } -> query_param { url = it.req.url, name = name },
+  ## The first value the query gave for `name`, or `default`.
+  query_or = { it: 'it, name: Str, default: Str } ->
+    match query_param { url = it.req.url, name = name } is
+      Some { val } -> val
+      None -> default,
+  ## Every value the query gave for `name`.
+  query_all = { it: 'it, name: Str } -> query_all { url = it.req.url, name = name },
   ## A bound path parameter, or `default` when the pattern bound none.
   ##
   ## Most handlers want this: a `:name` in the pattern always binds, so the

@@ -202,4 +202,106 @@ class HttpRouterTest {
         """.trimIndent())
         assertEquals("7", r, "the query belongs to the target, not to the path segment")
     }
+
+    // ── Query parameters ───────────────────────────────────────────────────
+    //
+    // `path_of` keeps the query out of routing; these read it back out. Both
+    // are pure, so none of this needs a socket.
+
+    @Test
+    fun `a query parameter is read by name`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_param }
+            match query_param { url = "/users/7?page=2&sort=name", name = "sort" } is
+              Some { val } -> val
+              None -> "absent"
+        """.trimIndent())
+        assertEquals("name", r)
+    }
+
+    @Test
+    fun `a parameter nobody sent is None`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_param }
+            match query_param { url = "/users/7?page=2", name = "sort" } is
+              Some { val } -> val
+              None -> "absent"
+        """.trimIndent())
+        assertEquals("absent", r)
+    }
+
+    @Test
+    fun `a repeated key collects every value, in order`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_all }
+            use std::str
+            str::join { strings = query_all { url = "/x?tags=a&tags=b&tags=c", name = "tags" }, separator = "-" }
+        """.trimIndent())
+        assertEquals("a-b-c", r, "repeated keys are what with_query's QList produces; both halves must agree")
+    }
+
+    @Test
+    fun `query_param gives the FIRST of a repeated key`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_param }
+            match query_param { url = "/x?tags=a&tags=b", name = "tags" } is
+              Some { val } -> val
+              None -> "absent"
+        """.trimIndent())
+        assertEquals("a", r)
+    }
+
+    @Test
+    fun `percent escapes and plus are decoded in keys and values`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_param }
+            match query_param { url = "/x?full%20name=ada+lovelace", name = "full name" } is
+              Some { val } -> val
+              None -> "absent"
+        """.trimIndent())
+        assertEquals("ada lovelace", r, "a key is decoded too, not only a value")
+    }
+
+    @Test
+    fun `a flag with no equals is a key with an empty value`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_param }
+            match query_param { url = "/x?debug", name = "debug" } is
+              Some { val } -> "empty"
+              None -> "absent"
+        """.trimIndent())
+        assertEquals("empty", r, "`?debug` sent the key; it did not fail to send it")
+    }
+
+    @Test
+    fun `no query at all gives no parameters`() {
+        val r = MezzeTestHelper.run("""
+            $head
+            use std::effects::http_router::{ query_params }
+            use std::collections::map
+            map::size { m = query_params { url = "/users/7" } }
+        """.trimIndent())
+        assertEquals(0L, r)
+    }
+
+    @Test
+    fun `a handler reads the query off its Matched`() {
+        // The chainable form, which is what a route handler actually writes.
+        val r = MezzeTestHelper.run("""
+            $head
+            let app = otherwise {
+              routes = route { method = Get, path = "/users/:id", handler = { m } ->
+                reply { code = 200, text = m.query_or { name = "sort", default = "none" }, url = m.req.url } },
+              fallback = not_found,
+            }
+            body_of { resp = app { req = get_request { url = "/users/7?sort=age" } } }
+        """.trimIndent())
+        assertEquals("age", r)
+    }
 }

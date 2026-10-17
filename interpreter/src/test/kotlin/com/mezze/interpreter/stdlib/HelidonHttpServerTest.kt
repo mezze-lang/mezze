@@ -211,6 +211,41 @@ class HelidonHttpServerTest {
     }
 
     @Test
+    fun `a query the client encoded is the query the server reads`() {
+        // `with_query`'s QList renders a repeated key; `query_all` collects
+        // one. Nothing else holds the two halves of the story to the same
+        // convention, and a convention only one side follows is a bug waiting
+        // for a user.
+        val r = MezzeTestHelper.run(
+            """
+            $head
+            use std::effects::http::{ QList, with_query }
+            use std::str
+            let app = otherwise {
+              routes = route { method = Get, path = "/q",
+                handler = { m } -> reply { code = 200,
+                  text = str::join { strings = m.query_all { name = "tags" }, separator = "-" },
+                  url = m.req.url } },
+              fallback = not_found,
+            }
+            let go: {} -> Str <*> = {} ->
+              perform HelidonHttpServerWith { config = listen_on_any_port } in
+                perform SimpleHttpClient in do
+                  let h = HttpServer.serve { handler = app }
+                  let params = map::insert { m = map::empty {}, k = "tags", v = QList { xs = ["a", "b"] } }
+                  let sent = request { url = ${url("/q")} }.with_query { params = params }.send {}
+                  let out = match sent is
+                    Ok { val } -> text_of { resp = val }
+                    Err { error = e } -> format_error { err = e }
+                  h.stop {}
+                  out
+            go {}
+            """.trimIndent(),
+        )
+        assertEquals("a-b", r, "the client's repeated key is what the server's query_all collects")
+    }
+
+    @Test
     fun `two requests in a row both get answered`() {
         // One request proves the path works once. A second proves the worker
         // went back for more rather than retiring after its first job.
