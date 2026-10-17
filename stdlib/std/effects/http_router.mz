@@ -20,6 +20,7 @@
 use std::effects::http::{ Method, Request, Response }
 use std::collections::map
 use std::collections::seq
+use std::collections::bytes
 use std::str
 
 ## What a matched route hands its handler: the request, plus the path
@@ -95,3 +96,52 @@ pub let otherwise: { routes: Routes, fallback: { req: Request } -> Response } ->
   { routes, fallback } -> { req } -> match routes.run { req = req } is
     Some { val } -> val
     None -> fallback { req = req }
+
+## ── Dot-chaining surface ──────────────────────────────────────────────────
+##
+## Inherent impls on the two types this module declares, so a route table reads
+## as a chain instead of a nest. These are legal here precisely because `Routes`
+## and `Matched` are declared in this module — an inherent impl must live with
+## its type.
+##
+##   route { method = Get, path = "/users/:id", handler = { m } ->
+##     m.ok { text = m.param_or { name = "id", default = "?" } } }
+##     .or_else { b = route { method = Post, path = "/users",
+##                            handler = { m } -> m.reply { status = 201, text = "created" } } }
+##     .otherwise { fallback = not_found }
+
+impl Routes where {
+  ## Try this table, then `b`. First match wins.
+  or_else = { it: 'it, b: Routes } -> or_else { a = it, b = b },
+  ## Close the table with a fallback, producing the handler `serve` takes.
+  otherwise = { it: 'it, fallback: { req: Request } -> Response } ->
+    otherwise { routes = it, fallback = fallback },
+}
+
+impl Matched where {
+  ## A bound path parameter, if the pattern bound one by that name.
+  param = { it: 'it, name: Str } -> map::get { m = it.params, k = name },
+  ## A bound path parameter, or `default` when the pattern bound none.
+  ##
+  ## Most handlers want this: a `:name` in the pattern always binds, so the
+  ## `None` arm is unreachable for a parameter the route itself declared, and
+  ## making every handler write the match obscured the interesting line.
+  param_or = { it: 'it, name: Str, default: Str } ->
+    match map::get { m = it.params, k = name } is
+      Some { val } -> val
+      None -> default,
+  ## A 200 carrying `text`, with the request's own url echoed back.
+  ok = { it: 'it, text: Str } -> {
+    status = 200,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = it.req.url,
+  },
+  ## Any status carrying `text`.
+  reply = { it: 'it, status: Int, text: Str } -> {
+    status = status,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = it.req.url,
+  },
+}
