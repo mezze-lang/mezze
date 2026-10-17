@@ -207,8 +207,9 @@ pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
 ##
 ##   let page: Result { q: Str, page: Int } DecodeError = query_decoded { url = req.url }
 ##
-## `FromQuery` has to be in scope where this is called, because that is where
-## the constraint is discharged; it is re-exported from this module.
+## `FromQuery` is re-exported from this module, and a `pub use` carries the
+## instance as well as the name — so importing anything from here is enough to
+## call this.
 pub let query_decoded = { url: Str } -> query_of { url = url }.from_query {}
 
 ## ── Dot-chaining surface ──────────────────────────────────────────────────

@@ -49,6 +49,11 @@ class HttpStageDTest {
     // encode a structured query, and `std::codec::query` is that format. So
     // these tests pass records, and a value's own type decides how it renders
     // — which is what the note that used to sit here was waiting for.
+    //
+    // And they import `request` ALONE. `with_query` is constrained on
+    // `ToQuery`, http.mz re-exports it with `pub use`, and a `pub use` now
+    // carries the instance as well as the name — so a caller adding `?page=2`
+    // does not have to know which codec module makes that work.
 
     // =========================================================================
     // with_query — append + percent-encode
@@ -57,7 +62,7 @@ class HttpStageDTest {
     @Test
     fun `with_query appends single string param`() {
         val result = eval("""
-            use std::effects::http::{request, ToQuery}
+            use std::effects::http::{request}
 
             let r = request { url = "https://api.acme.com/search" }
               .with_query { params = { q = "hello" } }
@@ -71,7 +76,7 @@ class HttpStageDTest {
         // An Int field renders as an Int: no stringify at the call site, and no
         // wrapper constructor to say which kind of value it is either.
         val result = eval("""
-            use std::effects::http::{request, ToQuery}
+            use std::effects::http::{request}
 
             let r = request { url = "https://api.acme.com/items" }
               .with_query { params = { page = 42 } }
@@ -84,7 +89,7 @@ class HttpStageDTest {
     fun `with_query list value renders as a repeated key`() {
         // A sequence field expands to one key=value fragment per element.
         val result = eval("""
-            use std::effects::http::{request, ToQuery}
+            use std::effects::http::{request}
 
             let r = request { url = "https://api.acme.com/items" }
               .with_query { params = { tags = ["a", "b"] } }
@@ -96,7 +101,7 @@ class HttpStageDTest {
     @Test
     fun `with_query percent-encodes special characters`() {
         val result = eval("""
-            use std::effects::http::{request, ToQuery}
+            use std::effects::http::{request}
 
             let r = request { url = "https://api.acme.com/s" }
               .with_query { params = { q = "a b&c" } }
@@ -108,7 +113,7 @@ class HttpStageDTest {
     @Test
     fun `with_query empty params is a no-op`() {
         val result = eval("""
-            use std::effects::http::{request, ToQuery}
+            use std::effects::http::{request}
 
             let r = request { url = "https://api.acme.com/x" }
               .with_query { params = {} }
@@ -120,7 +125,7 @@ class HttpStageDTest {
     @Test
     fun `with_query uses ampersand when URL already has a query string`() {
         val result = eval("""
-            use std::effects::http::{request, ToQuery}
+            use std::effects::http::{request}
 
             let r = request { url = "https://api.acme.com/x?lang=en" }
               .with_query { params = { page = 2 } }

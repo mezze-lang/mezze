@@ -1,9 +1,10 @@
 use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
 use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
 ## Re-exported, not merely imported: `with_query` is constrained on `ToQuery`,
-## and that constraint is resolved at the CALL SITE, so the blanket impl has to
-## be in scope wherever someone adds a query parameter. Nobody adding `?page=2`
-## should have to know which codec module makes that work.
+## and that constraint is settled at the CALL SITE, so the blanket impl has to be
+## in scope wherever someone adds a query parameter. A `pub use` carries the
+## instance along with the name, so importing anything from this module is
+## enough.
 pub use std::codec::query::{ ToQuery }
 use std::collections::map
 use std::collections::seq
@@ -383,10 +384,10 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
 ## Keys and values are percent-encoded. A value that encodes to nothing — an
 ## empty record, a `None` — is a no-op.
 ##
-## `ToQuery` must be in scope at the CALL SITE, which is where the constraint
-## is discharged; it is re-exported from this module so one import covers it:
-##
-##   use std::effects::http::{ request, ToQuery }
+## A constraint is settled at the CALL SITE, so the `ToQuery` instance has to be
+## in scope there — and it is, through this module's `pub use` below. Importing
+## anything from here brings it, so adding `?page=2` needs no knowledge of which
+## codec module makes it work.
 pub let with_query: { req: Request, params: 'a } with ToQuery 'a -> Request = { req, params } -> do
   let qs = params.query_string {}
   if str::is_empty { s = qs } then req else do

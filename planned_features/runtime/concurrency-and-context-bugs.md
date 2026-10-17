@@ -130,7 +130,7 @@ do not pay it for a hypothesis.
 
 ---
 
-## C4 — `pub use` of an ability does not carry its blanket impl
+## C4 — FIXED: `pub use` of an ability did not carry its blanket impl
 
 A consumer that does not NAME the re-exported item gets the binding and not the
 instance. `http.mz` has `pub use std::codec::query::{ ToQuery }`, and
@@ -149,8 +149,23 @@ anything from a module carries that module's own impls wholesale.
 **Evidence:** reproduced 2026-10-17; the `pub use` was added for exactly this
 and did not help. The error now suggests the import, which is a workaround.
 
-**Fix shape:** a module's `pub use`d impls should travel with it the way its own
-do. Watch coherence — this widens what an import brings into scope.
+**Fixed:** `ImportResolver.reexportedAbilityImpls` walks a module's `pub use`
+declarations, transitively, and merges the source modules' `abilityImplsByHash`
+alongside the module's own. A module that writes `pub use` is asking for its
+source's surface to be part of its own, and the instances are part of that
+surface.
+
+Callers stopped working around it: `HttpStageDTest` imports `request` alone
+again, and the router tests no longer import `FromQuery`.
+
+It does widen what an import brings into scope, which is the thing to watch —
+but only for modules whose author opted in by writing `pub use`.
+
+**The shape this does NOT cover, and the hint is for:** a module that plain-
+`use`s an ability and exposes a function constrained on it. Its consumers get
+the function and not the instance, because nothing was re-exported. That is
+`from_json_result`'s shape, and `UnimportedAbilityHintTest` now builds it out of
+three modules rather than relying on the `ToQuery` case this fix removed.
 
 ---
 

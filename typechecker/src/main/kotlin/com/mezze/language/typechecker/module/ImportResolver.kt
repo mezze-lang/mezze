@@ -770,6 +770,9 @@ class ImportResolver(
             }
 
             abilityImpls.putAll(index.abilityImplsByHash)
+            // …and the impls of whatever this module re-exports. See
+            // reexportedAbilityImpls for why a `pub use` has to carry them.
+            module?.let { abilityImpls.putAll(reexportedAbilityImpls(it, mutableSetOf())) }
 
             // #183 follow-up: also collect from inherent impl op annotations
             // (param + return + impl target) so chain expressions like
@@ -870,6 +873,47 @@ class ImportResolver(
                     }
                 is ParsedUsePath.Module -> out.putAll(fromSource)
             }
+        }
+        return out
+    }
+
+    /**
+     * The ability impls of every module [module] re-exports, transitively.
+     *
+     * A plain `use some::module::{ anything }` carries that module's OWN impls
+     * wholesale, and it has to: an impl is not a named item anyone can ask for.
+     * It is the reason a constraint can be discharged, and a constraint is
+     * discharged at the CALL SITE — so the caller is who needs it.
+     *
+     * A `pub use`d impl travelled with nothing. The re-export path carries
+     * impls only for items the consumer happens to NAME, so a facade module
+     * could re-export an ability and still leave its consumers unable to use
+     * it. `http.mz` does exactly that with `ToQuery` for `with_query`, and
+     * `use std::effects::http::{ request }` then failed with "`ToQuery` isn't
+     * imported here" — the module had said "get it from me" and could not
+     * deliver.
+     *
+     * A module that writes `pub use` is asking for its source's surface to be
+     * part of its own, and the instances are part of that surface. [visited]
+     * breaks `pub use` cycles, keyed apart from the name walk's own marks.
+     */
+    private fun reexportedAbilityImpls(
+        module: LoadedModule,
+        visited: MutableSet<String>,
+    ): Map<Hash, ParsedImplAbilityDecl> {
+        if (!visited.add("impls:${module.modulePath}")) return emptyMap()
+        val out = mutableMapOf<Hash, ParsedImplAbilityDecl>()
+        for (pubUse in module.index.pubUseDeclarations) {
+            val srcSegments = when (val p = pubUse.path) {
+                is ParsedUsePath.Selective -> p.modulePath.segments
+                is ParsedUsePath.Module -> p.path.segments
+            }
+            val srcModule = when (val r = loader.loadModule(ModulePath(srcSegments))) {
+                is ModuleLoadResult.Success -> r.module
+                is ModuleLoadResult.Failure -> continue
+            }
+            out.putAll(srcModule.index.abilityImplsByHash)
+            out.putAll(reexportedAbilityImpls(srcModule, visited))
         }
         return out
     }

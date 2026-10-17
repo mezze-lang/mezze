@@ -256,7 +256,6 @@ class HelidonHttpServerTest {
             """
             $head
             use std::effects::http::{ with_query, ToQuery }
-            use std::effects::http_router::{ FromQuery }
             use std::codec::core::{ DecodeError }
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
