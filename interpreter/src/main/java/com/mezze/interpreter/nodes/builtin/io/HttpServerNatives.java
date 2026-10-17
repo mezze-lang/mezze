@@ -262,6 +262,10 @@ public final class HttpServerNatives {
      * Runs on a Helidon thread. Everything it touches is Java; the Mezze
      * handler is somebody else's problem, by design.
      */
+    /** Runs on a Helidon thread and is never partially evaluated. Without the
+     *  boundary, SVM analyses it as runtime-compilable and its queue and map
+     *  calls land on the blocklist, failing every user `mez build --native`. */
+    @TruffleBoundary
     private static void dispatch(BlockingQueue<Job> queue, ServerRequest req, ServerResponse res) {
         String method = req.prologue().method().text();
         String target = requestTarget(req);
@@ -326,6 +330,9 @@ public final class HttpServerNatives {
      * Runs on a Truffle-owned virtual thread, so calling guest code and
      * allocating guest values are both legal here.
      */
+    /** A worker's whole life, on a thread of its own. Same blocklist reason as
+     *  `dispatch`. */
+    @TruffleBoundary
     private static void workerLoop(
         BlockingQueue<Job> queue,
         MezzeFunction handler,

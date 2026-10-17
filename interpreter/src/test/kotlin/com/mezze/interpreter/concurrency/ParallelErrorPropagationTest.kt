@@ -276,8 +276,8 @@ class ParallelErrorPropagationTest {
             let result = with_timeout {p = fast_op, ms = 500}
 
             match result is
-                Some { val } -> val
-                None -> 0 - 1
+                Ok { val } -> val
+                Err { error = _ } -> 0 - 1
         """
         val result = eval(code)
         assertEquals(42L, result)

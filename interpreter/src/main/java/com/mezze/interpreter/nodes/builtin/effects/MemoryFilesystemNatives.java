@@ -59,19 +59,23 @@ public final class MemoryFilesystemNatives {
         }
     }
 
+    @TruffleBoundary
     private static State state() {
         return com.mezze.interpreter.runtime.MezzeContext.get(null)
             .nativeState(State.class, State::new);
     }
 
+    @TruffleBoundary
     private static ConcurrentHashMap<String, Entry> files() {
         return state().files;
     }
 
+    @TruffleBoundary
     private static ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories() {
         return state().directories;
     }
 
+    @TruffleBoundary
     private static AtomicLong nowMs() {
         return state().nowMs;
     }

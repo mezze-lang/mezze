@@ -863,8 +863,18 @@ object NativeBuildPath {
         // put them on the image classpath so guest languages work in the AOT
         // binary, matching what `mez dev` does. (See ResolvedJarsClasspath.)
         val extraCpFiles = extraClasspath.filter { it.exists() }
-        val cp = (classpathJars + sanitisedUserJar + embeddedJar + userJvmCpFiles + extraCpFiles)
-            .joinToString(File.pathSeparator) { it.absolutePath }
+        val cpFiles = classpathJars + sanitisedUserJar + embeddedJar + userJvmCpFiles + extraCpFiles
+        val cp = cpFiles.joinToString(File.pathSeparator) { it.absolutePath }
+
+        // What went on the image classpath, on request. A native build that fails
+        // in the analyser nearly always fails because of what is REACHABLE, and
+        // the first question is always "what is even on the classpath?" — which
+        // nothing could answer without rebuilding the CLI with a print in it.
+        // `--verbose` streams native-image's own output and never showed this.
+        if (System.getenv("MEZZE_DEBUG_NATIVE_CP") != null) {
+            System.err.println("[mezze] native-image classpath (${cpFiles.size} entries):")
+            for (f in cpFiles) System.err.println("  " + f.absolutePath)
+        }
 
         val cmd = mutableListOf(nativeImage.absolutePath)
         val commonFlags = if (polyglot.enablePython) {

@@ -29,9 +29,10 @@ class AsyncModuleTest {
 
     // Helper to wrap code in LoomAsync handler
     private fun withLoomAsync(body: String): String =
-        "use std::effects::async::{ Async, LoomAsync, all, await, is_done, join, join3, par_filter, par_for_each, par_map, promise_from, promise_of, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }\n" +
+        "use std::effects::async::{ Async, LoomAsync, all, await, is_done, join, join3, par_filter, par_for_each, par_map, promise_failed, promise_from, promise_of, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
+        "use std::int\n" +
         "\n" +
         "perform LoomAsync in do\n" +
         body.trimIndent().lines().joinToString("\n") { "    $it" }
@@ -218,44 +219,68 @@ class AsyncModuleTest {
     // is no second promise, no `Time`, and nothing left to lose a race to.
 
     @Test
-    fun `test timeout returns Some when fast`() {
+    fun `test timeout returns the value when fast`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
             match with_timeout {ms = 1000, p = p} is
-                Some {val} -> val
-                None -> 0
+                Ok {val} -> val
+                Err {error = _} -> 0
         """))
         assertEquals(42L, result)
     }
 
     @Test
     fun `test timeout needs no Time performer`() {
-        // The bite. Nothing in this program installs a `Time` performer, and a
-        // thousand runs of a task that is instant must all say 42 — the old
-        // implementation lost this perhaps one run in a few hundred, which is
-        // exactly the frequency that survives review and fails in CI.
+        // The bite. Nothing in this program installs a `Time` performer, and
+        // fifty runs of a task that is instant must all say 42 — the sleeper
+        // implementation lost this about one run in 130, which is exactly the
+        // frequency that survives review and fails in CI.
         repeat(50) { attempt ->
             val result = eval(withLoomAsync("""
                 let p = Async.spawn {f = {} -> 42}
                 match with_timeout {ms = 1000, p = p} is
-                    Some {val} -> val
-                    None -> 0
+                    Ok {val} -> val
+                    Err {error = _} -> 0
             """))
             assertEquals(42L, result, "attempt $attempt answered a timeout that had not elapsed")
         }
     }
 
     @Test
-    fun `test timeout returns None when the promise never settles`() {
+    fun `test timeout names the deadline when the promise never settles`() {
         // No sleeping on either side: the promise resolves nothing, ever, so the
-        // deadline is the only thing that can end the wait.
+        // deadline is the only thing that can end the wait — and it SAYS so.
+        // `Option` used to collapse this into the same `None` a failed promise
+        // produced, which sent the caller back to `inspect` for the difference.
         val result = eval(withLoomAsync("""
             let p = promise_from {setup = {complete, fail, on_cancel} -> {}}
             match with_timeout {ms = 30, p = p} is
-                Some {val} -> val
-                None -> 0 - 7
+                Ok {val = _} -> "settled"
+                Err {error} -> match error is
+                    AsyncTimedOut {ms} -> "timed out after $(int::to_str {n = ms})ms"
+                    AsyncFailed {msg = _} -> "failed"
+                    AsyncCancelled {reason = _} -> "cancelled"
         """))
-        assertEquals(-7L, result)
+        assertEquals(
+            "timed out after 30ms", result,
+            "the deadline and the promise's own failure are different answers now",
+        )
+    }
+
+    @Test
+    fun `test timeout tells a failed promise apart from a deadline`() {
+        // The other half of what `Option` could not express: this promise is
+        // already Failed, so the answer is its error and not a timeout.
+        val result = eval(withLoomAsync("""
+            let p = promise_failed {err = AsyncFailed {msg = "boom"}}
+            match with_timeout {ms = 1000, p = p} is
+                Ok {val = _} -> "settled"
+                Err {error} -> match error is
+                    AsyncFailed {msg} -> msg
+                    AsyncTimedOut {ms = _} -> "timed out"
+                    AsyncCancelled {reason = _} -> "cancelled"
+        """))
+        assertEquals("boom", result)
     }
 
     @Test
@@ -264,16 +289,16 @@ class AsyncModuleTest {
         // already-resolved promise says yes; one that never resolves says no.
         val settled = eval(withLoomAsync("""
             match with_timeout {ms = 0, p = promise_of {val = 9}} is
-                Some {val} -> val
-                None -> 0
+                Ok {val} -> val
+                Err {error = _} -> 0
         """))
         assertEquals(9L, settled)
 
         val pending = eval(withLoomAsync("""
             let p = promise_from {setup = {complete, fail, on_cancel} -> {}}
             match with_timeout {ms = 0, p = p} is
-                Some {val} -> val
-                None -> 0 - 7
+                Ok {val} -> val
+                Err {error = _} -> 0 - 7
         """))
         assertEquals(-7L, pending)
     }

@@ -439,6 +439,7 @@ public final class IONatives {
         final Map<String, Object> responses = new ConcurrentHashMap<>();
     }
 
+    @TruffleBoundary
     private static Map<String, Object> mockResponses() {
         return com.mezze.interpreter.runtime.MezzeContext.get(null)
             .nativeState(MockState.class, MockState::new).responses;

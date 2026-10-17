@@ -752,6 +752,7 @@ public final class AsyncNatives {
      * and a hash is at least greppable — `Time`'s is the same everywhere. A
      * name would need a hash→effect lookup the runtime does not have here.
      */
+    @TruffleBoundary
     private static String effectIds(MezzeSuspend suspended) {
         StringBuilder sb = new StringBuilder();
         for (Hash h : suspended.getUnhandledEffects()) {
@@ -765,6 +766,21 @@ public final class AsyncNatives {
         return p.getUnhandledOpCall() != null || p.snapshotResult() instanceof MezzeSuspend;
     }
 
+    /**
+     * `@TruffleBoundary` is load-bearing, not decoration.
+     *
+     * This is reached from `MezzePromise.complete` and `setUnhandledOpCall`,
+     * both on paths Truffle partially evaluates, and it does a context lookup
+     * and a ConcurrentHashMap get. `ConcurrentHashMap.get` / `putIfAbsent` are
+     * on SVM's runtime-compilation blocklist, so without the boundary a user's
+     * `mez build --native` aborts with "Blocklisted methods are reachable for
+     * runtime compilation" naming this method — which is how the regression was
+     * found, by a native build that had passed an hour earlier.
+     *
+     * The boundary is free here anyway: the only callers are the cold branches
+     * that take on or discharge a suspended computation.
+     */
+    @TruffleBoundary
     private static SuspendedOps suspendedOps() {
         return MezzeContext.get(null).nativeState(SuspendedOps.class, SuspendedOps::new);
     }

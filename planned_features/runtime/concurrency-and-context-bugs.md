@@ -49,32 +49,44 @@ marked COMPLETED with the op stashed on the promise
 the op is re-dispatched by `await` — by `await` and nothing else. Nobody awaits,
 nobody ever performs it. The effect is silently gone.
 
-Nothing in the types warns: `Async.spawn`'s callback row is `{} -> 'a <...>`,
-absorbed at the spawn, so
+**A SECOND correction: the types are not silent, and "absorbed at the spawn" was
+wrong.** The `<...>` on the callback's arrow carries its effects to the spawn
+site already. A function annotated `<Async>` alone whose body spawns `sleep`
+is a T0210 naming `<Time>`, and a named entry is rejected with "Entry 'main'
+performs Time". Both were verified — AND verified to behave identically with
+`spawn` declared `-> Promise 'a <Async, ...>`, which is why that change was
+made, measured to be a no-op, and reverted rather than shipped on a premise
+that did not hold.
+
+What is genuinely unchecked is a **bare top-level expression**: no annotation to
+contradict, no entry check to answer to. So
 
 ```
-perform LoomAsync in do            # no Time performer anywhere
+perform LoomAsync in do            # a top-level expression, no entry
   let p = Async.spawn { f = {} -> sleep { ms = 1000 } }
-  …                                 # never awaited
+  7                                 # never awaited
 ```
 
-typechecks, runs, and sleeps for nothing. This is exactly how the `with_timeout`
-flake was built, and fixing `inspect` only stopped `is_done` from lying about it.
+typechecks, runs, and sleeps for nothing. That is the test harness's own shape
+and `mez exec`-style snippets; `mez dev` and `mez build` always have an entry
+and are covered. It is how the `with_timeout` flake was built.
 
 **Evidence:** measured. A probe over 400 runs printed
 `sleeper=Completed { val = {} }` in 295 of them for a task whose entire body is
 `sleep { ms = 1000 }`. Only the await paths read `getUnhandledOpCall`
 (`AsyncNatives` lines ~1293, ~1335, ~1499) — grep it.
 
-**Options, none chosen:**
+**Options:**
 1. Fail the promise instead of completing it, and let `await` reconstruct the
    op from the failure. Changes what `await` returns for the propagation case,
    which is a real feature (a spawned task CAN perform the parent's effects).
 2. Keep the stash, and complain when a context disposes with ops nobody
-   collected. Catches the leak without touching propagation semantics; needs a
-   per-context register of suspended promises.
-3. Stop absorbing at the spawn, so the row surfaces on the caller. Most honest,
-   biggest blast radius — `effect_absorption` is load-bearing elsewhere.
+   collected. Catches the drop without touching propagation semantics.
+3. ~~Stop absorbing at the spawn~~ — there is no absorption to stop. Tried,
+   measured as a no-op, reverted.
+4. Check a bare top-level expression's residual effects the way a named entry's
+   are checked. That is the actual remaining gap, and it is a language decision
+   about what a top-level expression means, not an async bug.
 
 (2) is done: `AsyncNatives.SuspendedOps` counts suspended completions per
 context against the forces that claim them, and reports the difference on
@@ -169,22 +181,48 @@ three modules rather than relying on the `ToQuery` case this fix removed.
 
 ---
 
-## C5 — `just native-test` is red, and not because of anything web
+## C5 — `just native-test` is red. Partly my fault, now partly fixed.
 
-Running `cli/build/native/nativeCompile/mez` from inside the repo resolves the
-whole gradle runtime set onto the user-app native classpath: the build log shows
-9 user-specific features including python, wasm, icu and jline, against 5 for an
-installed mez. native-image then reports ~270 Truffle compilation-blocklist
-violations before reaching anything else.
+**Two corrections to the first version of this entry, both of which I got
+wrong by reasoning from logs instead of measuring.**
 
-**Evidence:** reproduced twice, with the no-server fixture as a control (253
-violations, zero `io.helidon` in any trace). The same fixtures build clean under
-`~/.mezze/bin/mez` after `./gradlew :cli:installNative`, which is why
-`native-server-test` uses that deliberately.
+1. "Running the in-tree binary resolves provider jars onto the classpath" —
+   NO. The two binaries are byte-identical (`cmp` says so; `installNative`
+   copies one to the other), and dumping the actual classpath with the new
+   `MEZZE_DEBUG_NATIVE_CP=1` shows no python/wasm/js/icu/jline jar on it in
+   either case. The 9-vs-5 feature count I built the theory on was a red
+   herring, and a build with 5 features still failed with 372 violations.
+2. "Not because of anything web" — it WAS, mostly. Four methods added on
+   2026-10-17 were reachable for runtime compilation and dragged ~300
+   blocklisted JDK methods in with them: `AsyncNatives.suspendedOps`,
+   `AsyncNatives.effectIds`, `HttpServerNatives.dispatch` and
+   `HttpServerNatives.workerLoop`, plus the per-context accessors added in the
+   leak sweep (`RandomNatives.state` surfaced through the native-smoke
+   fixture's `SeededRandom`). The control that misled me — the no-server
+   fixture failing with zero `io.helidon` in any trace — proved nothing: the
+   native handler table makes `workerLoop` reachable whether the app serves or
+   not.
 
-**Diagnosis order that worked:** compare `N user-specific feature(s)` between a
-failing and a known-good build log FIRST. 9-vs-5 named the cause before any flag
-was touched.
+   All are `@TruffleBoundary` now, and `MezzeContext.nativeState` carries the
+   rule: call it only from a boundary, because `ConcurrentHashMap.get` is
+   blocklisted. `just native-server-test` builds and runs again.
+
+**What is left is genuinely pre-existing, and now actually diagnosed.** 302
+violations remain for the native-smoke fixture, and every trace goes through
+one of two places:
+
+- `MezzeBytecodeRootNodeGen$InstructionImpl.getArguments`, reached from Truffle's
+  own `Instruction.toString` → `Instruction.formatInstruction` → `Formatter`.
+  That is the Bytecode DSL's DEBUG PRINTING being reachable for runtime
+  compilation. It is generated code, so the fix is a reachability exclusion
+  rather than an annotation.
+- `EmbeddedExec.executeWithTruffle$lambda$24`.
+
+**Diagnosis order that works** (the one above does not): dump the classpath with
+`MEZZE_DEBUG_NATIVE_CP=1`, then group the violation traces by the `com.mezze.`
+frame they pass through — `grep -E "Blocklisted method" -A 6 log | grep -oE
+"com\.mezze\.[A-Za-z0-9_.$]+" | sort | uniq -c`. That names the culprits in one
+pass, and distinguishes yours from the pre-existing set immediately.
 
 ---
 

@@ -36,6 +36,7 @@ public final class DrawLogNatives {
         final ConcurrentHashMap<Long, List<Long>> logs = new ConcurrentHashMap<>();
     }
 
+    @TruffleBoundary
     private static ConcurrentHashMap<Long, List<Long>> logs() {
         return com.mezze.interpreter.runtime.MezzeContext.get(null)
             .nativeState(State.class, State::new).logs;

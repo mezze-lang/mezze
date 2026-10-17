@@ -32,6 +32,7 @@ public final class ScriptNatives {
         final ConcurrentHashMap<String, AtomicLong> cursors = new ConcurrentHashMap<>();
     }
 
+    @TruffleBoundary
     private static ConcurrentHashMap<String, AtomicLong> cursors() {
         return com.mezze.interpreter.runtime.MezzeContext.get(null)
             .nativeState(State.class, State::new).cursors;

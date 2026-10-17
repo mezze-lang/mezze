@@ -338,6 +338,18 @@ pub type JoinOutcome 'a = |
 ## like) if you need cooperative cancel.
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
+  ##
+  ## The callback's own effects reach the spawn site through the `<...>` on its
+  ## arrow — `{} -> 'a <...>` — so a caller is still answerable for them:
+  ## `spawn { f = {} -> sleep { ms } }` inside a function annotated `<Async>`
+  ## alone is a T0210, naming `<Time>`. Writing `<Async, ...>` on the result
+  ## instead was tried and changes nothing observable; the row already travels.
+  ##
+  ## Where it does NOT travel is a bare top-level expression, which has neither
+  ## an annotation nor the entry check to answer to. A spawned task's unhandled
+  ## effect is then dropped at runtime unless somebody awaits — see
+  ## `planned_features/runtime/concurrency-and-context-bugs.md` C1, and the
+  ## report `AsyncNatives.SuspendedOps` prints when a context closes holding one.
   spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>
 }
 
@@ -500,17 +512,24 @@ pub let par_filter
 ## for a timeout to be right, and `with_timeout` performs no `Time` — see
 ## `park_until` for what the sleeper version got wrong.
 ##
-## A `None` has two causes and they are not distinguished here: the deadline
-## elapsed, or the promise settled as a failure or a cancellation. Use
-## `inspect` directly if you need to tell them apart.
-pub let with_timeout: { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
+## A `Result`, not an `Option`, because there are two ways not to get a value and
+## a caller usually has to tell them apart: `AsyncTimedOut { ms }` when the
+## deadline won, and the promise's own error when it failed or was cancelled.
+## `Option` collapsed both into `None` and sent the caller back to `inspect` —
+## a second observation of a promise that had already answered. The variant for
+## this was in `AsyncError` from the start.
+##
+## This is the same shape `await` returns, so the two compose: `with_timeout` is
+## `await` with a deadline.
+pub let with_timeout: { ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async, ...> = { ms, p } ->
   match park_until { predicate = {} -> is_done { p = p }, ms = ms } is
     True -> match inspect { p = p } is
-      Completed { val = v } -> Some { val = v }
-      _ -> None
+      Completed { val = v } -> Ok { val = v }
+      Failed { err = e } -> Err { error = e }
+      Pending -> Err { error = AsyncTimedOut { ms = ms } }
     False -> do
       cancel { p = p, reason = Timeout { deadline_ms = ms } }
-      None
+      Err { error = AsyncTimedOut { ms = ms } }
 
 
 ## ==================================================================

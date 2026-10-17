@@ -323,6 +323,7 @@ public final class PolyglotNatives {
         }
     }
 
+    @TruffleBoundary
     private static InnerContexts innerContexts() {
         return MezzeContext.get(null).nativeState(InnerContexts.class, InnerContexts::new);
     }

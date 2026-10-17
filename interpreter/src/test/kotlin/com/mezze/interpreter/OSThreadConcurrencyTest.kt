@@ -444,8 +444,8 @@ class OSThreadConcurrencyTest {
                 let p = Async.spawn {f = {} -> 42}
                 let result = with_timeout {ms = 5000, p = p}
                 match result is
-                    Some {val} -> val
-                    None -> 0
+                    Ok {val} -> val
+                    Err {error = _} -> 0
         """
         val result = eval(code)
         assertEquals(42L, result)

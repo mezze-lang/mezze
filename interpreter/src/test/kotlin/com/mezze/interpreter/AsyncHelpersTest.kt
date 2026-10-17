@@ -189,7 +189,7 @@ class AsyncHelpersTest {
     }
 
     @Test
-    fun `with_timeout returns Some on success`() {
+    fun `with_timeout returns the value on success`() {
         val source = """
             use std::effects::async::{ Async, LoomAsync, await, sleep, with_timeout }
             use std::effects::time::{ Time, SystemTime }
@@ -197,8 +197,8 @@ class AsyncHelpersTest {
             perform SystemTime in perform LoomAsync in do
               let p = Async.spawn { f = {} -> 42 }
               match with_timeout { ms = 1000, p = p } is
-                Some { val } -> val
-                None -> 0
+                Ok { val } -> val
+                Err { error = _ } -> 0
         """.trimIndent()
         assertEquals(42L, eval(source))
     }

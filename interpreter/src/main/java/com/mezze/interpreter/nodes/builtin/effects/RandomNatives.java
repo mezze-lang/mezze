@@ -47,15 +47,18 @@ public final class RandomNatives {
         final ConcurrentHashMap<Long, long[]> covering = new ConcurrentHashMap<>();
     }
 
+    @TruffleBoundary
     private static State state() {
         return com.mezze.interpreter.runtime.MezzeContext.get(null)
             .nativeState(State.class, State::new);
     }
 
+    @TruffleBoundary
     private static ConcurrentHashMap<Long, Random> seededRandoms() {
         return state().seeded;
     }
 
+    @TruffleBoundary
     private static ConcurrentHashMap<Long, long[]> coveringDraws() {
         return state().covering;
     }

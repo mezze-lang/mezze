@@ -78,6 +78,20 @@ public final class MezzeContext {
      * update". Losing the race is cheap: the loser's object is simply dropped,
      * never registered, never seen.
      */
+    /**
+     * CALL THIS ONLY FROM A `@TruffleBoundary`. It does a context lookup and a
+     * map get, and `ConcurrentHashMap.get` / `putIfAbsent` are on SVM's
+     * runtime-compilation blocklist — so an accessor reachable from a partially
+     * evaluated path makes every user's `mez build --native` abort with
+     * "Blocklisted methods are reachable for runtime compilation", naming the
+     * accessor. That is how it was found: a native build that had passed an hour
+     * earlier came back with 300-odd violations, all of them downstream of four
+     * unannotated accessors added the same day.
+     *
+     * The boundary costs nothing in practice. Per-context state is read on the
+     * cold side of a native — opening a file, stashing a suspended task — never
+     * in a loop Truffle is specialising.
+     */
     @SuppressWarnings("unchecked")
     public <T> T nativeState(Class<T> key, java.util.function.Supplier<T> create) {
         Object existing = nativeState.get(key);
