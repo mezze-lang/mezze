@@ -29,7 +29,7 @@ class AsyncModuleTest {
 
     // Helper to wrap code in LoomAsync handler
     private fun withLoomAsync(body: String): String =
-        "use std::effects::async::{ Async, LoomAsync, all, await, is_done, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }\n" +
+        "use std::effects::async::{ Async, LoomAsync, all, await, is_done, join, join3, par_filter, par_for_each, par_map, promise_from, promise_of, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
         "\n" +
@@ -205,6 +205,17 @@ class AsyncModuleTest {
     }
 
     // === timeout Tests ===
+    //
+    // These used to be a race. `with_timeout` spawned a task that slept for the
+    // deadline and parked until either it or the target was done — so the answer
+    // depended on which of two promises the scheduler reached first, and on the
+    // sleeper SUCCEEDING. `is_done` holds for a failed promise too, and a sleeper
+    // performs `Time`, which no test here installs: the sleeper died on an
+    // unhandled op, counted as done immediately, and `ms = 1000` against a task
+    // returning 42 answered `None` every so often.
+    //
+    // The deadline belongs to the thread that waits. With one `park_until` there
+    // is no second promise, no `Time`, and nothing left to lose a race to.
 
     @Test
     fun `test timeout returns Some when fast`() {
@@ -215,6 +226,56 @@ class AsyncModuleTest {
                 None -> 0
         """))
         assertEquals(42L, result)
+    }
+
+    @Test
+    fun `test timeout needs no Time performer`() {
+        // The bite. Nothing in this program installs a `Time` performer, and a
+        // thousand runs of a task that is instant must all say 42 — the old
+        // implementation lost this perhaps one run in a few hundred, which is
+        // exactly the frequency that survives review and fails in CI.
+        repeat(50) { attempt ->
+            val result = eval(withLoomAsync("""
+                let p = Async.spawn {f = {} -> 42}
+                match with_timeout {ms = 1000, p = p} is
+                    Some {val} -> val
+                    None -> 0
+            """))
+            assertEquals(42L, result, "attempt $attempt answered a timeout that had not elapsed")
+        }
+    }
+
+    @Test
+    fun `test timeout returns None when the promise never settles`() {
+        // No sleeping on either side: the promise resolves nothing, ever, so the
+        // deadline is the only thing that can end the wait.
+        val result = eval(withLoomAsync("""
+            let p = promise_from {setup = {complete, fail, on_cancel} -> {}}
+            match with_timeout {ms = 30, p = p} is
+                Some {val} -> val
+                None -> 0 - 7
+        """))
+        assertEquals(-7L, result)
+    }
+
+    @Test
+    fun `test timeout with ms zero polls without waiting`() {
+        // `ms = 0` asks "is it done yet?" and must answer without parking. An
+        // already-resolved promise says yes; one that never resolves says no.
+        val settled = eval(withLoomAsync("""
+            match with_timeout {ms = 0, p = promise_of {val = 9}} is
+                Some {val} -> val
+                None -> 0
+        """))
+        assertEquals(9L, settled)
+
+        val pending = eval(withLoomAsync("""
+            let p = promise_from {setup = {complete, fail, on_cancel} -> {}}
+            match with_timeout {ms = 0, p = p} is
+                Some {val} -> val
+                None -> 0 - 7
+        """))
+        assertEquals(-7L, pending)
     }
 
     // === run Helper Tests ===

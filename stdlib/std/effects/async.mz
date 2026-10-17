@@ -141,6 +141,21 @@ pub let yield_now: {} -> {} <Async> = {} -> __native_async_yield_now {}
 pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
   __native_async_park_until { predicate = predicate }
 
+## Suspend until `predicate` returns True, or until `ms` milliseconds pass.
+## True means the predicate won; False means the deadline did. `ms = 0` is a
+## poll: check once and report.
+##
+## The deadline is measured by the thread that WAITS, which is what makes a
+## timeout built on this predictable. The alternative — spawn a task that
+## sleeps, then park until either it or the target is done — makes the answer
+## depend on a second promise being scheduled, and on it SUCCEEDING: `is_done`
+## holds for a failed promise too, so a sleeper that died reported a deadline
+## that had not elapsed. Worse, `sleep` performs `Time`, and the effect row of a
+## spawned callback is absorbed at the spawn, so a caller with no `Time`
+## performer installed hit that case with nothing in the types to warn them.
+pub let park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async, ...> =
+  { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms }
+
 ## Run f within a structured concurrency scope.
 pub let scoped: { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...> = { f } ->
   __native_async_scoped { f = f }
@@ -480,23 +495,22 @@ pub let par_filter
 
 ## Wait for p up to ms milliseconds; None if it didn't finish in time.
 ##
-## Built from `sleep` + `park`: spawn a sleeper task that
-## becomes done after `ms` ms, then park until either the input promise
-## or the sleeper settles. If the target wins, return its value; if the
-## sleeper wins, cancel the target and return None.
+## One `park_until` and nothing else: the deadline belongs to the thread that is
+## waiting. There is no sleeper task, so no second promise has to be scheduled
+## for a timeout to be right, and `with_timeout` performs no `Time` — see
+## `park_until` for what the sleeper version got wrong.
+##
+## A `None` has two causes and they are not distinguished here: the deadline
+## elapsed, or the promise settled as a failure or a cancellation. Use
+## `inspect` directly if you need to tell them apart.
 pub let with_timeout: { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
-  do
-    let sleeper = Async.spawn { f = {} -> sleep { ms = ms } }
-    park { predicate = {} -> is_done { p = p } || is_done { p = sleeper } }
-    match is_done { p = p } is
-      True -> do
-        cancel { p = sleeper, reason = LostRace }
-        match inspect { p = p } is
-          Completed { val = v } -> Some { val = v }
-          _ -> None
-      False -> do
-        cancel { p = p, reason = Timeout { deadline_ms = ms } }
-        None
+  match park_until { predicate = {} -> is_done { p = p }, ms = ms } is
+    True -> match inspect { p = p } is
+      Completed { val = v } -> Some { val = v }
+      _ -> None
+    False -> do
+      cancel { p = p, reason = Timeout { deadline_ms = ms } }
+      None
 
 
 ## ==================================================================
@@ -651,14 +665,12 @@ pub let scope_is_cancelled: { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
 pub let scope_join_until
   : { sc: Scope 'a, ps: [Promise 'b], ms: Int }
   -> Bool <Async, ...>
-  = { sc, ps, ms } -> do
-    let sleeper = Async.spawn { f = {} -> sleep { ms = ms } }
-    park { predicate = {} ->
-      seq::all { xs = ps, p = { x } -> is_done { p = x } } || is_done { p = sleeper } }
-    match seq::all { xs = ps, p = { x } -> is_done { p = x } } is
-      True -> do
-        cancel { p = sleeper, reason = LostRace }
-        True
+  = { sc, ps, ms } ->
+    match park_until {
+      predicate = {} -> seq::all { xs = ps, p = { x } -> is_done { p = x } },
+      ms = ms,
+    } is
+      True -> True
       False -> do
         scope_cancel_all { sc = sc }
         False

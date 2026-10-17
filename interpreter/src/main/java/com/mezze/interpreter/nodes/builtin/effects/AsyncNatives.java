@@ -857,6 +857,47 @@ public final class AsyncNatives {
      * explicit waker would be cheaper for predicates that change
      * rarely; can land later if profile demands.
      */
+    /**
+     * Park until the predicate holds, or until a deadline passes. True means the
+     * predicate won; False means the deadline did.
+     *
+     * The deadline is measured HERE, on the thread that is doing the waiting, so
+     * a timeout needs neither a clock effect nor a helper task.
+     *
+     * `with_timeout` used to spawn a sleeper task and park until EITHER the
+     * target or the sleeper was done. That made a deadline depend on a second
+     * promise being scheduled — and, worse, on it succeeding. `is_done` is true
+     * of a FAILED promise too, so a sleeper that died became "done" instantly and
+     * the deadline fired at once; whichever of the two tasks the scheduler
+     * happened to run first then decided the answer. A sleeper performs `Time`,
+     * and `Async.spawn` absorbs its callback's effect row, so a caller with no
+     * `Time` performer installed got exactly that: `with_timeout { ms = 1000 }`
+     * on a task returning 42 immediately, answering `None` once in a while.
+     */
+    @TruffleBoundary
+    public static boolean parkUntilDeadline(MezzeRecord args, IndirectCallNode callNode) {
+        MezzeFunction predicate = getFunction(args, "predicate");
+        long ms = getLong(args, "ms");
+        // A non-positive deadline is a poll: check once, do not wait.
+        long deadline = System.nanoTime() + Math.max(0L, ms) * 1_000_000L;
+        long backoffNanos = 1_000L; // 1µs to start
+        final long maxBackoffNanos = 1_000_000L; // 1ms cap
+        while (true) {
+            Object result = callThunkFunction(predicate, callNode);
+            if (result instanceof Boolean b && b) return true;
+            long remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0L) return false;
+            // Never sleep past the deadline, or a 1ms backoff would overshoot a
+            // sub-millisecond one and report a timeout the caller didn't ask for.
+            LockSupport.parkNanos(Math.min(backoffNanos, remainingNanos));
+            if (Thread.interrupted()) {
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Park cancelled");
+            }
+            backoffNanos = Math.min(backoffNanos * 2, maxBackoffNanos);
+        }
+    }
+
     @TruffleBoundary
     public static MezzeRecord parkUntil(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
@@ -1155,6 +1196,24 @@ public final class AsyncNatives {
     public static MezzeVariant promiseInspect(MezzeRecord args) {
         MezzePromise p = getPromise(args, "p");
         int state = p.snapshotState();
+        // A task that ran into an op NOBODY has handled yet is marked COMPLETED
+        // carrying the op, because that is how the effect reaches the awaiter:
+        // `await` re-dispatches it in the awaiting context (see
+        // promiseAwaitResultDone). The task itself produced no value, so
+        // reporting `Completed { val = {} }` here told a poller the opposite of
+        // the truth — and `is_done` is built on this, so `park` stopped waiting
+        // and `with_timeout` reported a deadline that had not elapsed.
+        //
+        // PENDING is not a hedge, it is the accurate answer: the work is not
+        // finished, and what finishes it is an await.
+        //
+        // A `MezzeSuspend` RESULT is deliberately NOT treated this way. The task
+        // finished and produced a value; await forces it on the way out. That is
+        // a representation detail, not an unmet obligation, so the promise really
+        // is complete and a poller should hear so.
+        if (state == MezzePromise.COMPLETED && p.getUnhandledOpCall() != null) {
+            return promiseStatePending();
+        }
         return switch (state) {
             case MezzePromise.PENDING   -> promiseStatePending();
             case MezzePromise.COMPLETED -> promiseStateCompleted(p.snapshotResult());
