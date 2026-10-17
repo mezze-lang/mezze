@@ -96,9 +96,22 @@ pub let query_of: { url: Str } -> Str = { url } ->
 ##
 ## Returns `None` when the lengths differ or a literal segment disagrees. A
 ## `:name` segment always matches and binds.
-pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } -> do
-  let ps = segments { path = pattern }
-  let xs = segments { path = path_of { url = path } }
+pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } ->
+  match_split { ps = segments { path = pattern }, url = path }
+
+## `match_path` with the pattern ALREADY split into segments.
+##
+## A pattern cannot change between requests, so splitting it again on every one
+## is work that can only produce the same answer. `route` splits its pattern
+## when the table is BUILT and calls this; doing it per request cost 7% of
+## throughput on a two-segment route.
+##
+## Measured and NOT worth it: precomputing whether the pattern binds any
+## `:name` at all, to skip the zip and the parameter map for a static route.
+## The static route came out the same (457.5k -> 457.3k req/s), so the JIT is
+## already removing that work and the extra field earned only complexity.
+let match_split: { ps: [Str], url: Str } -> Option (Map Str Str) = { ps, url } -> do
+  let xs = segments { path = path_of { url = url } }
   if seq::size { xs = ps } != seq::size { xs = xs } then None
   else
     seq::fold {
@@ -120,14 +133,17 @@ pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { patt
 ## One route: a method, a path pattern, and a handler that receives the bound
 ## parameters.
 pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response <...> } -> Routes =
-  { method, path, handler } -> {
-    run = { req } ->
-      if req.method != method then None
-      else match match_path { pattern = path, path = req.url } is
-        None -> None
-        Some { val = params } ->
-          Some { val = handler { m = { req = req, params = params } } },
-  }
+  { method, path, handler } -> do
+    ## Split once, here, not on every request.
+    let ps = segments { path = path }
+    {
+      run = { req } ->
+        if req.method != method then None
+        else match match_split { ps = ps, url = req.url } is
+          None -> None
+          Some { val = params } ->
+            Some { val = handler { m = { req = req, params = params } } },
+    }
 
 ## Try `a`, then `b`. First match wins, so declaration order is the priority.
 ##
