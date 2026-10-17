@@ -55,12 +55,20 @@ report. `-H:+PrintRuntimeCompilationCallTree` names the sites.
 **Done when** `just native-test` is clean, or every remaining violation is
 individually explained.
 
-### W-C3 — a bare top-level expression's residual effects are unchecked (C1 remainder)
+### W-C3 — CLOSED, no code needed: build and dev never take a bare expression
 
-A LANGUAGE DECISION, not a patch: what should a module's trailing expression do
-with an effect row it never discharges? Options are in
-`concurrency-and-context-bugs.md` (option 4 was the preferred one). Needs the
-owner's call before any code.
+Owner's decision, verified. `mez build` and `mez dev` take their entry from
+`Mezze.toml` (`[[app]] entry = "main"`), and a bare top-level expression is
+refused outright — `error[V0710]: A bare expression isn't valid at the top level
+of a program`, with a hint to wrap it in `let main = {} -> …`. Effects never
+come into it.
+
+So the unchecked residual row only exists where bare expressions ARE allowed:
+`MezzeTestHelper.run`, and a future REPL. Nothing to tighten in the shipping
+paths; a REPL's policy is decided when there is a REPL.
+
+Verified by `mez init` plus an `app.mz` holding exactly the sleeping snippet
+from C1, built with `mez build`.
 
 ### W-C4 — CLOSED, resolved by construction: C3's correctness half
 
@@ -109,10 +117,35 @@ And three REPRESENTATION changes were measured and all lost (949-byte payload):
 tree + one native serialize **235.8k**, bytes concatenated per node 199.6k, a
 writer closure per node 149.2k (p99 44.8ms). So the gap is NOT the data shape.
 
-**The one untested lead:** whether `config.encode_*` in the generated impl body
-resolves to a DIRECT call or goes through dictionary indirection. A
-record-of-functions probe meant to test this returned an empty body and was
-abandoned. Check the emitted IR for `CallDirect` vs `CallIndirect`.
+**The lead was TESTED and is a SIXTH disproved cause.** It was real: inside the
+generated body `config` was typed as a bare type VARIABLE, not the concrete
+`JsonC`, so every `config.encode_*` went through DICTIONARY indirection — about
+101 indirect, non-inlinable calls per request. The reason is that an impl's
+`abilityTypeArgs` do not substitute into the op's declared parameter types when
+its body is typed (annotating the op's `paramType` does not help either; that
+field is validated against the ability's declared signature rather than used to
+type the body).
+
+Fixed in `CodecGenerator` by reading the config through a type-ANNOTATED local,
+so the whole walk resolves statically — verified: `receiver=TypeApplication(JsonC)
+opHash=DIRECT` for `encode_int`/`encode_str`/`encode_record`/`encode_sequence`,
+where it had been `VarType(config) → NULL(dict path)`.
+
+**It changed throughput by nothing.** 238.7k vs 234-236k before; per core 26.2k
+vs 25.9-26.1k. Kept for the structural reason (a generated body that cannot see
+its own config's type is a latent dictionary hazard, and static resolution is the
+direction the rest of the compiler goes), NOT as a performance fix.
+
+**So the 20% is still unexplained after six hypotheses.** Every individual layer
+that was removed — the calls, the dispatch, the field transform, the argument
+width, the intermediate, the representation — turned out to be free. The
+remaining shape of the thing is that no SINGLE layer accounts for it, which
+points at the inlining budget across the whole chain (handler → to_json → encode
+→ generated impl → seq_map lambda → encode_record → encode_str). Testing that
+needs a harness that holds the AppCDS archive constant: dropping
+`-XX:SharedArchiveFile` alone moved this benchmark 238.7k → 196.3k, which is
+larger than the effect being measured, and is what made a first attempt
+unreadable.
 
 ### W-P2 — request/response construction, 11.7%
 
@@ -120,13 +153,18 @@ Java-with-our-handoff 444.7k → Mezze no-router 482.3k is the only step left at
 the floor: building the guest `Request` record and decoding the `Response`.
 Not yet broken down further.
 
-### W-P3 — the p99 regression from deleting the handoff
+### W-P3 — CLOSED as a documented trade-off: the p99 cost of dropping the queue
 
-Removing the queue took p99 from **3.8ms to 5.1ms** while the mean improved
-hugely (333k → 391k) — a real regression, left standing. It moves with the
-`workers` permit count: 16 permits measured 395k req/s at p99 4.6ms, 128
-permits 401k at 6.3ms. Either pick a better default or explain the trade-off
-where the bound is set.
+Removing the queue took p99 from 3.8ms to 5.1ms while the mean went 333k → 391k.
+It moves monotonically with the `workers` permit count (16 → 395k at p99 4.6ms;
+32 → 392k at 4.8ms; 64 → 391k at 5.1ms; 128 → 401k at 6.3ms), so a narrower
+bound buys tail and a wider one buys throughput.
+
+The default stays WIDE and is not changed: a handler that performs a request of
+its own holds its permit while it waits, so a bound near the core count would
+starve an IO-bound route — a worse failure than a 0.3ms tail. The whole table and
+that reasoning now sit on `DEFAULT_WORKERS`, where someone choosing a
+`ServerConfig` will find them.
 
 ### W-P4 — headers, 5.5% (only with real headers)
 

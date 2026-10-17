@@ -83,7 +83,27 @@ public final class HttpServerNatives {
     private HttpServerNatives() {
     }
 
-    /** Pool size when the config does not name one. Wide, because workers park. */
+    /**
+     * How many handlers may run at once when the config does not say.
+     *
+     * Wide, and deliberately not core-count-sized: a handler that performs a
+     * request of its own HOLDS its permit while it waits, so a bound near the
+     * core count would starve an IO-bound route.
+     *
+     * It is also the knob for the one regression that came with running handlers
+     * on Helidon's own threads — p99 went 3.8ms to 5.1ms while the mean went 333k
+     * to 391k. Measured, same payload, at 8 threads / 256 connections:
+     *
+     *   16 permits    395k req/s   p99 4.6ms
+     *   32 permits    392k req/s   p99 4.8ms
+     *   64 permits    391k req/s   p99 5.1ms
+     *  128 permits    401k req/s   p99 6.3ms
+     *
+     * So a narrower bound buys tail latency and a wider one buys throughput. The
+     * default stays wide because starving a blocking handler is a worse failure
+     * than a 0.3ms tail, and a deployment that cares more about the tail than the
+     * mean can say so in its `ServerConfig`.
+     */
     private static final int DEFAULT_WORKERS =
         Math.max(16, 2 * Runtime.getRuntime().availableProcessors());
 

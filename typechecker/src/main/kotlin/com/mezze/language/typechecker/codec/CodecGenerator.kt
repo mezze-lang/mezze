@@ -146,7 +146,10 @@ class CodecGenerator(
 
         currentConfig = formatType
         val encoded = buildEncodeExpr(dataType, id("it"))
-        val body = doWithLet("ctx", initialCtx(), encoded)
+        val body = typedLet(
+            CONFIG_LOCAL, mezzeTypeToAnnotation(formatType), id("config"),
+            doWithLet("ctx", initialCtx(), encoded),
+        )
         val impl = createEncodeImpl(formatType, dataType, body)
         encodeCache[key] = impl
         return impl
@@ -171,7 +174,10 @@ class CodecGenerator(
 
         currentConfig = formatType
         val decoded = buildDecodeExpr(dataType, id("it"))
-        val body = doWithLet("ctx", initialCtx(), decoded)
+        val body = typedLet(
+            CONFIG_LOCAL, mezzeTypeToAnnotation(formatType), id("config"),
+            doWithLet("ctx", initialCtx(), decoded),
+        )
         val impl = createDecodeImpl(formatType, dataType, inType, body)
         decodeCache[key] = impl
         return impl
@@ -288,7 +294,7 @@ class CodecGenerator(
     /** `config.encode_<hook> { val = <valueExpr>, ctx = ctx }` */
     private fun scalarEncode(hookName: String, valueExpr: ParsedExpr): ParsedExpr =
         call(
-            member(id("config"), hookName),
+            member(id(CONFIG_LOCAL), hookName),
             record("val" to valueExpr, "ctx" to id("ctx")),
         )
 
@@ -296,7 +302,7 @@ class CodecGenerator(
     private fun tierThreeEncode(valueExpr: ParsedExpr): ParsedExpr =
         call(
             member(valueExpr, "encode"),
-            record("config" to id("config")),
+            record("config" to id(CONFIG_LOCAL)),
         )
 
     private fun buildEncodeRecord(type: MezzeType.RecordType, valueExpr: ParsedExpr): ParsedExpr {
@@ -310,7 +316,7 @@ class CodecGenerator(
             }
         )
         return call(
-            member(id("config"), "encode_record"),
+            member(id(CONFIG_LOCAL), "encode_record"),
             record("fields" to encodedFieldsSeq, "ctx" to id("ctx")),
         )
     }
@@ -321,7 +327,7 @@ class CodecGenerator(
                 matchCase(
                     constructorPat(ctorName, null),
                     call(
-                        member(id("config"), "encode_variant"),
+                        member(id(CONFIG_LOCAL), "encode_variant"),
                         record(
                             "tag" to str(ctorName),
                             "payload" to none(),
@@ -342,7 +348,7 @@ class CodecGenerator(
                 matchCase(
                     constructorPat(ctorName, pattern),
                     call(
-                        member(id("config"), "encode_variant"),
+                        member(id(CONFIG_LOCAL), "encode_variant"),
                         record(
                             "tag" to str(ctorName),
                             "payload" to some(encodedPayload),
@@ -410,7 +416,7 @@ class CodecGenerator(
         scalarSeqTag(elemType)?.let { tag ->
             if (bulkScalarSeqAvailable(isEncode = true)) {
                 return call(
-                    member(id("config"), Hooks.encodeScalarSeq(tag)),
+                    member(id(CONFIG_LOCAL), Hooks.encodeScalarSeq(tag)),
                     record("vals" to asSeq, "ctx" to id("ctx")),
                 )
             }
@@ -424,7 +430,7 @@ class CodecGenerator(
             ),
         )
         return call(
-            member(id("config"), "encode_sequence"),
+            member(id(CONFIG_LOCAL), "encode_sequence"),
             record("elems" to mappedElems, "ctx" to id("ctx")),
         )
     }
@@ -465,7 +471,7 @@ class CodecGenerator(
             ),
         )
         return call(
-            member(id("config"), "encode_mapping"),
+            member(id(CONFIG_LOCAL), "encode_mapping"),
             record("entries" to encodedEntries, "ctx" to id("ctx")),
         )
     }
@@ -521,7 +527,7 @@ class CodecGenerator(
             )
         }
         return call(
-            member(id("config"), "encode_option"),
+            member(id(CONFIG_LOCAL), "encode_option"),
             record("val" to optionVal, "ctx" to id("ctx")),
         )
     }
@@ -620,14 +626,14 @@ class CodecGenerator(
     /** `config.decode_<hook> { val = <inputExpr>, ctx = ctx }`. Returns `Result T DecodeError`. */
     private fun scalarDecode(hookName: String, inputExpr: ParsedExpr): ParsedExpr =
         call(
-            member(id("config"), hookName),
+            member(id(CONFIG_LOCAL), hookName),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
 
     private fun tierThreeDecode(inputExpr: ParsedExpr): ParsedExpr =
         call(
             member(inputExpr, "decode"),
-            record("config" to id("config")),
+            record("config" to id(CONFIG_LOCAL)),
         )
 
     private fun buildDecodeRecord(type: MezzeType.RecordType, inputExpr: ParsedExpr): ParsedExpr {
@@ -646,7 +652,7 @@ class CodecGenerator(
 
         for ((fieldName, fieldType) in fields.reversed()) {
             val fetchRaw = call(
-                member(id("config"), "decode_record_field"),
+                member(id(CONFIG_LOCAL), "decode_record_field"),
                 record(
                     "val" to inputExpr,
                     "key" to transformFieldName(fieldName),
@@ -674,7 +680,7 @@ class CodecGenerator(
         val ctors = type.constructors.entries.sortedBy { it.key }
         // config.decode_variant { val = it, ctx = ctx } -> Ok { val = { tag, payload } }.
         val decodeCall = call(
-            member(id("config"), "decode_variant"),
+            member(id(CONFIG_LOCAL), "decode_variant"),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
 
@@ -752,7 +758,7 @@ class CodecGenerator(
         scalarSeqTag(elemType)?.let { tag ->
             if (bulkScalarSeqAvailable(isEncode = false)) {
                 val bulk = call(
-                    member(id("config"), Hooks.decodeScalarSeq(tag)),
+                    member(id(CONFIG_LOCAL), Hooks.decodeScalarSeq(tag)),
                     record("val" to inputExpr, "ctx" to id("ctx")),
                 )
                 return if (rebuild == null) bulk else match(
@@ -765,7 +771,7 @@ class CodecGenerator(
         // config.decode_sequence { val = it, ctx = ctx } -> Ok { val = ['in] }.
         // Then map each element through decodeExpr, gathering into Ok/Err.
         val listCall = call(
-            member(id("config"), "decode_sequence"),
+            member(id(CONFIG_LOCAL), "decode_sequence"),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
         // Auto-derived list decode currently threads through a helper native
@@ -811,7 +817,7 @@ class CodecGenerator(
 
     private fun buildDecodeMapping(keyType: MezzeType, valType: MezzeType, inputExpr: ParsedExpr, sorted: Boolean): ParsedExpr {
         val mapCall = call(
-            member(id("config"), "decode_mapping"),
+            member(id(CONFIG_LOCAL), "decode_mapping"),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
         // __native_seq_try_map wraps each element as `{ x = <elem> }` (wrapX), so the
@@ -903,7 +909,7 @@ class CodecGenerator(
 
     private fun buildDecodeOption(innerType: MezzeType?, inputExpr: ParsedExpr): ParsedExpr {
         val optCall = call(
-            member(id("config"), "decode_option"),
+            member(id(CONFIG_LOCAL), "decode_option"),
             record("val" to inputExpr, "ctx" to id("ctx")),
         )
         if (innerType == null) {
@@ -985,7 +991,7 @@ class CodecGenerator(
     /** `{ path = [], shared = config.shared }` — initial encode/decode ctx. */
     private fun initialCtx(): ParsedExpr = record(
         "path" to seqLit(emptyList()),
-        "shared" to member(id("config"), "shared"),
+        "shared" to member(id(CONFIG_LOCAL), "shared"),
     )
 
     /**
@@ -1010,7 +1016,7 @@ class CodecGenerator(
         fun nativeCase(nativeName: String): ParsedExpr =
             call(id(nativeName), record("s" to nameLit))
         return match(
-            member(member(id("config"), "shared"), "field_transform"),
+            member(member(id(CONFIG_LOCAL), "shared"), "field_transform"),
             matchCase(constructorPat("Identity", null), nameLit),
             matchCase(constructorPat("SnakeCase", null), nativeCase("__native_string_to_snake_case")),
             matchCase(constructorPat("CamelCase", null), nativeCase("__native_string_to_camel_case")),
@@ -1065,6 +1071,44 @@ class CodecGenerator(
             body = body,
             loc = GEN_LOC,
         )
+
+    /**
+     * The generated body reads the config through this local, not through the
+     * `config` PARAMETER, so that it carries the concrete format type.
+     *
+     * The op's parameter types come from the ABILITY declaration
+     * (`encode: { it: 'a, config: 'config } -> 'out`), and the impl's
+     * `abilityTypeArgs` do not substitute into them when the body is typed — so
+     * `config` was a bare type variable inside the generated walk. With the
+     * format unknown, `config.encode_int` cannot pick between
+     * `impl EncodeScalar for JsonC`, `for QueryC`, … so every one of them
+     * dispatched through a DICTIONARY: roughly 101 indirect, non-inlinable calls
+     * per request for a 20-record payload, which measured as 20% of throughput.
+     *
+     * A `let` with an annotation makes the type concrete at exactly one place and
+     * the whole walk resolves directly off it. Annotating the op's `paramType`
+     * does NOT work: that field is validated against the ability's declared
+     * signature rather than used to type the body.
+     */
+    private val CONFIG_LOCAL = "__codec_config"
+
+    private fun typedLet(
+        varName: String,
+        annotation: ParsedTypeAnnotation,
+        varValue: ParsedExpr,
+        result: ParsedExpr,
+    ): ParsedDo = ParsedDo(
+        statements = listOf(
+            ParsedStatement.Let(
+                pattern = ParsedVariablePattern(name = varName, loc = GEN_LOC),
+                typeAnnotation = annotation,
+                value = varValue,
+                loc = GEN_LOC,
+            )
+        ),
+        result = result,
+        loc = GEN_LOC,
+    )
 
     private fun doWithLet(varName: String, varValue: ParsedExpr, result: ParsedExpr): ParsedDo =
         ParsedDo(

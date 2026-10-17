@@ -84,8 +84,29 @@ and are covered. It is how the `with_timeout` flake was built.
    collected. Catches the drop without touching propagation semantics.
 3. ~~Stop absorbing at the spawn~~ — there is no absorption to stop. Tried,
    measured as a no-op, reverted.
-4. Check a bare top-level expression's residual effects the way a named entry's
-   are checked. That is the actual remaining gap, and it is a language decision
+4. ~~Check a bare top-level expression's residual effects the way a named entry's
+   are checked~~ — **RESOLVED 2026-10-17, no code needed. Owner's decision,
+   verified.**
+
+   A bare top-level expression is not a program shape `mez build` or `mez dev`
+   accept AT ALL. Both take their entry from `Mezze.toml` (`[[app]] entry =
+   "main"`), and a bare expression is refused before effects are even considered:
+
+   ```
+   error[V0710]: A bare expression isn't valid at the top level of a program —
+   the top level takes declarations (`let`, `type`, `effect`, `ability`, `impl`,
+   `use`). This expression has nothing to run it and won't execute. Wrap it in a
+   function and use that as the entry point, e.g. `let main = {} -> ...`.
+     = hint: move it into `let main = {} -> ...` (or another function)
+   ```
+
+   So the unchecked residual row exists only where bare expressions are allowed:
+   the TEST HARNESS (`MezzeTestHelper.run`), and a future REPL. There is nothing
+   to tighten in the shipping paths. When a REPL lands, what it does with an
+   undischarged row is a REPL policy decision, to be made then.
+
+   Measured, not assumed: `mez init` + an `app.mz` holding exactly the sleeping
+   snippet above, built with `mez build` — rejected as shown.
    about what a top-level expression means, not an async bug.
 
 (2) is done: `AsyncNatives.SuspendedOps` counts suspended completions per
