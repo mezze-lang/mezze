@@ -79,12 +79,7 @@ effect FileSystem where {
   delete: { path: Str } -> Result {} FsError <FileSystem>,
   create_directory: { path: Str } -> Result {} FsError <FileSystem>,
   copy_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-  move_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-  ## Streaming — open/read_chunk/write_chunk/close
-  open: { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileSystem>,
-  read_chunk: { handle: FileHandle, max_bytes: Int } -> Result Bytes FsError <FileSystem>,
-  write_chunk: { handle: FileHandle, bytes: Bytes } -> Result {} FsError <FileSystem>,
-  close: { handle: FileHandle } -> Result {} FsError <FileSystem>
+  move_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>
 }
 
 ## Real filesystem via java.nio. Kernel fast paths for copy/move/stat.
@@ -98,11 +93,6 @@ impl FileSystem for LocalDisk where {
   create_directory = { path } -> __native_fs_create_directory { path = path },
   copy_file = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
   move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
-  open = { path, mode } -> __native_fs_open { path = path, mode = mode },
-  read_chunk = { handle, max_bytes } ->
-    __native_fs_read_chunk { handle = handle, max_bytes = max_bytes },
-  write_chunk = { handle, bytes } -> __native_fs_write_chunk { handle = handle, bytes = bytes },
-  close = { handle } -> __native_fs_close { handle = handle },
 }
 
 ## In-memory filesystem for tests. ConcurrentHashMap-backed; test
@@ -117,10 +107,68 @@ impl FileSystem for MemoryFS where {
   create_directory = { path } -> __native_memfs_create_directory { path = path },
   copy_file = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
   move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
+}
+
+## ==================================================================
+## FileStreaming — random access over an open handle.
+##
+## Split out of FileSystem, and this split is the one that makes an
+## object-store backend clean: S3 has no seek and no partial write, so a
+## unified effect would force it to stub half its ops. It implements
+## FileSystem only, and the typechecker rejects it at the `perform` site
+## for anything needing <FileStreaming>.
+##
+## `read_at`/`write_at`/`seek`/`truncate` are what a database or a
+## binary-format tool needs and what Mezze had no way to express.
+## ==================================================================
+effect FileStreaming where {
+  open: { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileStreaming>,
+  read_chunk: { handle: FileHandle, max_bytes: Int }
+    -> Result Bytes FsError <FileStreaming>,
+  write_chunk: { handle: FileHandle, bytes: Bytes }
+    -> Result {} FsError <FileStreaming>,
+  ## Positional read. Does NOT move the handle's position, so an index
+  ## read cannot disturb a sequential scan sharing the handle.
+  read_at: { handle: FileHandle, offset: Int, max_bytes: Int }
+    -> Result Bytes FsError <FileStreaming>,
+  ## Positional write. Also leaves the position alone.
+  write_at: { handle: FileHandle, offset: Int, bytes: Bytes }
+    -> Result {} FsError <FileStreaming>,
+  ## Move the position. Seeking past the end is legal — a write there
+  ## creates a hole, which is how sparse files happen.
+  seek: { handle: FileHandle, offset: Int } -> Result {} FsError <FileStreaming>,
+  ## Cut the file to `size`, discarding anything beyond. Growing is NOT
+  ## guaranteed: on a short file this is a no-op rather than an extend,
+  ## matching FileChannel.truncate.
+  truncate: { handle: FileHandle, size: Int } -> Result {} FsError <FileStreaming>,
+  close: { handle: FileHandle } -> Result {} FsError <FileStreaming>,
+}
+
+impl FileStreaming for LocalFileStreaming where {
+  open = { path, mode } -> __native_fs_open { path = path, mode = mode },
+  read_chunk = { handle, max_bytes } ->
+    __native_fs_read_chunk { handle = handle, max_bytes = max_bytes },
+  write_chunk = { handle, bytes } -> __native_fs_write_chunk { handle = handle, bytes = bytes },
+  read_at = { handle, offset, max_bytes } ->
+    __native_fs_read_at { handle = handle, offset = offset, max_bytes = max_bytes },
+  write_at = { handle, offset, bytes } ->
+    __native_fs_write_at { handle = handle, offset = offset, bytes = bytes },
+  seek = { handle, offset } -> __native_fs_seek { handle = handle, offset = offset },
+  truncate = { handle, size } -> __native_fs_truncate { handle = handle, size = size },
+  close = { handle } -> __native_fs_close { handle = handle },
+}
+
+impl FileStreaming for MemoryFileStreaming where {
   open = { path, mode } -> __native_memfs_open { path = path, mode = mode },
   read_chunk = { handle, max_bytes } ->
     __native_memfs_read_chunk { handle = handle, max_bytes = max_bytes },
   write_chunk = { handle, bytes } -> __native_memfs_write_chunk { handle = handle, bytes = bytes },
+  read_at = { handle, offset, max_bytes } ->
+    __native_memfs_read_at { handle = handle, offset = offset, max_bytes = max_bytes },
+  write_at = { handle, offset, bytes } ->
+    __native_memfs_write_at { handle = handle, offset = offset, bytes = bytes },
+  seek = { handle, offset } -> __native_memfs_seek { handle = handle, offset = offset },
+  truncate = { handle, size } -> __native_memfs_truncate { handle = handle, size = size },
   close = { handle } -> __native_memfs_close { handle = handle },
 }
 
@@ -431,17 +479,17 @@ pub let file_size: { path: Str } -> Result Int FsError <FileSystem> = { path } -
 ## On backends where open(Append) sets O_APPEND this is one syscall
 ## for the write plus open/close overhead — same perf as a dedicated
 ## append primitive would give.
-pub let append_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem> = { path, bytes } ->
-  match FileSystem.open { path = path, mode = Append } is
+pub let append_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileStreaming> = { path, bytes } ->
+  match FileStreaming.open { path = path, mode = Append } is
     Ok { val = h } -> do
-      let write_result = FileSystem.write_chunk { handle = h, bytes = bytes }
-      let _ = FileSystem.close { handle = h }
+      let write_result = FileStreaming.write_chunk { handle = h, bytes = bytes }
+      let _ = FileStreaming.close { handle = h }
       write_result
     Err { error } -> Err { error = error }
 
 
 ## Append UTF-8 text.
-pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
+pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileStreaming> = { path, text } ->
   append_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 ## ---------- Directory + write conveniences ----------
@@ -509,23 +557,23 @@ pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { pa
 ## Auto-closing read wrapper. `f` receives the handle; on return or
 ## error, the handle is closed.
 pub let with_read
-  : { path: Str, f: { handle: FileHandle } -> 'a <FileSystem, ...> }
-  -> Result 'a FsError <FileSystem, ...>
-  = { path, f } -> match FileSystem.open { path = path, mode = Read } is
+  : { path: Str, f: { handle: FileHandle } -> 'a <FileStreaming, ...> }
+  -> Result 'a FsError <FileStreaming, ...>
+  = { path, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
       let result = f { handle = h }
-      let _ = FileSystem.close { handle = h }
+      let _ = FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }
 
 
 ## Auto-closing write wrapper.
 pub let with_write
-  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileSystem, ...> }
-  -> Result 'a FsError <FileSystem, ...>
-  = { path, mode, f } -> match FileSystem.open { path = path, mode = mode } is
+  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileStreaming, ...> }
+  -> Result 'a FsError <FileStreaming, ...>
+  = { path, mode, f } -> match FileStreaming.open { path = path, mode = mode } is
     Ok { val = h } -> do
       let result = f { handle = h }
-      let _ = FileSystem.close { handle = h }
+      let _ = FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }

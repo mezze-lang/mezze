@@ -369,6 +369,21 @@ public final class MemoryFilesystemNatives {
                 if (isDir(path)) return errIO(path, "Is a directory");
                 String parentW = parentOf(path);
                 if (!isDir(parentW)) return errNotFound(parentW);
+                // Truncate NOW, not lazily when close republishes the buffer.
+                // OpenMode says "Write — truncate-or-create. Existing content
+                // replaced", and LocalDisk opens with TRUNCATE_EXISTING, so
+                // the file is empty the moment it is open. Deferring it made
+                // the two backends disagree: a write_at on a freshly opened
+                // Write handle patched the OLD bytes here and an empty file
+                // there. Found by a test asserting the same thing of both.
+                Entry existingW = files().get(path);
+                if (existingW != null) {
+                    existingW.bytes = new byte[0];
+                } else {
+                    files().put(path, new Entry(new byte[0]));
+                    directories().get(parentW).add(basenameOf(path));
+                    notifyWatchers(path, "Created");
+                }
                 h.writeBuf = new ByteArrayOutputStream();
                 return ok(h);
             case "Append":
@@ -462,6 +477,122 @@ public final class MemoryFilesystemNatives {
         String path = getString(args, "path");
         if (!isDir(path)) {
             return isFile(path) ? errNotADirectory(path) : errNotFound(path);
+        }
+        return ok(MezzeRecord.empty());
+    }
+
+    // ==================== Random access ====================
+
+    /**
+     * Positional ops work on the published Entry, not on the write buffer.
+     *
+     * A memfs write handle accumulates into a ByteArrayOutputStream, which
+     * has no random access at all — so `write_at` publishes whatever is
+     * pending first and then patches the entry. Without that, the handle's
+     * buffer and the entry would be two different versions of the file and
+     * a read_at between two write_chunks would see the wrong one. LocalDisk
+     * has no buffer (write_chunk goes straight to the channel), so this is
+     * what keeps the two backends meaning the same thing.
+     */
+    private static Entry publishAndGet(MemFileHandle h) {
+        if (h.writeBuf != null) {
+            String parent = parentOf(h.path);
+            if (isDir(parent)) {
+                Entry cur = files().get(h.path);
+                byte[] pending = h.writeBuf.toByteArray();
+                if (cur == null) {
+                    cur = new Entry(pending);
+                    files().put(h.path, cur);
+                    directories().get(parent).add(basenameOf(h.path));
+                    notifyWatchers(h.path, "Created");
+                } else if (pending.length > 0) {
+                    cur.bytes = pending;
+                    notifyWatchers(h.path, "Modified");
+                }
+                // Hand authority to the Entry: a positional op has touched
+                // it, so `close` must NOT republish the sequential buffer
+                // over the top. Mixing the two on one handle is ambiguous,
+                // and "positional wins" is the rule — otherwise close would
+                // silently undo every write_at.
+                h.writeBuf = null;
+                return cur;
+            }
+        }
+        return files().get(h.path);
+    }
+
+    @TruffleBoundary
+    public static Object readAt(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if (!"Read".equals(h.mode)) return errIO(h.path, "handle not opened for reading");
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        Entry e = files().get(h.path);
+        if (e == null) return errNotFound(h.path);
+        byte[] src = e.bytes;
+        if (offset >= src.length) return ok(new MezzeBytes(new byte[0]));
+        int cap = (int) Math.min(maxBytes, src.length - offset);
+        byte[] out = new byte[cap];
+        System.arraycopy(src, (int) offset, out, 0, cap);
+        return ok(new MezzeBytes(out));
+    }
+
+    @TruffleBoundary
+    public static Object writeAt(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        MezzeBytes bytes = getBytes(args, "bytes");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if ("Read".equals(h.mode)) return errIO(h.path, "handle not opened for writing");
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        Entry e = publishAndGet(h);
+        if (e == null) return errNotFound(parentOf(h.path));
+        byte[] data = bytes.getData();
+        byte[] cur = e.bytes;
+        int end = (int) offset + data.length;
+        if (end > cur.length) {
+            // Writing past the end extends, and the gap is zero-filled —
+            // the in-memory equivalent of a sparse hole.
+            byte[] grown = new byte[end];
+            System.arraycopy(cur, 0, grown, 0, cur.length);
+            cur = grown;
+        }
+        System.arraycopy(data, 0, cur, (int) offset, data.length);
+        e.bytes = cur;
+        notifyWatchers(h.path, "Modified");
+        return ok(MezzeRecord.empty());
+    }
+
+    /** Seeking past the end is legal and does not extend — same as LocalDisk. */
+    @TruffleBoundary
+    public static Object seek(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        if (offset > Integer.MAX_VALUE) return errIO(h.path, "offset too large for MemoryFS");
+        h.pos = (int) offset;
+        return ok(MezzeRecord.empty());
+    }
+
+    /** Cut to `size`. Does NOT grow a short file, matching FileChannel. */
+    @TruffleBoundary
+    public static Object truncate(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long size = getLong(args, "size");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if ("Read".equals(h.mode)) return errIO(h.path, "handle not opened for writing");
+        if (size < 0) return errIO(h.path, "negative size: " + size);
+        Entry e = publishAndGet(h);
+        if (e == null) return errNotFound(h.path);
+        byte[] cur = e.bytes;
+        if (size < cur.length) {
+            byte[] cut = new byte[(int) size];
+            System.arraycopy(cur, 0, cut, 0, (int) size);
+            e.bytes = cut;
+            notifyWatchers(h.path, "Modified");
         }
         return ok(MezzeRecord.empty());
     }

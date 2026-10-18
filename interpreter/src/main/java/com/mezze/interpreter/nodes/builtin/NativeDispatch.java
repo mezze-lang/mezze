@@ -2836,6 +2836,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_fs_watch", (r, c) -> FilesystemNatives.watch(r));
         HANDLERS.put("__native_fs_poll", (r, c) -> FilesystemNatives.poll(r));
         HANDLERS.put("__native_fs_unwatch", (r, c) -> FilesystemNatives.unwatch(r));
+        HANDLERS.put("__native_fs_read_at", (r, c) -> FilesystemNatives.readAt(r));
+        HANDLERS.put("__native_fs_write_at", (r, c) -> FilesystemNatives.writeAt(r));
+        HANDLERS.put("__native_fs_seek", (r, c) -> FilesystemNatives.seek(r));
+        HANDLERS.put("__native_fs_truncate", (r, c) -> FilesystemNatives.truncate(r));
     }
 
     // ==================== Memory Filesystem (MemoryFS, #82) ====================
@@ -2875,6 +2879,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_memfs_watch", (r, c) -> MemoryFilesystemNatives.watch(r));
         HANDLERS.put("__native_memfs_poll", (r, c) -> MemoryFilesystemNatives.poll(r));
         HANDLERS.put("__native_memfs_unwatch", (r, c) -> MemoryFilesystemNatives.unwatch(r));
+        HANDLERS.put("__native_memfs_read_at", (r, c) -> MemoryFilesystemNatives.readAt(r));
+        HANDLERS.put("__native_memfs_write_at", (r, c) -> MemoryFilesystemNatives.writeAt(r));
+        HANDLERS.put("__native_memfs_seek", (r, c) -> MemoryFilesystemNatives.seek(r));
+        HANDLERS.put("__native_memfs_truncate", (r, c) -> MemoryFilesystemNatives.truncate(r));
         // Test isolation
         HANDLERS.put("__native_memfs_clear", (r, c) -> {
             MemoryFilesystemNatives.clear();

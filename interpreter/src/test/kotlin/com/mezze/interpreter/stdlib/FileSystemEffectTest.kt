@@ -259,24 +259,24 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFS streaming write then read via chunks`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS }
+            use std::effects::filesystem::{ FileSystem, MemoryFS, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in do
-              let write_result = match FileSystem.open { path = "/f", mode = Write } is
+            perform MemoryFS in perform MemoryFileStreaming in do
+              let write_result = match FileStreaming.open { path = "/f", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.write_chunk {
+                  let _ = FileStreaming.write_chunk {
                     handle = h,
                     bytes = bytes::from_str { s = "hello" }
                   }
-                  FileSystem.close { handle = h }
+                  FileStreaming.close { handle = h }
                 Err { error } -> Err { error = error }
-              match FileSystem.open { path = "/f", mode = Read } is
+              match FileStreaming.open { path = "/f", mode = Read } is
                 Ok { val = h } -> do
-                  let chunk_result = FileSystem.read_chunk {
+                  let chunk_result = FileStreaming.read_chunk {
                     handle = h,
                     max_bytes = 1024
                   }
-                  let _ = FileSystem.close { handle = h }
+                  let _ = FileStreaming.close { handle = h }
                   match chunk_result is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -290,18 +290,18 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFS streaming read at EOF returns empty bytes`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS }
+            use std::effects::filesystem::{ FileSystem, MemoryFS, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in do
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
                 bytes = bytes::from_str { s = "ab" }
               }
-              match FileSystem.open { path = "/f", mode = Read } is
+              match FileStreaming.open { path = "/f", mode = Read } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.read_chunk { handle = h, max_bytes = 100 }
-                  let eof_chunk = FileSystem.read_chunk { handle = h, max_bytes = 100 }
-                  let _ = FileSystem.close { handle = h }
+                  let _ = FileStreaming.read_chunk { handle = h, max_bytes = 100 }
+                  let eof_chunk = FileStreaming.read_chunk { handle = h, max_bytes = 100 }
+                  let _ = FileStreaming.close { handle = h }
                   match eof_chunk is
                     Ok { val = b } -> bytes::size { b = b }
                     Err { error } -> 0 - 1
@@ -313,20 +313,20 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFS streaming append preserves existing content`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS }
+            use std::effects::filesystem::{ FileSystem, MemoryFS, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in do
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
                 bytes = bytes::from_str { s = "hello " }
               }
-              let _ = match FileSystem.open { path = "/f", mode = Append } is
+              let _ = match FileStreaming.open { path = "/f", mode = Append } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.write_chunk {
+                  let _ = FileStreaming.write_chunk {
                     handle = h,
                     bytes = bytes::from_str { s = "world" }
                   }
-                  FileSystem.close { handle = h }
+                  FileStreaming.close { handle = h }
                 Err { error } -> Err { error = error }
               match FileSystem.read_bytes { path = "/f" } is
                 Ok { val = b } -> match bytes::to_str { b = b } is
@@ -340,13 +340,13 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFS close is idempotent`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS }
-            perform MemoryFS in do
+            use std::effects::filesystem::{ FileSystem, MemoryFS, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = FileSystem.create_directory { path = "/d" }
-              match FileSystem.open { path = "/d/f", mode = Write } is
+              match FileStreaming.open { path = "/d/f", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.close { handle = h }
-                  match FileSystem.close { handle = h } is
+                  let _ = FileStreaming.close { handle = h }
+                  match FileStreaming.close { handle = h } is
                     Ok { val } -> "ok"
                     Err { error } -> "err"
                 Err { error } -> "open-fail"
@@ -357,17 +357,17 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFS read_chunk after close returns ClosedHandle`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS }
+            use std::effects::filesystem::{ FileSystem, MemoryFS, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in do
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes {
                 path = "/f",
                 bytes = bytes::from_str { s = "x" }
               }
-              match FileSystem.open { path = "/f", mode = Read } is
+              match FileStreaming.open { path = "/f", mode = Read } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.close { handle = h }
-                  match FileSystem.read_chunk { handle = h, max_bytes = 10 } is
+                  let _ = FileStreaming.close { handle = h }
+                  match FileStreaming.read_chunk { handle = h, max_bytes = 10 } is
                     Ok { val } -> "unexpected-ok"
                     Err { error } -> match error is
                       FsClosedHandle { path } -> path
@@ -475,8 +475,8 @@ class FileSystemEffectTest {
     @Test
     fun `append_text appends to existing file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS, write_text, append_text, read_text }
-            perform MemoryFS in do
+            use std::effects::filesystem::{ FileSystem, MemoryFS, write_text, append_text, read_text, MemoryFileStreaming }
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = write_text { path = "/f", text = "hello " }
               let _ = append_text { path = "/f", text = "world" }
               match read_text { path = "/f" } is
@@ -545,12 +545,12 @@ class FileSystemEffectTest {
     @Test
     fun `with_read auto-closes handle after body`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS, with_read, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFS, with_read, write_text, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in do
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = write_text { path = "/f", text = "abc" }
               match with_read { path = "/f", f = { handle } ->
-                match FileSystem.read_chunk { handle = handle, max_bytes = 100 } is
+                match FileStreaming.read_chunk { handle = handle, max_bytes = 100 } is
                   Ok { val = b } -> bytes::size { b = b }
                   Err { error } -> 0 - 1
               } is
@@ -563,12 +563,12 @@ class FileSystemEffectTest {
     @Test
     fun `with_write auto-closes handle and content is flushed`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFS, with_write, read_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFS, with_write, read_text, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in do
+            perform MemoryFS in perform MemoryFileStreaming in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = with_write { path = "/d/f", mode = Write, f = { handle } ->
-                FileSystem.write_chunk {
+                FileStreaming.write_chunk {
                   handle = handle,
                   bytes = bytes::from_str { s = "written" }
                 }
@@ -643,17 +643,17 @@ class FileSystemEffectTest {
     fun `LocalDisk streaming read of a real file`(@TempDir tmp: Path) {
         val path = tmp.resolve("streamed").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalDisk, with_write, with_read }
+            use std::effects::filesystem::{ FileSystem, LocalDisk, with_write, with_read, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform LocalDisk in do
+            perform LocalDisk in perform LocalFileStreaming in do
               let _ = with_write { path = "$path", mode = Write, f = { handle } ->
-                FileSystem.write_chunk {
+                FileStreaming.write_chunk {
                   handle = handle,
                   bytes = bytes::from_str { s = "abcdefg" }
                 }
               }
               match with_read { path = "$path", f = { handle } ->
-                match FileSystem.read_chunk { handle = handle, max_bytes = 3 } is
+                match FileStreaming.read_chunk { handle = handle, max_bytes = 3 } is
                   Ok { val = b } -> bytes::to_str { b = b }
                   Err { error } -> Err { error = "err" }
               } is

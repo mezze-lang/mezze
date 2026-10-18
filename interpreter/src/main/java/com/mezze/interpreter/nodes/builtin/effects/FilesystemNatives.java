@@ -373,6 +373,113 @@ public final class FilesystemNatives {
         return ok(MezzeRecord.empty());
     }
 
+    // ==================== Random access ====================
+
+    /**
+     * Positional read. Uses the two-arg `read(buf, position)` overload,
+     * which does NOT move the channel position — so an index lookup cannot
+     * disturb a sequential scan sharing the handle. That property is the
+     * reason this exists rather than being seek-then-read.
+     */
+    @TruffleBoundary
+    public static Object readAt(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.isClosed()) return errClosedHandle(h.path);
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        try {
+            int cap = (int) Math.min(maxBytes, Integer.MAX_VALUE);
+            ByteBuffer buf = ByteBuffer.allocate(cap);
+            int n = h.channel.read(buf, offset);
+            if (n <= 0) return ok(new MezzeBytes(new byte[0]));
+            byte[] out = new byte[n];
+            buf.flip();
+            buf.get(out);
+            return ok(new MezzeBytes(out));
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (java.nio.channels.NonReadableChannelException e) {
+            return errIO(h.path, "handle not opened for reading");
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    /** Positional write; also leaves the channel position alone. */
+    @TruffleBoundary
+    public static Object writeAt(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        MezzeBytes bytes = getBytes(args, "bytes");
+        if (h.isClosed()) return errClosedHandle(h.path);
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        try {
+            ByteBuffer buf = ByteBuffer.wrap(bytes.getData());
+            // A single write may be partial, so loop until the buffer drains
+            // or the channel stops accepting — a short write that reported
+            // success would silently truncate the caller's data.
+            long pos = offset;
+            while (buf.hasRemaining()) {
+                int n = h.channel.write(buf, pos);
+                if (n <= 0) return errIO(h.path, "write made no progress at offset " + pos);
+                pos += n;
+            }
+            return ok(MezzeRecord.empty());
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (java.nio.channels.NonWritableChannelException e) {
+            return errIO(h.path, "handle not opened for writing");
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    /**
+     * Move the position. Seeking PAST the end is legal and does not extend
+     * the file — a later write there creates a hole, which is how sparse
+     * files happen. Rejecting it would make that impossible to express.
+     */
+    @TruffleBoundary
+    public static Object seek(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        if (h.isClosed()) return errClosedHandle(h.path);
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        try {
+            h.channel.position(offset);
+            return ok(MezzeRecord.empty());
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    /**
+     * Cut to `size`. Note FileChannel.truncate does NOT grow a short file —
+     * it is a no-op in that direction, and this preserves that rather than
+     * emulating an extend, because a caller who wants growth wants a write
+     * and should say so.
+     */
+    @TruffleBoundary
+    public static Object truncate(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        long size = getLong(args, "size");
+        if (h.isClosed()) return errClosedHandle(h.path);
+        if (size < 0) return errIO(h.path, "negative size: " + size);
+        try {
+            h.channel.truncate(size);
+            return ok(MezzeRecord.empty());
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (java.nio.channels.NonWritableChannelException e) {
+            return errIO(h.path, "handle not opened for writing");
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
     // ==================== Durability ====================
 
     /**

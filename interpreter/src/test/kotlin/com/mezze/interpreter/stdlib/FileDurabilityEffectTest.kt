@@ -39,13 +39,13 @@ class FileDurabilityEffectTest {
     @Test
     fun `MemoryFS fsync on a write handle succeeds`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability, Write }
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileDurability in do
+            perform MemoryFS in perform MemoryFileStreaming in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
-              match FileSystem.open { path = "/d/wal", mode = Write } is
+              match FileStreaming.open { path = "/d/wal", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.write_chunk {
+                  let _ = FileStreaming.write_chunk {
                     handle = h, bytes = bytes::from_str { s = "entry" }
                   }
                   match FileDurability.fsync { handle = h } is
@@ -65,13 +65,13 @@ class FileDurabilityEffectTest {
     @Test
     fun `MemoryFS fsync publishes a buffered write before close`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability, Write }
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileDurability in do
+            perform MemoryFS in perform MemoryFileStreaming in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
-              match FileSystem.open { path = "/d/wal", mode = Write } is
+              match FileStreaming.open { path = "/d/wal", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.write_chunk {
+                  let _ = FileStreaming.write_chunk {
                     handle = h, bytes = bytes::from_str { s = "committed" }
                   }
                   let _ = FileDurability.fsync { handle = h }
@@ -109,18 +109,18 @@ class FileDurabilityEffectTest {
     fun `LocalDisk fsync forces a written handle`(@TempDir tmp: Path) {
         val path = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, LocalDisk, LocalFileDurability, Write }
+            use std::effects::filesystem::{ FileSystem, FileDurability, LocalDisk, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFileDurability in do
-              match FileSystem.open { path = "$path", mode = Write } is
+            perform LocalDisk in perform LocalFileStreaming in perform LocalFileDurability in do
+              match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.write_chunk {
+                  let _ = FileStreaming.write_chunk {
                     handle = h, bytes = bytes::from_str { s = "durable" }
                   }
                   let synced = match FileDurability.fsync { handle = h } is
                     Ok { val = _ } -> "synced"
                     Err { error = _ } -> "fsync-failed"
-                  let _ = FileSystem.close { handle = h }
+                  let _ = FileStreaming.close { handle = h }
                   synced
                 Err { error = _ } -> "open-failed"
         """.trimIndent()
@@ -131,11 +131,11 @@ class FileDurabilityEffectTest {
     fun `LocalDisk fsync on a closed handle reports ClosedHandle`(@TempDir tmp: Path) {
         val path = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, LocalDisk, LocalFileDurability, Write }
-            perform LocalDisk in perform LocalFileDurability in do
-              match FileSystem.open { path = "$path", mode = Write } is
+            use std::effects::filesystem::{ FileSystem, FileDurability, LocalDisk, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            perform LocalDisk in perform LocalFileStreaming in perform LocalFileDurability in do
+              match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileSystem.close { handle = h }
+                  let _ = FileStreaming.close { handle = h }
                   match FileDurability.fsync { handle = h } is
                     Ok { val = _ } -> "unexpectedly-ok"
                     Err { error = FsClosedHandle { path = _ } } -> "closed"
