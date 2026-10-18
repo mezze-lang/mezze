@@ -615,9 +615,19 @@ val mezzeToolchainVersion: String = project.version.toString()
 val toolchainDir = mezzeHome.map { File(it, "toolchains/$mezzeToolchainVersion") }
 
 /**
- * Install `mezze-runtime.jar` (the slim runtime fat-jar) into
- * ~/.mezze/lib/. This is the only library artifact users need at run
- * time:
+ * Install `mezze-runtime.jar` (the slim runtime fat-jar) into the
+ * VERSIONED toolchain lib — `~/.mezze/toolchains/<version>/lib/`, see
+ * `toolchainDir` below, not the unversioned `~/.mezze/lib/` this comment
+ * used to claim.
+ *
+ * That distinction bites: `JvmLauncher.findRuntimeJar` searches the
+ * UNVERSIONED `~/.mezze/lib/` first, so a jar left there by an older release
+ * shadows every versioned install and this task can never replace it. An old
+ * provider-bundled jar in that position put 19,157 GraalPy classes into every
+ * `mez build` — ~100MB app jars, and GraalPy reachable in every native image
+ * (see C5/W-C2). `NativeBuildPath` now strips the providers and says so.
+ *
+ * This is the only library artifact users need at run time:
  *
  *   - `mez dev` / `mez exec` spawn a JVM child loading this jar to
  *     run user code via the wire protocol.

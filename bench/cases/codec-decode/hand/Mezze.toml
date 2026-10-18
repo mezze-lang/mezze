@@ -1,0 +1,12 @@
+[package]
+name = "codec_hand"
+version = "0.1.0"
+
+[[app]]
+name = "codec_hand"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

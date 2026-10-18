@@ -1,0 +1,12 @@
+[package]
+name = "codec_derived"
+version = "0.1.0"
+
+[[app]]
+name = "codec_derived"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

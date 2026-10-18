@@ -846,8 +846,30 @@ object NativeBuildPath {
         // Ours is a LEAF of the chain, not its head.
         val prefixes = if (enablePolyglot) BUILDER_CLASS_PREFIXES_TO_STRIP
                        else BUILDER_CLASS_PREFIXES_TO_STRIP + LANGUAGE_PROVIDER_PREFIXES_TO_STRIP
-        stripJarEntries(jarFile, out, FAT_JAR_DIRECTIVES_TO_STRIP, prefixes)
+        val stripped = stripJarEntries(jarFile, out, FAT_JAR_DIRECTIVES_TO_STRIP, prefixes)
         if (timing) System.err.println("[${relativeTime()}ms] native: user jar sanitised")
+
+        // Stripping these keeps the IMAGE correct, but their presence means the
+        // runtime jar this build read is carrying language providers the project
+        // never asked for — and that jar is also what `mez build` fat-jars onto
+        // the JVM path, where nothing strips it. Say so rather than silently
+        // absorbing it: it is why app jars come out ~100MB instead of ~20MB.
+        //
+        // The usual cause is a STALE unversioned install. `installRuntime`
+        // writes `~/.mezze/toolchains/<version>/lib/`, but the launcher looks in
+        // the unversioned `~/.mezze/lib/` FIRST — so a provider-bundled jar left
+        // there by an older release shadows every newer one, permanently.
+        if (!enablePolyglot && stripped > 0) {
+            System.err.println(
+                "[mezze] note: the runtime jar bundled $stripped Truffle "
+                + "language-provider entries, but this project declares no "
+                + "`[polyglot.*]`. They were left out of the native image. If "
+                + "`~/.mezze/lib/mezze-runtime.jar` is much larger than ~20MB it "
+                + "is a stale install shadowing the versioned one under "
+                + "`~/.mezze/toolchains/`; deleting it also shrinks the JVM jar, "
+                + "which this does not touch."
+            )
+        }
         return out
     }
 
@@ -1392,12 +1414,14 @@ object NativeBuildPath {
 
     /** Copy [source] to [target], dropping entries whose name is in
      *  [excludePaths] OR starts with any entry in [excludePrefixes]. */
+    /** Copies [source] to [target] minus the excluded entries; returns how
+     *  many LANGUAGE-PROVIDER entries were dropped (see the caller's note). */
     private fun stripJarEntries(
         source: File,
         target: File,
         excludePaths: Set<String>,
         excludePrefixes: List<String> = emptyList(),
-    ) {
+    ): Int {
         // A class removed from the jar must also lose its SERVICE REGISTRATION,
         // or the loader fails on a provider it can no longer find:
         //   ServiceConfigurationError: InternalResourceProvider:
@@ -1409,6 +1433,7 @@ object NativeBuildPath {
         val dottedPrefixes = excludePrefixes
             .filter { it.endsWith("/") && !it.startsWith("META-INF/") }
             .map { it.replace('/', '.') }
+        var providerEntries = 0
 
         java.util.jar.JarInputStream(source.inputStream().buffered()).use { jin ->
             val manifest = jin.manifest
@@ -1423,7 +1448,12 @@ object NativeBuildPath {
                     val name = entry.name
                     val excluded = name in excludePaths
                             || excludePrefixes.any { name.startsWith(it) }
-                    if (excluded) { jin.closeEntry(); continue }
+                    if (excluded) {
+                        if (LANGUAGE_PROVIDER_PREFIXES_TO_STRIP.any { name.startsWith(it) }) {
+                            providerEntries++
+                        }
+                        jin.closeEntry(); continue
+                    }
 
                     if (dottedPrefixes.isNotEmpty()
                         && name.startsWith("META-INF/services/")
@@ -1451,6 +1481,7 @@ object NativeBuildPath {
                 }
             }
         }
+        return providerEntries
     }
 
     /** Minimal jar writer — manifest + supplied resource entries. */

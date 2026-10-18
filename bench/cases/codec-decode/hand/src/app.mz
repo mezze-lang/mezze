@@ -1,0 +1,93 @@
+## The DECODE side of the codec, measured the same way the encode side was.
+##
+## The scalar-ABI fix (W-P1) registers EVERY ability-impl operation, decode's
+## included, so decode should have gained the same way encode did — but that was
+## an argument, not a measurement, and the encode gap turned out to be 8x what
+## the record claimed. So: a derived decode against a hand-written one, both
+## producing the SAME ANSWER, asserted before anything is timed.
+##
+## Run the BUILT JAR (`mez build` then `./.build/codec_decode`), never
+## `mez dev` — dev leaves `engine.Compilation` off unless `MEZZE_JIT=1`.
+use std::codec::core::{ Decode, DecodeError }
+use std::codec::json::{ Json, JObject, JArray, JInt, JString, JsonC, json_default, parse_str, to_str }
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::filesystem::{ FileSystem, LocalDisk, read_text_or }
+use std::str
+use std::int
+
+type Row = {
+  id: Int,
+  name: Str,
+}
+
+## The payload, parsed ONCE. Timing the parse as well would mix two costs that
+## move together and muddle the attribution — the question here is the WALK.
+let raw_for: { k: Int } -> Str = { k } -> do
+  let body = str::join {
+    strings = seq::map {
+      xs = seq::range { start = 1, end = 21 },
+      f = { x } -> "{\"id\":$(int::to_str { n = x + (k * 1000) }),\"name\":\"row-$(int::to_str { n = x })\"}",
+    },
+    separator = ",",
+  }
+  "[$(body)]"
+
+
+## The tree is READ FROM DISK, so it is a runtime value the compiler cannot
+## see. With a constant tree — even four of them picked by the loop counter —
+## Graal folds the whole decode away: measured, the 1/10-work run took the SAME
+## time as the full run both times. Folding a pure decode of a constant is
+## correct and desirable; it just means a constant input measures nothing.
+let load_tree: {} -> Json <FileSystem> = {} ->
+  match parse_str { s = read_text_or { path = "payload.json", def = "[]" } } is
+    Ok { val } -> val
+    Err { error = _ } -> JArray { items = [] }
+
+## ── The derived walk ────────────────────────────────────────────────────────
+let derived_decode: { t: Json } -> Int = { t } -> do
+  let r: Result [Row] DecodeError = t.decode { config = json_default }
+  match r is
+    Ok { val = rows } -> seq::fold { xs = rows, init = 0, f = { acc, x } -> acc + x.id }
+    Err { error = _ } -> -1
+
+## ── The hand-written walk ───────────────────────────────────────────────────
+##
+## Reads the same tree with no codec, no config and no ability op.
+let field_int: { fields: [{ key: Str, value: Json }], k: Str } -> Int = { fields, k } ->
+  match seq::find { xs = fields, p = { x } -> x.key == k } is
+    Some { val = f } -> match f.value is
+      JInt { val = n } -> n
+      _ -> 0
+    None -> 0
+
+let hand_decode: { t: Json } -> Int = { t } -> match t is
+  JObject { fields = fs } -> field_int { fields = fs, k = "id" }
+  _ -> -1
+
+
+## Split into two PROGRAMS: the second loop in a process rides a JIT the first
+## one warmed, and that difference is the size of what is being measured.
+## `../src/app.mz` keeps both halves only to assert they agree.
+
+
+## One element of the array, chosen by the loop counter.
+##
+## `decode` of a loop-invariant value is HOISTED out of the loop — measured
+## three ways (a constant tree, four constant trees picked by the counter, and a
+## tree read from disk) and every time the 1/10-work run took the same time as
+## the full one. That is the optimiser doing its job; it just means the decode
+## has to depend on `n` to be measured at all.
+let row_at: { t: Json, n: Int } -> Json = { t, n } -> match t is
+  JArray { items = xs } -> match seq::get { xs = xs, i = n % 20 } is
+    Some { val } -> val
+    None -> JObject { fields = [] }
+  _ -> JObject { fields = [] }
+
+let spin: { n: Int, acc: Int, t: Json } -> Int = { n, acc, t } ->
+  if n <= 0 then acc
+  else spin { t = t, n = n - 1, acc = acc + hand_decode { t = row_at { t = t, n = n } } }
+
+let main = {} -> perform Console in perform LocalDisk in do
+  let t = load_tree {}
+  println { msg = int::to_str { n = spin { t = t, n = 400000, acc = 0 } } }

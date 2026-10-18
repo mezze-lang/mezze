@@ -1,0 +1,103 @@
+## The DECODE side of the codec, measured the same way the encode side was.
+##
+## The scalar-ABI fix (W-P1) registers EVERY ability-impl operation, decode's
+## included, so decode should have gained the same way encode did — but that was
+## an argument, not a measurement, and the encode gap turned out to be 8x what
+## the record claimed. So: a derived decode against a hand-written one, both
+## producing the SAME ANSWER, asserted before anything is timed.
+##
+## Run the BUILT JAR (`mez build` then `./.build/codec_decode`), never
+## `mez dev` — dev leaves `engine.Compilation` off unless `MEZZE_JIT=1`.
+use std::codec::core::{ Decode, DecodeError }
+use std::codec::json::{ Json, JObject, JArray, JInt, JString, JsonC, json_default, parse_str, to_str }
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::str
+use std::int
+
+type Row = {
+  id: Int,
+  name: Str,
+}
+
+## The payload, parsed ONCE. Timing the parse as well would mix two costs that
+## move together and muddle the attribution — the question here is the WALK.
+let raw: Str = do
+  let body = str::join {
+    strings = seq::map {
+      xs = seq::range { start = 1, end = 21 },
+      f = { x } -> "{\"id\":$(int::to_str { n = x }),\"name\":\"row-$(int::to_str { n = x })\"}",
+    },
+    separator = ",",
+  }
+  "[$(body)]"
+
+let tree: Json = match parse_str { s = raw } is
+  Ok { val } -> val
+  Err { error = _ } -> JArray { items = [] }
+
+## ── The derived walk ────────────────────────────────────────────────────────
+let derived_decode: { t: Json } -> Int = { t } -> do
+  let r: Result [Row] DecodeError = t.decode { config = json_default }
+  match r is
+    Ok { val = rows } -> seq::fold { xs = rows, init = 0, f = { acc, x } -> acc + x.id }
+    Err { error = _ } -> -1
+
+## ── The hand-written walk ───────────────────────────────────────────────────
+##
+## Reads the same tree with no codec, no config and no ability op.
+let field_int: { fields: [{ key: Str, value: Json }], k: Str } -> Int = { fields, k } ->
+  match seq::find { xs = fields, p = { x } -> x.key == k } is
+    Some { val = f } -> match f.value is
+      JInt { val = n } -> n
+      _ -> 0
+    None -> 0
+
+let hand_decode: { t: Json } -> Int = { t } -> match t is
+  JArray { items = xs } -> seq::fold {
+    xs = xs,
+    init = 0,
+    f = { acc, x } -> match x is
+      JObject { fields = fs } -> acc + field_int { fields = fs, k = "id" }
+      _ -> acc,
+  }
+  _ -> -1
+
+let main = {} -> perform Console in do
+  let d = derived_decode { t = tree }
+  let h = hand_decode { t = tree }
+  println { msg = if d == h then "AGREE sum=$(int::to_str { n = d })"
+                  else "DISAGREE derived=$(int::to_str { n = d }) hand=$(int::to_str { n = h })" }
+
+## ── Measured 2026-10-18 ─────────────────────────────────────────────────────
+##
+## Built jars, two work sizes, slope-fitted so startup drops out:
+##
+##              400k      4M      slope/400k
+##   hand       1004 ms   1368 ms   40.4 ms
+##   derived    1153 ms   1889 ms   81.8 ms      -> 2.02x
+##
+## So the derived decode walk is ~2x the hand-written one — much worse than the
+## ENCODE side, which came out at ~6% (bench/cases/codec-vs-handwritten).
+##
+## READ THAT AS AN UPPER BOUND, NOT CLEAN OVERHEAD. The two halves are not doing
+## equal work: `hand_decode` pulls ONE field (`id`) out of the object, while the
+## derived decoder builds a whole `Row` — both fields, a `Result` per field, the
+## ctx and path threading an error message would need. A fair split would need a
+## hand version that constructs the same record, which is the obvious next step
+## if anyone picks this up.
+##
+## Startup: the derived program's intercept is ~108 ms higher (1071 vs 964),
+## which is the derivation's own classload/compile cost. For a server that is
+## paid once.
+##
+## TWO MEASUREMENT TRAPS, both hit here first:
+##
+## 1. `decode` of a LOOP-INVARIANT value is hoisted out of the loop, so the walk
+##    has to depend on the counter (`row_at { t, n }`) to be measured at all.
+## 2. Copying a bench project to make a second work size brings its `.build/`
+##    along, and `mez build` then considers it up to date — so both "sizes" run
+##    the SAME binary and every slope reads as zero. That produced three rounds
+##    of a confident, wrong "the loop is hoisted" conclusion before the answer
+##    column (unchanged at 4200000 when it should have been 42000000) gave it
+##    away. Copy `Mezze.toml` and `src/` only.

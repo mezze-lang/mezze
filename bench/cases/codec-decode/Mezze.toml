@@ -1,0 +1,12 @@
+[package]
+name = "codec_decode"
+version = "0.1.0"
+
+[[app]]
+name = "codec_decode"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
