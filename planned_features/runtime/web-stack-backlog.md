@@ -295,12 +295,36 @@ process.** That is the 15.5% HTTP-route gap's dominant term; the route does more
 than encode, so the whole-request gain will be smaller and is not yet measured
 (see below).
 
-#### Still unmeasured: the HTTP route itself
+#### The whole request: +16.0%
 
-The server benchmark was never committed, so the 15.5% figure cannot be
-re-measured without rebuilding that harness. The codec benchmark above is now in
-the tree so this does not happen again. Re-running the route is the remaining
-step to close the number.
+`bench/cases/http-work-route` — rebuilt and COMMITTED, with `ab.sh` beside it.
+Two jars of one app, one per compiler, interleaved A B A B, `wrk -t8 -c256`,
+5s warm + 10s measured:
+
+| round | before | after |
+|---|---|---|
+| 1 | 218,630 | 254,268 |
+| 2 | 218,759 | 252,444 |
+| 3 | 215,794 | 249,924 |
+| 4 | 207,420 | 251,518 |
+| **median** | **217,212** | **251,981** |
+
+**+16.0% on the whole request**, and the two ranges do not overlap at all
+(before 207-219k, after 250-254k) — every round shows it.
+
+The static control behaved as it should: `/health`, which has no codec, gave
+447,735 -> 431,859, i.e. **no gain** (-3.5%). That control is NOISY — its `after`
+samples spread 406-455k, 12% — so its median difference means nothing on its
+own; what matters is that it shows no IMPROVEMENT where none is possible, which
+is what says the +16% is the codec path and not a general shift.
+
+**These absolute numbers are NOT comparable to the ~405k figures elsewhere in
+this file.** This is a reconstructed route — 20 records of 4 fields, fully
+encoded — not the original program, which was never committed. Only the A/B
+delta transfers.
+
+The old 15.5% walker gap is consistent with this: the walk itself got 1.44x
+faster, the request does more than encode, and the request-level gain is +16%.
 
 #### Where to look next
 

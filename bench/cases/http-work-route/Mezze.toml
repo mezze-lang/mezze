@@ -1,0 +1,12 @@
+[package]
+name = "http_work_route"
+version = "0.1.0"
+
+[[app]]
+name = "http_work_route"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

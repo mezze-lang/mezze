@@ -1,0 +1,123 @@
+## The HTTP WORK ROUTE — a whole request, end to end, on a real socket.
+##
+## A RECONSTRUCTION, not the original. The 15.5% walker figure in
+## `planned_features/runtime/web-stack-backlog.md` came from a server program
+## that was never committed, so it could not be re-measured — which is how a
+## 2.1x effect stayed filed as 13% for weeks. This file exists so that cannot
+## happen again, and it is deliberately NOT tuned: it is what a route looks like
+## when someone writes one.
+##
+## Three routes, each isolating a layer:
+##
+##   /work/:n?mul=M   the full path — router with a bound param, a query param,
+##                    N records built, and a DERIVED `Encode` walk to JSON.
+##                    This is the route the walker gap was measured on.
+##   /plain           a static route returning a fixed body. The router's own
+##                    cost with no payload and no codec.
+##   /health          a second static route, so `/plain` is not accidentally
+##                    first-in-table and the static match is exercised fairly.
+##
+## Run it with the built jar — `mez build` then `./.build/http_work_route` —
+## never `mez dev`, which leaves `engine.Compilation` off unless `MEZZE_JIT=1`
+## and would measure the AST interpreter.
+##
+##   PORT=8080 ./.build/http_work_route
+##   bench/bench.sh work 8080 '/work/20?mul=3' -- ./.build/http_work_route
+use std::effects::http::{ Request, Response }
+use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
+use std::effects::http_router::{ route, or_else, otherwise, Matched }
+use std::effects::http::{ Method, Get }
+use std::codec::core::{ Encode }
+use std::codec::json::{ Json, JsonC, json_default, to_str }
+use std::collections::map
+use std::collections::bytes
+use std::collections::seq
+use std::str
+use std::int
+use std::float
+use std::effects::log::{ println, Console }
+use std::effects::time::{ Time, SystemTime, sleep }
+use std::datetime::{ duration_seconds }
+
+type Row = {
+  id: Int,
+  name: Str,
+  score: Float,
+  active: Bool,
+}
+
+let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } -> {
+  status = code,
+  headers = map::empty {},
+  body = bytes::from_str { s = text },
+  url = url,
+}
+
+## The encode is behind an ability constraint, exactly as application code puts
+## it: that is what makes the walk a DERIVED one with a captured config, which
+## is the shape W-P1 was about.
+let encode_json: { body: 'a } with Encode JsonC 'a -> Str = { body } -> do
+  let j: Json = body.encode { config = json_default }
+  to_str { json = j }
+
+## `n` rows, each touching the query's multiplier so neither the payload nor the
+## query read can be folded away at compile time.
+let build_rows: { n: Int, mul: Int } -> [Row] = { n, mul } ->
+  seq::map {
+    xs = seq::range { start = 1, end = n + 1 },
+    f = { x } -> {
+      id = x * mul,
+      name = "row-$(int::to_str { n = x })",
+      score = float::from_int { n = x * mul } * 1.5,
+      active = x % 2 == 0,
+    },
+  }
+
+let work_handler: { m: Matched } -> Response = { m } -> do
+  let n = match int::from_str { s = m.param_or { name = "n", default = "20" } } is
+    Some { val } -> val
+    None -> 20
+  let mul = match int::from_str { s = m.query_or { name = "mul", default = "1" } } is
+    Some { val } -> val
+    None -> 1
+  reply {
+    code = 200,
+    text = encode_json { body = build_rows { n = n, mul = mul } },
+    url = m.req.url,
+  }
+
+let app = otherwise {
+  routes = or_else {
+    a = route { method = Get, path = "/work/:n", handler = work_handler },
+    b = or_else {
+      a = route { method = Get, path = "/plain",
+        handler = { m } -> reply { code = 200, text = "plain", url = m.req.url } },
+      b = route { method = Get, path = "/health",
+        handler = { m } -> reply { code = 200, text = "ok", url = m.req.url } },
+    },
+  },
+  fallback = { req } -> reply { code = 404, text = "not found", url = req.url },
+}
+
+## `workers = 0` takes the default permit count, which is what a deployment
+## would get.
+##
+## The server stays INSIDE the `perform`, parked on a sleep loop. It cannot be
+## started and then returned from: the handler chain is installed for the
+## duration of the `perform`, so once that scope ends Helidon is still listening
+## but every request answers Helidon's own 404 without ever reaching the guest
+## handler. That is what this harness did on its first run, and the tell is a
+## 404 whose body is NOT the route table's fallback text.
+let park: { n: Int } -> {} <Time> = { n } ->
+  if n <= 0 then {}
+  else do
+    sleep { d = duration_seconds { n = 3600 } }
+    park { n = n - 1 }
+
+let main = {} -> perform Console in
+  perform SystemTime in do
+    let cfg: ServerConfig = { port = 8111, host = "127.0.0.1", workers = 0 }
+    perform HelidonHttpServerWith { config = cfg } in do
+      let h = HttpServer.serve { handler = app }
+      println { msg = "listening on $(int::to_str { n = h.port })" }
+      park { n = 24 }
