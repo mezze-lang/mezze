@@ -425,6 +425,112 @@ public final class FilesystemNatives {
         }
     }
 
+    // ==================== Locking ====================
+
+    /**
+     * An acquired lock. Holds the channel as well as the {@link FileLock},
+     * because releasing the lock without closing the channel leaks a file
+     * descriptor per lock/unlock cycle — a lockfile loop would exhaust the
+     * process. Opaque to the guest, which only passes it back to `unlock`.
+     */
+    public static final class MezzeLockHandle {
+        final java.nio.channels.FileLock lock;
+        final FileChannel channel;
+        final String path;
+        final java.util.concurrent.atomic.AtomicBoolean released =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        MezzeLockHandle(java.nio.channels.FileLock lock, FileChannel channel, String path) {
+            this.lock = lock;
+            this.channel = channel;
+            this.path = path;
+        }
+    }
+
+    /**
+     * `FileLock.lock` — an advisory, process-wide lock on a whole file.
+     *
+     * A shared lock still needs a readable channel and an exclusive one a
+     * writable channel, so the open mode follows the requested kind. The file
+     * is CREATEd rather than required to exist, because the overwhelmingly
+     * common use is a lockfile that the winner creates.
+     *
+     * Non-blocking mode returns `FsPermissionDenied` rather than an "already
+     * held" variant: adding `FsLockHeld` to FsError would widen a type every
+     * FileSystem caller matches on, for one op's benefit. Revisit if a real
+     * caller needs to tell the two apart.
+     *
+     * Advisory is the honest word. On a network filesystem the lock may be a
+     * no-op that reports success; that is the backend lying, not us, and it
+     * is why this is a separate effect a backend can decline to implement.
+     */
+    @TruffleBoundary
+    public static Object lock(MezzeRecord args) {
+        String path = getString(args, "path");
+        String kind = getVariantTag(args, "kind");
+        boolean shared = "Shared".equals(kind);
+        boolean blocking = getBool(args, "blocking");
+        FileChannel channel = null;
+        try {
+            channel = shared
+                ? FileChannel.open(Paths.get(path),
+                    StandardOpenOption.READ, StandardOpenOption.CREATE)
+                : FileChannel.open(Paths.get(path),
+                    StandardOpenOption.READ, StandardOpenOption.WRITE,
+                    StandardOpenOption.CREATE);
+            java.nio.channels.FileLock l = blocking
+                ? channel.lock(0L, Long.MAX_VALUE, shared)
+                : channel.tryLock(0L, Long.MAX_VALUE, shared);
+            if (l == null) {
+                channel.close();
+                return errPermissionDenied(path, "lock (already held)");
+            }
+            return ok(new MezzeLockHandle(l, channel, path));
+        } catch (java.nio.channels.OverlappingFileLockException e) {
+            closeQuietly(channel);
+            // Same JVM already holds an overlapping lock. Not an OS-level
+            // contention failure, but indistinguishable to the caller.
+            return errPermissionDenied(path, "lock (held by this process)");
+        } catch (AccessDeniedException e) {
+            closeQuietly(channel);
+            return errPermissionDenied(path, "lock");
+        } catch (NoSuchFileException e) {
+            closeQuietly(channel);
+            return errNotFound(path);
+        } catch (IOException e) {
+            closeQuietly(channel);
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    /** `FileLock.unlock` — release and close. Idempotent, like `close`. */
+    @TruffleBoundary
+    public static Object unlock(MezzeRecord args) {
+        MezzeLockHandle h = getLockHandle(args, "handle");
+        if (!h.released.compareAndSet(false, true)) {
+            return ok(MezzeRecord.empty());
+        }
+        try {
+            h.lock.release();
+            h.channel.close();
+            return ok(MezzeRecord.empty());
+        } catch (java.nio.channels.ClosedChannelException e) {
+            return ok(MezzeRecord.empty());
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    private static void closeQuietly(FileChannel c) {
+        if (c == null) return;
+        try {
+            c.close();
+        } catch (IOException ignored) {
+            // Nothing useful to do: we are already returning an error for the
+            // reason we got here, and that reason is the one worth reporting.
+        }
+    }
+
     // ==================== Record helpers ====================
 
     private static final String[] FILE_STAT_FIELDS = {"kind", "size", "modified"};
@@ -525,6 +631,22 @@ public final class FilesystemNatives {
         Object val = r.getField(index);
         if (val instanceof MezzeFileHandle h) return h;
         throw new NativeTypeMismatchException("Expected FileHandle for field '" + name + "'");
+    }
+
+    private static MezzeLockHandle getLockHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeLockHandle h) return h;
+        throw new NativeTypeMismatchException("Expected LockHandle for field '" + name + "'");
+    }
+
+    private static boolean getBool(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof Boolean b) return b;
+        throw new NativeTypeMismatchException("Expected Bool for field '" + name + "'");
     }
 
     /**

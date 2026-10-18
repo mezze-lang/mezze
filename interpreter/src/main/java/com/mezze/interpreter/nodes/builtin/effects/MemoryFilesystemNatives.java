@@ -52,6 +52,17 @@ public final class MemoryFilesystemNatives {
          *  move another program's clock. */
         final AtomicLong nowMs = new AtomicLong(0);
 
+        /**
+         * `FileLock` state: path -> who holds it. Per context like the rest,
+         * so one program's lockfile is invisible to another — which is what
+         * the real backend does across processes.
+         *
+         * A counter rather than a boolean: a shared lock may be held many
+         * times at once, and unlocking one holder must not free the others.
+         * `exclusive` and a non-zero `shared` are mutually exclusive.
+         */
+        final ConcurrentHashMap<String, LockState> locks = new ConcurrentHashMap<>();
+
         State() {
             // `directories`, not `directories()`: this IS the state being built,
             // and the accessor would come straight back here for it.
@@ -73,6 +84,11 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     private static ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories() {
         return state().directories;
+    }
+
+    @TruffleBoundary
+    private static ConcurrentHashMap<String, LockState> locks() {
+        return state().locks;
     }
 
     @TruffleBoundary
@@ -402,6 +418,82 @@ public final class MemoryFilesystemNatives {
         return ok(MezzeRecord.empty());
     }
 
+    // ==================== Locking ====================
+
+    /** Holders of one path's lock. Guarded by synchronizing on the instance. */
+    static final class LockState {
+        boolean exclusive;
+        int shared;
+    }
+
+    /**
+     * An acquired memfs lock. Carries what `unlock` needs to undo exactly
+     * this acquisition — releasing a shared lock must decrement, not clear.
+     */
+    public static final class MemLockHandle {
+        final String path;
+        final boolean shared;
+        final AtomicBoolean released = new AtomicBoolean(false);
+
+        MemLockHandle(String path, boolean shared) {
+            this.path = path;
+            this.shared = shared;
+        }
+    }
+
+    /**
+     * `FileLock.lock` — contention is REAL here, not simulated.
+     *
+     * memfs could have reported success unconditionally, since one program
+     * rarely contends with itself. It does not, because then a test could
+     * never show that a lock excludes anyone, and "locking works" would be
+     * untestable without a second process. Shared locks stack; an exclusive
+     * lock excludes everything; `blocking` is rejected rather than parked,
+     * since a blocking wait inside a single-context memfs can only deadlock —
+     * there is no other holder to release it.
+     */
+    @TruffleBoundary
+    public static Object lock(MezzeRecord args) {
+        String path = getString(args, "path");
+        String kind = getVariantTag(args, "kind");
+        boolean shared = "Shared".equals(kind);
+        boolean blocking = getBool(args, "blocking");
+        LockState st = locks().computeIfAbsent(path, p -> new LockState());
+        synchronized (st) {
+            boolean free = shared ? !st.exclusive : (!st.exclusive && st.shared == 0);
+            if (!free) {
+                if (blocking) {
+                    // Parking here would hang forever: the only holder is this
+                    // same context, and it is the thread asking.
+                    return errIO(path, "lock is held and blocking would deadlock in MemoryFS");
+                }
+                return errPermissionDenied(path, "lock (already held)");
+            }
+            if (shared) st.shared++; else st.exclusive = true;
+        }
+        return ok(new MemLockHandle(path, shared));
+    }
+
+    /** `FileLock.unlock` — idempotent; decrements a shared hold. */
+    @TruffleBoundary
+    public static Object unlock(MezzeRecord args) {
+        MemLockHandle h = getMemLockHandle(args, "handle");
+        if (!h.released.compareAndSet(false, true)) {
+            return ok(MezzeRecord.empty());
+        }
+        LockState st = locks().get(h.path);
+        if (st != null) {
+            synchronized (st) {
+                if (h.shared) {
+                    if (st.shared > 0) st.shared--;
+                } else {
+                    st.exclusive = false;
+                }
+            }
+        }
+        return ok(MezzeRecord.empty());
+    }
+
     @TruffleBoundary
     public static Object close(MezzeRecord args) {
         MemFileHandle h = getMemHandle(args, "handle");
@@ -452,6 +544,14 @@ public final class MemoryFilesystemNatives {
 
     private static MezzeVariant errNotADirectory(String path) {
         return err("FsNotADirectory", new String[]{"path"}, new Object[]{path});
+    }
+
+    /** Lock contention surfaces as PermissionDenied — see the note on
+     *  `lock` for why FsError does not grow an FsLockHeld variant. */
+    private static MezzeVariant errPermissionDenied(String path, String operation) {
+        return err("FsPermissionDenied",
+                   new String[]{"path", "operation"},
+                   new Object[]{path, operation});
     }
 
     private static MezzeVariant errIO(String path, String message) {
@@ -505,6 +605,22 @@ public final class MemoryFilesystemNatives {
         Object v = r.getField(i);
         if (v instanceof MemFileHandle h) return h;
         throw new NativeTypeMismatchException("Expected MemFileHandle for field '" + name + "'");
+    }
+
+    private static MemLockHandle getMemLockHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MemLockHandle h) return h;
+        throw new NativeTypeMismatchException("Expected LockHandle for field '" + name + "'");
+    }
+
+    private static boolean getBool(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof Boolean b) return b;
+        throw new NativeTypeMismatchException("Expected Bool for field '" + name + "'");
     }
 
     private static String getVariantTag(MezzeRecord r, String name) {

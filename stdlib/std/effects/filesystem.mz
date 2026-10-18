@@ -163,6 +163,53 @@ impl FileDurability for MemoryFileDurability where {
 }
 
 ## ==================================================================
+## FileLock — coordinated access to a path.
+##
+## Whole-file, advisory, process-wide. Byte-range locks are deliberately
+## omitted: POSIX-only, rarely used, and a caller who needs them is
+## better served by a native escape hatch than by a stdlib surface that
+## most backends cannot honour.
+##
+## "Advisory" is the honest word. On a network filesystem the lock may be
+## a no-op that reports success — that is the backend lying, and it is
+## precisely why this is a separate effect a backend may decline to
+## implement rather than an op on FileSystem that S3 would have to stub.
+## ==================================================================
+pub type LockKind = | Shared, Exclusive |
+
+## Opaque handle for a held lock. Pass it back to `unlock`; holding the
+## channel open is what keeps the lock, so dropping this without
+## unlocking leaks a file descriptor.
+pub newtype LockHandle = __NativeLockHandle
+
+effect FileLock where {
+  ## Acquire. `blocking = True` waits for the holder to release;
+  ## `False` fails immediately with FsPermissionDenied if it is held.
+  lock: { path: Str, kind: LockKind, blocking: Bool }
+    -> Result LockHandle FsError <FileLock>,
+  ## Release. Idempotent — unlocking twice is a no-op success.
+  unlock: { handle: LockHandle } -> Result {} FsError <FileLock>,
+}
+
+impl FileLock for LocalFileLock where {
+  lock = { path, kind, blocking } ->
+    __native_fs_lock { path = path, kind = kind, blocking = blocking },
+  unlock = { handle } -> __native_fs_unlock { handle = handle },
+}
+
+## MemoryFS contention is REAL, not simulated: shared locks stack, an
+## exclusive lock excludes everything. Reporting success unconditionally
+## would make "a lock excludes someone" untestable without a second
+## process. `blocking = True` on a held lock is rejected rather than
+## parked — the only possible holder is this same context, so waiting
+## could only deadlock.
+impl FileLock for MemoryFileLock where {
+  lock = { path, kind, blocking } ->
+    __native_memfs_lock { path = path, kind = kind, blocking = blocking },
+  unlock = { handle } -> __native_memfs_unlock { handle = handle },
+}
+
+## ==================================================================
 ## Derived helpers — pure Mezze, built on the 13 primitives.
 ## ==================================================================
 ## ---------- Text convenience ----------
