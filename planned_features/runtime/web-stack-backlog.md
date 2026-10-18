@@ -460,43 +460,52 @@ A `//` in the path falls back to the segment walk, because `segments` drops empt
 pieces and so `//health` must match `/health` where a comparison would not.
 `HttpRouterTest` pins both halves of that branch and the root route.
 
-### W-P6 — MEASURED on the committed route: ~4.5x, and the last lever does not exist
+### W-P6 — ~2.3x, and the slim runtime jar nearly DOUBLED native throughput
 
-**Re-measured 2026-10-18 on `bench/cases/http-work-route`, which is committed,
-so unlike the numbers below this can be re-run.** Same program, same box, same
-`wrk -t8 -c256`:
+**Re-measured 2026-10-18 after the distribution fix, interleaved in one session,
+15s warm + 10s measured, `bench/cases/http-work-route`:**
 
 | | req/s | vs JVM |
 |---|---|---|
-| JVM (jar) | 251,981 | 1.00 |
-| native, default heap | 42,280 | **6.0x behind** |
-| native, heap tuned | **55,803** | **4.5x behind** |
+| JVM (jar) | 251.9k | 1.00 |
+| native, heap tuned | **108.4k** | **2.3x behind** |
 
-**Heap tuning is worth +32% here**, not the 8.5% recorded below — this route
-allocates far more (a derived codec walk per request) than whatever the old
-figure was taken on. The flags, which SVM accepts only in bytes:
+**Native went 55.8k -> 108.4k, +94%, from nothing but a smaller input jar.** The
+earlier reading was taken while `~/.mezze/lib/mezze-runtime.jar` was the stale
+112MB provider-bundled one, so the app jar was 106MB; after the fix it is 20MB
+and the image is built from a fifth of the classes. The blocklist strip had
+already made that build COMPILE — this is what it costs to merely carry the
+providers into the input.
 
-    ./app-native -XX:MaxHeapSize=4294967296 -XX:MinHeapSize=1073741824                  -XX:MaxNewSize=1073741824
+**So the "~2x" originally recorded here was RIGHT, and the 4.5x I replaced it
+with was measured on a polluted build.** Correcting my own correction.
 
-**The "~2x" below was a different program.** It came from the uncommitted
-server harness, so it could not be reproduced; on a codec-heavy route the gap is
-4.5x after tuning. Both numbers can be true — the ratio depends entirely on how
-much GUEST work the route does, and the old note says as much itself ("at the
-floor with ZERO guest computation, native was 232k against the jar's 316k", i.e.
-1.4x). The more guest code a route runs, the worse native looks.
+**PE is confirmed ACTIVE in native binaries**, which had been an open question.
+On a tight guest loop (4M iterations) native finishes FASTER in total than the
+jar — 1491ms against 1756ms — because it skips ~1s of JVM startup; subtract
+startup and the native loop is ~2x slower, not the 10x+ an interpreter would
+give. Startup is where native wins outright: ~40ms against ~1s.
 
-**PGO — the one untried lever — is NOT AVAILABLE.** `--expert-options-all` on
-this GraalVM lists no PGO or ProfileGuided option at all: profile-guided
-optimisation is an Oracle GraalVM feature and this is CE. So the suggestion
-below is not actionable without changing distribution.
+**Heap tuning still matters** (SVM takes the sizes only in bytes):
 
-**What that leaves.** Serial GC (CE has no G1) plus Truffle-on-SVM with no host
-C2 for the interpreter itself. Neither is addressable from this repo. W-P6 is
-therefore NOT a fixable item: it is a property of the distribution, now measured
-on a harness anyone can re-run, with the one tuning lever quantified. Closing it
-as "won't fix here" rather than leaving it open as if work remained.
+    ./app-native -XX:MaxHeapSize=4294967296 -XX:MinHeapSize=1073741824 \
+                 -XX:MaxNewSize=1073741824
 
-### W-P6 (superseded) — native is ~2× behind the JVM
+**What remains is distribution, not code.** PGO does not exist in GraalVM CE —
+`--expert-options-all` lists no PGO or ProfileGuided option, it is an Oracle
+GraalVM feature. CE has Serial GC only. And Truffle-on-SVM has no host C2 for
+the interpreter itself. None of that is addressable from this repo, so the
+remaining 2.3x is a property of the distribution.
+
+**Measurement traps hit here, both now avoidable.** The two binaries share a
+name, so `pkill -f http_work_route` killed the server the NEXT round had just
+started — that produced one `NORESULT` and one half-rate reading that looked
+like a 2x JVM regression. Kill by an ANCHORED pattern. And if a stale server
+still holds the port, the new one fails to bind and `wrk` silently measures the
+OLD process; absolute numbers from different sessions are not comparable, so
+interleave and quote the ratio.
+
+### W-P6 (superseded) — native is ~2× behind the JVM### W-P6 (superseded) — native is ~2× behind the JVM
 
 195.3k tuned vs ~405k on the JVM. Two causes:
 
