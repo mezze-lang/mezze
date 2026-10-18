@@ -3197,6 +3197,15 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_server_start", (r, c) -> HttpServerNatives.httpServerStart(r));
         HANDLERS.put("__native_http_server_port", (r, c) -> HttpServerNatives.httpServerPort(r));
         HANDLERS.put("__native_http_server_stop", (r, c) -> HttpServerNatives.httpServerStop(r));
+
+        // === Database ===
+        HANDLERS.put("__native_db_sqlite_scope_open", (r, c) -> DbNatives.dbSqliteScopeOpen(r));
+        HANDLERS.put("__native_db_scope_close", (r, c) -> DbNatives.dbScopeClose(r));
+        HANDLERS.put("__native_db_query", (r, c) -> DbNatives.dbQuery(r));
+        HANDLERS.put("__native_db_exec", (r, c) -> DbNatives.dbExec(r));
+        HANDLERS.put("__native_db_begin", (r, c) -> DbNatives.dbBegin(r));
+        HANDLERS.put("__native_db_commit", (r, c) -> DbNatives.dbCommit(r));
+        HANDLERS.put("__native_db_rollback", (r, c) -> DbNatives.dbRollback(r));
     }
 
     // ==================== Mutation Operations ====================

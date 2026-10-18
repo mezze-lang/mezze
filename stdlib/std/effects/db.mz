@@ -336,3 +336,81 @@ pub let first_row: { rows: Rows } -> Option Rows = { rows } ->
   else match seq::get { xs = rows.rows, i = 0 } is
     Some { val = r } -> Some { val = { cols = rows.cols, rows = [r] } }
     None -> None
+
+## ── SQLite, the first real driver ───────────────────────────────────────────
+##
+## SQLite because it needs no server: the whole surface above becomes provable
+## against a real database in a unit test, with `:memory:` and no fixture. The
+## natives underneath speak JDBC, so the second driver is a connection string
+## rather than a rewrite.
+##
+## THE CONNECTION IS NOT A VALUE. `initialize_scope` opens it and
+## `finalize_scope` closes it, and in between it lives in the runtime, keyed by
+## the context. A guest that could hold the handle could use it after its scope
+## ended with no way to know it had; here the only reachable connection is the
+## open one. It is also why the natives below take no `db` argument.
+##
+## ONE CONNECTION PER SCOPE, shared by every thread inside it, because that is
+## what the scope means. A connection per thread was the first design and it is
+## wrong for the case that matters: a server handler runs on a thread the server
+## owns, and `:memory:` is per connection, so a handler opening its own would
+## query a different, empty database and answer no rows with no error at all.
+##
+## So operations in a scope SERIALIZE, and a `tx` holds the connection from
+## begin to commit — without that a concurrent query would read rows that may
+## yet be rolled back. Waiting is normal and is not a failure; waiting forever
+## is, so a wait that runs out answers `Timeout` rather than pinning the caller.
+## The fix for the serializing is a POOL of connections (W-D4), not a connection
+## per thread.
+##
+## A thread that never entered a scope — a handler — uses the one open scope.
+## If SEVERAL are open it is told so rather than given one of them: there is no
+## database that operation could mean, and picking the first would make a route
+## read from whichever happened to be opened earliest.
+
+## Open the database at `path` for the scope of the `perform`.
+##
+##   perform SqliteDb { path = ":memory:" } in do
+##     Db.apply { q = sql { text = "create table t (a int)" } }
+##
+## `":memory:"` is a fresh private database per scope — what a test wants.
+## A path that cannot be opened makes every operation in the scope answer
+## `Unavailable`: `initialize_scope` has nowhere to put a failure, so rather
+## than crash the program at `perform` it leaves no connection open, and the
+## first operation says so. That is the one place this design pays for the
+## connection not being a value.
+##
+## Nesting two `SqliteDb` scopes is allowed and they are separate databases —
+## the inner one answers inside it, and the outer is still open afterwards.
+impl Db for SqliteDb { path: Str } where {
+  initialize_scope = {} -> do
+    __native_db_sqlite_scope_open { path = path }
+    {},
+  finalize_scope = {} -> __native_db_scope_close {},
+
+  run   = { q } -> __native_db_query { sql = q.sql, params = q.params },
+  apply = { q } -> __native_db_exec { sql = q.sql, params = q.params },
+
+  ## Begin, run, then commit or roll back.
+  ##
+  ## A nested `tx` JOINS the enclosing one instead of opening a savepoint: the
+  ## promise is that a body commits together or not at all, and an inner
+  ## transaction that could roll back on its own would leave the outer one half
+  ## applied. So the inner `tx` neither commits nor rolls back — `began.nested`
+  ## says it did not begin anything — and the outer one decides for both.
+  ##
+  ## A body that fails rolls back and the body's error is what comes out. A
+  ## rollback that itself fails is not reported, because it would replace the
+  ## reason the transaction was abandoned with a fact about the abandoning.
+  tx = { body } -> match __native_db_begin {} is
+    Err { error = e } -> Err { error = e }
+    Ok { val = began } -> match body {} is
+      Err { error = e } -> do
+        if began.nested then {} else __native_db_rollback {}
+        Err { error = e }
+      Ok { val = v } ->
+        if began.nested then Ok { val = v }
+        else match __native_db_commit {} is
+          Err { error = e } -> Err { error = e }
+          Ok { val = _ } -> Ok { val = v },
+}

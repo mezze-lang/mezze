@@ -55,6 +55,11 @@ dependencies {
     // defined in :wire-protocol.
     implementation(project(":wire-protocol"))
 
+    // SQLite, for `std::effects::db`'s first driver. Same coordinates the
+    // compiler's own code store already uses (:store-sqlite), so there is one
+    // SQLite version in the build rather than two.
+    implementation("org.xerial:sqlite-jdbc:3.51.2.0")
+
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:25.0.3")
 

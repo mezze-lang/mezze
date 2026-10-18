@@ -110,24 +110,64 @@ A performer owns its pool. Non-negotiable, from this session's leak sweep:
   Helidon's connection threads, and a blocking driver call parks that thread
   without consuming a carrier.
 
-### W-D5 — the first real driver
+### W-D5 — the first real driver — **LANDED**
 
-JDBC is the pragmatic choice (one driver surface, every database). Two things to
-settle before writing code, and they are the owner's calls:
+SQLite over JDBC, raw SQL with bound params, as recommended. `SqliteDb { path }`
+is a performer; `DbNatives` is the driver. 28 tests in `SqliteDbTest`, all
+against `:memory:` or a `@TempDir` file, so the whole surface is proven against
+a real database with no fixture and no server.
 
-- **Which backend first.** SQLite embeds, needs no server, and makes the test
-  story trivial; Postgres is what applications actually use. My recommendation is
-  SQLite first for the test seam and Postgres immediately after, because the
-  effect surface must be proven against a networked database before it sets.
-- **Raw SQL first, or a typed query DSL.** Recommendation: raw SQL with bound
-  params first, with the DSL added later as PURE VALUES that fold into a `Query`
-  — the same shape as the route table, which is the part of the HTTP story that
-  aged best.
+**What the implementation decided, and why.**
 
-**Native image:** a JDBC driver needs reflection and resource configuration, and
-Helidon already cost `--initialize-at-run-time=io.helidon.service.registry.GlobalServiceRegistry`
-plus a long resources list. Expect the same and budget for it;
-`just native-test` is currently red for unrelated reasons (W-C2).
+- **The connection is not a guest value.** `initialize_scope` opens it,
+  `finalize_scope` closes it, `registerForDispose` catches the rest. The natives
+  take no `db` argument, so there is no way for a guest to hold a connection past
+  its scope — which it could not detect.
+- **One connection per scope, shared by every thread in it.** A connection per
+  thread was the first design and it was WRONG for the case the effect exists
+  for. A handler runs on a thread the server owns; `:memory:` is per connection,
+  so a handler opening its own queried a different, empty database and answered
+  **no rows with no error at all**. Measured, not reasoned: a probe returned
+  `db error` before the fix and `count=2` after.
+- **A thread that entered no scope uses the one open scope.** This is what makes
+  `perform SqliteDb in perform HelidonHttpServer in …` work, since a Helidon
+  thread inherits the handler CHAIN but not the thread-local state the chain was
+  built beside. With SEVERAL open it is told so instead of given one — there is
+  no database the operation could mean, and picking the earliest would make a
+  route read from whichever scope happened to open first.
+- **A transaction holds the scope's lock from begin to commit.** Otherwise a
+  concurrent query reads rows that may be rolled back. A `ReentrantLock` gives
+  all three things needed at once: cross-thread exclusion, same-thread
+  reentrancy (a query inside a `tx`, and a nested `tx`, are not self-deadlocks),
+  and a bounded wait — a wait that runs out answers `Timeout`, so a stuck
+  transaction cannot pin a thread pool. Nesting is read off the lock's HOLD
+  COUNT, not the connection's autocommit flag: the flag is shared, so it told a
+  merely-concurrent second thread it was nested.
+- **A nested `tx` joins the outer one** rather than opening a SAVEPOINT. The
+  promise is that a body commits together or not at all, and an inner rollback
+  would leave the outer transaction half applied.
+- **`DbError` is chosen by what the caller can DO**, not by the driver's error
+  code: `Conflict` for SQLite 5/6 and SQLSTATE 40 (retry the transaction),
+  `Unavailable` for 08 and an unopenable file (retry the connection), `Rejected`
+  for everything else (fix the query), `Timeout` for the lock wait. A code is a
+  fact about SQLite; a `DbError` is advice to the program.
+- **A path that cannot be opened** leaves no connection open and the first
+  operation answers `Unavailable`. `initialize_scope` has nowhere to put a
+  failure, and crashing at `perform` is worse. This is the one place the design
+  pays for the connection not being a value.
+
+**Every behavioural claim was perturbed.** Removing the rollback, letting an
+inner `tx` commit, making the scope stack answer the outermost, dropping the
+live-scope fallback, and reading nesting off autocommit each broke exactly the
+tests that assert them and nothing else.
+
+**What serializing costs** is unmeasured and is W-D6's job. The fix for it is
+W-D4's pool, not a connection per thread — that is the thing that was already
+tried and found to answer from the wrong database.
+
+**Native image:** still untested. `org.xerial:sqlite-jdbc` needs reflection and
+ships a native library per platform, so expect the same kind of configuration
+Helidon needed. `just native-test` is red for unrelated reasons (W-C2).
 
 ### W-D6 — measure it, with the harness that works
 
@@ -147,8 +187,8 @@ is the shape most applications have and nothing in this repo measures it.
 
 ## Order
 
-W-D1 (effect + MockDb) → W-D2 (codec row mapping) → W-D5 (one real driver)
-→ W-D4 (pool) → W-D6 (measure) → W-D3 (streaming).
+W-D1 (effect + MockDb) ✅ → W-D2 (codec row mapping) ✅ → W-D5 (one real
+driver) ✅ → W-D4 (pool) → W-D6 (measure) → W-D3 (streaming).
 
 W-D3 last deliberately: streaming is the feature most likely to be designed
 speculatively, and it should be built once a real driver and real measurements
