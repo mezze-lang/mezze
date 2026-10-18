@@ -430,7 +430,43 @@ A `//` in the path falls back to the segment walk, because `segments` drops empt
 pieces and so `//health` must match `/health` where a comparison would not.
 `HttpRouterTest` pins both halves of that branch and the root route.
 
-### W-P6 — native is ~2× behind the JVM
+### W-P6 — MEASURED on the committed route: ~4.5x, and the last lever does not exist
+
+**Re-measured 2026-10-18 on `bench/cases/http-work-route`, which is committed,
+so unlike the numbers below this can be re-run.** Same program, same box, same
+`wrk -t8 -c256`:
+
+| | req/s | vs JVM |
+|---|---|---|
+| JVM (jar) | 251,981 | 1.00 |
+| native, default heap | 42,280 | **6.0x behind** |
+| native, heap tuned | **55,803** | **4.5x behind** |
+
+**Heap tuning is worth +32% here**, not the 8.5% recorded below — this route
+allocates far more (a derived codec walk per request) than whatever the old
+figure was taken on. The flags, which SVM accepts only in bytes:
+
+    ./app-native -XX:MaxHeapSize=4294967296 -XX:MinHeapSize=1073741824                  -XX:MaxNewSize=1073741824
+
+**The "~2x" below was a different program.** It came from the uncommitted
+server harness, so it could not be reproduced; on a codec-heavy route the gap is
+4.5x after tuning. Both numbers can be true — the ratio depends entirely on how
+much GUEST work the route does, and the old note says as much itself ("at the
+floor with ZERO guest computation, native was 232k against the jar's 316k", i.e.
+1.4x). The more guest code a route runs, the worse native looks.
+
+**PGO — the one untried lever — is NOT AVAILABLE.** `--expert-options-all` on
+this GraalVM lists no PGO or ProfileGuided option at all: profile-guided
+optimisation is an Oracle GraalVM feature and this is CE. So the suggestion
+below is not actionable without changing distribution.
+
+**What that leaves.** Serial GC (CE has no G1) plus Truffle-on-SVM with no host
+C2 for the interpreter itself. Neither is addressable from this repo. W-P6 is
+therefore NOT a fixable item: it is a property of the distribution, now measured
+on a harness anyone can re-run, with the one tuning lever quantified. Closing it
+as "won't fix here" rather than leaving it open as if work remained.
+
+### W-P6 (superseded) — native is ~2× behind the JVM
 
 195.3k tuned vs ~405k on the JVM. Two causes:
 
