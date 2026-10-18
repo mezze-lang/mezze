@@ -88,7 +88,7 @@ conditions are in `concurrency-and-context-bugs.md`.
 
 ## Part 2 — Performance (measured, ranked by size)
 
-### W-P1 — CAUSE FOUND: an ability op on a NON-CONSTANT receiver does not inline
+### W-P1 — OPEN, and ~2.1x not 15.5%: an ability op on a CAPTURED receiver
 
 The walker's gap is **15.5%** (not 20% — that figure came from a harness that
 could not resolve it). It is now fully accounted for, and it is NOT about codecs
@@ -155,6 +155,80 @@ implemented (unwrap an inflated stub when the function captures nothing, the sam
 way `resolveScalarTarget` unwraps a trampoline), VERIFIED to fire — 17 unwraps,
 all successful — and changed nothing. Reverted rather than kept.
 
+#### CORRECTED 2026-10-18: it is ~2.1x, not 13% — the old percentages were startup-diluted
+
+The three programs' RAW TIMINGS above were right. The PERCENTAGES derived from
+them were not, because they are whole-process times and the loop was only ~15%
+of the process. Re-measured at 100x the work (so startup is ~6% instead of ~85%),
+built jars, 2-3 reps, spread under 2%:
+
+| program | receiver | callee | total | loop (less ~0.9s startup) | vs lamplain |
+|---|---|---|---|---|---|
+| `lamplain` | captured | plain fn | 14.8s | 13.9s | 1.00 |
+| `lamc` | GLOBAL | ability op | 20.1-22.0s | 19.2-21.1s | **1.38-1.52** |
+| `lamp` | captured | ability op | 30.9s | 30.0s | **2.16** |
+
+Cross-checked on the `mez dev` path at 1x/10x/100x: the slope fit predicts every
+measured point within 6%, and after subtracting that path's larger (~4.1s)
+startup it agrees — lamp 2.08x, lamc 1.25x. Two paths, three work sizes.
+
+So the honest figures: an ability op on a CAPTURED receiver costs **~2.1x** a
+plain function with the same capture, the same argument record and the same call
+count. On a CONSTANT (global) receiver the same op costs ~1.4x. The old "+13%"
+and "ability dispatch is free when the receiver is constant" both understated it
+by roughly 8x and 0.4x respectively.
+
+The old claim's DIRECTION was right and should not be re-doubted: `lamc` < `lamp`.
+A first re-measurement appeared to invert it, and that was an artifact —
+see the trap below.
+
+#### THE TRAP: `mez dev` runs the INTERPRETER by default
+
+`RuntimeServer` sets `engine.Compilation` from `MEZZE_JIT`, which **defaults to
+false**. So `mez dev` executes guest code in the Truffle AST interpreter unless
+`MEZZE_JIT=1` is in the environment, and `mez doctor`'s "JIT enabled" refers to
+the GraalVM being JIT-CAPABLE, not to compilation being on.
+
+Measured interpreter-mode, the ordering INVERTS — `lamc` becomes the slowest of
+the three (plain/captured 1.00, global/plain 1.35, ability/captured 1.46,
+ability/global 1.82, all cleanly additive). That is a true fact about the
+interpreter and tells you nothing about compiled code. Any benchmark run through
+`mez dev` without `MEZZE_JIT=1` measures the interpreter.
+
+#### NOT a rejected inline — the inlined code is just bigger
+
+With the compilation trace (built jar + `MEZZE_TRACE_COMPILATION=1`), all three
+programs reach `Inlined 9Y 0N` on their hot OSR compilation. **Nothing is being
+refused.** What differs is the size of the result:
+
+| program | the lambda's compiled unit | code size |
+|---|---|---|
+| `lamplain` | `LazyStub[lambda]` Inlined 5Y 0N | 2427 |
+| `lamc` | `LazyStub[lambda]` Inlined 8Y 0N | 4854 |
+| `lamp` | `LazyStub[lambda]` Inlined 8Y 0N | **6409** |
+
+lamp's lambda compiles to 2.6x lamplain's code and 1.3x lamc's, which tracks the
+runtime ratios. And lamp's hot OSR body is byte-identical in shape to
+lamplain's (IR 521/1350, code 5248) — so the loop is not the difference; the
+lambda is.
+
+That reframes the question. It is NOT "why does Graal refuse to inline the
+ability op" — it inlines it. It is **"what per-call work survives inlining on a
+non-constant receiver that folds away on a constant one"**. A constant receiver
+lets Graal fold the impl selection; a captured one leaves something behind,
+even though the Mezze-level dispatch already resolved `opHash=DIRECT`. The
+suspect is a guard or a field read on the receiver inside the inlined body.
+
+#### Found while doing this: `mez dev --trace-jit` emits nothing
+
+`mez --help` documents `--trace-jit` as "Trace Graal compilation + deopts to
+stderr". It produces no output, with or without `MEZZE_JIT=1`, and neither does
+`MEZZE_ENGINE_OPTS="engine.TraceCompilation=true"` on that path. The working
+instrument is a BUILT JAR plus `MEZZE_TRACE_COMPILATION=1`, which goes through
+`EmbeddedExec` instead of `RuntimeServer`. That is also what the original
+measurements used, which is why their absolute times were ~5x smaller than
+`mez dev`'s. Unfixed; it is the tool that would have shortened this.
+
 #### Where to look next
 
 The IR is IDENTICAL except the receiver read (`ReadCaptureIR` vs
@@ -171,6 +245,8 @@ reached its limit; eight hypotheses in, the instrument needs to change.
 
 **This is a LANGUAGE-WIDE finding, not a codec one.** Any hot loop calling
 ability methods on a non-constant receiver pays it — which is most generic code.
+At ~2.1x rather than 13%, it is also much the largest item in this document:
+bigger than the router, the header map and the per-request overhead combined.
 
 ### W-P2 — CLOSED: ~4% spread thin, and the 11.7% figure was partly drift
 
