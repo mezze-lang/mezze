@@ -115,13 +115,19 @@ native-test:
 # neither of which the JVM gates can say anything about.
 #
 # Runs the INSTALLED toolchain (`~/.mezze/bin/mez`), not the in-tree binary that
-# `native-test` uses, and that is deliberate: a `mez` run from inside the repo
-# resolves the whole gradle runtime classpath, polyglot provider jars included,
-# and that configuration fails native-image with a few hundred Truffle
-# compilation-blocklist violations before it reaches anything web-related.
-# `native-test` fails the same way for the same reason and has nothing to do
-# with serving. `~/.mezze/bin/mez` is what a user runs, so it is what this
-# guards. Install it with `./gradlew :cli:installNative`.
+# `native-test` uses.
+#
+# The reason given here used to be that an in-tree `mez` resolves polyglot
+# provider jars onto the classpath and so fails native-image with a few hundred
+# blocklist violations. That was wrong twice over: the two binaries are
+# byte-identical (`installNative` copies one to the other), and the providers
+# were never a CLASSPATH entry — they were 19,157 GraalPy classes bundled inside
+# the runtime fat jar. Fixed 2026-10-18 by stripping them for non-polyglot
+# builds, and `native-test` is green. See C5/W-C2 in
+# planned_features/runtime/concurrency-and-context-bugs.md.
+#
+# Using the installed toolchain is still right — it is what a user runs, so it
+# is what this should guard. Install it with `./gradlew :cli:installNative`.
 [group('test')]
 native-server-test:
     #!/usr/bin/env bash

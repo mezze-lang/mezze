@@ -306,9 +306,59 @@ wrong by reasoning from logs instead of measuring.**
    rule: call it only from a boundary, because `ConcurrentHashMap.get` is
    blocklisted. `just native-server-test` builds and runs again.
 
-**What is left is genuinely pre-existing, and now actually diagnosed.** 302
-violations remain for the native-smoke fixture, and every trace goes through
-one of two places:
+## C5/W-C2 — FIXED 2026-10-18: the bundled LANGUAGE PROVIDERS were the violations
+
+`just native-test` is GREEN. 278 violations -> **0**, the image builds, and the
+binary runs (`native-smoke: all ops OK`).
+
+**The cause.** `mez build --native` hands native-image the whole `mez` runtime
+fat jar, and that jar bundles every Truffle language provider — **19,157 GraalPy
+classes in a 105 MB jar** — because `:cli` shadows them in for its own use.
+`collectClasspathJars`'s `drop` list filters the EXTRACTED per-library jars by
+file name; the fat jar is a separate native-image input and nothing ever
+filtered its CONTENTS. So GraalPy stayed reachable, and with
+`--macro:truffle-svm` on (correct for a non-polyglot build) its ~300 blocklisted
+JDK methods became reachable for runtime compilation.
+
+**The code already knew this hazard.** `buildNativeImageCommand` drops
+`truffle-runtime-` when python IS enabled, with a comment naming these exact
+violations. The missing half was the symmetric case: when python is NOT enabled,
+drop the PROVIDERS instead of the JIT. That is the fix — `sanitiseUserJar` now
+strips the language-provider classes, their `META-INF/native-image` directives,
+and their service registrations when the app declared no `[polyglot.*]`.
+`com/oracle/truffle/api/` is deliberately NOT stripped: that is the framework
+the Mezze interpreter is built on. A polyglot build takes the old path
+byte-for-byte, and `enablePython` was already part of the build-cache digest.
+
+**Why the diagnosis went wrong twice, so it does not go wrong a third time.**
+
+1. Dumping the native-image classpath shows no python jar — and that is TRUE.
+   The providers are not a jar on the classpath; they are classes INSIDE the fat
+   jar. The classpath evidence was sound and the conclusion drawn from it was
+   not.
+2. Every violation trace passes through our own
+   `MezzeBytecodeRootNodeGen$InstructionImpl.getArguments`, which reads like the
+   root cause. It is the LEAF. The chain is GraalPy's `CodeUnit.toString` ->
+   `Formatter` -> `String.format` -> `Preconditions.outOfBoundsMessage`, and once
+   `Formatter` is reachable the analysis must treat every `toString` as a
+   candidate — ours among them. The previous entry read the trace in the right
+   direction but stopped one frame short of the head.
+
+So the conclusion that this needed "per-index-site interpreter work... too large
+to bolt onto a session about something else" was WRONG. `Preconditions` is not
+reached from our index sites at all. The lever was reachability, as the entry
+said — but the reachable thing was the bundled providers.
+
+**The grouping that actually finds this:** split the log on `Blocklisted method`,
+cut each block at `[Root]`, and tag the block by which provider appears in it.
+All 278 carried `com.oracle.graal.python`. Grouping by the `com.mezze.` frame
+instead — the recipe the old entry recommended — returns three lines and names
+the leaf, which is how this stayed misdiagnosed.
+
+### Superseded diagnosis, kept for the record
+
+302 violations remained for the native-smoke fixture, and every trace went
+through one of two places:
 
 - `MezzeBytecodeRootNodeGen$InstructionImpl.getArguments`, reached from Truffle's
   own `Instruction.toString` → `formatInstruction` → `Formatter.format` →
@@ -320,8 +370,8 @@ one of two places:
   not the problem and annotating generated code is not the fix.
 - `EmbeddedExec.executeWithTruffle$lambda$24`.
 
-**There is no shortcut.** GraalVM 25.0.3 has no `-H:` option to ignore or
-whitelist blocklist violations — checked `--expert-options-all`; the only
+**There was no shortcut at the flag level.** GraalVM 25.0.3 has no `-H:` option
+to ignore or whitelist blocklist violations — checked `--expert-options-all`; the only
 Truffle options are host-inlining and trusted-cast knobs. The lever is
 reachability and nothing else.
 

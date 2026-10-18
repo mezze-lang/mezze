@@ -273,7 +273,10 @@ object NativeBuildPath {
         if (timing) System.err.println("[${relativeTime()}ms] native: embedded-app.jar (${embeddedJar.length() / 1024}KB)")
 
         val classpathJars = extractRuntimeClasspath(stagingDir, timing, relativeTime, polyglot)
-        val sanitisedUserJar = sanitiseUserJar(jarFile, stagingDir, timing, relativeTime)
+        val sanitisedUserJar = sanitiseUserJar(
+            jarFile, stagingDir, timing, relativeTime,
+            enablePolyglot = polyglot.enablePython,
+        )
         val logbackConfig = writeSilentLogbackConfig(stagingDir)
 
         val cmd = buildNativeImageCommand(
@@ -811,12 +814,66 @@ object NativeBuildPath {
         stagingDir: File,
         timing: Boolean,
         relativeTime: () -> Long,
+        enablePolyglot: Boolean,
     ): File {
         val out = File(stagingDir, "user-no-modpath-directives.jar")
-        stripJarEntries(jarFile, out, FAT_JAR_DIRECTIVES_TO_STRIP, BUILDER_CLASS_PREFIXES_TO_STRIP)
+        // An app that declared no `[polyglot.*]` must not carry the language
+        // providers into its image. THEY WERE THE 278 BLOCKLIST VIOLATIONS.
+        //
+        // The fat jar bundles every provider — 19,157 GraalPy classes in a
+        // 105 MB jar — because `:cli` shadows them in for its own use. The
+        // `drop` list in collectClasspathJars filters the EXTRACTED per-library
+        // jars by file name; the fat jar is a separate native-image input and
+        // nothing ever filtered its CONTENTS. So GraalPy stayed reachable, and
+        // with `--macro:truffle-svm` on (which is correct for a non-polyglot
+        // build) its ~300 blocklisted JDK methods became reachable for runtime
+        // compilation and the build aborted.
+        //
+        // The code already knew this hazard — `buildNativeImageCommand` drops
+        // `truffle-runtime-` when python IS enabled, for exactly these
+        // violations. This is the symmetric case that was missing: when python
+        // is NOT enabled, drop the providers instead of the JIT.
+        //
+        // Why the earlier diagnosis went wrong twice, recorded so it does not
+        // go wrong a third time: dumping the native-image classpath shows no
+        // python jar, and that is TRUE — the providers are not a jar on the
+        // classpath, they are classes inside the fat jar. And the violation
+        // traces pass through our own
+        // `MezzeBytecodeRootNodeGen$InstructionImpl.getArguments`, which reads
+        // like the root cause but is not: it is reached from GraalPy's
+        // `CodeUnit.toString` through `Formatter`, and once `Formatter` is
+        // reachable the analysis must treat every `toString` as a candidate.
+        // Ours is a LEAF of the chain, not its head.
+        val prefixes = if (enablePolyglot) BUILDER_CLASS_PREFIXES_TO_STRIP
+                       else BUILDER_CLASS_PREFIXES_TO_STRIP + LANGUAGE_PROVIDER_PREFIXES_TO_STRIP
+        stripJarEntries(jarFile, out, FAT_JAR_DIRECTIVES_TO_STRIP, prefixes)
         if (timing) System.err.println("[${relativeTime()}ms] native: user jar sanitised")
         return out
     }
+
+    /**
+     * The bundled Truffle language providers, stripped from a NON-polyglot
+     * app's image.
+     *
+     * Classes and their `META-INF/native-image` directives both: a surviving
+     * directive is honoured by native-image on its own (the wasm one was,
+     * turning on `-H:+VectorAPISupport` in a build that uses no wasm).
+     *
+     * `com/oracle/truffle/api/` is deliberately NOT here — that is the Truffle
+     * framework the Mezze interpreter itself is built on. Only LANGUAGES go.
+     */
+    private val LANGUAGE_PROVIDER_PREFIXES_TO_STRIP = listOf(
+        "com/oracle/graal/python/",
+        "META-INF/native-image/org.graalvm.python/",
+        "com/oracle/truffle/js/",
+        "META-INF/native-image/org.graalvm.js/",
+        "org/graalvm/wasm/",
+        "META-INF/native-image/org.graalvm.wasm/",
+        "com/oracle/truffle/llvm/",
+        "META-INF/native-image/org.graalvm.llvm/",
+        "com/oracle/truffle/regex/",
+        "META-INF/native-image/org.graalvm.regex/",
+    )
 
     /** Step 5: assemble the full native-image command. */
     private fun buildNativeImageCommand(
@@ -1341,6 +1398,18 @@ object NativeBuildPath {
         excludePaths: Set<String>,
         excludePrefixes: List<String> = emptyList(),
     ) {
+        // A class removed from the jar must also lose its SERVICE REGISTRATION,
+        // or the loader fails on a provider it can no longer find:
+        //   ServiceConfigurationError: InternalResourceProvider:
+        //   Provider com.oracle.graal.python.resources.PythonResourceProvider not found
+        // Deleting the whole service file is wrong — one file lists several
+        // providers and the survivors are still needed — so the file is
+        // REWRITTEN with the stripped classes' lines dropped, and omitted only
+        // if nothing is left.
+        val dottedPrefixes = excludePrefixes
+            .filter { it.endsWith("/") && !it.startsWith("META-INF/") }
+            .map { it.replace('/', '.') }
+
         java.util.jar.JarInputStream(source.inputStream().buffered()).use { jin ->
             val manifest = jin.manifest
             val out: java.util.jar.JarOutputStream = if (manifest != null) {
@@ -1355,6 +1424,25 @@ object NativeBuildPath {
                     val excluded = name in excludePaths
                             || excludePrefixes.any { name.startsWith(it) }
                     if (excluded) { jin.closeEntry(); continue }
+
+                    if (dottedPrefixes.isNotEmpty()
+                        && name.startsWith("META-INF/services/")
+                        && !entry.isDirectory) {
+                        val kept = jin.readBytes().decodeToString()
+                            .lineSequence()
+                            .filterNot { line ->
+                                val cls = line.substringBefore('#').trim()
+                                cls.isNotEmpty() && dottedPrefixes.any { cls.startsWith(it) }
+                            }
+                            .toList()
+                        jin.closeEntry()
+                        if (kept.none { it.substringBefore('#').isNotBlank() }) continue
+                        it.putNextEntry(java.util.jar.JarEntry(name).apply { time = entry.time })
+                        it.write(kept.joinToString("\n").toByteArray())
+                        it.closeEntry()
+                        continue
+                    }
+
                     val newEntry = java.util.jar.JarEntry(name).apply { time = entry.time }
                     it.putNextEntry(newEntry)
                     jin.copyTo(it)
