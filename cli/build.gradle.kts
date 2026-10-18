@@ -648,6 +648,32 @@ tasks.register<Copy>("installRuntime") {
     into(toolchainDir.map { File(it, "lib") })
 }
 
+/**
+ * Refresh the UNVERSIONED `~/.mezze/lib/mezze-runtime.jar` as well.
+ *
+ * `JvmLauncher.findRuntimeJar` searches that path FIRST, so until this existed
+ * a jar left there by an older release shadowed every versioned install and
+ * `installRuntime` could never replace it. The Justfile's `build` recipe has
+ * always CLAIMED this happens ("Also refresh ~/.mezze/lib/mezze-runtime.jar:
+ * the launcher searches there FIRST ... without this step a fresh dev build is
+ * shadowed") — the intent was documented and the implementation had drifted to
+ * the versioned path only.
+ *
+ * What that cost: the stale jar on this machine was 107MB and carried 19,157
+ * GraalPy classes from a release that bundled the language providers. Every
+ * `mez build` fat-jarred them in — ~100MB app jars, and GraalPy reachable for
+ * runtime compilation in every native image, which is the 278 blocklist
+ * violations of C5/W-C2.
+ */
+tasks.register<Copy>("installRuntimeUnversioned") {
+    group = "install"
+    description = "Refresh ~/.mezze/lib/mezze-runtime.jar (the path the launcher prefers)"
+    dependsOn(":interpreter:runtimeShadowJar")
+    from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
+    into(mezzeHome.map { File(it, "lib") })
+}
+tasks.named("installRuntime") { finalizedBy("installRuntimeUnversioned") }
+
 // Stage mezze-runtime.jar into the DEV installDist output's lib/ too, so a
 // `just build` dev launcher (cli/build/install/mez/bin/mez) finds its runtime via
 // MezzeHome.selfLib (bin/mez -> ../lib) — without it, `mez dev` from a dev build

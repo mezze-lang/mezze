@@ -54,15 +54,39 @@ let derived_decode: { t: Json } -> Int = { t } -> do
 ## ── The hand-written walk ───────────────────────────────────────────────────
 ##
 ## Reads the same tree with no codec, no config and no ability op.
-let field_int: { fields: [{ key: Str, value: Json }], k: Str } -> Int = { fields, k } ->
+## FAIR WORK. The first version of this pulled ONE field and returned an Int,
+## while the derived decoder built a whole `Row` — both fields, a `Result` per
+## field, the error paths. That made the derived side look 2x slower when some
+## of the gap was simply more work. These helpers do what the derived one does:
+## look both fields up by name, fail with a `DecodeError` rather than a default,
+## and construct the record.
+let field_int: { fields: [{ key: Str, value: Json }], k: Str } -> Result Int DecodeError = { fields, k } ->
   match seq::find { xs = fields, p = { x } -> x.key == k } is
     Some { val = f } -> match f.value is
-      JInt { val = n } -> n
-      _ -> 0
-    None -> 0
+      JInt { val = n } -> Ok { val = n }
+      _ -> Err { error = { path = [k], message = "not an Int", expected = "Int", found = None } }
+    None -> Err { error = { path = [k], message = "missing", expected = "Int", found = None } }
+
+let field_str: { fields: [{ key: Str, value: Json }], k: Str } -> Result Str DecodeError = { fields, k } ->
+  match seq::find { xs = fields, p = { x } -> x.key == k } is
+    Some { val = f } -> match f.value is
+      JString { val = v } -> Ok { val = v }
+      _ -> Err { error = { path = [k], message = "not a Str", expected = "Str", found = None } }
+    None -> Err { error = { path = [k], message = "missing", expected = "Str", found = None } }
+
+## Builds the same `Row` the derived decoder builds, and answers the same
+## `Result`, so the only difference left is DERIVED versus HAND.
+let hand_row: { fields: [{ key: Str, value: Json }] } -> Result Row DecodeError = { fields } ->
+  match field_int { fields = fields, k = "id" } is
+    Err { error = e } -> Err { error = e }
+    Ok { val = i } -> match field_str { fields = fields, k = "name" } is
+      Err { error = e } -> Err { error = e }
+      Ok { val = nm } -> Ok { val = { id = i, name = nm } }
 
 let hand_decode: { t: Json } -> Int = { t } -> match t is
-  JObject { fields = fs } -> field_int { fields = fs, k = "id" }
+  JObject { fields = fs } -> match hand_row { fields = fs } is
+    Ok { val = row } -> row.id
+    Err { error = _ } -> -1
   _ -> -1
 
 

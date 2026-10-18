@@ -295,36 +295,35 @@ process.** That is the 15.5% HTTP-route gap's dominant term; the route does more
 than encode, so the whole-request gain will be smaller and is not yet measured
 (see below).
 
-#### The DECODE side: ~2x, an upper bound — `bench/cases/codec-decode`
+#### The DECODE side: ~12% — `bench/cases/codec-decode`
 
 Encode was the half that got fixed and measured. Decode gets the scalar ABI by
-construction (the fix registers EVERY impl op, decode's included), but that was
-an argument, not a number, so here is the number. Built jars, two work sizes,
-slope-fitted:
+construction (the fix registers EVERY impl op), and here is the number. Built
+jars, two work sizes, slope-fitted:
 
 |  | 400k | 4M | slope/400k |
 |---|---|---|---|
-| hand | 1004 ms | 1368 ms | 40.4 ms |
-| derived | 1153 ms | 1889 ms | **81.8 ms** |
+| hand | 1094 ms | 1760 ms | 74.0 ms |
+| derived | 1194 ms | 1938 ms | **82.7 ms** |
 
-**~2.02x** — much worse than encode's ~6%. But read it as an UPPER BOUND, not
-clean overhead: the two halves do unequal work. `hand_decode` pulls ONE field
-out of the object; the derived decoder builds a whole `Row` — both fields, a
-`Result` per field, the ctx and path threading an error message needs. A fair
-split needs a hand version that constructs the same record, and that is the
-obvious next step.
+**~12% behind hand-written** — the same ballpark as encode's ~6%.
 
-Startup: the derived program's intercept is ~108 ms higher, which is the
-derivation's classload/compile cost. Paid once by a server.
+**The first version of this measurement said 2x and was WRONG.** The hand half
+pulled ONE field and returned an `Int` while the derived decoder built a whole
+`Row` — both fields, a `Result` each, the error paths. Almost the entire "2x"
+was that work difference. The halves now do the same thing and the gap is 12%.
+
+Startup: the derived program's intercept is ~91 ms higher, the derivation's
+classload/compile cost. Paid once by a server.
 
 **Two measurement traps, both hit here first and both now in the file's own
 comments.** A `decode` of a loop-invariant value is hoisted out of the loop, so
-the walk must depend on the counter to be measured. And copying a bench project
-to make a second work size brings its `.build/` along — `mez build` then no-ops
-and both "sizes" run the SAME binary, so every slope reads as zero. That
-produced three rounds of a confident, wrong "the loop is hoisted" conclusion
-before the answer column, unchanged when it should have scaled 10x, gave it
-away. Copy `Mezze.toml` and `src/` only.
+the walk must depend on the counter. And copying a bench project to make a
+second work size brings its `.build/` along — `mez build` no-ops and both
+"sizes" run the SAME binary, so every slope reads as zero. That produced three
+rounds of a confident, wrong "the loop is hoisted" conclusion before the answer
+column, unchanged when 10x the work should have scaled it, gave it away. Copy
+`Mezze.toml` and `src/` only.
 
 #### The whole request: +16.0%
 

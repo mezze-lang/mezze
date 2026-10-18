@@ -46,12 +46,34 @@ let derived_decode: { t: Json } -> Int = { t } -> do
 ## ── The hand-written walk ───────────────────────────────────────────────────
 ##
 ## Reads the same tree with no codec, no config and no ability op.
-let field_int: { fields: [{ key: Str, value: Json }], k: Str } -> Int = { fields, k } ->
+## FAIR WORK. The first version of this pulled ONE field and returned an Int,
+## while the derived decoder built a whole `Row` — both fields, a `Result` per
+## field, the error paths. That made the derived side look 2x slower when some
+## of the gap was simply more work. These helpers do what the derived one does:
+## look both fields up by name, fail with a `DecodeError` rather than a default,
+## and construct the record.
+let field_int: { fields: [{ key: Str, value: Json }], k: Str } -> Result Int DecodeError = { fields, k } ->
   match seq::find { xs = fields, p = { x } -> x.key == k } is
     Some { val = f } -> match f.value is
-      JInt { val = n } -> n
-      _ -> 0
-    None -> 0
+      JInt { val = n } -> Ok { val = n }
+      _ -> Err { error = { path = [k], message = "not an Int", expected = "Int", found = None } }
+    None -> Err { error = { path = [k], message = "missing", expected = "Int", found = None } }
+
+let field_str: { fields: [{ key: Str, value: Json }], k: Str } -> Result Str DecodeError = { fields, k } ->
+  match seq::find { xs = fields, p = { x } -> x.key == k } is
+    Some { val = f } -> match f.value is
+      JString { val = v } -> Ok { val = v }
+      _ -> Err { error = { path = [k], message = "not a Str", expected = "Str", found = None } }
+    None -> Err { error = { path = [k], message = "missing", expected = "Str", found = None } }
+
+## Builds the same `Row` the derived decoder builds, and answers the same
+## `Result`, so the only difference left is DERIVED versus HAND.
+let hand_row: { fields: [{ key: Str, value: Json }] } -> Result Row DecodeError = { fields } ->
+  match field_int { fields = fields, k = "id" } is
+    Err { error = e } -> Err { error = e }
+    Ok { val = i } -> match field_str { fields = fields, k = "name" } is
+      Err { error = e } -> Err { error = e }
+      Ok { val = nm } -> Ok { val = { id = i, name = nm } }
 
 let hand_decode: { t: Json } -> Int = { t } -> match t is
   JArray { items = xs } -> seq::fold {
@@ -69,27 +91,25 @@ let main = {} -> perform Console in do
   println { msg = if d == h then "AGREE sum=$(int::to_str { n = d })"
                   else "DISAGREE derived=$(int::to_str { n = d }) hand=$(int::to_str { n = h })" }
 
-## ── Measured 2026-10-18 ─────────────────────────────────────────────────────
+## ── Measured 2026-10-18 (corrected) ────────────────────────────────────────
 ##
 ## Built jars, two work sizes, slope-fitted so startup drops out:
 ##
-##              400k      4M      slope/400k
-##   hand       1004 ms   1368 ms   40.4 ms
-##   derived    1153 ms   1889 ms   81.8 ms      -> 2.02x
+##              400k      4M       slope/400k
+##   hand       1094 ms   1760 ms   74.0 ms
+##   derived    1194 ms   1938 ms   82.7 ms   -> 1.12x
 ##
-## So the derived decode walk is ~2x the hand-written one — much worse than the
-## ENCODE side, which came out at ~6% (bench/cases/codec-vs-handwritten).
+## **The derived decode walk is ~12% behind a hand-written one** — the same
+## ballpark as the encode side's ~6% (bench/cases/codec-vs-handwritten).
 ##
-## READ THAT AS AN UPPER BOUND, NOT CLEAN OVERHEAD. The two halves are not doing
-## equal work: `hand_decode` pulls ONE field (`id`) out of the object, while the
-## derived decoder builds a whole `Row` — both fields, a `Result` per field, the
-## ctx and path threading an error message would need. A fair split would need a
-## hand version that constructs the same record, which is the obvious next step
-## if anyone picks this up.
+## FIRST MEASUREMENT SAID 2x, AND IT WAS WRONG. `hand_decode` pulled ONE field
+## and returned an Int while the derived decoder built a whole `Row` — both
+## fields, a `Result` per field, the error paths. Almost the entire "2x" was
+## that extra work, not overhead. The halves now do the same thing: look both
+## fields up by name, answer a `Result DecodeError`, construct the record.
 ##
-## Startup: the derived program's intercept is ~108 ms higher (1071 vs 964),
-## which is the derivation's own classload/compile cost. For a server that is
-## paid once.
+## Startup: the derived program's intercept is ~91 ms higher (1111 vs 1020),
+## which is the derivation's classload/compile cost. A server pays it once.
 ##
 ## TWO MEASUREMENT TRAPS, both hit here first:
 ##
@@ -99,5 +119,5 @@ let main = {} -> perform Console in do
 ##    along, and `mez build` then considers it up to date — so both "sizes" run
 ##    the SAME binary and every slope reads as zero. That produced three rounds
 ##    of a confident, wrong "the loop is hoisted" conclusion before the answer
-##    column (unchanged at 4200000 when it should have been 42000000) gave it
-##    away. Copy `Mezze.toml` and `src/` only.
+##    column (unchanged when 10x the work should have scaled it) gave it away.
+##    Copy `Mezze.toml` and `src/` only.

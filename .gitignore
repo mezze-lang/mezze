@@ -100,3 +100,4 @@ Mezze.lock
 website/wasm-build/.binaryen-*/
 website/wasm-build/.graalvm-*/
 website/wasm-build/.jars/
+**/.build/
