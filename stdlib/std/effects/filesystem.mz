@@ -119,6 +119,50 @@ impl FileSystem for MemoryFS where {
 }
 
 ## ==================================================================
+## FileDurability — fsync, as its own effect.
+##
+## Separate from `FileSystem` because of what a backend can honestly
+## promise. `close` flushes to the operating system; it does not say the
+## storage device has the bytes. Only a write-ahead log, a queue or a
+## database needs that distinction, and for everyone else carrying it in
+## the row would be noise — so a function that needs durability says so:
+##
+##   let commit: { h: FileHandle } -> Result {} FsError <FileDurability>
+##
+## A reader sees from the signature that this wants a real filesystem.
+## Backends: LocalDisk (FileChannel.force), MemoryFS (publishes its write
+## buffer — see the native, it is deliberately not a no-op). An object
+## store would implement this trivially, since every PUT is already
+## durable; one that could not would simply not implement the effect, and
+## the typechecker would reject it at the `perform` site.
+## ==================================================================
+effect FileDurability where {
+  ## Force this handle's content AND metadata to the device. A write whose
+  ## length change never reached the inode is still a lost write.
+  fsync: { handle: FileHandle } -> Result {} FsError <FileDurability>,
+  ## Force a directory's own entries, which is what makes a create or a
+  ## rename survive power loss — the name lives in the parent, not in the
+  ## file. POSIX-specific; Windows reports FsIOError rather than pretending.
+  fsync_dir: { path: Str } -> Result {} FsError <FileDurability>,
+}
+
+## A performer handles exactly ONE effect (V0701 keys on the performer
+## name alone), so each capability effect gets its own performer rather
+## than `LocalDisk` implementing several. The name says which backend and
+## which capability, and a program installs only the ones it needs:
+##
+##   perform LocalDisk in perform LocalFileDurability in …
+impl FileDurability for LocalFileDurability where {
+  fsync = { handle } -> __native_fs_fsync { handle = handle },
+  fsync_dir = { path } -> __native_fs_fsync_dir { path = path },
+}
+
+impl FileDurability for MemoryFileDurability where {
+  fsync = { handle } -> __native_memfs_fsync { handle = handle },
+  fsync_dir = { path } -> __native_memfs_fsync_dir { path = path },
+}
+
+## ==================================================================
 ## Derived helpers — pure Mezze, built on the 13 primitives.
 ## ==================================================================
 ## ---------- Text convenience ----------

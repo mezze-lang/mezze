@@ -373,6 +373,58 @@ public final class FilesystemNatives {
         return ok(MezzeRecord.empty());
     }
 
+    // ==================== Durability ====================
+
+    /**
+     * `FileDurability.fsync` — flush this handle's writes to the storage
+     * device. `force(true)` syncs file METADATA as well as content: a write
+     * whose length change never reached the inode is still a lost write.
+     *
+     * Separate from `close`, which flushes to the OS but makes no promise the
+     * device has the bytes. That distinction is the whole reason this is an
+     * effect of its own rather than a flag.
+     */
+    @TruffleBoundary
+    public static Object fsync(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        if (h.isClosed()) {
+            return errClosedHandle(h.path);
+        }
+        try {
+            h.channel.force(true);
+            return ok(MezzeRecord.empty());
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    /**
+     * `FileDurability.fsync_dir` — durably record a directory's own entries,
+     * which is what makes a CREATE or RENAME survive power loss. Syncing the
+     * file is not enough: the name pointing at it lives in the parent.
+     *
+     * POSIX-specific, and that is why it is explicit. Opening a directory for
+     * READ is legal on Linux and macOS; Windows refuses it, which surfaces as
+     * the IOException below rather than as a silent no-op — a fake success
+     * here would be a lie about durability.
+     */
+    @TruffleBoundary
+    public static Object fsyncDir(MezzeRecord args) {
+        String path = getString(args, "path");
+        try (FileChannel dir = FileChannel.open(Paths.get(path), StandardOpenOption.READ)) {
+            dir.force(true);
+            return ok(MezzeRecord.empty());
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "fsync_dir");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
     // ==================== Record helpers ====================
 
     private static final String[] FILE_STAT_FIELDS = {"kind", "size", "modified"};

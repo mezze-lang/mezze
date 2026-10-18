@@ -2819,6 +2819,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_fs_read_chunk",       (r, c) -> FilesystemNatives.readChunk(r));
         HANDLERS.put("__native_fs_write_chunk",      (r, c) -> FilesystemNatives.writeChunk(r));
         HANDLERS.put("__native_fs_close",            (r, c) -> FilesystemNatives.close(r));
+        HANDLERS.put("__native_fs_fsync",            (r, c) -> FilesystemNatives.fsync(r));
+        HANDLERS.put("__native_fs_fsync_dir",        (r, c) -> FilesystemNatives.fsyncDir(r));
     }
 
     // ==================== Memory Filesystem (MemoryFS, #82) ====================
@@ -2841,6 +2843,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_memfs_read_chunk",       (r, c) -> MemoryFilesystemNatives.readChunk(r));
         HANDLERS.put("__native_memfs_write_chunk",      (r, c) -> MemoryFilesystemNatives.writeChunk(r));
         HANDLERS.put("__native_memfs_close",            (r, c) -> MemoryFilesystemNatives.close(r));
+        HANDLERS.put("__native_memfs_fsync",            (r, c) -> MemoryFilesystemNatives.fsync(r));
+        HANDLERS.put("__native_memfs_fsync_dir",        (r, c) -> MemoryFilesystemNatives.fsyncDir(r));
         // Test isolation
         HANDLERS.put("__native_memfs_clear", (r, c) -> {
             MemoryFilesystemNatives.clear();

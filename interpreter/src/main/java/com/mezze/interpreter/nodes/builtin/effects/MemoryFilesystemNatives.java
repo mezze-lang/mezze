@@ -358,6 +358,50 @@ public final class MemoryFilesystemNatives {
         }
     }
 
+    /**
+     * `FileDurability.fsync` — memfs has no storage device, so there is
+     * nothing to force. It is NOT a no-op all the same.
+     *
+     * A write handle buffers into `writeBuf` and only publishes to `files()`
+     * on close, so a handle that had been fsynced but not closed would read
+     * back as absent here while LocalDisk would already show the bytes. That
+     * divergence is the exact failure the effect split exists to prevent — a
+     * backend quietly meaning something different by the same op — so fsync
+     * publishes the buffer. The buffer is kept, so later writes still append
+     * and close republishes the whole thing.
+     */
+    @TruffleBoundary
+    public static Object fsync(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        if (h.closed.get()) {
+            return errClosedHandle(h.path);
+        }
+        if (h.writeBuf != null) {
+            String parent = parentOf(h.path);
+            if (!isDir(parent)) {
+                return errNotFound(parent);
+            }
+            files().put(h.path, new Entry(h.writeBuf.toByteArray()));
+            directories().get(parent).add(basenameOf(h.path));
+        }
+        return ok(MezzeRecord.empty());
+    }
+
+    /**
+     * `FileDurability.fsync_dir` — the directory entries are the map, and the
+     * map is already the truth. Nothing to force, but the path must exist:
+     * reporting success for a directory that is not there would hide the
+     * caller's bug.
+     */
+    @TruffleBoundary
+    public static Object fsyncDir(MezzeRecord args) {
+        String path = getString(args, "path");
+        if (!isDir(path)) {
+            return isFile(path) ? errNotADirectory(path) : errNotFound(path);
+        }
+        return ok(MezzeRecord.empty());
+    }
+
     @TruffleBoundary
     public static Object close(MezzeRecord args) {
         MemFileHandle h = getMemHandle(args, "handle");
