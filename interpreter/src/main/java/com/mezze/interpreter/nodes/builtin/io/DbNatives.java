@@ -108,6 +108,18 @@ public final class DbNatives {
         }
         // 08xxx is "connection exception" in SQLSTATE; a file SQLite cannot open
         // reports no usable state, so the message is all there is.
+        // No driver on the classpath is NOT a rejected statement — it is the
+        // most common first-run failure and the message has to name the cure.
+        // `java.sql` ships with the JDK; no DRIVER does (the JDBC-ODBC bridge
+        // went in Java 8), and this runtime deliberately does not bundle one,
+        // so the driver arrives as a package dependency.
+        if (msg.contains("No suitable driver")) {
+            return unavailable(
+                "no JDBC driver for this URL is on the classpath. The `Db` effect "
+                + "and its mock performers ship with the stdlib, but a DRIVER does "
+                + "not — the JDK provides the `java.sql` API only. Add the driver "
+                + "package to your Mezze.toml `[dependencies]`. (" + msg + ")");
+        }
         if (state.startsWith("08") || msg.contains("unable to open database")) {
             return unavailable(msg);
         }
@@ -227,12 +239,29 @@ public final class DbNatives {
     static final class Scope {
         private final String path;
         private final DbHandle handle;
+        /**
+         * Why this scope has no connection, or null when it has one.
+         *
+         * A POISONED scope is still pushed, and that is the point.
+         * `initialize_scope` has nowhere to put a failure — it answers `{}` —
+         * so an open that fails used to push nothing, and the first operation
+         * then reported "no database is open here ... ran outside the scope of
+         * the performer", which is the one thing the user can see is false: they
+         * are plainly inside the `perform`. Carrying the reason here means the
+         * operation reports what actually went wrong.
+         */
+        private final MezzeVariant openError;
         private final java.util.concurrent.locks.ReentrantLock lock =
             new java.util.concurrent.locks.ReentrantLock();
 
         Scope(String path, DbHandle handle) {
+            this(path, handle, null);
+        }
+
+        Scope(String path, DbHandle handle, MezzeVariant openError) {
             this.path = path;
             this.handle = handle;
+            this.openError = openError;
         }
 
         /** Take the connection, or `null` if the wait ran out. */
@@ -293,7 +322,7 @@ public final class DbNatives {
         @Override
         public void close() {
             synchronized (live) {
-                for (Scope s : live) s.handle.close();
+                for (Scope s : live) if (s.handle != null) s.handle.close();
                 live.clear();
             }
         }
@@ -364,7 +393,10 @@ public final class DbNatives {
             scopes().push(new Scope(path, new DbHandle(conn)));
             return MezzeVariant.ok(MezzeRecord.empty());
         } catch (SQLException e) {
-            return MezzeVariant.err(dbError(e, ""));
+            // Push the scope anyway, carrying the reason. See Scope.openError.
+            MezzeVariant err = dbError(e, "");
+            scopes().push(new Scope(path, null, err));
+            return MezzeVariant.err(err);
         }
     }
 
@@ -377,7 +409,7 @@ public final class DbNatives {
     @TruffleBoundary
     public static MezzeRecord dbScopeClose(MezzeRecord args) {
         Scope s = scopes().pop();
-        if (s != null) s.handle.close();
+        if (s != null && s.handle != null) s.handle.close();
         return MezzeRecord.empty();
     }
 
@@ -386,6 +418,7 @@ public final class DbNatives {
     public static Object dbQuery(MezzeRecord args) {
         Scope scope = current();
         if (scope == null) return noScope();
+        if (scope.openError != null) return MezzeVariant.err(scope.openError);
         String sql = getString(args, "sql");
         DbHandle h = scope.handle;
         if (h.closed) return MezzeVariant.err(unavailable("this database is already closed"));
@@ -434,6 +467,7 @@ public final class DbNatives {
     public static Object dbExec(MezzeRecord args) {
         Scope scope = current();
         if (scope == null) return noScope();
+        if (scope.openError != null) return MezzeVariant.err(scope.openError);
         String sql = getString(args, "sql");
         DbHandle h = scope.handle;
         if (h.closed) return MezzeVariant.err(unavailable("this database is already closed"));
@@ -475,6 +509,7 @@ public final class DbNatives {
     public static Object dbBegin(MezzeRecord args) {
         Scope scope = current();
         if (scope == null) return noScope();
+        if (scope.openError != null) return MezzeVariant.err(scope.openError);
         if (!scope.acquire()) return timedOut();
         // Held more than once means this thread is already inside a transaction:
         // release the extra hold straight away, since no inner commit will.
@@ -497,6 +532,7 @@ public final class DbNatives {
     public static Object dbCommit(MezzeRecord args) {
         Scope scope = current();
         if (scope == null) return noScope();
+        if (scope.openError != null) return MezzeVariant.err(scope.openError);
         try {
             scope.handle.conn.commit();
             scope.handle.conn.setAutoCommit(true);
