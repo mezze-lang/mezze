@@ -29,8 +29,17 @@
 ## testable without a driver, a file or a server. That mirrors a handler being
 ## callable with no socket.
 
+use std::codec::core::{
+  Format,
+  DecodeScalar, DecodeRecord, DecodeSequence, DecodeOption,
+  Decode,
+  CodecCtx, SharedConfig, FieldTransform, Identity, DecodeError
+}
 use std::collections::seq
 use std::str
+use std::int
+use std::float
+use std::nat
 
 ## A single bound parameter or column value.
 ##
@@ -179,3 +188,151 @@ impl Db for FailingDb { error: DbError } where {
   apply = { q } -> Err { error = error },
   tx    = { body } -> Err { error = error },
 }
+
+## ── Rows ⇄ records, through the codec ──────────────────────────────────────
+##
+## A row is a WIRE SHAPE, so reading records out of a result set is the codec's
+## job and not a second bespoke mapper. `RowC` is a `Format` with Tier-2 impls,
+## exactly as `JsonC` and `QueryC` are, which means `Encode`/`Decode` derivation,
+## field-name transforms and nested shapes all come for free.
+##
+## `'in = Rows` AT EVERY LEVEL, the way `QueryC` uses `[{ k, v }]` for all of
+## them. One type covers the three things a decoder descends through:
+##
+##   the whole result set   N rows, N columns
+##   one row                1 row,  N columns
+##   one cell               1 row,  1 column
+##
+## So descending is projection, never conversion: `decode_sequence` splits the
+## set into single-row sets, `decode_record_field` narrows to one column, and the
+## scalar decoders read the single remaining cell.
+
+pub type RowC = {
+  shared: SharedConfig,
+}
+
+pub let row_c: RowC = {
+  shared = { field_transform = Identity },
+}
+
+impl Format for RowC having 'out = Rows where {
+}
+
+## The one cell of a 1x1 view, or `None` when the view is empty.
+let only_cell: { rows: Rows } -> Option DbValue = { rows } ->
+  value_at { rows = rows, row = 0, col = 0 }
+
+let decode_err: { ctx: CodecCtx, expected: Str, got: Str } -> DecodeError = { ctx, expected, got } -> {
+  path = ctx.path,
+  message = "this column does not hold a $(expected)",
+  expected = expected,
+  found = Some { val = got },
+}
+
+let no_cell: { ctx: CodecCtx, expected: Str } -> DecodeError = { ctx, expected } -> {
+  path = ctx.path,
+  message = "no column here to read a $(expected) from",
+  expected = expected,
+  found = None,
+}
+
+## What a value IS, for an error message that names the mismatch.
+let kind_of: { v: DbValue } -> Str = { v } -> match v is
+  DbNull -> "null"
+  DbInt { val = _ } -> "an integer"
+  DbStr { val = _ } -> "a string"
+  DbFloat { val = _ } -> "a float"
+  DbBool { val = _ } -> "a boolean"
+  DbBytes { val = _ } -> "bytes"
+
+impl DecodeScalar for RowC having 'in = Rows where {
+  decode_int = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbInt { val = n } } -> Ok { val = n }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Int", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Int" } },
+  decode_float = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbFloat { val = f } } -> Ok { val = f }
+    ## An integer column read as a Float is a widening, not a mismatch — a
+    ## database is free to hand back `1` for a value the schema calls numeric.
+    Some { val = DbInt { val = n } } -> Ok { val = float::from_int { n = n } }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Float", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Float" } },
+  decode_str = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbStr { val = s } } -> Ok { val = s }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Str", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Str" } },
+  decode_bool = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbBool { val = b } } -> Ok { val = b }
+    ## SQLite has no boolean type and answers 0/1, which is the common case
+    ## rather than an exotic one.
+    Some { val = DbInt { val = n } } -> Ok { val = n != 0 }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Bool", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Bool" } },
+  decode_bytes = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbBytes { val = b } } -> Ok { val = b }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Bytes", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Bytes" } },
+  decode_frac = { it, val, ctx } ->
+    Err { error = decode_err { ctx = ctx, expected = "Frac", got = "a column (no database type maps to Frac yet)" } },
+  decode_char = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbStr { val = s } } -> match str::char_at { s = s, i = 0 } is
+      Some { val = c } -> if str::size { s = s } == 1 then Ok { val = c }
+        else Err { error = decode_err { ctx = ctx, expected = "Char", got = "a string of length $(int::to_str { n = str::size { s = s } })" } }
+      None -> Err { error = decode_err { ctx = ctx, expected = "Char", got = "an empty string" } }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Char", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Char" } },
+  decode_nat = { it, val, ctx } -> match only_cell { rows = val } is
+    Some { val = DbInt { val = n } } -> match nat::from_int { n = n } is
+      Some { val = u } -> Ok { val = u }
+      None -> Err { error = decode_err { ctx = ctx, expected = "Nat", got = "a negative integer" } }
+    Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Nat", got = kind_of { v = v } } }
+    None -> Err { error = no_cell { ctx = ctx, expected = "Nat" } },
+}
+
+impl DecodeRecord for RowC having 'in = Rows where {
+  ## Narrow the view to one column, by name. A column the result set does not
+  ## have yields the EMPTY view, which `decode_option` reads as `None` and every
+  ## other decoder reports as "no column here" — the same convention `QueryC`
+  ## uses for a parameter the query never mentioned.
+  decode_record_field = { it, val, key, ctx } -> match col_index { rows = val, name = key } is
+    None -> Ok { val = no_rows {} }
+    Some { val = c } -> Ok { val = {
+      cols = [key],
+      rows = seq::map { xs = val.rows, f = { x } -> match seq::get { xs = x, i = c } is
+        Some { val = v } -> [v]
+        None -> [DbNull]
+      },
+    } },
+}
+
+impl DecodeSequence for RowC having 'in = Rows where {
+  ## One element per row, each still carrying the column names so a record
+  ## decoder inside can find its fields by name.
+  decode_sequence = { it, val, ctx } -> Ok { val = seq::map {
+    xs = val.rows,
+    f = { x } -> { cols = val.cols, rows = [x] },
+  } },
+}
+
+impl DecodeOption for RowC having 'in = Rows where {
+  ## Absent and NULL are the same answer to "is there a value here". A column
+  ## the query did not select is as much a `None` as one that selected NULL.
+  decode_option = { it, val, ctx } -> match only_cell { rows = val } is
+    None -> Ok { val = None }
+    Some { val = DbNull } -> Ok { val = None }
+    Some { val = _ } -> Ok { val = Some { val = val } },
+}
+
+## ── Reading records out of a result set ────────────────────────────────────
+
+## The first row as a record, or `None` when nothing came back.
+##
+##   match rows.first_as {} is
+##     Some { val = Ok { val = user } } -> …    ## a User
+##     Some { val = Err { error = e } } -> …    ## the row did not fit
+##     None -> …                                ## no rows
+pub let first_row: { rows: Rows } -> Option Rows = { rows } ->
+  if is_empty { rows = rows } then None
+  else match seq::get { xs = rows.rows, i = 0 } is
+    Some { val = r } -> Some { val = { cols = rows.cols, rows = [r] } }
+    None -> None
