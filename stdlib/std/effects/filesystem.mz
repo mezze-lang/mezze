@@ -41,6 +41,12 @@ pub type OpenMode = | Read, Write, Append |
 ## other stdlib error ADTs.
 pub type FsError = |
   FsNotFound { path: Str },
+  ## The backend does not implement this capability at all — an object
+  ## store asked for a symlink, a non-NTFS volume asked for an owner. It
+  ## exists so a performer can refuse honestly instead of faking success;
+  ## a backend that cannot do a WHOLE effect declines the effect instead,
+  ## and the typechecker catches that at the `perform` site.
+  FsNotSupported { path: Str, operation: Str },
   FsPermissionDenied { path: Str, operation: Str },
   FsIOError { path: Str, message: Str },
   FsDiskFull { path: Str, bytes_needed: Int },
@@ -207,6 +213,108 @@ impl FileLock for MemoryFileLock where {
   lock = { path, kind, blocking } ->
     __native_memfs_lock { path = path, kind = kind, blocking = blocking },
   unlock = { handle } -> __native_memfs_unlock { handle = handle },
+}
+
+## ==================================================================
+## FileSymlinks — links, created and inspected.
+##
+## POSIX-only and admitted as such rather than faked. Matters for package
+## managers (nix, npm), blue/green deploy swaps and monorepo tooling.
+## Windows needs administrator or developer mode for symlinks, which
+## surfaces as FsPermissionDenied; an object store declines the whole
+## effect.
+## ==================================================================
+effect FileSymlinks where {
+  ## Create a symbolic link at `link` pointing at `target`. `target` is
+  ## not resolved or required to exist — a dangling symlink is legal and
+  ## is how blue/green swaps stage the next release.
+  create_symlink: { link: Str, target: Str } -> Result {} FsError <FileSymlinks>,
+  ## Create a hard link. Both names then refer to one inode, so the
+  ## content outlives either name. Same filesystem only.
+  create_hardlink: { link: Str, target: Str } -> Result {} FsError <FileSymlinks>,
+  ## Read a symlink's target WITHOUT following it. Errors if the path is
+  ## not a symlink.
+  read_symlink: { path: Str } -> Result Str FsError <FileSymlinks>,
+  ## True iff the path is a symlink. Does not follow it, so this answers
+  ## about the link and never about what it points at.
+  is_symlink: { path: Str } -> Result Bool FsError <FileSymlinks>,
+}
+
+impl FileSymlinks for LocalFileSymlinks where {
+  create_symlink = { link, target } ->
+    __native_fs_create_symlink { link = link, target = target },
+  create_hardlink = { link, target } ->
+    __native_fs_create_hardlink { link = link, target = target },
+  read_symlink = { path } -> __native_fs_read_symlink { path = path },
+  is_symlink = { path } -> __native_fs_is_symlink { path = path },
+}
+
+impl FileSymlinks for MemoryFileSymlinks where {
+  create_symlink = { link, target } ->
+    __native_memfs_create_symlink { link = link, target = target },
+  create_hardlink = { link, target } ->
+    __native_memfs_create_hardlink { link = link, target = target },
+  read_symlink = { path } -> __native_memfs_read_symlink { path = path },
+  is_symlink = { path } -> __native_memfs_is_symlink { path = path },
+}
+
+## ==================================================================
+## FilePermissions — POSIX metadata.
+##
+## `real_path` lives here because symlink resolution touches the same
+## metadata layer. Windows implements what it can and returns
+## FsNotSupported for owner/group off an NTFS ACL volume, which is honest
+## rather than aspirational.
+## ==================================================================
+## Nine permission bits as a record rather than an octal Int: `0o755` is
+## write-only knowledge, while `owner_exec = True` reads at the call site
+## and cannot be transposed by accident.
+pub type FileMode = {
+  owner_read: Bool, owner_write: Bool, owner_exec: Bool,
+  group_read: Bool, group_write: Bool, group_exec: Bool,
+  other_read: Bool, other_write: Bool, other_exec: Bool,
+}
+
+pub type FileOwner = { user: Str, group: Str }
+
+effect FilePermissions where {
+  get_mode: { path: Str } -> Result FileMode FsError <FilePermissions>,
+  set_mode: { path: Str, mode: FileMode } -> Result {} FsError <FilePermissions>,
+  get_owner: { path: Str } -> Result FileOwner FsError <FilePermissions>,
+  set_owner: { path: Str, owner: FileOwner } -> Result {} FsError <FilePermissions>,
+  ## Set last-modified time. `touch`, reproducible builds, mtime-preserving
+  ## copies for anything `copy`'s preserve_attrs does not cover.
+  set_modified: { path: Str, millis: Int } -> Result {} FsError <FilePermissions>,
+  ## Canonical path with every symlink resolved. The security-relevant one:
+  ## "does this path still live inside my sandbox after resolution".
+  real_path: { path: Str, follow_symlinks: Bool } -> Result Str FsError <FilePermissions>,
+}
+
+impl FilePermissions for LocalFilePermissions where {
+  get_mode = { path } -> __native_fs_get_mode { path = path },
+  set_mode = { path, mode } -> __native_fs_set_mode { path = path, mode = mode },
+  get_owner = { path } -> __native_fs_get_owner { path = path },
+  set_owner = { path, owner } -> __native_fs_set_owner { path = path, owner = owner },
+  set_modified = { path, millis } ->
+    __native_fs_set_modified { path = path, millis = millis },
+  real_path = { path, follow_symlinks } ->
+    __native_fs_real_path { path = path, follow_symlinks = follow_symlinks },
+}
+
+## MemoryFS stores mode, owner and mtime per entry, so tests can assert on
+## them. It is NOT a POSIX kernel: set_mode records what you asked for and
+## nothing enforces it, so a mode of all-False does not make a read fail.
+## Permission ENFORCEMENT is a real filesystem's job; this backend is for
+## asserting that your code sets what it meant to set.
+impl FilePermissions for MemoryFilePermissions where {
+  get_mode = { path } -> __native_memfs_get_mode { path = path },
+  set_mode = { path, mode } -> __native_memfs_set_mode { path = path, mode = mode },
+  get_owner = { path } -> __native_memfs_get_owner { path = path },
+  set_owner = { path, owner } -> __native_memfs_set_owner { path = path, owner = owner },
+  set_modified = { path, millis } ->
+    __native_memfs_set_modified { path = path, millis = millis },
+  real_path = { path, follow_symlinks } ->
+    __native_memfs_real_path { path = path, follow_symlinks = follow_symlinks },
 }
 
 ## ==================================================================

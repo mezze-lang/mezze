@@ -26,10 +26,31 @@ public final class MemoryFilesystemNatives {
 
     private MemoryFilesystemNatives() {}
 
-    /** File entry: content bytes + last-modified epoch millis. */
+    /**
+     * File entry: content bytes + last-modified epoch millis, plus the
+     * POSIX metadata `FilePermissions` reads and writes and the symlink
+     * target `FileSymlinks` reads.
+     *
+     * The metadata is RECORDED, not ENFORCED: `set_mode` stores what you
+     * asked for and nothing here checks it before a read. Enforcement is a
+     * real kernel's job; this backend exists so a test can assert that the
+     * code set what it meant to set.
+     *
+     * `symlinkTarget` non-null makes this entry a link rather than a file.
+     * Its `bytes` stay empty — reading THROUGH a memfs symlink is not
+     * implemented, and `read_bytes` on a link reports FsNotSupported rather
+     * than silently returning nothing.
+     */
     private static final class Entry {
         volatile byte[] bytes;
         volatile long modifiedMs;
+        /** Nine permission bits, in MODE_FIELDS order. Defaults to rw-r--r--. */
+        volatile boolean[] mode = {true, true, false, true, false, false, true, false, false};
+        volatile String ownerUser = "mezze";
+        volatile String ownerGroup = "mezze";
+        /** Non-null iff this entry is a symlink; the raw, unresolved target. */
+        volatile String symlinkTarget;
+
         Entry(byte[] bytes) {
             this.bytes = bytes;
             this.modifiedMs = System.currentTimeMillis();
@@ -418,6 +439,155 @@ public final class MemoryFilesystemNatives {
         return ok(MezzeRecord.empty());
     }
 
+    // ==================== Symlinks ====================
+
+    private static final String[] MODE_FIELDS = {
+        "owner_read", "owner_write", "owner_exec",
+        "group_read", "group_write", "group_exec",
+        "other_read", "other_write", "other_exec",
+    };
+    private static final String[] OWNER_FIELDS = {"user", "group"};
+
+    @TruffleBoundary
+    public static Object createSymlink(MezzeRecord args) {
+        String link = getString(args, "link");
+        String target = getString(args, "target");
+        if (isFile(link) || isDir(link)) return errAlreadyExists(link);
+        String parent = parentOf(link);
+        if (!isDir(parent)) return errNotFound(parent);
+        // The target is NOT required to exist: a dangling symlink is legal,
+        // and staging one is how a blue/green swap works.
+        Entry e = new Entry(new byte[0]);
+        e.symlinkTarget = target;
+        files().put(link, e);
+        directories().get(parent).add(basenameOf(link));
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object createHardlink(MezzeRecord args) {
+        String link = getString(args, "link");
+        String target = getString(args, "target");
+        if (isFile(link) || isDir(link)) return errAlreadyExists(link);
+        Entry src = files().get(target);
+        // Unlike a symlink, a hard link needs a real target: there is no
+        // inode to give a second name to otherwise.
+        if (src == null) return errNotFound(target);
+        if (src.symlinkTarget != null) return errNotSupported(target, "create_hardlink to a symlink");
+        String parent = parentOf(link);
+        if (!isDir(parent)) return errNotFound(parent);
+        // The SAME Entry under both names — that is what a hard link is, and
+        // it means a later write through one name is visible through the
+        // other, as on a real filesystem.
+        files().put(link, src);
+        directories().get(parent).add(basenameOf(link));
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object readSymlink(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        if (e.symlinkTarget == null) return errIO(path, "not a symbolic link");
+        return ok(e.symlinkTarget);
+    }
+
+    @TruffleBoundary
+    public static Object isSymlink(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) {
+            // A directory is not a symlink; a missing path is an error, which
+            // is what distinguishes "no" from "not there".
+            return isDir(path) ? ok(false) : errNotFound(path);
+        }
+        return ok(e.symlinkTarget != null);
+    }
+
+    // ==================== Permissions / metadata ====================
+
+    @TruffleBoundary
+    public static Object getMode(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) return isDir(path) ? ok(defaultDirMode()) : errNotFound(path);
+        Object[] vals = new Object[9];
+        boolean[] m = e.mode;
+        for (int i = 0; i < 9; i++) vals[i] = m[i];
+        return ok(MezzeRecord.fromFields(MODE_FIELDS, vals));
+    }
+
+    @TruffleBoundary
+    public static Object setMode(MezzeRecord args) {
+        String path = getString(args, "path");
+        MezzeRecord mode = getRecord(args, "mode");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        boolean[] m = new boolean[9];
+        for (int i = 0; i < 9; i++) m[i] = getBool(mode, MODE_FIELDS[i]);
+        e.mode = m;
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object getOwner(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        return ok(MezzeRecord.fromFields(OWNER_FIELDS,
+            new Object[]{e.ownerUser, e.ownerGroup}));
+    }
+
+    @TruffleBoundary
+    public static Object setOwner(MezzeRecord args) {
+        String path = getString(args, "path");
+        MezzeRecord owner = getRecord(args, "owner");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        e.ownerUser = getString(owner, "user");
+        e.ownerGroup = getString(owner, "group");
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object setModified(MezzeRecord args) {
+        String path = getString(args, "path");
+        long millis = getLong(args, "millis");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        e.modifiedMs = millis;
+        return ok(MezzeRecord.empty());
+    }
+
+    /**
+     * memfs paths are already canonical — there is no `..`, no `.` and no
+     * mount table — so resolution is only about symlinks. One hop is
+     * followed repeatedly with a bound, because a symlink cycle is a thing
+     * a test should be able to create without hanging the suite.
+     */
+    @TruffleBoundary
+    public static Object realPath(MezzeRecord args) {
+        String path = getString(args, "path");
+        boolean follow = getBool(args, "follow_symlinks");
+        String cur = path;
+        if (follow) {
+            for (int hops = 0; hops < 40; hops++) {
+                Entry e = files().get(cur);
+                if (e == null || e.symlinkTarget == null) break;
+                cur = e.symlinkTarget;
+                if (hops == 39) return errIO(path, "too many symbolic links");
+            }
+        }
+        if (!isFile(cur) && !isDir(cur)) return errNotFound(cur);
+        return ok(cur);
+    }
+
+    private static MezzeRecord defaultDirMode() {
+        Object[] vals = {true, true, true, true, false, true, true, false, true};
+        return MezzeRecord.fromFields(MODE_FIELDS, vals);
+    }
+
     // ==================== Locking ====================
 
     /** Holders of one path's lock. Guarded by synchronizing on the instance. */
@@ -554,6 +724,12 @@ public final class MemoryFilesystemNatives {
                    new Object[]{path, operation});
     }
 
+    private static MezzeVariant errNotSupported(String path, String operation) {
+        return err("FsNotSupported",
+                   new String[]{"path", "operation"},
+                   new Object[]{path, operation});
+    }
+
     private static MezzeVariant errIO(String path, String message) {
         return err("FsIOError",
             new String[]{"path", "message"},
@@ -621,6 +797,14 @@ public final class MemoryFilesystemNatives {
         Object val = r.getField(index);
         if (val instanceof Boolean b) return b;
         throw new NativeTypeMismatchException("Expected Bool for field '" + name + "'");
+    }
+
+    private static MezzeRecord getRecord(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeRecord rec) return rec;
+        throw new NativeTypeMismatchException("Expected record for field '" + name + "'");
     }
 
     private static String getVariantTag(MezzeRecord r, String name) {

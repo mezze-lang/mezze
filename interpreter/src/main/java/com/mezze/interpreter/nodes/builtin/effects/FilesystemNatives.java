@@ -531,6 +531,257 @@ public final class FilesystemNatives {
         }
     }
 
+    // ==================== Symlinks ====================
+
+    @TruffleBoundary
+    public static Object createSymlink(MezzeRecord args) {
+        String link = getString(args, "link");
+        String target = getString(args, "target");
+        try {
+            // Paths.get(target), not toRealPath: a dangling symlink is legal
+            // and is how a blue/green swap stages the next release.
+            Files.createSymbolicLink(Paths.get(link), Paths.get(target));
+            return ok(MezzeRecord.empty());
+        } catch (FileAlreadyExistsException e) {
+            return errAlreadyExists(link);
+        } catch (AccessDeniedException e) {
+            // Windows without developer mode lands here, not on an
+            // UnsupportedOperationException.
+            return errPermissionDenied(link, "create_symlink");
+        } catch (UnsupportedOperationException e) {
+            return errNotSupported(link, "create_symlink");
+        } catch (IOException e) {
+            return errIO(link, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object createHardlink(MezzeRecord args) {
+        String link = getString(args, "link");
+        String target = getString(args, "target");
+        try {
+            Files.createLink(Paths.get(link), Paths.get(target));
+            return ok(MezzeRecord.empty());
+        } catch (FileAlreadyExistsException e) {
+            return errAlreadyExists(link);
+        } catch (NoSuchFileException e) {
+            // Unlike a symlink, a hard link REQUIRES an existing target —
+            // there is no inode to point a second name at otherwise.
+            return errNotFound(target);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(link, "create_hardlink");
+        } catch (UnsupportedOperationException e) {
+            return errNotSupported(link, "create_hardlink");
+        } catch (IOException e) {
+            return errIO(link, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object readSymlink(MezzeRecord args) {
+        String path = getString(args, "path");
+        try {
+            return ok(Files.readSymbolicLink(Paths.get(path)).toString());
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (java.nio.file.NotLinkException e) {
+            return errIO(path, "not a symbolic link");
+        } catch (UnsupportedOperationException e) {
+            return errNotSupported(path, "read_symlink");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object isSymlink(MezzeRecord args) {
+        String path = getString(args, "path");
+        // isSymbolicLink answers false for a missing path as well as for a
+        // regular file. Distinguishing them needs an explicit existence
+        // check, and NOFOLLOW is what makes "does the LINK exist" right.
+        java.nio.file.Path p = Paths.get(path);
+        if (!Files.exists(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            return errNotFound(path);
+        }
+        return ok(Files.isSymbolicLink(p));
+    }
+
+    // ==================== Permissions / metadata ====================
+
+    @TruffleBoundary
+    public static Object getMode(MezzeRecord args) {
+        String path = getString(args, "path");
+        try {
+            java.util.Set<java.nio.file.attribute.PosixFilePermission> perms =
+                Files.getPosixFilePermissions(Paths.get(path));
+            return ok(modeRecord(perms));
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (UnsupportedOperationException e) {
+            // Non-POSIX volume: say so rather than inventing bits.
+            return errNotSupported(path, "get_mode");
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "get_mode");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object setMode(MezzeRecord args) {
+        String path = getString(args, "path");
+        MezzeRecord mode = getRecord(args, "mode");
+        try {
+            Files.setPosixFilePermissions(Paths.get(path), permsFromRecord(mode));
+            return ok(MezzeRecord.empty());
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (UnsupportedOperationException e) {
+            return errNotSupported(path, "set_mode");
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "set_mode");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object getOwner(MezzeRecord args) {
+        String path = getString(args, "path");
+        try {
+            java.nio.file.attribute.PosixFileAttributes attrs = Files.readAttributes(
+                Paths.get(path), java.nio.file.attribute.PosixFileAttributes.class);
+            return ok(MezzeRecord.fromFields(
+                OWNER_FIELDS,
+                new Object[]{attrs.owner().getName(), attrs.group().getName()}));
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (UnsupportedOperationException e) {
+            return errNotSupported(path, "get_owner");
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "get_owner");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object setOwner(MezzeRecord args) {
+        String path = getString(args, "path");
+        MezzeRecord owner = getRecord(args, "owner");
+        String user = getString(owner, "user");
+        String group = getString(owner, "group");
+        try {
+            java.nio.file.attribute.UserPrincipalLookupService svc =
+                Paths.get(path).getFileSystem().getUserPrincipalLookupService();
+            java.nio.file.attribute.PosixFileAttributeView view = Files.getFileAttributeView(
+                Paths.get(path), java.nio.file.attribute.PosixFileAttributeView.class);
+            if (view == null) {
+                return errNotSupported(path, "set_owner");
+            }
+            view.setOwner(svc.lookupPrincipalByName(user));
+            view.setGroup(svc.lookupPrincipalByGroupName(group));
+            return ok(MezzeRecord.empty());
+        } catch (java.nio.file.attribute.UserPrincipalNotFoundException e) {
+            return errIO(path, "no such user or group: " + e.getName());
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (UnsupportedOperationException e) {
+            return errNotSupported(path, "set_owner");
+        } catch (AccessDeniedException e) {
+            // Changing an owner needs privilege; an unprivileged process
+            // gets here, which is the common case and not a bug.
+            return errPermissionDenied(path, "set_owner");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object setModified(MezzeRecord args) {
+        String path = getString(args, "path");
+        long millis = getLong(args, "millis");
+        try {
+            Files.setLastModifiedTime(Paths.get(path),
+                java.nio.file.attribute.FileTime.fromMillis(millis));
+            return ok(MezzeRecord.empty());
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "set_modified");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object realPath(MezzeRecord args) {
+        String path = getString(args, "path");
+        boolean follow = getBool(args, "follow_symlinks");
+        try {
+            java.nio.file.Path resolved = follow
+                ? Paths.get(path).toRealPath()
+                : Paths.get(path).toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
+            return ok(resolved.toString());
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "real_path");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    // ==================== Mode conversion ====================
+
+    private static final String[] MODE_FIELDS = {
+        "owner_read", "owner_write", "owner_exec",
+        "group_read", "group_write", "group_exec",
+        "other_read", "other_write", "other_exec",
+    };
+    private static final String[] OWNER_FIELDS = {"user", "group"};
+
+    private static MezzeRecord modeRecord(
+            java.util.Set<java.nio.file.attribute.PosixFilePermission> perms) {
+        java.nio.file.attribute.PosixFilePermission[] order = {
+            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
+            java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+            java.nio.file.attribute.PosixFilePermission.GROUP_WRITE,
+            java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE,
+        };
+        Object[] vals = new Object[order.length];
+        for (int i = 0; i < order.length; i++) {
+            vals[i] = perms.contains(order[i]);
+        }
+        return MezzeRecord.fromFields(MODE_FIELDS, vals);
+    }
+
+    private static java.util.Set<java.nio.file.attribute.PosixFilePermission>
+            permsFromRecord(MezzeRecord mode) {
+        java.util.EnumSet<java.nio.file.attribute.PosixFilePermission> out =
+            java.util.EnumSet.noneOf(java.nio.file.attribute.PosixFilePermission.class);
+        java.nio.file.attribute.PosixFilePermission[] order = {
+            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
+            java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+            java.nio.file.attribute.PosixFilePermission.GROUP_WRITE,
+            java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE,
+        };
+        for (int i = 0; i < MODE_FIELDS.length; i++) {
+            if (getBool(mode, MODE_FIELDS[i])) out.add(order[i]);
+        }
+        return out;
+    }
+
     // ==================== Record helpers ====================
 
     private static final String[] FILE_STAT_FIELDS = {"kind", "size", "modified"};
@@ -572,6 +823,14 @@ public final class FilesystemNatives {
 
     private static MezzeVariant errNotADirectory(String path) {
         return err("FsNotADirectory", new String[]{"path"}, new Object[]{path});
+    }
+
+    /** The backend cannot do this at all — a non-POSIX volume asked for a
+     *  mode, Windows asked for an owner. Honest refusal, not a fake success. */
+    private static MezzeVariant errNotSupported(String path, String operation) {
+        return err("FsNotSupported",
+                   new String[]{"path", "operation"},
+                   new Object[]{path, operation});
     }
 
     private static MezzeVariant errIO(String path, String message) {
@@ -647,6 +906,14 @@ public final class FilesystemNatives {
         Object val = r.getField(index);
         if (val instanceof Boolean b) return b;
         throw new NativeTypeMismatchException("Expected Bool for field '" + name + "'");
+    }
+
+    private static MezzeRecord getRecord(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeRecord rec) return rec;
+        throw new NativeTypeMismatchException("Expected record for field '" + name + "'");
     }
 
     /**

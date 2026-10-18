@@ -2823,6 +2823,16 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_fs_fsync_dir",        (r, c) -> FilesystemNatives.fsyncDir(r));
         HANDLERS.put("__native_fs_lock",             (r, c) -> FilesystemNatives.lock(r));
         HANDLERS.put("__native_fs_unlock",           (r, c) -> FilesystemNatives.unlock(r));
+        HANDLERS.put("__native_fs_create_symlink", (r, c) -> FilesystemNatives.createSymlink(r));
+        HANDLERS.put("__native_fs_create_hardlink", (r, c) -> FilesystemNatives.createHardlink(r));
+        HANDLERS.put("__native_fs_read_symlink", (r, c) -> FilesystemNatives.readSymlink(r));
+        HANDLERS.put("__native_fs_is_symlink", (r, c) -> FilesystemNatives.isSymlink(r));
+        HANDLERS.put("__native_fs_get_mode", (r, c) -> FilesystemNatives.getMode(r));
+        HANDLERS.put("__native_fs_set_mode", (r, c) -> FilesystemNatives.setMode(r));
+        HANDLERS.put("__native_fs_get_owner", (r, c) -> FilesystemNatives.getOwner(r));
+        HANDLERS.put("__native_fs_set_owner", (r, c) -> FilesystemNatives.setOwner(r));
+        HANDLERS.put("__native_fs_set_modified", (r, c) -> FilesystemNatives.setModified(r));
+        HANDLERS.put("__native_fs_real_path", (r, c) -> FilesystemNatives.realPath(r));
     }
 
     // ==================== Memory Filesystem (MemoryFS, #82) ====================
@@ -2849,6 +2859,16 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_memfs_fsync_dir",        (r, c) -> MemoryFilesystemNatives.fsyncDir(r));
         HANDLERS.put("__native_memfs_lock",             (r, c) -> MemoryFilesystemNatives.lock(r));
         HANDLERS.put("__native_memfs_unlock",           (r, c) -> MemoryFilesystemNatives.unlock(r));
+        HANDLERS.put("__native_memfs_create_symlink", (r, c) -> MemoryFilesystemNatives.createSymlink(r));
+        HANDLERS.put("__native_memfs_create_hardlink", (r, c) -> MemoryFilesystemNatives.createHardlink(r));
+        HANDLERS.put("__native_memfs_read_symlink", (r, c) -> MemoryFilesystemNatives.readSymlink(r));
+        HANDLERS.put("__native_memfs_is_symlink", (r, c) -> MemoryFilesystemNatives.isSymlink(r));
+        HANDLERS.put("__native_memfs_get_mode", (r, c) -> MemoryFilesystemNatives.getMode(r));
+        HANDLERS.put("__native_memfs_set_mode", (r, c) -> MemoryFilesystemNatives.setMode(r));
+        HANDLERS.put("__native_memfs_get_owner", (r, c) -> MemoryFilesystemNatives.getOwner(r));
+        HANDLERS.put("__native_memfs_set_owner", (r, c) -> MemoryFilesystemNatives.setOwner(r));
+        HANDLERS.put("__native_memfs_set_modified", (r, c) -> MemoryFilesystemNatives.setModified(r));
+        HANDLERS.put("__native_memfs_real_path", (r, c) -> MemoryFilesystemNatives.realPath(r));
         // Test isolation
         HANDLERS.put("__native_memfs_clear", (r, c) -> {
             MemoryFilesystemNatives.clear();
