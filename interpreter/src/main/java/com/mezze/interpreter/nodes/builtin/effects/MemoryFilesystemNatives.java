@@ -84,6 +84,19 @@ public final class MemoryFilesystemNatives {
          */
         final ConcurrentHashMap<String, LockState> locks = new ConcurrentHashMap<>();
 
+        /**
+         * `FileWatch` state: watch id -> its pending events.
+         *
+         * This is the one effect whose state the CORE has to know about: a
+         * write through FileSystem must enqueue an event for a watcher, so
+         * the mutating ops call {@link #notifyWatchers}. The alternative —
+         * pollers diffing `modifiedMs` — needs no coupling but cannot tell
+         * Created from Deleted and can never report Overflow, so it could
+         * not honestly implement WatchEvent.
+         */
+        final ConcurrentHashMap<Long, Watch> watches = new ConcurrentHashMap<>();
+        final AtomicLong nextWatchId = new AtomicLong(1);
+
         State() {
             // `directories`, not `directories()`: this IS the state being built,
             // and the accessor would come straight back here for it.
@@ -105,6 +118,11 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     private static ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories() {
         return state().directories;
+    }
+
+    @TruffleBoundary
+    private static ConcurrentHashMap<Long, Watch> watches() {
+        return state().watches;
     }
 
     @TruffleBoundary
@@ -203,8 +221,10 @@ public final class MemoryFilesystemNatives {
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
         if (isDir(path)) return errIO(path, "Is a directory");
+        boolean existed = isFile(path);
         files().put(path, new Entry(bytes.getData()));
         directories().get(parent).add(basenameOf(path));
+        notifyWatchers(path, existed ? "Modified" : "Created");
         return ok(MezzeRecord.empty());
     }
 
@@ -268,6 +288,7 @@ public final class MemoryFilesystemNatives {
             directories().remove(path);
         } else if (isFile(path)) {
             files().remove(path);
+            notifyWatchers(path, "Deleted");
         } else {
             return errNotFound(path);
         }
@@ -287,6 +308,7 @@ public final class MemoryFilesystemNatives {
         if (!isDir(parent)) return errNotFound(parent);
         directories().put(path, ConcurrentHashMap.newKeySet());
         directories().get(parent).add(basenameOf(path));
+        notifyWatchers(path, "Created");
         return ok(MezzeRecord.empty());
     }
 
@@ -305,6 +327,7 @@ public final class MemoryFilesystemNatives {
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
         files().put(dest, new Entry(srcEntry.bytes.clone()));
+        notifyWatchers(dest, "Created");
         directories().get(destParent).add(basenameOf(dest));
         return ok(MezzeRecord.empty());
     }
@@ -322,6 +345,8 @@ public final class MemoryFilesystemNatives {
         if (!isDir(destParent)) return errNotFound(destParent);
         files().put(dest, srcEntry);
         files().remove(src);
+        notifyWatchers(dest, "Created");
+        notifyWatchers(src, "Deleted");
         String srcParent = parentOf(src);
         directories().get(srcParent).remove(basenameOf(src));
         directories().get(destParent).add(basenameOf(dest));
@@ -418,8 +443,10 @@ public final class MemoryFilesystemNatives {
             if (!isDir(parent)) {
                 return errNotFound(parent);
             }
+            boolean existedBefore = isFile(h.path);
             files().put(h.path, new Entry(h.writeBuf.toByteArray()));
             directories().get(parent).add(basenameOf(h.path));
+            notifyWatchers(h.path, existedBefore ? "Modified" : "Created");
         }
         return ok(MezzeRecord.empty());
     }
@@ -437,6 +464,115 @@ public final class MemoryFilesystemNatives {
             return isFile(path) ? errNotADirectory(path) : errNotFound(path);
         }
         return ok(MezzeRecord.empty());
+    }
+
+    // ==================== Watching ====================
+
+    /**
+     * One registered watch and its pending events.
+     *
+     * Bounded, like inotify's queue: past {@link #CAP} the events are
+     * dropped and a single `Overflow` is delivered instead. Reporting
+     * Overflow is the honest answer — a watcher that silently lost events
+     * would have the caller believe it saw everything, and the usual
+     * recovery (rescan the tree) is only available if it is told.
+     */
+    static final class Watch {
+        static final int CAP = 1024;
+        final String root;
+        final boolean recursive;
+        final java.util.concurrent.ConcurrentLinkedQueue<String[]> events =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+        volatile boolean overflowed;
+
+        Watch(String root, boolean recursive) {
+            this.root = root;
+            this.recursive = recursive;
+        }
+    }
+
+    /** Opaque watch handle. Carries only the id; the state lives per context. */
+    public static final class MemWatchHandle {
+        final long id;
+        MemWatchHandle(long id) { this.id = id; }
+    }
+
+    /**
+     * Called by every mutating op. This is the coupling the design accepted:
+     * the core must tell the watchers, because the alternative (pollers
+     * diffing modifiedMs) cannot distinguish Created from Deleted.
+     *
+     * A non-recursive watch sees its DIRECT children only, which is what
+     * inotify without IN_ONLYDIR recursion gives you.
+     */
+    private static void notifyWatchers(String path, String kind) {
+        ConcurrentHashMap<Long, Watch> ws = watches();
+        if (ws.isEmpty()) return;  // the overwhelmingly common case
+        for (Watch w : ws.values()) {
+            boolean under = w.recursive
+                ? path.equals(w.root) || path.startsWith(w.root.endsWith("/") ? w.root : w.root + "/")
+                : w.root.equals(parentOf(path));
+            if (!under) continue;
+            if (w.events.size() >= Watch.CAP) {
+                w.overflowed = true;
+                continue;
+            }
+            w.events.add(new String[]{kind, path});
+        }
+    }
+
+    @TruffleBoundary
+    public static Object watch(MezzeRecord args) {
+        String path = getString(args, "path");
+        boolean recursive = getBool(args, "recursive");
+        if (!isDir(path)) {
+            return isFile(path) ? errNotADirectory(path) : errNotFound(path);
+        }
+        long id = state().nextWatchId.getAndIncrement();
+        watches().put(id, new Watch(path, recursive));
+        return ok(new MemWatchHandle(id));
+    }
+
+    /**
+     * Drain the queue. `timeout_ms` is accepted and ignored: there is no
+     * other thread to wait for in a single context, so blocking could only
+     * delay the caller for nothing. An empty Seq means "nothing happened",
+     * which is a normal answer for a poll.
+     */
+    @TruffleBoundary
+    public static Object poll(MezzeRecord args) {
+        MemWatchHandle h = getMemWatchHandle(args, "handle");
+        Watch w = watches().get(h.id);
+        if (w == null) return errIO("<watch>", "watch handle is not registered");
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        if (w.overflowed) {
+            w.overflowed = false;
+            w.events.clear();
+            out.add(watchEvent("Overflow", null));
+            return ok(MezzeSeq.fromArray(out.toArray()));
+        }
+        String[] ev;
+        while ((ev = w.events.poll()) != null) {
+            out.add(watchEvent(ev[0], ev[1]));
+        }
+        return ok(MezzeSeq.fromArray(out.toArray()));
+    }
+
+    @TruffleBoundary
+    public static Object unwatch(MezzeRecord args) {
+        MemWatchHandle h = getMemWatchHandle(args, "handle");
+        watches().remove(h.id);
+        return ok(MezzeRecord.empty());
+    }
+
+    private static MezzeVariant watchEvent(String kind, String path) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(kind);
+        if (path == null) {
+            // Overflow carries no path — there is no single path it is about.
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        }
+        MezzeRecord payload = MezzeRecord.fromFields(new String[]{"path"}, new Object[]{path});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
     }
 
     // ==================== Symlinks ====================
@@ -461,6 +597,7 @@ public final class MemoryFilesystemNatives {
         e.symlinkTarget = target;
         files().put(link, e);
         directories().get(parent).add(basenameOf(link));
+        notifyWatchers(link, "Created");
         return ok(MezzeRecord.empty());
     }
 
@@ -481,6 +618,7 @@ public final class MemoryFilesystemNatives {
         // other, as on a real filesystem.
         files().put(link, src);
         directories().get(parent).add(basenameOf(link));
+        notifyWatchers(link, "Created");
         return ok(MezzeRecord.empty());
     }
 
@@ -789,6 +927,14 @@ public final class MemoryFilesystemNatives {
         Object val = r.getField(index);
         if (val instanceof MemLockHandle h) return h;
         throw new NativeTypeMismatchException("Expected LockHandle for field '" + name + "'");
+    }
+
+    private static MemWatchHandle getMemWatchHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MemWatchHandle h) return h;
+        throw new NativeTypeMismatchException("Expected WatchHandle for field '" + name + "'");
     }
 
     private static boolean getBool(MezzeRecord r, String name) {

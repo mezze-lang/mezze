@@ -2833,6 +2833,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_fs_set_owner", (r, c) -> FilesystemNatives.setOwner(r));
         HANDLERS.put("__native_fs_set_modified", (r, c) -> FilesystemNatives.setModified(r));
         HANDLERS.put("__native_fs_real_path", (r, c) -> FilesystemNatives.realPath(r));
+        HANDLERS.put("__native_fs_watch", (r, c) -> FilesystemNatives.watch(r));
+        HANDLERS.put("__native_fs_poll", (r, c) -> FilesystemNatives.poll(r));
+        HANDLERS.put("__native_fs_unwatch", (r, c) -> FilesystemNatives.unwatch(r));
     }
 
     // ==================== Memory Filesystem (MemoryFS, #82) ====================
@@ -2869,6 +2872,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_memfs_set_owner", (r, c) -> MemoryFilesystemNatives.setOwner(r));
         HANDLERS.put("__native_memfs_set_modified", (r, c) -> MemoryFilesystemNatives.setModified(r));
         HANDLERS.put("__native_memfs_real_path", (r, c) -> MemoryFilesystemNatives.realPath(r));
+        HANDLERS.put("__native_memfs_watch", (r, c) -> MemoryFilesystemNatives.watch(r));
+        HANDLERS.put("__native_memfs_poll", (r, c) -> MemoryFilesystemNatives.poll(r));
+        HANDLERS.put("__native_memfs_unwatch", (r, c) -> MemoryFilesystemNatives.unwatch(r));
         // Test isolation
         HANDLERS.put("__native_memfs_clear", (r, c) -> {
             MemoryFilesystemNatives.clear();

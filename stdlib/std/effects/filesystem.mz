@@ -318,6 +318,61 @@ impl FilePermissions for MemoryFilePermissions where {
 }
 
 ## ==================================================================
+## FileWatch — change notification.
+##
+## The one capability whose backends differ most: inotify/kqueue locally,
+## synthesised from writes in MemoryFS, and nothing at all for an object
+## store or an HTTP-backed tree, which decline the effect.
+## ==================================================================
+## `Overflow` carries no path on purpose: it means the queue dropped
+## events, so there is no single path it is about. The honest recovery is
+## to rescan the tree — which a caller can only do if it is told, which is
+## why this variant exists instead of silently losing events.
+pub type WatchEvent = |
+  Created { path: Str },
+  Modified { path: Str },
+  Deleted { path: Str },
+  Overflow,
+|
+
+pub newtype WatchHandle = __NativeWatchHandle
+
+effect FileWatch where {
+  ## Watch a directory. `recursive = True` also watches existing
+  ## subdirectories; see the note on the native about directories created
+  ## afterwards.
+  watch: { path: Str, recursive: Bool } -> Result WatchHandle FsError <FileWatch>,
+  ## Drain whatever has arrived, waiting at most `timeout_ms` (0 = don't
+  ## wait). A BATCH, because that is what the OS delivers — one key
+  ## carries many events, and splitting them would lose the grouping and
+  ## multiply syscalls. An empty Seq means nothing happened, which is a
+  ## normal answer.
+  poll: { handle: WatchHandle, timeout_ms: Int }
+    -> Result [WatchEvent] FsError <FileWatch>,
+  unwatch: { handle: WatchHandle } -> Result {} FsError <FileWatch>,
+}
+
+impl FileWatch for LocalFileWatch where {
+  watch = { path, recursive } ->
+    __native_fs_watch { path = path, recursive = recursive },
+  poll = { handle, timeout_ms } ->
+    __native_fs_poll { handle = handle, timeout_ms = timeout_ms },
+  unwatch = { handle } -> __native_fs_unwatch { handle = handle },
+}
+
+## MemoryFS synthesises events from its own mutations, which is why the
+## core ops notify the watchers. `timeout_ms` is accepted and ignored:
+## there is no other thread to wait for inside one context, so blocking
+## could only delay the caller for nothing.
+impl FileWatch for MemoryFileWatch where {
+  watch = { path, recursive } ->
+    __native_memfs_watch { path = path, recursive = recursive },
+  poll = { handle, timeout_ms } ->
+    __native_memfs_poll { handle = handle, timeout_ms = timeout_ms },
+  unwatch = { handle } -> __native_memfs_unwatch { handle = handle },
+}
+
+## ==================================================================
 ## Derived helpers — pure Mezze, built on the 13 primitives.
 ## ==================================================================
 ## ---------- Text convenience ----------

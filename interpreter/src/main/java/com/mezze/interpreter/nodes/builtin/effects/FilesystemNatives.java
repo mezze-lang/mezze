@@ -531,6 +531,138 @@ public final class FilesystemNatives {
         }
     }
 
+    // ==================== Watching ====================
+
+    /**
+     * A registered WatchService and the key(s) it holds.
+     *
+     * Non-recursive is one key. Recursive registers every existing
+     * subdirectory at `watch` time — the JDK has no recursive mode, and
+     * directories created LATER are not auto-registered, which is a real
+     * limitation of this implementation rather than of the design. A caller
+     * that needs it re-watches after a Created event for a directory; said
+     * here because discovering it from behaviour would be unpleasant.
+     */
+    public static final class MezzeWatchHandle {
+        final java.nio.file.WatchService service;
+        final java.nio.file.Path root;
+        final java.util.concurrent.atomic.AtomicBoolean closed =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        MezzeWatchHandle(java.nio.file.WatchService service, java.nio.file.Path root) {
+            this.service = service;
+            this.root = root;
+        }
+    }
+
+    @TruffleBoundary
+    public static Object watch(MezzeRecord args) {
+        String path = getString(args, "path");
+        boolean recursive = getBool(args, "recursive");
+        java.nio.file.Path root = Paths.get(path);
+        if (!Files.isDirectory(root)) {
+            return Files.exists(root) ? errNotADirectory(path) : errNotFound(path);
+        }
+        try {
+            java.nio.file.WatchService svc = root.getFileSystem().newWatchService();
+            registerWatch(root, svc);
+            if (recursive) {
+                try (java.util.stream.Stream<java.nio.file.Path> tree = Files.walk(root)) {
+                    for (java.nio.file.Path dir : tree.filter(Files::isDirectory).toList()) {
+                        if (!dir.equals(root)) registerWatch(dir, svc);
+                    }
+                }
+            }
+            return ok(new MezzeWatchHandle(svc, root));
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "watch");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    private static void registerWatch(java.nio.file.Path dir, java.nio.file.WatchService svc)
+            throws IOException {
+        dir.register(svc,
+            java.nio.file.StandardWatchEventKinds.ENTRY_CREATE,
+            java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY,
+            java.nio.file.StandardWatchEventKinds.ENTRY_DELETE);
+    }
+
+    /**
+     * Drain whatever has arrived, waiting at most `timeout_ms`.
+     *
+     * `poll` returns a BATCH because that is what the OS delivers: one
+     * WatchKey carries many events, and handing them over one at a time
+     * would both lose that grouping and multiply the syscalls.
+     */
+    @TruffleBoundary
+    public static Object poll(MezzeRecord args) {
+        MezzeWatchHandle h = getWatchHandle(args, "handle");
+        long timeoutMs = getLong(args, "timeout_ms");
+        if (h.closed.get()) {
+            return errClosedHandle(h.root.toString());
+        }
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        try {
+            java.nio.file.WatchKey key = timeoutMs <= 0
+                ? h.service.poll()
+                : h.service.poll(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            while (key != null) {
+                java.nio.file.Path dir = (java.nio.file.Path) key.watchable();
+                for (java.nio.file.WatchEvent<?> ev : key.pollEvents()) {
+                    if (ev.kind() == java.nio.file.StandardWatchEventKinds.OVERFLOW) {
+                        // The OS dropped events. Say so instead of implying
+                        // the batch was complete.
+                        out.clear();
+                        out.add(watchEvent("Overflow", null));
+                        key.reset();
+                        return ok(MezzeSeq.fromArray(out.toArray()));
+                    }
+                    String kind =
+                        ev.kind() == java.nio.file.StandardWatchEventKinds.ENTRY_CREATE ? "Created"
+                      : ev.kind() == java.nio.file.StandardWatchEventKinds.ENTRY_DELETE ? "Deleted"
+                      : "Modified";
+                    java.nio.file.Path ctx = (java.nio.file.Path) ev.context();
+                    out.add(watchEvent(kind, dir.resolve(ctx).toString()));
+                }
+                key.reset();
+                // Keep draining without waiting again: the caller asked for
+                // everything available, and a second timeout would stall.
+                key = h.service.poll();
+            }
+            return ok(MezzeSeq.fromArray(out.toArray()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ok(MezzeSeq.fromArray(out.toArray()));
+        } catch (java.nio.file.ClosedWatchServiceException e) {
+            return errClosedHandle(h.root.toString());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object unwatch(MezzeRecord args) {
+        MezzeWatchHandle h = getWatchHandle(args, "handle");
+        if (!h.closed.compareAndSet(false, true)) {
+            return ok(MezzeRecord.empty());
+        }
+        try {
+            h.service.close();
+            return ok(MezzeRecord.empty());
+        } catch (IOException e) {
+            return errIO(h.root.toString(), e.getMessage());
+        }
+    }
+
+    private static MezzeVariant watchEvent(String kind, String path) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(kind);
+        if (path == null) {
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        }
+        MezzeRecord payload = MezzeRecord.fromFields(new String[]{"path"}, new Object[]{path});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+    }
+
     // ==================== Symlinks ====================
 
     @TruffleBoundary
@@ -898,6 +1030,14 @@ public final class FilesystemNatives {
         Object val = r.getField(index);
         if (val instanceof MezzeLockHandle h) return h;
         throw new NativeTypeMismatchException("Expected LockHandle for field '" + name + "'");
+    }
+
+    private static MezzeWatchHandle getWatchHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeWatchHandle h) return h;
+        throw new NativeTypeMismatchException("Expected WatchHandle for field '" + name + "'");
     }
 
     private static boolean getBool(MezzeRecord r, String name) {
