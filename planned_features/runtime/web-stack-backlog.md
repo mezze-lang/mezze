@@ -470,15 +470,35 @@ pieces and so `//health` must match `/health` where a comparison would not.
 | JVM (jar) | 251.9k | 1.00 |
 | native, heap tuned | **108.4k** | **2.3x behind** |
 
-**Native went 55.8k -> 108.4k, +94%, from nothing but a smaller input jar.** The
-earlier reading was taken while `~/.mezze/lib/mezze-runtime.jar` was the stale
-112MB provider-bundled one, so the app jar was 106MB; after the fix it is 20MB
-and the image is built from a fifth of the classes. The blocklist strip had
-already made that build COMPILE — this is what it costs to merely carry the
-providers into the input.
+Six readings, 105-110k, in a tight cluster. The JVM side has four, 250-254k.
 
-**So the "~2x" originally recorded here was RIGHT, and the 4.5x I replaced it
-with was measured on a polluted build.** Correcting my own correction.
+**The "~2x" originally recorded here was RIGHT. The 4.5x I replaced it with is
+WITHDRAWN — and I cannot say why it was wrong.** It came from a 55.8k reading on
+a binary built before the distribution fix. I checked the two obvious
+explanations and neither holds:
+
+- **Not the input jar.** The app jar went 106MB -> 20MB, but the BINARY barely
+  moved: 109MB before, 108MB after. If the image contents are the same size,
+  "fewer classes in the image" cannot buy 2x.
+- **Not warmup.** The old run warmed 5s and the new one 15s, so this looked
+  likely. Measured directly on the current binary: 5s gives 106.8k and 109.6k,
+  15s gives 104.0k and 110.3k. No effect.
+- **Not build contention either**, which is the usual suspect on this box — the
+  native-image build that was later caught at 836% CPU ran at 16:07, and those
+  readings were taken at 15:43.
+
+So the honest record is: the current, clean, warmup-insensitive figure is
+**~2.3x**, and the 55.8k is an unexplained outlier that should not be quoted.
+Two same-size binaries differing 2x with no identified cause is itself worth
+knowing — if native throughput is ever measured again and comes out near 50k,
+this is the thing to chase rather than assume.
+
+**Binary SIZE is ~108MB** for the web-server program, against a 20MB app jar.
+The provider strip did not change it (109 -> 108MB), which is the expected
+result and a useful confirmation: the providers were never getting into the
+image, only into the input. The 108MB is our own closure — the Mezze
+interpreter, the Truffle runtime, Helidon — not the application. Shrinking it is
+untouched ground.
 
 **PE is confirmed ACTIVE in native binaries**, which had been an open question.
 On a tight guest loop (4M iterations) native finishes FASTER in total than the
