@@ -1,0 +1,12 @@
+[package]
+name = "codec_vs_handwritten"
+version = "0.1.0"
+
+[[app]]
+name = "codec_vs_handwritten"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

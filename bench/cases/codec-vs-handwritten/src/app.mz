@@ -1,0 +1,106 @@
+## How much of the DERIVED codec's gap to a hand-written encode is left?
+##
+## The question W-P1 opened and did not answer. The old ladder put the derived
+## walker 15.5% behind a hand-written encode, attributed 11.6% of that to an
+## ability op on a captured receiver and the remaining 4.2% to "everything else
+## in the generated body". The 11.6% is fixed. This program measures what is
+## actually left, rather than subtracting one number from another.
+##
+## Both halves produce the SAME STRING — the program asserts it by comparing
+## lengths and printing both, so a "faster" result that encodes less is visible
+## instead of silent. That mistake has already been made once in this tree: a
+## +19% fusion reading came from a program that skipped a multiply.
+##
+## `MODE=derived` / `MODE=hand` picks a half; with neither, it checks they agree
+## and prints both. Run the BUILT JAR.
+use std::codec::core::{ Encode }
+use std::codec::json::{ Json, JNull, JBool, JInt, JFloat, JString, JArray, JObject,
+                        JsonC, json_default, to_str }
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::str
+use std::int
+use std::float
+
+type Row = {
+  id: Int,
+  name: Str,
+  score: Float,
+  active: Bool,
+}
+
+let rows: [Row] = seq::map {
+  xs = seq::range { start = 1, end = 21 },
+  f = { x } -> {
+    id = x,
+    name = "row-$(int::to_str { n = x })",
+    score = float::from_int { n = x } * 1.5,
+    active = x % 2 == 0,
+  },
+}
+
+## ── The derived walk ────────────────────────────────────────────────────────
+##
+## Behind an ability constraint, which is what makes it a derived walk with a
+## CAPTURED config — the shape the fix was about.
+let derived_encode: { body: 'a } with Encode JsonC 'a -> Str = { body } -> do
+  let j: Json = body.encode { config = json_default }
+  to_str { json = j }
+
+## ── The hand-written encode ─────────────────────────────────────────────────
+##
+## Builds the same `Json` tree with no codec, no config and no ability op. Field
+## order is ALPHABETICAL to match what the derived walk emits, so the two
+## strings are identical and the comparison is of cost, not of output.
+let hand_row: { r: Row } -> Json = { r } -> JObject {
+  fields = [
+    { key = "active", value = JBool { val = r.active } },
+    { key = "id", value = JInt { val = r.id } },
+    { key = "name", value = JString { val = r.name } },
+    { key = "score", value = JFloat { val = r.score } },
+  ],
+}
+
+let hand_encode: { body: [Row] } -> Str = { body } -> do
+  let j: Json = JArray { items = seq::map { xs = body, f = { x } -> hand_row { r = x } } }
+  to_str { json = j }
+
+let spin_derived: { n: Int, acc: Int } -> Int = { n, acc } ->
+  if n <= 0 then acc
+  else spin_derived { n = n - 1, acc = acc + str::size { s = derived_encode { body = rows } } }
+
+let spin_hand: { n: Int, acc: Int } -> Int = { n, acc } ->
+  if n <= 0 then acc
+  else spin_hand { n = n - 1, acc = acc + str::size { s = hand_encode { body = rows } } }
+
+let reps: Int = 400000
+
+let main = {} -> perform Console in do
+  ## Agreement first. If these ever differ, every timing below is meaningless.
+  let d = derived_encode { body = rows }
+  let h = hand_encode { body = rows }
+  println { msg = if d == h then "AGREE len=$(int::to_str { n = str::size { s = d } })"
+                  else "DISAGREE\nderived: $(d)\nhand:    $(h)" }
+  println { msg = "derived $(int::to_str { n = spin_derived { n = reps, acc = 0 } })" }
+  println { msg = "hand    $(int::to_str { n = spin_hand { n = reps, acc = 0 } })" }
+
+## ── Measured 2026-10-18, after the scalar-ABI fix ───────────────────────────
+##
+## Built jars, two work sizes, slope-fitted so startup drops out:
+##
+##   reps      hand      derived
+##   40,000    1065 ms   1129 ms
+##   400,000   3113 ms   3306 ms
+##   slope/40k  227.6 ms   241.9 ms      -> derived is 6.3% slower
+##   intercept   837 ms     887 ms       -> agree within 6%, so the fit holds
+##
+## So the derived walk is **~6% behind a hand-written encode**, not zero. Do not
+## compare that 6% with the older "15.5%" figure as a like-for-like: that was a
+## different program (the HTTP route, against a two-pass hand encode), so only
+## this file's own numbers are a controlled comparison.
+##
+## The residue is diffuse and matches what the old ladder could not pin down —
+## ctx threading, the field-name transform, the `{it, val, ctx}` argument shape,
+## the Tier-3 entry — each of which measured FREE on its own. That is the shape
+## of a cost with no single owner, so it needs a different approach than another
+## bisect.

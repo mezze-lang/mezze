@@ -1,0 +1,79 @@
+## How much of the DERIVED codec's gap to a hand-written encode is left?
+##
+## The question W-P1 opened and did not answer. The old ladder put the derived
+## walker 15.5% behind a hand-written encode, attributed 11.6% of that to an
+## ability op on a captured receiver and the remaining 4.2% to "everything else
+## in the generated body". The 11.6% is fixed. This program measures what is
+## actually left, rather than subtracting one number from another.
+##
+## Both halves produce the SAME STRING — the program asserts it by comparing
+## lengths and printing both, so a "faster" result that encodes less is visible
+## instead of silent. That mistake has already been made once in this tree: a
+## +19% fusion reading came from a program that skipped a multiply.
+##
+## `MODE=derived` / `MODE=hand` picks a half; with neither, it checks they agree
+## and prints both. Run the BUILT JAR.
+use std::codec::core::{ Encode }
+use std::codec::json::{ Json, JNull, JBool, JInt, JFloat, JString, JArray, JObject,
+                        JsonC, json_default, to_str }
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::str
+use std::int
+use std::float
+
+type Row = {
+  id: Int,
+  name: Str,
+  score: Float,
+  active: Bool,
+}
+
+let rows: [Row] = seq::map {
+  xs = seq::range { start = 1, end = 21 },
+  f = { x } -> {
+    id = x,
+    name = "row-$(int::to_str { n = x })",
+    score = float::from_int { n = x } * 1.5,
+    active = x % 2 == 0,
+  },
+}
+
+## ── The derived walk ────────────────────────────────────────────────────────
+##
+## Behind an ability constraint, which is what makes it a derived walk with a
+## CAPTURED config — the shape the fix was about.
+let derived_encode: { body: 'a } with Encode JsonC 'a -> Str = { body } -> do
+  let j: Json = body.encode { config = json_default }
+  to_str { json = j }
+
+## ── The hand-written encode ─────────────────────────────────────────────────
+##
+## Builds the same `Json` tree with no codec, no config and no ability op. Field
+## order is ALPHABETICAL to match what the derived walk emits, so the two
+## strings are identical and the comparison is of cost, not of output.
+let hand_row: { r: Row } -> Json = { r } -> JObject {
+  fields = [
+    { key = "active", value = JBool { val = r.active } },
+    { key = "id", value = JInt { val = r.id } },
+    { key = "name", value = JString { val = r.name } },
+    { key = "score", value = JFloat { val = r.score } },
+  ],
+}
+
+let hand_encode: { body: [Row] } -> Str = { body } -> do
+  let j: Json = JArray { items = seq::map { xs = body, f = { x } -> hand_row { r = x } } }
+  to_str { json = j }
+
+
+## Split into two PROGRAMS rather than two loops in one, because the second loop
+## in a process rides a JIT the first one warmed, and that difference is the
+## size of what is being measured. `../src/app.mz` keeps both halves together
+## purely to assert they produce the same string.
+
+let spin: { n: Int, acc: Int } -> Int = { n, acc } ->
+  if n <= 0 then acc
+  else spin { n = n - 1, acc = acc + str::size { s = hand_encode { body = rows } } }
+
+let main = {} -> perform Console in
+  println { msg = int::to_str { n = spin { n = 400000, acc = 0 } } }
