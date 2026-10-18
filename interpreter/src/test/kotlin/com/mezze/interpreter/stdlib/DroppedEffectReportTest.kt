@@ -18,8 +18,11 @@ import kotlin.test.assertTrue
  * accepted. That is how a `with_timeout` flake got built — the sleeper never
  * slept, and `is_done` called it finished.
  *
- * This does not close the hole. It makes it audible, which is the part that was
- * missing: the effect still does not happen, but you are told.
+ * This does not make the effect happen. It makes the drop IMPOSSIBLE TO MISS:
+ * the report goes to stderr AND is latched for the embedder, so
+ * `MezzeTestHelper.run` fails any program that dropped one. This test is the
+ * one caller that opts out, via `runAllowingDroppedEffects`, because the drop is
+ * what it is asserting.
  */
 class DroppedEffectReportTest {
 
@@ -38,7 +41,7 @@ class DroppedEffectReportTest {
     @Test
     fun `a spawned effect nobody awaits is reported when the context closes`() {
         val err = stderrOf {
-            MezzeTestHelper.run(
+            MezzeTestHelper.runAllowingDroppedEffects(
                 """
                 use std::effects::async::{ Async, LoomAsync, sleep, yield_now }
                 use std::collections::seq
@@ -72,7 +75,7 @@ class DroppedEffectReportTest {
         // discharge it, is not a dropped effect and must not be reported — a
         // diagnostic that fires on correct programs is worse than none.
         val err = stderrOf {
-            MezzeTestHelper.run(
+            MezzeTestHelper.runAllowingDroppedEffects(
                 """
                 use std::effects::async::{ Async, LoomAsync, await, sleep }
                 use std::effects::time::{ Time, SystemTime }

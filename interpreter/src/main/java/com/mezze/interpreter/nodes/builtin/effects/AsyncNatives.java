@@ -721,12 +721,48 @@ public final class AsyncNatives {
         public void close() {
             long left = outstanding.get();
             if (left <= 0) return;
-            System.err.println("[mezze] " + left + " spawned task(s) performed an effect that no "
+            String report = left + " spawned task(s) performed an effect that no "
                 + "handler could discharge and were never awaited, so those effects never "
                 + "happened (effects " + String.join(", ", names) + "). `await` is what "
                 + "finishes such a task — it forces the suspended computation or re-raises the "
-                + "operation — and nothing else collects it.");
+                + "operation — and nothing else collects it.";
+            System.err.println("[mezze] " + report);
+            DROPPED_ON_THIS_THREAD.set(report);
         }
+    }
+
+    /**
+     * The drop, left where the embedder can find it after the context is gone.
+     *
+     * Printing it made it audible; a line on stderr is still something a test
+     * or a REPL can run straight past, and running past it is exactly how the
+     * `with_timeout` flake was built — a sleeper that never slept, with
+     * `is_done` calling it finished.
+     *
+     * PER THREAD, and that is the whole reason this static is acceptable: a
+     * context is closed by the thread that owns it, so the writer in
+     * `SuspendedOps.close` and the reader in the embedder are the same thread,
+     * and two tests sharing an Engine cannot see each other's drops. A plain
+     * static would cross contexts — the mistake this codebase has made and
+     * fixed three times (see MezzeContext's per-context-state note).
+     *
+     * It is a LATCH, not a counter: the question an embedder asks is "did this
+     * program drop an effect", and the report already carries how many.
+     */
+    private static final ThreadLocal<String> DROPPED_ON_THIS_THREAD = new ThreadLocal<>();
+
+    /**
+     * Read and clear this thread's dropped-effect report, or null if the
+     * program dropped nothing.
+     *
+     * Clearing on read is deliberate: a report belongs to one program run, and
+     * leaving it set would make the NEXT run on this thread inherit a failure
+     * it did not cause.
+     */
+    public static String takeDroppedEffectReport() {
+        String report = DROPPED_ON_THIS_THREAD.get();
+        DROPPED_ON_THIS_THREAD.remove();
+        return report;
     }
 
     /**

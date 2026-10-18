@@ -1,6 +1,7 @@
 package com.mezze.interpreter;
 
 import com.mezze.datastructures.list.MezzeList;
+import com.mezze.interpreter.nodes.builtin.effects.AsyncNatives;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.*;
 import com.mezze.language.parser.MezzeParser;
@@ -86,10 +87,28 @@ public final class MezzeTestHelper {
      * first call pays compile cost, subsequent calls are warm.
      */
     public static Object runJit(String sourceCode) {
-        return runWith(sourceCode, null, jitEngine, false);
+        return runWith(sourceCode, null, jitEngine, false, false);
+    }
+
+    /**
+     * Execute a program whose DROPPED EFFECT is the thing under test.
+     *
+     * `run` fails a program that spawned an effect nobody discharged, because a
+     * test that quietly computes the wrong answer is worse than one that stops.
+     * A test asserting the drop itself has to opt out, and should be the only
+     * caller of this.
+     */
+    public static Object runAllowingDroppedEffects(String sourceCode) {
+        Engine engine = newInterpreterEngine();
+        return runWith(sourceCode, null, engine, true, true);
     }
 
     private static Object runWith(String sourceCode, Path projectRoot, Engine engine, boolean ownEngine) {
+        return runWith(sourceCode, projectRoot, engine, ownEngine, false);
+    }
+
+    private static Object runWith(String sourceCode, Path projectRoot, Engine engine,
+                                  boolean ownEngine, boolean allowDroppedEffects) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
@@ -113,15 +132,42 @@ public final class MezzeTestHelper {
                 .allowExperimentalOptions(true);
 
         Context context = builder.build();
+        boolean closed = false;
 
         try {
             Source source = Source.newBuilder(MezzeLanguage.ID, sourceCode, sourcePath)
                 .buildLiteral();
 
             context.eval(source);
-            return MezzeLanguage.getLastExecutionResult();
-        } finally {
+            Object result = MezzeLanguage.getLastExecutionResult();
+            closed = true;
             try { context.close(true); } catch (Exception ignored) {}
+            // The context is gone, so its drop report — if any — is now latched
+            // on this thread. Read it HERE, between the run and the return, so a
+            // program that silently dropped an effect fails the test instead of
+            // handing back an answer it did not really compute.
+            //
+            // This is the C1 gap and it is specifically the HARNESS's: the type
+            // system already rejects the shape in any shipping path (a named
+            // entry performing an undischarged effect is refused, and `mez
+            // build`/`dev` take their entry from Mezze.toml), so a bare
+            // top-level expression under a test harness is the one place a drop
+            // can still happen. It is how the `with_timeout` flake was built.
+            String dropped = AsyncNatives.takeDroppedEffectReport();
+            if (dropped != null && !allowDroppedEffects) {
+                throw new AssertionError(
+                    "this program dropped an effect: " + dropped
+                    + "\n\nIf that is the behaviour under test, call "
+                    + "MezzeTestHelper.runAllowingDroppedEffects(...) instead.");
+            }
+            return result;
+        } finally {
+            if (!closed) {
+                try { context.close(true); } catch (Exception ignored) {}
+                // A failed run latches too; clear it so the next program on this
+                // thread does not inherit a report it did not cause.
+                AsyncNatives.takeDroppedEffectReport();
+            }
             if (ownEngine) {
                 try { engine.close(); } catch (Exception ignored) {}
             }

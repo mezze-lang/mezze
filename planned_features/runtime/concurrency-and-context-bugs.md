@@ -25,11 +25,50 @@ SEPARATELY, `--no-daemon`.
 
 ---
 
-## C1 — PARTLY FIXED: a spawned task's unhandled effect is dropped unless somebody awaits
+## C1 — FIXED: a dropped effect now FAILS the run it happened in
 
-**The drop is now audible, and `inspect` no longer lies about it. The hole
-itself is still open:** the effect still does not happen, and the types still
-say nothing. Fixing that is options (1) or (3) below.
+**The effect still does not happen — that part is by design and cannot change
+without breaking propagation (see option (1) below). What is fixed is that a
+program which drops one no longer answers as if it had not.**
+
+Option (1) as written — fail the promise instead of completing it — is NOT
+available: every `MezzePromise` transition CASes from `PENDING_SENTINEL`, so a
+COMPLETED promise cannot be moved to FAILED without rebuilding the outcome state
+machine, and completing-with-the-op-stashed is exactly how `await` propagates a
+spawned task's effect to its parent. That is a feature, not the bug.
+
+**Where the drop actually becomes observable was measured, not guessed.** A probe
+counted suspended children at every seam across the whole interpreter suite:
+
+- at SCOPE close (`PromiseTracker.clear`): **1 hit in 6841 tests.** So that is
+  not where drops happen — the common shape is a bare `Async.spawn` under a
+  `perform`, which no scope tracks. Failing the scope would have been the wrong
+  design, and the probe said so before any semantics changed.
+- at CONTEXT close (`SuspendedOps`): also 1, the test that asserts the report.
+
+So nothing in the suite depended on a silent drop, which made the fix safe:
+`SuspendedOps.close` now LATCHES its report (per thread — a context is closed by
+the thread that owns it, so the writer and the embedder's reader are the same
+thread and two tests sharing an Engine cannot see each other's drops), and
+`MezzeTestHelper.run` raises on it. `runAllowingDroppedEffects` is the opt-out,
+and `DroppedEffectReportTest` is its only caller.
+
+**That matters because the harness was the whole remaining hole.** The types
+already reject the shape everywhere that ships — a named entry performing an
+undischarged effect is refused, and `mez build`/`dev` take their entry from
+`Mezze.toml` (option 4, resolved). A bare top-level expression under a test
+harness was the one place left, and it is how the `with_timeout` flake was built.
+
+**It found one on the first run.** `TransitiveScopeCancelDeepTest` carries a
+comment promising "5s guard so a broken cancel wave doesn't hang" — and ran
+`perform LoomAsync in main {}` with `SystemTime` imported but never performed.
+Its guard's `sleep` had no handler, so the sleeper suspended, its effect was
+dropped, and `timed_out` could never flip: the guard did not exist. A broken
+cancel wave would have hung to the 15s `@Timeout` rather than reporting
+"escaped". Same shape as the flake — a sleeper that never slept. Fixed by
+performing `SystemTime`.
+
+6841 tests, 1 failure, and the failure was a real defect.
 
 **A correction to an earlier claim.** The commit that landed the `inspect` fix
 said it took the flake 3/400 → 0/400. That measurement was taken with a check
@@ -302,10 +341,27 @@ pass, and distinguishes yours from the pre-existing set immediately.
 
 ---
 
-## C6 — `with_timeout`'s `None` conflates two different answers
+## C6 — FIXED: `with_timeout` answers a `Result`, and the three outcomes are distinct
 
-`None` means either "the deadline elapsed" or "the promise settled as a failure
-or a cancellation". A caller that wants to distinguish them has to `inspect`
-the promise itself, which is a second observation of a thing that already
-answered. Documented in `async.mz`; splitting it changes the signature, so it
-wants a decision rather than a patch.
+**This entry was STALE — the code had already been changed and the doc had not.**
+`with_timeout` is `{ ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async, ...>`:
+the deadline is `AsyncTimedOut { ms }` and a promise that failed or was cancelled
+surfaces its OWN error. `Option` was what collapsed the two into one `None` and
+sent the caller back to `inspect` — a second observation of a promise that had
+already answered.
+
+**What was genuinely missing was the test.** Only the success case was covered,
+and the entire point of the change is the two unhappy cases being DIFFERENT, so
+a test asserting merely "it was an `Err`" would pass with the distinction
+collapsed again. `WithTimeoutDistinguishesOutcomesTest` names each of the four
+outcomes separately:
+
+- a value in time -> `Ok`
+- a deadline elapsing -> `AsyncTimedOut { ms }`, carrying the ms it was given,
+  because a caller that retries needs to know which deadline it was
+- a cancellation before the deadline -> `AsyncCancelled { reason }`, carrying
+  the caller's own reason, NOT a timeout
+- a failure before the deadline -> the promise's own `AsyncFailed { msg }`
+
+Verified by perturbation: collapsing the `Failed` arm back into
+`AsyncTimedOut` breaks exactly the cancelled and failed cases and nothing else.

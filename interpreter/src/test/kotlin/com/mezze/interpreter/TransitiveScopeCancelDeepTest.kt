@@ -52,6 +52,16 @@ class TransitiveScopeCancelDeepTest {
                       scoped { f = { sc } -> do
                         let c_sc = sc
                         # 5s guard so a broken cancel wave doesn't hang.
+                        #
+                        # This needs `perform SystemTime` at the bottom to work.
+                        # Without it `sleep` has no handler: the sleeper suspends,
+                        # its effect is DROPPED, and `timed_out` can never flip —
+                        # so the guard this comment promises did not exist, and a
+                        # broken cancel wave would have hung to the 15s @Timeout
+                        # instead of reporting "escaped". Found by the
+                        # dropped-effect check in MezzeTestHelper.run (C1); it is
+                        # the same shape as the `with_timeout` flake, a sleeper
+                        # that never slept.
                         let timed_out = atom { val = False }
                         let sleeper = Async.spawn { f = {} -> do
                           sleep { ms = 5000 }
@@ -84,7 +94,7 @@ class TransitiveScopeCancelDeepTest {
                 True  -> "escaped"
                 False -> "cancelled-deep"
 
-            perform LoomAsync in main {}
+            perform SystemTime in perform LoomAsync in main {}
         """.trimIndent()
         assertEquals("cancelled-deep", eval(source))
     }
