@@ -1,0 +1,53 @@
+## The DERIVED codec walker, on its own, at a work size where it dominates.
+##
+## This is W-P1's real target. The derived `Encode` walk calls `config.encode_*`
+## on a receiver the walk CAPTURES, once per node, and an ability op on a
+## captured receiver used to cost ~2x a plain call because it took the record
+## ABI and so could not bypass the callee's trampoline. On the HTTP work route
+## that was 15.5% of a request; here it is the whole program.
+##
+## Committed because the numbers it replaces came from an HTTP harness that was
+## never in the tree, so nobody could re-run them — which is how a 2.1x effect
+## stayed filed as 13% for weeks.
+##
+## Run with the built jar (`mez build` then `./.build/codec_encode_walker`), not
+## `mez dev`: dev leaves `engine.Compilation` off unless `MEZZE_JIT=1`, so it
+## measures the AST interpreter.
+use std::codec::core::{ Encode }
+use std::codec::json::{ Json, JsonC, json_default, to_str }
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::str
+use std::int
+
+type Row = {
+  id: Int,
+  name: Str,
+  score: Float,
+  active: Bool,
+}
+
+## One payload, built once, so the measurement is the ENCODE and not the build.
+let rows: [Row] = seq::map {
+  xs = seq::range { start = 1, end = 21 },
+  f = { x } -> {
+    id = x,
+    name = "row-$(int::to_str { n = x })",
+    score = 1.5,
+    active = True,
+  },
+}
+
+let encode_rows: { body: 'a } with Encode JsonC 'a -> Int = { body } -> do
+  let j: Json = body.encode { config = json_default }
+  ## Measure the WALK, not the serializer: `to_str` would add a second cost
+  ## that moves with the same input and muddles the attribution. The length
+  ## keeps the result live so nothing is dead-code eliminated.
+  str::size { s = to_str { json = j } }
+
+let spin: { n: Int, acc: Int } -> Int = { n, acc } ->
+  if n <= 0 then acc
+  else spin { n = n - 1, acc = acc + encode_rows { body = rows } }
+
+let main = {} -> perform Console in
+  println { msg = int::to_str { n = spin { n = 400000, acc = 0 } } }

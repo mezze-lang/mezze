@@ -1,0 +1,12 @@
+[package]
+name = "codec_encode_walker"
+version = "0.1.0"
+
+[[app]]
+name = "codec_encode_walker"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

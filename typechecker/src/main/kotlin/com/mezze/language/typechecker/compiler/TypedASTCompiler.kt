@@ -3995,6 +3995,43 @@ class TypedASTCompiler(
             }
         }
 
+        // Ability-impl OPERATIONS. These are compiled as standalone functions
+        // (see the `abilityImpls` loop in compile), so they are every bit as
+        // scalar-ABI-targetable as a top-level let — but they were never
+        // registered here, so `paramNamesForHash` answered null for every one
+        // and EVERY ability-op call fell back to the record ABI.
+        //
+        // That is not a missed micro-optimisation. The record ABI forces the
+        // call through the callee's trampoline, because unpacking the record
+        // into flat parameter slots is what the trampoline is FOR
+        // (`TrampolineRootNode.normalizeArgs`), and only a scalar call may
+        // bypass it (`MezzeBytecodeRootNode.resolveScalarTarget`). So an
+        // ability op paid a LazyStub + Trampoline hop per call where the same
+        // function called as a plain `let` paid none — measured at ~2.1x on a
+        // hot lambda (W-P1), and it is why the derived codec walker was 15.5%
+        // off a hand-written encode.
+        //
+        // The formula MUST match compileFunctionBody's `allParamNames` exactly
+        // — regular params in source order, then the sorted dict params — or a
+        // scalar call would hand the callee its arguments in the wrong order.
+        // Registered BEFORE preloweredFunctions so a prelowered stdlib entry
+        // still wins, matching the compile loop's `opHash in stdlibHashes` skip.
+        for (impl in abilityImpls) {
+            for ((opName, opBody) in impl.operations) {
+                // Only a lambda body has a callable shape with known params.
+                // A non-lambda op body is a THUNK that evaluates to a value —
+                // the same hazard #389 excludes non-lambda lets for above, so
+                // it keeps the record ABI.
+                val lambda = opBody as? TypedLambda ?: continue
+                val opHash = computeOpHash(impl.hash, opName)
+                val regular = lambda.params.map { it.name }
+                val dict = (dictMethodsForHash[opHash] ?: emptySet())
+                    .sorted()
+                    .map { com.mezze.language.ast.MagicParams.dictParamName(it) }
+                hashToParamNames[opHash] = regular + dict
+            }
+        }
+
         for ((hash, fnIR) in preloweredFunctions) {
             hashToParamNames[hash] = fnIR.paramNames
         }

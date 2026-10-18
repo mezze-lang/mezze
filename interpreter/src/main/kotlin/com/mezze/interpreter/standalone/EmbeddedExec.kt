@@ -112,12 +112,22 @@ object EmbeddedExec {
             if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
         }
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
-        // Suppress chatty Truffle log output UNLESS the user asked for
-        // trace compilation — compilation trace events route through the
-        // polyglot logger and would be eaten by level=OFF. (#515)
-        val traceRequested = System.getenv("MEZZE_TRACE_COMPILATION")?.let {
+        // Suppress chatty Truffle log output UNLESS the user asked for a
+        // trace — trace events route through the polyglot logger and would be
+        // eaten by level=OFF. (#515)
+        //
+        // EVERY trace flag has to be listed here, not just
+        // MEZZE_TRACE_COMPILATION. `MEZZE_TRACE_INLINING=1` on its own set its
+        // engine options correctly and then had its output swallowed by the
+        // level=OFF below, so the flag looked like a no-op and the option name
+        // looked wrong. That cost a detour; the inlining tree is the instrument
+        // W-P1 needed.
+        fun flagOn(name: String): Boolean = System.getenv(name)?.let {
             it == "1" || it.equals("true", ignoreCase = true)
         } ?: false
+        val traceRequested = flagOn("MEZZE_TRACE_COMPILATION") ||
+            flagOn("MEZZE_TRACE_INLINING") ||
+            flagOn("MEZZE_TRACE_TTI")
         if (!traceRequested) {
             System.setProperty("polyglot.log.level", "OFF")
         }
@@ -164,8 +174,15 @@ object EmbeddedExec {
                 "interpreter-only (no compilation events to trace). No-op."
             )
         }
-        // MEZZE_TRACE_INLINING=1 → engine.TraceCompilationDetails (per-call-site
-        // inlining decisions). Useful for #256/#257 hot-loop PE debugging.
+        // MEZZE_TRACE_INLINING=1 → the INLINING TREE (engine.TraceInlining),
+        // plus the per-compilation summary (engine.TraceCompilationDetails).
+        //
+        // It used to set only the summary, which gives `Inlined 8Y 0N` — a
+        // COUNT. A count tells you whether anything was refused; it cannot tell
+        // you WHICH call site, at what depth, or why, and when nothing is
+        // refused it says nothing at all. W-P1 is the cautionary tale: all three
+        // of its programs reach `9Y 0N`, so the summary declared them
+        // equivalent while one ran 2.1x slower.
         val traceInlining = System.getenv("MEZZE_TRACE_INLINING")?.let {
             it == "1" || it.equals("true", ignoreCase = true)
         } ?: false
@@ -184,7 +201,18 @@ object EmbeddedExec {
             .option("engine.WarnInterpreterOnly", "false")
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
-            .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
+            .apply {
+                if (traceInlining && jitCapable) {
+                    // TraceInlining prints NOTHING on its own — the tree is
+                    // emitted as part of a compilation's trace, so the base
+                    // TraceCompilation has to be on too. Setting just the two
+                    // detail options gave an empty log and looked like the
+                    // option name was wrong.
+                    option("engine.TraceCompilation", "true")
+                    option("engine.TraceCompilationDetails", "true")
+                    option("engine.TraceInlining", "true")
+                }
+            }
             .apply { if (traceTTI && jitCapable) option("engine.TraceTransferToInterpreter", "true") }
             // Aggressive compilation thresholds. Mezze's static type system
             // means call-site types stabilize at invocation #1, so the JIT's

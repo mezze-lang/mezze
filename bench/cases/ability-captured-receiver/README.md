@@ -1,4 +1,11 @@
-# An ability op on a CAPTURED receiver costs ~2.1x a plain function
+# FIXED — an ability op took the record ABI, so it could not skip the trampoline
+
+> **FIXED 2026-10-18.** `lamp` went 30.9s -> 14.9s at 100x work, landing exactly
+> on `lamplain`: an ability op now costs what a plain call costs. `lamc` went
+> 20.1s -> 2.3s. Cause and fix are at the bottom; the history below is kept
+> because its two WRONG readings are the reusable lesson.
+
+# (historical) An ability op on a CAPTURED receiver costs ~2.1x a plain function
 
 > **CORRECTED 2026-10-18.** This file first said "~13%". The raw timings below
 > were right; the PERCENTAGE was wrong, because `date`-around-the-process times
@@ -120,3 +127,61 @@ pair never isolated the ability op on its own. In interpreter mode that read
 costs +36% and is cleanly separable; under JIT it is folded. Not committed here,
 since under JIT it measures nothing; reconstruct it from this paragraph if the
 interpreter-mode decomposition is ever wanted.
+
+
+## The cause: an unregistered map, not a Graal mystery
+
+`TypedASTCompiler.populateHashToParamNames` registered param names for
+`TypedLetDecl` lambdas only. **Ability-impl operations were never registered**,
+so `paramNamesForHash(opHash)` was null, `emitCallDirect` could not prove full
+application, and every ability-op call took the RECORD ABI.
+
+The record ABI is not a free choice. Unpacking the argument record into flat
+parameter slots is what the callee's trampoline is FOR
+(`TrampolineRootNode.normalizeArgs`), and only a scalar call may bypass it
+(`MezzeBytecodeRootNode.resolveScalarTarget`). So an ability op paid a
+`LazyStub` + `Trampoline` hop per call — 229 IR nodes for a body of
+`B1 { v = v }` — that the same function called as a plain `let` did not.
+
+The fix registers `computeOpHash(impl.hash, opName)` against
+`lambda.params + sorted dict params`, matching `compileFunctionBody`'s own
+`allParamNames` exactly. Get that order wrong and scalar calls hand the callee
+transposed arguments, which is a WRONG ANSWER, not a crash — hence
+`AbilityOpScalarArgOrderTest` (6 of its 7 cases fail if the order is reversed).
+
+## The inlining tree: nothing was ever refused
+
+The old claim was that the op "does not inline". It does. All three programs
+reach `Inlined 9Y 0N` on the hot OSR compilation. What differed was the SIZE,
+because the trampoline hop survived inlining:
+
+    before   lamplain  LazyStub[lambda] 5Y 0N  code 2427   (no TrampolineRootNode[e_a])
+             lamc      LazyStub[lambda] 8Y 0N  code 4854
+             lamp      LazyStub[lambda] 8Y 0N  code 6409   (+ TrampolineRootNode[e_a])
+
+    after    lamp's tree is identical in shape to lamplain's (IR 354, only
+             `unbox` inlined), and TrampolineRootNode[e_a] is gone from all three.
+
+So `Inlined NY 0N` — a COUNT — declared three programs equivalent while one ran
+2.1x slower. The tree is the instrument; the count is not.
+
+## After
+
+| program | receiver | callee | before | after | speedup |
+|---|---|---|---|---|---|
+| `lamplain` | captured | plain fn | 14.8s | 14.9s | 1.00 (control) |
+| `lamp` | captured | ability op | 30.9s | **14.9s** | **2.07x** |
+| `lamc` | GLOBAL | ability op | 20.1-22.0s | **2.3s** | **~8.7x** |
+
+The real target, the derived codec walk, is in
+`bench/cases/codec-encode-walker`: **1.44x faster** on the loop.
+
+## Getting the tree
+
+    mez build && MEZZE_TRACE_INLINING=1 ./.build/<app>
+
+`MEZZE_TRACE_INLINING=1` used to emit nothing: it set `TraceCompilationDetails`
+(the counts) rather than `TraceInlining` (the tree), and the log-level gate only
+listed `MEZZE_TRACE_COMPILATION`, so even once the option was right the output
+was swallowed. Both are fixed. `mez dev --trace-jit` still emits nothing — use
+the built jar.

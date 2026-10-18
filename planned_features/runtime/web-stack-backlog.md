@@ -88,7 +88,7 @@ conditions are in `concurrency-and-context-bugs.md`.
 
 ## Part 2 — Performance (measured, ranked by size)
 
-### W-P1 — OPEN, and ~2.1x not 15.5%: an ability op on a CAPTURED receiver
+### W-P1 — FIXED: an ability op took the record ABI, so it could not skip the trampoline
 
 The walker's gap is **15.5%** (not 20% — that figure came from a harness that
 could not resolve it). It is now fully accounted for, and it is NOT about codecs
@@ -228,6 +228,79 @@ instrument is a BUILT JAR plus `MEZZE_TRACE_COMPILATION=1`, which goes through
 `EmbeddedExec` instead of `RuntimeServer`. That is also what the original
 measurements used, which is why their absolute times were ~5x smaller than
 `mez dev`'s. Unfixed; it is the tool that would have shortened this.
+
+#### THE CAUSE, and the fix — one unregistered map
+
+`TypedASTCompiler.populateHashToParamNames` walked only `TypedLetDecl`s whose
+value is a lambda. **Ability-impl OPERATIONS were never registered**, so
+`paramNamesForHash(opHash)` answered null for every one of them, `emitCallDirect`
+could not prove full application, and every ability-op call fell back to the
+RECORD ABI.
+
+That is not a missed micro-optimisation, because the record ABI is not optional:
+unpacking the argument record into flat parameter slots is what the callee's
+trampoline is FOR (`TrampolineRootNode.normalizeArgs`), and only a scalar call
+may bypass it (`MezzeBytecodeRootNode.resolveScalarTarget`,
+`needsTrampoline = hasTail || paramCount > 0`). So an ability op paid a
+`LazyStub` + `Trampoline` hop per call — 229 IR nodes for a body of
+`B1 { v = v }` — where the same function called as a plain `let` paid none.
+
+The fix registers each impl op's `computeOpHash(impl.hash, opName)` against
+`lambda.params + sorted dict params`, which is exactly `compileFunctionBody`'s
+own `allParamNames`. Non-lambda op bodies are excluded, the same way #389
+excludes non-lambda lets: such a body is a thunk, and calling its hash with a
+fresh arg record would discard accumulated partial args.
+
+#### What the inlining tree showed, and why the earlier read was wrong
+
+The old note said the op "does not inline". It does. All three programs reach
+`Inlined 9Y 0N` on their hot OSR compilation — **nothing was ever refused.**
+What differed was the compiled SIZE, because the trampoline hop survived
+inlining:
+
+    before    lamplain  LazyStub[lambda] 5Y 0N  code 2427   (no TrampolineRootNode[e_a] at all)
+              lamc      LazyStub[lambda] 8Y 0N  code 4854
+              lamp      LazyStub[lambda] 8Y 0N  code 6409   (+ TrampolineRootNode[e_a], 229 nodes)
+
+    after     lamp's lambda tree is byte-identical in shape to lamplain's
+              (IR 354, only `unbox` inlined) and no TrampolineRootNode[e_a]
+              appears in any of the three.
+
+#### Measured, built jars, 100x work, 3 reps, spread under 1.3%
+
+| program | receiver | callee | before | after | speedup |
+|---|---|---|---|---|---|
+| `lamplain` | captured | plain fn | 14.8s | 14.9s | 1.00 (control, unchanged) |
+| `lamp` | captured | ability op | 30.9s | **14.9s** | **2.07x** |
+| `lamc` | GLOBAL | ability op | 20.1-22.0s | **2.3s** | **~8.7x** |
+
+`lamp` now lands exactly on the plain-function control: an ability op costs what
+a plain call costs. `lamc` goes further than parity because the scalar ABI lets
+Graal fold the constant-receiver case away almost entirely.
+
+#### The codec walk — the gap this was found through
+
+`bench/cases/codec-encode-walker` (committed, because the HTTP harness these
+numbers used to come from was never in the tree, which is how a 2.1x effect
+stayed filed as 13%). A/B/A on the same build, 3 reps, same answer either side:
+
+| | whole process | loop (less ~0.9s jar startup) |
+|---|---|---|
+| before | 4368 ms | 3463 ms |
+| after | **3302 ms** | **2397 ms** |
+| restored | 3263-3332 ms | — |
+
+**The derived encode walk is 1.44x faster — 31% off the loop, 24% off the whole
+process.** That is the 15.5% HTTP-route gap's dominant term; the route does more
+than encode, so the whole-request gain will be smaller and is not yet measured
+(see below).
+
+#### Still unmeasured: the HTTP route itself
+
+The server benchmark was never committed, so the 15.5% figure cannot be
+re-measured without rebuilding that harness. The codec benchmark above is now in
+the tree so this does not happen again. Re-running the route is the remaining
+step to close the number.
 
 #### Where to look next
 
