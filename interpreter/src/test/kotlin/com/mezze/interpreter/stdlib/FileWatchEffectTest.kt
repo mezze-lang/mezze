@@ -291,4 +291,94 @@ class FileWatchEffectTest {
     /** Live NIO watcher threads. `AbstractPoller` names them all the same. */
     private fun watchThreads(): Int =
         Thread.getAllStackTraces().keys.count { it.name == "FileSystemWatchService" }
+
+    // ==================== Overflow ====================
+
+    /**
+     * `Overflow` is the one event kind that only memfs can produce on demand,
+     * and it was the one with no test.
+     *
+     * The queue is bounded at 1024 like inotify's, and past the cap the events
+     * are dropped and a single `Overflow` is delivered in their place. That is
+     * the honest answer — a watcher that quietly lost events cannot tell the
+     * difference between "nothing changed" and "I missed everything" — but it
+     * is also the one `WatchEvent` arm a caller is most likely to get wrong,
+     * because it carries no path and replaces rather than accompanies the
+     * batch.
+     *
+     * 1100 writes to one path: the first is Created, the rest Modified, and
+     * everything past 1024 trips the flag.
+     */
+    @Test
+    fun `MemoryFileSystem reports Overflow once the queue passes its cap`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::collections::{ bytes, seq }
+            perform MemoryFileSystem in perform MemoryFileWatch in do
+              let _ = FileSystem.create_directory { path = "/d" }
+              match FileWatch.watch { path = "/d", recursive = False } is
+                Err { error = _ } -> "watch-failed"
+                Ok { val = h } -> do
+                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } } }
+                match FileWatch.poll { handle = h, timeout_ms = 0 } is
+                  Ok { val = evs } -> match seq::first { xs = evs } is
+                    Some { val = Overflow } -> "overflow"
+                    Some { val = _ } -> "wrong-kind"
+                    None -> "no-events"
+                  Err { error = _ } -> "poll-failed"
+        """.trimIndent()
+        assertEquals("overflow", eval(code))
+    }
+
+    /**
+     * Overflow REPLACES the batch rather than joining it — one event, not
+     * 1024 plus a marker. A caller that folded over the batch looking for a
+     * path would otherwise be handed a thousand stale events alongside the
+     * notice that they are unreliable.
+     */
+    @Test
+    fun `MemoryFileSystem an overflowed poll returns exactly one event`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::collections::{ bytes, seq }
+            perform MemoryFileSystem in perform MemoryFileWatch in do
+              let _ = FileSystem.create_directory { path = "/d" }
+              match FileWatch.watch { path = "/d", recursive = False } is
+                Err { error = _ } -> 0 - 1
+                Ok { val = h } -> do
+                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } } }
+                match FileWatch.poll { handle = h, timeout_ms = 0 } is
+                  Ok { val = evs } -> seq::size { xs = evs }
+                  Err { error = _ } -> 0 - 1
+        """.trimIndent()
+        assertEquals(1L, eval(code))
+    }
+
+    /**
+     * And the flag clears: after the overflowed batch is taken, a watcher goes
+     * back to reporting real events rather than Overflow for ever.
+     */
+    @Test
+    fun `MemoryFileSystem recovers after an overflow`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::collections::{ bytes, seq }
+            perform MemoryFileSystem in perform MemoryFileWatch in do
+              let _ = FileSystem.create_directory { path = "/d" }
+              match FileWatch.watch { path = "/d", recursive = False } is
+                Err { error = _ } -> "watch-failed"
+                Ok { val = h } -> do
+                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } } }
+                let _ = FileWatch.poll { handle = h, timeout_ms = 0 }
+                let _ = FileSystem.write_bytes { path = "/d/after", bytes = bytes::from_str { s = "y" } }
+                match FileWatch.poll { handle = h, timeout_ms = 0 } is
+                  Ok { val = evs } -> match seq::first { xs = evs } is
+                    Some { val = Created { path = p } } -> p
+                    Some { val = Overflow } -> "still-overflowing"
+                    Some { val = _ } -> "wrong-kind"
+                    None -> "no-events"
+                  Err { error = _ } -> "poll-failed"
+        """.trimIndent()
+        assertEquals("/d/after", eval(code))
+    }
 }
