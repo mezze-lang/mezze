@@ -73,7 +73,7 @@ public final class MezzeContext {
     /**
      * Deliberately NOT `computeIfAbsent`: [create] runs OUTSIDE the map, because
      * a state object's own constructor may well reach back for its state —
-     * MemoryFS's does, to seed the root directory — and ConcurrentHashMap
+     * MemoryFileSystem's does, to seed the root directory — and ConcurrentHashMap
      * answers a mapping function that touches the same map with "Recursive
      * update". Losing the race is cheap: the loser's object is simply dropped,
      * never registered, never seen.

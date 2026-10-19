@@ -16,7 +16,7 @@ use std::comptime::{ Comptime, ComptimeEval }
 use std::effects::noop::{ noop }
 
 let config = {} -> Comptime.comptime { eval = {} ->
-    perform LocalDisk in read_text_or { path = "app.config", def = "{}" }
+    perform LocalFileSystem in read_text_or { path = "app.config", def = "{}" }
 }
 
 # A computation that needs no effects still says so — `<*>` has a lower bound.
@@ -298,7 +298,7 @@ Handlers at compile time are the **ordinary** handlers. There is no
 compile-time handler set, because the evaluator *is* the interpreter.
 
 ```mezze
-Comptime.comptime { eval = {} -> perform LocalDisk in read_text_or { path = "app.config", def = "{}" } }
+Comptime.comptime { eval = {} -> perform LocalFileSystem in read_text_or { path = "app.config", def = "{}" } }
 ```
 
 Which handler you perform is part of the block's content hash, so determinism is

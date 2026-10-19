@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * In-memory FileSystem impl for tests (#82).
  *
- * Same 13-op surface as LocalDisk, backed by a ConcurrentHashMap of
+ * Same 13-op surface as LocalFileSystem, backed by a ConcurrentHashMap of
  * path → { bytes, modifiedMs }. Directories tracked as a separate map.
  * Streaming handles carry their own position and refer back to the map.
  */
@@ -182,7 +182,7 @@ public final class MemoryFilesystemNatives {
     // ==================== FileHandle (in-memory) ====================
 
     /**
-     * Streaming handle for MemoryFS. Reads/writes byte-array pages
+     * Streaming handle for MemoryFileSystem. Reads/writes byte-array pages
      * held by the file's {@link Entry}. Position advances on each op.
      *
      * write handles accumulate bytes in a ByteArrayOutputStream; on
@@ -323,7 +323,7 @@ public final class MemoryFilesystemNatives {
         if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
         if (!isDir(destParent)) return errNotFound(destParent);
-        // MemoryFS is a byte-array copy — no kernel path, but still
+        // MemoryFileSystem is a byte-array copy — no kernel path, but still
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
         files().put(dest, new Entry(srcEntry.bytes.clone()));
@@ -371,7 +371,7 @@ public final class MemoryFilesystemNatives {
                 if (!isDir(parentW)) return errNotFound(parentW);
                 // Truncate NOW, not lazily when close republishes the buffer.
                 // OpenMode says "Write — truncate-or-create. Existing content
-                // replaced", and LocalDisk opens with TRUNCATE_EXISTING, so
+                // replaced", and LocalFileSystem opens with TRUNCATE_EXISTING, so
                 // the file is empty the moment it is open. Deferring it made
                 // the two backends disagree: a write_at on a freshly opened
                 // Write handle patched the OLD bytes here and an empty file
@@ -441,7 +441,7 @@ public final class MemoryFilesystemNatives {
      *
      * A write handle buffers into `writeBuf` and only publishes to `files()`
      * on close, so a handle that had been fsynced but not closed would read
-     * back as absent here while LocalDisk would already show the bytes. That
+     * back as absent here while LocalFileSystem would already show the bytes. That
      * divergence is the exact failure the effect split exists to prevent — a
      * backend quietly meaning something different by the same op — so fsync
      * publishes the buffer. The buffer is kept, so later writes still append
@@ -490,7 +490,7 @@ public final class MemoryFilesystemNatives {
      * has no random access at all — so `write_at` publishes whatever is
      * pending first and then patches the entry. Without that, the handle's
      * buffer and the entry would be two different versions of the file and
-     * a read_at between two write_chunks would see the wrong one. LocalDisk
+     * a read_at between two write_chunks would see the wrong one. LocalFileSystem
      * has no buffer (write_chunk goes straight to the channel), so this is
      * what keeps the two backends meaning the same thing.
      */
@@ -565,14 +565,14 @@ public final class MemoryFilesystemNatives {
         return ok(MezzeRecord.empty());
     }
 
-    /** Seeking past the end is legal and does not extend — same as LocalDisk. */
+    /** Seeking past the end is legal and does not extend — same as LocalFileSystem. */
     @TruffleBoundary
     public static Object seek(MezzeRecord args) {
         MemFileHandle h = getMemHandle(args, "handle");
         long offset = getLong(args, "offset");
         if (h.closed.get()) return errClosedHandle(h.path);
         if (offset < 0) return errIO(h.path, "negative offset: " + offset);
-        if (offset > Integer.MAX_VALUE) return errIO(h.path, "offset too large for MemoryFS");
+        if (offset > Integer.MAX_VALUE) return errIO(h.path, "offset too large for MemoryFileSystem");
         h.pos = (int) offset;
         return ok(MezzeRecord.empty());
     }
@@ -904,7 +904,7 @@ public final class MemoryFilesystemNatives {
                 if (blocking) {
                     // Parking here would hang forever: the only holder is this
                     // same context, and it is the thread asking.
-                    return errIO(path, "lock is held and blocking would deadlock in MemoryFS");
+                    return errIO(path, "lock is held and blocking would deadlock in MemoryFileSystem");
                 }
                 return errPermissionDenied(path, "lock (already held)");
             }

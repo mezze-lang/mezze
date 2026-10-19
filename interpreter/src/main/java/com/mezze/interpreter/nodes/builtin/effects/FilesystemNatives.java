@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Native implementations for LocalDisk FileSystem effect (#82).
+ * Native implementations for LocalFileSystem FileSystem effect (#82).
  *
  * Thirteen primitive ops mapping to java.nio.file kernel fast paths:
  *   read_bytes   — Files.readAllBytes

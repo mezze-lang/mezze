@@ -33,7 +33,7 @@ class HostNativeErrorHandlingTest {
     fun setUp() {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.language.typechecker.TypeChecker.clearCache()
-        // MemoryFS is per context now; a fresh program starts empty.
+        // MemoryFileSystem is per context now; a fresh program starts empty.
     }
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
@@ -47,8 +47,8 @@ class HostNativeErrorHandlingTest {
         // A path guaranteed not to exist on the real disk.
         val missing = tmp.resolve("definitely_missing_file").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalDisk }
-            perform LocalDisk in
+            use std::effects::filesystem::{ FileSystem, LocalFileSystem }
+            perform LocalFileSystem in
               match FileSystem.read_bytes { path = "$missing" } is
                 Ok { val } -> "unexpected-ok"
                 Err { error } -> match error is

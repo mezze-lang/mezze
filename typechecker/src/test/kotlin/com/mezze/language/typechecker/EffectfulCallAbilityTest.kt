@@ -393,7 +393,7 @@ class EffectfulCallAbilityTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let getNumber: {} -> Int <FileSystem, Log> = {} -> do

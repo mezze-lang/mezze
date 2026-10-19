@@ -216,20 +216,20 @@ let main = {} ->
 
 **`std::effects::filesystem`** - File system operations
 ```mezze
-use std::effects::filesystem::{FileSystem, LocalDisk, MemoryFS}
+use std::effects::filesystem::{FileSystem, LocalFileSystem, MemoryFileSystem}
 
 let program = {} -> do
     FileSystem.write_file { path = "test.txt", content = "Hello!" }
     let content = FileSystem.read_file { path = "test.txt" }
     content
 
-# Use LocalDisk for real filesystem
+# Use LocalFileSystem for real filesystem
 let main = {} ->
-    perform LocalDisk in program {}
+    perform LocalFileSystem in program {}
 
-# Or MemoryFS for testing
+# Or MemoryFileSystem for testing
 let test = {} ->
-    perform MemoryFS in program {}
+    perform MemoryFileSystem in program {}
 ```
 
 **`std::effects::time`** - Time operations
@@ -329,7 +329,7 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 
 ### Effects
 - `std::effects::log` - Logging (Console, QuietConsole)
-- `std::effects::filesystem` - Files (LocalDisk, MemoryFS)
+- `std::effects::filesystem` - Files (LocalFileSystem, MemoryFileSystem)
 - `std::effects::time` - Time (SystemTime, MockTime)
 - `std::effects::random` - Random (SystemRandom, SeededRandom)
 - `std::effects::environment` - Environment (SystemEnvironment, MockEnvironment)
@@ -341,7 +341,7 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 Most effect modules provide both production and testing implementations:
 
 - **Log**: `Console` (real), `QuietConsole` (testing)
-- **FileSystem**: `LocalDisk` (real), `MemoryFS` (testing)
+- **FileSystem**: `LocalFileSystem` (real), `MemoryFileSystem` (testing)
 - **Time**: `SystemTime` (real), `MockTime` (testing)
 - **Random**: `SystemRandom` (crypto), `SeededRandom` (reproducible)
 - **Environment**: `SystemEnvironment` (real), `MockEnvironment` (testing)
@@ -351,14 +351,14 @@ This allows you to write testable code by swapping implementations:
 ```mezze
 # Production
 let main = {} ->
-    perform LocalDisk in
+    perform LocalFileSystem in
     perform SystemTime in
     perform Console in
         my_program {}
 
 # Testing
 let test = {} ->
-    perform MemoryFS in
+    perform MemoryFileSystem in
     perform MockTime { current_time = 0 } in
     perform QuietConsole in
         my_program {}

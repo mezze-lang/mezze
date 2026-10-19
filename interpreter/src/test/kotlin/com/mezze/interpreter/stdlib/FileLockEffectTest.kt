@@ -10,7 +10,7 @@ import java.nio.file.Path
 /**
  * `FileLock` — whole-file advisory locking as its own effect.
  *
- * The point of these tests is that contention is OBSERVABLE. MemoryFS could
+ * The point of these tests is that contention is OBSERVABLE. MemoryFileSystem could
  * have reported success unconditionally — one program rarely contends with
  * itself — but then "a lock excludes someone" would be untestable without a
  * second process, and a backend that always succeeds is the kind of lie the
@@ -27,10 +27,10 @@ class FileLockEffectTest {
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
-    // ==================== MemoryFS ====================
+    // ==================== MemoryFileSystem ====================
 
     @Test
-    fun `MemoryFS exclusive lock then unlock`() {
+    fun `MemoryFileSystem exclusive lock then unlock`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
             perform MemoryFileLock in
@@ -45,7 +45,7 @@ class FileLockEffectTest {
 
     /** The one that matters: a second exclusive acquire must be refused. */
     @Test
-    fun `MemoryFS exclusive lock excludes a second acquire`() {
+    fun `MemoryFileSystem exclusive lock excludes a second acquire`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
             perform MemoryFileLock in
@@ -62,7 +62,7 @@ class FileLockEffectTest {
 
     /** Releasing must actually free it, or the count is wrong. */
     @Test
-    fun `MemoryFS unlock lets the next acquire succeed`() {
+    fun `MemoryFileSystem unlock lets the next acquire succeed`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
             perform MemoryFileLock in
@@ -78,7 +78,7 @@ class FileLockEffectTest {
     }
 
     @Test
-    fun `MemoryFS shared locks stack and exclude an exclusive`() {
+    fun `MemoryFileSystem shared locks stack and exclude an exclusive`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Shared, Exclusive }
             perform MemoryFileLock in
@@ -97,7 +97,7 @@ class FileLockEffectTest {
 
     /** A shared hold must be decremented, not cleared, by one unlock. */
     @Test
-    fun `MemoryFS one unlock does not release both shared holds`() {
+    fun `MemoryFileSystem one unlock does not release both shared holds`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Shared, Exclusive }
             perform MemoryFileLock in
@@ -117,7 +117,7 @@ class FileLockEffectTest {
 
     /** Blocking on a held lock can only deadlock in one context — refuse it. */
     @Test
-    fun `MemoryFS blocking acquire on a held lock reports rather than hanging`() {
+    fun `MemoryFileSystem blocking acquire on a held lock reports rather than hanging`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
             perform MemoryFileLock in
@@ -133,7 +133,7 @@ class FileLockEffectTest {
     }
 
     @Test
-    fun `MemoryFS unlock is idempotent`() {
+    fun `MemoryFileSystem unlock is idempotent`() {
         val code = """
             use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
             perform MemoryFileLock in
@@ -148,10 +148,10 @@ class FileLockEffectTest {
         assertEquals("idempotent", eval(code))
     }
 
-    // ==================== LocalDisk ====================
+    // ==================== LocalFileSystem ====================
 
     @Test
-    fun `LocalDisk exclusive lock creates the lockfile and releases`(@TempDir tmp: Path) {
+    fun `LocalFileSystem exclusive lock creates the lockfile and releases`(@TempDir tmp: Path) {
         val path = tmp.resolve("app.lock").toString()
         val code = """
             use std::effects::filesystem::{ FileLock, LocalFileLock, Exclusive }
@@ -171,7 +171,7 @@ class FileLockEffectTest {
      * and it must not escape as a host exception.
      */
     @Test
-    fun `LocalDisk second acquire in one process is refused, not thrown`(@TempDir tmp: Path) {
+    fun `LocalFileSystem second acquire in one process is refused, not thrown`(@TempDir tmp: Path) {
         val path = tmp.resolve("app.lock").toString()
         val code = """
             use std::effects::filesystem::{ FileLock, LocalFileLock, Exclusive }

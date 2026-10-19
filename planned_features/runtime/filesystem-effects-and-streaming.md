@@ -52,7 +52,7 @@ Consequences that fall out of it:
 
 | Effect | Ops | Local performer | Memory performer |
 |---|---|---|---|
-| `FileSystem` | 9 | `LocalDisk` | `MemoryFS` |
+| `FileSystem` | 9 | `LocalFileSystem` | `MemoryFileSystem` |
 | `FileStreaming` | 8 | `LocalFileStreaming` | `MemoryFileStreaming` |
 | `FilePermissions` | 6 | `LocalFilePermissions` | `MemoryFilePermissions` |
 | `FileSymlinks` | 4 | `LocalFileSymlinks` | `MemoryFileSymlinks` |
@@ -67,9 +67,9 @@ while every backend implements only what it genuinely supports.
 
 **Why fourteen performer names and not two.** A performer implements exactly
 **one** effect — `validateDuplicatePerformers` keys on the performer's name and
-rejects a second `impl` for it (V0701). So `impl FileDurability for LocalDisk`
+rejects a second `impl` for it (V0701). So `impl FileDurability for LocalFileSystem`
 is not expressible; each effect gets its own `Local*`/`Memory*` pair, and a
-program composes them: `perform LocalDisk in perform LocalFileDurability in …`.
+program composes them: `perform LocalFileSystem in perform LocalFileDurability in …`.
 This is the shape the design wanted anyway — the set of performers in scope *is*
 the declaration of what the backend supports.
 
@@ -98,7 +98,7 @@ because they are the shape of bug this split invites:
 - `close` republished its buffered writes *over* a `write_at`, undoing it. A
   positional op now takes authority and clears the handle's write buffer.
 - memfs `open(Write)` did not truncate, though its doc said it did —
-  `LocalDisk` passes `TRUNCATE_EXISTING`. Writing both backends in the **same
+  `LocalFileSystem` passes `TRUNCATE_EXISTING`. Writing both backends in the **same
   pass** is what surfaced this; neither backend alone looks wrong.
 
 #### 3. `FileDurability` — commit semantics (2 ops)
@@ -118,12 +118,12 @@ that hiding it behind an explicit effect is the honest move.
 `WatchEvent = | Created, Modified, Deleted, Overflow |`.
 
 `poll` returns a **batch**, matching inotify's `read` semantics, and lets the
-caller control cadence rather than imposing one. LocalDisk uses NIO
+caller control cadence rather than imposing one. LocalFileSystem uses NIO
 `WatchService`; memfs **synthesises** events from its own mutations (8 mutation
 points call `notifyWatchers`), bounded at 1024 queued events before `Overflow`.
 
 The event semantics are pinned on memfs, where they are deterministic. The
-LocalDisk tests are deliberately weaker — a real `WatchService` may coalesce or
+LocalFileSystem tests are deliberately weaker — a real `WatchService` may coalesce or
 delay, so asserting an exact sequence there would be a flake generator.
 
 #### 5. `FileLock` — coordinated access (2 ops)

@@ -15,9 +15,9 @@ import java.nio.file.Path
  * a WAL, a queue or a database needs the difference, so a function that
  * needs it declares `<FileDurability>` and everyone else carries nothing.
  *
- * The interesting case is MemoryFS. A memfs write handle buffers into
+ * The interesting case is MemoryFileSystem. A memfs write handle buffers into
  * `writeBuf` and only publishes to the file map on `close`, so a no-op
- * `fsync` would mean something different from LocalDisk's — fsync-then-read
+ * `fsync` would mean something different from LocalFileSystem's — fsync-then-read
  * would see the bytes on disk and nothing in memory. The memfs native
  * therefore publishes its buffer, and `fsync publishes a buffered write`
  * below is what pins that. A backend quietly meaning something different by
@@ -29,19 +29,19 @@ class FileDurabilityEffectTest {
     fun setUp() {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.language.typechecker.TypeChecker.clearCache()
-        // MemoryFS state is per CONTEXT and every run is its own context.
+        // MemoryFileSystem state is per CONTEXT and every run is its own context.
     }
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
-    // ==================== MemoryFS ====================
+    // ==================== MemoryFileSystem ====================
 
     @Test
-    fun `MemoryFS fsync on a write handle succeeds`() {
+    fun `MemoryFileSystem fsync on a write handle succeeds`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileStreaming in perform MemoryFileDurability in do
+            perform MemoryFileSystem in perform MemoryFileStreaming in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileStreaming.open { path = "/d/wal", mode = Write } is
                 Ok { val = h } -> do
@@ -59,15 +59,15 @@ class FileDurabilityEffectTest {
     /**
      * The divergence guard. After `fsync` and BEFORE `close`, the bytes must
      * be readable — that is what durability means to a caller. Without the
-     * publish in the memfs native this reads back empty while LocalDisk
+     * publish in the memfs native this reads back empty while LocalFileSystem
      * reads back the data.
      */
     @Test
-    fun `MemoryFS fsync publishes a buffered write before close`() {
+    fun `MemoryFileSystem fsync publishes a buffered write before close`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileStreaming in perform MemoryFileDurability in do
+            perform MemoryFileSystem in perform MemoryFileStreaming in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileStreaming.open { path = "/d/wal", mode = Write } is
                 Ok { val = h } -> do
@@ -87,10 +87,10 @@ class FileDurabilityEffectTest {
     }
 
     @Test
-    fun `MemoryFS fsync_dir succeeds for a directory and reports a missing one`() {
+    fun `MemoryFileSystem fsync_dir succeeds for a directory and reports a missing one`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFS, MemoryFileDurability }
-            perform MemoryFS in perform MemoryFileDurability in do
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability }
+            perform MemoryFileSystem in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
               let here = match FileDurability.fsync_dir { path = "/d" } is
                 Ok { val = _ } -> "ok"
@@ -103,15 +103,15 @@ class FileDurabilityEffectTest {
         assertEquals("ok-err", eval(code))
     }
 
-    // ==================== LocalDisk ====================
+    // ==================== LocalFileSystem ====================
 
     @Test
-    fun `LocalDisk fsync forces a written handle`(@TempDir tmp: Path) {
+    fun `LocalFileSystem fsync forces a written handle`(@TempDir tmp: Path) {
         val path = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, LocalDisk, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, LocalFileSystem, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFileStreaming in perform LocalFileDurability in do
+            perform LocalFileSystem in perform LocalFileStreaming in perform LocalFileDurability in do
               match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do
                   let _ = FileStreaming.write_chunk {
@@ -128,11 +128,11 @@ class FileDurabilityEffectTest {
     }
 
     @Test
-    fun `LocalDisk fsync on a closed handle reports ClosedHandle`(@TempDir tmp: Path) {
+    fun `LocalFileSystem fsync on a closed handle reports ClosedHandle`(@TempDir tmp: Path) {
         val path = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, LocalDisk, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
-            perform LocalDisk in perform LocalFileStreaming in perform LocalFileDurability in do
+            use std::effects::filesystem::{ FileSystem, FileDurability, LocalFileSystem, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            perform LocalFileSystem in perform LocalFileStreaming in perform LocalFileDurability in do
               match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do
                   let _ = FileStreaming.close { handle = h }
@@ -146,7 +146,7 @@ class FileDurabilityEffectTest {
     }
 
     @Test
-    fun `LocalDisk fsync_dir succeeds on a real directory`(@TempDir tmp: Path) {
+    fun `LocalFileSystem fsync_dir succeeds on a real directory`(@TempDir tmp: Path) {
         val code = """
             use std::effects::filesystem::{ FileDurability, LocalFileDurability }
             perform LocalFileDurability in
@@ -158,7 +158,7 @@ class FileDurabilityEffectTest {
     }
 
     @Test
-    fun `LocalDisk fsync_dir on a missing path reports NotFound`(@TempDir tmp: Path) {
+    fun `LocalFileSystem fsync_dir on a missing path reports NotFound`(@TempDir tmp: Path) {
         val path = tmp.resolve("absent").toString()
         val code = """
             use std::effects::filesystem::{ FileDurability, LocalFileDurability }

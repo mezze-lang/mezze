@@ -14,7 +14,7 @@ import java.nio.file.Path
  * an object store declines the whole effect, and the odd op that a backend
  * cannot do returns `FsNotSupported` instead of inventing an answer.
  *
- * MemoryFS RECORDS this metadata rather than ENFORCING it. `set_mode`
+ * MemoryFileSystem RECORDS this metadata rather than ENFORCING it. `set_mode`
  * stores what you asked for and nothing checks it before a read, because
  * enforcement is a kernel's job; the backend exists so a test can assert
  * the code set what it meant to set.
@@ -29,14 +29,14 @@ class FilePosixEffectsTest {
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
-    // ==================== Symlinks — MemoryFS ====================
+    // ==================== Symlinks — MemoryFileSystem ====================
 
     @Test
-    fun `MemoryFS symlink roundtrips its target`() {
+    fun `MemoryFileSystem symlink roundtrips its target`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFS, MemoryFileSymlinks }
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileSymlinks in do
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/real", bytes = bytes::from_str { s = "x" }
@@ -51,10 +51,10 @@ class FilePosixEffectsTest {
 
     /** A dangling symlink is legal — it is how a blue/green swap stages. */
     @Test
-    fun `MemoryFS allows a dangling symlink`() {
+    fun `MemoryFileSystem allows a dangling symlink`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFS, MemoryFileSymlinks }
-            perform MemoryFS in perform MemoryFileSymlinks in do
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileSymlinks.create_symlink { link = "/d/next", target = "/d/not-yet" } is
                 Ok { val = _ } -> match FileSymlinks.is_symlink { path = "/d/next" } is
@@ -66,11 +66,11 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `MemoryFS read_symlink on a regular file is an error`() {
+    fun `MemoryFileSystem read_symlink on a regular file is an error`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFS, MemoryFileSymlinks }
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileSymlinks in do
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/plain", bytes = bytes::from_str { s = "x" }
@@ -85,11 +85,11 @@ class FilePosixEffectsTest {
 
     /** A hard link shares the entry, so a later write is visible via both. */
     @Test
-    fun `MemoryFS hardlink shares content with its target`() {
+    fun `MemoryFileSystem hardlink shares content with its target`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFS, MemoryFileSymlinks }
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFileSymlinks in do
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/a", bytes = bytes::from_str { s = "shared" }
@@ -105,10 +105,10 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `MemoryFS hardlink to a missing target reports NotFound`() {
+    fun `MemoryFileSystem hardlink to a missing target reports NotFound`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFS, MemoryFileSymlinks }
-            perform MemoryFS in perform MemoryFileSymlinks in do
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileSymlinks.create_hardlink { link = "/d/b", target = "/d/nope" } is
                 Ok { val = _ } -> "unexpectedly-ok"
@@ -120,11 +120,11 @@ class FilePosixEffectsTest {
 
     /** A symlink cycle must error, not hang the suite. */
     @Test
-    fun `MemoryFS real_path refuses a symlink cycle`() {
+    fun `MemoryFileSystem real_path refuses a symlink cycle`() {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, FilePermissions,
-                                            MemoryFS, MemoryFileSymlinks, MemoryFilePermissions }
-            perform MemoryFS in perform MemoryFileSymlinks in perform MemoryFilePermissions in do
+                                            MemoryFileSystem, MemoryFileSymlinks, MemoryFilePermissions }
+            perform MemoryFileSystem in perform MemoryFileSymlinks in perform MemoryFilePermissions in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSymlinks.create_symlink { link = "/d/a", target = "/d/b" }
               let _ = FileSymlinks.create_symlink { link = "/d/b", target = "/d/a" }
@@ -135,14 +135,14 @@ class FilePosixEffectsTest {
         assertEquals("cycle-refused", eval(code))
     }
 
-    // ==================== Permissions — MemoryFS ====================
+    // ==================== Permissions — MemoryFileSystem ====================
 
     @Test
-    fun `MemoryFS set_mode then get_mode roundtrips the bits`() {
+    fun `MemoryFileSystem set_mode then get_mode roundtrips the bits`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFS, MemoryFilePermissions }
+            use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFilePermissions in do
+            perform MemoryFileSystem in perform MemoryFilePermissions in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/secret", bytes = bytes::from_str { s = "s" }
@@ -157,11 +157,11 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `MemoryFS set_owner then get_owner roundtrips`() {
+    fun `MemoryFileSystem set_owner then get_owner roundtrips`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFS, MemoryFilePermissions }
+            use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFilePermissions in do
+            perform MemoryFileSystem in perform MemoryFilePermissions in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/f", bytes = bytes::from_str { s = "x" }
@@ -177,11 +177,11 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `MemoryFS set_modified is visible through stat`() {
+    fun `MemoryFileSystem set_modified is visible through stat`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFS, MemoryFilePermissions }
+            use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions }
             use std::collections::bytes
-            perform MemoryFS in perform MemoryFilePermissions in do
+            perform MemoryFileSystem in perform MemoryFilePermissions in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes {
                 path = "/d/f", bytes = bytes::from_str { s = "x" }
@@ -195,10 +195,10 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `MemoryFS get_mode on a missing path reports NotFound`() {
+    fun `MemoryFileSystem get_mode on a missing path reports NotFound`() {
         val code = """
-            use std::effects::filesystem::{ FilePermissions, MemoryFS, MemoryFilePermissions }
-            perform MemoryFS in perform MemoryFilePermissions in
+            use std::effects::filesystem::{ FilePermissions, MemoryFileSystem, MemoryFilePermissions }
+            perform MemoryFileSystem in perform MemoryFilePermissions in
               match FilePermissions.get_mode { path = "/nope" } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = FsNotFound { path = _ } } -> "not-found"
@@ -207,16 +207,16 @@ class FilePosixEffectsTest {
         assertEquals("not-found", eval(code))
     }
 
-    // ==================== LocalDisk ====================
+    // ==================== LocalFileSystem ====================
 
     @Test
-    fun `LocalDisk symlink roundtrips and is_symlink agrees`(@TempDir tmp: Path) {
+    fun `LocalFileSystem symlink roundtrips and is_symlink agrees`(@TempDir tmp: Path) {
         val real = tmp.resolve("real").toString()
         val link = tmp.resolve("link").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalDisk, LocalFileSymlinks }
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalFileSystem, LocalFileSymlinks }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFileSymlinks in do
+            perform LocalFileSystem in perform LocalFileSymlinks in do
               let _ = FileSystem.write_bytes {
                 path = "$real", bytes = bytes::from_str { s = "x" }
               }
@@ -231,7 +231,7 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `LocalDisk is_symlink on a missing path reports NotFound`(@TempDir tmp: Path) {
+    fun `LocalFileSystem is_symlink on a missing path reports NotFound`(@TempDir tmp: Path) {
         val path = tmp.resolve("absent").toString()
         val code = """
             use std::effects::filesystem::{ FileSymlinks, LocalFileSymlinks }
@@ -245,12 +245,12 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `LocalDisk set_mode then get_mode roundtrips on a real file`(@TempDir tmp: Path) {
+    fun `LocalFileSystem set_mode then get_mode roundtrips on a real file`(@TempDir tmp: Path) {
         val path = tmp.resolve("secret").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FilePermissions, LocalDisk, LocalFilePermissions }
+            use std::effects::filesystem::{ FileSystem, FilePermissions, LocalFileSystem, LocalFilePermissions }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFilePermissions in do
+            perform LocalFileSystem in perform LocalFilePermissions in do
               let _ = FileSystem.write_bytes {
                 path = "$path", bytes = bytes::from_str { s = "s" }
               }
@@ -263,14 +263,14 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `LocalDisk real_path resolves a symlink`(@TempDir tmp: Path) {
+    fun `LocalFileSystem real_path resolves a symlink`(@TempDir tmp: Path) {
         val real = tmp.resolve("real").toString()
         val link = tmp.resolve("link").toString()
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, FilePermissions,
-                                            LocalDisk, LocalFileSymlinks, LocalFilePermissions }
+                                            LocalFileSystem, LocalFileSymlinks, LocalFilePermissions }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFileSymlinks in perform LocalFilePermissions in do
+            perform LocalFileSystem in perform LocalFileSymlinks in perform LocalFilePermissions in do
               let _ = FileSystem.write_bytes {
                 path = "$real", bytes = bytes::from_str { s = "x" }
               }
@@ -283,12 +283,12 @@ class FilePosixEffectsTest {
     }
 
     @Test
-    fun `LocalDisk set_modified is visible through stat`(@TempDir tmp: Path) {
+    fun `LocalFileSystem set_modified is visible through stat`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FilePermissions, LocalDisk, LocalFilePermissions }
+            use std::effects::filesystem::{ FileSystem, FilePermissions, LocalFileSystem, LocalFilePermissions }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFilePermissions in do
+            perform LocalFileSystem in perform LocalFilePermissions in do
               let _ = FileSystem.write_bytes {
                 path = "$path", bytes = bytes::from_str { s = "x" }
               }

@@ -1,7 +1,7 @@
 ## FileSystem effect (#82).
 ##
 ## Thirteen primitive ops. Each is a genuine backend-specialization
-## slot — copy_file becomes kernel sendfile on LocalDisk; list_with_stat
+## slot — copy_file becomes kernel sendfile on LocalFileSystem; list_with_stat
 ## bundles readdir+attributes into one syscall; open opens a real
 ## FileChannel with the OpenMode set.
 ##
@@ -59,7 +59,7 @@ pub type FsError = |
 |
 
 ## Opaque handle for streaming I/O. Backed by a native FileChannel
-## (LocalDisk) or in-memory byte buffer (MemoryFS). Users don't inspect
+## (LocalFileSystem) or in-memory byte buffer (MemoryFileSystem). Users don't inspect
 ## it — they pass it to read_chunk / write_chunk / close, or use the
 ## with_read / with_write scope helpers below.
 pub newtype FileHandle = __NativeFileHandle
@@ -83,7 +83,7 @@ effect FileSystem where {
 }
 
 ## Real filesystem via java.nio. Kernel fast paths for copy/move/stat.
-impl FileSystem for LocalDisk where {
+impl FileSystem for LocalFileSystem where {
   read_bytes = { path } -> __native_fs_read_bytes { path = path },
   write_bytes = { path, bytes } -> __native_fs_write_bytes { path = path, bytes = bytes },
   stat = { path } -> __native_fs_stat { path = path },
@@ -97,7 +97,7 @@ impl FileSystem for LocalDisk where {
 
 ## In-memory filesystem for tests. ConcurrentHashMap-backed; test
 ## isolation via memfs_clear (called from test setup).
-impl FileSystem for MemoryFS where {
+impl FileSystem for MemoryFileSystem where {
   read_bytes = { path } -> __native_memfs_read_bytes { path = path },
   write_bytes = { path, bytes } -> __native_memfs_write_bytes { path = path, bytes = bytes },
   stat = { path } -> __native_memfs_stat { path = path },
@@ -184,7 +184,7 @@ impl FileStreaming for MemoryFileStreaming where {
 ##   let commit: { h: FileHandle } -> Result {} FsError <FileDurability>
 ##
 ## A reader sees from the signature that this wants a real filesystem.
-## Backends: LocalDisk (FileChannel.force), MemoryFS (publishes its write
+## Backends: LocalFileSystem (FileChannel.force), MemoryFileSystem (publishes its write
 ## buffer — see the native, it is deliberately not a no-op). An object
 ## store would implement this trivially, since every PUT is already
 ## durable; one that could not would simply not implement the effect, and
@@ -202,10 +202,10 @@ effect FileDurability where {
 
 ## A performer handles exactly ONE effect (V0701 keys on the performer
 ## name alone), so each capability effect gets its own performer rather
-## than `LocalDisk` implementing several. The name says which backend and
+## than `LocalFileSystem` implementing several. The name says which backend and
 ## which capability, and a program installs only the ones it needs:
 ##
-##   perform LocalDisk in perform LocalFileDurability in …
+##   perform LocalFileSystem in perform LocalFileDurability in …
 impl FileDurability for LocalFileDurability where {
   fsync = { handle } -> __native_fs_fsync { handle = handle },
   fsync_dir = { path } -> __native_fs_fsync_dir { path = path },
@@ -251,7 +251,7 @@ impl FileLock for LocalFileLock where {
   unlock = { handle } -> __native_fs_unlock { handle = handle },
 }
 
-## MemoryFS contention is REAL, not simulated: shared locks stack, an
+## MemoryFileSystem contention is REAL, not simulated: shared locks stack, an
 ## exclusive lock excludes everything. Reporting success unconditionally
 ## would make "a lock excludes someone" untestable without a second
 ## process. `blocking = True` on a held lock is rejected rather than
@@ -349,7 +349,7 @@ impl FilePermissions for LocalFilePermissions where {
     __native_fs_real_path { path = path, follow_symlinks = follow_symlinks },
 }
 
-## MemoryFS stores mode, owner and mtime per entry, so tests can assert on
+## MemoryFileSystem stores mode, owner and mtime per entry, so tests can assert on
 ## them. It is NOT a POSIX kernel: set_mode records what you asked for and
 ## nothing enforces it, so a mode of all-False does not make a read fail.
 ## Permission ENFORCEMENT is a real filesystem's job; this backend is for
@@ -369,7 +369,7 @@ impl FilePermissions for MemoryFilePermissions where {
 ## FileWatch — change notification.
 ##
 ## The one capability whose backends differ most: inotify/kqueue locally,
-## synthesised from writes in MemoryFS, and nothing at all for an object
+## synthesised from writes in MemoryFileSystem, and nothing at all for an object
 ## store or an HTTP-backed tree, which decline the effect.
 ## ==================================================================
 ## `Overflow` carries no path on purpose: it means the queue dropped
@@ -408,7 +408,7 @@ impl FileWatch for LocalFileWatch where {
   unwatch = { handle } -> __native_fs_unwatch { handle = handle },
 }
 
-## MemoryFS synthesises events from its own mutations, which is why the
+## MemoryFileSystem synthesises events from its own mutations, which is why the
 ## core ops notify the watchers. `timeout_ms` is accepted and ignored:
 ## there is no other thread to wait for inside one context, so blocking
 ## could only delay the caller for nothing.

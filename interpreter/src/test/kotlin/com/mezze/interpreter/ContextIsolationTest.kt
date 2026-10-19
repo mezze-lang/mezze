@@ -26,7 +26,7 @@ import kotlin.test.assertEquals
 class ContextIsolationTest {
 
     private val fsHead = """
-        use std::effects::filesystem::{ FileSystem, MemoryFS, exists, write_text }
+        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, write_text }
         use std::effects::log::{ println, Console }
         use std::bool
     """.trimIndent()
@@ -36,7 +36,7 @@ class ContextIsolationTest {
         val wrote = MezzeTestHelper.run(
             """
             $fsHead
-            perform MemoryFS in
+            perform MemoryFileSystem in
               match write_text { path = "/leaked.txt", text = "from the first program" } is
                 Ok { val } -> "wrote"
                 Err { error = _ } -> "write failed"
@@ -47,7 +47,7 @@ class ContextIsolationTest {
         val seen = MezzeTestHelper.run(
             """
             $fsHead
-            perform MemoryFS in
+            perform MemoryFileSystem in
               match exists { path = "/leaked.txt" } is
                 Ok { val } -> bool::to_str { b = val }
                 Err { error = _ } -> "stat failed"

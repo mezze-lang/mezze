@@ -11,12 +11,12 @@ import java.nio.file.Path
  * `FileWatch` — change notification.
  *
  * The backends differ more here than anywhere else: inotify/kqueue on
- * LocalDisk, synthesised from its own mutations in MemoryFS, and nothing at
+ * LocalFileSystem, synthesised from its own mutations in MemoryFileSystem, and nothing at
  * all for an object store, which declines the effect entirely.
  *
- * MemoryFS is the one worth testing hard, because its events are
+ * MemoryFileSystem is the one worth testing hard, because its events are
  * deterministic: a write produces exactly one event, immediately, with no
- * OS coalescing to race against. The LocalDisk tests are deliberately
+ * OS coalescing to race against. The LocalFileSystem tests are deliberately
  * weaker — a real WatchService may coalesce or delay, so asserting an exact
  * event sequence there would be a flake generator.
  */
@@ -30,14 +30,14 @@ class FileWatchEffectTest {
 
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
-    // ==================== MemoryFS ====================
+    // ==================== MemoryFileSystem ====================
 
     @Test
-    fun `MemoryFS reports a Created event for a new file`() {
+    fun `MemoryFileSystem reports a Created event for a new file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
             use std::collections::{ bytes, seq }
-            perform MemoryFS in perform MemoryFileWatch in do
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
@@ -54,11 +54,11 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `MemoryFS reports Modified when an existing file is rewritten`() {
+    fun `MemoryFileSystem reports Modified when an existing file is rewritten`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
             use std::collections::{ bytes, seq }
-            perform MemoryFS in perform MemoryFileWatch in do
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" } }
               match FileWatch.watch { path = "/d", recursive = False } is
@@ -77,11 +77,11 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `MemoryFS reports Deleted`() {
+    fun `MemoryFileSystem reports Deleted`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
             use std::collections::{ bytes, seq }
-            perform MemoryFS in perform MemoryFileWatch in do
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" } }
               match FileWatch.watch { path = "/d", recursive = False } is
@@ -100,11 +100,11 @@ class FileWatchEffectTest {
 
     /** Polling twice must not redeliver — the queue drains. */
     @Test
-    fun `MemoryFS a second poll returns nothing new`() {
+    fun `MemoryFileSystem a second poll returns nothing new`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
             use std::collections::{ bytes, seq }
-            perform MemoryFS in perform MemoryFileWatch in do
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
@@ -120,11 +120,11 @@ class FileWatchEffectTest {
 
     /** A non-recursive watch sees direct children only. */
     @Test
-    fun `MemoryFS non-recursive watch ignores a nested write`() {
+    fun `MemoryFileSystem non-recursive watch ignores a nested write`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
             use std::collections::{ bytes, seq }
-            perform MemoryFS in perform MemoryFileWatch in do
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.create_directory { path = "/d/sub" }
               match FileWatch.watch { path = "/d", recursive = False } is
@@ -139,11 +139,11 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `MemoryFS recursive watch sees a nested write`() {
+    fun `MemoryFileSystem recursive watch sees a nested write`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
             use std::collections::{ bytes, seq }
-            perform MemoryFS in perform MemoryFileWatch in do
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               let _ = FileSystem.create_directory { path = "/d/sub" }
               match FileWatch.watch { path = "/d", recursive = True } is
@@ -158,10 +158,10 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `MemoryFS watching a missing directory reports NotFound`() {
+    fun `MemoryFileSystem watching a missing directory reports NotFound`() {
         val code = """
-            use std::effects::filesystem::{ FileWatch, MemoryFS, MemoryFileWatch }
-            perform MemoryFS in perform MemoryFileWatch in
+            use std::effects::filesystem::{ FileWatch, MemoryFileSystem, MemoryFileWatch }
+            perform MemoryFileSystem in perform MemoryFileWatch in
               match FileWatch.watch { path = "/nope", recursive = False } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = FsNotFound { path = _ } } -> "not-found"
@@ -171,10 +171,10 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `MemoryFS unwatch then poll reports the handle is gone`() {
+    fun `MemoryFileSystem unwatch then poll reports the handle is gone`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFS, MemoryFileWatch }
-            perform MemoryFS in perform MemoryFileWatch in do
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
@@ -187,17 +187,17 @@ class FileWatchEffectTest {
         assertEquals("unregistered", eval(code))
     }
 
-    // ==================== LocalDisk ====================
+    // ==================== LocalFileSystem ====================
 
     /**
      * Deliberately weak: that a watch registers, polls without error and
      * unwatches. A real WatchService may coalesce or delay events, and
      * asserting an exact sequence here would be a flake generator — the
-     * event semantics are pinned on MemoryFS instead, where they are
+     * event semantics are pinned on MemoryFileSystem instead, where they are
      * deterministic.
      */
     @Test
-    fun `LocalDisk watch registers polls and unwatches`(@TempDir tmp: Path) {
+    fun `LocalFileSystem watch registers polls and unwatches`(@TempDir tmp: Path) {
         val code = """
             use std::effects::filesystem::{ FileWatch, LocalFileWatch }
             perform LocalFileWatch in do
@@ -213,12 +213,12 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `LocalDisk watching a file rather than a directory is an error`(@TempDir tmp: Path) {
+    fun `LocalFileSystem watching a file rather than a directory is an error`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, LocalDisk, LocalFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, LocalFileSystem, LocalFileWatch }
             use std::collections::bytes
-            perform LocalDisk in perform LocalFileWatch in do
+            perform LocalFileSystem in perform LocalFileWatch in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" } }
               match FileWatch.watch { path = "$path", recursive = False } is
                 Ok { val = _ } -> "unexpectedly-ok"
@@ -229,7 +229,7 @@ class FileWatchEffectTest {
     }
 
     @Test
-    fun `LocalDisk poll after unwatch reports a closed handle`(@TempDir tmp: Path) {
+    fun `LocalFileSystem poll after unwatch reports a closed handle`(@TempDir tmp: Path) {
         val code = """
             use std::effects::filesystem::{ FileWatch, LocalFileWatch }
             perform LocalFileWatch in do

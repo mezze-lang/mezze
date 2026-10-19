@@ -2796,7 +2796,7 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> com.mezze.interpreter.nodes.builtin.effects.CoverageNatives.observeHit(r));
     }
 
-    // ==================== Filesystem (LocalDisk, #82) ====================
+    // ==================== Filesystem (LocalFileSystem, #82) ====================
     // 13 primitive ops. Bytes are the wire format; text conversions live
     // in Mezze helpers. FileHandle is opaque; open/read_chunk/write_chunk/
     // close forms the streaming primitives.
@@ -2842,7 +2842,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_fs_truncate", (r, c) -> FilesystemNatives.truncate(r));
     }
 
-    // ==================== Memory Filesystem (MemoryFS, #82) ====================
+    // ==================== Memory Filesystem (MemoryFileSystem, #82) ====================
 
     private static void registerMemoryFilesystemHandlers() {
         // Whole-file
