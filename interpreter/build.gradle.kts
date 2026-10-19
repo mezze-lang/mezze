@@ -233,7 +233,8 @@ tasks.test {
 // Contains: :interpreter + its runtime transitive deps (truffle, polyglot,
 // helidon-webclient, kotlin-stdlib, kotlinx-serialization-cbor). Crucially NOT:
 // :parser, :typechecker, :formatter, :lsp, :store-sqlite, :cli, lsp4j,
-// logback, ktor, sqlite-jdbc.
+// logback, ktor. DOES include sqlite-jdbc (trimmed to the release platforms)
+// so `std::effects::db`'s SqliteDb works with no install — see below.
 //
 // User-app build path (BuildCommand.createStandaloneJar): clones this
 // jar, appends META-INF/mezze/embedded-app.cbor + .meta, sets Main-Class
@@ -293,11 +294,39 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
         exclude(dependency("org.graalvm.tools:dap-tool"))
         exclude(dependency("org.graalvm.tools:coverage-tool"))
         exclude(dependency("org.graalvm.tools:insight-tool"))
-        // sqlite-jdbc is pulled in transitively via :typechecker, but the
-        // runtime never opens SQLite — both the wire-protocol path (#220)
-        // and the embedded-app path read FunctionIR from CBOR. Drops 26 MB.
-        exclude(dependency("org.xerial:sqlite-jdbc"))
+        // sqlite-jdbc STAYS. The comment here used to read "the runtime never
+        // opens SQLite" and dropped the whole dependency for 26 MB — true when
+        // sqlite was only the stdlib cache, which the CBOR snapshot replaced.
+        // `std::effects::db`'s `SqliteDb` performer changed that: an embedded
+        // database with no install step is the point, the way Python ships
+        // `sqlite3` in its own stdlib, so the driver has to be here or the
+        // performer is a lie. Before this it worked ONLY in the gradle test
+        // JVM — `mez dev` answered "no JDBC driver on the classpath".
+        //
+        // What is dropped instead is the 19 platforms we do not release for.
+        // The jar carries 24.5 MB of natives across 24 platform/arch pairs; the
+        // five in .github/workflows/release.yml need 5.33 MB of that, so the
+        // runtime grows ~3 MB compressed rather than ~14 MB.
+        //
+        // A user on an unlisted platform (FreeBSD, musl/Alpine, 32-bit, riscv)
+        // gets sqlite-jdbc's own "no native library found" at the first `Db`
+        // operation — which is accurate and actionable, and they have no `mez`
+        // binary for that platform either. Add a platform here when the release
+        // matrix adds one; these two lists must agree.
     }
+    // Keep: Linux/x86_64, Linux/aarch64, Mac/x86_64, Mac/aarch64, Windows/x86_64.
+    exclude("org/sqlite/native/FreeBSD/**")
+    exclude("org/sqlite/native/Linux-Android/**")
+    exclude("org/sqlite/native/Linux-Musl/**")
+    exclude("org/sqlite/native/Linux/x86/**")
+    exclude("org/sqlite/native/Linux/arm/**")
+    exclude("org/sqlite/native/Linux/armv6/**")
+    exclude("org/sqlite/native/Linux/armv7/**")
+    exclude("org/sqlite/native/Linux/ppc64/**")
+    exclude("org/sqlite/native/Linux/riscv64/**")
+    exclude("org/sqlite/native/Windows/x86/**")
+    exclude("org/sqlite/native/Windows/armv7/**")
+    exclude("org/sqlite/native/Windows/aarch64/**")
 
     // Truffle discovers languages/instruments via ServiceLoader —
     // META-INF/services/com.oracle.truffle.api.provider.TruffleLanguageProvider
