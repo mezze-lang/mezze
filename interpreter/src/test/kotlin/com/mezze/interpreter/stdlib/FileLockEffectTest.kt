@@ -186,4 +186,13 @@ class FileLockEffectTest {
         """.trimIndent()
         assertEquals("excluded", eval(code))
     }
+
+    // A leaked lock IS released when its context is disposed — see
+    // OpenResources in FilesystemNatives. There is deliberately no test for
+    // it here, because a lock cannot witness the fix: drop the last reference
+    // to the channel and FileDescriptor's Cleaner closes the fd on the next
+    // GC, which releases the lock whether dispose did or not. A test for it
+    // passes with the registry removed, which makes it worse than no test.
+    // The leak is pinned where GC cannot mask it — on the WatchService thread,
+    // in FileWatchEffectTest.
 }

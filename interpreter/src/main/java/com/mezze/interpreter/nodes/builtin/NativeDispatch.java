@@ -2883,11 +2883,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_memfs_write_at", (r, c) -> MemoryFilesystemNatives.writeAt(r));
         HANDLERS.put("__native_memfs_seek", (r, c) -> MemoryFilesystemNatives.seek(r));
         HANDLERS.put("__native_memfs_truncate", (r, c) -> MemoryFilesystemNatives.truncate(r));
-        // Test isolation
-        HANDLERS.put("__native_memfs_clear", (r, c) -> {
-            MemoryFilesystemNatives.clear();
-            return MezzeRecord.empty();
-        });
+        // No `__native_memfs_clear`: the in-memory filesystem is per context,
+        // so a fresh program starts empty and there is nothing to wipe.
     }
 
     // ==================== Environment ====================

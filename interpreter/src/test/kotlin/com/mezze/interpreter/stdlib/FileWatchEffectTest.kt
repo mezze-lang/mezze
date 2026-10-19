@@ -244,4 +244,51 @@ class FileWatchEffectTest {
         """.trimIndent()
         assertEquals("closed", eval(code))
     }
+
+    /**
+     * A program that watches a directory and never calls `unwatch` must not
+     * cost a thread for the life of the PROCESS.
+     *
+     * This is the one resource in the seven effects whose leak GC cannot
+     * mask, which is why the per-context dispose registry is pinned here and
+     * not on `FileLock`. A NIO `WatchService` runs a daemon thread named
+     * `FileSystemWatchService`; that thread is a GC ROOT and holds the
+     * service, so an orphaned service is never unreachable and never
+     * collected. Measured directly: open → 1 thread, close → 0, but
+     * leak + 5 forced GCs → still 1. A leaked lock or fd, by contrast, is
+     * released by FileDescriptor's Cleaner on the next GC, so it cannot
+     * witness the fix.
+     *
+     * `MezzeTestHelper.run` closes the context, and `OpenResources.close()`
+     * in FilesystemNatives is what must then close the service. With that
+     * registry removed this fails: the count stays up permanently.
+     */
+    @Test
+    fun `LocalFileSystem a watch leaked by one program is closed when its context goes`(@TempDir tmp: Path) {
+        val baseline = watchThreads()
+        val code = """
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch }
+            perform LocalFileWatch in
+              match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
+                Ok { val = _ } -> "watching"
+                Err { error = _ } -> "watch-failed"
+        """.trimIndent()
+        // Deliberately no unwatch.
+        assertEquals("watching", eval(code), "precondition: the watch must register")
+
+        // The thread exits asynchronously once the service is closed, so give
+        // it a bounded window rather than asserting on the instant.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (watchThreads() > baseline && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50)
+        }
+        assertEquals(
+            baseline, watchThreads(),
+            "a WatchService thread outlived its context — the leaked watch was never closed",
+        )
+    }
+
+    /** Live NIO watcher threads. `AbstractPoller` names them all the same. */
+    private fun watchThreads(): Int =
+        Thread.getAllStackTraces().keys.count { it.name == "FileSystemWatchService" }
 }

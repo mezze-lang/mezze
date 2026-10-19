@@ -135,23 +135,16 @@ public final class MemoryFilesystemNatives {
         return state().nowMs;
     }
 
-    /**
-     * Clear THIS context's in-memory filesystem. Registered as
-     * {@code __native_memfs_clear} in NativeDispatch.
-     *
-     * Tests used to call this from their `setUp`, straight to the Java method,
-     * because the filesystem was static and one test's files were every test's
-     * files. The state is per context now, so a fresh program starts empty and
-     * that call is both unnecessary and impossible — there is no context to
-     * clear from JUnit's own thread, and asking for one there fails loudly
-     * rather than silently clearing nothing.
-     */
-    @TruffleBoundary
-    public static void clear() {
-        files().clear();
-        directories().clear();
-        directories().put("/", ConcurrentHashMap.newKeySet());
-    }
+    // A `clear()` used to live here, registered as `__native_memfs_clear`.
+    // Tests called it from `setUp` because the filesystem was static and one
+    // test's files were every test's files. Both are gone: the state is per
+    // context, so a fresh program starts empty, and no Mezze code could reach
+    // the native anyway — it was never bound to an op. It was also silently
+    // stale, clearing `files` and `directories` but not the `locks` and
+    // `watches` added later, which would have left a path locked against a
+    // filesystem that no longer had the file. Deleted rather than fixed,
+    // because a `clear` op would have to sit on `FileSystem` and oblige
+    // LocalFileSystem to wipe a real disk.
 
     // ==================== Path normalization ====================
 

@@ -95,8 +95,12 @@ impl FileSystem for LocalFileSystem where {
   move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
 }
 
-## In-memory filesystem for tests. ConcurrentHashMap-backed; test
-## isolation via memfs_clear (called from test setup).
+## In-memory filesystem for tests. ConcurrentHashMap-backed, and held
+## PER CONTEXT, so isolation needs no explicit wipe: a fresh program
+## starts empty and its files die with it. There is deliberately no
+## `clear` op — it would have to live on `FileSystem`, and then
+## `LocalFileSystem` would owe an implementation that wipes a real disk.
+## To empty one of these, `delete` the paths or end the program.
 impl FileSystem for MemoryFileSystem where {
   read_bytes = { path } -> __native_memfs_read_bytes { path = path },
   write_bytes = { path, bytes } -> __native_memfs_write_bytes { path = path, bytes = bytes },

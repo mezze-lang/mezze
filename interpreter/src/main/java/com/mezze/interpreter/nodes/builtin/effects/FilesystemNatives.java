@@ -29,22 +29,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Native implementations for LocalFileSystem FileSystem effect (#82).
+ * Native implementations for the seven filesystem effects' Local performers
+ * (#82), mapping to java.nio.file kernel fast paths.
  *
- * Thirteen primitive ops mapping to java.nio.file kernel fast paths:
- *   read_bytes   — Files.readAllBytes
- *   write_bytes  — Files.write (create-or-truncate)
- *   delete       — Files.delete (unlink)
- *   list         — Files.newDirectoryStream (names only)
- *   list_with_stat — Files.newDirectoryStream + readAttributes (bundled)
- *   stat         — Files.readAttributes; NotFound is a legal FileKind
- *   create_directory — Files.createDirectory (mkdir)
- *   copy_file    — Files.copy (kernel sendfile on Linux)
- *   move_file    — Files.move (atomic rename on same fs)
- *   open         — FileChannel.open (with mode)
- *   read_chunk   — FileChannel.read (advances position)
- *   write_chunk  — FileChannel.write (advances position)
- *   close        — FileChannel.close (idempotent)
+ * `FileSystem` (9, path-keyed): read_bytes → Files.readAllBytes, write_bytes →
+ * Files.write, delete → Files.delete, list / list_with_stat →
+ * Files.newDirectoryStream (± readAttributes), stat → Files.readAttributes
+ * (NotFound is a legal FileKind), create_directory → Files.createDirectory,
+ * copy_file → Files.copy (sendfile on Linux), move_file → Files.move (atomic
+ * rename on the same fs).
+ *
+ * `FileStreaming` (8, handle-keyed) over one FileChannel: open, read_chunk /
+ * write_chunk (advance the position), read_at / write_at (do NOT), seek,
+ * truncate, close. Plus `FileDurability` (fsync, fsync_dir), `FileLock`,
+ * `FileSymlinks`, `FilePermissions` and `FileWatch`.
  *
  * All ops return {@code Result 'a FsError}. FsError constructors match
  * the Mezze-side ADT in {@code std::effects::filesystem}.
@@ -52,6 +50,70 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class FilesystemNatives {
 
     private FilesystemNatives() {}
+
+    // ==================== Per-context open resources ====================
+
+    /**
+     * Every OS resource this backend has handed to guest code and not got
+     * back, so that disposing the context releases it.
+     *
+     * Without this, forgetting `close` / `unlock` / `unwatch` leaks for the
+     * life of the PROCESS, not of the program. A `FileChannel`'s fd is at
+     * least reclaimed eventually by FileDescriptor's Cleaner, but a
+     * `WatchService` runs a daemon thread that holds a strong reference back
+     * to itself, so it is never unreachable and never collected: one missed
+     * `unwatch` costs a thread and an inotify instance permanently. An
+     * unreleased `FileLock` is worse than a leak — it keeps excluding other
+     * processes.
+     *
+     * Registered through {@code nativeState}, which enrolls an AutoCloseable
+     * for dispose, so {@code MezzeLanguage.disposeContext} drives it.
+     * Deliberately a registry of handles rather than an fd count: dispose has
+     * to actually close them, and the guest may still be holding the handle
+     * value when the context goes.
+     */
+    static final class OpenResources implements AutoCloseable {
+        final java.util.Set<MezzeFileHandle> files = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        final java.util.Set<MezzeLockHandle> locks = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        final java.util.Set<MezzeWatchHandle> watches = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+        /**
+         * Watches first — they own threads, and a thread can still be running
+         * when the rest goes. Then locks, because releasing one unblocks
+         * another process and the channel close that follows must not be what
+         * does it. Files last; they hold nothing but an fd.
+         *
+         * Errors are swallowed: this runs during dispose, there is no caller
+         * to return a Result to, and a failure to close one handle must not
+         * abandon the others.
+         */
+        @Override
+        public void close() {
+            for (MezzeWatchHandle h : watches) {
+                if (h.closed.compareAndSet(false, true)) {
+                    try { h.service.close(); } catch (IOException ignored) { /* disposing */ }
+                }
+            }
+            watches.clear();
+            for (MezzeLockHandle h : locks) {
+                if (h.released.compareAndSet(false, true)) {
+                    try { h.lock.release(); } catch (IOException ignored) { /* disposing */ }
+                    closeQuietly(h.channel);
+                }
+            }
+            locks.clear();
+            for (MezzeFileHandle h : files) {
+                if (h.closed.compareAndSet(false, true)) closeQuietly(h.channel);
+            }
+            files.clear();
+        }
+    }
+
+    @TruffleBoundary
+    private static OpenResources openResources() {
+        return com.mezze.interpreter.runtime.MezzeContext.get(null)
+            .nativeState(OpenResources.class, OpenResources::new);
+    }
 
     // ==================== FileHandle ====================
 
@@ -305,7 +367,9 @@ public final class FilesystemNatives {
                 default:
                     return errIO(path, "Unknown OpenMode: " + mode);
             }
-            return ok(new MezzeFileHandle(channel, path));
+            MezzeFileHandle handle = new MezzeFileHandle(channel, path);
+            openResources().files.add(handle);
+            return ok(handle);
         } catch (NoSuchFileException e) {
             return errNotFound(path);
         } catch (AccessDeniedException e) {
@@ -362,6 +426,11 @@ public final class FilesystemNatives {
     public static Object close(MezzeRecord args) {
         MezzeFileHandle h = getHandle(args, "handle");
         if (h.closed.compareAndSet(false, true)) {
+            // Drop it from the dispose registry whether or not the close
+            // succeeds: the fd is gone either way, and holding a reference to
+            // a dead handle until dispose is the leak this registry exists to
+            // prevent.
+            openResources().files.remove(h);
             try {
                 h.channel.close();
                 return ok(MezzeRecord.empty());
@@ -592,7 +661,9 @@ public final class FilesystemNatives {
                 channel.close();
                 return errPermissionDenied(path, "lock (already held)");
             }
-            return ok(new MezzeLockHandle(l, channel, path));
+            MezzeLockHandle handle = new MezzeLockHandle(l, channel, path);
+            openResources().locks.add(handle);
+            return ok(handle);
         } catch (java.nio.channels.OverlappingFileLockException e) {
             closeQuietly(channel);
             // Same JVM already holds an overlapping lock. Not an OS-level
@@ -617,6 +688,7 @@ public final class FilesystemNatives {
         if (!h.released.compareAndSet(false, true)) {
             return ok(MezzeRecord.empty());
         }
+        openResources().locks.remove(h);
         try {
             h.lock.release();
             h.channel.close();
@@ -680,7 +752,9 @@ public final class FilesystemNatives {
                     }
                 }
             }
-            return ok(new MezzeWatchHandle(svc, root));
+            MezzeWatchHandle handle = new MezzeWatchHandle(svc, root);
+            openResources().watches.add(handle);
+            return ok(handle);
         } catch (AccessDeniedException e) {
             return errPermissionDenied(path, "watch");
         } catch (IOException e) {
@@ -753,6 +827,7 @@ public final class FilesystemNatives {
         if (!h.closed.compareAndSet(false, true)) {
             return ok(MezzeRecord.empty());
         }
+        openResources().watches.remove(h);
         try {
             h.service.close();
             return ok(MezzeRecord.empty());
