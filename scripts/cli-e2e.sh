@@ -54,8 +54,13 @@ if [ "${MEZ_E2E_NATIVE:-1}" = "1" ]; then
     # JVM-launcher script, and `.build/<app>-native`, the true AOT image. The
     # AOT binary is the one we assert on — its presence as an ELF/Mach-O is the
     # difference between a real native build and the JVM-launcher fallback.
-    native="$(find .build -maxdepth 2 -type f -perm -u+x -name '*-native' 2>/dev/null | head -1)"
-    if [ -n "$native" ] && file -b "$native" | grep -qiE 'ELF|Mach-O'; then
+    # mapfile + here-string rather than `find | head -1` and `file | grep -q`:
+    # both readers exit early, SIGPIPE their writer, and pipefail turns that
+    # into 141 — which this `if` would read as "not a native binary" about a
+    # binary that is one.
+    mapfile -t _natives < <(find .build -maxdepth 2 -type f -perm -u+x -name '*-native' 2>/dev/null)
+    native="${_natives[0]-}"
+    if [ -n "$native" ] && grep -qiE 'ELF|Mach-O' <<<"$(file -b "$native")"; then
       if grep -qF "Hello from app!" <<<"$("$native" 2>&1)"; then
         echo "  ✅ build --native + run (AOT binary: $(file -b "$native" | cut -d, -f1))"
       else

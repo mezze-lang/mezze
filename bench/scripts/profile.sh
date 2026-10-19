@@ -83,7 +83,10 @@ if [[ "$MODE" == "jvm" ]]; then
         exit 2
     fi
     # Some tools want the raw .dylib path; find it under the brew cellar.
-    LIB="$(find /opt/homebrew/Cellar/async-profiler -name libasyncProfiler.dylib 2>/dev/null | head -1)"
+    # mapfile, not `find | head -1`: head exits on the first line and
+    # SIGPIPEs find, which under pipefail is a 141 the script reads as failure.
+    mapfile -t _libs < <(find /opt/homebrew/Cellar/async-profiler -name libasyncProfiler.dylib 2>/dev/null)
+    LIB="${_libs[0]-}"
     if [[ -z "$LIB" ]]; then
         echo "error: libasyncProfiler.dylib not found under /opt/homebrew/Cellar/async-profiler" >&2
         exit 2
@@ -153,5 +156,9 @@ if [[ "$FORMAT" == "text" ]]; then
     echo "==> flat hotspots (top 40):"
     # asprof text output has traces first, then a flat table below. Print
     # the flat table lines (they look like: "  <ns> <pct>% <samples>  <name>").
-    grep -E '^ +[0-9]+ +[0-9]+\.[0-9]+% +[0-9]+ ' "$OUT" | head -40
+    # Capture first: `grep … | head -40` SIGPIPEs grep once head has its 40
+    # lines, and pipefail turns that into a failed exit on the last line of a
+    # profile run that otherwise succeeded.
+    flat="$(grep -E '^ +[0-9]+ +[0-9]+\.[0-9]+% +[0-9]+ ' "$OUT" || true)"
+    head -40 <<<"$flat"
 fi

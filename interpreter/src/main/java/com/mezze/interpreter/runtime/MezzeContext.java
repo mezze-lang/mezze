@@ -106,9 +106,26 @@ public final class MezzeContext {
     }
 
     /**
-     * Close everything registered, newest first. A failure to close one does not
-     * stop the rest — a half-torn-down context is worse than a noisy one — but it
-     * is reported, because silence here is how a leak survives.
+     * Close everything registered, newest first, then drop the per-context
+     * state itself. A failure to close one does not stop the rest — a
+     * half-torn-down context is worse than a noisy one — but it is reported,
+     * because silence here is how a leak survives.
+     *
+     * The `nativeState` clear is the second half of the job and was missing.
+     * Closing an AutoCloseable state object releases what it HOLDS; it does
+     * not drop the object, and most state objects are not AutoCloseable at
+     * all because they hold nothing but memory. That memory then outlived
+     * dispose: every entry stayed reachable from this field until the
+     * MezzeContext itself was collected, so an in-memory filesystem, a mock
+     * response table, a draw log and a cursor map all survived the close of
+     * the context that made them. For a one-shot program that is invisible —
+     * the context goes and the heap goes with it — but an embedder or pool
+     * holding closed Context objects kept every byte, and a long-running
+     * context never freed anything.
+     *
+     * Order is load-bearing: close first (PolyglotNatives' inner contexts are
+     * shut that way), drop second. Clearing first would strand a live
+     * resource with nothing left pointing at it.
      */
     @TruffleBoundary
     public void closeRegisteredResources() {
@@ -121,6 +138,7 @@ public final class MezzeContext {
                     + " on context dispose: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getName()));
             }
         }
+        nativeState.clear();
     }
 
     // Per-context closure cache — replaces the static evaluatedClosureCache in HashModuleLoaderNode.

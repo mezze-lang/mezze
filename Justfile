@@ -169,9 +169,16 @@ test-one module:
 [group('test')]
 test: (test-one "parser") (test-one "typechecker") (test-one "interpreter")
 
-# Full gate: the three above + cli
+# Lint the shell scripts for the SIGPIPE-under-pipefail class that this repo
+# has produced five times (`producer | grep -q p` reads as "not found"). Runs in
+# a second; see the header of the script for the measurements.
 [group('test')]
-gate: test (test-one "cli")
+lint-shell:
+    bash scripts/lint-shell.sh
+
+# Full gate: the three above + cli, plus the shell lint
+[group('test')]
+gate: lint-shell test (test-one "cli")
 
 # End-to-end CLI smoke: check/exec/dev/build(jar)/build --native against a real app.
 # Needs a built mez (`just build`). MEZ_E2E_NATIVE=0 skips the slow native step.

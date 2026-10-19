@@ -35,7 +35,8 @@ done
 if [[ "$SKIP_MEZ" -eq 0 ]]; then
   echo "==> [1/3] Rebuilding + installing native mez ..."
   ( cd "$ROOT" && ./gradlew :cli:installNative )
-  echo "    installed: $("$HOME/.mezze/bin/mez" --version 2>&1 | head -1)"
+  mez_ver="$("$HOME/.mezze/bin/mez" --version 2>&1 || true)"
+  echo "    installed: $(sed -n '1p' <<<"$mez_ver")"
 else
   echo "==> [1/3] Skipping mez rebuild (--skip-mez)"
 fi
@@ -48,7 +49,8 @@ if [[ "$SKIP_EXT" -eq 0 ]]; then
   # vsce prints the path with the DONE banner; fall back to newest vsix if the
   # grep missed (e.g. vsce output format drift).
   if [[ -z "${VSIX:-}" || ! -f "$VSIX" ]]; then
-    VSIX="$(ls -t "$EXT_DIR"/*.vsix | head -1)"
+    mapfile -t _vsix < <(ls -t "$EXT_DIR"/*.vsix)
+    VSIX="${_vsix[0]-}"
   fi
   echo "    packaged: $VSIX"
 

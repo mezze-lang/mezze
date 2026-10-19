@@ -33,7 +33,10 @@ time_ms() {
   # Prefer `date +%s%3N` (GNU) or fall back to nanoseconds (BSD/mac) and
   # divide. Avoids the python3 dependency.
   local start end nanos
-  if date +%s%3N | grep -q '^[0-9]\+$'; then
+  # `date … | grep -q` would SIGPIPE date under pipefail. Harmless here only
+  # because date writes one line and has already exited — but the same shape
+  # has produced five real bugs in this repo, so it does not get to stay.
+  if grep -q '^[0-9]\+$' <<<"$(date +%s%3N)"; then
     start=$(date +%s%3N)
     "$@" >/dev/null 2>&1
     end=$(date +%s%3N)
