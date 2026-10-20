@@ -331,7 +331,7 @@ data class ParsedSeqLit(
  * Examples:
  * - `perform Console in expr`
  * - `perform SeededRandom {seed = 42} in expr`
- * - `perform Console, LocalDisk in expr`
+ * - `perform Console, LocalFileSystem in expr`
  */
 @Serializable
 data class ParsedPerform(

@@ -55,13 +55,26 @@ echo "package management e2e — transitive graph app → greet → core:"
   || echo "  ✅ greet/ source dir NOT polluted with a nested .deps"
 
 # type-check
-if "$MEZ" check 2>&1 | grep -qF "Check passed"; then echo "  ✅ check (app→greet→core resolves)"
-else echo "  ❌ check failed"; "$MEZ" check 2>&1 | grep -iE 'error|not found' | head -2 | sed 's/^/       /'; fail=1; fi
+# Run `check` ONCE and match its captured output. Piping into `grep -qF`
+# SIGPIPEs mez the moment grep matches, and pipefail reports 141 — so this
+# `if` read "check failed" about a check that had just printed "Check passed".
+# That is the exact shape of the bug that killed the wasm build twice.
+check_out="$("$MEZ" check 2>&1 || true)"
+if grep -qF "Check passed" <<<"$check_out"; then echo "  ✅ check (app→greet→core resolves)"
+else
+  echo "  ❌ check failed"
+  grep -iE 'error|not found' <<<"$check_out" | sed -n '1,2p' | sed 's/^/       /'
+  fail=1
+fi
 
 # RUN — the value must flow core → greet → app at runtime (this is what regressed)
 out="$("$MEZ" dev --no-watch 2>&1 | grep -v WARNING)"
 if grep -qF "value-from-core" <<<"$out"; then echo "  ✅ run (dev --no-watch) → value-from-core"
-else echo "  ❌ run (dev --no-watch):"; echo "$out" | grep -iE 'not found|error' | head -1 | sed 's/^/       /'; fail=1; fi
+else
+  echo "  ❌ run (dev --no-watch):"
+  grep -iE 'not found|error' <<<"$out" | sed -n '1p' | sed 's/^/       /'
+  fail=1
+fi
 
 echo
 [ "$fail" = 0 ] && echo "✅ pkg-e2e: transitive dependency graph type-checks and runs" \

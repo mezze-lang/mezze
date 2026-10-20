@@ -26,7 +26,7 @@ ZED_QUERIES="$TOOLING/zed-extension/languages/mezze"
 
 command -v tree-sitter >/dev/null 2>&1 || { echo "error: tree-sitter CLI not on PATH" >&2; exit 2; }
 
-PIN="$(sed -n 's/^commit = "\(.*\)"/\1/p' "$MANIFEST" | head -1)"
+PIN="$(sed -n 's/^commit = "\(.*\)"/\1/p;' "$MANIFEST" | sed -n '1p')"
 [[ -n "$PIN" ]] || { echo "error: no commit pin found in $MANIFEST" >&2; exit 2; }
 echo "pinned grammar commit: $PIN"
 

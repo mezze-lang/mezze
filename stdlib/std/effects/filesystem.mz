@@ -1,7 +1,7 @@
 ## FileSystem effect (#82).
 ##
 ## Thirteen primitive ops. Each is a genuine backend-specialization
-## slot — copy_file becomes kernel sendfile on LocalDisk; list_with_stat
+## slot — copy_file becomes kernel sendfile on LocalFileSystem; list_with_stat
 ## bundles readdir+attributes into one syscall; open opens a real
 ## FileChannel with the OpenMode set.
 ##
@@ -41,6 +41,12 @@ pub type OpenMode = | Read, Write, Append |
 ## other stdlib error ADTs.
 pub type FsError = |
   FsNotFound { path: Str },
+  ## The backend does not implement this capability at all — an object
+  ## store asked for a symlink, a non-NTFS volume asked for an owner. It
+  ## exists so a performer can refuse honestly instead of faking success;
+  ## a backend that cannot do a WHOLE effect declines the effect instead,
+  ## and the typechecker catches that at the `perform` site.
+  FsNotSupported { path: Str, operation: Str },
   FsPermissionDenied { path: Str, operation: Str },
   FsIOError { path: Str, message: Str },
   FsDiskFull { path: Str, bytes_needed: Int },
@@ -52,70 +58,420 @@ pub type FsError = |
   FsInvalidUtf8 { path: Str, message: Str },
 |
 
+## How `write_bytes` treats a path that already exists.
+##
+## - `CreateOrTruncate` — create it, or replace its contents. The default
+##   anyone means by "write a file".
+## - `CreateNew` — create it, and FAIL with `FsAlreadyExists` if it is
+##   already there. This is the ATOMIC LOCKFILE primitive: the check and
+##   the create are one syscall, so two processes racing for the same
+##   lockfile cannot both win. Nothing else in the effect can express
+##   that — `stat` then `write` has a window between them.
+## - `CreateOrAppend` — create it if missing, and add to the end
+##   otherwise. Previously only reachable through `FileStreaming`, which
+##   meant a program that just wanted to add a log line had to disclose
+##   random-access file I/O.
+##
+## A backend that cannot do `CreateNew` atomically returns
+## `FsNotSupported` for THAT ARM ONLY, rather than lying about it or
+## declining the whole effect.
+##
+## `CreateOrAppend` and not `Append`, for two reasons. A constructor name
+## is unique across a module, and `OpenMode.Append` already has it — the
+## typechecker rejects the reuse outright. And the two are not the same
+## idea: `OpenMode.Append` positions a HANDLE at the end, while this is a
+## policy for a whole-file write that says what happens to the content
+## already there. Spelling all three as Create-or-what makes the one that
+## does NOT create stand out, which is the one with the sharp edge.
+pub type WriteMode = | CreateOrTruncate, CreateNew, CreateOrAppend |
+
 ## Opaque handle for streaming I/O. Backed by a native FileChannel
-## (LocalDisk) or in-memory byte buffer (MemoryFS). Users don't inspect
+## (LocalFileSystem) or in-memory byte buffer (MemoryFileSystem). Users don't inspect
 ## it — they pass it to read_chunk / write_chunk / close, or use the
 ## with_read / with_write scope helpers below.
 pub newtype FileHandle = __NativeFileHandle
 
 ## ==================================================================
-## Effect — 13 primitive ops in 4 groups.
+## Effect — 9 primitive ops in 4 groups.
 ## ==================================================================
 effect FileSystem where {
   ## Whole-file — each maps to an optimized native call
   read_bytes: { path: Str } -> Result Bytes FsError <FileSystem>,
-  write_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem>,
-  ## Metadata — stat returns NotFound as a FileKind, not an error
-  stat: { path: Str } -> Result FileStat FsError <FileSystem>,
+  ## `mode` is explicit rather than defaulted because the three answers to
+  ## "the file is already there" are genuinely different operations, and
+  ## the dangerous one is the one people get by accident.
+  write_bytes: { path: Str, bytes: Bytes, mode: WriteMode } -> Result {} FsError <FileSystem>,
+  ## Metadata — stat returns NotFound as a FileKind, not an error.
+  ##
+  ## `follow_symlinks = True` reports on what the link POINTS AT (NIO's
+  ## default); `False` reports on the link itself, which is the only way
+  ## to see a dangling one — following it reports NotFound and a caller
+  ## cannot tell that from "no such path".
+  stat: { path: Str, follow_symlinks: Bool } -> Result FileStat FsError <FileSystem>,
   list: { path: Str } -> Result [Str] FsError <FileSystem>,
   list_with_stat: { path: Str } -> Result [DirEntry] FsError <FileSystem>,
-  ## Structural mutation — each is a kernel syscall
+  ## Structural mutation — each is a kernel syscall.
+  ##
+  ## `delete` takes no `follow_symlinks`: POSIX `unlink` and NIO's
+  ## `Files.delete` BOTH always remove the link and never the target, and
+  ## there is no option to change that. A flag here could only be
+  ## implemented as "resolve, then delete", which is not what any
+  ## filesystem means by deleting a path, so it would be a Mezze
+  ## invention wearing a POSIX name.
   delete: { path: Str } -> Result {} FsError <FileSystem>,
   create_directory: { path: Str } -> Result {} FsError <FileSystem>,
-  copy_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-  move_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-  ## Streaming — open/read_chunk/write_chunk/close
-  open: { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileSystem>,
-  read_chunk: { handle: FileHandle, max_bytes: Int } -> Result Bytes FsError <FileSystem>,
-  write_chunk: { handle: FileHandle, bytes: Bytes } -> Result {} FsError <FileSystem>,
-  close: { handle: FileHandle } -> Result {} FsError <FileSystem>
+  ## `replace_existing` overwrites the destination instead of failing with
+  ## `FsAlreadyExists`; `preserve_attrs` carries mode and timestamps over;
+  ## `follow_symlinks = False` copies the LINK rather than its target.
+  copy_file: { src: Str, dest: Str, replace_existing: Bool, preserve_attrs: Bool, follow_symlinks: Bool } -> Result {} FsError <FileSystem>,
+  ## `require_atomic` demands a rename that no reader can observe halfway,
+  ## and fails with `FsNotSupported` rather than silently degrading to
+  ## copy-then-delete — which is the whole reason to ask. It also takes no
+  ## `follow_symlinks`: `Files.move` has no such option, because a rename
+  ## moves the directory entry and there is no target to follow.
+  move_file: { src: Str, dest: Str, replace_existing: Bool, require_atomic: Bool } -> Result {} FsError <FileSystem>
 }
 
 ## Real filesystem via java.nio. Kernel fast paths for copy/move/stat.
-impl FileSystem for LocalDisk where {
+impl FileSystem for LocalFileSystem where {
   read_bytes = { path } -> __native_fs_read_bytes { path = path },
-  write_bytes = { path, bytes } -> __native_fs_write_bytes { path = path, bytes = bytes },
-  stat = { path } -> __native_fs_stat { path = path },
+  write_bytes = { path, bytes, mode } -> __native_fs_write_bytes { path = path, bytes = bytes, mode = mode },
+  stat = { path, follow_symlinks } -> __native_fs_stat { path = path, follow_symlinks = follow_symlinks },
   list = { path } -> __native_fs_list { path = path },
   list_with_stat = { path } -> __native_fs_list_with_stat { path = path },
   delete = { path } -> __native_fs_delete { path = path },
   create_directory = { path } -> __native_fs_create_directory { path = path },
-  copy_file = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
-  move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
-  open = { path, mode } -> __native_fs_open { path = path, mode = mode },
-  read_chunk = { handle, max_bytes } ->
-    __native_fs_read_chunk { handle = handle, max_bytes = max_bytes },
-  write_chunk = { handle, bytes } -> __native_fs_write_chunk { handle = handle, bytes = bytes },
-  close = { handle } -> __native_fs_close { handle = handle },
+  copy_file = { src, dest, replace_existing, preserve_attrs, follow_symlinks } -> __native_fs_copy_file { src = src, dest = dest, replace_existing = replace_existing, preserve_attrs = preserve_attrs, follow_symlinks = follow_symlinks },
+  move_file = { src, dest, replace_existing, require_atomic } -> __native_fs_move_file { src = src, dest = dest, replace_existing = replace_existing, require_atomic = require_atomic },
 }
 
-## In-memory filesystem for tests. ConcurrentHashMap-backed; test
-## isolation via memfs_clear (called from test setup).
-impl FileSystem for MemoryFS where {
+## In-memory filesystem for tests. ConcurrentHashMap-backed, and held
+## PER CONTEXT, so isolation needs no explicit wipe: a fresh program
+## starts empty and its files die with it. There is deliberately no
+## `clear` op — it would have to live on `FileSystem`, and then
+## `LocalFileSystem` would owe an implementation that wipes a real disk.
+## To empty one of these, `delete` the paths or end the program.
+impl FileSystem for MemoryFileSystem where {
   read_bytes = { path } -> __native_memfs_read_bytes { path = path },
-  write_bytes = { path, bytes } -> __native_memfs_write_bytes { path = path, bytes = bytes },
-  stat = { path } -> __native_memfs_stat { path = path },
+  write_bytes = { path, bytes, mode } -> __native_memfs_write_bytes { path = path, bytes = bytes, mode = mode },
+  stat = { path, follow_symlinks } -> __native_memfs_stat { path = path, follow_symlinks = follow_symlinks },
   list = { path } -> __native_memfs_list { path = path },
   list_with_stat = { path } -> __native_memfs_list_with_stat { path = path },
   delete = { path } -> __native_memfs_delete { path = path },
   create_directory = { path } -> __native_memfs_create_directory { path = path },
-  copy_file = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
-  move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
+  copy_file = { src, dest, replace_existing, preserve_attrs, follow_symlinks } -> __native_memfs_copy_file { src = src, dest = dest, replace_existing = replace_existing, preserve_attrs = preserve_attrs, follow_symlinks = follow_symlinks },
+  move_file = { src, dest, replace_existing, require_atomic } -> __native_memfs_move_file { src = src, dest = dest, replace_existing = replace_existing, require_atomic = require_atomic },
+}
+
+## ==================================================================
+## FileStreaming — random access over an open handle.
+##
+## Split out of FileSystem, and this split is the one that makes an
+## object-store backend clean: S3 has no seek and no partial write, so a
+## unified effect would force it to stub half its ops. It implements
+## FileSystem only, and the typechecker rejects it at the `perform` site
+## for anything needing <FileStreaming>.
+##
+## `read_at`/`write_at`/`seek`/`truncate` are what a database or a
+## binary-format tool needs and what Mezze had no way to express.
+## ==================================================================
+effect FileStreaming where {
+  open: { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileStreaming>,
+  read_chunk: { handle: FileHandle, max_bytes: Int }
+    -> Result Bytes FsError <FileStreaming>,
+  write_chunk: { handle: FileHandle, bytes: Bytes }
+    -> Result {} FsError <FileStreaming>,
+  ## Positional read. Does NOT move the handle's position, so an index
+  ## read cannot disturb a sequential scan sharing the handle.
+  read_at: { handle: FileHandle, offset: Int, max_bytes: Int }
+    -> Result Bytes FsError <FileStreaming>,
+  ## Positional write. Also leaves the position alone.
+  write_at: { handle: FileHandle, offset: Int, bytes: Bytes }
+    -> Result {} FsError <FileStreaming>,
+  ## Move the position. Seeking past the end is legal — a write there
+  ## creates a hole, which is how sparse files happen.
+  seek: { handle: FileHandle, offset: Int } -> Result {} FsError <FileStreaming>,
+  ## Cut the file to `size`, discarding anything beyond. Growing is NOT
+  ## guaranteed: on a short file this is a no-op rather than an extend,
+  ## matching FileChannel.truncate.
+  truncate: { handle: FileHandle, size: Int } -> Result {} FsError <FileStreaming>,
+  close: { handle: FileHandle } -> Result {} FsError <FileStreaming>,
+}
+
+impl FileStreaming for LocalFileStreaming where {
+  open = { path, mode } -> __native_fs_open { path = path, mode = mode },
+  read_chunk = { handle, max_bytes } ->
+    __native_fs_read_chunk { handle = handle, max_bytes = max_bytes },
+  write_chunk = { handle, bytes } -> __native_fs_write_chunk { handle = handle, bytes = bytes },
+  read_at = { handle, offset, max_bytes } ->
+    __native_fs_read_at { handle = handle, offset = offset, max_bytes = max_bytes },
+  write_at = { handle, offset, bytes } ->
+    __native_fs_write_at { handle = handle, offset = offset, bytes = bytes },
+  seek = { handle, offset } -> __native_fs_seek { handle = handle, offset = offset },
+  truncate = { handle, size } -> __native_fs_truncate { handle = handle, size = size },
+  close = { handle } -> __native_fs_close { handle = handle },
+}
+
+impl FileStreaming for MemoryFileStreaming where {
   open = { path, mode } -> __native_memfs_open { path = path, mode = mode },
   read_chunk = { handle, max_bytes } ->
     __native_memfs_read_chunk { handle = handle, max_bytes = max_bytes },
   write_chunk = { handle, bytes } -> __native_memfs_write_chunk { handle = handle, bytes = bytes },
+  read_at = { handle, offset, max_bytes } ->
+    __native_memfs_read_at { handle = handle, offset = offset, max_bytes = max_bytes },
+  write_at = { handle, offset, bytes } ->
+    __native_memfs_write_at { handle = handle, offset = offset, bytes = bytes },
+  seek = { handle, offset } -> __native_memfs_seek { handle = handle, offset = offset },
+  truncate = { handle, size } -> __native_memfs_truncate { handle = handle, size = size },
   close = { handle } -> __native_memfs_close { handle = handle },
+}
+
+## ==================================================================
+## FileDurability — fsync, as its own effect.
+##
+## Separate from `FileSystem` because of what a backend can honestly
+## promise. `close` flushes to the operating system; it does not say the
+## storage device has the bytes. Only a write-ahead log, a queue or a
+## database needs that distinction, and for everyone else carrying it in
+## the row would be noise — so a function that needs durability says so:
+##
+##   let commit: { h: FileHandle } -> Result {} FsError <FileDurability>
+##
+## A reader sees from the signature that this wants a real filesystem.
+## Backends: LocalFileSystem (FileChannel.force), MemoryFileSystem (publishes its write
+## buffer — see the native, it is deliberately not a no-op). An object
+## store would implement this trivially, since every PUT is already
+## durable; one that could not would simply not implement the effect, and
+## the typechecker would reject it at the `perform` site.
+## ==================================================================
+effect FileDurability where {
+  ## Force this handle's content AND metadata to the device. A write whose
+  ## length change never reached the inode is still a lost write.
+  fsync: { handle: FileHandle } -> Result {} FsError <FileDurability>,
+  ## Force a directory's own entries, which is what makes a create or a
+  ## rename survive power loss — the name lives in the parent, not in the
+  ## file. POSIX-specific; Windows reports FsIOError rather than pretending.
+  fsync_dir: { path: Str } -> Result {} FsError <FileDurability>,
+}
+
+## A performer handles exactly ONE effect (V0701 keys on the performer
+## name alone), so each capability effect gets its own performer rather
+## than `LocalFileSystem` implementing several. The name says which backend and
+## which capability, and a program installs only the ones it needs:
+##
+##   perform LocalFileSystem in perform LocalFileDurability in …
+impl FileDurability for LocalFileDurability where {
+  fsync = { handle } -> __native_fs_fsync { handle = handle },
+  fsync_dir = { path } -> __native_fs_fsync_dir { path = path },
+}
+
+impl FileDurability for MemoryFileDurability where {
+  fsync = { handle } -> __native_memfs_fsync { handle = handle },
+  fsync_dir = { path } -> __native_memfs_fsync_dir { path = path },
+}
+
+## ==================================================================
+## FileLock — coordinated access to a path.
+##
+## Whole-file, advisory, process-wide. Byte-range locks are deliberately
+## omitted: POSIX-only, rarely used, and a caller who needs them is
+## better served by a native escape hatch than by a stdlib surface that
+## most backends cannot honour.
+##
+## "Advisory" is the honest word. On a network filesystem the lock may be
+## a no-op that reports success — that is the backend lying, and it is
+## precisely why this is a separate effect a backend may decline to
+## implement rather than an op on FileSystem that S3 would have to stub.
+## ==================================================================
+pub type LockKind = | Shared, Exclusive |
+
+## Opaque handle for a held lock. Pass it back to `unlock`; holding the
+## channel open is what keeps the lock, so dropping this without
+## unlocking leaks a file descriptor.
+pub newtype LockHandle = __NativeLockHandle
+
+effect FileLock where {
+  ## Acquire. `blocking = True` waits for the holder to release;
+  ## `False` fails immediately with FsPermissionDenied if it is held.
+  lock: { path: Str, kind: LockKind, blocking: Bool }
+    -> Result LockHandle FsError <FileLock>,
+  ## Release. Idempotent — unlocking twice is a no-op success.
+  unlock: { handle: LockHandle } -> Result {} FsError <FileLock>,
+}
+
+impl FileLock for LocalFileLock where {
+  lock = { path, kind, blocking } ->
+    __native_fs_lock { path = path, kind = kind, blocking = blocking },
+  unlock = { handle } -> __native_fs_unlock { handle = handle },
+}
+
+## MemoryFileSystem contention is REAL, not simulated: shared locks stack, an
+## exclusive lock excludes everything. Reporting success unconditionally
+## would make "a lock excludes someone" untestable without a second
+## process. `blocking = True` on a held lock is rejected rather than
+## parked — the only possible holder is this same context, so waiting
+## could only deadlock.
+impl FileLock for MemoryFileLock where {
+  lock = { path, kind, blocking } ->
+    __native_memfs_lock { path = path, kind = kind, blocking = blocking },
+  unlock = { handle } -> __native_memfs_unlock { handle = handle },
+}
+
+## ==================================================================
+## FileSymlinks — links, created and inspected.
+##
+## POSIX-only and admitted as such rather than faked. Matters for package
+## managers (nix, npm), blue/green deploy swaps and monorepo tooling.
+## Windows needs administrator or developer mode for symlinks, which
+## surfaces as FsPermissionDenied; an object store declines the whole
+## effect.
+## ==================================================================
+effect FileSymlinks where {
+  ## Create a symbolic link at `link` pointing at `target`. `target` is
+  ## not resolved or required to exist — a dangling symlink is legal and
+  ## is how blue/green swaps stage the next release.
+  create_symlink: { link: Str, target: Str } -> Result {} FsError <FileSymlinks>,
+  ## Create a hard link. Both names then refer to one inode, so the
+  ## content outlives either name. Same filesystem only.
+  create_hardlink: { link: Str, target: Str } -> Result {} FsError <FileSymlinks>,
+  ## Read a symlink's target WITHOUT following it. Errors if the path is
+  ## not a symlink.
+  read_symlink: { path: Str } -> Result Str FsError <FileSymlinks>,
+  ## True iff the path is a symlink. Does not follow it, so this answers
+  ## about the link and never about what it points at.
+  is_symlink: { path: Str } -> Result Bool FsError <FileSymlinks>,
+}
+
+impl FileSymlinks for LocalFileSymlinks where {
+  create_symlink = { link, target } ->
+    __native_fs_create_symlink { link = link, target = target },
+  create_hardlink = { link, target } ->
+    __native_fs_create_hardlink { link = link, target = target },
+  read_symlink = { path } -> __native_fs_read_symlink { path = path },
+  is_symlink = { path } -> __native_fs_is_symlink { path = path },
+}
+
+impl FileSymlinks for MemoryFileSymlinks where {
+  create_symlink = { link, target } ->
+    __native_memfs_create_symlink { link = link, target = target },
+  create_hardlink = { link, target } ->
+    __native_memfs_create_hardlink { link = link, target = target },
+  read_symlink = { path } -> __native_memfs_read_symlink { path = path },
+  is_symlink = { path } -> __native_memfs_is_symlink { path = path },
+}
+
+## ==================================================================
+## FilePermissions — POSIX metadata.
+##
+## `real_path` lives here because symlink resolution touches the same
+## metadata layer. Windows implements what it can and returns
+## FsNotSupported for owner/group off an NTFS ACL volume, which is honest
+## rather than aspirational.
+## ==================================================================
+## Nine permission bits as a record rather than an octal Int: `0o755` is
+## write-only knowledge, while `owner_exec = True` reads at the call site
+## and cannot be transposed by accident.
+pub type FileMode = {
+  owner_read: Bool, owner_write: Bool, owner_exec: Bool,
+  group_read: Bool, group_write: Bool, group_exec: Bool,
+  other_read: Bool, other_write: Bool, other_exec: Bool,
+}
+
+pub type FileOwner = { user: Str, group: Str }
+
+effect FilePermissions where {
+  get_mode: { path: Str } -> Result FileMode FsError <FilePermissions>,
+  set_mode: { path: Str, mode: FileMode } -> Result {} FsError <FilePermissions>,
+  get_owner: { path: Str } -> Result FileOwner FsError <FilePermissions>,
+  set_owner: { path: Str, owner: FileOwner } -> Result {} FsError <FilePermissions>,
+  ## Set last-modified time. `touch`, reproducible builds, mtime-preserving
+  ## copies for anything `copy`'s preserve_attrs does not cover.
+  set_modified: { path: Str, millis: Int } -> Result {} FsError <FilePermissions>,
+  ## Canonical path with every symlink resolved. The security-relevant one:
+  ## "does this path still live inside my sandbox after resolution".
+  real_path: { path: Str, follow_symlinks: Bool } -> Result Str FsError <FilePermissions>,
+}
+
+impl FilePermissions for LocalFilePermissions where {
+  get_mode = { path } -> __native_fs_get_mode { path = path },
+  set_mode = { path, mode } -> __native_fs_set_mode { path = path, mode = mode },
+  get_owner = { path } -> __native_fs_get_owner { path = path },
+  set_owner = { path, owner } -> __native_fs_set_owner { path = path, owner = owner },
+  set_modified = { path, millis } ->
+    __native_fs_set_modified { path = path, millis = millis },
+  real_path = { path, follow_symlinks } ->
+    __native_fs_real_path { path = path, follow_symlinks = follow_symlinks },
+}
+
+## MemoryFileSystem stores mode, owner and mtime per entry, so tests can assert on
+## them. It is NOT a POSIX kernel: set_mode records what you asked for and
+## nothing enforces it, so a mode of all-False does not make a read fail.
+## Permission ENFORCEMENT is a real filesystem's job; this backend is for
+## asserting that your code sets what it meant to set.
+impl FilePermissions for MemoryFilePermissions where {
+  get_mode = { path } -> __native_memfs_get_mode { path = path },
+  set_mode = { path, mode } -> __native_memfs_set_mode { path = path, mode = mode },
+  get_owner = { path } -> __native_memfs_get_owner { path = path },
+  set_owner = { path, owner } -> __native_memfs_set_owner { path = path, owner = owner },
+  set_modified = { path, millis } ->
+    __native_memfs_set_modified { path = path, millis = millis },
+  real_path = { path, follow_symlinks } ->
+    __native_memfs_real_path { path = path, follow_symlinks = follow_symlinks },
+}
+
+## ==================================================================
+## FileWatch — change notification.
+##
+## The one capability whose backends differ most: inotify/kqueue locally,
+## synthesised from writes in MemoryFileSystem, and nothing at all for an object
+## store or an HTTP-backed tree, which decline the effect.
+## ==================================================================
+## `Overflow` carries no path on purpose: it means the queue dropped
+## events, so there is no single path it is about. The honest recovery is
+## to rescan the tree — which a caller can only do if it is told, which is
+## why this variant exists instead of silently losing events.
+pub type WatchEvent = |
+  Created { path: Str },
+  Modified { path: Str },
+  Deleted { path: Str },
+  Overflow,
+|
+
+pub newtype WatchHandle = __NativeWatchHandle
+
+effect FileWatch where {
+  ## Watch a directory. `recursive = True` also watches existing
+  ## subdirectories; see the note on the native about directories created
+  ## afterwards.
+  watch: { path: Str, recursive: Bool } -> Result WatchHandle FsError <FileWatch>,
+  ## Drain whatever has arrived, waiting at most `timeout_ms` (0 = don't
+  ## wait). A BATCH, because that is what the OS delivers — one key
+  ## carries many events, and splitting them would lose the grouping and
+  ## multiply syscalls. An empty Seq means nothing happened, which is a
+  ## normal answer.
+  poll: { handle: WatchHandle, timeout_ms: Int }
+    -> Result [WatchEvent] FsError <FileWatch>,
+  unwatch: { handle: WatchHandle } -> Result {} FsError <FileWatch>,
+}
+
+impl FileWatch for LocalFileWatch where {
+  watch = { path, recursive } ->
+    __native_fs_watch { path = path, recursive = recursive },
+  poll = { handle, timeout_ms } ->
+    __native_fs_poll { handle = handle, timeout_ms = timeout_ms },
+  unwatch = { handle } -> __native_fs_unwatch { handle = handle },
+}
+
+## MemoryFileSystem synthesises events from its own mutations, which is why the
+## core ops notify the watchers. `timeout_ms` is accepted and ignored:
+## there is no other thread to wait for inside one context, so blocking
+## could only delay the caller for nothing.
+impl FileWatch for MemoryFileWatch where {
+  watch = { path, recursive } ->
+    __native_memfs_watch { path = path, recursive = recursive },
+  poll = { handle, timeout_ms } ->
+    __native_memfs_poll { handle = handle, timeout_ms = timeout_ms },
+  unwatch = { handle } -> __native_memfs_unwatch { handle = handle },
 }
 
 ## ==================================================================
@@ -133,7 +489,7 @@ pub let read_text: { path: Str } -> Result Str FsError <FileSystem> = { path } -
 
 ## Write a Str as UTF-8. Create-or-replace.
 pub let write_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
-  FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text } }
+  FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text }, mode = CreateOrTruncate }
 
 ## Read text with a default on error. Common for config loading.
 pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def } ->
@@ -143,7 +499,7 @@ pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def 
 
 
 ## ---------- Metadata queries derived from stat ----------
-pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path } is
+pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path, follow_symlinks = True } is
   Ok { val = s } -> match s.kind is
     NotFound -> Ok { val = False }
     _ -> Ok { val = True }
@@ -151,7 +507,7 @@ pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> 
 
 
 pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
       File -> Ok { val = True }
       _ -> Ok { val = False }
@@ -159,7 +515,7 @@ pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
 
 
 pub let is_directory: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
       Directory -> Ok { val = True }
       _ -> Ok { val = False }
@@ -167,28 +523,46 @@ pub let is_directory: { path: Str } -> Result Bool FsError <FileSystem> = { path
 
 
 pub let file_size: { path: Str } -> Result Int FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> Ok { val = s.size }
     Err { error } -> Err { error = error }
 
 
-## ---------- Append via streaming ----------
-## Append bytes to a file. Uses open(Append) + write_chunk + close.
-## On backends where open(Append) sets O_APPEND this is one syscall
-## for the write plus open/close overhead — same perf as a dedicated
-## append primitive would give.
+## ---------- Append ----------
+## Append bytes to a file, creating it if missing.
+##
+## This used to open a handle, write a chunk and close it, which meant a
+## program that wanted to add a log line had to disclose `<FileStreaming>`
+## — random-access file I/O, the one capability an object store cannot
+## offer — for an operation that needs none of it. `WriteMode.Append` is
+## the primitive, so this now needs only `<FileSystem>` and works on every
+## backend.
 pub let append_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem> = { path, bytes } ->
-  match FileSystem.open { path = path, mode = Append } is
-    Ok { val = h } -> do
-      let write_result = FileSystem.write_chunk { handle = h, bytes = bytes }
-      let _ = FileSystem.close { handle = h }
-      write_result
-    Err { error } -> Err { error = error }
+  FileSystem.write_bytes { path = path, bytes = bytes, mode = CreateOrAppend }
 
 
 ## Append UTF-8 text.
 pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
   append_bytes { path = path, bytes = bytes::from_str { s = text } }
+
+
+## ---------- The atomic lockfile primitive ----------
+## Create a file ONLY if it does not exist, and say which happened.
+##
+## `Ok { val = True }` means this caller created it; `Ok { val = False }`
+## means somebody else already had. The check and the create are one
+## syscall, so of two processes racing exactly one gets `True` — which is
+## what makes this usable as a lock, and what `exists`-then-`write_bytes`
+## can never be, because another process fits between them.
+##
+## A backend that cannot do it atomically returns `FsNotSupported` rather
+## than guessing, so a caller is never silently handed a lock that does
+## not exclude.
+pub let create_exclusive: { path: Str, bytes: Bytes } -> Result Bool FsError <FileSystem> = { path, bytes } ->
+  match FileSystem.write_bytes { path = path, bytes = bytes, mode = CreateNew } is
+    Ok { val = _ } -> Ok { val = True }
+    Err { error = FsAlreadyExists { path = _ } } -> Ok { val = False }
+    Err { error } -> Err { error = error }
 
 ## ---------- Directory + write conveniences ----------
 ## Create directory + all missing ancestors.
@@ -204,7 +578,7 @@ pub let create_directories: { path: Str } -> Result {} FsError <FileSystem> = { 
 
 ## Ensure path is an existing directory. Create if absent.
 pub let ensure_directory: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
       Directory -> Ok { val = {} }
       NotFound -> create_directories { path = path }
@@ -229,7 +603,7 @@ pub let write_text_mkdirs: { path: Str, text: Str } -> Result {} FsError <FileSy
 ## short-circuits, and the parent directory is NOT deleted if any
 ## child failed. Matches Rust's `std::fs::remove_dir_all` semantics.
 pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Err { error } -> Err { error = error }
     Ok { val = s } -> match s.kind is
       NotFound -> Err { error = FsNotFound { path = path } }
@@ -255,23 +629,23 @@ pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { pa
 ## Auto-closing read wrapper. `f` receives the handle; on return or
 ## error, the handle is closed.
 pub let with_read
-  : { path: Str, f: { handle: FileHandle } -> 'a <FileSystem, ...> }
-  -> Result 'a FsError <FileSystem, ...>
-  = { path, f } -> match FileSystem.open { path = path, mode = Read } is
+  : { path: Str, f: { handle: FileHandle } -> 'a <FileStreaming, ...> }
+  -> Result 'a FsError <FileStreaming, ...>
+  = { path, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
       let result = f { handle = h }
-      let _ = FileSystem.close { handle = h }
+      let _ = FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }
 
 
 ## Auto-closing write wrapper.
 pub let with_write
-  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileSystem, ...> }
-  -> Result 'a FsError <FileSystem, ...>
-  = { path, mode, f } -> match FileSystem.open { path = path, mode = mode } is
+  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileStreaming, ...> }
+  -> Result 'a FsError <FileStreaming, ...>
+  = { path, mode, f } -> match FileStreaming.open { path = path, mode = mode } is
     Ok { val = h } -> do
       let result = f { handle = h }
-      let _ = FileSystem.close { handle = h }
+      let _ = FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }

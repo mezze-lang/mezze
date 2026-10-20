@@ -353,10 +353,10 @@ data class ParsedEffectOp(
 
 
 /**
- * Performer declaration: `impl FileSystem for LocalDisk where { ... }`
+ * Performer declaration: `impl FileSystem for LocalFileSystem where { ... }`
  *
  * Example:
- * - `impl FileSystem for LocalDisk where { read_file = { path } -> ... }`
+ * - `impl FileSystem for LocalFileSystem where { read_file = { path } -> ... }`
  * - `impl FileSystem for FileLogger { path: Str } where { ... }` (with params)
  */
 @Serializable

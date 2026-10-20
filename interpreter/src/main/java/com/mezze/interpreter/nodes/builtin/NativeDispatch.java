@@ -2798,7 +2798,7 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> com.mezze.interpreter.nodes.builtin.effects.CoverageNatives.observeHit(r));
     }
 
-    // ==================== Filesystem (LocalDisk, #82) ====================
+    // ==================== Filesystem (LocalFileSystem, #82) ====================
     // 13 primitive ops. Bytes are the wire format; text conversions live
     // in Mezze helpers. FileHandle is opaque; open/read_chunk/write_chunk/
     // close forms the streaming primitives.
@@ -2821,9 +2821,30 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_fs_read_chunk",       (r, c) -> FilesystemNatives.readChunk(r));
         HANDLERS.put("__native_fs_write_chunk",      (r, c) -> FilesystemNatives.writeChunk(r));
         HANDLERS.put("__native_fs_close",            (r, c) -> FilesystemNatives.close(r));
+        HANDLERS.put("__native_fs_fsync",            (r, c) -> FilesystemNatives.fsync(r));
+        HANDLERS.put("__native_fs_fsync_dir",        (r, c) -> FilesystemNatives.fsyncDir(r));
+        HANDLERS.put("__native_fs_lock",             (r, c) -> FilesystemNatives.lock(r));
+        HANDLERS.put("__native_fs_unlock",           (r, c) -> FilesystemNatives.unlock(r));
+        HANDLERS.put("__native_fs_create_symlink", (r, c) -> FilesystemNatives.createSymlink(r));
+        HANDLERS.put("__native_fs_create_hardlink", (r, c) -> FilesystemNatives.createHardlink(r));
+        HANDLERS.put("__native_fs_read_symlink", (r, c) -> FilesystemNatives.readSymlink(r));
+        HANDLERS.put("__native_fs_is_symlink", (r, c) -> FilesystemNatives.isSymlink(r));
+        HANDLERS.put("__native_fs_get_mode", (r, c) -> FilesystemNatives.getMode(r));
+        HANDLERS.put("__native_fs_set_mode", (r, c) -> FilesystemNatives.setMode(r));
+        HANDLERS.put("__native_fs_get_owner", (r, c) -> FilesystemNatives.getOwner(r));
+        HANDLERS.put("__native_fs_set_owner", (r, c) -> FilesystemNatives.setOwner(r));
+        HANDLERS.put("__native_fs_set_modified", (r, c) -> FilesystemNatives.setModified(r));
+        HANDLERS.put("__native_fs_real_path", (r, c) -> FilesystemNatives.realPath(r));
+        HANDLERS.put("__native_fs_watch", (r, c) -> FilesystemNatives.watch(r));
+        HANDLERS.put("__native_fs_poll", (r, c) -> FilesystemNatives.poll(r));
+        HANDLERS.put("__native_fs_unwatch", (r, c) -> FilesystemNatives.unwatch(r));
+        HANDLERS.put("__native_fs_read_at", (r, c) -> FilesystemNatives.readAt(r));
+        HANDLERS.put("__native_fs_write_at", (r, c) -> FilesystemNatives.writeAt(r));
+        HANDLERS.put("__native_fs_seek", (r, c) -> FilesystemNatives.seek(r));
+        HANDLERS.put("__native_fs_truncate", (r, c) -> FilesystemNatives.truncate(r));
     }
 
-    // ==================== Memory Filesystem (MemoryFS, #82) ====================
+    // ==================== Memory Filesystem (MemoryFileSystem, #82) ====================
 
     private static void registerMemoryFilesystemHandlers() {
         // Whole-file
@@ -2843,11 +2864,29 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_memfs_read_chunk",       (r, c) -> MemoryFilesystemNatives.readChunk(r));
         HANDLERS.put("__native_memfs_write_chunk",      (r, c) -> MemoryFilesystemNatives.writeChunk(r));
         HANDLERS.put("__native_memfs_close",            (r, c) -> MemoryFilesystemNatives.close(r));
-        // Test isolation
-        HANDLERS.put("__native_memfs_clear", (r, c) -> {
-            MemoryFilesystemNatives.clear();
-            return MezzeRecord.empty();
-        });
+        HANDLERS.put("__native_memfs_fsync",            (r, c) -> MemoryFilesystemNatives.fsync(r));
+        HANDLERS.put("__native_memfs_fsync_dir",        (r, c) -> MemoryFilesystemNatives.fsyncDir(r));
+        HANDLERS.put("__native_memfs_lock",             (r, c) -> MemoryFilesystemNatives.lock(r));
+        HANDLERS.put("__native_memfs_unlock",           (r, c) -> MemoryFilesystemNatives.unlock(r));
+        HANDLERS.put("__native_memfs_create_symlink", (r, c) -> MemoryFilesystemNatives.createSymlink(r));
+        HANDLERS.put("__native_memfs_create_hardlink", (r, c) -> MemoryFilesystemNatives.createHardlink(r));
+        HANDLERS.put("__native_memfs_read_symlink", (r, c) -> MemoryFilesystemNatives.readSymlink(r));
+        HANDLERS.put("__native_memfs_is_symlink", (r, c) -> MemoryFilesystemNatives.isSymlink(r));
+        HANDLERS.put("__native_memfs_get_mode", (r, c) -> MemoryFilesystemNatives.getMode(r));
+        HANDLERS.put("__native_memfs_set_mode", (r, c) -> MemoryFilesystemNatives.setMode(r));
+        HANDLERS.put("__native_memfs_get_owner", (r, c) -> MemoryFilesystemNatives.getOwner(r));
+        HANDLERS.put("__native_memfs_set_owner", (r, c) -> MemoryFilesystemNatives.setOwner(r));
+        HANDLERS.put("__native_memfs_set_modified", (r, c) -> MemoryFilesystemNatives.setModified(r));
+        HANDLERS.put("__native_memfs_real_path", (r, c) -> MemoryFilesystemNatives.realPath(r));
+        HANDLERS.put("__native_memfs_watch", (r, c) -> MemoryFilesystemNatives.watch(r));
+        HANDLERS.put("__native_memfs_poll", (r, c) -> MemoryFilesystemNatives.poll(r));
+        HANDLERS.put("__native_memfs_unwatch", (r, c) -> MemoryFilesystemNatives.unwatch(r));
+        HANDLERS.put("__native_memfs_read_at", (r, c) -> MemoryFilesystemNatives.readAt(r));
+        HANDLERS.put("__native_memfs_write_at", (r, c) -> MemoryFilesystemNatives.writeAt(r));
+        HANDLERS.put("__native_memfs_seek", (r, c) -> MemoryFilesystemNatives.seek(r));
+        HANDLERS.put("__native_memfs_truncate", (r, c) -> MemoryFilesystemNatives.truncate(r));
+        // No `__native_memfs_clear`: the in-memory filesystem is per context,
+        // so a fresh program starts empty and there is nothing to wipe.
     }
 
     // ==================== Environment ====================

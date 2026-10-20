@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * In-memory FileSystem impl for tests (#82).
  *
- * Same 13-op surface as LocalDisk, backed by a ConcurrentHashMap of
+ * Same 13-op surface as LocalFileSystem, backed by a ConcurrentHashMap of
  * path → { bytes, modifiedMs }. Directories tracked as a separate map.
  * Streaming handles carry their own position and refer back to the map.
  */
@@ -26,10 +26,31 @@ public final class MemoryFilesystemNatives {
 
     private MemoryFilesystemNatives() {}
 
-    /** File entry: content bytes + last-modified epoch millis. */
+    /**
+     * File entry: content bytes + last-modified epoch millis, plus the
+     * POSIX metadata `FilePermissions` reads and writes and the symlink
+     * target `FileSymlinks` reads.
+     *
+     * The metadata is RECORDED, not ENFORCED: `set_mode` stores what you
+     * asked for and nothing here checks it before a read. Enforcement is a
+     * real kernel's job; this backend exists so a test can assert that the
+     * code set what it meant to set.
+     *
+     * `symlinkTarget` non-null makes this entry a link rather than a file.
+     * Its `bytes` stay empty — reading THROUGH a memfs symlink is not
+     * implemented, and `read_bytes` on a link reports FsNotSupported rather
+     * than silently returning nothing.
+     */
     private static final class Entry {
         volatile byte[] bytes;
         volatile long modifiedMs;
+        /** Nine permission bits, in MODE_FIELDS order. Defaults to rw-r--r--. */
+        volatile boolean[] mode = {true, true, false, true, false, false, true, false, false};
+        volatile String ownerUser = "mezze";
+        volatile String ownerGroup = "mezze";
+        /** Non-null iff this entry is a symlink; the raw, unresolved target. */
+        volatile String symlinkTarget;
+
         Entry(byte[] bytes) {
             this.bytes = bytes;
             this.modifiedMs = System.currentTimeMillis();
@@ -51,6 +72,30 @@ public final class MemoryFilesystemNatives {
         /** Mock clock, also per context — a test that advances time must not
          *  move another program's clock. */
         final AtomicLong nowMs = new AtomicLong(0);
+
+        /**
+         * `FileLock` state: path -> who holds it. Per context like the rest,
+         * so one program's lockfile is invisible to another — which is what
+         * the real backend does across processes.
+         *
+         * A counter rather than a boolean: a shared lock may be held many
+         * times at once, and unlocking one holder must not free the others.
+         * `exclusive` and a non-zero `shared` are mutually exclusive.
+         */
+        final ConcurrentHashMap<String, LockState> locks = new ConcurrentHashMap<>();
+
+        /**
+         * `FileWatch` state: watch id -> its pending events.
+         *
+         * This is the one effect whose state the CORE has to know about: a
+         * write through FileSystem must enqueue an event for a watcher, so
+         * the mutating ops call {@link #notifyWatchers}. The alternative —
+         * pollers diffing `modifiedMs` — needs no coupling but cannot tell
+         * Created from Deleted and can never report Overflow, so it could
+         * not honestly implement WatchEvent.
+         */
+        final ConcurrentHashMap<Long, Watch> watches = new ConcurrentHashMap<>();
+        final AtomicLong nextWatchId = new AtomicLong(1);
 
         State() {
             // `directories`, not `directories()`: this IS the state being built,
@@ -76,27 +121,30 @@ public final class MemoryFilesystemNatives {
     }
 
     @TruffleBoundary
+    private static ConcurrentHashMap<Long, Watch> watches() {
+        return state().watches;
+    }
+
+    @TruffleBoundary
+    private static ConcurrentHashMap<String, LockState> locks() {
+        return state().locks;
+    }
+
+    @TruffleBoundary
     private static AtomicLong nowMs() {
         return state().nowMs;
     }
 
-    /**
-     * Clear THIS context's in-memory filesystem. Registered as
-     * {@code __native_memfs_clear} in NativeDispatch.
-     *
-     * Tests used to call this from their `setUp`, straight to the Java method,
-     * because the filesystem was static and one test's files were every test's
-     * files. The state is per context now, so a fresh program starts empty and
-     * that call is both unnecessary and impossible — there is no context to
-     * clear from JUnit's own thread, and asking for one there fails loudly
-     * rather than silently clearing nothing.
-     */
-    @TruffleBoundary
-    public static void clear() {
-        files().clear();
-        directories().clear();
-        directories().put("/", ConcurrentHashMap.newKeySet());
-    }
+    // A `clear()` used to live here, registered as `__native_memfs_clear`.
+    // Tests called it from `setUp` because the filesystem was static and one
+    // test's files were every test's files. Both are gone: the state is per
+    // context, so a fresh program starts empty, and no Mezze code could reach
+    // the native anyway — it was never bound to an op. It was also silently
+    // stale, clearing `files` and `directories` but not the `locks` and
+    // `watches` added later, which would have left a path locked against a
+    // filesystem that no longer had the file. Deleted rather than fixed,
+    // because a `clear` op would have to sit on `FileSystem` and oblige
+    // LocalFileSystem to wipe a real disk.
 
     // ==================== Path normalization ====================
 
@@ -127,7 +175,7 @@ public final class MemoryFilesystemNatives {
     // ==================== FileHandle (in-memory) ====================
 
     /**
-     * Streaming handle for MemoryFS. Reads/writes byte-array pages
+     * Streaming handle for MemoryFileSystem. Reads/writes byte-array pages
      * held by the file's {@link Entry}. Position advances on each op.
      *
      * write handles accumulate bytes in a ByteArrayOutputStream; on
@@ -159,23 +207,86 @@ public final class MemoryFilesystemNatives {
         return ok(new MezzeBytes(e.bytes));
     }
 
+    /**
+     * Whole-file write under one of three modes.
+     *
+     * `CreateNew` must be ATOMIC against a concurrent writer, because that
+     * is the only property it is asked for — it is the lockfile primitive.
+     * `putIfAbsent` gives exactly that: of two threads racing for one
+     * path, the map decides, and the loser sees the winner's entry rather
+     * than overwriting it. A `containsKey` check followed by a `put` would
+     * read as correct and race, which is the bug this mode exists to make
+     * impossible.
+     *
+     * `Append` keeps the existing entry's identity and grows its bytes,
+     * rather than replacing it, so a handle or a watcher holding the entry
+     * sees the appended data.
+     */
     @TruffleBoundary
     public static Object writeBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
         MezzeBytes bytes = getBytes(args, "bytes");
+        String mode = getVariantTag(args, "mode");
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
         if (isDir(path)) return errIO(path, "Is a directory");
+
+        if ("CreateNew".equals(mode)) {
+            Entry prior = files().putIfAbsent(path, new Entry(bytes.getData()));
+            if (prior != null) return errAlreadyExists(path);
+            directories().get(parent).add(basenameOf(path));
+            notifyWatchers(path, "Created");
+            return ok(MezzeRecord.empty());
+        }
+
+        if ("CreateOrAppend".equals(mode)) {
+            Entry existing = files().get(path);
+            if (existing != null) {
+                byte[] add = bytes.getData();
+                byte[] grown = new byte[existing.bytes.length + add.length];
+                System.arraycopy(existing.bytes, 0, grown, 0, existing.bytes.length);
+                System.arraycopy(add, 0, grown, existing.bytes.length, add.length);
+                existing.bytes = grown;
+                existing.modifiedMs = nowMs().get() > 0 ? nowMs().get() : System.currentTimeMillis();
+                notifyWatchers(path, "Modified");
+                return ok(MezzeRecord.empty());
+            }
+            // Append to a missing file creates it, like O_APPEND|O_CREAT.
+            files().put(path, new Entry(bytes.getData()));
+            directories().get(parent).add(basenameOf(path));
+            notifyWatchers(path, "Created");
+            return ok(MezzeRecord.empty());
+        }
+
+        boolean existed = isFile(path);
         files().put(path, new Entry(bytes.getData()));
         directories().get(parent).add(basenameOf(path));
+        notifyWatchers(path, existed ? "Modified" : "Created");
         return ok(MezzeRecord.empty());
     }
 
     // ==================== Metadata ====================
 
+    /**
+     * `follow_symlinks = False` reports on the LINK rather than its target,
+     * which is the only way to see a dangling one.
+     *
+     * A link inspected without following reports `Other`, matching
+     * LocalFileSystem: NOFOLLOW_LINKS attributes are neither a regular
+     * file nor a directory there either. Following resolves one hop and
+     * reports on the target, or `NotFound` if the target is missing —
+     * which is exactly what makes the unfollowed form necessary, since a
+     * caller otherwise cannot tell a broken link from no link at all.
+     */
     @TruffleBoundary
     public static Object stat(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
+        boolean follow = getBool(args, "follow_symlinks");
+        Entry direct = files().get(path);
+        if (direct != null && direct.symlinkTarget != null) {
+            if (!follow) return ok(fileStatRecord("Other", 0L, direct.modifiedMs));
+            path = normalize(direct.symlinkTarget);
+        }
         if (isDir(path)) {
             return ok(fileStatRecord("Directory", 0L, 0L));
         }
@@ -231,6 +342,7 @@ public final class MemoryFilesystemNatives {
             directories().remove(path);
         } else if (isFile(path)) {
             files().remove(path);
+            notifyWatchers(path, "Deleted");
         } else {
             return errNotFound(path);
         }
@@ -250,6 +362,7 @@ public final class MemoryFilesystemNatives {
         if (!isDir(parent)) return errNotFound(parent);
         directories().put(path, ConcurrentHashMap.newKeySet());
         directories().get(parent).add(basenameOf(path));
+        notifyWatchers(path, "Created");
         return ok(MezzeRecord.empty());
     }
 
@@ -261,13 +374,41 @@ public final class MemoryFilesystemNatives {
         if (srcEntry == null) {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
-        if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
+        boolean replaceExisting = getBool(args, "replace_existing");
+        boolean preserveAttrs = getBool(args, "preserve_attrs");
+        boolean follow = getBool(args, "follow_symlinks");
+        if (srcEntry.symlinkTarget != null && !follow) {
+            // Copy the LINK: a new entry pointing at the same raw target,
+            // not the bytes it resolves to.
+            if ((isFile(dest) || isDir(dest)) && !replaceExisting) return errAlreadyExists(dest);
+            String linkParent = parentOf(dest);
+            if (!isDir(linkParent)) return errNotFound(linkParent);
+            Entry link = new Entry(new byte[0]);
+            link.symlinkTarget = srcEntry.symlinkTarget;
+            files().put(dest, link);
+            directories().get(linkParent).add(basenameOf(dest));
+            notifyWatchers(dest, "Created");
+            return ok(MezzeRecord.empty());
+        }
+        boolean destExisted = isFile(dest) || isDir(dest);
+        if (destExisted && !replaceExisting) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
         if (!isDir(destParent)) return errNotFound(destParent);
-        // MemoryFS is a byte-array copy — no kernel path, but still
+        // MemoryFileSystem is a byte-array copy — no kernel path, but still
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
-        files().put(dest, new Entry(srcEntry.bytes.clone()));
+        Entry copy = new Entry(srcEntry.bytes.clone());
+        if (preserveAttrs) {
+            // Mode, owner and mtime, so a copy --preserve round-trips. The
+            // mode array is cloned: sharing it would make a later chmod of
+            // one file silently change the other.
+            copy.mode = srcEntry.mode.clone();
+            copy.ownerUser = srcEntry.ownerUser;
+            copy.ownerGroup = srcEntry.ownerGroup;
+            copy.modifiedMs = srcEntry.modifiedMs;
+        }
+        files().put(dest, copy);
+        notifyWatchers(dest, destExisted ? "Modified" : "Created");
         directories().get(destParent).add(basenameOf(dest));
         return ok(MezzeRecord.empty());
     }
@@ -280,11 +421,21 @@ public final class MemoryFilesystemNatives {
         if (srcEntry == null) {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
-        if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
+        boolean replaceExisting = getBool(args, "replace_existing");
+        // `require_atomic` is read and deliberately unused: a move here is
+        // two map operations on one context's state, with no window a
+        // reader of this filesystem can observe, so the guarantee always
+        // holds and refusing would be a lie in the other direction. Read
+        // anyway, so a caller that passes it gets the same signature.
+        boolean requireAtomic = getBool(args, "require_atomic");
+        boolean destExisted = isFile(dest) || isDir(dest);
+        if (destExisted && !replaceExisting) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
         if (!isDir(destParent)) return errNotFound(destParent);
         files().put(dest, srcEntry);
         files().remove(src);
+        notifyWatchers(dest, destExisted ? "Modified" : "Created");
+        notifyWatchers(src, "Deleted");
         String srcParent = parentOf(src);
         directories().get(srcParent).remove(basenameOf(src));
         directories().get(destParent).add(basenameOf(dest));
@@ -307,6 +458,21 @@ public final class MemoryFilesystemNatives {
                 if (isDir(path)) return errIO(path, "Is a directory");
                 String parentW = parentOf(path);
                 if (!isDir(parentW)) return errNotFound(parentW);
+                // Truncate NOW, not lazily when close republishes the buffer.
+                // OpenMode says "Write — truncate-or-create. Existing content
+                // replaced", and LocalFileSystem opens with TRUNCATE_EXISTING, so
+                // the file is empty the moment it is open. Deferring it made
+                // the two backends disagree: a write_at on a freshly opened
+                // Write handle patched the OLD bytes here and an empty file
+                // there. Found by a test asserting the same thing of both.
+                Entry existingW = files().get(path);
+                if (existingW != null) {
+                    existingW.bytes = new byte[0];
+                } else {
+                    files().put(path, new Entry(new byte[0]));
+                    directories().get(parentW).add(basenameOf(path));
+                    notifyWatchers(path, "Created");
+                }
                 h.writeBuf = new ByteArrayOutputStream();
                 return ok(h);
             case "Append":
@@ -356,6 +522,504 @@ public final class MemoryFilesystemNatives {
         } catch (Exception e) {
             return errIO(h.path, e.getMessage());
         }
+    }
+
+    /**
+     * `FileDurability.fsync` — memfs has no storage device, so there is
+     * nothing to force. It is NOT a no-op all the same.
+     *
+     * A write handle buffers into `writeBuf` and only publishes to `files()`
+     * on close, so a handle that had been fsynced but not closed would read
+     * back as absent here while LocalFileSystem would already show the bytes. That
+     * divergence is the exact failure the effect split exists to prevent — a
+     * backend quietly meaning something different by the same op — so fsync
+     * publishes the buffer. The buffer is kept, so later writes still append
+     * and close republishes the whole thing.
+     */
+    @TruffleBoundary
+    public static Object fsync(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        if (h.closed.get()) {
+            return errClosedHandle(h.path);
+        }
+        if (h.writeBuf != null) {
+            String parent = parentOf(h.path);
+            if (!isDir(parent)) {
+                return errNotFound(parent);
+            }
+            boolean existedBefore = isFile(h.path);
+            files().put(h.path, new Entry(h.writeBuf.toByteArray()));
+            directories().get(parent).add(basenameOf(h.path));
+            notifyWatchers(h.path, existedBefore ? "Modified" : "Created");
+        }
+        return ok(MezzeRecord.empty());
+    }
+
+    /**
+     * `FileDurability.fsync_dir` — the directory entries are the map, and the
+     * map is already the truth. Nothing to force, but the path must exist:
+     * reporting success for a directory that is not there would hide the
+     * caller's bug.
+     */
+    @TruffleBoundary
+    public static Object fsyncDir(MezzeRecord args) {
+        String path = getString(args, "path");
+        if (!isDir(path)) {
+            return isFile(path) ? errNotADirectory(path) : errNotFound(path);
+        }
+        return ok(MezzeRecord.empty());
+    }
+
+    // ==================== Random access ====================
+
+    /**
+     * Positional ops work on the published Entry, not on the write buffer.
+     *
+     * A memfs write handle accumulates into a ByteArrayOutputStream, which
+     * has no random access at all — so `write_at` publishes whatever is
+     * pending first and then patches the entry. Without that, the handle's
+     * buffer and the entry would be two different versions of the file and
+     * a read_at between two write_chunks would see the wrong one. LocalFileSystem
+     * has no buffer (write_chunk goes straight to the channel), so this is
+     * what keeps the two backends meaning the same thing.
+     */
+    private static Entry publishAndGet(MemFileHandle h) {
+        if (h.writeBuf != null) {
+            String parent = parentOf(h.path);
+            if (isDir(parent)) {
+                Entry cur = files().get(h.path);
+                byte[] pending = h.writeBuf.toByteArray();
+                if (cur == null) {
+                    cur = new Entry(pending);
+                    files().put(h.path, cur);
+                    directories().get(parent).add(basenameOf(h.path));
+                    notifyWatchers(h.path, "Created");
+                } else if (pending.length > 0) {
+                    cur.bytes = pending;
+                    notifyWatchers(h.path, "Modified");
+                }
+                // Hand authority to the Entry: a positional op has touched
+                // it, so `close` must NOT republish the sequential buffer
+                // over the top. Mixing the two on one handle is ambiguous,
+                // and "positional wins" is the rule — otherwise close would
+                // silently undo every write_at.
+                h.writeBuf = null;
+                return cur;
+            }
+        }
+        return files().get(h.path);
+    }
+
+    @TruffleBoundary
+    public static Object readAt(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if (!"Read".equals(h.mode)) return errIO(h.path, "handle not opened for reading");
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        Entry e = files().get(h.path);
+        if (e == null) return errNotFound(h.path);
+        byte[] src = e.bytes;
+        if (offset >= src.length) return ok(new MezzeBytes(new byte[0]));
+        int cap = (int) Math.min(maxBytes, src.length - offset);
+        byte[] out = new byte[cap];
+        System.arraycopy(src, (int) offset, out, 0, cap);
+        return ok(new MezzeBytes(out));
+    }
+
+    @TruffleBoundary
+    public static Object writeAt(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        MezzeBytes bytes = getBytes(args, "bytes");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if ("Read".equals(h.mode)) return errIO(h.path, "handle not opened for writing");
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        Entry e = publishAndGet(h);
+        if (e == null) return errNotFound(parentOf(h.path));
+        byte[] data = bytes.getData();
+        byte[] cur = e.bytes;
+        int end = (int) offset + data.length;
+        if (end > cur.length) {
+            // Writing past the end extends, and the gap is zero-filled —
+            // the in-memory equivalent of a sparse hole.
+            byte[] grown = new byte[end];
+            System.arraycopy(cur, 0, grown, 0, cur.length);
+            cur = grown;
+        }
+        System.arraycopy(data, 0, cur, (int) offset, data.length);
+        e.bytes = cur;
+        notifyWatchers(h.path, "Modified");
+        return ok(MezzeRecord.empty());
+    }
+
+    /** Seeking past the end is legal and does not extend — same as LocalFileSystem. */
+    @TruffleBoundary
+    public static Object seek(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long offset = getLong(args, "offset");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if (offset < 0) return errIO(h.path, "negative offset: " + offset);
+        if (offset > Integer.MAX_VALUE) return errIO(h.path, "offset too large for MemoryFileSystem");
+        h.pos = (int) offset;
+        return ok(MezzeRecord.empty());
+    }
+
+    /** Cut to `size`. Does NOT grow a short file, matching FileChannel. */
+    @TruffleBoundary
+    public static Object truncate(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long size = getLong(args, "size");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if ("Read".equals(h.mode)) return errIO(h.path, "handle not opened for writing");
+        if (size < 0) return errIO(h.path, "negative size: " + size);
+        Entry e = publishAndGet(h);
+        if (e == null) return errNotFound(h.path);
+        byte[] cur = e.bytes;
+        if (size < cur.length) {
+            byte[] cut = new byte[(int) size];
+            System.arraycopy(cur, 0, cut, 0, (int) size);
+            e.bytes = cut;
+            notifyWatchers(h.path, "Modified");
+        }
+        return ok(MezzeRecord.empty());
+    }
+
+    // ==================== Watching ====================
+
+    /**
+     * One registered watch and its pending events.
+     *
+     * Bounded, like inotify's queue: past {@link #CAP} the events are
+     * dropped and a single `Overflow` is delivered instead. Reporting
+     * Overflow is the honest answer — a watcher that silently lost events
+     * would have the caller believe it saw everything, and the usual
+     * recovery (rescan the tree) is only available if it is told.
+     */
+    static final class Watch {
+        static final int CAP = 1024;
+        final String root;
+        final boolean recursive;
+        final java.util.concurrent.ConcurrentLinkedQueue<String[]> events =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+        volatile boolean overflowed;
+
+        Watch(String root, boolean recursive) {
+            this.root = root;
+            this.recursive = recursive;
+        }
+    }
+
+    /** Opaque watch handle. Carries only the id; the state lives per context. */
+    public static final class MemWatchHandle {
+        final long id;
+        MemWatchHandle(long id) { this.id = id; }
+    }
+
+    /**
+     * Called by every mutating op. This is the coupling the design accepted:
+     * the core must tell the watchers, because the alternative (pollers
+     * diffing modifiedMs) cannot distinguish Created from Deleted.
+     *
+     * A non-recursive watch sees its DIRECT children only, which is what
+     * inotify without IN_ONLYDIR recursion gives you.
+     */
+    private static void notifyWatchers(String path, String kind) {
+        ConcurrentHashMap<Long, Watch> ws = watches();
+        if (ws.isEmpty()) return;  // the overwhelmingly common case
+        for (Watch w : ws.values()) {
+            boolean under = w.recursive
+                ? path.equals(w.root) || path.startsWith(w.root.endsWith("/") ? w.root : w.root + "/")
+                : w.root.equals(parentOf(path));
+            if (!under) continue;
+            if (w.events.size() >= Watch.CAP) {
+                w.overflowed = true;
+                continue;
+            }
+            w.events.add(new String[]{kind, path});
+        }
+    }
+
+    @TruffleBoundary
+    public static Object watch(MezzeRecord args) {
+        String path = getString(args, "path");
+        boolean recursive = getBool(args, "recursive");
+        if (!isDir(path)) {
+            return isFile(path) ? errNotADirectory(path) : errNotFound(path);
+        }
+        long id = state().nextWatchId.getAndIncrement();
+        watches().put(id, new Watch(path, recursive));
+        return ok(new MemWatchHandle(id));
+    }
+
+    /**
+     * Drain the queue. `timeout_ms` is accepted and ignored: there is no
+     * other thread to wait for in a single context, so blocking could only
+     * delay the caller for nothing. An empty Seq means "nothing happened",
+     * which is a normal answer for a poll.
+     */
+    @TruffleBoundary
+    public static Object poll(MezzeRecord args) {
+        MemWatchHandle h = getMemWatchHandle(args, "handle");
+        Watch w = watches().get(h.id);
+        if (w == null) return errIO("<watch>", "watch handle is not registered");
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        if (w.overflowed) {
+            w.overflowed = false;
+            w.events.clear();
+            out.add(watchEvent("Overflow", null));
+            return ok(MezzeSeq.fromArray(out.toArray()));
+        }
+        String[] ev;
+        while ((ev = w.events.poll()) != null) {
+            out.add(watchEvent(ev[0], ev[1]));
+        }
+        return ok(MezzeSeq.fromArray(out.toArray()));
+    }
+
+    @TruffleBoundary
+    public static Object unwatch(MezzeRecord args) {
+        MemWatchHandle h = getMemWatchHandle(args, "handle");
+        watches().remove(h.id);
+        return ok(MezzeRecord.empty());
+    }
+
+    private static MezzeVariant watchEvent(String kind, String path) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(kind);
+        if (path == null) {
+            // Overflow carries no path — there is no single path it is about.
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        }
+        MezzeRecord payload = MezzeRecord.fromFields(new String[]{"path"}, new Object[]{path});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+    }
+
+    // ==================== Symlinks ====================
+
+    private static final String[] MODE_FIELDS = {
+        "owner_read", "owner_write", "owner_exec",
+        "group_read", "group_write", "group_exec",
+        "other_read", "other_write", "other_exec",
+    };
+    private static final String[] OWNER_FIELDS = {"user", "group"};
+
+    @TruffleBoundary
+    public static Object createSymlink(MezzeRecord args) {
+        String link = getString(args, "link");
+        String target = getString(args, "target");
+        if (isFile(link) || isDir(link)) return errAlreadyExists(link);
+        String parent = parentOf(link);
+        if (!isDir(parent)) return errNotFound(parent);
+        // The target is NOT required to exist: a dangling symlink is legal,
+        // and staging one is how a blue/green swap works.
+        Entry e = new Entry(new byte[0]);
+        e.symlinkTarget = target;
+        files().put(link, e);
+        directories().get(parent).add(basenameOf(link));
+        notifyWatchers(link, "Created");
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object createHardlink(MezzeRecord args) {
+        String link = getString(args, "link");
+        String target = getString(args, "target");
+        if (isFile(link) || isDir(link)) return errAlreadyExists(link);
+        Entry src = files().get(target);
+        // Unlike a symlink, a hard link needs a real target: there is no
+        // inode to give a second name to otherwise.
+        if (src == null) return errNotFound(target);
+        if (src.symlinkTarget != null) return errNotSupported(target, "create_hardlink to a symlink");
+        String parent = parentOf(link);
+        if (!isDir(parent)) return errNotFound(parent);
+        // The SAME Entry under both names — that is what a hard link is, and
+        // it means a later write through one name is visible through the
+        // other, as on a real filesystem.
+        files().put(link, src);
+        directories().get(parent).add(basenameOf(link));
+        notifyWatchers(link, "Created");
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object readSymlink(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        if (e.symlinkTarget == null) return errIO(path, "not a symbolic link");
+        return ok(e.symlinkTarget);
+    }
+
+    @TruffleBoundary
+    public static Object isSymlink(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) {
+            // A directory is not a symlink; a missing path is an error, which
+            // is what distinguishes "no" from "not there".
+            return isDir(path) ? ok(false) : errNotFound(path);
+        }
+        return ok(e.symlinkTarget != null);
+    }
+
+    // ==================== Permissions / metadata ====================
+
+    @TruffleBoundary
+    public static Object getMode(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) return isDir(path) ? ok(defaultDirMode()) : errNotFound(path);
+        Object[] vals = new Object[9];
+        boolean[] m = e.mode;
+        for (int i = 0; i < 9; i++) vals[i] = m[i];
+        return ok(MezzeRecord.fromFields(MODE_FIELDS, vals));
+    }
+
+    @TruffleBoundary
+    public static Object setMode(MezzeRecord args) {
+        String path = getString(args, "path");
+        MezzeRecord mode = getRecord(args, "mode");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        boolean[] m = new boolean[9];
+        for (int i = 0; i < 9; i++) m[i] = getBool(mode, MODE_FIELDS[i]);
+        e.mode = m;
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object getOwner(MezzeRecord args) {
+        String path = getString(args, "path");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        return ok(MezzeRecord.fromFields(OWNER_FIELDS,
+            new Object[]{e.ownerUser, e.ownerGroup}));
+    }
+
+    @TruffleBoundary
+    public static Object setOwner(MezzeRecord args) {
+        String path = getString(args, "path");
+        MezzeRecord owner = getRecord(args, "owner");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        e.ownerUser = getString(owner, "user");
+        e.ownerGroup = getString(owner, "group");
+        return ok(MezzeRecord.empty());
+    }
+
+    @TruffleBoundary
+    public static Object setModified(MezzeRecord args) {
+        String path = getString(args, "path");
+        long millis = getLong(args, "millis");
+        Entry e = files().get(path);
+        if (e == null) return errNotFound(path);
+        e.modifiedMs = millis;
+        return ok(MezzeRecord.empty());
+    }
+
+    /**
+     * memfs paths are already canonical — there is no `..`, no `.` and no
+     * mount table — so resolution is only about symlinks. One hop is
+     * followed repeatedly with a bound, because a symlink cycle is a thing
+     * a test should be able to create without hanging the suite.
+     */
+    @TruffleBoundary
+    public static Object realPath(MezzeRecord args) {
+        String path = getString(args, "path");
+        boolean follow = getBool(args, "follow_symlinks");
+        String cur = path;
+        if (follow) {
+            for (int hops = 0; hops < 40; hops++) {
+                Entry e = files().get(cur);
+                if (e == null || e.symlinkTarget == null) break;
+                cur = e.symlinkTarget;
+                if (hops == 39) return errIO(path, "too many symbolic links");
+            }
+        }
+        if (!isFile(cur) && !isDir(cur)) return errNotFound(cur);
+        return ok(cur);
+    }
+
+    private static MezzeRecord defaultDirMode() {
+        Object[] vals = {true, true, true, true, false, true, true, false, true};
+        return MezzeRecord.fromFields(MODE_FIELDS, vals);
+    }
+
+    // ==================== Locking ====================
+
+    /** Holders of one path's lock. Guarded by synchronizing on the instance. */
+    static final class LockState {
+        boolean exclusive;
+        int shared;
+    }
+
+    /**
+     * An acquired memfs lock. Carries what `unlock` needs to undo exactly
+     * this acquisition — releasing a shared lock must decrement, not clear.
+     */
+    public static final class MemLockHandle {
+        final String path;
+        final boolean shared;
+        final AtomicBoolean released = new AtomicBoolean(false);
+
+        MemLockHandle(String path, boolean shared) {
+            this.path = path;
+            this.shared = shared;
+        }
+    }
+
+    /**
+     * `FileLock.lock` — contention is REAL here, not simulated.
+     *
+     * memfs could have reported success unconditionally, since one program
+     * rarely contends with itself. It does not, because then a test could
+     * never show that a lock excludes anyone, and "locking works" would be
+     * untestable without a second process. Shared locks stack; an exclusive
+     * lock excludes everything; `blocking` is rejected rather than parked,
+     * since a blocking wait inside a single-context memfs can only deadlock —
+     * there is no other holder to release it.
+     */
+    @TruffleBoundary
+    public static Object lock(MezzeRecord args) {
+        String path = getString(args, "path");
+        String kind = getVariantTag(args, "kind");
+        boolean shared = "Shared".equals(kind);
+        boolean blocking = getBool(args, "blocking");
+        LockState st = locks().computeIfAbsent(path, p -> new LockState());
+        synchronized (st) {
+            boolean free = shared ? !st.exclusive : (!st.exclusive && st.shared == 0);
+            if (!free) {
+                if (blocking) {
+                    // Parking here would hang forever: the only holder is this
+                    // same context, and it is the thread asking.
+                    return errIO(path, "lock is held and blocking would deadlock in MemoryFileSystem");
+                }
+                return errPermissionDenied(path, "lock (already held)");
+            }
+            if (shared) st.shared++; else st.exclusive = true;
+        }
+        return ok(new MemLockHandle(path, shared));
+    }
+
+    /** `FileLock.unlock` — idempotent; decrements a shared hold. */
+    @TruffleBoundary
+    public static Object unlock(MezzeRecord args) {
+        MemLockHandle h = getMemLockHandle(args, "handle");
+        if (!h.released.compareAndSet(false, true)) {
+            return ok(MezzeRecord.empty());
+        }
+        LockState st = locks().get(h.path);
+        if (st != null) {
+            synchronized (st) {
+                if (h.shared) {
+                    if (st.shared > 0) st.shared--;
+                } else {
+                    st.exclusive = false;
+                }
+            }
+        }
+        return ok(MezzeRecord.empty());
     }
 
     @TruffleBoundary
@@ -410,6 +1074,20 @@ public final class MemoryFilesystemNatives {
         return err("FsNotADirectory", new String[]{"path"}, new Object[]{path});
     }
 
+    /** Lock contention surfaces as PermissionDenied — see the note on
+     *  `lock` for why FsError does not grow an FsLockHeld variant. */
+    private static MezzeVariant errPermissionDenied(String path, String operation) {
+        return err("FsPermissionDenied",
+                   new String[]{"path", "operation"},
+                   new Object[]{path, operation});
+    }
+
+    private static MezzeVariant errNotSupported(String path, String operation) {
+        return err("FsNotSupported",
+                   new String[]{"path", "operation"},
+                   new Object[]{path, operation});
+    }
+
     private static MezzeVariant errIO(String path, String message) {
         return err("FsIOError",
             new String[]{"path", "message"},
@@ -461,6 +1139,38 @@ public final class MemoryFilesystemNatives {
         Object v = r.getField(i);
         if (v instanceof MemFileHandle h) return h;
         throw new NativeTypeMismatchException("Expected MemFileHandle for field '" + name + "'");
+    }
+
+    private static MemLockHandle getMemLockHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MemLockHandle h) return h;
+        throw new NativeTypeMismatchException("Expected LockHandle for field '" + name + "'");
+    }
+
+    private static MemWatchHandle getMemWatchHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MemWatchHandle h) return h;
+        throw new NativeTypeMismatchException("Expected WatchHandle for field '" + name + "'");
+    }
+
+    private static boolean getBool(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof Boolean b) return b;
+        throw new NativeTypeMismatchException("Expected Bool for field '" + name + "'");
+    }
+
+    private static MezzeRecord getRecord(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeRecord rec) return rec;
+        throw new NativeTypeMismatchException("Expected record for field '" + name + "'");
     }
 
     private static String getVariantTag(MezzeRecord r, String name) {

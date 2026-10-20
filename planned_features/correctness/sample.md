@@ -28,7 +28,7 @@ mez sample module::function_name
 mez sample perform Console, ExceptionToResult in module::parse_config
 
 # Parameterized handlers
-mez sample perform SeededRandom {seed = 42}, MemoryFS in module::process
+mez sample perform SeededRandom {seed = 42}, MemoryFileSystem in module::process
 
 # More cases than the default (~8)
 mez sample module::function_name --cases 20

@@ -226,13 +226,13 @@ effect FileSystem where {
     @Test
     fun `performer declaration`() {
         val source = """
-impl FileSystem for LocalDisk where {
+impl FileSystem for LocalFileSystem where {
     read_file = { path } -> __native_fs_read_file { path = path }
 }
 """.trim()
         val module = parser.parseParsedModule(source, file = "test.mz")
         val decl = module.decls[0] as ParsedPerformerDecl
-        assertEquals("LocalDisk", decl.performerName)
+        assertEquals("LocalFileSystem", decl.performerName)
         assertEquals(1, decl.operations.size)
     }
 

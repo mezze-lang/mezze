@@ -102,7 +102,7 @@ and the star appears the moment anything has been handled at all.
 <!--mezze-editor
 use std::effects::log::{ Console, println }
 use std::effects::http::{ MockHttpClient, mock_get, request }
-use std::effects::filesystem::{ MemoryFS, write_text }
+use std::effects::filesystem::{ MemoryFileSystem, write_text }
 use std::effects::time::{ SystemTime, now }
 
 # Reaches the network, writes a file, and reads the clock.
@@ -119,7 +119,7 @@ let all_three = { url } ->
     # <Http, *>                Time and FileSystem settled, Http still to go
     perform SystemTime in
       # <Http, Time, *>        only FileSystem settled so far
-      perform MemoryFS in
+      perform MemoryFileSystem in
         # <FileSystem, Http, Time>   what snapshot promised, nothing handled
         snapshot { url }
 
@@ -128,7 +128,7 @@ let main = {} -> perform Console in println { msg = all_three { url = "https://e
 
 The innermost line is what `snapshot` promised: three effects, none handled.
 Each handler above it takes one name away and puts the star there instead.
-`MemoryFS` settles `FileSystem`, `SystemTime` settles `Time`, and only when
+`MemoryFileSystem` settles `FileSystem`, `SystemTime` settles `Time`, and only when
 the outermost handler settles `Http` does the row become a bare `<*>`.
 
 So the star is not "handled" — it is "handled, and nothing remains". A row
@@ -155,7 +155,7 @@ then writes what it got carries both:
 <!--mezze-editor
 use std::effects::log::{ Console, println }
 use std::effects::http::{ MockHttpClient, mock_get, request }
-use std::effects::filesystem::{ MemoryFS, write_text, read_text_or }
+use std::effects::filesystem::{ MemoryFileSystem, write_text, read_text_or }
 
 # Two effects on one arrow: it fetches, then writes what it got.
 let cache = { url, path } -> do
@@ -163,7 +163,7 @@ let cache = { url, path } -> do
   write_text { path = path, text = body }
   body
 
-let main = {} -> perform Console, MemoryFS in
+let main = {} -> perform Console, MemoryFileSystem in
   perform MockHttpClient { rules = [mock_get { body = "sunny", url = "*" }] } in do
     cache { url = "https://x.dev/weather", path = "weather.txt" }
     println { msg = read_text_or { path = "weather.txt", def = "nothing" } }
@@ -173,14 +173,14 @@ let main = {} -> perform Console, MemoryFS in
 is handled inside it, so both raise to its arrow and both have to be supplied
 by a caller.
 
-Handlers can be listed together, `perform Console, MemoryFS in …`, or nested
+Handlers can be listed together, `perform Console, MemoryFileSystem in …`, or nested
 when one takes arguments as `MockHttpClient` does. Both forms discharge what
 they name and leave the rest to rise further.
 
-Note what the mocks buy here. `MemoryFS` holds the file in memory, so the
+Note what the mocks buy here. `MemoryFileSystem` holds the file in memory, so the
 example writes and reads a real file without touching your disk, and
 `MockHttpClient` answers without a socket. The same `cache` runs against
-`LocalDisk` and `PooledHttpClient` unchanged.
+`LocalFileSystem` and `PooledHttpClient` unchanged.
 
 ## Your own effects
 
@@ -189,7 +189,7 @@ unimplemented; a handler supplies them.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::filesystem::{ MemoryFS, append_text, read_text_or }
+use std::effects::filesystem::{ MemoryFileSystem, append_text, read_text_or }
 
 # Declaring an effect: the operations, with no implementation.
 effect Audit where {
@@ -208,7 +208,7 @@ let checkout = {} -> do
   Audit.record { line = "cart opened" }
   Audit.record { line = "paid" }
 
-let main = {} -> perform Console, MemoryFS, ToFile in do
+let main = {} -> perform Console, MemoryFileSystem, ToFile in do
   checkout {}
   println { msg = read_text_or { path = "audit.log", def = "empty" } }
 -->

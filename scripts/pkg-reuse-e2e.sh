@@ -77,7 +77,8 @@ echo "package IR-reuse e2e — precompiled deps (plain fns + ability ops) are re
 # Precompile is on by default now that the read-side is wired.
 "$MEZ" sync >/dev/null 2>&1
 for dep in greet core shoutlib; do
-  store="$(ls "$W"/$dep/compiled-*.sqlite 2>/dev/null | head -1)"
+  mapfile -t _stores < <(ls "$W"/$dep/compiled-*.sqlite 2>/dev/null)
+  store="${_stores[0]-}"
   [ -n "$store" ] && echo "  ✅ $dep precompiled → $(basename "$store")" \
     || { echo "  ❌ $dep not precompiled"; fail=1; }
 done
@@ -88,7 +89,8 @@ CONS="$W/app/.mez/store/src.sqlite"
 [ -f "$CONS" ] || { echo "  ❌ consumer store missing after build"; exit 1; }
 
 for dep in greet core shoutlib; do
-  store="$(ls "$W"/$dep/compiled-*.sqlite 2>/dev/null | head -1)"
+  mapfile -t _stores < <(ls "$W"/$dep/compiled-*.sqlite 2>/dev/null)
+  store="${_stores[0]-}"
   [ -n "$store" ] || continue
   hashes="$(SQL "$store" 'SELECT hash FROM blobs WHERE ir IS NOT NULL;')"
   n=0; relowered=0

@@ -269,7 +269,7 @@ Same pattern as `mez sample` — the developer provides handlers:
 check {
   name = "parse_config handles missing files",
   gen = ast_gen {func = parse_config},
-  perform = [MemoryFS, ExceptionToResult],
+  perform = [MemoryFileSystem, ExceptionToResult],
   prop = {path: Str} ->
     match parse_config {path} is
       Ok _ -> True

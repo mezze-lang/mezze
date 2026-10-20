@@ -12,7 +12,7 @@ Everything you would reach for syntax to do — exceptions, retries, early retur
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::filesystem::{ MemoryFS, append_text, read_text_or }
+use std::effects::filesystem::{ MemoryFileSystem, append_text, read_text_or }
 
 # An operation the shop has. Declared, not defined.
 effect Inventory where {
@@ -43,7 +43,7 @@ let main = {} -> perform Console in do
 
   println { msg = "for real:" }
   # An in-memory filesystem: nothing touches the disk.
-  perform MemoryFS in perform ToFile in do
+  perform MemoryFileSystem in perform ToFile in do
     delivery {}
     println { msg = read_text_or { path = "inventory.csv", def = "" } }
 -->

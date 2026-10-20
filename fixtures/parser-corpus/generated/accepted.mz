@@ -1181,7 +1181,7 @@ impl Eq for ['a] where {
 }
 
 # === 275
-impl FileSystem for LocalDisk where {
+impl FileSystem for LocalFileSystem where {
     read_file = { path } -> __native_fs_read_file { path = path }
 }
 

@@ -131,12 +131,14 @@ for case in "${CASES[@]}"; do
     fi
     # Mezze JVM jar (glob — the jar's basename is the pkg name in
     # Mezze.toml, not necessarily the case dir name).
-    mez_jar=$(find "$case_dir/.build" -maxdepth 1 -name '*.jar' -not -name '*.jsa' 2>/dev/null | head -1)
+    mapfile -t _jars < <(find "$case_dir/.build" -maxdepth 1 -name '*.jar' -not -name '*.jsa' 2>/dev/null)
+    mez_jar=${_jars[0]-}
     if [[ -n "$mez_jar" ]]; then
         results[$case,mezze_jvm]=$(min_of_n "$N" java -jar "$mez_jar")
     fi
     # Mezze native (glob for -native suffix)
-    mez_native=$(find "$case_dir/.build" -maxdepth 1 -type f -perm -u+x -name '*-native' 2>/dev/null | head -1)
+    mapfile -t _natives < <(find "$case_dir/.build" -maxdepth 1 -type f -perm -u+x -name '*-native' 2>/dev/null)
+    mez_native=${_natives[0]-}
     if [[ -n "$mez_native" ]]; then
         results[$case,mezze_native]=$(min_of_n "$N" "$mez_native")
     fi

@@ -31,7 +31,13 @@ MEZZE_HOME="$HOME_DIR" bash "$INSTALL" "$WORK/dist/$V2.tgz" >/dev/null 2>&1
 PX="$HOME_DIR/bin/mez"
 
 fail=0
-ver() { MEZZE_HOME="$HOME_DIR" "$@" 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+# Capture, then match the here-string. `cmd | grep -oE … | head -1` SIGPIPEs
+# grep as soon as head has its line, and pipefail reports that 141 — so `ver`
+# returned empty for a command that printed its version perfectly well.
+ver() {
+  local out; out="$(MEZZE_HOME="$HOME_DIR" "$@" 2>&1 || true)"
+  grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' <<<"$out" | sed -n '1p'
+}
 expect() { # <name> <wanted-vX.Y.Z> <cmd...>
   local name="$1" want="$2"; shift 2
   local got; got="$(ver "$@")"
@@ -63,13 +69,15 @@ got="$(cd "$PROJ" && ver "$PX" +"$V2" --version)"
   || { echo "  ❌ +ver override → got '$got', wanted 'v$V2'"; fail=1; }
 
 # MEZ_VERSION env beats the project pin too
-got="$(cd "$PROJ" && MEZZE_HOME="$HOME_DIR" MEZ_VERSION="$V2" "$PX" --version 2>&1 | grep -oE 'v[0-9.]+' | head -1)"
+env_out="$(cd "$PROJ" && MEZZE_HOME="$HOME_DIR" MEZ_VERSION="$V2" "$PX" --version 2>&1 || true)"
+got="$(grep -oE 'v[0-9.]+' <<<"$env_out" | sed -n '1p')"
 [ "$got" = "v$V2" ] && echo "  ✅ MEZ_VERSION=$V2 overrides the project pin → $got" \
   || { echo "  ❌ MEZ_VERSION → got '$got', wanted 'v$V2'"; fail=1; }
 
 # remove a version → gone from the list, and a clear message if still requested
 MEZZE_HOME="$HOME_DIR" "$PX" toolchain remove "$V1" >/dev/null 2>&1
-if MEZZE_HOME="$HOME_DIR" "$PX" toolchain list 2>&1 | grep -qE "  $V1$| $V1 "; then
+list_out="$(MEZZE_HOME="$HOME_DIR" "$PX" toolchain list 2>&1 || true)"
+if grep -qE "  $V1$| $V1 " <<<"$list_out"; then
   echo "  ❌ removed $V1 still listed"; fail=1
 else echo "  ✅ removed $V1 — no longer listed"; fi
 out="$(cd "$PROJ" && MEZZE_HOME="$HOME_DIR" "$PX" --version 2>&1)"

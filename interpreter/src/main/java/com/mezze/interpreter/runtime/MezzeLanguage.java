@@ -1114,6 +1114,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         context.closeRegisteredResources();
         com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives
                 .resetPerThreadStmState();
+        // The scope ThreadLocal gets the same belt-and-braces as the STM one.
+        // disposeThread is the complete hook for both; this covers the closing
+        // thread in an embedder that closes without unwinding, and it is the
+        // one ThreadLocal holding a GUEST object — a MezzeScope, and with it
+        // the scope's child promises.
+        com.mezze.interpreter.nodes.builtin.effects.AsyncNatives
+                .resetPerThreadScope();
         // #392 — SlotTable is per-Engine but its entries are populated by
         // per-Context eagerCompileReachable, so stale entries from a
         // disposed Context can leak into the next Context sharing this

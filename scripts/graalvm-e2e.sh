@@ -24,7 +24,8 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # The Graal line mez wants — read from the binary itself so this test tracks the
 # build's pin instead of hardcoding it.
-WANT_LINE="$("$MEZ_NATIVE" doctor 2>/dev/null | sed -n 's/.*wants GraalVM line \([0-9.]*\).*/\1/p' | head -1)"
+doctor_out="$("$MEZ_NATIVE" doctor 2>/dev/null || true)"
+WANT_LINE="$(sed -n 's/.*wants GraalVM line \([0-9.]*\).*/\1/p' <<<"$doctor_out" | sed -n '1p')"
 [ -n "$WANT_LINE" ] || WANT_LINE="25.0"
 
 # Build a fake JDK home whose bin/java prints a chosen `java -version` banner.

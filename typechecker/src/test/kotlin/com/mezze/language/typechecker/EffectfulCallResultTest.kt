@@ -42,7 +42,7 @@ class EffectfulCallResultTest {
                 info = {msg} -> {}
             }
 
-            impl FileSystem for LocalDisk where {
+            impl FileSystem for LocalFileSystem where {
                 write = {path, content} -> {}
             }
 
@@ -127,7 +127,7 @@ class EffectfulCallResultTest {
                 info = {msg} -> {}
             }
 
-            impl FileSystem for LocalDisk where {
+            impl FileSystem for LocalFileSystem where {
                 write = {path, content} -> {}
             }
 
@@ -138,7 +138,7 @@ class EffectfulCallResultTest {
 
             # Handle effects on the FUNCTION (not calling it)
             let step1 = perform Console in demo
-            let step2 = perform LocalDisk in step1
+            let step2 = perform LocalFileSystem in step1
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
