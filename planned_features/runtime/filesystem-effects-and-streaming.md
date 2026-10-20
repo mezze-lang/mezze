@@ -159,28 +159,37 @@ a backend that does not offer the effect at all.
 > `FileSymlinks` be one `effect FileMetadata` (a POSIX-only umbrella) instead of
 > two? Seven separate effects was approved as-is, so the default is two.
 
-### Mixing backends typechecks — the one unguarded hazard
+### Mixing backends is the point, and each one owns its own paths
 
-Nothing links the performers, so `perform MemoryFileSystem in perform
-LocalFileStreaming in …` compiles. Sometimes that is wanted:
-`LocalFileSystem` + `MemoryFileLock` is a real test seam, locking without
-touching a disk.
+Performers are chosen per effect, so
 
-But **path-keyed ops across backends silently address two different
-filesystems**. `MemoryFileSystem.write_bytes { path }` followed by
-`LocalFilePermissions.get_mode { path }` asks the real disk and gets
-`FsNotFound`, and the typechecker has nothing to object to — both
-performers satisfy their rows honestly. This is the cost of having split
-the effects at all.
+```mezze
+perform LocalFileSystem in perform MemoryFilePermissions in …
+```
 
-HANDLES do fail loudly: `MezzeFileHandle` and `MemFileHandle` are distinct
-Java classes and the extractors `instanceof`-check, throwing
-`NativeTypeMismatchException`. Only paths are unguarded.
+is ordinary, supported composition — real file content with fake modes, or the
+reverse. This is what "a backend is the set of performers in scope" means, and
+it is the main reason to have split the effects: a test can swap one capability
+without faking the other six, and a program can take real content with an
+in-memory lock.
 
-This is a DECISION, not a bug to patch. A guard would have to be opt-in,
-since mixing is sometimes deliberate — which makes it a language-design
-question (can a backend declare itself as a bundle?) rather than a
-filesystem one.
+The one thing to know is that **a path is resolved by whichever performer
+handles the op, so mixing two path-keyed effects means two namespaces.**
+`MemoryFileSystem.write_bytes { path = "/x" }` puts bytes in the in-memory map;
+a subsequent `LocalFilePermissions.get_mode { path = "/x" }` asks the real disk
+and correctly reports that nothing is there. Neither performer is wrong — a
+path is a plain string, not a handle scoped to a store, and each effect
+interprets it against its own.
+
+Where that is most likely to surprise: `MemoryFileSystem` writes do not wake a
+`LocalFileWatch` watcher, because memfs synthesises its events from its own
+mutations and the NIO `WatchService` is watching a real directory. Pair the
+backends when you want them to see each other.
+
+HANDLES, unlike paths, cannot be crossed at all: `MezzeFileHandle` and
+`MemFileHandle` are distinct Java classes and the extractors `instanceof`-check
+them, so passing one backend's handle to the other's op raises
+`NativeTypeMismatchException` rather than reading the wrong file.
 
 ### The three signature changes — LANDED 2026-10-20
 
@@ -383,8 +392,6 @@ Rust-synchronous baggage. `Iter` is what shipped.
    runner) — the last piece of the agreed streaming shape, and now unblocked.
 2. Retrofit `read_lines`, HTTP bodies and `FileWatch.poll` onto `Iter`.
 3. A durable-write `OpenMode`, or `OpenMode` as a flags record.
-4. Decide the cross-backend question above: leave it documented, or let a
-   backend declare itself as a bundle.
 
 Done: the seven effects, the three signature changes, and the `Iter` boundary
 question.
