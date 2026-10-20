@@ -60,7 +60,7 @@ class EntryPointCheckTest {
 
         val result = checkMain(source)
         assertEquals(EntryPointCheck.Result.Ok, result,
-            "expected Ok, got: ${EntryPointCheck.errorMessage(result, "main")}")
+            "expected Ok, got: ${EntryPointCheck.errorMessage(result, "main", emptyMap())}")
     }
 
     @Test
@@ -76,7 +76,7 @@ class EntryPointCheckTest {
         """.trimIndent()
 
         val result = checkMain(source)
-        val msg = EntryPointCheck.errorMessage(result, "main")
+        val msg = EntryPointCheck.errorMessage(result, "main", emptyMap())
         assertEquals(EntryPointCheck.Result.Ok, result,
             "expected Ok, got error: $msg")
         assertNull(msg)
@@ -112,7 +112,7 @@ class EntryPointCheckTest {
 
         val result = EntryPointCheck.check(mainDecl)
         assertEquals(EntryPointCheck.Result.Ok, result,
-            "expected Ok, got: ${EntryPointCheck.errorMessage(result, "main")}")
+            "expected Ok, got: ${EntryPointCheck.errorMessage(result, "main", emptyMap())}")
     }
 
     @Test
@@ -128,7 +128,7 @@ class EntryPointCheckTest {
         val result = checkMain(source)
         assertTrue(result is EntryPointCheck.Result.UnhandledEffects,
             "expected UnhandledEffects (Log leaks at the entry), got: $result")
-        val msg = EntryPointCheck.errorMessage(result, "main")
+        val msg = EntryPointCheck.errorMessage(result, "main", emptyMap())
         assertNotNull(msg)
         assertTrue(msg!!.contains("perform"),
             "message must tell the user to add a handler, got: $msg")
@@ -146,14 +146,14 @@ class EntryPointCheckTest {
     @Test
     fun `a missing entry is an error, not a skipped check`() {
         val decls = typedDecls("let other = {} -> {}")
-        val msg = EntryPointCheck.entryError(decls, "main")
+        val msg = EntryPointCheck.entryError(decls, "main", emptyMap())
         assertNotNull(msg, "an app whose declared entry is absent must be rejected")
         assertTrue(msg!!.contains("main"), "the message must name the missing entry, got: $msg")
     }
 
     @Test
     fun `entryError is null when the entry is present and acceptable`() {
-        assertNull(EntryPointCheck.entryError(typedDecls("let main = {} -> {}"), "main"))
+        assertNull(EntryPointCheck.entryError(typedDecls("let main = {} -> {}"), "main", emptyMap()))
     }
 
     @Test
@@ -163,9 +163,37 @@ class EntryPointCheckTest {
 
             let main = {} -> println { msg = "hi" }
         """.trimIndent()
-        val msg = EntryPointCheck.entryError(typedDecls(source), "main")
+        val msg = EntryPointCheck.entryError(typedDecls(source), "main", emptyMap())
         assertNotNull(msg)
         assertTrue(msg!!.contains("perform"), "must tell the user to add a handler, got: $msg")
+    }
+
+    /**
+     * Which performer to reach for is the effect AUTHOR's to say, written on the
+     * effect as `#{ unhandled: "…" }` — for the stdlib's `Log`, `Console`. It
+     * used to be a list kept in this file, naming three stdlib effects and none
+     * of anyone else's.
+     */
+    @Test
+    fun `an unhandled effect carries its author's advice`() {
+        val source = """
+            use std::effects::log::{println, Console}
+
+            #{ unhandled: "Answer it with `perform Oracle42 in …`." }
+            effect Oracle where { ask: {} -> Int <Oracle> }
+
+            let main = {} -> do
+              println { msg = "hi" }
+              println { msg = Oracle.ask {}.to_str {} }
+        """.trimIndent()
+        val parsed = MezzeParser().parseParsedModule(source, "test.mz")
+        val wrapped = TypeChecker().typeCheck(parsed, Paths.get("."), enablePrelude = true)
+        val decls = wrapped.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
+
+        val msg = EntryPointCheck.entryError(decls, "main", wrapped.metadataByHash)!!
+
+        assertTrue(msg.contains("Oracle: Answer it with `perform Oracle42 in …`."), "this module's effect: $msg")
+        assertTrue(msg.contains("Log: Wrap it in `perform Console in …`"), "the stdlib's effect: $msg")
     }
 
     @Test
@@ -188,7 +216,7 @@ class EntryPointCheckTest {
         val result = checkMain(source)
         assertTrue(result is EntryPointCheck.Result.UnhandledEffects,
             "expected UnhandledEffects (Oracle leaks at the entry), got: $result")
-        assertTrue((result as EntryPointCheck.Result.UnhandledEffects).effects.contains("Oracle"),
+        assertTrue((result as EntryPointCheck.Result.UnhandledEffects).effects.any { it.first == "Oracle" },
             "message should name Oracle, got: ${result.effects}")
     }
 }

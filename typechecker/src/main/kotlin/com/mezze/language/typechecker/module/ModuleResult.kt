@@ -237,7 +237,23 @@ data class ModuleImportContext(
     // Absent means "that module did not declare the ability it implements" (it
     // imported it); such an impl stays untagged and reachable by name, exactly as
     // before. See BUG 24.
-    val abilityDeclHashByImpl: Map<Hash, Hash> = emptyMap()
+    val abilityDeclHashByImpl: Map<Hash, Hash> = emptyMap(),
+    // Performers that answer at COMPILE time (they raise `Comptime`): a `perform`
+    // of one is folded during the build. Decided in the performer's own module,
+    // from its typed bodies; see CompileTimePerformers.
+    val compileTimePerformers: Set<Hash> = emptySet(),
+    // The subset of those that leave `Comptime` to an outer handler
+    // (`EvalCodebase`), as opposed to answering it themselves (`ComptimeEvalCodebase`).
+    val comptimeLeavingPerformers: Set<Hash> = emptySet(),
+    // A handler of `Comptime` (`ComptimeEval`), by identity, found in an imported
+    // module's bodies: what answers a folded question's `Comptime` during the build.
+    val comptimeAnswererHash: Hash? = null,
+    val comptimeAnswererName: String? = null,
+    // The `#{ … }` metadata of every declaration an imported module exports, by
+    // the declaration's identity. A use site names a declaration by hash, so this
+    // is how `#{deprecated}` and the other author-written messages reach the
+    // module that uses it. Metadata never affects a hash; it only travels here.
+    val metadataByHash: Map<Hash, com.mezze.language.parsedast.ParsedMetadata> = emptyMap(),
 ) {
     companion object {
         fun empty() = ModuleImportContext(
@@ -265,7 +281,12 @@ data class ModuleImportContext(
             inherentImplOpParamTypes = inherentImplOpParamTypes + other.inherentImplOpParamTypes,
             inherentImplOpEffects = inherentImplOpEffects + other.inherentImplOpEffects,
             abilityDeclHashByImpl = abilityDeclHashByImpl + other.abilityDeclHashByImpl,
-            inherentImplOpConstraints = inherentImplOpConstraints + other.inherentImplOpConstraints
+            inherentImplOpConstraints = inherentImplOpConstraints + other.inherentImplOpConstraints,
+            compileTimePerformers = compileTimePerformers + other.compileTimePerformers,
+            comptimeLeavingPerformers = comptimeLeavingPerformers + other.comptimeLeavingPerformers,
+            comptimeAnswererHash = comptimeAnswererHash ?: other.comptimeAnswererHash,
+            comptimeAnswererName = if (comptimeAnswererHash != null) comptimeAnswererName else other.comptimeAnswererName,
+            metadataByHash = metadataByHash + other.metadataByHash,
         )
     }
 

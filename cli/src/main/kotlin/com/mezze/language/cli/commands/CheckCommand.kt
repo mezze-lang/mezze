@@ -107,7 +107,7 @@ class CheckCommand {
                                 parseResult.errors.map { JsonDiagnosticFormatter.fromParseException(it) },
                                 exitCode = 3)
                         }
-                        emitJson(JsonDiagnosticFormatter.ok(absPath, null, typedModule, emptyList()))
+                        emitJson(JsonDiagnosticFormatter.ok(absPath, null, typedModule, result.warnings))
                         return
                     }
                     if (parseResult.errors.isNotEmpty()) {
@@ -118,6 +118,7 @@ class CheckCommand {
                         // exit non-zero so callers see a failure.
                         kotlin.system.exitProcess(3)
                     }
+                    printWarnings(result.warnings, source)
                     if (quiet) {
                         println("OK (${String.format("%.1f", totalTime)}ms)")
                     } else {
@@ -206,6 +207,13 @@ class CheckCommand {
     ): Nothing {
         emitJson(JsonDiagnosticFormatter.errors(file, app, diagnostics))
         kotlin.system.exitProcess(exitCode)
+    }
+
+    private fun printWarnings(warnings: List<com.mezze.language.typechecker.TypeChecker.TypeCheckWarning>, source: String) {
+        for (w in warnings) {
+            println(com.mezze.language.langservice.printing.ErrorFormatter.formatWarning(w, source))
+            println()
+        }
     }
 
     private fun checkPackage(currentDir: File, appName: String?, quiet: Boolean, jsonMode: Boolean) {
@@ -344,7 +352,7 @@ class CheckCommand {
             val entryName = appConfig.entry
             val decls = typeCheckResult.typedModule?.decls
                 ?.filterIsInstance<TypedLetDecl>().orEmpty()
-            EntryPointCheck.entryError(decls, entryName)?.let { msg ->
+            EntryPointCheck.entryError(decls, entryName, typeCheckResult.metadataByHash)?.let { msg ->
                 if (jsonMode) {
                     jsonExitWith(null, appConfig.name,
                         DiagnosticJson(Severity.ERROR, code = "V0501", message = msg), exitCode = 4)
@@ -366,10 +374,12 @@ class CheckCommand {
             )
 
             if (jsonMode) {
-                emitJson(JsonDiagnosticFormatter.ok(null, appConfig.name, typeCheckResult.typedModule, emptyList()))
+                emitJson(JsonDiagnosticFormatter.ok(null, appConfig.name, typeCheckResult.typedModule, rawResult.warnings))
             } else if (quiet) {
+                printWarnings(rawResult.warnings, source)
                 println("OK (${String.format("%.1f", totalTime)}ms)")
             } else {
+                printWarnings(rawResult.warnings, source)
                 val typedModule = typeCheckResult.typedModule
                 if (typedModule != null) {
                     printTypedModuleSummary(typedModule)

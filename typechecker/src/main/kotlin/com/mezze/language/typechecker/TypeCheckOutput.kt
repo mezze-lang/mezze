@@ -36,6 +36,11 @@ data class TypeCheckResult(
     // Per-position "expected type" for LSP completion ranking. Transient — recomputed each typecheck.
     @Transient
     val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
+    // The `#{ … }` metadata of every declaration in reach — imported or this
+    // module's own — by identity. What an author-written message (`unhandled`,
+    // `missing`) is read from where only a hash is at hand. Transient, like the above.
+    @Transient
+    val metadataByHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedMetadata> = emptyMap(),
 ) {
     fun getVariableType(name: String): MezzeType? {
         return typedModule?.decls
@@ -84,6 +89,25 @@ enum class ImportKind {
  * Shared so the LSP and the WASM playground cannot drift: the playground
  * previously did none of this and simply returned nothing on any error.
  */
+/** Every declaration's `#{ … }` metadata this check can see, by identity. */
+fun TypeChecker.TypeCheckResult.Success.metadataInReach():
+    Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedMetadata> = buildMap {
+    importContext?.let { ic ->
+        putAll(ic.metadataByHash)
+        // Effects and abilities can be in reach without being exported by a module
+        // this one imports (a performer brings its effect); their own decls say.
+        for (decl in ic.effectsByHash.values + ic.importedEffects.values) {
+            val h = decl.contentHash ?: continue
+            decl.metadata?.let { put(h, it) }
+        }
+        for (decl in ic.abilitiesByHash.values + ic.importedAbilities.values) {
+            val h = decl.contentHash ?: continue
+            decl.metadata?.let { put(h, it) }
+        }
+    }
+    resolvedParsedModule?.let { putAll(com.mezze.language.typechecker.validation.DeprecationLinter.localMetadata(it)) }
+}
+
 fun TypeChecker.TypeCheckResult.toHoverResult(): TypeCheckResult = when (this) {
     is TypeChecker.TypeCheckResult.Success -> TypeCheckResult(
         importedAbilities = importContext?.importedAbilities ?: emptyMap(),
@@ -95,6 +119,7 @@ fun TypeChecker.TypeCheckResult.toHoverResult(): TypeCheckResult = when (this) {
         typedModule = typedModule,
         warnings = warnings.map { TypeCheckWarning(it.message, it.loc, it.code) },
         expectedTypeAt = expectedTypeAt,
+        metadataByHash = metadataInReach(),
     )
     is TypeChecker.TypeCheckResult.Failure -> TypeCheckResult(
         typedModule = typedModule,

@@ -55,7 +55,12 @@ internal fun TypedAstBuilder.buildFunctionCall(expr: ParsedFunctionCall, file: S
             if (isEffect) {
                 val effectHash = resolveEffectHash(receiverName)
                 val opName = memberAccess.member
-                val argExpr = buildExpr(expr.arguments, file)
+                // Inside a `comptime` block everything already runs while compiling,
+                // so a question to the compiler there is asked in place, not folded
+                // again (TypedAstBuilder.foldQuestion).
+                val isComptimeBlock = com.mezze.language.typechecker.WellKnownHashConstants.isComptime(effectHash, opName)
+                if (isComptimeBlock) insideComptimeBlock++
+                val argExpr = try { buildExpr(expr.arguments, file) } finally { if (isComptimeBlock) insideComptimeBlock-- }
                 val effectDecl = registry.lookupEffect(receiverName)
                     ?: importContext?.importedEffects?.get(receiverName)
                 // The solver already unified this call's result var with the
@@ -624,11 +629,30 @@ internal fun TypedAstBuilder.buildMethodCall(
         val calleeArrow = solvedFnType ?: callReturnTypes[loc]
             ?.let { substitution.apply(it) }
             ?.let { MezzeType.FunctionType(paramType = argExpr.type, returnType = it) }
-        val built = buildExpr(expr.function, file, calleeArrow)
-        if (ambiguousAbilityHash != null && built is TypedFieldAccess) {
-            built.copy(abilityHash = ambiguousAbilityHash)
-        } else built
+        // The receiver was built once already, above. Building the callee from
+        // `expr.function` built it a second time, and in an operator chain
+        // `x1 && x2 && … && xk` the receiver of each `&&` is the whole chain
+        // before it — so the tree doubled per term (16 terms: 163,837 nodes, a
+        // 78 MB stored blob). The callee's type is what `buildExpr` would have
+        // given it: the solved arrow, else the receiver's declared field.
+        val receiverType = closeGeneratedRowVars(substitution.apply(receiverExpr.type), mustBeOpenRowVars)
+        val calleeType = calleeArrow?.let { substitution.apply(it) }
+            ?.takeIf { it !is MezzeType.VarType }
+            ?: (declaredShape(receiverType) as? MezzeType.RecordType)?.fields?.get(memberAccess.member)
+            ?: calleeArrow?.let { substitution.apply(it) }
+            ?: noContextType("method callee with no solved arrow and no declared field")
+        TypedFieldAccess(
+            receiverExpr, memberAccess.member, -1,
+            closeGeneratedRowVars(calleeType, mustBeOpenRowVars), memberAccess.loc,
+            abilityHash = ambiguousAbilityHash,
+        )
     }
+
+    // A callee that reads the method off its receiver already carries the
+    // receiver: every consumer (the compiler, the monomorphizer) injects
+    // `fn.record` into the argument when the argument lacks it. Putting it in
+    // the argument as well is the second copy that doubled operator chains.
+    val receiverRidesInCallee = fn is TypedFieldAccess && fn.record === receiverExpr
 
     // #226: the STATIC ability-call form `Ability.method { it = v, ... }`
     // (desugared to a method call by the typechecker) already carries the
@@ -735,9 +759,13 @@ internal fun TypedAstBuilder.buildMethodCall(
         )
     }
 
+    // The argument as written, without the receiver, when the callee carries
+    // it. `wrappedArg` still states the method's parameter type above.
+    val callArg = if (receiverRidesInCallee && argExpr is TypedRecord) argExpr else wrappedArg
+
     return TypedCall(
         function = correctedFn,
-        arg = wrappedArg,
+        arg = callArg,
         instantiation = instantiation,
         isTailCall = isTailCall,
         type = callReturnType,

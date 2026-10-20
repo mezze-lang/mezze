@@ -134,7 +134,7 @@ class SQLiteMezzeStoreTest {
                 stmt.setString(2, "FUNCTION")
                 stmt.setString(3, "PUBLIC")
                 stmt.setBytes(4, null)
-                stmt.setBytes(5, irBytes)
+                stmt.setBytes(5, StoredBytes.pack(irBytes)) // the stored format, as putBlob writes it
                 stmt.executeUpdate()
             }
         }
@@ -429,8 +429,8 @@ class SQLiteMezzeStoreTest {
     @Test
     fun `putUsage and getUsages`() {
         val hash = stubBlob(Hash("a".repeat(64)))
-        store.putUsage(hash, "src/main.mz", 10, 5, 10, 8)
-        store.putUsage(hash, "src/utils.mz", 20, 1, 20, 4)
+        store.putUsage(hash, "src/main.mz", 10, 5, 10, 8, fromHash = Hash("e".repeat(64)), isCall = false)
+        store.putUsage(hash, "src/utils.mz", 20, 1, 20, 4, fromHash = Hash("e".repeat(64)), isCall = false)
 
         val refs = store.getUsages(hash)
         assertEquals(2, refs.size)
@@ -439,8 +439,8 @@ class SQLiteMezzeStoreTest {
     @Test
     fun `clearUsagesForFile removes only that file`() {
         val hash = stubBlob(Hash("a".repeat(64)))
-        store.putUsage(hash, "src/main.mz", 1, 1, 1, 5)
-        store.putUsage(hash, "src/utils.mz", 2, 1, 2, 5)
+        store.putUsage(hash, "src/main.mz", 1, 1, 1, 5, fromHash = Hash("e".repeat(64)), isCall = false)
+        store.putUsage(hash, "src/utils.mz", 2, 1, 2, 5, fromHash = Hash("e".repeat(64)), isCall = false)
 
         store.clearUsagesForFile("src/main.mz")
 
@@ -592,8 +592,8 @@ class SQLiteMezzeStoreTest {
         val targetHash = stubBlob(Hash("c".repeat(64)))
         store.putModule("std::test", "/tmp/test.mz", "h1")
         store.registerName("std::test", "thing", targetHash)
-        store.putUsage(targetHash, "/tmp/a.mz", 1, 0, 1, 5)
-        store.putUsage(targetHash, "/tmp/b.mz", 2, 0, 2, 5)
+        store.putUsage(targetHash, "/tmp/a.mz", 1, 0, 1, 5, fromHash = Hash("e".repeat(64)), isCall = false)
+        store.putUsage(targetHash, "/tmp/b.mz", 2, 0, 2, 5, fromHash = Hash("e".repeat(64)), isCall = false)
 
         val threads = 8
         val iterations = 50

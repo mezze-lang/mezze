@@ -110,7 +110,7 @@ object JsonDiagnosticFormatter {
 
     fun fromWarning(w: TypeChecker.TypeCheckWarning): DiagnosticJson = DiagnosticJson(
         severity = Severity.WARNING,
-        code = null,
+        code = w.code?.display(),
         message = w.message,
         location = w.loc?.toJson(),
         hints = emptyList(),
@@ -138,7 +138,8 @@ object JsonDiagnosticFormatter {
             ?: emptyList()
         val warningDiags = warnings.map { fromWarning(it) }
         return CheckResultJson(
-            status = if (warningDiags.isEmpty()) Status.OK else Status.ERRORS,
+            // Warnings do not fail a check — the same rule `errors` applies.
+            status = Status.OK,
             file = file,
             app = app,
             summary = SummaryJson(errors = 0, warnings = warningDiags.size),

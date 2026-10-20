@@ -79,7 +79,14 @@ use std::abilities::embed::{ Embeddable }
 ## that runs a `comptime` block carries the mark into its own signature and a
 ## consumer can tell it apart from one that does not.
 effect Comptime where {
-  comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <Comptime>
+  comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <Comptime>,
+  ## Ask the compiler about the codebase being compiled.
+  ##
+  ## Nobody calls this directly: `std::codebase`'s handlers do, so that asking
+  ## the codebase anything shows up as `<Comptime>` in the asker's row. `run`
+  ## reaches the compiler through natives that answer only while compiling; at
+  ## run time there is no codebase, and they fail rather than answer.
+  codebase: { run: {} -> 'a } -> 'a <Comptime>
 }
 
 ## The handler, and the consent.
@@ -94,7 +101,8 @@ effect Comptime where {
 ## left alone, and it computes the same value — just at run time instead of for
 ## free.
 impl Comptime for ComptimeEval where {
-  comptime = { eval } -> resume { val = __native_comptime_eval { eval = eval } }
+  comptime = { eval } -> resume { val = __native_comptime_eval { eval = eval } },
+  codebase = { run } -> resume { val = run {} }
 }
 
 ## Fail the build, from inside a `comptime` block.

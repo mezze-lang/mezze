@@ -18,7 +18,9 @@ from it.
 | store read | `DeclRow.metadata`, returned by all four decl SELECTs |
 | formatter | preserved by `PrettyPrinter` |
 | LSP hover | shown by `HoverInfo` next to the doc comment |
-| **`deprecated`** | **fully realised** — `deprecationDiagnostics()` emits `DiagnosticTag.Deprecated`, so editors strike it through; `since` and `note` fold into the message |
+| **`deprecated`** | **fully realised** — the declaration is struck through (`deprecationDiagnostics()`), and every USE warns W0501 in `mez check`/`build` and the editor (`DeprecationLinter`, by identity, across modules); `since` and `note` fold into the message |
+| **`missing`** | on an ability: the author's advice in the "does not implement" error, replacing the impl skeleton |
+| **`unhandled`** | on an effect: the author's advice when the entry leaks it — which performer to wrap it in |
 
 Hash exclusion is worth calling out as a design win: a rendering hint can never
 invalidate a cache or trigger recompilation, and metadata can never become

@@ -218,7 +218,7 @@ class StorePopulatorTest {
                 stmt.setString(2, "PERFORMER")
                 stmt.setString(3, "PUBLIC")
                 stmt.setBytes(4, null)
-                stmt.setBytes(5, "stdlib-ir".toByteArray())
+                stmt.setBytes(5, StoredBytes.pack("stdlib-ir".toByteArray())) // the stored format, as putBlob writes it
                 stmt.executeUpdate()
             }
         }

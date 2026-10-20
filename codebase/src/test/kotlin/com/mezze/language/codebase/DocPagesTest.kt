@@ -160,7 +160,7 @@ class DocPagesTest {
     @Test
     fun `references carry file and position`() {
         val h = decl("used")
-        store.putUsage(h, "src/other.mz", 42, 7, 42, 11)
+        store.putUsage(h, "src/other.mz", 42, 7, 42, 11, fromHash = Hash("e".repeat(64)), isCall = false)
 
         val ref = pageOf(h).references.single()
         assertEquals("src/other.mz", ref.filePath)

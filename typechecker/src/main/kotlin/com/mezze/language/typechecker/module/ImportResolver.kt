@@ -263,6 +263,7 @@ class ImportResolver(
                 val reexportedInherentImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
                 val reexportedAbilitiesByHash = mutableMapOf<Hash, ParsedAbilityDecl>()
                 val reexportedEffectsByHash = mutableMapOf<Hash, ParsedEffectDecl>()
+                val reexportedMetadata = mutableMapOf<Hash, com.mezze.language.parsedast.ParsedMetadata>()
                 val reexportedAbilityImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
                 // A PERFORMER is not an export. `ExportedItemType` has no PERFORMER
                 // case, so a performer never appears in `module.exports` and the
@@ -291,6 +292,8 @@ class ImportResolver(
                             // an ability, every impl the origin knows) into the context
                             // so its operations dispatch downstream.
                             val originModule = loader.getModule(originModulePath)
+                            originModule?.let { exportMetadata(it)[export.contentHash] }
+                                ?.let { reexportedMetadata[export.contentHash] = it }
                             // A PERFORMER is exported as `ExportedItemType.FUNCTION`
                             // (there is no PERFORMER kind), so the `when` below cannot
                             // recognise one and dropped it through `else -> {}`. The
@@ -406,6 +409,7 @@ class ImportResolver(
                             abilitiesByHash = reexportedAbilitiesByHash,
                             effectsByHash = reexportedEffectsByHash,
                             importedImpls = reexportedPerformers,
+                            metadataByHash = reexportedMetadata,
                         )
                     )
                 }
@@ -640,8 +644,31 @@ class ImportResolver(
             importedAbilityImpls = abilityImpls,
             effectsByHash = effectsByHash,
             abilitiesByHash = abilitiesByHash,
-            abilityDeclHashByImpl = module?.let { abilityIdentityForImpls(it.index) } ?: emptyMap()
+            abilityDeclHashByImpl = module?.let { abilityIdentityForImpls(it.index) } ?: emptyMap(),
+            metadataByHash = module?.let { exportMetadata(it) } ?: emptyMap(),
         )
+    }
+
+    /**
+     * The `#{ … }` metadata of everything [module] exports, by the exported
+     * declaration's identity. Read off the module's own parsed declarations, where
+     * the author wrote it.
+     */
+    private fun exportMetadata(module: LoadedModule): Map<Hash, com.mezze.language.parsedast.ParsedMetadata> {
+        val index = module.index
+        return buildMap {
+            for (export in module.exports.values) {
+                val name = export.originalName
+                val metadata = when (export.type) {
+                    ExportedItemType.FUNCTION ->
+                        index.letBindings[name]?.metadata ?: index.performersByName[name]?.metadata
+                    ExportedItemType.TYPE, ExportedItemType.CONSTRUCTOR -> index.typeDeclarations[name]?.metadata
+                    ExportedItemType.ABILITY -> index.abilityDeclarations[name]?.metadata
+                    ExportedItemType.EFFECT -> index.effectDeclarations[name]?.metadata
+                } ?: continue
+                put(export.contentHash, metadata)
+            }
+        }
     }
 
     private fun buildContextFromSelectiveImports(
@@ -810,7 +837,8 @@ class ImportResolver(
             importedAbilityImpls = abilityImpls,
             effectsByHash = effectsByHash,
             abilitiesByHash = abilitiesByHash,
-            abilityDeclHashByImpl = module?.let { abilityIdentityForImpls(it.index) } ?: emptyMap()
+            abilityDeclHashByImpl = module?.let { abilityIdentityForImpls(it.index) } ?: emptyMap(),
+            metadataByHash = module?.let { exportMetadata(it) } ?: emptyMap(),
         )
     }
 

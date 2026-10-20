@@ -421,7 +421,11 @@ object WireRunner {
         val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
+        projectStore = store
     }
+
+    /** The project store [initStore] opened; what `std::codebase` questions are answered from. */
+    private var projectStore: com.mezze.language.store.MezzeStore? = null
 
     /**
      * Parse + typecheck + lower the user app. Writes CBOR files under
@@ -468,7 +472,7 @@ object WireRunner {
         if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${result.loweredFunctions.size} fns)")
 
         val decls = result.typedModule?.decls?.filterIsInstance<TypedLetDecl>().orEmpty()
-        EntryPointCheck.entryError(decls, entryName)?.let { msg ->
+        EntryPointCheck.entryError(decls, entryName, result.metadataByHash)?.let { msg ->
             System.err.println("Error: $msg")
             return null
         }
@@ -478,7 +482,21 @@ object WireRunner {
         // once here at the front door from the user-named entry; carried as a
         // hash through packing / runtime selection. entryName kept as display.
         val entryHash = entry.hash
-        val rawClosure: List<FunctionIR> = NativeBuildPath.computeReachableClosure(result.loweredFunctions)
+        // Fold `comptime` HERE, in the process that holds the store, as `mez build`
+        // does. Left to the runtime child, a block that asks `std::codebase` a
+        // question had no codebase to ask: the runtime never opens the store.
+        val codebase = projectStore?.let { store ->
+            com.mezze.language.codebase.CodebaseHostAdapter(
+                com.mezze.language.codebase.CodebaseQueries(store),
+                prepare = { ProjectIndex.ensure(store, currentDir) },
+            )
+        }
+        val rawClosure: List<FunctionIR> = try {
+            ComptimeHost.reduce(NativeBuildPath.computeReachableClosure(result.loweredFunctions), result.performerRecords, codebase)
+        } catch (e: com.mezze.language.comptime.ComptimeReduction.ComptimeFailure) {
+            System.err.println(e.message)
+            return null
+        }
         // #446 — canonicalize iter/seq/list HOF chains into FusedChainIR.
         // StdlibPrecompiler runs this on stdlib functions at build time;
         // we need to run it again on user code (and any reachable stdlib

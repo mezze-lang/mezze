@@ -154,6 +154,12 @@ class BuildCommand {
         val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
+        // What `comptime` blocks see when they ask `std::codebase` about this
+        // project: the same store this build indexes into.
+        val codebase = com.mezze.language.codebase.CodebaseHostAdapter(
+            com.mezze.language.codebase.CodebaseQueries(store),
+            prepare = { ProjectIndex.ensure(store, currentDir) },
+        )
 
         try {
             val startTime = System.nanoTime()
@@ -183,6 +189,7 @@ class BuildCommand {
             // on cache hits (if the IR was good enough to cache, the shape
             // already passed).
             val typedModuleForValidation: com.mezze.language.typedast.TypedModule?
+            var metadataForValidation: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedMetadata> = emptyMap()
             var warningCount = 0
 
             if (cached != null) {
@@ -206,6 +213,7 @@ class BuildCommand {
                 compiledFunctions = compiled.loweredFunctions
                 performerRecords = compiled.performerRecords
                 typedModuleForValidation = compiled.typedModule
+                metadataForValidation = compiled.metadataByHash
                 warningCount = compiled.warningCount
             }
 
@@ -268,7 +276,7 @@ class BuildCommand {
             val entryName = appConfig.entry
             if (typedModuleForValidation != null) {
                 val decls = typedModuleForValidation.decls.filterIsInstance<TypedLetDecl>()
-                EntryPointCheck.entryError(decls, entryName)?.let { msg ->
+                EntryPointCheck.entryError(decls, entryName, metadataForValidation)?.let { msg ->
                     println("Error: $msg")
                     kotlin.system.exitProcess(4)
                 }
@@ -291,7 +299,7 @@ class BuildCommand {
             // Reachable IR, comptime folded, chains canonicalized — see
             // NativeBuildPath.finalizeClosure for why the fold belongs here and
             // not earlier.
-            val closure = NativeBuildPath.finalizeClosure(loweredFunctions, performerRecords)
+            val closure = NativeBuildPath.finalizeClosure(loweredFunctions, performerRecords, codebase)
             if (timing) System.err.println("[${ms()}ms] runtime closure (${closure.size} fns)")
 
             // 6. Create runnable JAR — clones mezze-runtime.jar (slim
@@ -392,6 +400,7 @@ class BuildCommand {
                         entryName = appConfig.entry,
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
+                        codebase = codebase,
                         optimized = optimizedNI,
                         polyglot = polyglot,
                         extraClasspath = polyglotJars,
@@ -412,6 +421,7 @@ class BuildCommand {
                         entryName = appConfig.entry,
                         loweredFunctions = loweredFunctions,
                         performerRecords = performerRecords,
+                        codebase = codebase,
                         polyglot = polyglot,
                         extraClasspath = polyglotJars,
                         timing = timing,
@@ -477,6 +487,7 @@ class BuildCommand {
         val loweredFunctions: List<FunctionIR>,
         val performerRecords: List<Array<String>>,
         val typedModule: com.mezze.language.typedast.TypedModule?,
+        val metadataByHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedMetadata>,
         // Warnings from the fresh typecheck (0 on a cache hit — we didn't
         // re-typecheck, so there's nothing new to report).
         val warningCount: Int = 0,
@@ -534,6 +545,11 @@ class BuildCommand {
         val typeCheckResult = TypeCheckRunner.wrapSuccess(
             rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
         )
+        // The summary counts these; say what they are.
+        for (w in rawResult.warnings) {
+            System.err.println(com.mezze.language.langservice.printing.ErrorFormatter.formatWarning(w, source))
+            System.err.println()
+        }
         if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${typeCheckResult.loweredFunctions.size} fns)")
 
         // Scatter result into store so next run hits the cache.
@@ -562,6 +578,7 @@ class BuildCommand {
             loweredFunctions = typeCheckResult.loweredFunctions,
             performerRecords = typeCheckResult.performerRecords,
             typedModule = typeCheckResult.typedModule,
+            metadataByHash = typeCheckResult.metadataByHash,
             warningCount = typeCheckResult.warnings.size,
         )
     }

@@ -416,6 +416,18 @@ class TypeChecker(
             listOf("abilityNames = $abilityNames", "effectNames = $effectNames")
         }
 
+        // Which imported handlers answer at compile time, over every loaded module
+        // at once: a handler may wrap one declared in a module it imports.
+        importContext = importContext?.let { ctx ->
+            val found = com.mezze.language.typechecker.comptime.CompileTimePerformers
+                .ofModules(loadedModules.values.mapNotNull { it.typedModule })
+            ctx.copy(
+                compileTimePerformers = found.compileTime,
+                comptimeLeavingPerformers = found.leavesComptime,
+                comptimeAnswererHash = found.answerer?.performerHash,
+                comptimeAnswererName = found.answerer?.performerName,
+            )
+        }
         val registry = buildFullRegistry(loadedModules, buildResult, importContext)
 
         // Install the registry-backed hash resolver for the whole module check so
@@ -847,9 +859,20 @@ class TypeChecker(
                 // the runtime with "TruffleIR not produced by typechecker" — no
                 // location, no cause. Now it says which phase failed and why.
                 emitResult.internalFailure?.let { throw it }
+                // Uses of deprecated declarations, by identity: needs the typed tree,
+                // so it runs after emit.
+                val deprecationWarnings = emitResult.typedModule?.let { typed ->
+                    com.mezze.language.typechecker.validation.DeprecationLinter.lint(
+                        typed, parsedModule, importContext?.metadataByHash ?: emptyMap(),
+                        effectName = { h ->
+                            importContext?.effectsByHash?.get(h)?.name
+                                ?: parsedModule.decls.filterIsInstance<ParsedEffectDecl>().firstOrNull { it.contentHash == h }?.name
+                        },
+                    ).map { TypeCheckWarning(message = it.message, loc = it.loc, code = it.code) }
+                }.orEmpty()
                 return TypeCheckResult.Success(
                     substitution = substitution, importContext = importContext,
-                    warnings = warnings + validationWarnings,
+                    warnings = warnings + validationWarnings + deprecationWarnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
                     typedModule = emitResult.typedModule,
@@ -1182,6 +1205,7 @@ class TypeChecker(
                     } ?: emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
+                    metadataByHash = result.metadataInReach(),
                     performerRecords = result.loweredPerformers,
                     loadedModules = result.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! },
                     loadedModuleSources = result.loadedModules

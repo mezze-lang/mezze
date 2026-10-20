@@ -369,7 +369,7 @@ class MezzeParser {
             // includes what its names resolve to, so it is stamped once the
             // module's imports are known (DeclIdentity), never at parse time.
             val parsedModule =
-                resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments))
+                resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments, moduleDocOf(leadingBlock, decls.firstOrNull())))
 
             return ParseResultWithRecovery(parsedModule, errors)
         } catch (e: ParseException) {
@@ -507,7 +507,7 @@ class MezzeParser {
         orphanComments.addAll(pendingBlock.regularComments)
 
         failure ?: ParseResult.Success(
-            ParsedModule(currentFile ?: "<unknown>", decls, orphanComments),
+            ParsedModule(currentFile ?: "<unknown>", decls, orphanComments, moduleDocOf(leadingBlock, decls.firstOrNull())),
             currentStream
         )
     }
@@ -717,8 +717,19 @@ class MezzeParser {
     internal data class AnnotationBlock(
         val regularComments: List<ParsedComment>,
         val docComment: String?,
-        val metadata: ParsedMetadata?
+        val metadata: ParsedMetadata?,
+        /** The first `##` run that a blank line or `#` comment cut off from what follows. */
+        val firstDetachedDoc: String? = null,
     )
+
+    /**
+     * The module doc, from the annotations before the first item (`leading`) and
+     * that item: the first `##` run, when it does not document the item — set
+     * apart by a blank line, or followed by a `use`.
+     */
+    private fun moduleDocOf(leading: AnnotationBlock, firstDecl: ParsedDecl?): String? =
+        leading.firstDetachedDoc
+            ?: leading.docComment?.takeIf { firstDecl is ParsedUseDecl || firstDecl is ParsedPubUseDecl }
 
     /**
      * Skip newlines and collect COMMENT tokens, applying Roc-style reset rules:
@@ -755,7 +766,9 @@ class MezzeParser {
 
         // Reset the current annotation block, preserving any doc lines it held
         // as verbatim comments so they survive the round-trip.
+        var firstDetachedDoc: String? = null
         fun resetBlock() {
+            if (firstDetachedDoc == null && docLines.isNotEmpty()) firstDetachedDoc = docLines.joinToString("\n")
             regularComments.addAll(docRaw)
             docLines = mutableListOf()
             docRaw = mutableListOf()
@@ -818,7 +831,7 @@ class MezzeParser {
         }
 
         val docComment = if (docLines.isNotEmpty()) docLines.joinToString("\n") else null
-        return Pair(current, AnnotationBlock(regularComments, docComment, metadata))
+        return Pair(current, AnnotationBlock(regularComments, docComment, metadata, firstDetachedDoc))
     }
 
     internal fun tok(type: TokenType): Parser<Token> =

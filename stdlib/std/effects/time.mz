@@ -28,6 +28,7 @@
 use std::datetime::{ Instant, Duration, Zone, DateTime, TestClock, decompose, add, diff, utc, year, month, day, hour, minute, second, duration_zero, sub_duration, test_clock_now, test_clock_advance, test_clock_monotonic }
 
 ## The Time effect.
+#{ unhandled: "Wrap it in `perform SystemTime in …` for the system clock, or `MockTime` / `FrozenTime` in a test." }
 effect Time where {
   ## Current wall-clock instant. Not monotonic — can jump.
   ## Use for timestamps, expiries, log records.

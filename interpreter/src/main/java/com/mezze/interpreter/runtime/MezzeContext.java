@@ -344,6 +344,25 @@ public final class MezzeContext {
         return globals.keySet();
     }
 
+    /**
+     * The content hash a function VALUE was registered under, or null when it is
+     * not a top-level function this context knows (a lambda, say). Found by its
+     * CallTarget, which a value read from a global shares with the global.
+     *
+     * A linear scan: it serves `std::codebase`'s `ref`, asked a handful of times
+     * per build, never on a hot path.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    public Hash hashOfFunction(com.oracle.truffle.api.CallTarget target) {
+        for (var e : globals.entrySet()) {
+            if (e.getValue() instanceof com.mezze.interpreter.values.MezzeFunction f && f.getCallTarget() == target) return e.getKey();
+        }
+        for (var e : callTargetCache.entrySet()) {
+            if (e.getValue() == target) return e.getKey();
+        }
+        return null;
+    }
+
     @TruffleBoundary
     public boolean hasGlobal(Hash contentHash) {
         return globals.containsKey(contentHash);

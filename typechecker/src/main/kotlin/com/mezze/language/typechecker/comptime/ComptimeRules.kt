@@ -111,4 +111,37 @@ object ComptimeRules {
     // and rejecting it was tried and reverted. See TypedASTCompiler's
     // checkComptimeCallSite. V0803 is burned and must not be reused.
 
+
+    // ── questions to the compiler (introspection §9.2) ─────────────────────
+    //
+    // A `perform` of a compile-time handler (`ComptimeEvalCodebase`, or `ComptimeEval`
+    // around `EvalCodebase`) is folded during the build, exactly as a comptime
+    // block is. These are its rules, in its own words: the person wrote a
+    // `perform`, not a `comptime`.
+
+    /** The question reads a run-time value, so it cannot be answered while compiling. */
+    fun checkQuestionIsClosed(capturedNames: List<String>, loc: Loc?) {
+        if (capturedNames.isEmpty()) return
+        val what = capturedNames.distinct().joinToString(", ") { "`$it`" }
+        throw TypeCheckError(
+            "this question to the compiler depends on $what — a run-time value. It is " +
+                "answered while the program is being compiled, so it may use literals, " +
+                "top-level functions and top-level values, but nothing from an enclosing " +
+                "function.",
+            loc,
+            code = ErrorCode.V0802_COMPTIME_NOT_CLOSED,
+        )
+    }
+
+    /** A compile-time handler whose `Comptime` nothing here answers. */
+    fun rejectUnansweredQuestion(loc: Loc?): Nothing {
+        throw TypeCheckError(
+            "this asks the compiler a question, but no handler of `Comptime` is in " +
+                "reach to answer it while compiling. Import `std::codebase` (whose " +
+                "handlers bring one), or answer it here: `perform ComptimeEval in …`.",
+            loc,
+            code = ErrorCode.V0801_COMPTIME_MISUSE,
+        )
+    }
+
 }

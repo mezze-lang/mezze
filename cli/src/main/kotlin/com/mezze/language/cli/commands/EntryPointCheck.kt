@@ -1,6 +1,8 @@
 package com.mezze.language.cli.commands
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.ParsedMetadata
+import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLetDecl
 
 /**
@@ -35,7 +37,8 @@ object EntryPointCheck {
         data class NotAFunction(val actualType: MezzeType) : Result()
         data class WrongParamShape(val actualParamType: MezzeType, val visibleFieldNames: List<String>) : Result()
         data class WrongReturnShape(val actualReturnType: MezzeType) : Result()
-        data class UnhandledEffects(val effects: List<String>) : Result()
+        /** Each unhandled effect by name, with its identity when the row carries one. */
+        data class UnhandledEffects(val effects: List<Pair<String, Hash?>>) : Result()
     }
 
     fun check(decl: TypedLetDecl): Result {
@@ -57,9 +60,10 @@ object EntryPointCheck {
         // auto-discharge for "ambient" effects (a bare `println` entry prints
         // nothing). `*` (performed) and an open row-var tail are not concrete
         // effects (absent from allEffectNames), so `{} -> {} <*>` is fine.
-        val unhandled = type.residualEffects?.allEffectNames?.sorted().orEmpty()
+        val residual = type.residualEffects
+        val unhandled = residual?.allEffectNames?.sorted().orEmpty()
         if (unhandled.isNotEmpty()) {
-            return Result.UnhandledEffects(unhandled)
+            return Result.UnhandledEffects(unhandled.map { it to residual?.effectHashes?.get(it) })
         }
 
         return Result.Ok
@@ -76,15 +80,19 @@ object EntryPointCheck {
      * module defines passed `mez check` and then failed `mez build`, and the one
      * command whose job is to tell you in advance stayed quiet.
      */
-    fun entryError(decls: List<TypedLetDecl>, entryName: String): String? {
+    fun entryError(
+        decls: List<TypedLetDecl>,
+        entryName: String,
+        metadataByHash: Map<Hash, ParsedMetadata>,
+    ): String? {
         val decl = decls.find { it.name == entryName }
             ?: return "App must define a '$entryName' function with type `{} -> {} <*>` " +
                 "(the entry named by Mezze.toml's `entry = \"$entryName\"`)"
-        return errorMessage(check(decl), entryName)
+        return errorMessage(check(decl), entryName, metadataByHash)
     }
 
     /** Format a [Result] into a one-line user-facing error, or null if Ok. */
-    fun errorMessage(result: Result, entryName: String): String? = when (result) {
+    fun errorMessage(result: Result, entryName: String, metadataByHash: Map<Hash, ParsedMetadata>): String? = when (result) {
         Result.Ok -> null
         is Result.NotAFunction ->
             "Entry '$entryName' must be a function `{} -> {} <*>`, got: ${render(result.actualType)}"
@@ -100,11 +108,16 @@ object EntryPointCheck {
         is Result.WrongReturnShape ->
             "Entry '$entryName' must return `{}`, got: ${render(result.actualReturnType)}"
         is Result.UnhandledEffects -> {
-            val list = result.effects.joinToString(", ")
+            val list = result.effects.joinToString(", ") { it.first }
+            // Which performer to reach for is the effect author's to say
+            // (`#{ unhandled: "…" }` on the effect), not a list kept here.
+            val advice = result.effects.mapNotNull { (name, hash) ->
+                hash?.let { metadataByHash[it]?.unhandled }?.let { "$name: $it" }
+            }
             "Entry '$entryName' performs $list, but nothing discharges it — the entry has no " +
                 "enclosing handler, so it leaks at runtime (you get a raw suspended value, not the result). " +
-                "Wrap the body in a handler: `perform <Performer> in …` " +
-                "(e.g. `Console` for Log, `SystemTime` for Time, `LoomAsync` for Async)."
+                "Wrap the body in a handler: `perform <Performer> in …`." +
+                advice.joinToString("") { " $it" }
         }
     }
 

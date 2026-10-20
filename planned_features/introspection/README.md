@@ -22,7 +22,7 @@ code*, at a different moment:
 |---|---|---|---|
 | parse time | turn this syntax into that syntax | macros (`!()`, pattern macros) | designed (`../macros/`) |
 | compile time | compute this value now | `comptime` | built |
-| compile time | what is in this function? | static queries (`branches`, types, impls) | `branches` exists inside `mez sample` only |
+| compile time | what is in this function? what is the codebase? | the `Codebase` effect (§9) | designed; `branches` exists inside `mez sample` only |
 | run time | what inputs does this take? | `Arbitrary` + `Sample` | built |
 | run time | **what is it doing?** | observation — this document | partial (DAP engine, coverage collector) |
 | edit time | what is the codebase? | store, signature index, eval, LSP | largely built |
@@ -352,21 +352,19 @@ type that does this?* — with evidence, not a name match.
 
 ### 5.8 The program queries its own codebase at compile time
 
-A `Codebase` effect available to `comptime` and macros:
-`implementors { of = Route }`, `callers { of = f }`,
-`by_signature { ... }`. Whole-program registration — routes, plugins, CLI
-subcommands, codecs — with no runtime registry and no scanning names or
-annotations: a query by type or ability. The query's answer is part of the
-comptime result's cache key, so the cache is exact (this is the "effectful or
-not" bit from `../macros/` made precise: the effect *is* the dependency).
+Designed in §9: the `Codebase` effect, answered from the store while compiling
+and handled into `Comptime`. One correction to the first sketch of this idea:
+"whole-program registration" (routes, plugins) is NOT the main use. Anything a
+person chooses is better written as plain data. Queries are for facts only the
+compiler knows (§9.6).
 
-### 5.9 Typed code generation at run time
+### 5.9 Typed code generation at run time — dropped
 
-A program builds an AST value (F-1), hands it to the compiler, and gets back
-either a hash plus a typed function value or a type error as data. That's
-`eval`, but typed, cached by hash, and inspectable afterwards. The runtime
-cannot compile (eval contract), so this is a `Compile` effect answered by the
-compiler process — which also makes it visible in the row, and refusable.
+Decided 2026-10-16: reading and writing the codebase happens at compile time
+only. After the build the code is frozen and content-addressed, so a run-time
+answer would equal the compile-time one, and a run-time `Compile` effect would
+bring the store and the compiler into every app. Code is generated at compile
+time by preprocessors and macros (`../frontends/`), and values by `comptime`.
 
 ### 5.10 Traces that point at the code that ran
 
@@ -412,6 +410,8 @@ on the far side trustworthy.
 7. Everything else builds on 3–6: calls-as-tests, behaviour diff, holes,
    spans, what-if, live attach, the §5 queries.
 
+Codebase queries (§9) have their own task list, §9.9.
+
 ## 8. Open questions
 
 - Does observing a private declaration from its own module's tests count as
@@ -428,3 +428,200 @@ on the far side trustworthy.
   that can be wiped without touching code?
 - Is the behaviour key stored, or computed on demand? Stored makes every cache
   lookup one read; computed avoids a second hash that can drift.
+
+---
+
+## 9. Codebase queries — design (2026-10-18)
+
+**The idea in one line: Mezze is programmable, authorable and queryable from
+Mezze itself.**
+
+| | mechanism | phase |
+|---|---|---|
+| programmable | `comptime { }` computes a value while compiling | after type checking (lowering) |
+| authorable | preprocessors and `name!( … )` write syntax (`../frontends/`) | before type checking |
+| queryable | the `Codebase` effect reads the typed store | wherever compile-time code runs |
+
+The core keeps one job: deciding what is well-typed. Libraries add vocabulary;
+they never add typing rules ("extensions may reject more, never accept more").
+
+### 9.1 Two kinds of compile-time evaluation
+
+| | folding: `comptime { }` | authoring: preprocessors, macros |
+|---|---|---|
+| changes | nothing about meaning; a value is computed early | what the program is |
+| input → output | closed thunk → `Embeddable` value → IR literal | tokens → `Decl`/`Expr` |
+| phase | after type checking | before type checking |
+| runs in | `mez build` (CLI), `mez dev`/WASM (runtime); never `check`/LSP | `check`, LSP, `build` — always the compiler host |
+| if it never runs | the `eval {}` fallback computes the same value at run time | no fallback |
+| consent | `ComptimeEval` handler | listed in `Mezze.toml` |
+
+`Codebase` needs the store, which exists only in the compiler host. So until
+the interpreter runs inside `mez` (T6), a query works only where folding happens
+in the CLI process: `mez build` on the JVM, and tests. Everywhere else it must
+fail loudly. Queries have no run-time fallback.
+
+### 9.2 Effects
+
+```
+Codebase.find { … }                   raises   <Codebase>
+   │  perform EvalCodebase in …      consumes Codebase, raises <Comptime>
+   ▼
+<Comptime>
+   │  perform ComptimeEval in …       evaluated while compiling
+   ▼
+plain data
+```
+
+```
+let routes = {} -> perform ComptimeEval in perform EvalCodebase in Codebase.decls { module = "app::http" }
+let routes = {} -> perform ComptimeEvalCodebase in Codebase.decls { module = "app::http" }   # helper
+```
+
+- `EvalCodebase` turns each `Codebase` op into `Comptime.codebase { run }` and
+  leaves `<Comptime>` outward, so it composes with other compile-time work under
+  one `perform ComptimeEval`. The handler cannot call `Comptime.comptime` itself, because the op's
+  parameters are run-time values from its point of view (V0802).
+- `ComptimeEvalCodebase` is a helper. It handles `Codebase` and installs
+  `ComptimeEval` inside its own op bodies. That is legal under V0701, since it is
+  a performer for `Codebase` only.
+- `FixtureCodebase { … }` answers from given data, for tests.
+- **Fold site:** the `perform … in` of a compile-time handler — `ComptimeEvalCodebase`,
+  or `ComptimeEval` around `EvalCodebase`. Nothing wraps it in
+  `Comptime.comptime`; the `perform` is the compile-time site. It is inside a
+  function: a `perform` at the top level is refused (V0502). The whole expression is evaluated while compiling. It must be
+  closed (a query that depends on a run-time value is a compile error naming
+  that value), and its result must be `Embeddable`.
+- Compile time only (§5.9). There is no run-time handler that reads the store.
+
+### 9.3 Referring to things
+
+| how | example | rename-safe | when |
+|---|---|---|---|
+| qualified name | `"app::model::Point"` | no | text search; stopgap |
+| a function value | `Codebase.ref { of = get_user }` | yes — its hash is known at the fold site | first slice |
+| a quote | `` Codebase.impls { for = `Point` } `` | yes — resolved where written | once quotes exist |
+
+Every result carries a `DeclRef` (hash + display name), and a `DeclRef` can be
+passed to the next query. A specialised (mono) copy maps back to its generic
+hash.
+
+### 9.4 API
+
+| group | operations |
+|---|---|
+| look up | `ref { of }` · `get { ref }` · `resolve { name }` |
+| definitions | `definition { of }`: record fields, variant constructors and payloads, newtype and wrapped type, alias target, type parameters · `signature { of }` · `ops { of }`: an ability's or effect's operations, class parameters, requirements, associated types |
+| abilities | `impls { of = ability }` · `impls { for = type }` · `impl_for { ability, type }` · `abilities_of { type }`: written, generic or derived, using the checker's own matching and derivation |
+| effects | `effects_of { of }` (residual) · `performers { of = effect }` |
+| graph | `callers` · `callees` · `references` · `usages` · `reaches { from, to }` with the path · `closure` · `unused` |
+| modules | `modules { prefix }` · `exports` · `imports` · `importers` |
+| docs | `doc` · `loc` · `source` · `metadata` · module docs |
+| search | `search { q = query {} … }`, a builder (below) |
+| later | `body { of }` (typed view) · `generated_by` (provenance) |
+
+`Query` is a plain record. Its inherent methods each return a modified copy:
+
+```
+Codebase.search { q = query {}
+  .kind { is = Function } .public {} .in_module { prefix = "app::http" }
+  .performs { effect = `Db` } .returns { type = `Response` }
+  .order { by = Name } .limit { n = 100 } }
+```
+
+Filters: kind, name / prefix / fuzzy, text (FTS over names and docs), module
+prefix, scope (project / deps / std), public, tagged, deprecated, has_doc,
+performs, pure, requires, mentions, returns, takes, shape (type-directed, Hoogle
+style), unused, order, limit. Results are always in a fixed order, so builds are
+reproducible. A `Query` is data, so it is also the cache key.
+
+### 9.5 Prior art
+
+Lean 4 is the closest: metaprograms walk the whole environment, and `exact?`
+searches it by type. Template Haskell has `reify` and `reifyInstances`; Scala 3
+has `Quotes.reflect`; Zig has `@typeInfo`; Java has annotation processors
+(`getElementsAnnotatedWith`). Smalltalk and Lisp images are queryable from the
+language, but at run time, untyped and mutable. CodeQL, Glean and Hoogle are
+external tools. The new combination here: type-directed search, effects,
+abilities and the call graph over a content-addressed store, asked from the
+language as an effect, cached and reproducible.
+
+### 9.6 What it is for
+
+**If you could write it down, write it as data.** Routes, flags and config are
+choices, so they are lists. Queries are for facts only the compiler knows:
+
+- **derive and codecs:** fields and constructors, and which abilities each field type has;
+- **sampler and test generation:** `abilities_of`, effect ops (for mocks), typed bodies;
+- **docs:** docs, signatures, usages, source;
+- **embedded languages:** a schema type's fields;
+- **lints and architecture rules:** the call graph and effects;
+- **completeness checks** over chosen data ("every handler returning `Response` is in `routes`").
+
+The main users are library and tool authors. The proof that it is enough: move
+sample branch analysis (`SampleBranches.kt`) and one built-in derive into Mezze,
+and delete the Kotlin.
+
+### 9.7 Store additions
+
+The abstraction is already complete for what exists: every query capability is
+on `MezzeStore`. `SQLiteMezzeStore` adds only file handling and factories. Gaps:
+
+| gap | today | addition |
+|---|---|---|
+| effect / ability lookups by hash | rows carry `effectHash` / `abilityHash`, but the lookup methods take names | hash-keyed methods; the name-keyed ones go once unused |
+| impls for a type | impl → targets only | targets → impls |
+| definitions of types, abilities, effects | signature rows only for `let`; the rest only in typed blobs | index them on the type-node tables; `getDefinition` |
+| whole project | a build indexes only modules reachable from the entry | index every project module |
+| source slice | line range plus a file read | stored slice (generated code has no file) |
+| module docs, scope tier | — | stored |
+| `getAllBlobHashes` | interface default `emptyList()`; in-memory never overrides it | abstract, implemented everywhere |
+| expansions / provenance | — | `putExpansion` / `getExpansion` / `generatedBy` |
+
+### 9.8 Layers
+
+```
+std::codebase (Mezze)      Codebase · Query · DeclInfo / Definition / ImplInfo
+      │  EvalCodebase / ComptimeEvalCodebase
+      ▼
+Comptime.query             fold site: a closed `perform … in`
+      │  native, through a small host interface (no global state)
+      ▼
+CodebaseQueries (Kotlin)   over :store plus the checker's impl matching;
+      │                    TypeSearch, AbilitySearch, EffectReach, DocPages move here
+      ▼
+MezzeStore                 SQLite · in-memory · chained
+```
+
+### 9.9 Tasks
+
+`[x]` done · `[~]` partly done · `[ ]` not started.
+
+- [x] **T1 Store: hash-keyed lookups.** `findDeclsPerforming` and `findDeclsRequiring`, indexed. The name-keyed searches stay for what a person TYPES (`mez search`).
+- [x] **T2 Store: impls for a type.** By receiver hash or by the type's declaration; plus `getAllAbilityImpls`.
+- [x] **T3 Store: `getAllBlobHashes`.** Abstract; the in-memory store used to return nothing.
+- [x] **T4 Store: definitions.** `DefinitionIndex` on `def_nodes`, written by the same walker as signatures.
+- [x] **Source call graph.** Each usage records its enclosing declaration and whether it is a call. `edges` is built from lowered code, where an inlined helper has no callers.
+- [x] **T5 Whole project.** `ProjectIndex` indexes every `src/` module on the FIRST question, so a build that asks nothing pays nothing. Declarations carry their origin (`MezzeStore.getModuleTier`). Module docs need a syntax first.
+- [x] **T6 Interpreter inside `mez`.** The native image carries `:interpreter` and finds the evaluator as a service. `comptime` now folds in the native binary (it silently did not before), and a build with `comptime` blocks it cannot evaluate fails instead of shipping them unevaluated.
+- [x] **T7 `CodebaseQueries`:** the `:codebase` module, over `:store` only.
+- [x] **T8 One set of shapes:** `CodebaseShapeContractTest` checks every record and constructor the adapter produces against `std/codebase.mz`.
+- [x] **T9** `Comptime.codebase { run }`; `CodebaseHost` in `:ast`; `__native_codebase_*` natives. `mez build`, `mez dev` and `mez exec` fold in the CLI, which holds the store.
+- [x] **T10 Fold at `perform … in`.** A question folds where it stands.
+  - `EvalCodebase` keeps `<Comptime>` in its row, composing with other compile-time work under one `ComptimeEval`.
+  - Compile-time handlers are found across all loaded modules and in the module itself; questions inside a handler's own operations are forwarded, not folded.
+  - Reading a run-time value is a compile error (V0802).
+  - Like any `perform`, a question is written inside a function, never as a top-level value (V0502).
+  - Run-time work inside a question fails the build when the evaluation suspends on an unhandled effect.
+- [x] **T11 `std::codebase`:** `Codebase`, `EvalCodebase`, `ComptimeEvalCodebase`, `FixtureCodebase`, the `DeclQuery` builder.
+- [x] **T12 API:** resolve, info (with origin), decls, modules, signature, definition, source, impls_of, impls_for, effects_of, performing, requiring, performers_of, callers, callees, references, usages, `ref { of = fn }`, `abilities_of` (written, derived, generic), `body` (a typed `CodeExpr` tree).
+- [x] **T13 Search:** kind, name, prefix, text, module, public, tagged, deprecated, documented, performs, pure, requires, mentions, shape (type-directed), unused, order, limit.
+- [ ] **T14 Quotes as references** (with `std::syntax`).
+- [ ] **T15 Proofs:** sample branch analysis in Mezze (now possible through `body`); one derive in Mezze; delete the Kotlin.
+- [x] **T16 Author-written messages:** `#{missing}` on abilities, `#{unhandled}` on effects, warnings for `#{deprecated}`.
+  - Metadata reaches an importing module by identity: `ModuleImportContext.metadataByHash`, filled from each imported module's exports (re-exports included).
+  - `#{deprecated}`: W0501 at every use — values, performers in `perform`, effect operations — imported or local; not inside a deprecated declaration. The editor strikes the use through.
+  - `#{missing}` replaces the "implement: impl …" advice, also on the operator path. The checker's `when (abilityName)` advice for `Encode`/`Decode`/`Tryable` moved into the stdlib as metadata.
+  - `#{unhandled}` is read by effect hash in the entry rule. The hard-coded "`Console` for Log, `SystemTime` for Time, `LoomAsync` for Async" list moved onto those effects.
+
+A question is a `perform`, so it lives inside a function: a top-level `let x = perform … in …` is refused (V0502) like any other. Importing a module must not run its effects, and there is no exemption for compile-time ones.

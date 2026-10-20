@@ -1,6 +1,8 @@
 package com.mezze.language.cli.commands
 
 import com.mezze.language.cli.JvmLauncher
+import com.mezze.language.comptime.Comptime
+import com.mezze.language.comptime.ComptimeEvaluator
 import com.mezze.language.comptime.ComptimeReduction
 import com.mezze.language.truffleir.FunctionIR
 import java.net.URLClassLoader
@@ -28,9 +30,10 @@ import java.net.URLClassLoader
  * one. `Comptime`, `FunctionIR` and the rest resolve from the parent, so both
  * sides agree on the types they exchange.
  *
- * No runtime jar means no evaluation, and the IR comes back untouched. That is
- * also the right answer for a slim install: a comptime call left alone still
- * computes the right value at run time through the declaration's `eval {}`.
+ * No evaluator means the build stops, when — and only when — the program has
+ * a `comptime` block. A block left alone would still compute a value at run
+ * time through `eval {}`, but not the one a build promises, and a question to
+ * the compiler (`std::codebase`) would have no answer at all.
  */
 internal object ComptimeHost {
 
@@ -40,8 +43,26 @@ internal object ComptimeHost {
      * Throws [ComptimeReduction.ComptimeFailure] when a block raises or calls
      * `compile_error` — the author's error, to be reported like any other.
      */
-    fun reduce(functions: List<FunctionIR>, performers: List<Array<String>>): List<FunctionIR> {
-        val loader = runtimeLoader() ?: return functions
+    fun reduce(
+        functions: List<FunctionIR>,
+        performers: List<Array<String>>,
+        codebase: com.mezze.language.comptime.CodebaseHost?,
+    ): List<FunctionIR> {
+        val ir = com.mezze.language.comptime.ComptimeIr()
+        if (functions.none { ir.hasSite(it.body) }) return functions
+
+        if (org.graalvm.nativeimage.ImageInfo.inImageRuntimeCode()) {
+            // The native `mez` carries the interpreter in its own image (a class
+            // loader cannot add one at run time there), and finds it as a service.
+            ensureInstalledFromImage()
+            return ComptimeReduction.reduceOrThrow(functions, performers, codebase)
+        }
+
+        val loader = runtimeLoader() ?: throw ComptimeReduction.ComptimeFailure(
+            "this program has `comptime` blocks, but this `mez` cannot evaluate them: " +
+                "mezze-runtime.jar was not found. Folding at build time is what " +
+                "`comptime` means, so the build stops rather than ship them unevaluated."
+        )
         // Truffle discovers languages through the CONTEXT class loader, not the
         // one that loaded the evaluator. Without this the engine comes up with
         // no languages at all and every thunk fails with "a language with id
@@ -49,10 +70,26 @@ internal object ComptimeHost {
         val previous = Thread.currentThread().contextClassLoader
         Thread.currentThread().contextClassLoader = loader
         try {
-            return ComptimeReduction.reduceOrThrow(functions, performers)
+            return ComptimeReduction.reduceOrThrow(functions, performers, codebase)
         } finally {
             Thread.currentThread().contextClassLoader = previous
         }
+    }
+
+    /**
+     * Inside the native image the evaluator is part of the binary. It used to be
+     * loaded from the runtime jar here too, which a native image cannot do: the
+     * load failed, was swallowed, and every `comptime` block silently ran at run
+     * time instead of during the build.
+     */
+    private fun ensureInstalledFromImage() {
+        if (Comptime.get() != null) return
+        val evaluator = java.util.ServiceLoader.load(ComptimeEvaluator::class.java).firstOrNull()
+            ?: throw ComptimeReduction.ComptimeFailure(
+                "this `mez` binary was built without the Mezze evaluator, so it cannot fold " +
+                    "`comptime` blocks. Rebuild it with :interpreter on the native-image class path."
+            )
+        Comptime.install(evaluator)
     }
 
     private var attempted = false
@@ -68,7 +105,7 @@ internal object ComptimeHost {
             loader = child
         } catch (e: ReflectiveOperationException) {
             // A runtime jar too old to have an evaluator, or one that failed to
-            // initialise. Nothing is folded; nothing is wrong with the program.
+            // initialise: reported by `reduce`, which knows whether it mattered.
         }
         return loader
     }

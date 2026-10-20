@@ -601,7 +601,16 @@ object MonoDriver {
         // uses in MonoDriver.buildOpDecls). See project_impl_op_with_constraint_dropped.
         val (opTypeParams, extraForallArgs) = opDeclTypeParamsWithForall(
             opBody.type, match.impl, receiverType)
-        val baseArgs = deriveTypeArgs(opParamType, opTypeParams.dropLast(extraForallArgs.size), callArg.type)
+        // The op's parameter record names the receiver (`{ it, r }`); a call
+        // whose callee reads the method off the receiver carries it there, not
+        // in the argument (CallEmit builds it once). Unify against the record
+        // the op is actually applied to.
+        val receiverParam = opBody.params.firstOrNull()?.name
+        val appliedArgType = (callArg.type as? MezzeType.RecordType)
+            ?.takeIf { receiverParam != null && receiverParam !in it.fields }
+            ?.let { it.copy(fields = mapOf(receiverParam!! to receiverType) + it.fields) }
+            ?: callArg.type
+        val baseArgs = deriveTypeArgs(opParamType, opTypeParams.dropLast(extraForallArgs.size), appliedArgType)
         val args = if (baseArgs != null) baseArgs + extraForallArgs else null
         if (args != null && args.all { isConcrete(it) }) {
             // #424: harvest closure args from the method-style call too.

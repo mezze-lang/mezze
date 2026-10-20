@@ -57,7 +57,7 @@ class TypedAstBuilder(
      *  loc-keyed bindings are authoritative and a structural guess must not
      *  override an absence the compiler already relies on (codec bodies). */
     private val tailCallLocations: Set<Loc> get() = solved.tailCallLocations
-    private val mustBeOpenRowVars: Set<RowVar> get() = solved.mustBeOpenRowVars
+    internal val mustBeOpenRowVars: Set<RowVar> get() = solved.mustBeOpenRowVars
     internal val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo>
         get() = solved.methodCallResolutions
     // S2.3 (#358): the SINGLE post-solve dispatch decision, keyed by call-site
@@ -434,7 +434,9 @@ class TypedAstBuilder(
         val performerDeclsList = mutableListOf<TypedPerformerDecl>()
         val exports = mutableMapOf<String, ExportEntry>()
 
-        for (decl in module.decls) {
+        builtPerformers = performerDeclsList; localCompileTime = null
+        // Handlers first: a use of one declared further down must know whether it is compile-time.
+        for (decl in module.decls.sortedBy { if (it is ParsedPerformerDecl) 0 else 1 }) {
             enclosing = when (decl) {
                 is ParsedLetDecl -> decl.identity
                 is ParsedImplAbilityDecl -> decl.identity
@@ -449,7 +451,10 @@ class TypedAstBuilder(
                 is ParsedAbilityDecl -> buildAbilityDecl(decl, module.path, abilityDeclsList, exports)
                 is ParsedImplAbilityDecl -> buildAbilityImpl(decl, module.path, abilityImplsList)
                 is ParsedEffectDecl -> buildEffectDecl(decl, module.path, effectDeclsList, exports)
-                is ParsedPerformerDecl -> buildPerformerDecl(decl, module.path, performerDeclsList, exports)
+                is ParsedPerformerDecl -> {
+                    insidePerformerBody++
+                    try { buildPerformerDecl(decl, module.path, performerDeclsList, exports) } finally { insidePerformerBody-- }
+                }
                 is ParsedTopLevelExpr -> buildTopLevelExpr(decl, module.path, decls)
                 is ParsedUseDecl -> { /* resolved at import phase */ }
                 is ParsedPubUseDecl -> { /* resolved at import phase */ }
@@ -995,10 +1000,11 @@ class TypedAstBuilder(
             convertParsedTypeAnnotation(ann)
         }
 
-        val ops = decl.operations.associate { op ->
-            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar.freshInternal("op_${op.name}")))
-            op.name to opExpr
-        }
+        // The params belong to the factory: a lambda INSIDE an op must capture them.
+        pushScope(params.map { it.name }.toMutableList(), isLambdaBoundary = true)
+        val ops = try { decl.operations.associate { op ->
+            op.name to buildExpr(op.implementation, file, MezzeType.VarType(TypeVar.freshInternal("op_${op.name}")))
+        } } finally { popScope() }
 
         val opHashes = ops.mapValues { (opName, opBody) ->
             val opBuilder = MezzeHashBuilder()
@@ -1470,10 +1476,12 @@ class TypedAstBuilder(
             }
             is ParsedParens -> buildExpr(expr.expr, file, contextType)
             is ParsedPerform -> {
+                val outerNames = lambdaParamScopes.flatMapTo(HashSet()) { it }  // see foldQuestion
                 val handlers = expr.handlers.map { h ->
                     buildHandlerRef(h, file, loc)
                 }
-                val body = buildExpr(expr.body, file, contextType)
+                val answersComptime = answersComptime(handlers)
+                val body = buildPerformBody(expr, file, contextType, answersComptime)
                 val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     ?: body.type
                 // Effect-model migration (docs/effect-model.md): source
@@ -1496,7 +1504,8 @@ class TypedAstBuilder(
                         h != null && h in handledHashes
                     }
                 }
-                TypedPerform(handlers, body, performType, loc, fullyDischarges, capturesIntoResult)
+                val perform = TypedPerform(handlers, body, performType, loc, fullyDischarges, capturesIntoResult)
+                foldQuestion(perform, answersComptime, outerNames)
             }
             is ParsedEffectCall -> {
                 val opName = expr.operation.localName
@@ -1702,6 +1711,13 @@ class TypedAstBuilder(
         }
         return false
     }
+
+    // Question-folding state; see QuestionEmit.kt.
+    internal var questionAnsweredOutside = 0
+    internal var insideComptimeBlock = 0
+    internal var insidePerformerBody = 0
+    internal var builtPerformers: List<TypedPerformerDecl> = emptyList()
+    internal var localCompileTime: com.mezze.language.typechecker.comptime.CompileTimePerformers.Found? = null
 
     private fun collectCaptures(body: TypedExpr, paramNames: Set<String>): List<TypedCapture> {
         val captures = mutableListOf<TypedCapture>()

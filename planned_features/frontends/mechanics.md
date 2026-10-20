@@ -679,11 +679,17 @@ in Racket.
 
 §1 rules out JVM plugins because Native Image closes the world at build time and
 cannot load an unknown class. **Mezze code is not a class — it is data to the
-Truffle interpreter.** `mez dev` already loads and runs Mezze at runtime inside
-the native binary.
+Truffle interpreter.** So the constraint that kills Java frontends does not touch
+Mezze frontends: Mezze is the one plugin format a native binary *can* load.
 
-So the constraint that kills Java frontends does not touch Mezze frontends. The
-language is the one plugin format the shipped binary can already load.
+**Correction (2026-10-18): the shipped `mez` cannot run Mezze today.**
+`:interpreter` is kept out of the native CLI on purpose. `mez dev` runs
+programs in a JVM child (`WireRunner` → `RuntimeServer`), not inside the binary.
+A probe confirmed the consequence: `comptime` in a native `mez build` is
+silently not folded. `ComptimeHost`'s `URLClassLoader` cannot load the evaluator
+in a native image, so the value is computed at run time instead. Linking the
+interpreter into `mez` is therefore a prerequisite for frontends, not a given
+(`../introspection/README.md` §9, task T6).
 
 ### Effects *are* the sandbox
 
@@ -724,8 +730,11 @@ This is the same insight as effects gating tool-initiated execution
    a frontend that builds a malformed AST fails to compile rather than failing
    at parse time.
 
-3. **A warm runtime.** Interpreter startup per parse is the real cost. The
-   daemon already exists to amortise exactly this.
+3. **A warm runtime.** Interpreter startup per parse is the real cost. There
+   is no daemon today (corrected 2026-10-18): the "dev server" is a
+   per-invocation `RuntimeServer` child. The plan is the interpreter linked into
+   `mez` with one long-lived engine, plus an output cache keyed by
+   (preprocessor hash, input hash), so an unchanged file never re-runs.
 
 ### Recommendation
 

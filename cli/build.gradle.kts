@@ -122,6 +122,7 @@ dependencies {
 
     // Store module for content-addressed storage (SQLite implementation)
     implementation(project(":store-sqlite"))
+    implementation(project(":codebase"))
 
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.10.2")
@@ -452,6 +453,14 @@ graalvmNative {
         named("main") {
             imageName.set("mez")
             mainClass.set("com.mezze.language.cli.MainKt")
+
+            // The interpreter is IN the native `mez`. A JVM `mez` loads it from
+            // mezze-runtime.jar when a build has `comptime` blocks (ComptimeHost);
+            // a native image cannot load classes at run time, so without this the
+            // load failed silently and every `comptime` block ran at run time
+            // instead of during the build. It is also what lets the binary answer
+            // `std::codebase` questions while compiling.
+            classpath.from(precompileOnly)
 
             // Get zlib path from environment or use default
             val zlibLibPath = System.getenv("ZLIB_LIB_PATH") ?: ""

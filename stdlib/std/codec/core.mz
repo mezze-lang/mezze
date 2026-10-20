@@ -179,6 +179,7 @@ ability DecodeScalarSequence for 'config having 'in where {
 ## escape hatch, not the default.
 
 ## One-shot encode of a value to a format's output type.
+#{ missing: "Ensure the data type is serializable." }
 ability Encode 'config for 'a having 'out where {
   encode: { it: 'a, config: 'config } -> 'out,
 }
@@ -187,6 +188,7 @@ ability Encode 'config for 'a having 'out where {
 ## `'a` appears only in the return position; dispatch is target-driven,
 ## typically via LHS type annotation or inherent method syntax
 ## (`Type.decode { ... }`).
+#{ missing: "Ensure the data type is serializable." }
 ability Decode 'config 'a for 'in where {
   decode: { it: 'in, config: 'config } -> Result 'a DecodeError,
 }

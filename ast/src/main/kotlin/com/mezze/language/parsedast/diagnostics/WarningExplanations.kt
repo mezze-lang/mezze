@@ -27,6 +27,11 @@ fun WarningCode.explain(): String = when (this) {
         "A `perform Handler in body` handles an effect that the body doesn't " +
         "perform. The handler is dead — remove it from the `perform` clause, " +
         "or add an op that uses it."
+
+    WarningCode.W0501_DEPRECATED ->
+        "This uses a declaration its author marked `#{ deprecated: True }`. The " +
+        "author's `since` and `note` fields, when present, say when and what to use " +
+        "instead. It still works; the warning is the author asking you to move off it."
 }
 
 /** Look up a warning explanation by its display code ("W0101") or full name. */

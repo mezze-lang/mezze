@@ -623,6 +623,9 @@ class MezzeTextDocumentService(
                             code = code?.display()
                         )
                         if (isUnused) diag.tags = listOf(DiagnosticTag.Unnecessary)
+                        // A use of a deprecated declaration strikes through at the
+                        // use, the same way the declaration itself is drawn.
+                        if (code == WarningCode.W0501_DEPRECATED) diag.tags = listOf(DiagnosticTag.Deprecated)
                         diagnostics.add(diag)
                     }
 

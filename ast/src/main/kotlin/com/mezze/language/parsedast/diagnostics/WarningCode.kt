@@ -29,7 +29,10 @@ enum class WarningCode {
     W0303_REDUNDANT_BOOLEAN,  // `!(!b)`, `x == True`, `if b then True else False`
 
     // ─── Effect / handler hygiene (W04xx) ────────────────────────────────
-    W0401_UNUSED_HANDLER;    // `perform Handler in body` where body performs no op of the handler's effect
+    W0401_UNUSED_HANDLER,    // `perform Handler in body` where body performs no op of the handler's effect
+
+    // ─── Author-written (W05xx) ──────────────────────────────────────────
+    W0501_DEPRECATED;        // a use of a declaration marked `#{ deprecated: True }`
 
     /** The wire code, e.g. "W0101". */
     fun display(): String = name.substringBefore('_')

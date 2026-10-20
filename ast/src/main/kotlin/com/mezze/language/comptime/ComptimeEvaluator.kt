@@ -63,6 +63,12 @@ interface ComptimeEvaluator {
          * passes them down rather than making this guess.
          */
         origin: String,
+        /**
+         * Answers `std::codebase` questions, or null where there is no codebase to
+         * ask about — the runtime, `mez dev` until the interpreter runs inside
+         * `mez`. A question asked with none fails loudly.
+         */
+        codebase: CodebaseHost?,
     ): ComptimeOutcome
 }
 

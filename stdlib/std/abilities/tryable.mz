@@ -12,6 +12,7 @@ use std::effects::exception::{ Exception }
 ## Standard impls live in `std::result` (for `Result 'a 'e`, throws the raw
 ## error) and `std::option` (for `Option 'a`, throws a synthetic `NoneOpt`
 ## variant). Custom failure types can implement `Tryable` to participate.
+#{ missing: "`.try {}` unwraps `Option`, `Result`, or any type with an `impl Tryable`." }
 ability Tryable for 'm having 'inner where {
   ## Extract the success value, throwing on failure.
   ##

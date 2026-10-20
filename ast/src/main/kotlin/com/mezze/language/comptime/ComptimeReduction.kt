@@ -67,11 +67,12 @@ object ComptimeReduction {
     fun reduceOrThrow(
         functions: List<FunctionIR>,
         performers: List<Array<String>>,
+        codebase: CodebaseHost?,
     ): List<FunctionIR> {
         if (Comptime.isEvaluating()) return functions
         val evaluator = Comptime.get() ?: return functions
 
-        val result = reduce(functions, performers, evaluator)
+        val result = reduce(functions, performers, evaluator, codebase)
         val first = result.failures.firstOrNull() ?: return result.functions
 
         val message = buildString {
@@ -96,6 +97,7 @@ object ComptimeReduction {
         functions: List<FunctionIR>,
         performers: List<Array<String>>,
         evaluator: ComptimeEvaluator,
+        codebase: CodebaseHost?,
     ): Result {
         val ir = ComptimeIr()
 
@@ -107,7 +109,7 @@ object ComptimeReduction {
         val cache = mutableMapOf<Hash, NodeIR>()
         val reduced = functions.map { fn ->
             val body = ir.rewrite(fn.body) { call ->
-                reduceOne(ir, call, functions, performers, evaluator, failures, cache, fn.sourceFile)
+                reduceOne(ir, call, functions, performers, evaluator, codebase, failures, cache, fn.sourceFile)
             }
             if (body === fn.body) fn else fn.copy(body = body)
         }
@@ -142,6 +144,7 @@ object ComptimeReduction {
         functions: List<FunctionIR>,
         performers: List<Array<String>>,
         evaluator: ComptimeEvaluator,
+        codebase: CodebaseHost?,
         failures: MutableList<Failure>,
         cache: MutableMap<Hash, NodeIR>,
         sourceFile: String,
@@ -164,7 +167,7 @@ object ComptimeReduction {
         cache[thunk]?.let { return it }
 
         val origin = "$sourceFile:${call.src.startLine}:${call.src.startCol}"
-        return when (val outcome = evaluator.evaluate(functions, thunk, shape, performers, origin)) {
+        return when (val outcome = evaluator.evaluate(functions, thunk, shape, performers, origin, codebase)) {
             is ComptimeOutcome.Reified -> outcome.node.also { cache[thunk] = it }
             is ComptimeOutcome.Failed -> {
                 failures += Failure(call.src, outcome.message, outcome.guestFrames)

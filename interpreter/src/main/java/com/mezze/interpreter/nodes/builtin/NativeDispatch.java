@@ -240,6 +240,8 @@ public final class NativeDispatch extends MezzeNode {
         registerMutationHandlers();
         // Polyglot interop (Foreign, JVM host lookup, Context lifecycle)
         registerPolyglotHandlers();
+        // std::codebase — answered only during compile-time evaluation
+        com.mezze.interpreter.comptime.CodebaseNatives.INSTANCE.register(HANDLERS::put);
         // Note: Comptime is handled at conversion time, no runtime handler needed
     }
 

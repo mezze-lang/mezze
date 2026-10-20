@@ -54,7 +54,22 @@ enum class TypeSlot(val dbValue: String) {
     /** An argument of an applied type; `ordinal` is its position. */
     ARG("arg"),
     /** A newtype's wrapped type. */
-    WRAPPED("wrapped");
+    WRAPPED("wrapped"),
+
+    // Slots that only DEFINITIONS use (`DefinitionIndex`); a signature never has them.
+
+    /** A declared type parameter; `label` is its name, `ordinal` its position. */
+    TYPE_PARAM("type_param"),
+    /** An ability's receiver parameter, the one after `for`; `label` is its name. */
+    RECEIVER("receiver"),
+    /** An associated type an ability or effect declares; `label` is its name. */
+    ASSOC("assoc"),
+    /** An ability another ability requires; an APP node naming it by hash. */
+    REQUIRES("requires"),
+    /** An operation of an ability or effect; `slotLabel` is its name. */
+    OP("op"),
+    /** A type alias's target. */
+    ALIASED("aliased");
 
     companion object {
         private val byDb = entries.associateBy { it.dbValue }
@@ -83,7 +98,13 @@ enum class TypeNodeKind(val dbValue: String) {
     STR("str"),
     CHAR("char"),
     FRAC("frac"),
-    BYTES("bytes");
+    BYTES("bytes"),
+
+    // Definition roots (`DefinitionIndex`). Not types: the type reader refuses them.
+
+    ALIAS("alias"),
+    ABILITY("ability"),
+    EFFECT("effect");
 
     companion object {
         private val byDb = entries.associateBy { it.dbValue }
@@ -192,118 +213,14 @@ object SignatureIndex {
      * annotation conversion went wrong — see the T-1 consolidation.
      */
     fun flatten(ownerHash: Hash, type: MezzeType): SignatureRows {
-        val nodes = mutableListOf<TypeNodeRow>()
-        val effects = mutableListOf<TypeNodeEffectRow>()
-        val constraints = mutableListOf<TypeNodeConstraintRow>()
-
         // The arrow whose effect row a caller is left holding. Taken from the type
         // itself rather than re-derived here, so the index and
         // `FunctionType.residualEffects` cannot disagree about which arrow is last.
         // Compared by identity below, which is why it is resolved once up front.
         val residual: MezzeType.FunctionType? = (type as? MezzeType.FunctionType)?.residualArrow
-
-        fun emit(node: MezzeType, parentId: Int?, slot: TypeSlot, ordinal: Int, slotLabel: String?): Int {
-            val id = nodes.size
-            fun add(
-                kind: TypeNodeKind,
-                nodeLabel: String? = null,
-                typeHash: Hash? = null,
-                isOpen: Boolean = false,
-                performed: Boolean = false,
-                isResidual: Boolean = false,
-            ) {
-                nodes.add(
-                    TypeNodeRow(
-                        ownerHash = ownerHash, nodeId = id, parentId = parentId, slot = slot,
-                        ordinal = ordinal, slotLabel = slotLabel, kind = kind, label = nodeLabel,
-                        typeHash = typeHash, isOpen = isOpen, performed = performed,
-                        isResidual = isResidual,
-                    )
-                )
-            }
-
-            when (node) {
-                is MezzeType.FunctionType -> {
-                    val row = node.effects
-                    add(
-                        TypeNodeKind.FN,
-                        isOpen = row?.rowVar != null,
-                        performed = row?.performed == true,
-                        isResidual = node === residual,
-                    )
-                    row?.let { r ->
-                        // allEffectNames is the right set: it unions bare effects
-                        // with instanced ones and excludes the open-row tail, which
-                        // is a variable rather than an effect.
-                        for (name in r.allEffectNames) {
-                            effects.add(TypeNodeEffectRow(ownerHash, id, name, r.effectHashes[name]))
-                        }
-                    }
-                    node.abilityConstraints.forEachIndexed { i, c ->
-                        constraints.add(
-                            TypeNodeConstraintRow(ownerHash, id, c.abilityName, c.abilityHash, i)
-                        )
-                    }
-                    emit(node.paramType, id, TypeSlot.PARAM, 0, null)
-                    emit(node.returnType, id, TypeSlot.RETURN, 0, null)
-                }
-
-                is MezzeType.RecordType -> {
-                    add(TypeNodeKind.RECORD, nodeLabel = node.identity.nameOrNull(),
-                        typeHash = node.identity.hashOrNull(), isOpen = node.rowVar != null)
-                    // Sorted, so one type produces one row set regardless of the
-                    // order a map happened to iterate in.
-                    node.fields.entries.sortedBy { it.key }.forEachIndexed { i, (fieldName, fieldType) ->
-                        emit(fieldType, id, TypeSlot.FIELD, i, fieldName)
-                    }
-                }
-
-                is MezzeType.VariantType -> {
-                    add(TypeNodeKind.VARIANT, nodeLabel = node.identity.nameOrNull(),
-                        typeHash = node.identity.hashOrNull(), isOpen = node.rowVar != null)
-                    node.constructors.entries.sortedBy { it.key }.forEachIndexed { i, (ctorName, payload) ->
-                        // A payload-less constructor is a CTOR slot with no child.
-                        if (payload == null) {
-                            nodes.add(
-                                TypeNodeRow(
-                                    ownerHash = ownerHash, nodeId = nodes.size, parentId = id,
-                                    slot = TypeSlot.CTOR, ordinal = i, slotLabel = ctorName,
-                                    kind = TypeNodeKind.VARIANT,
-                                )
-                            )
-                        } else {
-                            emit(payload, id, TypeSlot.CTOR, i, ctorName)
-                        }
-                    }
-                }
-
-                is MezzeType.TypeApplication -> {
-                    add(TypeNodeKind.APP, nodeLabel = node.constructor, typeHash = node.identity.hashOrNull())
-                    node.args.forEachIndexed { i, arg -> emit(arg, id, TypeSlot.ARG, i, null) }
-                }
-
-                is MezzeType.NewtypeType -> {
-                    add(TypeNodeKind.NEWTYPE, nodeLabel = node.name, typeHash = node.identity.hashOrNull())
-                    emit(node.wrappedType, id, TypeSlot.WRAPPED, 0, null)
-                }
-
-                is MezzeType.VarType -> add(TypeNodeKind.VAR, nodeLabel = node.variable.name)
-                is MezzeType.IntType -> add(TypeNodeKind.INT)
-                is MezzeType.FloatType -> add(TypeNodeKind.FLOAT)
-                is MezzeType.StringType -> add(TypeNodeKind.STR)
-                is MezzeType.CharType -> add(TypeNodeKind.CHAR)
-                is MezzeType.FracType -> add(TypeNodeKind.FRAC)
-                is MezzeType.BytesType -> add(TypeNodeKind.BYTES)
-
-                // An effect row is reached as a FunctionType's `effects`, never as
-                // a type in its own right, and is stored in the junction table.
-                is MezzeType.EffectRow -> add(TypeNodeKind.VAR, nodeLabel = null)
-            }
-            return id
-        }
-
-        emit(type, null, TypeSlot.ROOT, 0, null)
-        return SignatureRows(nodes, effects, constraints)
+        val writer = TypeTreeWriter(ownerHash, residual)
+        writer.type(type, null, TypeSlot.ROOT, 0, null)
+        return writer.rows()
     }
 
     /**
@@ -317,123 +234,292 @@ object SignatureIndex {
      */
     fun rebuild(rows: SignatureRows): MezzeType {
         require(rows.nodes.isNotEmpty()) { "cannot rebuild a signature from zero nodes" }
+        val reader = TypeTreeReader(rows)
+        reader.requireTree()
+        return reader.type(reader.root)
+    }
 
-        val byId = rows.nodes.associateBy { it.nodeId }
-        val children = rows.nodes.filter { it.parentId != null }.groupBy { it.parentId!! }
-        val effectsByNode = rows.effects.groupBy { it.nodeId }
-        val constraintsByNode = rows.constraints.groupBy { it.nodeId }
+    /**
+     * The canonical display form of a stored signature, or null when the
+     * declaration has none indexed.
+     *
+     * The one place rows become text. Going through [rebuild] rather than storing
+     * a rendering is the point of the whole change: the type is the stored fact
+     * and the string is derived from it, so the two can never disagree.
+     */
+    fun render(rows: SignatureRows): String? =
+        if (rows.isEmpty) null else SignatureNormalizer.render(rebuild(rows))
+}
 
-        // ONE TypeVar per variable NAME, for this whole signature. `TypeVar`
-        // carries an id, so minting per occurrence makes `{x: 'a} -> 'a` rebuild
-        // as two unrelated variables — it stops being the identity function and
-        // starts unifying with things it must not: `{x: 'a} -> Deque 'a` matched a
-        // search for `{x: 'a} -> 'a`, which the occurs check exists to reject.
-        // Instance seven of this codebase's most-repeated defect, introduced here.
-        val vars = mutableMapOf<String, TypeVar>()
+/**
+ * Writes type trees as rows: the one walker, shared by signatures and by
+ * definitions (`DefinitionIndex`). Six copies of a type walk is how this
+ * codebase's annotation conversion went wrong; a second one here would start
+ * the same drift.
+ */
+internal class TypeTreeWriter(
+    private val ownerHash: Hash,
+    /** The arrow whose row is the residual one; null when the tree is not a signature. */
+    private val residual: MezzeType.FunctionType?,
+) {
+    private val nodes = mutableListOf<TypeNodeRow>()
+    private val effects = mutableListOf<TypeNodeEffectRow>()
+    private val constraints = mutableListOf<TypeNodeConstraintRow>()
 
-        val root = rows.nodes.singleOrNull { it.parentId == null }
-            ?: error(
-                "a signature must have exactly one root node, found " +
-                    "${rows.nodes.count { it.parentId == null }} for ${rows.nodes.first().ownerHash.hex}"
+    /** A node that is not itself a type — a definition's root, a type parameter. Returns its id. */
+    fun node(
+        kind: TypeNodeKind,
+        parentId: Int?,
+        slot: TypeSlot,
+        ordinal: Int = 0,
+        slotLabel: String? = null,
+        label: String? = null,
+        typeHash: Hash? = null,
+        isOpen: Boolean = false,
+    ): Int {
+        val id = nodes.size
+        nodes.add(
+            TypeNodeRow(
+                ownerHash = ownerHash, nodeId = id, parentId = parentId, slot = slot,
+                ordinal = ordinal, slotLabel = slotLabel, kind = kind, label = label,
+                typeHash = typeHash, isOpen = isOpen,
             )
+        )
+        return id
+    }
 
-        fun kidsOf(id: Int) = children[id].orEmpty().sortedBy { it.ordinal }
-        fun kid(id: Int, slot: TypeSlot): TypeNodeRow? = children[id].orEmpty().firstOrNull { it.slot == slot }
-
-        fun build(row: TypeNodeRow): MezzeType = when (row.kind) {
-            TypeNodeKind.FN -> {
-                val param = kid(row.nodeId, TypeSlot.PARAM)
-                    ?: error("arrow node ${row.nodeId} has no parameter")
-                val ret = kid(row.nodeId, TypeSlot.RETURN)
-                    ?: error("arrow node ${row.nodeId} has no return type")
-                val effectRows = effectsByNode[row.nodeId].orEmpty()
-                MezzeType.FunctionType(
-                    paramType = build(param),
-                    returnType = build(ret),
-                    effects = if (effectRows.isEmpty() && !row.isOpen && !row.performed) null else {
-                        MezzeType.EffectRow.simple(
-                            effects = effectRows.map { it.effectName }.toSet(),
-                            rowVar = if (row.isOpen) RowVar.userOpen() else null,
-                            performed = row.performed,
-                            effectHashes = effectRows.mapNotNull { e -> e.effectHash?.let { e.effectName to it } }.toMap(),
-                        )
-                    },
-                    abilityConstraints = constraintsByNode[row.nodeId].orEmpty()
-                        .sortedBy { it.ordinal }
-                        .map { c ->
-                            MezzeType.FunctionAbilityConstraint(
-                                abilityName = c.abilityName,
-                                // Type arguments are not indexed — see the file header.
-                                typeArgs = emptyList(),
-                                abilityHash = c.abilityHash,
-                            )
-                        },
+    fun type(node: MezzeType, parentId: Int?, slot: TypeSlot, ordinal: Int, slotLabel: String?): Int {
+        val id = nodes.size
+        fun add(
+            kind: TypeNodeKind,
+            nodeLabel: String? = null,
+            typeHash: Hash? = null,
+            isOpen: Boolean = false,
+            performed: Boolean = false,
+            isResidual: Boolean = false,
+        ) {
+            nodes.add(
+                TypeNodeRow(
+                    ownerHash = ownerHash, nodeId = id, parentId = parentId, slot = slot,
+                    ordinal = ordinal, slotLabel = slotLabel, kind = kind, label = nodeLabel,
+                    typeHash = typeHash, isOpen = isOpen, performed = performed,
+                    isResidual = isResidual,
                 )
+            )
+        }
+
+        when (node) {
+            is MezzeType.FunctionType -> {
+                val row = node.effects
+                add(
+                    TypeNodeKind.FN,
+                    isOpen = row?.rowVar != null,
+                    performed = row?.performed == true,
+                    isResidual = node === residual,
+                )
+                row?.let { r ->
+                    // allEffectNames is the right set: it unions bare effects
+                    // with instanced ones and excludes the open-row tail, which
+                    // is a variable rather than an effect.
+                    for (name in r.allEffectNames) {
+                        effects.add(TypeNodeEffectRow(ownerHash, id, name, r.effectHashes[name]))
+                    }
+                }
+                node.abilityConstraints.forEachIndexed { i, c ->
+                    constraints.add(
+                        TypeNodeConstraintRow(ownerHash, id, c.abilityName, c.abilityHash, i)
+                    )
+                }
+                type(node.paramType, id, TypeSlot.PARAM, 0, null)
+                type(node.returnType, id, TypeSlot.RETURN, 0, null)
             }
 
-            TypeNodeKind.RECORD -> MezzeType.RecordType(
-                fields = kidsOf(row.nodeId).associate { field ->
-                    (field.slotLabel ?: error("record field node ${field.nodeId} has no name")) to build(field)
+            is MezzeType.RecordType -> {
+                add(TypeNodeKind.RECORD, nodeLabel = node.identity.nameOrNull(),
+                    typeHash = node.identity.hashOrNull(), isOpen = node.rowVar != null)
+                // Sorted, so one type produces one row set regardless of the
+                // order a map happened to iterate in.
+                node.fields.entries.sortedBy { it.key }.forEachIndexed { i, (fieldName, fieldType) ->
+                    type(fieldType, id, TypeSlot.FIELD, i, fieldName)
+                }
+            }
+
+            is MezzeType.VariantType -> {
+                add(TypeNodeKind.VARIANT, nodeLabel = node.identity.nameOrNull(),
+                    typeHash = node.identity.hashOrNull(), isOpen = node.rowVar != null)
+                node.constructors.entries.sortedBy { it.key }.forEachIndexed { i, (ctorName, payload) ->
+                    // A payload-less constructor is a CTOR slot with no child.
+                    if (payload == null) {
+                        nodes.add(
+                            TypeNodeRow(
+                                ownerHash = ownerHash, nodeId = nodes.size, parentId = id,
+                                slot = TypeSlot.CTOR, ordinal = i, slotLabel = ctorName,
+                                kind = TypeNodeKind.VARIANT,
+                            )
+                        )
+                    } else {
+                        type(payload, id, TypeSlot.CTOR, i, ctorName)
+                    }
+                }
+            }
+
+            is MezzeType.TypeApplication -> {
+                add(TypeNodeKind.APP, nodeLabel = node.constructor, typeHash = node.identity.hashOrNull())
+                node.args.forEachIndexed { i, arg -> type(arg, id, TypeSlot.ARG, i, null) }
+            }
+
+            is MezzeType.NewtypeType -> {
+                add(TypeNodeKind.NEWTYPE, nodeLabel = node.name, typeHash = node.identity.hashOrNull())
+                type(node.wrappedType, id, TypeSlot.WRAPPED, 0, null)
+            }
+
+            is MezzeType.VarType -> add(TypeNodeKind.VAR, nodeLabel = node.variable.name)
+            is MezzeType.IntType -> add(TypeNodeKind.INT)
+            is MezzeType.FloatType -> add(TypeNodeKind.FLOAT)
+            is MezzeType.StringType -> add(TypeNodeKind.STR)
+            is MezzeType.CharType -> add(TypeNodeKind.CHAR)
+            is MezzeType.FracType -> add(TypeNodeKind.FRAC)
+            is MezzeType.BytesType -> add(TypeNodeKind.BYTES)
+
+            // An effect row is reached as a FunctionType's `effects`, never as
+            // a type in its own right, and is stored in the junction table.
+            is MezzeType.EffectRow -> add(TypeNodeKind.VAR, nodeLabel = null)
+        }
+        return id
+    }
+
+    fun rows(): SignatureRows = SignatureRows(nodes.toList(), effects.toList(), constraints.toList())
+}
+
+/**
+ * Reads type trees back from rows: the inverse of [TypeTreeWriter], shared the
+ * same way. One reader holds one variable table, so every occurrence of `'a` in
+ * one tree — a signature, or a whole definition — is the same variable.
+ */
+internal class TypeTreeReader(private val rows: SignatureRows) {
+    val byId = rows.nodes.associateBy { it.nodeId }
+    val children = rows.nodes.filter { it.parentId != null }.groupBy { it.parentId!! }
+    val effectsByNode = rows.effects.groupBy { it.nodeId }
+    val constraintsByNode = rows.constraints.groupBy { it.nodeId }
+
+    // ONE TypeVar per variable NAME, for this whole signature. `TypeVar`
+    // carries an id, so minting per occurrence makes `{x: 'a} -> 'a` rebuild
+    // as two unrelated variables — it stops being the identity function and
+    // starts unifying with things it must not: `{x: 'a} -> Deque 'a` matched a
+    // search for `{x: 'a} -> 'a`, which the occurs check exists to reject.
+    // Instance seven of this codebase's most-repeated defect, introduced here.
+    val vars = mutableMapOf<String, TypeVar>()
+
+    val root: TypeNodeRow = rows.nodes.singleOrNull { it.parentId == null }
+        ?: error(
+            "a signature must have exactly one root node, found " +
+                "${rows.nodes.count { it.parentId == null }} for ${rows.nodes.first().ownerHash.hex}"
+        )
+
+    fun kidsOf(id: Int) = children[id].orEmpty().sortedBy { it.ordinal }
+    fun kid(id: Int, slot: TypeSlot): TypeNodeRow? = children[id].orEmpty().firstOrNull { it.slot == slot }
+
+    fun type(row: TypeNodeRow): MezzeType = when (row.kind) {
+        TypeNodeKind.FN -> {
+            val param = kid(row.nodeId, TypeSlot.PARAM)
+                ?: error("arrow node ${row.nodeId} has no parameter")
+            val ret = kid(row.nodeId, TypeSlot.RETURN)
+                ?: error("arrow node ${row.nodeId} has no return type")
+            val effectRows = effectsByNode[row.nodeId].orEmpty()
+            MezzeType.FunctionType(
+                paramType = type(param),
+                returnType = type(ret),
+                effects = if (effectRows.isEmpty() && !row.isOpen && !row.performed) null else {
+                    MezzeType.EffectRow.simple(
+                        effects = effectRows.map { it.effectName }.toSet(),
+                        rowVar = if (row.isOpen) RowVar.userOpen() else null,
+                        performed = row.performed,
+                        effectHashes = effectRows.mapNotNull { e -> e.effectHash?.let { e.effectName to it } }.toMap(),
+                    )
+                },
+                abilityConstraints = constraintsByNode[row.nodeId].orEmpty()
+                    .sortedBy { it.ordinal }
+                    .map { c ->
+                        MezzeType.FunctionAbilityConstraint(
+                            abilityName = c.abilityName,
+                            // Type arguments are not indexed — see the file header.
+                            typeArgs = emptyList(),
+                            abilityHash = c.abilityHash,
+                        )
+                    },
+            )
+        }
+
+        TypeNodeKind.RECORD -> MezzeType.RecordType(
+            fields = kidsOf(row.nodeId).associate { field ->
+                (field.slotLabel ?: error("record field node ${field.nodeId} has no name")) to type(field)
+            },
+            rowVar = if (row.isOpen) RowVar.userOpen() else null,
+            identity = identityOf(row),
+        )
+
+        TypeNodeKind.VARIANT -> {
+            // A VARIANT node in a CTOR slot with no children of its own is a
+            // payload-less constructor rather than a nested variant.
+            val kids = kidsOf(row.nodeId)
+            if (row.slot == TypeSlot.CTOR && kids.isEmpty()) {
+                error("unreachable: payload-less constructors are read by their parent")
+            }
+            MezzeType.VariantType(
+                constructors = kids.associate { ctor ->
+                    val name = ctor.slotLabel
+                        ?: error("variant constructor node ${ctor.nodeId} has no name")
+                    val payloadless = ctor.kind == TypeNodeKind.VARIANT &&
+                        ctor.slot == TypeSlot.CTOR &&
+                        children[ctor.nodeId].isNullOrEmpty()
+                    name to if (payloadless) null else type(ctor)
                 },
                 rowVar = if (row.isOpen) RowVar.userOpen() else null,
                 identity = identityOf(row),
             )
-
-            TypeNodeKind.VARIANT -> {
-                // A VARIANT node in a CTOR slot with no children of its own is a
-                // payload-less constructor rather than a nested variant.
-                val kids = kidsOf(row.nodeId)
-                if (row.slot == TypeSlot.CTOR && kids.isEmpty()) {
-                    error("unreachable: payload-less constructors are read by their parent")
-                }
-                MezzeType.VariantType(
-                    constructors = kids.associate { ctor ->
-                        val name = ctor.slotLabel
-                            ?: error("variant constructor node ${ctor.nodeId} has no name")
-                        val payloadless = ctor.kind == TypeNodeKind.VARIANT &&
-                            ctor.slot == TypeSlot.CTOR &&
-                            children[ctor.nodeId].isNullOrEmpty()
-                        name to if (payloadless) null else build(ctor)
-                    },
-                    rowVar = if (row.isOpen) RowVar.userOpen() else null,
-                    identity = identityOf(row),
-                )
-            }
-
-            TypeNodeKind.APP -> MezzeType.TypeApplication(
-                constructor = row.label ?: error("applied-type node ${row.nodeId} has no constructor"),
-                args = kidsOf(row.nodeId).map { build(it) },
-                identity = identityOf(row),
-            )
-
-            TypeNodeKind.NEWTYPE -> {
-                val name = row.label ?: error("newtype node ${row.nodeId} has no name")
-                MezzeType.NewtypeType(
-                    name = name,
-                    constructor = name,
-                    wrappedType = build(
-                        kid(row.nodeId, TypeSlot.WRAPPED)
-                            ?: error("newtype node ${row.nodeId} wraps nothing")
-                    ),
-                    identity = identityOf(row),
-                )
-            }
-
-            // An unnamed variable stays distinct per occurrence: there is no name
-            // to share by, and inventing sharing would be the opposite error.
-            TypeNodeKind.VAR -> MezzeType.VarType(
-                row.label?.let { name -> vars.getOrPut(name) { TypeVar.freshWithName(name) } }
-                    ?: TypeVar.fresh()
-            )
-
-            TypeNodeKind.INT -> MezzeType.IntType
-            TypeNodeKind.FLOAT -> MezzeType.FloatType
-            TypeNodeKind.STR -> MezzeType.StringType
-            TypeNodeKind.CHAR -> MezzeType.CharType
-            TypeNodeKind.FRAC -> MezzeType.FracType
-            TypeNodeKind.BYTES -> MezzeType.BytesType
         }
 
+        TypeNodeKind.APP -> MezzeType.TypeApplication(
+            constructor = row.label ?: error("applied-type node ${row.nodeId} has no constructor"),
+            args = kidsOf(row.nodeId).map { type(it) },
+            identity = identityOf(row),
+        )
+
+        TypeNodeKind.NEWTYPE -> {
+            val name = row.label ?: error("newtype node ${row.nodeId} has no name")
+            MezzeType.NewtypeType(
+                name = name,
+                constructor = name,
+                wrappedType = type(
+                    kid(row.nodeId, TypeSlot.WRAPPED)
+                        ?: error("newtype node ${row.nodeId} wraps nothing")
+                ),
+                identity = identityOf(row),
+            )
+        }
+
+        // An unnamed variable stays distinct per occurrence: there is no name
+        // to share by, and inventing sharing would be the opposite error.
+        TypeNodeKind.VAR -> MezzeType.VarType(
+            row.label?.let { name -> vars.getOrPut(name) { TypeVar.freshWithName(name) } }
+                ?: TypeVar.fresh()
+        )
+
+        TypeNodeKind.INT -> MezzeType.IntType
+        TypeNodeKind.FLOAT -> MezzeType.FloatType
+        TypeNodeKind.STR -> MezzeType.StringType
+        TypeNodeKind.CHAR -> MezzeType.CharType
+        TypeNodeKind.FRAC -> MezzeType.FracType
+        TypeNodeKind.BYTES -> MezzeType.BytesType
+
+        // The roots of DEFINITIONS (`DefinitionIndex`), never part of a type.
+        // Reaching one here means a definition's rows were read as a signature.
+        TypeNodeKind.ALIAS, TypeNodeKind.ABILITY, TypeNodeKind.EFFECT ->
+            error("node ${row.nodeId} of ${row.ownerHash.hex} is a ${row.kind.dbValue} definition, not a type")
+    }
+
+    /** Fail unless every node hangs off the root. */
+    fun requireTree() {
         // Every node must be reachable from the root: an orphan means the writer
         // and the reader disagree about the tree, and dropping it silently would
         // produce a smaller type than the one that was indexed.
@@ -448,44 +534,32 @@ object SignatureIndex {
             "type-node rows ${orphans.sorted()} are unreachable from the root for " +
                 "${root.ownerHash.hex}; the tree is not a tree"
         }
-
-        return build(root)
     }
-
-    /**
-     * The canonical display form of a stored signature, or null when the
-     * declaration has none indexed.
-     *
-     * The one place rows become text. Going through [rebuild] rather than storing
-     * a rendering is the point of the whole change: the type is the stored fact
-     * and the string is derived from it, so the two can never disagree.
-     */
-    fun render(rows: SignatureRows): String? =
-        if (rows.isEmpty) null else SignatureNormalizer.render(rebuild(rows))
-
-    /**
-     * Rebuild a node's identity through THE canonical factory.
-     *
-     * There are three identities, not two: a declaration has a content hash, a
-     * BUILTIN (`Bool`, `Seq`, `Map` — nothing to hash) has only a reserved name,
-     * and anything else is anonymous. Reading only the hash collapsed the first two
-     * together, so `Bool` — a builtin VARIANT — came back anonymous and rendered as
-     * `?variant` in every signature that mentioned it.
-     *
-     * `derive` is where that decision already lives, so this asks it rather than
-     * re-deciding and getting a different answer.
-     */
-    private fun identityOf(row: TypeNodeRow): TypeIdentity {
-        val name = row.label ?: return TypeIdentity.Anonymous
-        return TypeIdentity.derive(name, row.typeHash, allowBuiltin = true)
-    }
-
-    private fun TypeIdentity.hashOrNull(): Hash? = (this as? TypeIdentity.Declared)?.hash
-
-    /**
-     * The identity's NAME — display metadata, never an identity input (the hash is).
-     * Covers Builtin as well as Declared: a builtin's name is the only signal it
-     * has, so dropping it loses the type.
-     */
-    private fun TypeIdentity.nameOrNull(): String? = displayNameOrNull()
 }
+
+/**
+ * Rebuild a node's identity through THE canonical factory.
+ *
+ * There are three identities, not two: a declaration has a content hash, a
+ * BUILTIN (`Bool`, `Seq`, `Map` — nothing to hash) has only a reserved name,
+ * and anything else is anonymous. Reading only the hash collapsed the first two
+ * together, so `Bool` — a builtin VARIANT — came back anonymous and rendered as
+ * `?variant` in every signature that mentioned it.
+ *
+ * `derive` is where that decision already lives, so this asks it rather than
+ * re-deciding and getting a different answer.
+ */
+internal fun identityOf(row: TypeNodeRow): TypeIdentity {
+    val name = row.label ?: return TypeIdentity.Anonymous
+    return TypeIdentity.derive(name, row.typeHash, allowBuiltin = true)
+}
+
+internal fun TypeIdentity.hashOrNull(): Hash? = (this as? TypeIdentity.Declared)?.hash
+
+/**
+ * The identity's NAME — display metadata, never an identity input (the hash is).
+ * Covers Builtin as well as Declared: a builtin's name is the only signal it
+ * has, so dropping it loses the type.
+ */
+internal fun TypeIdentity.nameOrNull(): String? = displayNameOrNull()
+

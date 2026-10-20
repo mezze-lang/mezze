@@ -143,6 +143,38 @@ class JsonDiagnosticFormatterTest {
         assertEquals("Unused binding 'x'", d.message)
     }
 
+    @Test
+    fun `a coded warning keeps its code`() {
+        val w = com.mezze.language.typechecker.TypeChecker.TypeCheckWarning(
+            message = "`stale` is deprecated",
+            loc = Loc("f.mz", 2, 3, 2, 8),
+            code = com.mezze.language.parsedast.diagnostics.WarningCode.W0501_DEPRECATED,
+        )
+        assertEquals("W0501", JsonDiagnosticFormatter.fromWarning(w).code)
+    }
+
+    @Test
+    fun `warnings do not fail a check`() {
+        // `mez check --json` passed an empty list here, because a warning used to
+        // turn the envelope's status into ERRORS — so no warning ever reached JSON.
+        val w = com.mezze.language.typechecker.TypeChecker.TypeCheckWarning(message = "unused", loc = null)
+        val r = JsonDiagnosticFormatter.ok(file = "/tmp/a.mz", app = null, typedModule = null, warnings = listOf(w))
+        assertEquals(Status.OK, r.status)
+        assertEquals(1, r.summary.warnings)
+    }
+
+    @Test
+    fun `a warning prints like an error, with its code and place`() {
+        val w = com.mezze.language.typechecker.TypeChecker.TypeCheckWarning(
+            message = "`stale` is deprecated",
+            loc = Loc("app.mz", 1, 9, 1, 13),
+            code = com.mezze.language.parsedast.diagnostics.WarningCode.W0501_DEPRECATED,
+        )
+        val text = com.mezze.language.langservice.printing.ErrorFormatter.formatWarning(w, "let x = stale {}")
+        assertTrue(text.startsWith("warning[W0501]: `stale` is deprecated"), text)
+        assertTrue(text.contains("--> app.mz:1:9"), text)
+    }
+
     // ----- Envelope: status and summary -----
 
     @Test

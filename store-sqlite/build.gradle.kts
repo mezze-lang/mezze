@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    `java-test-fixtures`
     kotlin("plugin.serialization")
 }
 
@@ -21,6 +22,11 @@ dependencies {
     // CBOR serialization for compact AST storage
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+
+    // `indexSource`: type-check real code and index it, for any module's tests.
+    testFixturesImplementation(project(":ast"))
+    testFixturesImplementation(project(":parser"))
+    testFixturesImplementation(project(":typechecker"))
 
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.9.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.9.2")

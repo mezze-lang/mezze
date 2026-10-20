@@ -46,6 +46,7 @@ class InMemoryMezzeStore : MezzeStore {
     override fun ownsBlob(hash: Hash): Boolean = hash.hex in blobs
     override fun blobsExist(hashes: Collection<Hash>): Set<Hash> = hashes.filterTo(HashSet()) { it.hex in blobs }
     override fun getIR(hash: Hash): ByteArray? = blobs[hash.hex]?.ir
+    override fun getAllBlobHashes(): List<Hash> = blobs.values.map { it.hash }
 
     // ── NAMES ──
 
@@ -83,6 +84,15 @@ class InMemoryMezzeStore : MezzeStore {
     }
 
     override fun getModule(path: String): ModuleRow? = modules[path]
+
+    // One tier: everything an in-memory store holds was put there by this project.
+    override fun getModuleTier(path: String): StoreTier? = if (path in modules) StoreTier.PROJECT else null
+
+    private val moduleDocs = HashMap<String, String>()
+    override fun putModuleDoc(path: String, doc: String?) {
+        if (doc == null) moduleDocs.remove(path) else moduleDocs[path] = doc
+    }
+    override fun getModuleDoc(path: String): String? = moduleDocs[path]
 
     override fun isFileStale(filePath: String, currentSourceHash: String): Boolean {
         val mod = modules.values.find { it.filePath == filePath } ?: return true
@@ -135,16 +145,12 @@ class InMemoryMezzeStore : MezzeStore {
         }
 
     // SOURCE usages, not lowered edges — an inlined helper has no call edge but is
-    // plainly referenced. Self-references (inside the decl's own span) do not count.
+    // plainly referenced. Self-references (written inside the decl itself) do not count.
     override fun findUnreferencedDecls(modulePath: String?): List<DeclRow> =
         decls.filter { row ->
-            val ownFile = modules[row.modulePath]?.filePath
             (modulePath == null || row.modulePath == modulePath) &&
                 blobs[row.hash.hex]?.visibility != Visibility.PUBLIC &&
-                usages.none { u ->
-                    u.targetHash == row.hash &&
-                        !(u.filePath == ownFile && u.startLine in row.startLine..row.endLine)
-                }
+                usages.none { u -> u.targetHash == row.hash && u.fromHash != row.hash }
         }
 
     override fun getEdgesTo(hash: Hash): List<EdgeRow> = edges.filter { it.toHash == hash }
@@ -186,6 +192,11 @@ class InMemoryMezzeStore : MezzeStore {
             row.abilityHash == abilityHash && implTargets[row.hash]?.lastOrNull() == targetTypeHash
         }?.hash
 
+    override fun getAllAbilityImpls(): List<AbilityImplRow> = abilityImpls.toList()
+
+    override fun findImplsForType(targetTypeHash: Hash): List<AbilityImplRow> =
+        abilityImpls.filter { implTargets[it.hash]?.lastOrNull() == targetTypeHash }
+
     override fun findAbilityImplsByName(abilityName: String): List<AbilityImplRow> =
         // Name -> DECLARATION -> impls. Two modules may each declare `Ord`; this
         // answers for the one actually declared, not for the spelling.
@@ -208,9 +219,14 @@ class InMemoryMezzeStore : MezzeStore {
 
     // ── USAGES ──
 
-    override fun putUsage(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
-        usages.add(UsageRow(targetHash, filePath, startLine, startCol, endLine, endCol))
+    override fun putUsage(
+        targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int,
+        fromHash: Hash, isCall: Boolean,
+    ) {
+        usages.add(UsageRow(targetHash, filePath, startLine, startCol, endLine, endCol, fromHash, isCall))
     }
+
+    override fun getUsagesFrom(fromHash: Hash): List<UsageRow> = usages.filter { it.fromHash == fromHash }
 
     override fun getUsages(targetHash: Hash): List<UsageRow> =
         usages.filter { it.targetHash == targetHash }
@@ -289,6 +305,28 @@ class InMemoryMezzeStore : MezzeStore {
         decls.removeAll { it.modulePath == modulePath }
     }
 
+    override fun clearNamesForModule(modulePath: String) {
+        names.keys.removeAll { it.startsWith("$modulePath\u0000") }
+    }
+
+    private val blobOwners = HashMap<String, Set<Hash>>()   // owner → hashes it produces
+
+    override fun replaceBlobOwnership(owner: String, hashes: Set<Hash>) {
+        val dropped = (blobOwners.put(owner, hashes.toSet()) ?: emptySet()) - hashes
+        val garbage = dropped.filterTo(HashSet()) { h -> blobOwners.values.none { h in it } }
+        if (garbage.isEmpty()) return
+        val hex = garbage.mapTo(HashSet()) { it.hex }
+        blobs.keys.removeAll(hex)
+        edges.removeAll { it.fromHash in garbage }
+        abilityImpls.removeAll { it.hash in garbage }
+        implTargets.keys.removeAll(garbage)
+        effectPerformers.removeAll { it.hash in garbage }
+        monoSpecializations.keys.removeAll(hex)
+        signatures.keys.removeAll(garbage)
+        definitions.keys.removeAll(garbage)
+        usages.removeAll { it.fromHash in garbage }
+    }
+
     override fun getDeclsForModule(modulePath: String): List<DeclRow> =
         decls.filter { it.modulePath == modulePath }
 
@@ -328,6 +366,16 @@ class InMemoryMezzeStore : MezzeStore {
     override fun getSignature(ownerHash: Hash): SignatureRows =
         signatures[ownerHash] ?: SignatureRows.EMPTY
 
+    private val definitions = mutableMapOf<Hash, SignatureRows>()
+
+    override fun putDefinition(rows: SignatureRows) {
+        val ownerHash = rows.nodes.firstOrNull()?.ownerHash ?: return
+        definitions[ownerHash] = rows
+    }
+
+    override fun getDefinition(declHash: Hash): SignatureRows =
+        definitions[declHash] ?: SignatureRows.EMPTY
+
     /** The node ids of [ownerHash]'s residual arrow — see [TypeNodeRow.isResidual]. */
     private fun residualNodeIds(ownerHash: Hash): Set<Int> =
         signatures[ownerHash]?.nodes?.filter { it.isResidual }?.map { it.nodeId }?.toSet().orEmpty()
@@ -360,6 +408,22 @@ class InMemoryMezzeStore : MezzeStore {
             val residual = residualNodeIds(row.hash)
             signatures[row.hash]?.constraints?.any {
                 it.nodeId in residual && it.abilityName == abilityName
+            } == true
+        }
+
+    override fun findDeclsPerforming(effectHash: Hash): List<DeclRow> =
+        decls.filter { row ->
+            val residual = residualNodeIds(row.hash)
+            signatures[row.hash]?.effects?.any {
+                it.nodeId in residual && it.effectHash == effectHash
+            } == true
+        }
+
+    override fun findDeclsRequiring(abilityHash: Hash): List<DeclRow> =
+        decls.filter { row ->
+            val residual = residualNodeIds(row.hash)
+            signatures[row.hash]?.constraints?.any {
+                it.nodeId in residual && it.abilityHash == abilityHash
             } == true
         }
 

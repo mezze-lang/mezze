@@ -18,6 +18,19 @@ object MetadataFields {
 
     /** Free-text note from the author (deprecation reason, migration guide, etc). Value: Str. */
     const val NOTE = "note"
+
+    /**
+     * On an ability: what to tell someone whose type has no impl of it. Replaces
+     * the compiler's generic "implement: impl …" advice; the fact line ("`T`
+     * does not implement `A`") stays the compiler's. Value: Str.
+     */
+    const val MISSING = "missing"
+
+    /**
+     * On an effect: what to tell someone who performs it with nothing handling
+     * it — usually which performer to wrap the code in. Value: Str.
+     */
+    const val UNHANDLED = "unhandled"
 }
 
 /**
@@ -45,6 +58,14 @@ data class ParsedMetadata(
     /** Get the 'note' string, if present. */
     val note: String?
         get() = (fields[MetadataFields.NOTE] as? ParsedMetadataValue.StringVal)?.value
+
+    /** The author's message for a type with no impl of this ability, if written. */
+    val missing: String?
+        get() = (fields[MetadataFields.MISSING] as? ParsedMetadataValue.StringVal)?.value
+
+    /** The author's message for this effect performed with nothing handling it, if written. */
+    val unhandled: String?
+        get() = (fields[MetadataFields.UNHANDLED] as? ParsedMetadataValue.StringVal)?.value
 }
 
 /**

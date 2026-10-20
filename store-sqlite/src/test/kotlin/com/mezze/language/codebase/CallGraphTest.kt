@@ -173,9 +173,9 @@ class CallGraphTest {
     // plainly referenced — basing the report on edges named 18 stdlib declarations
     // as dead, one of which is referenced two lines below its own definition.
 
-    /** A source reference to [target], at [line] of [file]. */
+    /** A source reference to [target], at [line] of [file], written in some other declaration. */
     private fun referenceTo(target: Hash, file: String = "app.mz", line: Int = 500) =
-        store.putUsage(target, file, line, 1, line, 10)
+        store.putUsage(target, file, line, 1, line, 10, fromHash = Hash("f".repeat(64)), isCall = true)
 
     @Test
     fun `a private declaration nothing references is reported`() {
@@ -201,8 +201,8 @@ class CallGraphTest {
         // hide it.
         val recursive = decl("only_recurses")
         val row = store.findDeclByHash(recursive)!!
-        // Inside its own span, in its own file.
-        store.putUsage(recursive, "app.mz", row.startLine, 5, row.startLine, 9)
+        // Written inside itself.
+        store.putUsage(recursive, "app.mz", row.startLine, 5, row.startLine, 9, fromHash = recursive, isCall = true)
 
         assertEquals(listOf("only_recurses"), store.findUnreferencedDecls().map { it.declName },
             "a reference from inside its own body is not a use")

@@ -1197,8 +1197,24 @@ class AbilityChecker internal constructor(
                 // `[receiver] + typeArgs`), so the receiver leads and the class-args follow.
                 val classArgsRendered = typeArgs.drop(1).map { prettyPrintType(it) }
                 val skeleton = renderImplSkeleton(abilityName, primaryType, classArgsRendered)
-                "Cannot use '$operator' with $typeNames. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
+                val advice = registry.lookupAbility(abilityName)?.metadata?.missing
+                    ?: "To enable this, implement: $skeleton"
+                "Cannot use '$operator' with $typeNames. $advice${formatAbilityCandidates(abilityName)}"
             }
+        }
+
+        // The fact is the compiler's; the advice is the ability author's when they
+        // wrote one (`#{ missing: "…" }` on the declaration), else a skeleton impl.
+        fun notImplemented(): String {
+            val classArgsRendered = typeArgs.drop(1).map { prettyPrintType(it) }
+            val skeleton = renderImplSkeleton(abilityName, primaryType, classArgsRendered)
+            // Nothing visible implements it: before saying "write an impl",
+            // check whether one already exists and is merely unimported.
+            val home = if (abilityImpls(abilityName).isEmpty()) blanketImplHome(abilityName) else null
+            if (home != null) return "`$abilityName` isn't imported here, so `$typeNames` can't use it"
+            val advice = registry.lookupAbility(abilityName)?.metadata?.missing
+                ?: "To enable this, implement: $skeleton"
+            return "$typeNames does not implement '$abilityName'. $advice${formatAbilityCandidates(abilityName)}"
         }
 
         return when (abilityName) {
@@ -1213,36 +1229,16 @@ class AbilityChecker internal constructor(
   let result: MyType = it.decode { config = config }
   # or use inherent-method syntax:
   MyType.from_json { it = raw }"""
-                } else {
-                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
-                }
+                } else notImplemented()
             }
             // Codec Tier 3: `Encode 'config for 'a`. Positional args are [config, data].
             "Encode" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
                     "Cannot infer encode source type. Add a type annotation to the value being encoded."
-                } else {
-                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
-                }
+                } else notImplemented()
             }
-            "Tryable" -> {
-                "Cannot use `<-` on $typeNames — no `Tryable` impl. `<-` works " +
-                    "on `Option`, `Result`, or any type implementing `Tryable`. " +
-                    "If you meant a plain binding, use `let x = ...` instead."
-            }
-            else -> {
-                val classArgsRendered = typeArgs.drop(1).map { prettyPrintType(it) }
-                val skeleton = renderImplSkeleton(abilityName, primaryType, classArgsRendered)
-                // Nothing visible implements it: before saying "write an impl",
-                // check whether one already exists and is merely unimported.
-                val home = if (abilityImpls(abilityName).isEmpty()) blanketImplHome(abilityName) else null
-                if (home != null) {
-                    "`$abilityName` isn't imported here, so `$typeNames` can't use it"
-                } else {
-                    "$typeNames does not implement '$abilityName'. To enable this, implement: $skeleton${formatAbilityCandidates(abilityName)}"
-                }
-            }
+            else -> notImplemented()
         }
     }
 

@@ -80,6 +80,9 @@ class ChainedMezzeStore(
     }
 
     override fun getModule(path: String): ModuleRow? = firstNonNull { it.getModule(path) }
+    override fun getModuleTier(path: String): StoreTier? = firstNonNull { it.getModuleTier(path) }
+    override fun putModuleDoc(path: String, doc: String?) = primary.putModuleDoc(path, doc)
+    override fun getModuleDoc(path: String): String? = firstNonNull { it.getModuleDoc(path) }
 
     override fun isFileStale(filePath: String, currentSourceHash: String): Boolean =
         primary.isFileStale(filePath, currentSourceHash)
@@ -154,6 +157,12 @@ class ChainedMezzeStore(
     override fun getAbilityImplForType(abilityHash: Hash, targetTypeHash: Hash): Hash? =
         firstNonNull { it.getAbilityImplForType(abilityHash, targetTypeHash) }
 
+    override fun getAllAbilityImpls(): List<AbilityImplRow> =
+        all.flatMap { it.getAllAbilityImpls() }.distinct()
+
+    override fun findImplsForType(targetTypeHash: Hash): List<AbilityImplRow> =
+        all.flatMap { it.findImplsForType(targetTypeHash) }.distinct()
+
     override fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?) {
         primary.putEffectPerformer(hash, effectHash, performerName, module)
     }
@@ -166,12 +175,18 @@ class ChainedMezzeStore(
 
     // ── Usages (LSP) ──────────────────────────────────────────────────────
 
-    override fun putUsage(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
-        primary.putUsage(targetHash, filePath, startLine, startCol, endLine, endCol)
+    override fun putUsage(
+        targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int,
+        fromHash: Hash, isCall: Boolean,
+    ) {
+        primary.putUsage(targetHash, filePath, startLine, startCol, endLine, endCol, fromHash, isCall)
     }
 
     override fun getUsages(targetHash: Hash): List<UsageRow> =
         all.flatMap { it.getUsages(targetHash) }.distinct()
+
+    override fun getUsagesFrom(fromHash: Hash): List<UsageRow> =
+        all.flatMap { it.getUsagesFrom(fromHash) }.distinct()
 
     override fun clearUsagesForFile(filePath: String) {
         primary.clearUsagesForFile(filePath)
@@ -241,6 +256,9 @@ class ChainedMezzeStore(
     ) = primary.putDecl(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol,
         doc, metadata)
     override fun clearDeclsForModule(modulePath: String) = primary.clearDeclsForModule(modulePath)
+    override fun clearNamesForModule(modulePath: String) = primary.clearNamesForModule(modulePath)
+    override fun replaceBlobOwnership(owner: String, hashes: Set<Hash>) =
+        primary.replaceBlobOwnership(owner, hashes)
     override fun getDeclsForModule(modulePath: String): List<DeclRow> =
         all.flatMap { it.getDeclsForModule(modulePath) }.distinct()
     override fun searchDeclsByName(query: String): List<DeclRow> =
@@ -264,6 +282,10 @@ class ChainedMezzeStore(
 
     override fun findDeclsByConstraint(abilityName: String): List<DeclRow> =
         all.flatMap { it.findDeclsByConstraint(abilityName) }.distinct()
+    override fun findDeclsPerforming(effectHash: Hash): List<DeclRow> =
+        all.flatMap { it.findDeclsPerforming(effectHash) }.distinct()
+    override fun findDeclsRequiring(abilityHash: Hash): List<DeclRow> =
+        all.flatMap { it.findDeclsRequiring(abilityHash) }.distinct()
     override fun findDeclsMentioningType(typeHash: Hash): List<DeclRow> =
         all.flatMap { it.findDeclsMentioningType(typeHash) }.distinct()
 
@@ -272,6 +294,10 @@ class ChainedMezzeStore(
     override fun putSignature(rows: SignatureRows) = primary.putSignature(rows)
     override fun getSignature(ownerHash: Hash): SignatureRows =
         all.asSequence().map { it.getSignature(ownerHash) }.firstOrNull { !it.isEmpty }
+            ?: SignatureRows.EMPTY
+    override fun putDefinition(rows: SignatureRows) = primary.putDefinition(rows)
+    override fun getDefinition(declHash: Hash): SignatureRows =
+        all.asSequence().map { it.getDefinition(declHash) }.firstOrNull { !it.isEmpty }
             ?: SignatureRows.EMPTY
 
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) =

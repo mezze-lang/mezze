@@ -9,7 +9,13 @@ import kotlinx.serialization.Serializable
 data class ParsedModule(
     val path: String,
     val decls: List<ParsedDecl>,
-    val orphanComments: List<ParsedComment> = emptyList()
+    val orphanComments: List<ParsedComment> = emptyList(),
+    /**
+     * The module's own documentation: a `##` block at the very top that belongs to
+     * no declaration — followed by a `use`, or set apart by a blank line. Derived:
+     * the comment text itself stays where the formatter keeps it.
+     */
+    val doc: String? = null,
 )
 
 

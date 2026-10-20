@@ -13,16 +13,22 @@ everywhere it appears. This page is the key. Every later section assumes it.
 `##` is a doc comment. It attaches to the declaration below it and is what
 hover and the LSP show, so it is worth writing in full sentences.
 
-`#{ ... }` is a metadata comment, a record of facts about the declaration.
-Some fields are acted on by the compiler, such as `deprecated = True`, and
-others are there for tooling or for a reader.
+`#{ ... }` is a metadata comment, a record of facts about the declaration,
+written `key: value`. Some fields are acted on by the compiler, and others are
+there for tooling or for a reader:
+
+- `deprecated: True`, with optional `since` and `note`: every use of the
+  declaration warns (W0501), at the use.
+- `missing: "…"` on an ability: what to tell someone whose type has no impl.
+- `unhandled: "…"` on an effect: what to tell someone who performs it with
+  nothing handling it, usually which performer to wrap it in.
 
 <!--mezze-code
  # an ordinary note to a reader
 
  ## Returns the larger of two values.
  ## Works for any type that implements Ord.
- #{ deprecated = True, message = "use std::math::max instead" }
+ #{ deprecated: True, since: "0.2", note: "use std::math::max instead" }
  let bigger = { a, b } -> if a.gt { r = b } then a else b
 -->
 

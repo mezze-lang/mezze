@@ -1413,9 +1413,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     private static List<FunctionIR> reduceComptime(
             List<FunctionIR> functions, java.util.List<String[]> performers) {
+        // No codebase here: the runtime holds no store. A comptime block that
+        // asks `std::codebase` a question on this path fails, loudly, at the
+        // question (introspection §9).
         return com.mezze.language.comptime.ComptimeReduction.INSTANCE.reduceOrThrow(
             functions,
-            performers == null ? Collections.<String[]>emptyList() : performers);
+            performers == null ? Collections.<String[]>emptyList() : performers,
+            null);
     }
 
     /** Reflectively call a method, unwrapping InvocationTargetException. */

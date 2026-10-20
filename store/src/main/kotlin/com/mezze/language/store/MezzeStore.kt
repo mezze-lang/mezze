@@ -51,8 +51,12 @@ interface MezzeStore : AutoCloseable {
      * returns empty — implementations that can iterate efficiently (SQL,
      * etc.) should override. SQL impl UNION-ALLs across main + stdlib + deps;
      * Chained walks every tier.
+     *
+     * Abstract on purpose. It used to default to `emptyList()`, and the in-memory
+     * store never overrode it, so a bulk load over that store silently loaded
+     * nothing instead of failing.
      */
-    fun getAllBlobHashes(): List<Hash> = emptyList()
+    fun getAllBlobHashes(): List<Hash>
 
     // ====================================================================
     // NAMES — human-readable labels pointing to hashes
@@ -83,6 +87,19 @@ interface MezzeStore : AutoCloseable {
 
     /** Get module info. */
     fun getModule(path: String): ModuleRow?
+
+    /**
+     * Which part of the codebase the module [path] belongs to — this project, a
+     * dependency, or the standard library — or null when no module by that path
+     * is stored. Decided by WHERE the store keeps it, not by its name.
+     */
+    fun getModuleTier(path: String): StoreTier?
+
+    /** Record the module's own documentation (its leading `##` block), or clear it. */
+    fun putModuleDoc(path: String, doc: String?)
+
+    /** The module's own documentation, or null when it has none. */
+    fun getModuleDoc(path: String): String?
 
     /** Check if a file needs recompilation. True if source_hash differs or module not found. */
     fun isFileStale(filePath: String, currentSourceHash: String): Boolean
@@ -205,6 +222,20 @@ interface MezzeStore : AutoCloseable {
      */
     fun getAbilityImplForType(abilityHash: Hash, targetTypeHash: Hash): Hash?
 
+    /**
+     * Every impl, of any ability, whose RECEIVER is [targetTypeHash]: the impls
+     * WRITTEN for exactly this type.
+     *
+     * The reverse of [getImplTargets]. It answers "what has been implemented for
+     * `Point`" and finds neither generic impls that merely apply (`impl Eq for
+     * ['a]` at `[Point]`) nor derived ones. Deciding those takes the type
+     * checker's matching, not a lookup.
+     */
+    fun findImplsForType(targetTypeHash: Hash): List<AbilityImplRow>
+
+    /** Every ability impl stored, of every ability, across every tier. */
+    fun getAllAbilityImpls(): List<AbilityImplRow>
+
     /** Register an effect performer. */
     fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?)
 
@@ -225,11 +256,26 @@ interface MezzeStore : AutoCloseable {
     // USAGES — LSP cross-file find-references index
     // ====================================================================
 
-    /** Record a source location that references a hash. */
-    fun putUsage(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int)
+    /**
+     * Record a source location that references a hash.
+     *
+     * [fromHash] is the declaration the reference is WRITTEN IN, and [isCall]
+     * says whether it is the function position of a call. Together they are the
+     * source-level call graph. The `edges` table cannot be that: it is built from
+     * lowered code, where a small helper inlined into its callers has vanished,
+     * so "who calls `shout`" came back empty for a `shout` written twice in
+     * `twice`.
+     */
+    fun putUsage(
+        targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int,
+        fromHash: Hash, isCall: Boolean,
+    )
 
     /** Find all source locations referencing a hash. */
     fun getUsages(targetHash: Hash): List<UsageRow>
+
+    /** Every reference written inside the declaration [fromHash]: what its source mentions. */
+    fun getUsagesFrom(fromHash: Hash): List<UsageRow>
 
     /** Clear all usages recorded from a file. Called before re-indexing a changed file. */
     fun clearUsagesForFile(filePath: String)
@@ -316,6 +362,25 @@ interface MezzeStore : AutoCloseable {
         metadata: String? = null,
     )
     fun clearDeclsForModule(modulePath: String)
+
+    /** Forget every name [modulePath] declares; re-indexing registers the current ones. */
+    fun clearNamesForModule(modulePath: String)
+
+    /**
+     * The blobs [owner] produces now — a module's declarations, or the functions
+     * an entry point lowers to.
+     *
+     * A blob [owner] produced before and no longer does, and that no other owner
+     * produces, is deleted with every row keyed on it: its impl and performer
+     * registrations, edges, signature and definition, usages from it. Content
+     * addressing makes a blob never WRONG, but those rows are answers — without
+     * this a deleted `impl` stayed in every "what implements this" — and the
+     * store grew by every version of every declaration ever written.
+     *
+     * Only blobs some owner once claimed are ever deleted: a blob written by
+     * anything that records no ownership is never touched.
+     */
+    fun replaceBlobOwnership(owner: String, hashes: Set<Hash>)
     fun getDeclsForModule(modulePath: String): List<DeclRow>
     fun searchDeclsByName(query: String): List<DeclRow>
     fun getDeclsByKind(kind: DeclKind): List<DeclRow>
@@ -365,6 +430,23 @@ interface MezzeStore : AutoCloseable {
      * question an agent or doc browser asks when looking for what it can satisfy.
      */
     fun findDeclsByConstraint(abilityName: String): List<DeclRow>
+
+    /**
+     * Declarations whose residual arrow performs the effect DECLARED at
+     * [effectHash].
+     *
+     * The identity form of [findDeclsByEffect]. That one takes the name a person
+     * typed, which is right for text search; this one takes the declaration, so
+     * two effects that share a name (`Db` in two packages) are never merged. Rows
+     * whose effect has no recorded hash cannot match.
+     */
+    fun findDeclsPerforming(effectHash: Hash): List<DeclRow>
+
+    /**
+     * Declarations whose residual arrow requires the ability DECLARED at
+     * [abilityHash] (`with Ord 'a`). The identity form of [findDeclsByConstraint].
+     */
+    fun findDeclsRequiring(abilityHash: Hash): List<DeclRow>
 
     /**
      * The RESIDUAL effect names declared by each of [hashes] — what a caller is left
@@ -433,6 +515,20 @@ interface MezzeStore : AutoCloseable {
      */
     fun getSignature(declHash: Hash): SignatureRows
 
+    /**
+     * Store what a type, ability or effect declaration DEFINES: fields,
+     * constructors, operations (see [DefinitionIndex]). Replaces any rows already
+     * stored for the same declaration — a definition is one value.
+     */
+    fun putDefinition(rows: SignatureRows)
+
+    /**
+     * The definition rows of the declaration [declHash], or [SignatureRows.EMPTY]
+     * when none is stored (a `let`, an impl, or a declaration indexed without its
+     * source). Rebuild them with [DefinitionIndex.rebuild].
+     */
+    fun getDefinition(declHash: Hash): SignatureRows
+
     // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
     // ====================================================================
@@ -497,6 +593,9 @@ enum class Visibility {
     PUBLIC, PRIVATE
 }
 
+/** Where a module comes from. */
+enum class StoreTier { PROJECT, DEPENDENCY, STDLIB }
+
 enum class EdgeKind {
     CALLS, REFERENCES, IMPLEMENTS
 }
@@ -553,7 +652,18 @@ data class ReachableRow(val hash: Hash, val depth: Int)
  */
 data class AbilityImplRow(val hash: Hash, val abilityHash: Hash, val module: String?)
 data class EffectPerformerRow(val hash: Hash, val effectHash: Hash, val performerName: String, val module: String?)
-data class UsageRow(val targetHash: Hash, val filePath: String, val startLine: Int, val startCol: Int, val endLine: Int, val endCol: Int)
+data class UsageRow(
+    val targetHash: Hash,
+    val filePath: String,
+    val startLine: Int,
+    val startCol: Int,
+    val endLine: Int,
+    val endCol: Int,
+    /** The declaration this reference is written in. */
+    val fromHash: Hash,
+    /** True when the reference is the function being called (`f { … }`), not a value mention. */
+    val isCall: Boolean,
+)
 
 data class DeclRow(
     val modulePath: String,

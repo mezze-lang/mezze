@@ -120,8 +120,8 @@ class InMemoryMezzeStoreTest {
         val store = InMemoryMezzeStore()
         val h = hash()
 
-        store.putUsage(h, "file1.mz", 10, 5, 10, 8)
-        store.putUsage(h, "file2.mz", 20, 1, 20, 4)
+        store.putUsage(h, "file1.mz", 10, 5, 10, 8, fromHash = hash(), isCall = false)
+        store.putUsage(h, "file2.mz", 20, 1, 20, 4, fromHash = hash(), isCall = false)
 
         assertEquals(2, store.getUsages(h).size)
 

@@ -1,6 +1,7 @@
 package com.mezze.interpreter.comptime
 
 import com.mezze.interpreter.runtime.MezzeLanguage
+import com.mezze.language.comptime.CodebaseHost
 import com.mezze.language.comptime.Comptime
 import com.mezze.language.comptime.ComptimeEvaluator
 import com.mezze.language.comptime.ComptimeOutcome
@@ -53,8 +54,9 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
         resultShape: PrintType,
         performers: List<Array<String>>,
         origin: String,
+        codebase: CodebaseHost?,
     ): ComptimeOutcome = synchronized(LOCK) {
-        Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers, origin) }
+        Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers, origin, codebase) }
     }
 
     /** The body of [evaluate]; split out only so the re-entrancy guard wraps it
@@ -65,6 +67,7 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
         resultShape: PrintType,
         performers: List<Array<String>>,
         origin: String,
+        codebase: CodebaseHost?,
     ): ComptimeOutcome {
         evaluations.incrementAndGet()
         val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
@@ -75,6 +78,10 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
             .allowCreateThread(true)
             .allowExperimentalOptions(true)
             .build()
+        // The codebase this evaluation may ask about, handed to THIS context only:
+        // `std::codebase`'s natives look it up here, so two evaluations never
+        // share one, and nothing global holds it.
+        if (codebase != null) context.polyglotBindings.putMember(CodebaseNatives.BINDING, codebase)
 
         // The result channel is a STATIC on MezzeLanguage, and this evaluation is
         // NESTED inside the compilation of the program that will use it. Leaving
@@ -119,6 +126,15 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
             }
 
             val value = MezzeLanguage.getLastExecutionResult()
+            // Suspended on an effect nothing handled: the block — or a question to
+            // the compiler — did run-time work, which cannot happen during a build.
+            if (value is com.mezze.interpreter.values.MezzeSuspend) {
+                return ComptimeOutcome.Failed(
+                    "this compile-time evaluation performs an effect that nothing handles while " +
+                        "compiling, so it would have to happen at run time instead of during the build. " +
+                        "Handle it inside the block, or ask the question on its own and use the answer outside it."
+                )
+            }
             ComptimeOutcome.Reified(ComptimeReifier.reify(value, resultShape, SYNTHETIC))
         } catch (e: ComptimeReifier.NotEmbeddable) {
             // `Embeddable` admitted a shape reification cannot build. Reported as

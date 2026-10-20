@@ -1,0 +1,489 @@
+# Asking the compiler about the codebase being compiled.
+#
+# A question is an operation of `Codebase`, and the handler decides when it is
+# answered. Under a compile-time handler the `perform` itself is folded while
+# compiling — nothing goes around it — and it must be inside a function:
+#
+#   let names = {} -> perform ComptimeEvalCodebase in Codebase.decls { module = "app" }
+#   let names = {} -> perform ComptimeEval in perform EvalCodebase in Codebase.decls { module = "app" }
+
+use std::comptime::{ Comptime, ComptimeEval }
+use std::collections::seq
+use std::str
+
+## A declaration, by identity. `hash` IS the declaration: two declarations that
+## share a name never share a hash, so every question below follows hashes, and
+## a name is turned into one only by `resolve`.
+pub type DeclRef = { hash: Str, name: Str, module: Str, kind: DeclKind }
+
+pub type DeclKind = | LetDecl, TypeDecl, AbilityDecl, EffectDecl, ImplDecl, PerformerDecl |
+
+## Where something is written: 1-based lines and columns, the end column inclusive.
+pub type Span = { file: Option Str, start_line: Int, start_col: Int, end_line: Int, end_col: Int }
+
+pub type DeclInfo = {
+  decl: DeclRef,
+  is_public: Bool,
+  doc: Option Str,
+  span: Span,
+  ## The `#{...}` block written on the declaration, as JSON text.
+  metadata: Option Str,
+  origin: Option Origin,
+}
+
+## Where a declaration comes from.
+pub type Origin = | FromProject, FromDependency, FromStdlib |
+
+## An effect as it appears in a row; `decl` is its declaration, when known.
+pub type EffectRef = { name: Str, decl: Option DeclRef }
+
+## An ability impl. `targets` are type hashes, the receiver LAST.
+pub type ImplInfo = {
+  hash: Str,
+  ability_decl: Option DeclRef,
+  ability_hash: Str,
+  targets: [Str],
+  module: Option Str,
+}
+
+## A type, as the compiler resolved it.
+pub type TypeShape = |
+  TInt, TFloat, TStr, TChar, TFrac, TBytes,
+  TVar { name: Str },
+  TRecord { name: Option Str, hash: Option Str, fields: [FieldShape], is_open: Bool },
+  TVariant { name: Option Str, hash: Option Str, constructors: [ConstructorShape], is_open: Bool },
+  TApp { name: Str, hash: Option Str, args: [TypeShape] },
+  TNewtype { name: Str, hash: Option Str, wrapped: TypeShape },
+  TFn { param: TypeShape, result: TypeShape, effects: [EffectRef], requires: [RequiredAbility], open_effects: Bool },
+|
+
+pub type FieldShape = { name: Str, ty: TypeShape }
+pub type ConstructorShape = { name: Str, payload: Option TypeShape }
+pub type RequiredAbility = { name: Str, hash: Option Str }
+
+## What a type, ability or effect declaration DEFINES. Members are in the order
+## they were written.
+pub type Definition = |
+  RecordDef { type_params: [Str], fields: [FieldShape], is_open: Bool },
+  VariantDef { type_params: [Str], constructors: [ConstructorShape], is_open: Bool },
+  NewtypeDef { type_params: [Str], constructor: Str, wrapped: TypeShape },
+  AliasDef { type_params: [Str], aliased: TypeShape },
+  AbilityDef { type_params: [Str], receiver: Option Str, associated: [Str], requires: [Requirement], ops: [Operation] },
+  EffectDef { associated: [Str], ops: [Operation] },
+|
+
+pub type Operation = { name: Str, param: TypeShape, result: TypeShape }
+pub type Requirement = { ability_hash: Str, args: [TypeShape] }
+
+## A function body as the compiler typed it: every node carries its type and
+## where it is written, and every name the declaration it resolves to. What a
+## tool reads a body through — `body { decl }` — to see what it tests, calls
+## and returns.
+pub type CodeExpr = |
+  LitExpr { lit: CodeLit, ty: TypeShape, span: Span },
+  StrExpr { parts: [StrPart], ty: TypeShape, span: Span },
+  VarExpr { name: Str, decl: Option DeclRef, ty: TypeShape, span: Span },
+  CallExpr { callee: CodeExpr, arg: CodeExpr, ty: TypeShape, span: Span },
+  LambdaExpr { params: [Str], body: CodeExpr, ty: TypeShape, span: Span },
+  RecordExpr { items: [CodeItem], ty: TypeShape, span: Span },
+  FieldAccessExpr { record: CodeExpr, field: Str, ty: TypeShape, span: Span },
+  UpdateExpr { record: CodeExpr, items: [CodeItem], ty: TypeShape, span: Span },
+  VariantExpr { constructor: Str, payload: Option CodeExpr, ty: TypeShape, span: Span },
+  MatchExpr { scrutinee: CodeExpr, arms: [CodeArm], ty: TypeShape, span: Span },
+  IfExpr { cond: CodeExpr, then_branch: CodeExpr, else_branch: CodeExpr, ty: TypeShape, span: Span },
+  BlockExpr { statements: [CodeStmt], result: CodeExpr, ty: TypeShape, span: Span },
+  SeqExpr { items: [CodeItem], ty: TypeShape, span: Span },
+  PerformExpr { handlers: [HandlerUse], body: CodeExpr, ty: TypeShape, span: Span },
+  OpExpr { effect_hash: Str, op: Str, arg: CodeExpr, ty: TypeShape, span: Span },
+  PipeExpr { left: CodeExpr, right: CodeExpr, ty: TypeShape, span: Span },
+|
+
+pub type CodeLit = | LInt { val: Int }, LNat { val: Int }, LFloat { val: Float }, LFrac { num: Int, den: Int }, LBool { val: Bool }, LChar { val: Str } |
+
+## An entry of a record or a sequence, in written order.
+pub type CodeItem = | NamedItem { name: Str, value: CodeExpr }, SpreadItem { value: CodeExpr }, PlainItem { value: CodeExpr } |
+
+pub type StrPart = | TextPart { text: Str }, InterpPart { expr: CodeExpr } |
+
+pub type CodeStmt = | LetStmt { name: Str, value: CodeExpr, span: Span }, ExprStmt { expr: CodeExpr, span: Span } |
+
+pub type CodeArm = { patterns: [CodePattern], guard: Option CodeExpr, if_lets: [IfLet], body: CodeExpr, span: Span }
+
+pub type IfLet = { pattern: CodePattern, value: CodeExpr }
+
+pub type HandlerUse = { performer: Str, performer_hash: Str, effect_hash: Str }
+
+pub type CodePattern = |
+  VarPat { name: Str, ty: TypeShape },
+  WildcardPat { ty: TypeShape },
+  LitPat { value: CodeExpr, ty: TypeShape },
+  VariantPat { constructor: Str, payload: Option CodePattern, ty: TypeShape },
+  RecordPat { fields: [FieldPat], is_open: Bool, ty: TypeShape },
+  SeqPat { elements: [CodePattern], rest: Option Str, ty: TypeShape },
+  StrPat { parts: [StrPatPart], ty: TypeShape },
+|
+
+pub type FieldPat = { name: Str, pattern: Option CodePattern }
+
+pub type StrPatPart = | TextPat { text: Str }, CapturePat { name: Str } |
+
+## How an ability applies to a type.
+pub type ImplVia = | Written, Derived, Generic |
+
+pub type AbilityInfo = { ability_decl: Option DeclRef, ability_hash: Str, impl_hash: Str, via: ImplVia }
+
+pub type DeclOrder = | ByName, ByModule |
+
+## A search over declarations. Build one with `query {}` and the methods below;
+## every filter given must hold. Answers come back in `order`, at most `limit`.
+pub type DeclQuery = {
+  kind: Option DeclKind,
+  name: Option Str,
+  name_prefix: Option Str,
+  ## A substring of the name or the doc.
+  text: Option Str,
+  module_prefix: Option Str,
+  public_only: Bool,
+  ## Has a `#{...}` key of this name.
+  tagged: Option Str,
+  deprecated_only: Bool,
+  documented_only: Bool,
+  ## Performs the effect with this declaration hash.
+  performs: Option Str,
+  pure_only: Bool,
+  ## Requires the ability with this declaration hash.
+  requires: Option Str,
+  ## Mentions the type with this hash anywhere in its signature.
+  mentions: Option Str,
+  ## Its signature unifies with this type, written as Mezze: `{ xs: ['a] } -> Int`.
+  shape: Option Str,
+  unused_only: Bool,
+  order: DeclOrder,
+  limit: Option Int,
+}
+
+## Every declaration; narrow it with the methods on `DeclQuery`.
+pub let query: {} -> DeclQuery = {} -> {
+  kind = None, name = None, name_prefix = None, text = None, module_prefix = None,
+  public_only = False, tagged = None, deprecated_only = False, documented_only = False,
+  performs = None, pure_only = False, requires = None, mentions = None, shape = None,
+  unused_only = False, order = ByModule, limit = None,
+}
+
+impl DeclQuery where {
+  with_kind = { it, kind } -> { ...it, kind = Some { val = kind } },
+  with_name = { it, name } -> { ...it, name = Some { val = name } },
+  with_name_prefix = { it, prefix } -> { ...it, name_prefix = Some { val = prefix } },
+  with_text = { it, text } -> { ...it, text = Some { val = text } },
+  in_module = { it, prefix } -> { ...it, module_prefix = Some { val = prefix } },
+  only_public = { it } -> { ...it, public_only = True },
+  with_tag = { it, key } -> { ...it, tagged = Some { val = key } },
+  only_deprecated = { it } -> { ...it, deprecated_only = True },
+  only_documented = { it } -> { ...it, documented_only = True },
+  performing = { it, of } -> { ...it, performs = Some { val = of.hash } },
+  only_pure = { it } -> { ...it, pure_only = True },
+  requiring = { it, of } -> { ...it, requires = Some { val = of.hash } },
+  mentioning = { it, type_hash } -> { ...it, mentions = Some { val = type_hash } },
+  with_shape = { it, shape } -> { ...it, shape = Some { val = shape } },
+  only_unused = { it } -> { ...it, unused_only = True },
+  order_by = { it, order } -> { ...it, order = order },
+  take = { it, n } -> { ...it, limit = Some { val = n } },
+}
+
+## Questions about the codebase. Answered while compiling: by `EvalCodebase`
+## through `Comptime`, by `ComptimeEvalCodebase` there and then, or by a handler of
+## your own in a test.
+##
+## Every answer comes back in one fixed order, so the same question asked twice
+## gives the same answer twice.
+effect Codebase where {
+  ## The declaration `name` in `module`.
+  resolve: { module: Str, name: Str } -> Option DeclRef <Codebase>,
+  info: { decl: DeclRef } -> Option DeclInfo <Codebase>,
+  ## Every declaration in `module`.
+  decls: { module: Str } -> [DeclRef] <Codebase>,
+  ## Every module whose path starts with `prefix`.
+  modules: { prefix: Str } -> [Str] <Codebase>,
+  ## The module's own documentation: the `##` block at the top of its file.
+  module_doc: { module: Str } -> Option Str <Codebase>,
+  ## The type a caller sees, for a `let`.
+  signature: { decl: DeclRef } -> Option TypeShape <Codebase>,
+  ## What a type, ability or effect defines.
+  definition: { decl: DeclRef } -> Option Definition <Codebase>,
+  ## The declaration's source text.
+  source: { decl: DeclRef } -> Option Str <Codebase>,
+  ## Impls of the ability `of`.
+  impls_of: { of: DeclRef } -> [ImplInfo] <Codebase>,
+  ## Impls WRITTEN for the type `of` (its declaration), as their receiver.
+  impls_for: { of: DeclRef } -> [ImplInfo] <Codebase>,
+  ## The effects a call leaves its caller holding.
+  effects_of: { decl: DeclRef } -> [EffectRef] <Codebase>,
+  ## Declarations that perform the effect `of`.
+  performing: { of: DeclRef } -> [DeclRef] <Codebase>,
+  ## Declarations that require the ability `of`.
+  requiring: { of: DeclRef } -> [DeclRef] <Codebase>,
+  ## The handlers of the effect `of`.
+  performers_of: { of: DeclRef } -> [DeclRef] <Codebase>,
+  ## Declarations whose SOURCE calls this one — inlining does not hide a call.
+  callers: { decl: DeclRef } -> [DeclRef] <Codebase>,
+  callees: { decl: DeclRef } -> [DeclRef] <Codebase>,
+  ## Declarations whose source mentions this one at all.
+  references: { decl: DeclRef } -> [DeclRef] <Codebase>,
+  usages: { decl: DeclRef } -> [Span] <Codebase>,
+  ## The declaration a function value is — `ref { of = get_user }`.
+  ref: { of: 'a } -> Option DeclRef <Codebase>,
+  ## Every ability that applies to the type `of` (its declaration), and how.
+  abilities_of: { of: DeclRef } -> [AbilityInfo] <Codebase>,
+  search: { q: DeclQuery } -> [DeclRef] <Codebase>,
+  ## A `let`'s body, typed.
+  body: { decl: DeclRef } -> Option CodeExpr <Codebase>
+}
+
+## Answers from the compiler, and says so: each question becomes `<Comptime>`,
+## left outward so it composes with other compile-time work. One
+## `perform ComptimeEval in …` around it answers all of it while compiling.
+impl Codebase for EvalCodebase where {
+  resolve = { module, name } -> Comptime.codebase { run = {} -> __native_codebase_resolve { module = module, name = name } },
+  info = { decl } -> Comptime.codebase { run = {} -> __native_codebase_info { hash = decl.hash } },
+  decls = { module } -> Comptime.codebase { run = {} -> __native_codebase_decls { module = module } },
+  modules = { prefix } -> Comptime.codebase { run = {} -> __native_codebase_modules { prefix = prefix } },
+  module_doc = { module } -> Comptime.codebase { run = {} -> __native_codebase_module_doc { module = module } },
+  signature = { decl } -> Comptime.codebase { run = {} -> __native_codebase_signature { hash = decl.hash } },
+  definition = { decl } -> Comptime.codebase { run = {} -> __native_codebase_definition { hash = decl.hash } },
+  source = { decl } -> Comptime.codebase { run = {} -> __native_codebase_source { hash = decl.hash } },
+  impls_of = { of } -> Comptime.codebase { run = {} -> __native_codebase_impls_of { hash = of.hash } },
+  impls_for = { of } -> Comptime.codebase { run = {} -> __native_codebase_impls_for { hash = of.hash } },
+  effects_of = { decl } -> Comptime.codebase { run = {} -> __native_codebase_effects_of { hash = decl.hash } },
+  performing = { of } -> Comptime.codebase { run = {} -> __native_codebase_performing { hash = of.hash } },
+  requiring = { of } -> Comptime.codebase { run = {} -> __native_codebase_requiring { hash = of.hash } },
+  performers_of = { of } -> Comptime.codebase { run = {} -> __native_codebase_performers_of { hash = of.hash } },
+  callers = { decl } -> Comptime.codebase { run = {} -> __native_codebase_callers { hash = decl.hash } },
+  callees = { decl } -> Comptime.codebase { run = {} -> __native_codebase_callees { hash = decl.hash } },
+  references = { decl } -> Comptime.codebase { run = {} -> __native_codebase_references { hash = decl.hash } },
+  usages = { decl } -> Comptime.codebase { run = {} -> __native_codebase_usages { hash = decl.hash } },
+  ref = { of } -> Comptime.codebase { run = {} -> __native_codebase_ref { of = of } },
+  abilities_of = { of } -> Comptime.codebase { run = {} -> __native_codebase_abilities_of { hash = of.hash } },
+  search = { q } -> Comptime.codebase { run = {} -> __native_codebase_search { q = q } },
+  body = { decl } -> Comptime.codebase { run = {} -> __native_codebase_body { hash = decl.hash } },
+}
+
+## The same answers, with the `Comptime` they raise handled here: it handles
+## `Codebase` and answers its own `Comptime`. So `perform ComptimeEvalCodebase in …`
+## needs nothing around it — the compiler folds that `perform` while compiling.
+impl Codebase for ComptimeEvalCodebase where {
+  resolve = { module, name } -> perform ComptimeEval in perform EvalCodebase in Codebase.resolve { module = module, name = name },
+  info = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.info { decl = decl },
+  decls = { module } -> perform ComptimeEval in perform EvalCodebase in Codebase.decls { module = module },
+  modules = { prefix } -> perform ComptimeEval in perform EvalCodebase in Codebase.modules { prefix = prefix },
+  module_doc = { module } -> perform ComptimeEval in perform EvalCodebase in Codebase.module_doc { module = module },
+  signature = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.signature { decl = decl },
+  definition = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.definition { decl = decl },
+  source = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.source { decl = decl },
+  impls_of = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.impls_of { of = of },
+  impls_for = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.impls_for { of = of },
+  effects_of = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.effects_of { decl = decl },
+  performing = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.performing { of = of },
+  requiring = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.requiring { of = of },
+  performers_of = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.performers_of { of = of },
+  callers = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.callers { decl = decl },
+  callees = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.callees { decl = decl },
+  references = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.references { decl = decl },
+  usages = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.usages { decl = decl },
+  ref = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.ref { of = of },
+  abilities_of = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.abilities_of { of = of },
+  search = { q } -> perform ComptimeEval in perform EvalCodebase in Codebase.search { q = q },
+  body = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.body { decl = decl },
+}
+
+## ---- Testing without a compiler ----------------------------------------
+
+## What `FixtureCodebase` answers from. Start from `empty_fixture` and fill in
+## what a test needs: `{ ...empty_fixture, decls = [...] }`.
+pub type CodebaseFixture = {
+  decls: [DeclInfo],
+  signatures: [{ hash: Str, shape: TypeShape }],
+  definitions: [{ hash: Str, definition: Definition }],
+  sources: [{ hash: Str, text: Str }],
+  impls: [ImplInfo],
+  effects: [{ hash: Str, refs: [EffectRef] }],
+  requirements: [{ hash: Str, abilities: [DeclRef] }],
+  performers: [{ effect_hash: Str, performer: DeclRef }],
+  calls: [{ from: DeclRef, to: DeclRef }],
+  references: [{ from: DeclRef, to: DeclRef }],
+  usages: [{ hash: Str, spans: [Span] }],
+  bodies: [{ hash: Str, body: CodeExpr }],
+  module_docs: [{ module: Str, doc: Str }],
+}
+
+pub let empty_fixture: CodebaseFixture = {
+  decls = [], signatures = [], definitions = [], sources = [], impls = [], effects = [],
+  requirements = [], performers = [], calls = [], references = [], usages = [], bodies = [], module_docs = [],
+}
+
+## The helpers below take only the lists they read, never the whole fixture: a
+## typed body stamps every node's type, and `CodebaseFixture` holds every shape
+## in this file — threaded through a helper, it made one body's blob 475 MB.
+
+let fixture_decl: { decls: [DeclInfo], hash: Str } -> Option DeclInfo = { decls, hash } ->
+  seq::find { xs = decls, p = { x } -> x.decl.hash == hash }
+
+let effects_in: { effects: [{ hash: Str, refs: [EffectRef] }], hash: Str } -> [EffectRef] = { effects, hash } ->
+  match seq::find { xs = effects, p = { x } -> x.hash == hash } is
+    Some { val } -> val.refs
+    None -> []
+
+let names_effect: { refs: [EffectRef], hash: Str } -> Bool = { refs, hash } ->
+  seq::any { xs = refs, p = { x } -> match x.decl is
+    Some { val } -> val.hash == hash
+    None -> False }
+
+let requires_in: { requirements: [{ hash: Str, abilities: [DeclRef] }], hash: Str } -> [DeclRef] = { requirements, hash } ->
+  match seq::find { xs = requirements, p = { x } -> x.hash == hash } is
+    Some { val } -> val.abilities
+    None -> []
+
+let has_hash: { refs: [DeclRef], hash: Str } -> Bool = { refs, hash } ->
+  seq::any { xs = refs, p = { x } -> x.hash == hash }
+
+let refs_from: { edges: [{ from: DeclRef, to: DeclRef }], hash: Str } -> [DeclRef] = { edges, hash } ->
+  seq::map { xs = seq::filter { xs = edges, p = { x } -> x.from.hash == hash }, f = { x } -> x.to }
+
+let refs_to: { edges: [{ from: DeclRef, to: DeclRef }], hash: Str } -> [DeclRef] = { edges, hash } ->
+  seq::map { xs = seq::filter { xs = edges, p = { x } -> x.to.hash == hash }, f = { x } -> x.from }
+
+let receiver_is: { impl_info: ImplInfo, type_hash: Str } -> Bool = { impl_info, type_hash } ->
+  match seq::last { xs = impl_info.targets } is
+    Some { val } -> val == type_hash
+    None -> False
+
+## One filter each, so the predicate below is a flat list of calls.
+let wants_eq: { want: Option Str, actual: Str } -> Bool = { want, actual } -> match want is
+  Some { val } -> val == actual
+  None -> True
+
+let wants_prefix: { want: Option Str, actual: Str } -> Bool = { want, actual } -> match want is
+  Some { val } -> str::starts_with { s = actual, prefix = val }
+  None -> True
+
+let wants_text: { want: Option Str, name: Str, doc: Str } -> Bool = { want, name, doc } -> match want is
+  Some { val } -> str::contains { s = name, substring = val } || str::contains { s = doc, substring = val }
+  None -> True
+
+let wants_key: { want: Option Str, meta: Str } -> Bool = { want, meta } -> match want is
+  Some { val } -> str::contains { s = meta, substring = "\"$(val)\"" }
+  None -> True
+
+let wants_effect: { want: Option Str, refs: [EffectRef] } -> Bool = { want, refs } -> match want is
+  Some { val } -> names_effect { refs = refs, hash = val }
+  None -> True
+
+let wants_ability: { want: Option Str, refs: [DeclRef] } -> Bool = { want, refs } -> match want is
+  Some { val } -> has_hash { refs = refs, hash = val }
+  None -> True
+
+let wants_kind: { want: Option DeclKind, actual: DeclKind } -> Bool = { want, actual } -> match want is
+  Some { val } -> val == actual
+  None -> True
+
+let text_of: { opt: Option Str } -> Str = { opt } -> match opt is
+  Some { val } -> val
+  None -> ""
+
+## Whether the fixture declaration `info` passes every filter of `q`.
+let fixture_matches: {
+  effects: [{ hash: Str, refs: [EffectRef] }],
+  requirements: [{ hash: Str, abilities: [DeclRef] }],
+  references: [{ from: DeclRef, to: DeclRef }],
+  q: DeclQuery,
+  info: DeclInfo,
+} -> Bool = { effects, requirements, references, q, info } -> do
+  let d = info.decl
+  let doc = text_of { opt = info.doc }
+  let meta = text_of { opt = info.metadata }
+  let own_effects = effects_in { effects = effects, hash = d.hash }
+  if q.mentions != None || q.shape != None then
+    crash { msg = "FixtureCodebase cannot answer `mentioning` or `with_shape`: they need type matching, which only the compiler does" }
+  else
+    wants_eq { want = q.name, actual = d.name } &&
+      wants_prefix { want = q.name_prefix, actual = d.name } &&
+      wants_text { want = q.text, name = d.name, doc = doc } &&
+      wants_prefix { want = q.module_prefix, actual = d.module } &&
+      wants_key { want = q.tagged, meta = meta } &&
+      wants_effect { want = q.performs, refs = own_effects } &&
+      wants_ability { want = q.requires, refs = requires_in { requirements = requirements, hash = d.hash } } &&
+      wants_kind { want = q.kind, actual = d.kind } &&
+      (if q.public_only then info.is_public else True) &&
+      (if q.documented_only then doc != "" else True) &&
+      (if q.deprecated_only then str::contains { s = meta, substring = "\"deprecated\"" } else True) &&
+      (if q.pure_only then seq::is_empty { xs = own_effects } else True) &&
+      (if q.unused_only then seq::is_empty { xs = refs_to { edges = references, hash = d.hash } } else True)
+
+## Answers from data, for testing code that asks the codebase questions —
+## a preprocessor, a lint — with no compiler involved. `ref` answers `None`:
+## a fixture has no functions to recognise. `search` cannot answer `mentioning`
+## or `with_shape`, and says so rather than answering wrongly.
+impl Codebase for FixtureCodebase { data: CodebaseFixture } where {
+  resolve = { module, name } ->
+    match seq::find { xs = data.decls, p = { x } -> x.decl.module == module && x.decl.name == name } is
+      Some { val } -> Some { val = val.decl }
+      None -> None,
+  info = { decl } -> fixture_decl { decls = data.decls, hash = decl.hash },
+  decls = { module } ->
+    seq::map { xs = seq::filter { xs = data.decls, p = { x } -> x.decl.module == module }, f = { x } -> x.decl },
+  modules = { prefix } -> seq::distinct { xs = seq::map {
+    xs = seq::filter { xs = data.decls, p = { x } -> str::starts_with { s = x.decl.module, prefix = prefix } },
+    f = { x } -> x.decl.module } },
+  signature = { decl } -> match seq::find { xs = data.signatures, p = { x } -> x.hash == decl.hash } is
+    Some { val } -> Some { val = val.shape }
+    None -> None,
+  definition = { decl } -> match seq::find { xs = data.definitions, p = { x } -> x.hash == decl.hash } is
+    Some { val } -> Some { val = val.definition }
+    None -> None,
+  source = { decl } -> match seq::find { xs = data.sources, p = { x } -> x.hash == decl.hash } is
+    Some { val } -> Some { val = val.text }
+    None -> None,
+  impls_of = { of } -> seq::filter { xs = data.impls, p = { x } -> x.ability_hash == of.hash },
+  impls_for = { of } -> seq::filter { xs = data.impls, p = { x } -> receiver_is { impl_info = x, type_hash = of.hash } },
+  effects_of = { decl } -> effects_in { effects = data.effects, hash = decl.hash },
+  performing = { of } -> seq::map {
+    xs = seq::filter { xs = data.effects, p = { x } -> names_effect { refs = x.refs, hash = of.hash } },
+    f = { x } -> match fixture_decl { decls = data.decls, hash = x.hash } is
+      Some { val } -> val.decl
+      None -> crash { msg = "FixtureCodebase: an effects entry names a declaration not in `decls`" } },
+  requiring = { of } -> seq::map {
+    xs = seq::filter { xs = data.requirements, p = { x } -> has_hash { refs = x.abilities, hash = of.hash } },
+    f = { x } -> match fixture_decl { decls = data.decls, hash = x.hash } is
+      Some { val } -> val.decl
+      None -> crash { msg = "FixtureCodebase: a requirements entry names a declaration not in `decls`" } },
+  performers_of = { of } -> seq::map {
+    xs = seq::filter { xs = data.performers, p = { x } -> x.effect_hash == of.hash }, f = { x } -> x.performer },
+  callers = { decl } -> refs_to { edges = data.calls, hash = decl.hash },
+  callees = { decl } -> refs_from { edges = data.calls, hash = decl.hash },
+  references = { decl } -> refs_to { edges = data.references, hash = decl.hash },
+  usages = { decl } -> match seq::find { xs = data.usages, p = { x } -> x.hash == decl.hash } is
+    Some { val } -> val.spans
+    None -> [],
+  ref = { of } -> None,
+  module_doc = { module } -> match seq::find { xs = data.module_docs, p = { x } -> x.module == module } is
+    Some { val } -> Some { val = val.doc }
+    None -> None,
+  body = { decl } -> match seq::find { xs = data.bodies, p = { x } -> x.hash == decl.hash } is
+    Some { val } -> Some { val = val.body }
+    None -> None,
+  abilities_of = { of } -> seq::map {
+    xs = seq::filter { xs = data.impls, p = { x } -> receiver_is { impl_info = x, type_hash = of.hash } },
+    f = { x } -> { ability_decl = x.ability_decl, ability_hash = x.ability_hash, impl_hash = x.hash, via = Written } },
+  search = { q } -> do
+    let effects = data.effects
+    let requirements = data.requirements
+    let references = data.references
+    let found = seq::map {
+      xs = seq::filter { xs = data.decls, p = { x } -> fixture_matches { effects = effects, requirements = requirements, references = references, q = q, info = x } },
+      f = { x } -> x.decl }
+    let ordered = match q.order is
+      ByName -> seq::sort_by { xs = found, cmp = { a, b } -> if a.name == b.name then a.module < b.module else a.name < b.name }
+      ByModule -> seq::sort_by { xs = found, cmp = { a, b } -> if a.module == b.module then a.name < b.name else a.module < b.module }
+    match q.limit is
+      Some { val } -> seq::take { xs = ordered, n = val }
+      None -> ordered,
+}

@@ -5,6 +5,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typechecker.TypeCheckWarning
 import com.mezze.language.typechecker.TypeChecker
+import com.mezze.language.typechecker.metadataInReach
 import com.mezze.language.langservice.printing.ErrorFormatter
 
 /**
@@ -62,7 +63,8 @@ object TypeCheckRunner {
     fun wrapSuccess(success: TypeChecker.TypeCheckResult.Success): TypeCheckResult {
         return TypeCheckResult(
             resolvedImports = emptyList(),
-            warnings = success.warnings.map { TypeCheckWarning(it.message, it.loc) },
+            warnings = success.warnings.map { TypeCheckWarning(it.message, it.loc, it.code) },
+            metadataByHash = success.metadataInReach(),
             importedAbilities = success.importContext?.importedAbilities ?: emptyMap(),
             importedEffects = success.importContext?.importedEffects ?: emptyMap(),
             loweredFunctions = success.loweredFunctions ?: emptyList(),

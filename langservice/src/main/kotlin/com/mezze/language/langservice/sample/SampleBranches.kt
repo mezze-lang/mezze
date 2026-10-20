@@ -629,6 +629,18 @@ object SampleBranches {
         return Pinned(source, draws = true)
     }
 
+    /**
+     * An operator's two sides. `a < b` is the call `a.lt { r = b }`: the left
+     * side is the receiver the callee reads the operation off — the argument
+     * carries only `r`.
+     */
+    private fun operands(call: TypedCall): Pair<TypedExpr, TypedExpr>? {
+        val left = (call.function as? TypedFieldAccess)?.record ?: return null
+        val right = (call.arg as? TypedRecord)?.entries
+            ?.filterIsInstance<TypedRecordEntry.Field>()?.firstOrNull { it.name == "r" }?.value ?: return null
+        return left to right
+    }
+
     // ── comparisons ───────────────────────────────────────────────────────────
 
     /**
@@ -636,7 +648,7 @@ object SampleBranches {
      * values either side of where the comparison flips.
      *
      * A comparison operator arrives as an `Ord`/`Eq` method call —
-     * `n > max_value` is `n.gt { it = n, r = max_value }`. It is recognised only
+     * `n > max_value` is `n.gt { r = max_value }`. It is recognised only
      * when the operands are PRIMITIVE (`Int`, `Str`), where `gt` IS `Ord`'s: a user
      * type with a field that happens to be called `gt` is never read as a
      * comparison, so this is not name-matching on a method.
@@ -649,10 +661,7 @@ object SampleBranches {
     ): List<Map<String, Pinned>> {
         val op = (call.function as? TypedFieldAccess)?.field ?: return emptyList()
         if (op !in COMPARISONS) return emptyList()
-        val args = (call.arg as? TypedRecord)?.entries
-            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return emptyList()
-        val left = args["it"] ?: return emptyList()
-        val right = args["r"] ?: return emptyList()
+        val (left, right) = operands(call) ?: return emptyList()
         if (!isPrimitive(left.type) || !isPrimitive(right.type)) return emptyList()
 
         // Either side may hold the parameter. `k < n` is `n > k` seen from `n`, so
@@ -758,10 +767,9 @@ object SampleBranches {
     ): Known? {
         val op = (call.function as? TypedFieldAccess)?.field ?: return null
         if (op !in ARITHMETIC || call.type !is MezzeType.IntType) return null
-        val args = (call.arg as? TypedRecord)?.entries
-            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return null
-        val l = (knownValue(args["it"] ?: return null, byHash, null, depth + 1) as? Known.IntValue)?.value ?: return null
-        val r = (knownValue(args["r"] ?: return null, byHash, null, depth + 1) as? Known.IntValue)?.value ?: return null
+        val (left, right) = operands(call) ?: return null
+        val l = (knownValue(left, byHash, null, depth + 1) as? Known.IntValue)?.value ?: return null
+        val r = (knownValue(right, byHash, null, depth + 1) as? Known.IntValue)?.value ?: return null
         val v = try {
             when (op) {
                 "add" -> Math.addExact(l, r)
@@ -1049,10 +1057,7 @@ object SampleBranches {
         val call = expr as? TypedCall ?: return null
         val op = (call.function as? TypedFieldAccess)?.field ?: return null
         if (op !in setOf("add", "sub", "mul")) return null
-        val args = (call.arg as? TypedRecord)?.entries
-            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return null
-        val l = args["it"] ?: return null
-        val r = args["r"] ?: return null
+        val (l, r) = operands(call) ?: return null
         val sym = mapOf("add" to "+", "sub" to "-", "mul" to "*").getValue(op)
         return try {
             val ll = linearOf(l, params, byHash, locals, depth + 1)
@@ -1159,10 +1164,7 @@ object SampleBranches {
         val call = expr as? TypedCall ?: return null
         val op = (call.function as? TypedFieldAccess)?.field ?: return null
         val sym = mapOf("add" to "+", "sub" to "-", "mul" to "*", "div" to "/")[op] ?: return null
-        val args = (call.arg as? TypedRecord)?.entries
-            ?.filterIsInstance<TypedRecordEntry.Field>()?.associate { it.name to it.value } ?: return null
-        val l = args["it"] ?: return null
-        val r = args["r"] ?: return null
+        val (l, r) = operands(call) ?: return null
         val ll = floatLinearOf(l, params, byHash, locals, depth + 1)
         val rk = (knownValue(r, byHash) as? Known.FloatValue)?.value
         val rl = floatLinearOf(r, params, byHash, locals, depth + 1)

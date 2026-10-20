@@ -123,6 +123,9 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":parser"))
     testImplementation(project(":typechecker"))
+    // std::codebase end-to-end: index real code, answer through the real host.
+    testImplementation(project(":codebase"))
+    testImplementation(testFixtures(project(":store-sqlite")))
 }
 
 // Shared config applied to both the default `test` task and the

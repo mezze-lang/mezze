@@ -102,6 +102,7 @@ object StorePopulator {
             if (parsedModule != null) {
                 val parsedBlob = StoreSerialization.serializeParsedModule(parsedModule)
                 store.putParsedModule(modulePath, sourceHash, parsedBlob)
+                store.putModuleDoc(modulePath, parsedModule.doc)
             }
 
             val typedModule = result.typedModule
@@ -170,6 +171,7 @@ object StorePopulator {
                 if (depParsed != null) {
                     val parsedBlob = StoreSerialization.serializeParsedModule(depParsed)
                     store.putParsedModule(loadedPath, sha256, parsedBlob)
+                    store.putModuleDoc(loadedPath, depParsed.doc)
                 }
 
                 // Per-decl index for the dep too. We have its source in hand.
@@ -196,6 +198,9 @@ object StorePopulator {
             val functions = result.loweredFunctions
             if (functions.isNotEmpty()) {
                 scatterFunctionIRs(store, functions, modulePath, existing)
+                // Only when this run lowered: a check-only index has no functions,
+                // and that says nothing about which ones the program still needs.
+                store.replaceBlobOwnership("lowered:$modulePath", functions.mapTo(HashSet()) { it.hash })
             }
         }
 
@@ -227,24 +232,28 @@ object StorePopulator {
         if (filePath == null) return
         store.clearUsagesForFile(filePath)
 
-        val collect: (com.mezze.language.typedast.Hash, com.mezze.language.parsedast.Loc) -> Unit = { h, loc ->
-            store.putUsage(h, filePath, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
+        // Every reference is recorded with the declaration it is written IN, so
+        // the source call graph needs no guessing from line spans.
+        fun from(owner: com.mezze.language.typedast.Hash): UsageSink = { h, loc, isCall ->
+            store.putUsage(h, filePath, loc.startLine, loc.startCol, loc.endLine, loc.endCol, owner, isCall)
         }
 
         for (decl in module.decls) {
             when (decl) {
-                is TypedLetDecl -> walkExpr(decl.value, collect)
+                is TypedLetDecl -> walkExpr(decl.value, from(decl.hash))
                 is TypedTypeDecl -> Unit  // type defs hold MezzeType, no exprs
                 else -> Unit
             }
         }
         for (impl in module.abilityImpls) {
+            val collect = from(impl.hash)
             // Cross-ref: impl → ability
-            collect(impl.abilityHash, impl.loc)
+            collect(impl.abilityHash, impl.loc, false)
             for (body in impl.operations.values) walkExpr(body, collect)
         }
         for (decl in module.performerDecls) {
-            collect(decl.effectHash, decl.loc)
+            val collect = from(decl.hash)
+            collect(decl.effectHash, decl.loc, false)
             for (body in decl.operations.values) walkExpr(body, collect)
         }
         // ability/effect decls have no exec bodies in TypedAst (operations
@@ -253,22 +262,25 @@ object StorePopulator {
 
     private fun walkExpr(
         expr: com.mezze.language.typedast.TypedExpr,
-        collect: (com.mezze.language.typedast.Hash, com.mezze.language.parsedast.Loc) -> Unit
+        collect: UsageSink
     ) {
         when (expr) {
             is com.mezze.language.typedast.TypedVar -> {
                 val ref = expr.binding
                 if (ref is com.mezze.language.typedast.BindingRef.ByHash) {
-                    collect(ref.hash, expr.loc)
+                    collect(ref.hash, expr.loc, false)
                 }
             }
             is com.mezze.language.typedast.TypedCall -> {
-                walkExpr(expr.function, collect)
+                // The function position of a call is a CALL, not a mention.
+                val fn = expr.function
+                val callee = (fn as? com.mezze.language.typedast.TypedVar)?.binding as? com.mezze.language.typedast.BindingRef.ByHash
+                if (callee != null) collect(callee.hash, fn.loc, true) else walkExpr(fn, collect)
                 walkExpr(expr.arg, collect)
                 expr.instantiation?.abilityImpls?.forEach { ref ->
                     // No per-impl loc on AbilityImplRef; attribute to the call site.
-                    collect(ref.implHash, expr.loc)
-                    collect(ref.abilityHash, expr.loc)
+                    collect(ref.implHash, expr.loc, false)
+                    collect(ref.abilityHash, expr.loc, false)
                 }
             }
             is com.mezze.language.typedast.TypedLambda -> {
@@ -278,7 +290,7 @@ object StorePopulator {
                     val src = cap.source
                     if (src is com.mezze.language.typedast.BindingRef.ByHash) {
                         // No loc on a TypedCapture; attribute to the lambda.
-                        collect(src.hash, expr.loc)
+                        collect(src.hash, expr.loc, false)
                     }
                 }
             }
@@ -321,14 +333,14 @@ object StorePopulator {
             }
             is com.mezze.language.typedast.TypedPerform -> {
                 for (h in expr.handlers) {
-                    collect(h.performerHash, h.loc)
-                    collect(h.effectHash, h.loc)
+                    collect(h.performerHash, h.loc, false)
+                    collect(h.effectHash, h.loc, false)
                     h.params?.let { walkExpr(it, collect) }
                 }
                 walkExpr(expr.body, collect)
             }
             is com.mezze.language.typedast.TypedPerformOp -> {
-                collect(expr.effectHash, expr.loc)
+                collect(expr.effectHash, expr.loc, false)
                 walkExpr(expr.arg, collect)
             }
             is com.mezze.language.typedast.TypedPipe -> {
@@ -429,21 +441,31 @@ object StorePopulator {
         val parsedDeclsByName = buildParsedDeclLookup(parsedModule)
 
         for (decl in module.decls.filterIsInstance<TypedLetDecl>()) {
+            // A bare top-level expression is lowered as a synthetic `let`, but
+            // nobody declared it and no program can name it, so it is not a
+            // declaration of the codebase. Its references are still recorded, from
+            // its own hash, by scatterUsages.
+            if (decl.name.startsWith(com.mezze.language.ast.MagicParams.TOPLEVEL_EXPR_PREFIX)) continue
             val parsed = parsedDeclsByName[decl.name]
             writeDecl(store, modulePath, decl.name, DeclKind.LET, decl.hash, decl.loc, source, lineStarts, parsed,
                 type = decl.scheme.type)
         }
+        // A type, ability or effect has no signature but a DEFINITION — its
+        // fields, constructors or operations — indexed beside the decl row.
         for (decl in module.decls.filterIsInstance<TypedTypeDecl>()) {
             val parsed = parsedDeclsByName[decl.name]
             writeDecl(store, modulePath, decl.name, DeclKind.TYPE, decl.hash, decl.loc, source, lineStarts, parsed)
+            store.putDefinition(com.mezze.language.store.DefinitionIndex.flatten(decl))
         }
         for (decl in module.abilityDecls) {
             val parsed = parsedDeclsByName[decl.name]
             writeDecl(store, modulePath, decl.name, DeclKind.ABILITY, decl.hash, decl.loc, source, lineStarts, parsed)
+            store.putDefinition(com.mezze.language.store.DefinitionIndex.flatten(decl))
         }
         for (decl in module.effectDecls) {
             val parsed = parsedDeclsByName[decl.name]
             writeDecl(store, modulePath, decl.name, DeclKind.EFFECT, decl.hash, decl.loc, source, lineStarts, parsed)
+            store.putDefinition(com.mezze.language.store.DefinitionIndex.flatten(decl))
         }
         for (decl in module.performerDecls) {
             val parsed = parsedDeclsByName[decl.name]
@@ -476,24 +498,27 @@ object StorePopulator {
         return result
     }
 
+    /**
+     * A declaration's `#{ … }` metadata as JSON text — what `std::codebase` hands
+     * a program, which decodes it into whatever type it declares. Built with a
+     * JSON encoder, not by concatenation: a hand-built string escaped only `"`,
+     * so a note holding a backslash or a newline was not JSON at all.
+     */
     private fun serializeMetadata(metadata: com.mezze.language.parsedast.ParsedMetadata?): String? {
         if (metadata == null || metadata.fields.isEmpty()) return null
-        // Simple JSON serialization of metadata fields
-        return metadata.fields.entries.joinToString(", ", "{", "}") { (key, value) ->
-            "\"$key\": ${serializeMetadataValue(value)}"
-        }
+        return kotlinx.serialization.json.JsonObject(metadata.fields.mapValues { (_, v) -> metadataJson(v) }).toString()
     }
 
-    private fun serializeMetadataValue(value: com.mezze.language.parsedast.ParsedMetadataValue): String {
-        return when (value) {
-            is com.mezze.language.parsedast.ParsedMetadataValue.StringVal -> "\"${value.value.replace("\"", "\\\"")}\""
-            is com.mezze.language.parsedast.ParsedMetadataValue.IntVal -> value.value.toString()
-            is com.mezze.language.parsedast.ParsedMetadataValue.BoolVal -> value.value.toString()
-            is com.mezze.language.parsedast.ParsedMetadataValue.FloatVal -> value.value.toString()
-            is com.mezze.language.parsedast.ParsedMetadataValue.ListVal -> value.values.joinToString(", ", "[", "]") { serializeMetadataValue(it) }
-            is com.mezze.language.parsedast.ParsedMetadataValue.RecordVal -> value.fields.entries.joinToString(", ", "{", "}") { (k, v) -> "\"$k\": ${serializeMetadataValue(v)}" }
+    private fun metadataJson(value: com.mezze.language.parsedast.ParsedMetadataValue): kotlinx.serialization.json.JsonElement =
+        when (value) {
+            is com.mezze.language.parsedast.ParsedMetadataValue.StringVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
+            is com.mezze.language.parsedast.ParsedMetadataValue.IntVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
+            is com.mezze.language.parsedast.ParsedMetadataValue.BoolVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
+            is com.mezze.language.parsedast.ParsedMetadataValue.FloatVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
+            is com.mezze.language.parsedast.ParsedMetadataValue.ListVal -> kotlinx.serialization.json.JsonArray(value.values.map { metadataJson(it) })
+            is com.mezze.language.parsedast.ParsedMetadataValue.RecordVal ->
+                kotlinx.serialization.json.JsonObject(value.fields.mapValues { (_, v) -> metadataJson(v) })
         }
-    }
 
     private fun writeDecl(
         store: MezzeStore,
@@ -577,6 +602,9 @@ object StorePopulator {
         modulePath: String,
         existing: Set<Hash>
     ) {
+        // The names below are the module's names NOW; one deleted from the source
+        // must stop resolving.
+        store.clearNamesForModule(modulePath)
         for (decl in module.decls.filterIsInstance<TypedLetDecl>()) {
             if (decl.hash !in existing) {
                 val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
@@ -657,6 +685,17 @@ object StorePopulator {
             store.registerName(modulePath, decl.name, decl.hash)
             store.putEffectPerformer(decl.hash, decl.effectHash, decl.name, modulePath)
         }
+
+        store.replaceBlobOwnership(
+            "module:$modulePath",
+            buildSet {
+                module.decls.mapTo(this) { it.hash }
+                module.abilityDecls.mapTo(this) { it.hash }
+                module.abilityImpls.mapTo(this) { it.hash }
+                module.effectDecls.mapTo(this) { it.hash }
+                module.performerDecls.mapTo(this) { it.hash }
+            },
+        )
     }
 
     /**
@@ -989,3 +1028,6 @@ object StorePopulator {
         }
     }
 }
+
+/** Records one reference: its target, where it is written, and whether it is a call. */
+private typealias UsageSink = (com.mezze.language.typedast.Hash, com.mezze.language.parsedast.Loc, Boolean) -> Unit

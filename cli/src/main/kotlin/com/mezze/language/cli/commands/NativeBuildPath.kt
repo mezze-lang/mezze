@@ -61,6 +61,8 @@ object NativeBuildPath {
         entryName: String?,
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
+        /** Answers `std::codebase` while comptime folds; see [finalizeClosure]. */
+        codebase: com.mezze.language.comptime.CodebaseHost?,
         polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
             com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
         /** Language jars to bake into the shell (see build's extraClasspath). */
@@ -82,6 +84,7 @@ object NativeBuildPath {
                 entryName = entryName,
                 loweredFunctions = loweredFunctions,
                 performerRecords = performerRecords,
+                codebase = codebase,
                 optimized = true,
                 polyglot = polyglot,
                 extraClasspath = extraClasspath,
@@ -106,7 +109,7 @@ object NativeBuildPath {
         }
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
-        val closure = finalizeClosure(loweredFunctions, performerRecords)
+        val closure = finalizeClosure(loweredFunctions, performerRecords, codebase)
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
         shell.copyTo(outBinary, overwrite = true)
         outBinary.setExecutable(true, false)
@@ -209,6 +212,8 @@ object NativeBuildPath {
         entryName: String?,
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
+        /** Answers `std::codebase` while comptime folds; see [finalizeClosure]. */
+        codebase: com.mezze.language.comptime.CodebaseHost?,
         optimized: Boolean,
         polyglot: com.mezze.language.cli.`package`.PolyglotResolver.Resolved =
             com.mezze.language.cli.`package`.PolyglotResolver.Resolved.NONE,
@@ -226,11 +231,10 @@ object NativeBuildPath {
         val stagingDir = File(outputDir, ".native-staging").apply { mkdirs() }
 
         // Compute the closure + CBOR bytes ONCE up front. We hash these
-        // (content-addressed, deterministic) for the native-image cache key,
-        // then pass them to packEmbeddedAppJar which would otherwise
-        // recompute them. Hashing the jar bytes directly is non-determ
-        // because JarEntry stamps with current time.
-        val closure = finalizeClosure(loweredFunctions, performerRecords)
+        // (content-addressed, deterministic) for the native-image cache key.
+        // Hashing the jar bytes directly is non-determ because JarEntry stamps
+        // with current time.
+        val closure = finalizeClosure(loweredFunctions, performerRecords, codebase)
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
         val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
 
@@ -531,34 +535,6 @@ object NativeBuildPath {
     // ─── pipeline steps ──────────────────────────────────────────────────────
 
     /**
-     * Step 2: CBOR-serialize the closure + metadata into a tiny jar that
-     * native-image's EmbeddedAppLoader will decode at build time.
-     */
-    private fun packEmbeddedAppJar(
-        stagingDir: File,
-        loweredFunctions: List<FunctionIR>,
-        performerRecords: List<Array<String>>,
-        appName: String,
-        entryHash: String,
-        entryName: String?,
-        timing: Boolean,
-        relativeTime: () -> Long,
-    ): File {
-        val closure = finalizeClosure(loweredFunctions, performerRecords)
-        if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
-
-        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
-
-        val embeddedJar = File(stagingDir, "embedded-app.jar")
-        writeJar(embeddedJar, mapOf(
-            "META-INF/mezze/embedded-app.cbor" to fnBytes,
-            "META-INF/mezze/embedded-app.meta" to metaBytes,
-        ))
-        if (timing) System.err.println("[${relativeTime()}ms] native: embedded-app.jar (${embeddedJar.length() / 1024}KB)")
-        return embeddedJar
-    }
-
-    /**
      * Serialize an already-computed closure + metadata to the two byte
      * blobs that EmbeddedAppLoader reads at startup:
      *   - functions: List<FunctionIR>  → embedded-app.cbor
@@ -640,10 +616,15 @@ object NativeBuildPath {
     fun finalizeClosure(
         loweredFunctions: List<FunctionIR>,
         performerRecords: List<Array<String>>,
+        /**
+         * The codebase being built, for `comptime` blocks that ask `std::codebase`
+         * about it. Null only where there is no project store to answer from.
+         */
+        codebase: com.mezze.language.comptime.CodebaseHost?,
     ): List<FunctionIR> {
         val rawClosure = computeReachableClosure(loweredFunctions)
         val folded = try {
-            ComptimeHost.reduce(rawClosure, performerRecords)
+            ComptimeHost.reduce(rawClosure, performerRecords, codebase)
         } catch (e: com.mezze.language.comptime.ComptimeReduction.ComptimeFailure) {
             println(e.message)
             kotlin.system.exitProcess(4)

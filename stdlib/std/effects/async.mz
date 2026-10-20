@@ -336,6 +336,7 @@ pub type JoinOutcome 'a = |
 ## cancellation points). Pure CPU-bound tasks are not interruptible
 ## by design — sprinkle a natural yield point (await, sleep, or the
 ## like) if you need cooperative cancel.
+#{ unhandled: "Wrap it in `perform LoomAsync in …` (virtual threads), or `OSThreadAsync` for a thread pool." }
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
   ##

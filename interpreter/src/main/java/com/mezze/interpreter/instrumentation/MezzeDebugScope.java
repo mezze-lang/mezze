@@ -83,7 +83,14 @@ public final class MezzeDebugScope implements TruffleObject {
             }
         }
         this.memberNames = names.toArray(new String[0]);
-        this.memberSlots = slots.stream().mapToInt(Integer::intValue).toArray();
+        // A plain loop, not `slots.stream().mapToInt(...).toArray()`. This
+        // constructor is reachable from partially-evaluated code (NodeLibrary
+        // .getScope), and the stream made every lambda in the image reachable for
+        // runtime compilation: the native `mez`, which carries the interpreter,
+        // failed to build with 78 "blocklisted methods" reports through this line.
+        int[] memberSlots = new int[slots.size()];
+        for (int i = 0; i < memberSlots.length; i++) memberSlots[i] = slots.get(i);
+        this.memberSlots = memberSlots;
     }
 
     @ExportMessage
@@ -143,6 +150,10 @@ public final class MezzeDebugScope implements TruffleObject {
         throw UnknownIdentifierException.create(member);
     }
 
+    // Behind a boundary: a debugger's write is never hot, and `Number.longValue()`
+    // on an unknown Number is a megamorphic call the native `mez` refuses to
+    // runtime-compile (reachable through NodeLibrary from partially-evaluated code).
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     private void writeSlot(int slot, Object value) {
         if (bdsl) {
             bytecodeNode.setLocalValue(bci, frame, slot, value);

@@ -8,6 +8,20 @@ import com.mezze.language.typechecker.module.ModuleError
 import com.mezze.language.typechecker.solving.ConstraintSolver
 
 object ErrorFormatter {
+    /**
+     * A warning, in the same shape as an error: `warning[W0501]: …`, where it
+     * is, and the line. Without this the CLI only ever counted warnings.
+     */
+    fun formatWarning(warning: TypeChecker.TypeCheckWarning, sourceCode: String? = null): String = buildString {
+        val code = warning.code?.let { "[${it.display()}]" } ?: ""
+        appendLine("warning$code: ${warning.message}")
+        val loc = warning.loc
+        if (loc != null) {
+            appendLine("  --> ${loc.file.ifEmpty { "<input>" }}:${loc.startLine}:${loc.startCol}")
+            if (sourceCode != null) append(SourceContext.formatCodeSnippet(sourceCode, loc))
+        }
+    }.trim()
+
         fun format(
         error: TypeChecker.TypeCheckError,
         sourceCode: String? = null,
