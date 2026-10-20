@@ -513,4 +513,150 @@ class FileWriteModeTest {
         """.trimIndent()
         assertEquals("True-False", eval(code))
     }
+    // ==================== Backend divergences ====================
+
+    /**
+     * Concurrent appends must not lose a record.
+     *
+     * `O_APPEND` on a real file makes each write atomic with respect to the
+     * end, so two appenders both keep their bytes. memfs did this as a
+     * read-modify-write — both readers saw the same old array and whichever
+     * assigned last erased the other. That is a divergence in the WORSE
+     * direction: the program is correct on LocalFileSystem and silently loses
+     * data in its own tests.
+     *
+     * Eight tasks x 200 appends of four bytes each: a correct backend ends at
+     * 6400, and a lost update shows up as a short file. The SCALE is the
+     * point — at one append per task the window between a read and a write
+     * is almost never hit, and the test passed with the bug present. (`ConcurrentHashMap.compute` is
+     * what makes this hold — it is atomic per key, the same granularity
+     * O_APPEND gives.)
+     */
+    @Test
+    fun `MemoryFileSystem concurrent appends keep every record`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrAppend, write_text, read_text }
+            use std::effects::async::{ Async, LoomAsync, await }
+            use std::collections::{ bytes, iter, seq }
+            use std::str
+            perform MemoryFileSystem in perform LoomAsync in do
+              let _ = write_text { path = "/log", text = "" }
+              let ps = seq::map {
+                xs = seq::range { start = 0, end = 8 },
+                f = { x } -> Async.spawn { f = { } -> seq::for_each {
+                  xs = seq::range { start = 0, end = 200 },
+                  f = { x } -> FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "abcd" }, mode = CreateOrAppend }
+                } }
+              }
+              let _ = seq::for_each { xs = ps, f = { x } -> do
+                let _ = await { p = x }
+                {}
+              }
+              match read_text { path = "/log" } is
+                Ok { val = t } -> str::size { s = t }
+                Err { error = _ } -> 0 - 1
+        """.trimIndent()
+        assertEquals(6400L, eval(code))
+    }
+
+    /**
+     * memfs says NO to `require_atomic`, rather than pretending.
+     *
+     * Its move is `put(dest)` then `remove(src)` on a ConcurrentHashMap, and
+     * between those the entry is visible at BOTH paths — observable, because
+     * `Async` tasks are real threads. Making it true would need a lock taken
+     * by every op that reads a path, which the common case should not pay for.
+     * So it declines, which is the same honesty the capability split exists
+     * for: a caller is never handed a guarantee that does not hold.
+     */
+    @Test
+    fun `MemoryFileSystem move_file declines require_atomic instead of faking it`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text }
+            perform MemoryFileSystem in do
+              let _ = write_text { path = "/a", text = "payload" }
+              match FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = True } is
+                Ok { val = _ } -> "claimed-atomic"
+                Err { error = FsNotSupported { path = _, operation = _ } } -> "declined"
+                Err { error = _ } -> "other-error"
+        """.trimIndent()
+        assertEquals("declined", eval(code))
+    }
+
+    /** …and the non-atomic default still works, which is what most callers want. */
+    @Test
+    fun `MemoryFileSystem move_file without require_atomic still moves`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, read_text }
+            perform MemoryFileSystem in do
+              let _ = write_text { path = "/a", text = "payload" }
+              let _ = FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = False }
+              match read_text { path = "/b" } is
+                Ok { val } -> val
+                Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("payload", eval(code))
+    }
+
+    /**
+     * `stat` must follow a symlink CHAIN, not one hop. NIO resolves
+     * link -> link -> file, so stopping after one would report NotFound on
+     * memfs for a path LocalFileSystem reports as a File. Asserted of BOTH
+     * backends, which is the only way this class of divergence gets caught.
+     */
+    @Test
+    fun `MemoryFileSystem stat follows a chain of symlinks`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, write_text }
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
+              let _ = write_text { path = "/real", text = "12345" }
+              let _ = FileSymlinks.create_symlink { link = "/one", target = "/real" }
+              let _ = FileSymlinks.create_symlink { link = "/two", target = "/one" }
+              let _ = FileSymlinks.create_symlink { link = "/three", target = "/two" }
+              match FileSystem.stat { path = "/three", follow_symlinks = True } is
+                Ok { val = s } -> s.size
+                Err { error = _ } -> 0 - 1
+        """.trimIndent()
+        assertEquals(5L, eval(code))
+    }
+
+    @Test
+    fun `LocalFileSystem stat follows a chain of symlinks`(@TempDir tmp: Path) {
+        val real = tmp.resolve("real").toString()
+        val one = tmp.resolve("one").toString()
+        val two = tmp.resolve("two").toString()
+        val three = tmp.resolve("three").toString()
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalFileSystem, LocalFileSymlinks, write_text }
+            perform LocalFileSystem in perform LocalFileSymlinks in do
+              let _ = write_text { path = "$real", text = "12345" }
+              let _ = FileSymlinks.create_symlink { link = "$one", target = "$real" }
+              let _ = FileSymlinks.create_symlink { link = "$two", target = "$one" }
+              let _ = FileSymlinks.create_symlink { link = "$three", target = "$two" }
+              match FileSystem.stat { path = "$three", follow_symlinks = True } is
+                Ok { val = s } -> s.size
+                Err { error = _ } -> 0 - 1
+        """.trimIndent()
+        assertEquals(5L, eval(code))
+    }
+
+    /**
+     * A symlink CYCLE is legal to create and must not hang. NIO raises
+     * FileSystemLoopException; memfs reports the same shape of IO error at a
+     * hop limit rather than looping for ever.
+     */
+    @Test
+    fun `MemoryFileSystem stat on a symlink cycle reports an error, not a hang`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
+            perform MemoryFileSystem in perform MemoryFileSymlinks in do
+              let _ = FileSymlinks.create_symlink { link = "/a", target = "/b" }
+              let _ = FileSymlinks.create_symlink { link = "/b", target = "/a" }
+              match FileSystem.stat { path = "/a", follow_symlinks = True } is
+                Ok { val = _ } -> "unexpectedly-ok"
+                Err { error = FsIOError { path = _, message = _ } } -> "loop-reported"
+                Err { error = _ } -> "other-error"
+        """.trimIndent()
+        assertEquals("loop-reported", eval(code))
+    }
 }

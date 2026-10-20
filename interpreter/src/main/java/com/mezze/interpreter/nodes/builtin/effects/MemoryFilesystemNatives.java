@@ -240,21 +240,37 @@ public final class MemoryFilesystemNatives {
         }
 
         if ("CreateOrAppend".equals(mode)) {
-            Entry existing = files().get(path);
-            if (existing != null) {
-                byte[] add = bytes.getData();
+            // `compute`, not get-then-mutate. O_APPEND on a real file makes
+            // each write atomic with respect to the end, so two concurrent
+            // appenders both keep their bytes. A read-modify-write here would
+            // not: both read the same old array, and whichever assigned last
+            // would erase the other's record. That is a backend DIVERGENCE in
+            // the worse direction — the program is correct on LocalFileSystem
+            // and silently loses data in its own tests.
+            //
+            // ConcurrentHashMap.compute is atomic per key, which is exactly
+            // the granularity O_APPEND gives.
+            byte[] add = bytes.getData();
+            boolean[] created = { false };
+            files().compute(path, (k, existing) -> {
+                if (existing == null) {
+                    created[0] = true;
+                    return new Entry(add.clone());
+                }
                 byte[] grown = new byte[existing.bytes.length + add.length];
                 System.arraycopy(existing.bytes, 0, grown, 0, existing.bytes.length);
                 System.arraycopy(add, 0, grown, existing.bytes.length, add.length);
                 existing.bytes = grown;
                 existing.modifiedMs = nowMs().get() > 0 ? nowMs().get() : System.currentTimeMillis();
+                return existing;
+            });
+            if (created[0]) {
+                // Append to a missing file creates it, like O_APPEND|O_CREAT.
+                directories().get(parent).add(basenameOf(path));
+                notifyWatchers(path, "Created");
+            } else {
                 notifyWatchers(path, "Modified");
-                return ok(MezzeRecord.empty());
             }
-            // Append to a missing file creates it, like O_APPEND|O_CREAT.
-            files().put(path, new Entry(bytes.getData()));
-            directories().get(parent).add(basenameOf(path));
-            notifyWatchers(path, "Created");
             return ok(MezzeRecord.empty());
         }
 
@@ -285,7 +301,21 @@ public final class MemoryFilesystemNatives {
         Entry direct = files().get(path);
         if (direct != null && direct.symlinkTarget != null) {
             if (!follow) return ok(fileStatRecord("Other", 0L, direct.modifiedMs));
-            path = normalize(direct.symlinkTarget);
+            // Follow the whole CHAIN, not one hop: NIO resolves link -> link
+            // -> file, so stopping after one would report NotFound here for a
+            // path LocalFileSystem reports as a File. Bounded, because a
+            // symlink cycle is legal to create and must not hang — NIO raises
+            // FileSystemLoopException at its own limit, and this reports the
+            // same shape of IO error.
+            int hops = 0;
+            Entry link = direct;
+            while (link != null && link.symlinkTarget != null) {
+                if (++hops > 64) {
+                    return errIO(path, "Too many levels of symbolic links");
+                }
+                path = normalize(link.symlinkTarget);
+                link = files().get(path);
+            }
         }
         if (isDir(path)) {
             return ok(fileStatRecord("Directory", 0L, 0L));
@@ -422,12 +452,22 @@ public final class MemoryFilesystemNatives {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
         boolean replaceExisting = getBool(args, "replace_existing");
-        // `require_atomic` is read and deliberately unused: a move here is
-        // two map operations on one context's state, with no window a
-        // reader of this filesystem can observe, so the guarantee always
-        // holds and refusing would be a lie in the other direction. Read
-        // anyway, so a caller that passes it gets the same signature.
+        // A move here is `put(dest)` then `remove(src)` on a
+        // ConcurrentHashMap, and between those two calls the entry is
+        // visible at BOTH paths. So this is NOT atomic, and a caller that
+        // asked for atomicity is told so rather than handed a guarantee
+        // that does not hold — the same honesty the whole capability split
+        // exists for. (An earlier comment here claimed the window was
+        // unobservable. It is observable: `Async` tasks are real threads.)
+        //
+        // Making it true would need a lock taken by every op that reads a
+        // path, not just by move, which is a cost the common case should not
+        // pay for a guarantee almost nothing asks for. If a caller ever
+        // needs it, a per-State ReadWriteLock is the shape.
         boolean requireAtomic = getBool(args, "require_atomic");
+        if (requireAtomic) {
+            return errNotSupported(src, "move_file (atomic; the in-memory backend is not)");
+        }
         boolean destExisted = isFile(dest) || isDir(dest);
         if (destExisted && !replaceExisting) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
