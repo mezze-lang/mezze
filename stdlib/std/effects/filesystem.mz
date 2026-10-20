@@ -58,6 +58,33 @@ pub type FsError = |
   FsInvalidUtf8 { path: Str, message: Str },
 |
 
+## How `write_bytes` treats a path that already exists.
+##
+## - `CreateOrTruncate` — create it, or replace its contents. The default
+##   anyone means by "write a file".
+## - `CreateNew` — create it, and FAIL with `FsAlreadyExists` if it is
+##   already there. This is the ATOMIC LOCKFILE primitive: the check and
+##   the create are one syscall, so two processes racing for the same
+##   lockfile cannot both win. Nothing else in the effect can express
+##   that — `stat` then `write` has a window between them.
+## - `CreateOrAppend` — create it if missing, and add to the end
+##   otherwise. Previously only reachable through `FileStreaming`, which
+##   meant a program that just wanted to add a log line had to disclose
+##   random-access file I/O.
+##
+## A backend that cannot do `CreateNew` atomically returns
+## `FsNotSupported` for THAT ARM ONLY, rather than lying about it or
+## declining the whole effect.
+##
+## `CreateOrAppend` and not `Append`, for two reasons. A constructor name
+## is unique across a module, and `OpenMode.Append` already has it — the
+## typechecker rejects the reuse outright. And the two are not the same
+## idea: `OpenMode.Append` positions a HANDLE at the end, while this is a
+## policy for a whole-file write that says what happens to the content
+## already there. Spelling all three as Create-or-what makes the one that
+## does NOT create stand out, which is the one with the sharp edge.
+pub type WriteMode = | CreateOrTruncate, CreateNew, CreateOrAppend |
+
 ## Opaque handle for streaming I/O. Backed by a native FileChannel
 ## (LocalFileSystem) or in-memory byte buffer (MemoryFileSystem). Users don't inspect
 ## it — they pass it to read_chunk / write_chunk / close, or use the
@@ -65,34 +92,57 @@ pub type FsError = |
 pub newtype FileHandle = __NativeFileHandle
 
 ## ==================================================================
-## Effect — 13 primitive ops in 4 groups.
+## Effect — 9 primitive ops in 4 groups.
 ## ==================================================================
 effect FileSystem where {
   ## Whole-file — each maps to an optimized native call
   read_bytes: { path: Str } -> Result Bytes FsError <FileSystem>,
-  write_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem>,
-  ## Metadata — stat returns NotFound as a FileKind, not an error
-  stat: { path: Str } -> Result FileStat FsError <FileSystem>,
+  ## `mode` is explicit rather than defaulted because the three answers to
+  ## "the file is already there" are genuinely different operations, and
+  ## the dangerous one is the one people get by accident.
+  write_bytes: { path: Str, bytes: Bytes, mode: WriteMode } -> Result {} FsError <FileSystem>,
+  ## Metadata — stat returns NotFound as a FileKind, not an error.
+  ##
+  ## `follow_symlinks = True` reports on what the link POINTS AT (NIO's
+  ## default); `False` reports on the link itself, which is the only way
+  ## to see a dangling one — following it reports NotFound and a caller
+  ## cannot tell that from "no such path".
+  stat: { path: Str, follow_symlinks: Bool } -> Result FileStat FsError <FileSystem>,
   list: { path: Str } -> Result [Str] FsError <FileSystem>,
   list_with_stat: { path: Str } -> Result [DirEntry] FsError <FileSystem>,
-  ## Structural mutation — each is a kernel syscall
+  ## Structural mutation — each is a kernel syscall.
+  ##
+  ## `delete` takes no `follow_symlinks`: POSIX `unlink` and NIO's
+  ## `Files.delete` BOTH always remove the link and never the target, and
+  ## there is no option to change that. A flag here could only be
+  ## implemented as "resolve, then delete", which is not what any
+  ## filesystem means by deleting a path, so it would be a Mezze
+  ## invention wearing a POSIX name.
   delete: { path: Str } -> Result {} FsError <FileSystem>,
   create_directory: { path: Str } -> Result {} FsError <FileSystem>,
-  copy_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>,
-  move_file: { src: Str, dest: Str } -> Result {} FsError <FileSystem>
+  ## `replace_existing` overwrites the destination instead of failing with
+  ## `FsAlreadyExists`; `preserve_attrs` carries mode and timestamps over;
+  ## `follow_symlinks = False` copies the LINK rather than its target.
+  copy_file: { src: Str, dest: Str, replace_existing: Bool, preserve_attrs: Bool, follow_symlinks: Bool } -> Result {} FsError <FileSystem>,
+  ## `require_atomic` demands a rename that no reader can observe halfway,
+  ## and fails with `FsNotSupported` rather than silently degrading to
+  ## copy-then-delete — which is the whole reason to ask. It also takes no
+  ## `follow_symlinks`: `Files.move` has no such option, because a rename
+  ## moves the directory entry and there is no target to follow.
+  move_file: { src: Str, dest: Str, replace_existing: Bool, require_atomic: Bool } -> Result {} FsError <FileSystem>
 }
 
 ## Real filesystem via java.nio. Kernel fast paths for copy/move/stat.
 impl FileSystem for LocalFileSystem where {
   read_bytes = { path } -> __native_fs_read_bytes { path = path },
-  write_bytes = { path, bytes } -> __native_fs_write_bytes { path = path, bytes = bytes },
-  stat = { path } -> __native_fs_stat { path = path },
+  write_bytes = { path, bytes, mode } -> __native_fs_write_bytes { path = path, bytes = bytes, mode = mode },
+  stat = { path, follow_symlinks } -> __native_fs_stat { path = path, follow_symlinks = follow_symlinks },
   list = { path } -> __native_fs_list { path = path },
   list_with_stat = { path } -> __native_fs_list_with_stat { path = path },
   delete = { path } -> __native_fs_delete { path = path },
   create_directory = { path } -> __native_fs_create_directory { path = path },
-  copy_file = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
-  move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
+  copy_file = { src, dest, replace_existing, preserve_attrs, follow_symlinks } -> __native_fs_copy_file { src = src, dest = dest, replace_existing = replace_existing, preserve_attrs = preserve_attrs, follow_symlinks = follow_symlinks },
+  move_file = { src, dest, replace_existing, require_atomic } -> __native_fs_move_file { src = src, dest = dest, replace_existing = replace_existing, require_atomic = require_atomic },
 }
 
 ## In-memory filesystem for tests. ConcurrentHashMap-backed, and held
@@ -103,14 +153,14 @@ impl FileSystem for LocalFileSystem where {
 ## To empty one of these, `delete` the paths or end the program.
 impl FileSystem for MemoryFileSystem where {
   read_bytes = { path } -> __native_memfs_read_bytes { path = path },
-  write_bytes = { path, bytes } -> __native_memfs_write_bytes { path = path, bytes = bytes },
-  stat = { path } -> __native_memfs_stat { path = path },
+  write_bytes = { path, bytes, mode } -> __native_memfs_write_bytes { path = path, bytes = bytes, mode = mode },
+  stat = { path, follow_symlinks } -> __native_memfs_stat { path = path, follow_symlinks = follow_symlinks },
   list = { path } -> __native_memfs_list { path = path },
   list_with_stat = { path } -> __native_memfs_list_with_stat { path = path },
   delete = { path } -> __native_memfs_delete { path = path },
   create_directory = { path } -> __native_memfs_create_directory { path = path },
-  copy_file = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
-  move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
+  copy_file = { src, dest, replace_existing, preserve_attrs, follow_symlinks } -> __native_memfs_copy_file { src = src, dest = dest, replace_existing = replace_existing, preserve_attrs = preserve_attrs, follow_symlinks = follow_symlinks },
+  move_file = { src, dest, replace_existing, require_atomic } -> __native_memfs_move_file { src = src, dest = dest, replace_existing = replace_existing, require_atomic = require_atomic },
 }
 
 ## ==================================================================
@@ -439,7 +489,7 @@ pub let read_text: { path: Str } -> Result Str FsError <FileSystem> = { path } -
 
 ## Write a Str as UTF-8. Create-or-replace.
 pub let write_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
-  FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text } }
+  FileSystem.write_bytes { path = path, bytes = bytes::from_str { s = text }, mode = CreateOrTruncate }
 
 ## Read text with a default on error. Common for config loading.
 pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def } ->
@@ -449,7 +499,7 @@ pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def 
 
 
 ## ---------- Metadata queries derived from stat ----------
-pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path } is
+pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path, follow_symlinks = True } is
   Ok { val = s } -> match s.kind is
     NotFound -> Ok { val = False }
     _ -> Ok { val = True }
@@ -457,7 +507,7 @@ pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> 
 
 
 pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
       File -> Ok { val = True }
       _ -> Ok { val = False }
@@ -465,7 +515,7 @@ pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
 
 
 pub let is_directory: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
       Directory -> Ok { val = True }
       _ -> Ok { val = False }
@@ -473,28 +523,46 @@ pub let is_directory: { path: Str } -> Result Bool FsError <FileSystem> = { path
 
 
 pub let file_size: { path: Str } -> Result Int FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> Ok { val = s.size }
     Err { error } -> Err { error = error }
 
 
-## ---------- Append via streaming ----------
-## Append bytes to a file. Uses open(Append) + write_chunk + close.
-## On backends where open(Append) sets O_APPEND this is one syscall
-## for the write plus open/close overhead — same perf as a dedicated
-## append primitive would give.
-pub let append_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileStreaming> = { path, bytes } ->
-  match FileStreaming.open { path = path, mode = Append } is
-    Ok { val = h } -> do
-      let write_result = FileStreaming.write_chunk { handle = h, bytes = bytes }
-      let _ = FileStreaming.close { handle = h }
-      write_result
-    Err { error } -> Err { error = error }
+## ---------- Append ----------
+## Append bytes to a file, creating it if missing.
+##
+## This used to open a handle, write a chunk and close it, which meant a
+## program that wanted to add a log line had to disclose `<FileStreaming>`
+## — random-access file I/O, the one capability an object store cannot
+## offer — for an operation that needs none of it. `WriteMode.Append` is
+## the primitive, so this now needs only `<FileSystem>` and works on every
+## backend.
+pub let append_bytes: { path: Str, bytes: Bytes } -> Result {} FsError <FileSystem> = { path, bytes } ->
+  FileSystem.write_bytes { path = path, bytes = bytes, mode = CreateOrAppend }
 
 
 ## Append UTF-8 text.
-pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileStreaming> = { path, text } ->
+pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
   append_bytes { path = path, bytes = bytes::from_str { s = text } }
+
+
+## ---------- The atomic lockfile primitive ----------
+## Create a file ONLY if it does not exist, and say which happened.
+##
+## `Ok { val = True }` means this caller created it; `Ok { val = False }`
+## means somebody else already had. The check and the create are one
+## syscall, so of two processes racing exactly one gets `True` — which is
+## what makes this usable as a lock, and what `exists`-then-`write_bytes`
+## can never be, because another process fits between them.
+##
+## A backend that cannot do it atomically returns `FsNotSupported` rather
+## than guessing, so a caller is never silently handed a lock that does
+## not exclude.
+pub let create_exclusive: { path: Str, bytes: Bytes } -> Result Bool FsError <FileSystem> = { path, bytes } ->
+  match FileSystem.write_bytes { path = path, bytes = bytes, mode = CreateNew } is
+    Ok { val = _ } -> Ok { val = True }
+    Err { error = FsAlreadyExists { path = _ } } -> Ok { val = False }
+    Err { error } -> Err { error = error }
 
 ## ---------- Directory + write conveniences ----------
 ## Create directory + all missing ancestors.
@@ -510,7 +578,7 @@ pub let create_directories: { path: Str } -> Result {} FsError <FileSystem> = { 
 
 ## Ensure path is an existing directory. Create if absent.
 pub let ensure_directory: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
       Directory -> Ok { val = {} }
       NotFound -> create_directories { path = path }
@@ -535,7 +603,7 @@ pub let write_text_mkdirs: { path: Str, text: Str } -> Result {} FsError <FileSy
 ## short-circuits, and the parent directory is NOT deleted if any
 ## child failed. Matches Rust's `std::fs::remove_dir_all` semantics.
 pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
-  match FileSystem.stat { path = path } is
+  match FileSystem.stat { path = path, follow_symlinks = True } is
     Err { error } -> Err { error = error }
     Ok { val = s } -> match s.kind is
       NotFound -> Err { error = FsNotFound { path = path } }

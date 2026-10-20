@@ -35,14 +35,14 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports a Created event for a new file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/new", bytes = bytes::from_str { s = "x" } }
+                let _ = FileSystem.write_bytes { path = "/d/new", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Created { path = p } } -> p
@@ -56,15 +56,15 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports Modified when an existing file is rewritten`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" } }
+              let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "b" } }
+                let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "b" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Modified { path = _ } } -> "modified"
@@ -79,11 +79,11 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports Deleted`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" } }
+              let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
@@ -102,14 +102,14 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem a second poll returns nothing new`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } }
+                let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 let _ = FileWatch.poll { handle = h, timeout_ms = 0 }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
@@ -122,7 +122,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem non-recursive watch ignores a nested write`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -130,7 +130,7 @@ class FileWatchEffectTest {
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" } }
+                let _ = FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -141,7 +141,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem recursive watch sees a nested write`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -149,7 +149,7 @@ class FileWatchEffectTest {
               match FileWatch.watch { path = "/d", recursive = True } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" } }
+                let _ = FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -160,7 +160,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem watching a missing directory reports NotFound`() {
         val code = """
-            use std::effects::filesystem::{ FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             perform MemoryFileSystem in perform MemoryFileWatch in
               match FileWatch.watch { path = "/nope", recursive = False } is
                 Ok { val = _ } -> "unexpectedly-ok"
@@ -173,7 +173,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem unwatch then poll reports the handle is gone`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
@@ -199,7 +199,7 @@ class FileWatchEffectTest {
     @Test
     fun `LocalFileSystem watch registers polls and unwatches`(@TempDir tmp: Path) {
         val code = """
-            use std::effects::filesystem::{ FileWatch, LocalFileWatch }
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch, CreateOrTruncate }
             perform LocalFileWatch in do
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Err { error = _ } -> "watch-failed"
@@ -216,10 +216,10 @@ class FileWatchEffectTest {
     fun `LocalFileSystem watching a file rather than a directory is an error`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, LocalFileSystem, LocalFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, LocalFileSystem, LocalFileWatch, CreateOrTruncate }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileWatch in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" } }
+              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "$path", recursive = False } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = FsNotADirectory { path = _ } } -> "not-a-directory"
@@ -231,7 +231,7 @@ class FileWatchEffectTest {
     @Test
     fun `LocalFileSystem poll after unwatch reports a closed handle`(@TempDir tmp: Path) {
         val code = """
-            use std::effects::filesystem::{ FileWatch, LocalFileWatch }
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch, CreateOrTruncate }
             perform LocalFileWatch in do
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Err { error = _ } -> "watch-failed"
@@ -267,7 +267,7 @@ class FileWatchEffectTest {
     fun `LocalFileSystem a watch leaked by one program is closed when its context goes`(@TempDir tmp: Path) {
         val baseline = watchThreads()
         val code = """
-            use std::effects::filesystem::{ FileWatch, LocalFileWatch }
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch, CreateOrTruncate }
             perform LocalFileWatch in
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Ok { val = _ } -> "watching"
@@ -312,14 +312,14 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports Overflow once the queue passes its cap`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } } }
+                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Overflow } -> "overflow"
@@ -339,14 +339,14 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem an overflowed poll returns exactly one event`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } } }
+                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -361,16 +361,16 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem recovers after an overflow`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" } } }
+                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 let _ = FileWatch.poll { handle = h, timeout_ms = 0 }
-                let _ = FileSystem.write_bytes { path = "/d/after", bytes = bytes::from_str { s = "y" } }
+                let _ = FileSystem.write_bytes { path = "/d/after", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Created { path = p } } -> p

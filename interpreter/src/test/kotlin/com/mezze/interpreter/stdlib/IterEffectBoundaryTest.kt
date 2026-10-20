@@ -48,7 +48,7 @@ class IterEffectBoundaryTest {
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
     private val head = """
-        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists }
+        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, CreateOrTruncate }
         use std::collections::{ bytes, iter, seq }
         use std::int
     """.trimIndent()
@@ -69,7 +69,7 @@ class IterEffectBoundaryTest {
               let _ = iter::for_each {
                 it = iter::range { start = 0, end = 5 },
                 f = { x } -> do
-                  let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" } }
+                  let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                   {}
               }
               match FileSystem.list { path = "/d" } is
@@ -90,7 +90,7 @@ class IterEffectBoundaryTest {
                 it = iter::range { start = 1, end = 5 },
                 init = 0,
                 f = { acc, x } -> do
-                  let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" } }
+                  let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                   acc + x
               }
               total
@@ -115,7 +115,7 @@ class IterEffectBoundaryTest {
                 it = iter::map {
                   it = iter::range { start = 1, end = 4 },
                   f = { x } -> do
-                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" } }
+                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                     x * 10
                 }
               }
@@ -135,8 +135,8 @@ class IterEffectBoundaryTest {
             $head
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/keep" }
-              let _ = FileSystem.write_bytes { path = "/keep/2", bytes = bytes::from_str { s = "y" } }
-              let _ = FileSystem.write_bytes { path = "/keep/4", bytes = bytes::from_str { s = "y" } }
+              let _ = FileSystem.write_bytes { path = "/keep/2", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
+              let _ = FileSystem.write_bytes { path = "/keep/4", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
               iter::count {
                 it = iter::filter {
                   it = iter::range { start = 0, end = 6 },
@@ -156,7 +156,7 @@ class IterEffectBoundaryTest {
             $head
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/keep" }
-              let _ = FileSystem.write_bytes { path = "/keep/3", bytes = bytes::from_str { s = "y" } }
+              let _ = FileSystem.write_bytes { path = "/keep/3", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
               iter::any {
                 it = iter::range { start = 0, end = 6 },
                 p = { x } -> match exists { path = "/keep/$(int::to_str { n = x })" } is
@@ -202,9 +202,9 @@ class IterEffectBoundaryTest {
             $head
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/pages" }
-              let _ = FileSystem.write_bytes { path = "/pages/0", bytes = bytes::from_str { s = "a" } }
-              let _ = FileSystem.write_bytes { path = "/pages/1", bytes = bytes::from_str { s = "bb" } }
-              let _ = FileSystem.write_bytes { path = "/pages/2", bytes = bytes::from_str { s = "ccc" } }
+              let _ = FileSystem.write_bytes { path = "/pages/0", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
+              let _ = FileSystem.write_bytes { path = "/pages/1", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
+              let _ = FileSystem.write_bytes { path = "/pages/2", bytes = bytes::from_str { s = "ccc" }, mode = CreateOrTruncate }
               iter::sum {
                 it = iter::unfold {
                   state = 0,
@@ -229,10 +229,10 @@ class IterEffectBoundaryTest {
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/in" }
               let _ = FileSystem.create_directory { path = "/out" }
-              let _ = FileSystem.write_bytes { path = "/in/0", bytes = bytes::from_str { s = "a" } }
-              let _ = FileSystem.write_bytes { path = "/in/1", bytes = bytes::from_str { s = "bb" } }
-              let _ = FileSystem.write_bytes { path = "/in/2", bytes = bytes::from_str { s = "ccc" } }
-              let _ = FileSystem.write_bytes { path = "/in/3", bytes = bytes::from_str { s = "dddd" } }
+              let _ = FileSystem.write_bytes { path = "/in/0", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
+              let _ = FileSystem.write_bytes { path = "/in/1", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
+              let _ = FileSystem.write_bytes { path = "/in/2", bytes = bytes::from_str { s = "ccc" }, mode = CreateOrTruncate }
+              let _ = FileSystem.write_bytes { path = "/in/3", bytes = bytes::from_str { s = "dddd" }, mode = CreateOrTruncate }
               let _ = iter::for_each {
                 it = iter::filter {
                   it = iter::map {
@@ -247,7 +247,7 @@ class IterEffectBoundaryTest {
                   p = { x } -> x.n > 4
                 },
                 f = { x } -> do
-                  let _ = FileSystem.write_bytes { path = "/out/$(int::to_str { n = x.i })", bytes = bytes::from_str { s = "k" } }
+                  let _ = FileSystem.write_bytes { path = "/out/$(int::to_str { n = x.i })", bytes = bytes::from_str { s = "k" }, mode = CreateOrTruncate }
                   {}
               }
               match FileSystem.list { path = "/out" } is
@@ -269,7 +269,7 @@ class IterEffectBoundaryTest {
                 it = iter::flat_map {
                   it = iter::range { start = 1, end = 4 },
                   f = { x } -> do
-                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" } }
+                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                     iter::range { start = 0, end = x }
                 }
               }
@@ -297,7 +297,7 @@ class IterEffectBoundaryTest {
         val code = """
             use std::collections::iter
             use std::int
-            use std::effects::filesystem::{ MemoryFileSystem }
+            use std::effects::filesystem::{ MemoryFileSystem, CreateOrTruncate }
             use std::effects::exception::{ Exception, ExceptionToResult }
             perform MemoryFileSystem in do
               let r = perform ExceptionToResult in Ok { val = iter::sum {
@@ -333,7 +333,7 @@ class IterEffectBoundaryTest {
                 let _ = iter::for_each {
                   it = iter::range { start = 0, end = 10 },
                   f = { x } -> if x == 4 then Exception.throw { error = "stop" } else do
-                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" } }
+                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                     {}
                 }
                 Some { val = {} }

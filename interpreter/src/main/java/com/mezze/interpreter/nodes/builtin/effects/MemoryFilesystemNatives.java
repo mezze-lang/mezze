@@ -207,13 +207,57 @@ public final class MemoryFilesystemNatives {
         return ok(new MezzeBytes(e.bytes));
     }
 
+    /**
+     * Whole-file write under one of three modes.
+     *
+     * `CreateNew` must be ATOMIC against a concurrent writer, because that
+     * is the only property it is asked for — it is the lockfile primitive.
+     * `putIfAbsent` gives exactly that: of two threads racing for one
+     * path, the map decides, and the loser sees the winner's entry rather
+     * than overwriting it. A `containsKey` check followed by a `put` would
+     * read as correct and race, which is the bug this mode exists to make
+     * impossible.
+     *
+     * `Append` keeps the existing entry's identity and grows its bytes,
+     * rather than replacing it, so a handle or a watcher holding the entry
+     * sees the appended data.
+     */
     @TruffleBoundary
     public static Object writeBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
         MezzeBytes bytes = getBytes(args, "bytes");
+        String mode = getVariantTag(args, "mode");
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
         if (isDir(path)) return errIO(path, "Is a directory");
+
+        if ("CreateNew".equals(mode)) {
+            Entry prior = files().putIfAbsent(path, new Entry(bytes.getData()));
+            if (prior != null) return errAlreadyExists(path);
+            directories().get(parent).add(basenameOf(path));
+            notifyWatchers(path, "Created");
+            return ok(MezzeRecord.empty());
+        }
+
+        if ("CreateOrAppend".equals(mode)) {
+            Entry existing = files().get(path);
+            if (existing != null) {
+                byte[] add = bytes.getData();
+                byte[] grown = new byte[existing.bytes.length + add.length];
+                System.arraycopy(existing.bytes, 0, grown, 0, existing.bytes.length);
+                System.arraycopy(add, 0, grown, existing.bytes.length, add.length);
+                existing.bytes = grown;
+                existing.modifiedMs = nowMs().get() > 0 ? nowMs().get() : System.currentTimeMillis();
+                notifyWatchers(path, "Modified");
+                return ok(MezzeRecord.empty());
+            }
+            // Append to a missing file creates it, like O_APPEND|O_CREAT.
+            files().put(path, new Entry(bytes.getData()));
+            directories().get(parent).add(basenameOf(path));
+            notifyWatchers(path, "Created");
+            return ok(MezzeRecord.empty());
+        }
+
         boolean existed = isFile(path);
         files().put(path, new Entry(bytes.getData()));
         directories().get(parent).add(basenameOf(path));
@@ -223,9 +267,26 @@ public final class MemoryFilesystemNatives {
 
     // ==================== Metadata ====================
 
+    /**
+     * `follow_symlinks = False` reports on the LINK rather than its target,
+     * which is the only way to see a dangling one.
+     *
+     * A link inspected without following reports `Other`, matching
+     * LocalFileSystem: NOFOLLOW_LINKS attributes are neither a regular
+     * file nor a directory there either. Following resolves one hop and
+     * reports on the target, or `NotFound` if the target is missing —
+     * which is exactly what makes the unfollowed form necessary, since a
+     * caller otherwise cannot tell a broken link from no link at all.
+     */
     @TruffleBoundary
     public static Object stat(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
+        boolean follow = getBool(args, "follow_symlinks");
+        Entry direct = files().get(path);
+        if (direct != null && direct.symlinkTarget != null) {
+            if (!follow) return ok(fileStatRecord("Other", 0L, direct.modifiedMs));
+            path = normalize(direct.symlinkTarget);
+        }
         if (isDir(path)) {
             return ok(fileStatRecord("Directory", 0L, 0L));
         }
@@ -313,14 +374,41 @@ public final class MemoryFilesystemNatives {
         if (srcEntry == null) {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
-        if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
+        boolean replaceExisting = getBool(args, "replace_existing");
+        boolean preserveAttrs = getBool(args, "preserve_attrs");
+        boolean follow = getBool(args, "follow_symlinks");
+        if (srcEntry.symlinkTarget != null && !follow) {
+            // Copy the LINK: a new entry pointing at the same raw target,
+            // not the bytes it resolves to.
+            if ((isFile(dest) || isDir(dest)) && !replaceExisting) return errAlreadyExists(dest);
+            String linkParent = parentOf(dest);
+            if (!isDir(linkParent)) return errNotFound(linkParent);
+            Entry link = new Entry(new byte[0]);
+            link.symlinkTarget = srcEntry.symlinkTarget;
+            files().put(dest, link);
+            directories().get(linkParent).add(basenameOf(dest));
+            notifyWatchers(dest, "Created");
+            return ok(MezzeRecord.empty());
+        }
+        boolean destExisted = isFile(dest) || isDir(dest);
+        if (destExisted && !replaceExisting) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
         if (!isDir(destParent)) return errNotFound(destParent);
         // MemoryFileSystem is a byte-array copy — no kernel path, but still
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
-        files().put(dest, new Entry(srcEntry.bytes.clone()));
-        notifyWatchers(dest, "Created");
+        Entry copy = new Entry(srcEntry.bytes.clone());
+        if (preserveAttrs) {
+            // Mode, owner and mtime, so a copy --preserve round-trips. The
+            // mode array is cloned: sharing it would make a later chmod of
+            // one file silently change the other.
+            copy.mode = srcEntry.mode.clone();
+            copy.ownerUser = srcEntry.ownerUser;
+            copy.ownerGroup = srcEntry.ownerGroup;
+            copy.modifiedMs = srcEntry.modifiedMs;
+        }
+        files().put(dest, copy);
+        notifyWatchers(dest, destExisted ? "Modified" : "Created");
         directories().get(destParent).add(basenameOf(dest));
         return ok(MezzeRecord.empty());
     }
@@ -333,12 +421,20 @@ public final class MemoryFilesystemNatives {
         if (srcEntry == null) {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
-        if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
+        boolean replaceExisting = getBool(args, "replace_existing");
+        // `require_atomic` is read and deliberately unused: a move here is
+        // two map operations on one context's state, with no window a
+        // reader of this filesystem can observe, so the guarantee always
+        // holds and refusing would be a lie in the other direction. Read
+        // anyway, so a caller that passes it gets the same signature.
+        boolean requireAtomic = getBool(args, "require_atomic");
+        boolean destExisted = isFile(dest) || isDir(dest);
+        if (destExisted && !replaceExisting) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
         if (!isDir(destParent)) return errNotFound(destParent);
         files().put(dest, srcEntry);
         files().remove(src);
-        notifyWatchers(dest, "Created");
+        notifyWatchers(dest, destExisted ? "Modified" : "Created");
         notifyWatchers(src, "Deleted");
         String srcParent = parentOf(src);
         directories().get(srcParent).remove(basenameOf(src));

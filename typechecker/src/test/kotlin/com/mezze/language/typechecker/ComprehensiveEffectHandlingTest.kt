@@ -108,12 +108,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let partiallyHandled = perform Console in myFunc
@@ -129,12 +129,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let step1 = perform Console in myFunc
@@ -198,12 +198,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let partiallyHandled = perform Console in myFunc
@@ -220,12 +220,12 @@ class ComprehensiveEffectHandlingTest {
         assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let getResult = {} -> do
@@ -246,12 +246,12 @@ class ComprehensiveEffectHandlingTest {
         assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let getResult = {} -> do
@@ -275,12 +275,12 @@ class ComprehensiveEffectHandlingTest {
         val result = parseAndTypeCheck(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let called = myFunc {}
@@ -323,12 +323,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             # NEW MODEL: the perform body must lexically perform the effect; a bare
@@ -345,12 +345,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckFails(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let called = myFunc {}
@@ -367,12 +367,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckFails(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let called = myFunc {}
@@ -390,12 +390,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let partiallyHandled = perform Console in myFunc
@@ -414,12 +414,12 @@ class ComprehensiveEffectHandlingTest {
         assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             let getResult = {} -> perform LocalFileSystem in (perform Console in (myFunc {}))
@@ -485,12 +485,12 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 "Done"
 
             # NEW MODEL: inline the call so the perform body performs the effect

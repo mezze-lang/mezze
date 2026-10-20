@@ -393,12 +393,12 @@ class EffectfulCallAbilityTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
             use std::collections::bytes
 
             let getNumber: {} -> Int <FileSystem, Log> = {} -> do
                 println { msg = "Getting number" }
-                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" } }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_str { s = "data" }, mode = CreateOrTruncate }
                 42
 
             let result = getNumber {} + 10

@@ -153,13 +153,40 @@ public final class FilesystemNatives {
         }
     }
 
+    /**
+     * Whole-file write under one of three modes.
+     *
+     * Option sets rather than a flag, because the three really are
+     * different syscalls. CREATE_NEW makes the existence check and the
+     * create one atomic operation, which is what a lockfile needs and what
+     * nothing else in this effect can express.
+     *
+     * Append deliberately does NOT go through a channel. O_APPEND makes
+     * each write atomic with respect to the file's end, so concurrent
+     * appenders interleave whole records instead of corrupting one
+     * another — precisely what a log wants, and what a seek-then-write
+     * through FileStreaming would lose.
+     */
     @TruffleBoundary
     public static Object writeBytes(MezzeRecord args) {
         String path = getString(args, "path");
         MezzeBytes bytes = getBytes(args, "bytes");
+        String mode = getVariantTag(args, "mode");
+        StandardOpenOption[] options = switch (mode) {
+            case "CreateNew" -> new StandardOpenOption[] {
+                StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE };
+            case "CreateOrAppend" -> new StandardOpenOption[] {
+                StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE };
+            default -> new StandardOpenOption[] {
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE };
+        };
         try {
-            Files.write(Paths.get(path), bytes.getData());
+            Files.write(Paths.get(path), bytes.getData(), options);
             return ok(MezzeRecord.empty());
+        } catch (FileAlreadyExistsException e) {
+            // CreateNew lost the race, or the caller already had the file.
+            // This IS the answer rather than a failure — see create_exclusive.
+            return errAlreadyExists(path);
         } catch (NoSuchFileException e) {
             return errNotFound(path);
         } catch (AccessDeniedException e) {
@@ -175,12 +202,28 @@ public final class FilesystemNatives {
 
     // ==================== Metadata ====================
 
+    /**
+     * `follow_symlinks = False` adds NOFOLLOW_LINKS, reporting on the LINK
+     * rather than its target. That is the only way to see a DANGLING
+     * symlink: following one raises NoSuchFile, which this maps to the
+     * NotFound kind, and the caller cannot then tell a broken link from a
+     * path that was never there.
+     *
+     * A symlink inspected without following is neither File nor Directory,
+     * so it reports `Other`. `FileSymlinks.is_symlink` is the op that
+     * answers "is this a link"; duplicating that answer into FileKind
+     * would put it in two places that could disagree.
+     */
     @TruffleBoundary
     public static Object stat(MezzeRecord args) {
         String path = getString(args, "path");
+        boolean follow = getBool(args, "follow_symlinks");
         Path p = Paths.get(path);
         try {
-            BasicFileAttributes attrs = Files.readAttributes(p, BasicFileAttributes.class);
+            BasicFileAttributes attrs = follow
+                ? Files.readAttributes(p, BasicFileAttributes.class)
+                : Files.readAttributes(p, BasicFileAttributes.class,
+                                       java.nio.file.LinkOption.NOFOLLOW_LINKS);
             String kind = attrs.isDirectory() ? "Directory"
                         : attrs.isRegularFile() ? "File"
                         : "Other";
@@ -295,8 +338,19 @@ public final class FilesystemNatives {
     public static Object copyFile(MezzeRecord args) {
         String src = getString(args, "src");
         String dest = getString(args, "dest");
+        boolean replaceExisting = getBool(args, "replace_existing");
+        boolean preserveAttrs = getBool(args, "preserve_attrs");
+        boolean follow = getBool(args, "follow_symlinks");
+        List<java.nio.file.CopyOption> opts = new ArrayList<>(3);
+        if (replaceExisting) opts.add(StandardCopyOption.REPLACE_EXISTING);
+        if (preserveAttrs) opts.add(StandardCopyOption.COPY_ATTRIBUTES);
+        // NIO's copy follows by default, so NOFOLLOW is the opt-out: it
+        // copies the LINK, which is what a deploy staging a symlink tree
+        // wants, rather than fattening it into real files.
+        if (!follow) opts.add(java.nio.file.LinkOption.NOFOLLOW_LINKS);
         try {
-            Files.copy(Paths.get(src), Paths.get(dest));
+            Files.copy(Paths.get(src), Paths.get(dest),
+                       opts.toArray(new java.nio.file.CopyOption[0]));
             return ok(MezzeRecord.empty());
         } catch (NoSuchFileException e) {
             return errNotFound(src);
@@ -310,22 +364,44 @@ public final class FilesystemNatives {
     }
 
     /**
-     * Atomic move. On the same filesystem Linux uses rename(2) —
-     * atomic; observers never see a half-moved file. Derived
-     * copy+delete would break that guarantee.
+     * Move. On the same filesystem Linux uses rename(2) — atomic;
+     * observers never see a half-moved file. A derived copy+delete would
+     * break that guarantee, which is why this is a primitive.
+     *
+     * `require_atomic` is about the CROSS-FILESYSTEM case. This used to
+     * try ATOMIC_MOVE and silently fall back to a non-atomic move when the
+     * platform refused: fine for "put this file over there", and exactly
+     * wrong for publish-by-rename, where a reader seeing a partial file is
+     * the bug you chose rename to avoid. The caller now says which it
+     * needs, and asking for atomic and not getting it is `FsNotSupported`
+     * rather than a quiet downgrade.
      */
     @TruffleBoundary
     public static Object moveFile(MezzeRecord args) {
         String src = getString(args, "src");
         String dest = getString(args, "dest");
+        boolean replaceExisting = getBool(args, "replace_existing");
+        boolean requireAtomic = getBool(args, "require_atomic");
+        List<java.nio.file.CopyOption> opts = new ArrayList<>(2);
+        if (replaceExisting) opts.add(StandardCopyOption.REPLACE_EXISTING);
+        opts.add(StandardCopyOption.ATOMIC_MOVE);
         try {
-            Files.move(Paths.get(src), Paths.get(dest), StandardCopyOption.ATOMIC_MOVE);
+            Files.move(Paths.get(src), Paths.get(dest),
+                       opts.toArray(new java.nio.file.CopyOption[0]));
             return ok(MezzeRecord.empty());
         } catch (java.nio.file.AtomicMoveNotSupportedException e) {
-            // Cross-filesystem move — fall back to non-atomic.
+            if (requireAtomic) {
+                return errNotSupported(src, "move_file (atomic across filesystems)");
+            }
+            // The caller said it did not need atomicity — retry without it.
+            List<java.nio.file.CopyOption> relaxed = new ArrayList<>(1);
+            if (replaceExisting) relaxed.add(StandardCopyOption.REPLACE_EXISTING);
             try {
-                Files.move(Paths.get(src), Paths.get(dest));
+                Files.move(Paths.get(src), Paths.get(dest),
+                           relaxed.toArray(new java.nio.file.CopyOption[0]));
                 return ok(MezzeRecord.empty());
+            } catch (FileAlreadyExistsException retry) {
+                return errAlreadyExists(dest);
             } catch (IOException retry) {
                 return errIO(src, retry.getMessage());
             }
