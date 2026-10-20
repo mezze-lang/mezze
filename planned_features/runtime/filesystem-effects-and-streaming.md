@@ -4,11 +4,13 @@ Two linked designs from one session (2026-07-23): a seven-effect split of
 `FileSystem`, and the pull-based streaming abstraction that several of its ops
 want.
 
-**Status, 2026-10-19.** Part 1 is **implemented** — seven effects, 34 ops, both
-backends, ~58 tests (`std/effects/filesystem.mz`, `FilesystemNatives.java`,
-`MemoryFilesystemNatives.java`). Three signature-changing items from the design
-are deliberately **not** done and are listed under "Deferred" below. Part 2 is
-**mostly settled by `Iter` having since shipped**; what remains open is marked.
+**Status, 2026-10-20.** Part 1 is **complete** — seven effects, 34 ops, both
+backends, ~130 tests (`std/effects/filesystem.mz`, `FilesystemNatives.java`,
+`MemoryFilesystemNatives.java`), including the three signature changes that
+were deferred on the first pass. Part 2's open question has been **answered**:
+performing an effect from inside an `Iter` stage, source or sink works across
+the native driver loop's `@TruffleBoundary`, with no change needed. What is
+left is the runner effect.
 
 **Provenance.** This reconstructs a discussion that produced
 `docs/effect-improvement/02_FILESYSTEM_SEVEN_EFFECTS.md` (398 lines), lost when
@@ -157,21 +159,79 @@ a backend that does not offer the effect at all.
 > `FileSymlinks` be one `effect FileMetadata` (a POSIX-only umbrella) instead of
 > two? Seven separate effects was approved as-is, so the default is two.
 
-### Deferred — the three signature-changing items
+### Mixing backends typechecks — the one unguarded hazard
 
-Each of these changes an existing op's signature, so each wants its own pass
-with a migration of callers:
+Nothing links the performers, so `perform MemoryFileSystem in perform
+LocalFileStreaming in …` compiles. Sometimes that is wanted:
+`LocalFileSystem` + `MemoryFileLock` is a real test seam, locking without
+touching a disk.
 
-1. **`write_bytes` grows `mode: WriteMode = | CreateOrTruncate, CreateNew, Append |`.**
-   `CreateNew` is **the atomic lockfile primitive**, still missing, and `Append`
-   would stop being a userland special case. A backend that cannot do
-   `CreateNew` atomically returns `FsNotSupported` on that arm only.
-2. **`copy`/`move` grow options** — `replace_existing`, `preserve_attrs`,
-   `require_atomic` — closing the NIO gap.
-3. **`stat`/`delete`/`copy`/`move` grow `follow_symlinks: Bool`** (default
-   `true`, matching NIO) so callers can opt out at the primitive level.
+But **path-keyed ops across backends silently address two different
+filesystems**. `MemoryFileSystem.write_bytes { path }` followed by
+`LocalFilePermissions.get_mode { path }` asks the real disk and gets
+`FsNotFound`, and the typechecker has nothing to object to — both
+performers satisfy their rows honestly. This is the cost of having split
+the effects at all.
 
-`OpenMode` also wants a durable-write variant (`WriteSync`), or to become a
+HANDLES do fail loudly: `MezzeFileHandle` and `MemFileHandle` are distinct
+Java classes and the extractors `instanceof`-check, throwing
+`NativeTypeMismatchException`. Only paths are unguarded.
+
+This is a DECISION, not a bug to patch. A guard would have to be opt-in,
+since mixing is sometimes deliberate — which makes it a language-design
+question (can a backend declare itself as a bundle?) rather than a
+filesystem one.
+
+### The three signature changes — LANDED 2026-10-20
+
+```
+write_bytes { path, bytes, mode: WriteMode }
+stat        { path, follow_symlinks }
+copy_file   { src, dest, replace_existing, preserve_attrs, follow_symlinks }
+move_file   { src, dest, replace_existing, require_atomic }
+```
+
+99 call sites migrated, each to the OLD behaviour, so a migrated call means
+what it meant before. Three things worth keeping from the exercise:
+
+**`WriteMode` is `| CreateOrTruncate, CreateNew, CreateOrAppend |`,** not
+`Append`, because the typechecker rejected that: a constructor name is unique
+per module and `OpenMode.Append` already has it. The rejection was right and
+exposed the name doing two jobs — `OpenMode.Append` positions a HANDLE at the
+end, while a write mode is a policy about content already there. Spelling all
+three as Create-or-what also makes the one that does NOT create stand out,
+which is the one with the sharp edge.
+
+**`CreateNew` is the whole point.** It is the atomic lockfile primitive, and
+nothing else in the effect could express it: `exists` then `write_bytes` has a
+window, and two processes racing through it both believe they won.
+`create_exclusive { path, bytes } -> Result Bool` is its userland face — `True`
+if this caller created the file, `False` if somebody already had it. memfs
+implements it with `putIfAbsent` rather than contains-then-put, for exactly the
+same reason.
+
+**`require_atomic` closed a silent downgrade.** `move_file` used to try
+`ATOMIC_MOVE` and quietly fall back when the platform refused — fine for "put
+this file over there", and exactly wrong for publish-by-rename, where a reader
+seeing a partial file is the bug rename was chosen to avoid.
+
+**`follow_symlinks` landed on two of the four ops the design named**, and the
+omissions are deliberate rather than unfinished:
+
+- **`delete`** — POSIX `unlink` and `Files.delete` BOTH always remove the link
+  and never the target, with no option to change it. A flag here could only be
+  implemented as "resolve, then delete", which is not what any filesystem means
+  by deleting a path; it would be a Mezze invention wearing a POSIX name.
+- **`move_file`** — `Files.move` has no follow option, because a rename moves
+  the directory entry and there is no target to follow.
+
+**`append_bytes`/`append_text` lost an effect**, which is the ergonomic win
+hiding in this change. They opened a handle, so adding a log line required
+disclosing `<FileStreaming>` — random-access I/O, the one capability an object
+store cannot offer. They are one `CreateOrAppend` write now and need only
+`<FileSystem>`.
+
+Still wanted: a durable-write `OpenMode` (`WriteSync`), or `OpenMode` as a
 record of `mode + sync + create_new + delete_on_close` flags.
 
 ### Stays derived, in userland `std::fs`
@@ -290,12 +350,14 @@ Rust-synchronous baggage. `Iter` is what shipped.
 1. ~~The name~~ — settled: `Iter`.
 2. ~~Internal representation~~ — settled: a native descriptor tree, not the
    recursive-closure `newtype`.
-3. **The effect-polymorphic signature, concretely.** Advertised, **unverified**.
-   No test drives any effect through a native `Iter` sink, so suspension across
-   the Java walker — a `@TruffleBoundary` — is untested. This is the one genuine
-   research item before the streaming half: an `unfold` performing
-   `<FileSystem>` → `map`/`filter` → `for_each` performing `<Console>`, plus
-   `Async.await` and `Exception.raise` variants.
+3. ~~The effect-polymorphic signature, concretely~~ — **ANSWERED, it works.**
+   13 tests in `IterEffectBoundaryTest`, no code change needed. A suspension
+   does cross the native driver loop's `@TruffleBoundary`: sinks (`for_each`,
+   `fold`), stages (`map` mid-walk, `filter` deciding control flow on a read,
+   `any` short-circuiting, `flat_map`), a source (`unfold` whose step reads the
+   filesystem to decide `Yield`/`Done`), all three composed in one walk, and
+   both non-local exits — `Exception.throw` unwinds the loop and stops where it
+   says, `Async.await` parks and resumes from a sink and from a stage.
 4. **`IntoIter`/`FromIter` abilities** or plain `to_iter`/`to_seq` functions?
    `FromIter` depends on return-type-driven ability dispatch, itself open
    elsewhere in the codebase.
@@ -317,10 +379,12 @@ Rust-synchronous baggage. `Iter` is what shipped.
 
 ## Remaining order of work
 
-1. The `Iter`-across-a-`@TruffleBoundary` test (question 3). Everything
-   streaming-shaped depends on the answer, and it is currently an assumption.
-2. The three deferred signature changes, `WriteMode`/`CreateNew` first — atomic
-   lockfiles are the concrete thing nobody can write today.
-3. The userland derived set in `std::fs`, which is where most callers live.
-4. The runner effect for `Iter` (Sync / Async / Parallel performers).
-5. Retrofit `read_lines`, HTTP bodies and `FileWatch.poll` onto `Iter`.
+1. The runner effect for `Iter` (Sync / Async / Parallel as performers of one
+   runner) — the last piece of the agreed streaming shape, and now unblocked.
+2. Retrofit `read_lines`, HTTP bodies and `FileWatch.poll` onto `Iter`.
+3. A durable-write `OpenMode`, or `OpenMode` as a flags record.
+4. Decide the cross-backend question above: leave it documented, or let a
+   backend declare itself as a bundle.
+
+Done: the seven effects, the three signature changes, and the `Iter` boundary
+question.
