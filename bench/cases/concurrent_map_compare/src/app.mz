@@ -1,0 +1,134 @@
+## Does `chunk_fold` already cover bounded-concurrency work, or is a lazy
+## `map_concurrent` worth building?
+##
+## The question only has a measurable half. For a source that CANNOT be
+## materialised — an endless `watch_events`, a paginated API whose page N+1
+## needs page N — `chunk_fold` and `par_map` are both unusable, because
+## chunking needs the whole sequence up front. That is a capability gap and no
+## benchmark decides it.
+##
+## What a benchmark can decide is the FINITE case: when the source fits in
+## memory, does the existing surface go fast enough that a lazy
+## bounded-concurrency combinator would not earn its keep? Three ways of doing
+## the same work, over the same materialised input:
+##
+##   sequential   seq::map                      — the baseline
+##   par_map      one task per element          — fork-per-item
+##   chunk_fold   parallel over chunks, fused   — what exists today
+##
+## `work` has to be expensive enough that a fork can pay for itself; a cheap
+## body measures only scheduling overhead and makes fusion win by definition.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ Time, SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::async::{ Async, LoomAsyncWith, par_map, sleep }
+use std::effects::parallel::{ Parallel, LoomParallel, LoomParallelWith, chunk_fold }
+use std::collections::{ iter, seq }
+use std::abilities::iter::{ Iterable }
+use std::int
+
+## Per-item work. An integer mill rather than I/O: a benchmark that measured a
+## real file read would measure the page cache, and the point here is the
+## scheduling, not the device.
+let work = { x: Int } -> iter::fold {
+  it = iter::range { start = 0, end = 400 },
+  init = x,
+  f = { acc, x } -> acc + (x * x) % 7,
+}
+
+let sequential = { xs: [Int] } -> seq::fold {
+  xs = seq::map { xs = xs, f = { x } -> work { x = x } },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+## par_map answers [Result 'b AsyncError], so the fold unwraps.
+let forked = { xs: [Int] } -> perform LoomAsyncWith { max_concurrent = 16 } in
+  seq::fold {
+    xs = par_map { xs = xs, f = { x } -> work { x = x } },
+    init = 0,
+    f = { acc, x } -> match x is
+      Ok { val = v } -> acc + v
+      Err { error = _ } -> acc,
+  }
+
+## chunk_fold forks per CHUNK and runs a fused Iter pipeline inside each.
+let chunked = { xs: [Int] } -> perform LoomParallel in chunk_fold {
+  xs = xs,
+  zero = 0,
+  f = { xs } -> xs.to_iter{}.map { f = { x } -> work { x = x } }.sum{},
+  combine = { l, r } -> l + r,
+}
+
+let time_it = { label: Str, f: {} -> Int } -> perform Console in perform SystemTime in do
+  ## 2 warmup, 3 measured — enough to see a 2x, not enough to pretend at 5%.
+  let _w0 = f {}
+  let _w1 = f {}
+  let t0 = monotonic {}
+  let r0 = f {}
+  let e0 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t0 } }
+  let t1 = monotonic {}
+  let r1 = f {}
+  let e1 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t1 } }
+  let t2 = monotonic {}
+  let r2 = f {}
+  let e2 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t2 } }
+  let best = if e0 < e1 then (if e0 < e2 then e0 else e2) else (if e1 < e2 then e1 else e2)
+  println { msg = "  $(label): best=$(int::to_str { n = best / 1000000 })ms  checksum=$(int::to_str { n = r0 })" }
+
+## The I/O regime: a body that WAITS rather than computes. A parked fork
+## costs nothing, so this is where bounded concurrency should win and where
+## the integer mill above is no evidence at all.
+let io_work = { x: Int } -> perform SystemTime in do
+  let _ = sleep { ms = 2 }
+  x
+
+let io_sequential = { xs: [Int] } -> seq::fold {
+  xs = seq::map { xs = xs, f = { x } -> io_work { x = x } },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+let io_forked = { xs: [Int] } -> perform LoomAsyncWith { max_concurrent = 16 } in
+  seq::fold {
+    xs = par_map { xs = xs, f = { x } -> io_work { x = x } },
+    init = 0,
+    f = { acc, x } -> match x is
+      Ok { val = v } -> acc + v
+      Err { error = _ } -> acc,
+  }
+
+let io_chunked = { xs: [Int] } -> perform LoomParallel in chunk_fold {
+  xs = xs,
+  zero = 0,
+  f = { xs } -> seq::fold { xs = seq::map { xs = xs, f = { x } -> io_work { x = x } }, init = 0, f = { acc, x } -> acc + x },
+  combine = { l, r } -> l + r,
+}
+
+## chunk_fold with min_chunk = 1. The default 1024 is tuned for CPU work,
+## where splitting below that costs more than it saves — but it means a
+## 160-item I/O workload is ONE chunk and never fans out. If this version wins,
+## the finding is "the threshold is wrong for I/O", not "chunking cannot do
+## I/O", and those point at completely different fixes.
+let io_chunked_fine = { xs: [Int] } -> perform LoomParallelWith { max_concurrent = 16, min_chunk = 1 } in chunk_fold {
+  xs = xs,
+  zero = 0,
+  f = { xs } -> seq::fold { xs = seq::map { xs = xs, f = { x } -> io_work { x = x } }, init = 0, f = { acc, x } -> acc + x },
+  combine = { l, r } -> l + r,
+}
+
+let main = {} -> perform Console in perform SystemTime in do
+  let n = 20000
+  let xs = seq::range { start = 0, end = n }
+  println { msg = "== concurrent_map_compare N=$(int::to_str { n = n }), 400 ops/item, 2 warmup + 3 measured ==" }
+  let _ = time_it { label = "sequential", f = {} -> sequential { xs = xs } }
+  let _ = time_it { label = "par_map(16)", f = {} -> forked { xs = xs } }
+  let _ = time_it { label = "chunk_fold ", f = {} -> chunked { xs = xs } }
+  let m = 160
+  let ys = seq::range { start = 0, end = m }
+  println { msg = "== io-shaped (sleep 2ms) N=$(int::to_str { n = m }) ==" }
+  let _ = time_it { label = "io sequential", f = {} -> io_sequential { xs = ys } }
+  let _ = time_it { label = "io par_map(16)", f = {} -> io_forked { xs = ys } }
+  let _ = time_it { label = "io chunk_fold ", f = {} -> io_chunked { xs = ys } }
+  let _ = time_it { label = "io chunk(mc=1)", f = {} -> io_chunked_fine { xs = ys } }
+  println { msg = "== done ==" }

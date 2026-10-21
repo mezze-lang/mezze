@@ -129,12 +129,27 @@ for case in "${CASES[@]}"; do
             results[$case,python]=$(min_of_n "$N" nix-shell -p python3 --run "python3 $BENCH_DIR/reference/$case.py")
         fi
     fi
-    # Mezze JVM jar (glob — the jar's basename is the pkg name in
-    # Mezze.toml, not necessarily the case dir name).
+    # Mezze on the JVM. Prefer the LAUNCHER that `mez build` generates
+    # beside the jar, not `java -jar`: the jar needs
+    # --add-modules=jdk.incubator.vector,jdk.internal.vm.ci and dies with
+    # `NoClassDefFoundError: jdk/incubator/vector/Vector` without them. The
+    # launcher carries those flags; running the jar directly measured nothing
+    # but a crash, and `min_of_n` reported it as a time.
+    #
+    # The launcher is `.build/<app>` — executable, no extension. The native
+    # glob below looks for `*-native`, so the two do not collide.
+    mapfile -t _launchers < <(find "$case_dir/.build" -maxdepth 1 -type f -perm -u+x \
+        -not -name '*.jar' -not -name '*.jsa' -not -name '*-native' 2>/dev/null)
+    mez_launcher=${_launchers[0]-}
     mapfile -t _jars < <(find "$case_dir/.build" -maxdepth 1 -name '*.jar' -not -name '*.jsa' 2>/dev/null)
     mez_jar=${_jars[0]-}
-    if [[ -n "$mez_jar" ]]; then
-        results[$case,mezze_jvm]=$(min_of_n "$N" java -jar "$mez_jar")
+    if [[ -n "$mez_launcher" ]]; then
+        results[$case,mezze_jvm]=$(min_of_n "$N" "$mez_launcher")
+    elif [[ -n "$mez_jar" ]]; then
+        results[$case,mezze_jvm]=$(min_of_n "$N" java \
+            --enable-native-access=ALL-UNNAMED \
+            --add-modules=jdk.incubator.vector,jdk.internal.vm.ci \
+            -jar "$mez_jar")
     fi
     # Mezze native (glob for -native suffix)
     mapfile -t _natives < <(find "$case_dir/.build" -maxdepth 1 -type f -perm -u+x -name '*-native' 2>/dev/null)
