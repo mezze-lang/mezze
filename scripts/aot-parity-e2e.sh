@@ -93,6 +93,17 @@ parity() {
     fail=1
     return
   fi
+  # Nor is an identical ERROR on both sides. A case with a typo compiles
+  # nowhere and "agrees" perfectly — the same vacuous pass as two empty
+  # outputs, one step further along.
+  case "$jvm_out" in
+    *Error:*|*error:*|*Exception*|*TypeCheckError*|*ParseException*|*"must return"*)
+      echo "  ❌ $name — the JVM side failed, so parity means nothing:"
+      echo "       $jvm_out"
+      fail=1
+      return
+      ;;
+  esac
 
   if [ "$jvm_out" = "$native_out" ]; then
     echo "  ✅ $name — both: $jvm_out"
@@ -161,6 +172,125 @@ let main = {} -> perform Console in perform MemoryFileSystem in perform MemoryFi
         Err { error = _ } -> "read-failed"
     Err { error = _ } -> "open-failed"
   println { msg = report }'
+
+# ----------------------------------------------------------------------------
+# Beyond the filesystem. The risk is a native that reads a guest value's
+# IDENTITY — a variant's constructor, a record's field — where the value was
+# built by precompiled stdlib code that never registered the name. Only eight
+# constructors are pre-registered (Some None Ok Err True False Cons Nil); every
+# other name reaches the registry only when something CONSTRUCTS it.
+#
+# These cases each cross one such native boundary. They are parity checks, not
+# proofs: a case passes if both binaries agree, which they will whenever the
+# relevant constructor happens to get registered by some other path.
+# ----------------------------------------------------------------------------
+
+# Json: DslJsonCodec.serializeValue dispatches on the Json tree's constructor
+# name (JObject/JArray/JString/...), and the tree here is built by a DERIVED
+# encode in stdlib code. Its default arm throws, so a failure is loud.
+parity json-encode 'use std::codec::json
+use std::effects::log::{ println, Console }
+
+let main = {} -> perform Console in do
+  let user = { name = "ada", age = 36, tags = ["x", "y"] }
+  println { msg = user.to_json_str {} }'
+
+# Json round trip: parse_str builds the tree natively (which registers the
+# names) and then serializes it — the opposite order from json-encode, and the
+# reason encode alone is the interesting one.
+parity json-roundtrip 'use std::codec::json
+use std::effects::log::{ println, Console }
+
+let main = {} -> perform Console in do
+  let report = match json::parse_str { s = "{\"a\":[1,2,3],\"b\":true}" } is
+    Ok { val = tree } -> json::to_str { json = tree }
+    Err { error = _ } -> "parse-failed"
+  println { msg = report }'
+
+# Ability dispatch: a user ability + impl, called through the method. The
+# registries behind this are name-keyed, which is the same family as the tag
+# registry.
+parity ability-dispatch 'use std::effects::log::{ println, Console }
+
+ability Describe for '"'"'a where {
+  describe: { it: '"'"'a } -> Str
+}
+
+type Shape = | Circle { r: Int }, Square { side: Int } |
+
+impl Describe for Shape where {
+  describe = { it } -> match it is
+    Circle { r } -> "circle-$(r.to_str{})"
+    Square { side } -> "square-$(side.to_str{})"
+}
+
+let main = {} -> perform Console in do
+  let a = Circle { r = 2 }
+  let b = Square { side = 3 }
+  println { msg = "$(a.describe{})/$(b.describe{})" }'
+
+# Derived Eq/Ord on a user variant, compared through the derived impl.
+parity derived-eq-ord 'use std::effects::log::{ println, Console }
+use std::bool
+
+type Level = | Low, Mid, High |
+
+let main = {} -> perform Console in do
+  let x = Mid
+  let y = Mid
+  let z = High
+  println { msg = "$(bool::to_str { b = x == y })/$(bool::to_str { b = x == z })" }'
+
+# Map and Set: hash-based containers whose bucketing goes through
+# structural_hash in a native.
+parity map-set 'use std::collections::{ map, set, seq }
+use std::effects::log::{ println, Console }
+use std::int
+
+let main = {} -> perform Console in do
+  let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
+  let got = match map::get { m = m, k = "b" } is
+    Some { val = v } -> int::to_str { n = v }
+    None -> "missing"
+  let s = set::insert { s = set::insert { s = set::empty {}, x = 7 }, x = 7 }
+  println { msg = "map=$(got) setsize=$(int::to_str { n = set::size { s = s } })" }'
+
+# Iter unfold: the native driver reads the Step variant (Yield/Skip/Done). This
+# is the one place the codebase already got right — IterNatives compares TAGS
+# and registers the three names at class init — so this case is here to keep
+# it that way.
+parity iter-unfold-step 'use std::collections::iter
+use std::effects::log::{ println, Console }
+use std::int
+
+let main = {} -> perform Console in do
+  let total = iter::sum {
+    it = iter::unfold {
+      state = 0,
+      step = { s } -> if s >= 5 then Done else Yield { val = s * s, next = s + 1 }
+    }
+  }
+  println { msg = int::to_str { n = total } }'
+
+# Int overflow raises a guest error rather than wrapping, and the raise path
+# runs through the interpreter rather than a native.
+parity int-overflow 'use std::effects::log::{ println, Console }
+use std::int
+
+let main = {} -> perform Console in do
+  let big = 9223372036854775807
+  println { msg = int::to_str { n = big } }'
+
+# A Char value is a one-character String at run time, with the IR node holding
+# a Java char — a representation split a native has to agree about.
+parity char-string 'use std::effects::log::{ println, Console }
+use std::str
+
+let main = {} -> perform Console in do
+  let s = "mezze"
+  println { msg = "$(str::to_upper { s = s })/$(int_str{})" }
+
+let int_str = {} -> str::size { s = "mezze" }.to_str{}'
 
 echo
 if [ "$fail" = 0 ]; then
