@@ -500,6 +500,7 @@ public final class MemoryFilesystemNatives {
         String mode = variantIs(args, "mode", "Read") ? "Read"
                     : variantIs(args, "mode", "Write") ? "Write"
                     : variantIs(args, "mode", "Append") ? "Append"
+                    : variantIs(args, "mode", "WriteSync") ? "WriteSync"
                     : null;
         if (mode == null) return errIO(path, "Unrecognised OpenMode");
         MemFileHandle h = new MemFileHandle(path, mode);
@@ -508,6 +509,9 @@ public final class MemoryFilesystemNatives {
                 if (!isFile(path)) return errNotFound(path);
                 h.pos = 0;
                 return ok(h);
+            case "WriteSync":
+                // Same open semantics as Write — truncate-or-create. What
+                // differs is write_chunk, which publishes immediately.
             case "Write":
                 if (isDir(path)) return errIO(path, "Is a directory");
                 String parentW = parentOf(path);
@@ -572,6 +576,17 @@ public final class MemoryFilesystemNatives {
         if (h.writeBuf == null) return errIO(h.path, "Handle not opened for writing");
         try {
             h.writeBuf.write(bytes.getData());
+            if ("WriteSync".equals(h.mode)) {
+                // Publish NOW. On LocalFileSystem a SYNC handle has the bytes on
+                // the device before write_chunk returns, so another reader sees
+                // them; buffering here until close would make the same program
+                // read back empty on one backend and full on the other. memfs
+                // has no device to force, so visibility is the whole of the
+                // durability it can honestly offer — and withholding it would
+                // be the divergence, not the honesty.
+                Entry published = publishSequential(h);
+                if (published == null) return errNotFound(parentOf(h.path));
+            }
             return ok(MezzeRecord.empty());
         } catch (Exception e) {
             return errIO(h.path, e.getMessage());
@@ -637,6 +652,39 @@ public final class MemoryFilesystemNatives {
      * has no buffer (write_chunk goes straight to the channel), so this is
      * what keeps the two backends meaning the same thing.
      */
+    /**
+     * Publish the pending buffer WITHOUT handing authority to the Entry.
+     *
+     * `publishAndGet` nulls `writeBuf` on purpose — a positional op has taken
+     * over, so `close` must not republish the sequential bytes over the top.
+     * A `WriteSync` handle needs the opposite: it is still sequential and
+     * still accumulating, so the buffer has to survive. Nulling it here made
+     * the second `write_chunk` fail with "Handle not opened for writing",
+     * which a caller writing `let _ = write_chunk {...}` never sees — the file
+     * just quietly held the first record only.
+     *
+     * Idempotent: the buffer holds everything written so far and the Entry
+     * takes a full replacement, so publishing twice is publishing once.
+     */
+    @TruffleBoundary
+    private static Entry publishSequential(MemFileHandle h) {
+        if (h.writeBuf == null) return files().get(h.path);
+        String parent = parentOf(h.path);
+        if (!isDir(parent)) return null;
+        byte[] pending = h.writeBuf.toByteArray();
+        Entry cur = files().get(h.path);
+        if (cur == null) {
+            cur = new Entry(pending);
+            files().put(h.path, cur);
+            directories().get(parent).add(basenameOf(h.path));
+            notifyWatchers(h.path, "Created");
+        } else {
+            cur.bytes = pending;
+            notifyWatchers(h.path, "Modified");
+        }
+        return cur;
+    }
+
     private static Entry publishAndGet(MemFileHandle h) {
         if (h.writeBuf != null) {
             String parent = parentOf(h.path);

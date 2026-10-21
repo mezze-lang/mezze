@@ -443,6 +443,18 @@ public final class FilesystemNatives {
                     StandardOpenOption.WRITE,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.APPEND);
+            } else if (variantIs(args, "mode", "WriteSync")) {
+                // SYNC, not DSYNC: it forces the file's METADATA as well as
+                // its contents. DSYNC would leave a freshly extended file's
+                // new length unflushed, so a crash could leave bytes that are
+                // on the device and a length that does not reach them — which
+                // reads back as truncation, the exact failure a WAL opens a
+                // sync handle to avoid.
+                channel = FileChannel.open(Paths.get(path),
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.SYNC);
             } else {
                 return errIO(path, "Unrecognised OpenMode");
             }
