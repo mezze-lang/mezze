@@ -226,12 +226,11 @@ public final class MemoryFilesystemNatives {
     public static Object writeBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
         MezzeBytes bytes = getBytes(args, "bytes");
-        String mode = getVariantTag(args, "mode");
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
         if (isDir(path)) return errIO(path, "Is a directory");
 
-        if ("CreateNew".equals(mode)) {
+        if (variantIs(args, "mode", "CreateNew")) {
             Entry prior = files().putIfAbsent(path, new Entry(bytes.getData()));
             if (prior != null) return errAlreadyExists(path);
             directories().get(parent).add(basenameOf(path));
@@ -239,7 +238,7 @@ public final class MemoryFilesystemNatives {
             return ok(MezzeRecord.empty());
         }
 
-        if ("CreateOrAppend".equals(mode)) {
+        if (variantIs(args, "mode", "CreateOrAppend")) {
             // `compute`, not get-then-mutate. O_APPEND on a real file makes
             // each write atomic with respect to the end, so two concurrent
             // appenders both keep their bytes. A read-modify-write here would
@@ -494,7 +493,15 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object open(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        String mode = getVariantTag(args, "mode");
+        // Resolve the mode to a CANONICAL name by tag, rather than recovering
+        // a name from the tag registry — which yields "Unknown(<tag>)" in an
+        // AOT image and sent every open down the default arm. The handle
+        // carries this string, so it has to be the real one.
+        String mode = variantIs(args, "mode", "Read") ? "Read"
+                    : variantIs(args, "mode", "Write") ? "Write"
+                    : variantIs(args, "mode", "Append") ? "Append"
+                    : null;
+        if (mode == null) return errIO(path, "Unrecognised OpenMode");
         MemFileHandle h = new MemFileHandle(path, mode);
         switch (mode) {
             case "Read":
@@ -1030,8 +1037,7 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object lock(MezzeRecord args) {
         String path = getString(args, "path");
-        String kind = getVariantTag(args, "kind");
-        boolean shared = "Shared".equals(kind);
+        boolean shared = variantIs(args, "kind", "Shared");
         boolean blocking = getBool(args, "blocking");
         LockState st = locks().computeIfAbsent(path, p -> new LockState());
         synchronized (st) {
@@ -1220,11 +1226,34 @@ public final class MemoryFilesystemNatives {
         throw new NativeTypeMismatchException("Expected record for field '" + name + "'");
     }
 
-    private static String getVariantTag(MezzeRecord r, String name) {
-        int i = r.getFieldIndex(name);
-        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
-        Object v = r.getField(i);
-        if (v instanceof MezzeVariant vv) return vv.getConstructorName();
+
+    /**
+     * True iff the variant in field `name` is the constructor `ctor`.
+     *
+     * Compares TAGS. The obvious version — `getConstructorName()` then
+     * `equals` — looks identical and is not: it reverse-looks-up the tag in
+     * the registry and yields "Unknown(<tag>)" when the constructor was never
+     * registered there. In an AOT image the stdlib's constructors are not, so
+     * every switch over a recovered name fell to its default: a `write_bytes`
+     * asked to append silently truncated, and a Shared lock came out
+     * exclusive. Both tags are the same name-hash, so comparing them needs no
+     * registry round-trip and cannot fail that way.
+     */
+    @TruffleBoundary
+    private static boolean variantIs(MezzeRecord r, String name, String ctor) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeVariant v) {
+            return v.getTag() == MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(ctor);
+        }
         throw new NativeTypeMismatchException("Expected variant for field '" + name + "'");
     }
+
+    // No `getVariantTag` here any more. It returned
+    // `getConstructorName()`, which reverse-looks-up the tag in the
+    // registry and yields "Unknown(<tag>)" when the constructor was never
+    // registered — which is every stdlib constructor in an AOT image. Use
+    // `variantIs`, which compares tags. Deleted rather than left unused,
+    // because the next caller would reach for it by name.
 }

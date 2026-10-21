@@ -171,15 +171,23 @@ public final class FilesystemNatives {
     public static Object writeBytes(MezzeRecord args) {
         String path = getString(args, "path");
         MezzeBytes bytes = getBytes(args, "bytes");
-        String mode = getVariantTag(args, "mode");
-        StandardOpenOption[] options = switch (mode) {
-            case "CreateNew" -> new StandardOpenOption[] {
+        StandardOpenOption[] options;
+        if (variantIs(args, "mode", "CreateNew")) {
+            options = new StandardOpenOption[] {
                 StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE };
-            case "CreateOrAppend" -> new StandardOpenOption[] {
+        } else if (variantIs(args, "mode", "CreateOrAppend")) {
+            options = new StandardOpenOption[] {
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE };
-            default -> new StandardOpenOption[] {
+        } else if (variantIs(args, "mode", "CreateOrTruncate")) {
+            options = new StandardOpenOption[] {
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE };
-        };
+        } else {
+            // No `default` that picks a mode. A tag this does not recognise
+            // means the WriteMode arms and this switch have drifted apart, and
+            // guessing turns that into silent data loss — truncating a file
+            // the caller asked to append to.
+            throw new NativeTypeMismatchException("Unrecognised WriteMode for 'mode'");
+        }
         try {
             Files.write(Paths.get(path), bytes.getData(), options);
             return ok(MezzeRecord.empty());
@@ -421,27 +429,22 @@ public final class FilesystemNatives {
     @TruffleBoundary
     public static Object open(MezzeRecord args) {
         String path = getString(args, "path");
-        String mode = getVariantTag(args, "mode");
         try {
             FileChannel channel;
-            switch (mode) {
-                case "Read":
-                    channel = FileChannel.open(Paths.get(path), StandardOpenOption.READ);
-                    break;
-                case "Write":
-                    channel = FileChannel.open(Paths.get(path),
-                        StandardOpenOption.WRITE,
-                        StandardOpenOption.CREATE,
-                        StandardOpenOption.TRUNCATE_EXISTING);
-                    break;
-                case "Append":
-                    channel = FileChannel.open(Paths.get(path),
-                        StandardOpenOption.WRITE,
-                        StandardOpenOption.CREATE,
-                        StandardOpenOption.APPEND);
-                    break;
-                default:
-                    return errIO(path, "Unknown OpenMode: " + mode);
+            if (variantIs(args, "mode", "Read")) {
+                channel = FileChannel.open(Paths.get(path), StandardOpenOption.READ);
+            } else if (variantIs(args, "mode", "Write")) {
+                channel = FileChannel.open(Paths.get(path),
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING);
+            } else if (variantIs(args, "mode", "Append")) {
+                channel = FileChannel.open(Paths.get(path),
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND);
+            } else {
+                return errIO(path, "Unrecognised OpenMode");
             }
             MezzeFileHandle handle = new MezzeFileHandle(channel, path);
             openResources().files.add(handle);
@@ -719,8 +722,11 @@ public final class FilesystemNatives {
     @TruffleBoundary
     public static Object lock(MezzeRecord args) {
         String path = getString(args, "path");
-        String kind = getVariantTag(args, "kind");
-        boolean shared = "Shared".equals(kind);
+        // `"Shared".equals(name)` was the silent one: an unrecoverable name
+        // made every lock EXCLUSIVE, so a program whose readers take shared
+        // locks would serialise them all in a native build and deadlock
+        // nothing — it would just quietly stop being concurrent.
+        boolean shared = variantIs(args, "kind", "Shared");
         boolean blocking = getBool(args, "blocking");
         FileChannel channel = null;
         try {
@@ -1318,13 +1324,36 @@ public final class FilesystemNatives {
      * Extract the tag name of a variant (e.g. "Read" from OpenMode.Read).
      * Used for OpenMode dispatch. Nullary variants only.
      */
-    private static String getVariantTag(MezzeRecord r, String name) {
+
+    /**
+     * True iff the variant in field `name` is the constructor `ctor`.
+     *
+     * Compares TAGS. The obvious version — `getConstructorName()` then
+     * `equals` — looks identical and is not: that reverse-looks-up the tag in
+     * the registry and yields "Unknown(<tag>)" when the constructor was never
+     * registered there. In an AOT image the stdlib's constructors are not,
+     * so every switch over a recovered name fell to its default: a
+     * `write_bytes` asked for Append silently truncated, and a Shared lock
+     * came out exclusive. Both tags are the same name-hash, so comparing them
+     * needs no registry round-trip and cannot fail that way.
+     *
+     * See [[no_name_dispatch]]: never dispatch on a name string.
+     */
+    @TruffleBoundary
+    private static boolean variantIs(MezzeRecord r, String name, String ctor) {
         int index = r.getFieldIndex(name);
         if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
         Object val = r.getField(index);
         if (val instanceof MezzeVariant v) {
-            return v.getConstructorName();
+            return v.getTag() == MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(ctor);
         }
         throw new NativeTypeMismatchException("Expected variant for field '" + name + "'");
     }
+
+    // No `getVariantTag` here any more. It returned
+    // `getConstructorName()`, which reverse-looks-up the tag in the
+    // registry and yields "Unknown(<tag>)" when the constructor was never
+    // registered — which is every stdlib constructor in an AOT image. Use
+    // `variantIs`, which compares tags. Deleted rather than left unused,
+    // because the next caller would reach for it by name.
 }
