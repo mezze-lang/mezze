@@ -428,11 +428,18 @@ public final class MemoryFilesystemNatives {
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
         Entry copy = new Entry(srcEntry.bytes.clone());
+        // The PERMISSION BITS come across whether or not preserve_attrs was
+        // asked for, because that is what the real backend does: NIO's
+        // UnixCopyFile creates the target with the source's mode & 0777, and
+        // COPY_ATTRIBUTES adds only timestamps and ownership on top. memfs
+        // used to reset the mode here, so a copy was executable on
+        // LocalFileSystem and not in its own tests — the fourth divergence of
+        // this shape, and the one a copy-then-exec script would hit.
+        //
+        // Cloned, not shared: a later chmod of one file must not silently
+        // change the other.
+        copy.mode = srcEntry.mode.clone();
         if (preserveAttrs) {
-            // Mode, owner and mtime, so a copy --preserve round-trips. The
-            // mode array is cloned: sharing it would make a later chmod of
-            // one file silently change the other.
-            copy.mode = srcEntry.mode.clone();
             copy.ownerUser = srcEntry.ownerUser;
             copy.ownerGroup = srcEntry.ownerGroup;
             copy.modifiedMs = srcEntry.modifiedMs;
