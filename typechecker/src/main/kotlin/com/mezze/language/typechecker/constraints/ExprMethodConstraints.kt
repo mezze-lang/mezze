@@ -65,9 +65,16 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         mapOf(receiverParam to abilityVar),
     ) as? MezzeType.FunctionType ?: return null
 
-    // Receiver-taking operations are NOT this path — see the doc comment.
+    // Receiver-taking operations normally go the receiver-rewrite path (see the doc
+    // comment): `Combine.combine { it = v, ... }` rewrites to `v.combine { ... }`.
+    // EXCEPTION: when the argument carries a spread, `it` may be supplied THROUGH it
+    // (`Combine.combine { ...args }`), so there is no explicit `it` field to rewrite on.
+    // Take the static path then too — equate the whole record (it included) to the op's
+    // param type and dispatch by the produced type, which the `it`/field unification pins.
     val params = opType.paramType as? MezzeType.RecordType ?: return null
-    if (params.fields.containsKey(Keywords.IT)) return null
+    val argCarriesSpread = (expr.arguments as? ParsedRecordLit)
+        ?.entries?.any { it is ParsedRecordEntry.Spread } == true
+    if (params.fields.containsKey(Keywords.IT) && !argCarriesSpread) return null
 
     val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
     val constraints = mutableListOf<Constraint>()

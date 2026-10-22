@@ -34,6 +34,21 @@ class PerformerParamCaptureTest {
     )
 
     @Test
+    fun `an effect op called with a spread-only argument record`() = assertEquals(
+        "[1, 2]",
+        MezzeTestHelper.run("""
+            $head
+            impl Ask for WithData { data: [Int] } where {
+              ask = { n } -> do
+                let found = seq::filter { xs = [1, 2, 3], p = { x } -> seq::size { xs = data } > x }
+                found
+            }
+            let args = { n = 1 }
+            perform WithData { data = [1, 2, 3] } in Ask.ask { ...args }
+        """.trimIndent()).toString(),
+    )
+
+    @Test
     fun `a lambda in an op that captures both kinds`() = assertEquals(
         "[3]",
         MezzeTestHelper.run("""

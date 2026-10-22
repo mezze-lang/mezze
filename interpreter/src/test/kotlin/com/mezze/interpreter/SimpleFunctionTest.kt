@@ -23,6 +23,19 @@ class SimpleFunctionTest {
     }
 
     @Test
+    fun `spread-only argument into an ordinary function call evaluates`() {
+        // `f { ...k }` means "copy k's fields in" — the same record-merge lowering
+        // as `f { ...k, x = 1 }`. Pinned because the typechecker used to forbid a
+        // spread-only call record; it now allows it for ordinary (non-member) calls.
+        val code = """
+            let add = {x, y} -> x + y
+            let k = {x = 5, y = 7}
+            add { ...k }
+        """
+        assertEquals(12L, eval(code))
+    }
+
+    @Test
     fun `test function with single parameter`() {
         val code = """
             let square = {x} -> x * x

@@ -140,29 +140,34 @@ class AbilityOpScalarAbiTest {
     }
 
     @Test
-    fun `a spread argument is rejected outright, so scalar emission never sees one`() {
-        // Scalar emission needs the full field set statically, and a spread hides
-        // it — but the typechecker refuses a spread-only call record before
-        // lowering, so there is nothing for the scalar path to get wrong. Pinned
-        // because the emitter still carries a `__spread__` guard, and this says
-        // why that guard cannot be reached from an ability-op call.
-        val failure = runCatching {
-            lower(
-                """
-                type Cfg = { tag: Int }
-                ability Enc for 'c where { enc: { it: 'c, v: Int } -> Int }
-                impl Enc for Cfg where { enc = { it, v } -> v + it.tag }
+    fun `a spread argument lowers through the record ABI, not the scalar path`() {
+        // A spread hides the field set, so the scalar ABI cannot apply — but the call is
+        // still CORRECT: emitCallDirect sees the `__spread__` field and falls back to the
+        // record ABI (which handles spread). The receiver is merged in as `it` during emit,
+        // so the op is fully applied. A spread-only call record used to be rejected; it is
+        // now allowed in every call, scalar-eligible or not.
+        val lowered = lower(
+            """
+            type Cfg = { tag: Int }
+            ability Enc for 'c where { enc: { it: 'c, v: Int } -> Int }
+            impl Enc for Cfg where { enc = { it, v } -> do
+              let a = v + it.tag
+              let b = (a * 3) - it.tag
+              let d = (b + a) * 2
+              d + it.tag }
 
-                let main = {} -> do
-                  let args = { v = 2 }
-                  let c: Cfg = { tag = 1 }
-                  c.enc { ...args }
-                """.trimIndent(),
-            )
-        }.exceptionOrNull()
+            let main = {} -> do
+              let args = { v = 2 }
+              let c: Cfg = { tag = 1 }
+              c.enc { ...args }
+            """.trimIndent(),
+        )
+        val encCalls = lowered.callsTo("enc")
+        assertTrue(encCalls.isNotEmpty(), "the call to 'enc' was optimised away entirely — nothing to assert")
         assertTrue(
-            failure?.message?.contains("spread") == true,
-            "expected the typechecker to refuse a spread-only call record, got: ${failure?.message}",
+            encCalls.none { it.isScalarABI },
+            "a spread call to enc must fall back to the record ABI (isScalarABI=false), got: " +
+                encCalls.joinToString { "args=${it.args.size} scalar=${it.isScalarABI}" },
         )
     }
 

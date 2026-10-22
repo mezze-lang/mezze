@@ -73,7 +73,7 @@ class EmitFileSizeRatchetTest {
             // `structuralConstraintTypesFor` in the same commit, which shortens
             // `compileCall` but not the file — so the bound moves rather than the
             // code, which is what this test asks for when the code belongs here.
-            C + "TypedASTCompiler.kt" to 4330,   // was 5,580
+            C + "TypedASTCompiler.kt" to 4332,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             E + "TypedAstBuilder.kt" to 2350,    // was 3,107
         )
 

@@ -817,42 +817,12 @@ internal fun ExpressionConstraintGenerator.mergeAssociatedTypes(
 
 internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunctionCall, context: ConstraintContext): ConstraintResult {
 
-    // VALIDATION: Reject spread-only records in function calls (Bug #10 Extension)
-    // Valid: func { x = 1, y = 2 } - explicit fields
-    // Valid: func { ...k, x = 1 } - spread with explicit fields
-    // Invalid: func { ...k } - spread-only
-    if (expr.arguments is ParsedRecordLit) {
-        val recordLiteral = expr.arguments as ParsedRecordLit
-        val hasExplicitFields = recordLiteral.entries.any { it is ParsedRecordEntry.Field }
-        val hasSpreadEntries = recordLiteral.entries.any { it is ParsedRecordEntry.Spread }
-
-        if (hasSpreadEntries && !hasExplicitFields) {
-            val functionName = when (expr.function) {
-                is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
-                else -> "function"
-            }
-
-            val spreadEntry = recordLiteral.entries.filterIsInstance<ParsedRecordEntry.Spread>().first()
-            val spreadVarName = when (spreadEntry.expr) {
-                is ParsedIdentifier -> (spreadEntry.expr as ParsedIdentifier).localName
-                else -> "record"
-            }
-
-            throw TypeCheckError(
-                message = "cannot use spread-only records in function call to '$functionName'. " +
-                        "Spread variable: '$spreadVarName'. " +
-                        "Use explicit named arguments instead, e.g., { x = $spreadVarName.x, y = $spreadVarName.y }",
-                loc = expr.loc,
-                errorType = ErrorType.TYPE_MISMATCH,
-                metadata = mapOf(
-                    "functionName" to functionName,
-                    "spreadVariable" to spreadVarName
-                ),
-                code = ErrorCode.V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
-                hints = listOf("write each field explicitly: `{ x = $spreadVarName.x, y = $spreadVarName.y }`"),
-            )
-        }
-    }
+    // A spread-only argument record (`f { ...person }`, `c.enc { ...args }`) is allowed in
+    // EVERY call. The argument is just a record, built by the normal record rules and matched
+    // to the parameters — extras still error, a missing param still curries. For a receiver
+    // method/ability op the receiver is merged in as `it` during emit (CallEmit builds the
+    // wrapped `{ it = receiver, ...args }` record from argExpr's solved type, so a spread's
+    // fields survive); nothing here needs to pre-split the argument's named fields.
 
     if (expr.function is ParsedMemberAccess) {
         val memberAccess = expr.function as ParsedMemberAccess
@@ -883,10 +853,10 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                     )
                 }
                 if (itReceiver == null) {
-                    // No `it` to desugar through. Either the operation declares no
-                    // receiver — in which case the type the call PRODUCES is what
-                    // chooses the impl — or the call is malformed and the ladder
-                    // below reports it.
+                    // No explicit `it` field. The operation may declare no receiver — then
+                    // the type the call PRODUCES chooses the impl — OR `it` is hidden inside
+                    // a spread (`Combine.combine { ...args }`): tryGenerateStaticAbilityOpCall
+                    // handles both, dispatching by the produced type with the whole record.
                     tryGenerateStaticAbilityOpCall(
                         expr, memberAccess, memberAccess.member, receiverName, context,
                     )?.let { return it }

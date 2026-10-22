@@ -670,10 +670,16 @@ internal fun TypedAstBuilder.buildMethodCall(
         argExpr is TypedRecord -> {
             val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
             val allEntries = listOf(receiverField) + argExpr.entries
-            val allFieldTypes = mutableMapOf(receiverFieldName to receiverExpr.type)
-            for (entry in argExpr.entries) {
-                if (entry is TypedRecordEntry.Field) {
-                    allFieldTypes[entry.name] = entry.value.type
+            // Type from argExpr's own solved type, which already includes any field a
+            // `...spread` contributes (deriving it from Field entries alone dropped them).
+            val allFieldTypes = LinkedHashMap<String, MezzeType>()
+            allFieldTypes[receiverFieldName] = receiverExpr.type
+            val argType = argExpr.type
+            if (argType is MezzeType.RecordType) {
+                for ((name, ty) in argType.fields) if (name != receiverFieldName) allFieldTypes[name] = ty
+            } else {
+                for (entry in argExpr.entries) {
+                    if (entry is TypedRecordEntry.Field) allFieldTypes[entry.name] = entry.value.type
                 }
             }
             TypedRecord(allEntries, MezzeType.RecordType(allFieldTypes), argExpr.loc)

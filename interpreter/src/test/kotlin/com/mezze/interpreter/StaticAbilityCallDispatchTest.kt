@@ -1,6 +1,8 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
 
 /**
@@ -64,6 +66,48 @@ class StaticAbilityCallDispatchTest {
             Combine.combine { it = 3, other = 4 }
         """.trimIndent()
         assertEquals(7L, MezzeTestHelper.run(src))
+    }
+
+    @Test fun `static ability call with it inside the spread dispatches`() {
+        // `it` is bundled INSIDE the spread (`Combine.combine { ...args }`). Dispatch goes
+        // through the spread source's `it` field, which picks the impl by its solved type;
+        // the spread supplies the full record (it + other). Used to be refused outright.
+        val src = """
+            ability Combine for 'self where {
+              combine: { it: 'self, other: 'self } -> 'self
+            }
+            impl Combine for Int where { combine = { it, other } -> it + other }
+            let args = { it = 3, other = 4 }
+            Combine.combine { ...args }
+        """.trimIndent()
+        assertEquals(7L, MezzeTestHelper.run(src))
+    }
+
+    @Test fun `receiver-style ability op with a spread-only argument record`() {
+        // `c.enc { ...args }` — the receiver supplies `it`, the spread supplies `v`.
+        // Emit merges the receiver as `it` into the spread-built record; the op is fully
+        // applied (regression: this used to curry to the uncalled `<function enc>`).
+        val src = """
+            type Cfg = { tag: Int }
+            ability Enc for 'c where { enc: { it: 'c, v: Int } -> Int }
+            impl Enc for Cfg where { enc = { it, v } -> v + it.tag }
+            let c: Cfg = { tag = 1 }
+            let args = { v = 2 }
+            c.enc { ...args }
+        """.trimIndent()
+        assertEquals(3L, MezzeTestHelper.run(src))
+    }
+
+    @Test fun `receiver-style ability op with spread plus an explicit field`() {
+        val src = """
+            type Cfg = { tag: Int }
+            ability Enc for 'c where { enc: { it: 'c, v: Int } -> Int }
+            impl Enc for Cfg where { enc = { it, v } -> v + it.tag }
+            let c: Cfg = { tag = 10 }
+            let args = { v = 1 }
+            c.enc { ...args, v = 5 }
+        """.trimIndent()
+        assertEquals(15L, MezzeTestHelper.run(src))
     }
 
     // ── method-style and operator controls (must remain correct) ─────────

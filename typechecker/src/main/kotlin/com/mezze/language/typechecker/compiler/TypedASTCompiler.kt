@@ -1554,12 +1554,18 @@ class TypedASTCompiler(
                     opBody.params.firstOrNull()?.name ?: Keywords.IT
                 } else Keywords.IT
 
-                // Inject receiver into argument record
+                // Inject receiver into argument record. A `...spread` entry is carried
+                // through as a `__spread__` field (the runtime merges its fields at
+                // record-build), NOT dropped — otherwise `c.enc { ...args }` loses every
+                // field the spread supplies and the op curries to the uncalled function.
                 val fields = mutableListOf<FieldIR>()
                 if (expr.arg is TypedRecord) {
                     for (entry in (expr.arg as TypedRecord).entries) {
-                        if (entry is TypedRecordEntry.Field) {
-                            fields.add(FieldIR(entry.name, compileExpr(entry.value)))
+                        when (entry) {
+                            is TypedRecordEntry.Field ->
+                                fields.add(FieldIR(entry.name, compileExpr(entry.value)))
+                            is TypedRecordEntry.Spread ->
+                                fields.add(FieldIR(com.mezze.language.ast.MagicParams.SPREAD_FIELD, compileExpr(entry.expr)))
                         }
                     }
                 }
