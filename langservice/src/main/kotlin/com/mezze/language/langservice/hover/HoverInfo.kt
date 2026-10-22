@@ -296,16 +296,7 @@ object HoverInfo {
                             val varTypeStr = formatType(typeForReceiver(expr))
                             val hover = abilityHover ?: codeBlock("${expr.name} : $varTypeStr")
                             val (doc, meta) = resolveDoc(state, result, expr.name)
-                            // A reference to a top-level function, by the HASH it resolved
-                            // to: show what reaches its branches, as at its definition.
-                            val callee = (expr.binding as? com.mezze.language.typedast.BindingRef.ByHash)?.hash?.let { h ->
-                                (listOfNotNull(result?.typedModule) + result?.loadedModules?.values.orEmpty())
-                                    .flatMap { it.decls }
-                                    .filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-                                    .firstOrNull { it.hash == h }
-                            }
-                            val branches = if (callee != null && result != null) branchInputs(callee, result) else ""
-                            appendDoc(hover, doc, meta) + branches
+                            appendDoc(hover, doc, meta)
                         }
                         is com.mezze.language.typedast.TypedFieldAccess -> {
                             // A method-in-a-chain accessed as `.eq` keeps a
@@ -362,14 +353,7 @@ object HoverInfo {
                             return appendDoc(codeBlock(header), doc, meta)
                         }
                     }
-                    // At a top-level function's DEFINITION: its own decl, identified by
-                    // name AND the line it starts on — a local of the same name sits
-                    // inside some body, never on the declaration's first line.
-                    val defined = result?.typedModule?.decls
-                        ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-                        ?.firstOrNull { it.name == lookup.name && it.loc.startLine == lookup.loc.startLine }
-                    val branches = if (defined != null && result != null) branchInputs(defined, result) else ""
-                    return appendDoc(codeBlock("${lookup.name} : $typeStr"), doc, meta) + branches
+                    return appendDoc(codeBlock("${lookup.name} : $typeStr"), doc, meta)
                 }
                 is TypedAstLookup.LookupResult.NotFound -> {} // Fall through to word-based lookup
             }
@@ -424,8 +408,7 @@ object HoverInfo {
                     val constraints = if (annotated == null)
                         renderSchemeConstraints(state, typedBinding.scheme, result.typedModule)
                     else ""
-                    return appendDoc(codeBlock("$word : ${formatType(bindingType)}$constraints"), doc, meta) +
-                        branchInputs(typedBinding, result)
+                    return appendDoc(codeBlock("$word : ${formatType(bindingType)}$constraints"), doc, meta)
                 }
             }
 
@@ -492,36 +475,6 @@ object HoverInfo {
         return null
     }
 
-    /**
-     * The inputs that reach each branch of a function — the rows `mez sample`
-     * pins — as a hover section. Read from the function's own code, so a reader
-     * sees `n = 101 — if n > max_value (= 100) — then` without running anything.
-     * Empty for a value, or a function with nothing the analysis reads.
-     */
-    private fun branchInputs(decl: com.mezze.language.typedast.TypedLetDecl, result: TypeCheckResult): String {
-        val decls = result.typedModule?.decls.orEmpty().filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-        val imported = result.loadedModules.values.flatMap { it.decls }
-            .filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-        val branches = com.mezze.language.langservice.sample.SampleBranches
-        val rows = branches.forFunction(decl, decls, imported)
-            ?.filter { it.display.isNotEmpty() }
-            .orEmpty()
-        // Constants computed by a FUNCTION CALL: `mez sample` evaluates them, the
-        // editor runs nothing — so their branches are named rather than silently
-        // missing from the list.
-        val unresolved = if (branches.paramFields(decl) == null) emptyList()
-            else branches.unresolvedConstants(decl, decls, branches.importedConstants(result.loadedModules))
-                .map { it.decl.name }.distinct()
-        if (rows.isEmpty() && unresolved.isEmpty()) return ""
-        val lines = rows.joinToString("\n") { r -> "- `${r.display}` — ${r.why}" }
-        val note = if (unresolved.isEmpty()) "" else
-            "\n\n_Not pinned here:_ " + unresolved.joinToString(", ") { "`$it`" } +
-                " ${if (unresolved.size == 1) "is" else "are"} computed by a function call — `mez sample ${decl.name}` evaluates " +
-                "${if (unresolved.size == 1) "it" else "them"} and pins those branches too."
-        val head = if (rows.isEmpty()) "\n\n---\n**Branch inputs**" else
-            "\n\n---\n**Branch inputs** (${rows.size}) — what `mez sample ${decl.name}` pins:\n$lines"
-        return head + note
-    }
 
     private fun renderAbilityMethodHover(
         methodName: String,
