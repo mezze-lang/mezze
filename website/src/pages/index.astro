@@ -61,6 +61,7 @@ import { highlight } from '../lib/highlight'
     import hovers from '../data/hovers.json'
     import { renderHover } from '../lib/hover'
     import { hideHoverTip, showHoverTip } from '../scripts/hover-tip'
+    import { liveWeather } from '../scripts/weather'
 
     // Nothing here needs the runtime — the samples are highlighted at build
     // time and their output recorded. Fetch it during the first idle moment
@@ -173,9 +174,26 @@ import { highlight } from '../lib/highlight'
     runBtn.disabled = false
     runBtn.addEventListener('click', () => {
       msgEl.textContent = 'running…'
+      const tab = playground.tabs[current]
+      // The Effects sample talks to wttr.in. The landing page replays recorded
+      // output rather than compiling, so fetch the weather live (through the dev
+      // proxy, to dodge CORS) and inject it as the real-client — first — output
+      // line, keeping the rest of the recorded output as-is.
+      const url = tab.code.match(/https:\/\/wttr\.in\/[^\s"']+/)
+      if (url) {
+        // Cached per URL on the client (see scripts/weather.ts), so pressing Run
+        // again reuses the value instead of re-fetching.
+        liveWeather(url[0]).then((live) => {
+          const lines = tab.output.split('\n')
+          if (live && lines.length) lines[0] = live
+          // null → network/proxy unavailable; keep the recorded output.
+          msgEl.textContent = lines.join('\n')
+        })
+        return
+      }
       // A beat of delay so pressing Run feels like it did something.
       setTimeout(() => {
-        msgEl.textContent = playground.tabs[current].output
+        msgEl.textContent = tab.output
       }, 180)
     })
   </script>
