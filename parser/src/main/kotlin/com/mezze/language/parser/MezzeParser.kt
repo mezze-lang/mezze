@@ -180,6 +180,21 @@ class MezzeParser {
         }
     }
 
+    /** One token of [lex]: its kind, its text, and where it is in the file. */
+    data class LexedToken(val kind: String, val text: String, val line: Int, val column: Int, val endLine: Int, val endColumn: Int)
+
+    /**
+     * [source] as Mezze's lexer reads it, where [source] starts at [line] and
+     * [column] of its file. Comments and newlines are kept: a macro may care.
+     */
+    fun lex(source: String, line: Int, column: Int): List<LexedToken> =
+        com.mezze.language.parser.internal.Lexer(source, line, column).tokenize()
+            .filter { it.type != com.mezze.language.parser.internal.TokenType.EOF }
+            .map { t ->
+                val loc = com.mezze.language.parser.internal.tokenLoc(t, "")
+                LexedToken(t.type.name.lowercase(), t.text, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
+            }
+
     /**
      * [source] as Mezze — declarations when [declarations], else one expression —
      * where [source] is a slice of [file] starting at [line] and [column]: what a

@@ -368,6 +368,19 @@ internal class MacroExpander(
 
     /** The parser, for a macro reading its input as Mezze. */
     private object Parsing : SyntaxHost {
+        override fun tokens(text: String, file: String, line: Int, column: Int): HostValue =
+            HostValue.Seq(MezzeParser().lex(text, line, column).map { t ->
+                record(
+                    "kind" to HostValue.Str(t.kind),
+                    "text" to HostValue.Str(t.text),
+                    "span" to record(
+                        "file" to HostValue.str(file),
+                        "start_line" to HostValue.IntV(t.line.toLong()), "start_col" to HostValue.IntV(t.column.toLong()),
+                        "end_line" to HostValue.IntV(t.endLine.toLong()), "end_col" to HostValue.IntV(t.endColumn.toLong()),
+                    ),
+                )
+            })
+
         override fun parse(text: String, file: String, line: Int, column: Int, declarations: Boolean): HostValue = try {
             val code = MezzeParser().parseCode(text, file, line, column, declarations)
             record("code" to HostValue.Opt(SyntaxEncoder.WITHOUT_FACTS.code(code)), "error" to HostValue.Opt(null))

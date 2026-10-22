@@ -28,7 +28,7 @@ import java.nio.file.Path
 class MacroExpansionTest {
 
     private val macros = """
-        use std::macro::{ MacroInput, Expansion, parse_expr, parse_decls, expand_to, declare, reject }
+        use std::macro::{ MacroInput, Expansion, parse_expr, parse_decls, expand_to, declare, reject, tokens }
         use std::syntax::{ Expr, StrExpr, SyntaxDecl, Decl, TypeDefSyntax, DeclsCode }
         use std::collections::seq
 
@@ -98,6 +98,11 @@ class MacroExpansionTest {
         ## Expands to a mistake in a call of this module's `seq`.
         pub let bad_map: { input: MacroInput } -> Expansion = { input } ->
           expand_to { e = `(seq::map { xs = [1], f = { y } -> y }) }
+
+        ## `count_names!( … )` is how many identifiers its input has.
+        pub let count_names: { input: MacroInput } -> Expansion = { input } -> do
+          let names = seq::filter { xs = tokens { input = input }, p = { x } -> x.kind == "identifier" }
+          expand_to { e = IntExpr { value = seq::size { xs = names }, span = input.span, facts = None } }
 
         ## Never finishes.
         pub let spin: { input: MacroInput } -> Expansion = { input } -> forever { n = 0 }
@@ -377,6 +382,18 @@ class MacroExpansionTest {
             both
         """.trimIndent())
         assertEquals("example.org:8080", out)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a macro reads its input as Mezze tokens`() {
+        val out = run("""
+            use macros::{ count_names }
+
+            let n = count_names!(a + b * 3 - c ! "d")
+            n
+        """.trimIndent())
+        assertEquals(3L, out)
     }
 
     @Test

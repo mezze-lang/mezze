@@ -116,6 +116,13 @@ interface SyntaxHost {
      * declarations when [declarations], else as one expression.
      */
     fun parse(text: String, file: String, line: Int, column: Int, declarations: Boolean): HostValue
+
+    /**
+     * [text] as Mezze's lexer reads it, placed as [parse] places it: `[Token]`
+     * (`std::macro`). Text the lexer does not know is a token of kind `"error"`,
+     * not a failure — a macro's input need not be Mezze.
+     */
+    fun tokens(text: String, file: String, line: Int, column: Int): HostValue
 }
 
 /** What [ComptimeEvaluator.evaluate] produces. */

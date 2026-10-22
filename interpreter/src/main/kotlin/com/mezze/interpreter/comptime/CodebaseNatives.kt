@@ -45,6 +45,14 @@ object CodebaseNatives {
             answer(argument.fields.firstOrNull { it.first == field }?.second
                 ?: throw IllegalStateException("the invoked call's argument has no field `$field`"))
         }
+        put.accept("__native_syntax_tokens") { args, _ ->
+            val host = bound(SYNTAX_BINDING, "__native_syntax_tokens") as? SyntaxHost
+                ?: throw IllegalStateException("the value bound as $SYNTAX_BINDING is not a SyntaxHost")
+            answer(host.tokens(
+                str(args, "text"), str(args, "file"),
+                (args.getField("line") as Long).toInt(), (args.getField("column") as Long).toInt(),
+            ))
+        }
         put.accept("__native_syntax_parse") { args, _ ->
             val host = bound(SYNTAX_BINDING, "__native_syntax_parse") as? SyntaxHost
                 ?: throw IllegalStateException("the value bound as $SYNTAX_BINDING is not a SyntaxHost")

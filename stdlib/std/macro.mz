@@ -36,6 +36,20 @@ pub type Expansion = { code: Code, errors: [MacroError] }
 ## A mistake in a macro's input, reported where it is.
 pub type MacroError = { message: Str, span: Span, hints: [Str] }
 
+## One token of a macro's input, as Mezze's lexer reads it. `kind` is the
+## lexer's name for it: `identifier`, `integer`, `string`, `lparen`, `plus`, …,
+## `newline`, `comment`, and `error` for text Mezze has no token for.
+pub type Token = { kind: Str, text: Str, span: Span }
+
+## [input] as Mezze's lexer reads it, with spans in the caller's file — for a
+## macro whose language is close to Mezze's, without parsing all of it.
+pub let tokens: { input: MacroInput } -> [Token] = { input } -> do
+  let file = match input.span.file is
+    Some { val } -> val
+    None -> ""
+  let found: [Token] = __native_syntax_tokens { text = input.text, file = file, line = input.span.start_line, column = input.span.start_col }
+  found
+
 ## Input that does not parse as Mezze.
 pub type SyntaxError = { message: Str, span: Span }
 
