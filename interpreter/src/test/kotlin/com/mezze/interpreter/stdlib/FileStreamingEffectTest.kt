@@ -355,4 +355,175 @@ class FileStreamingEffectTest {
         """.trimIndent()
         assertEquals("closed", eval(code))
     }
+    // ==================== WriteSync ====================
+
+    /**
+     * The property that distinguishes `WriteSync` from `Write`: the bytes are
+     * readable by somebody else BEFORE the handle closes.
+     *
+     * On LocalFileSystem that falls out of `StandardOpenOption.SYNC` — the data
+     * is on the device when `write_chunk` returns. memfs has no device, so it
+     * publishes to the file map instead, which is the observable half of
+     * durability and the only half it can honestly offer. Withholding it would
+     * be the divergence: the same program would read back empty under
+     * MemoryFileSystem and full on disk.
+     *
+     * Asserted of both backends, which is the only way this class of
+     * disagreement gets caught.
+     */
+    @Test
+    fun `MemoryFileSystem WriteSync is visible before close`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync, read_text }
+            use std::collections::bytes
+            perform MemoryFileSystem in perform MemoryFileStreaming in
+              match FileStreaming.open { path = "/wal", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
+                match read_text { path = "/wal" } is
+                  Ok { val = t } -> t
+                  Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("record-1", eval(code))
+    }
+
+    @Test
+    fun `LocalFileSystem WriteSync is visible before close`(@TempDir tmp: Path) {
+        val f = tmp.resolve("wal").toString()
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, WriteSync, read_text }
+            use std::collections::bytes
+            perform LocalFileSystem in perform LocalFileStreaming in
+              match FileStreaming.open { path = "$f", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
+                match read_text { path = "$f" } is
+                  Ok { val = t } -> t
+                  Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("record-1", eval(code))
+    }
+
+    /**
+     * The contrast, and the reason the test above proves something: a plain
+     * `Write` handle is NOT required to be visible before close. Both backends
+     * buffer, so the file reads back empty — which is exactly why a WAL needs
+     * the sync handle rather than hoping.
+     */
+    @Test
+    fun `MemoryFileSystem a plain Write is not visible before close`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Write, read_text }
+            use std::collections::bytes
+            use std::str
+            perform MemoryFileSystem in perform MemoryFileStreaming in
+              match FileStreaming.open { path = "/buffered", mode = Write } is
+                Err { error = _ } -> 0 - 1
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
+                match read_text { path = "/buffered" } is
+                  Ok { val = t } -> str::size { s = t }
+                  Err { error = _ } -> 0 - 1
+        """.trimIndent()
+        assertEquals(0L, eval(code))
+    }
+
+    /** Successive sync writes accumulate rather than replacing each other. */
+    @Test
+    fun `MemoryFileSystem successive WriteSync writes accumulate`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync, read_text }
+            use std::collections::bytes
+            perform MemoryFileSystem in perform MemoryFileStreaming in
+              match FileStreaming.open { path = "/wal", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "c" } }
+                let _ = FileStreaming.close { handle = h }
+                match read_text { path = "/wal" } is
+                  Ok { val = t } -> t
+                  Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("abc", eval(code))
+    }
+
+    @Test
+    fun `LocalFileSystem successive WriteSync writes accumulate`(@TempDir tmp: Path) {
+        val f = tmp.resolve("wal").toString()
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, WriteSync, read_text }
+            use std::collections::bytes
+            perform LocalFileSystem in perform LocalFileStreaming in
+              match FileStreaming.open { path = "$f", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "c" } }
+                let _ = FileStreaming.close { handle = h }
+                match read_text { path = "$f" } is
+                  Ok { val = t } -> t
+                  Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("abc", eval(code))
+    }
+
+    /** `WriteSync` truncates on open, like `Write`. */
+    @Test
+    fun `MemoryFileSystem WriteSync truncates on open`() {
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync, write_text, read_text }
+            use std::collections::bytes
+            perform MemoryFileSystem in perform MemoryFileStreaming in do
+              let _ = write_text { path = "/f", text = "old-and-long" }
+              match FileStreaming.open { path = "/f", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
+                let _ = FileStreaming.close { handle = h }
+                match read_text { path = "/f" } is
+                  Ok { val = t } -> t
+                  Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("new", eval(code))
+    }
+
+    @Test
+    fun `LocalFileSystem WriteSync truncates on open`(@TempDir tmp: Path) {
+        val f = tmp.resolve("f").toString()
+        val code = """
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, WriteSync, write_text, read_text }
+            use std::collections::bytes
+            perform LocalFileSystem in perform LocalFileStreaming in do
+              let _ = write_text { path = "$f", text = "old-and-long" }
+              match FileStreaming.open { path = "$f", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> do
+                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
+                let _ = FileStreaming.close { handle = h }
+                match read_text { path = "$f" } is
+                  Ok { val = t } -> t
+                  Err { error = _ } -> "read-failed"
+        """.trimIndent()
+        assertEquals("new", eval(code))
+    }
+
+    /** A sync handle is write-only, like `Write` — reading from it is refused. */
+    @Test
+    fun `MemoryFileSystem WriteSync refuses a read`() {
+        val code = """
+            use std::effects::filesystem::{ FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync }
+            perform MemoryFileSystem in perform MemoryFileStreaming in
+              match FileStreaming.open { path = "/f", mode = WriteSync } is
+                Err { error = _ } -> "open-failed"
+                Ok { val = h } -> match FileStreaming.read_chunk { handle = h, max_bytes = 4 } is
+                  Ok { val = _ } -> "unexpectedly-read"
+                  Err { error = _ } -> "refused"
+        """.trimIndent()
+        assertEquals("refused", eval(code))
+    }
 }

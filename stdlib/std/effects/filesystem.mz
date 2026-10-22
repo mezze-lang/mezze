@@ -12,6 +12,8 @@
 ## lives in std::fs — no effect row, pure string surgery.
 use std::collections::bytes
 use std::collections::seq
+use std::collections::iter
+use std::str
 use std::int
 use std::result
 use std::fs
@@ -31,10 +33,21 @@ pub type FileStat = { kind: FileKind, size: Int, modified: Int }
 pub type DirEntry = { name: Str, stat: FileStat }
 
 ## Open modes for the streaming primitive.
-##   Read     — read-only. Path must exist.
-##   Write    — truncate-or-create. Existing content replaced.
-##   Append   — create-if-missing, position at end.
-pub type OpenMode = | Read, Write, Append |
+##   Read       — read-only. Path must exist.
+##   Write      — truncate-or-create. Existing content replaced.
+##   Append     — create-if-missing, position at end.
+##   WriteSync  — like Write, but every `write_chunk` is DURABLE before it
+##                returns. The difference from `Write` + `FileDurability.fsync`
+##                is where the decision lives: a sync handle cannot forget,
+##                while an fsync the caller is responsible for is one a caller
+##                can skip under load and not notice until a power cut. It is
+##                the right default for a write-ahead log, and the wrong one
+##                for bulk output — each write waits on the device.
+##
+## A backend with no storage device behind it implements `WriteSync` by
+## publishing each write immediately, which is the observable half of
+## durability and the only half it can offer.
+pub type OpenMode = | Read, Write, Append, WriteSync |
 
 ## Errors returned by FileSystem ops. Constructor names are prefixed
 ## with `Fs` to avoid collisions with FileKind's `NotFound` and with
@@ -637,6 +650,96 @@ pub let with_read
       let _ = FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }
+
+
+## ---------- Lazy sources: the filesystem as an `Iter` ----------
+
+## A file's lines, lazily, over an already-open handle.
+##
+## Lazy for real: one `read_chunk` per `chunk_bytes`, and a line is yielded as
+## soon as the buffer holds a newline. A 50GB log costs one chunk of memory
+## plus the longest line, which is the whole reason this is not
+## `read_text` + `str::split`.
+##
+## `Step.Skip` is what makes it work. When the buffer has no complete line the
+## step cannot yield and is not finished either, so it reads another chunk and
+## skips — the exact case `Skip` exists for. A source without it would have to
+## loop internally and block the pipeline on a chunk boundary.
+##
+## Takes a HANDLE rather than a path, because an `Iter` that owned one would
+## leak it: a consumer is free to stop early (`take { n = 10 }`) and nothing
+## would run a close. `with_lines` below is the scoped form that closes for
+## you; this is the piece to use when you already have the handle.
+pub let lines_of
+  : { handle: FileHandle, chunk_bytes: Int } -> Iter Str <FileStreaming, ...>
+  = { handle, chunk_bytes } -> iter::unfold {
+    state = { buf = "", eof = False },
+    step = { s } ->
+      match str::index_of { s = s.buf, sub = "\n" } is
+        Some { val = i } -> Yield {
+          val = str::substring { s = s.buf, start = 0, end = i },
+          next = { buf = str::substring { s = s.buf, start = i + 1, end = str::size { s = s.buf } }, eof = s.eof },
+        }
+        None -> if s.eof then
+            ## No newline left. A trailing line without one still counts —
+            ## a file that does not end in \n has a last line, and dropping
+            ## it is the classic off-by-one in this kind of reader.
+            if str::size { s = s.buf } > 0 then Yield { val = s.buf, next = { buf = "", eof = True } }
+            else Done
+          else match FileStreaming.read_chunk { handle = handle, max_bytes = chunk_bytes } is
+            Err { error = _ } -> Done
+            Ok { val = b } -> if bytes::size { b = b } == 0 then Skip { next = { buf = s.buf, eof = True } }
+              else match bytes::to_str { b = b } is
+                Ok { val = chunk } -> Skip { next = { buf = "$(s.buf)$(chunk)", eof = s.eof } }
+                Err { error = _ } -> Done
+  }
+
+
+## A file's lines, lazily, with the handle closed for you.
+##
+## The callback receives the `Iter` and may consume as much of it as it likes;
+## the handle closes when the callback returns, whether it drained the
+## iterator or stopped at the first line. Nothing escapes: an `Iter` returned
+## FROM the callback would be reading a closed handle, which reports
+## `FsClosedHandle` rather than silently yielding nothing.
+pub let with_lines
+  : { path: Str, chunk_bytes: Int, f: { lines: Iter Str } -> 'a <FileStreaming, ...> }
+  -> Result 'a FsError <FileStreaming, ...>
+  = { path, chunk_bytes, f } -> match FileStreaming.open { path = path, mode = Read } is
+    Ok { val = h } -> do
+      let result = f { lines = lines_of { handle = h, chunk_bytes = chunk_bytes } }
+      let _ = FileStreaming.close { handle = h }
+      Ok { val = result }
+    Err { error } -> Err { error = error }
+
+
+## A watch's events, lazily, as an `Iter`.
+##
+## `poll` answers a BATCH, which is right for the primitive — it matches
+## inotify's read and lets the caller choose its cadence — and awkward for a
+## consumer that wants one event at a time. This flattens the batches into a
+## stream, polling again only when the pipeline asks for an element the
+## current batch does not have.
+##
+## FINITE by construction: it stops at the first poll that yields nothing,
+## rather than spinning. An endless event stream is a different thing and
+## wants the runner effect to decide how it waits; a caller that wants to keep
+## watching calls this again.
+pub let watch_events
+  : { handle: WatchHandle, timeout_ms: Int } -> Iter WatchEvent <FileWatch, ...>
+  = { handle, timeout_ms } -> iter::unfold {
+    state = { pending = [] },
+    step = { s } ->
+      match seq::first { xs = s.pending } is
+        Some { val = e } -> Yield {
+          val = e,
+          next = { pending = seq::drop { xs = s.pending, n = 1 } },
+        }
+        None -> match FileWatch.poll { handle = handle, timeout_ms = timeout_ms } is
+          Err { error = _ } -> Done
+          Ok { val = batch } -> if seq::size { xs = batch } == 0 then Done
+            else Skip { next = { pending = batch } }
+  }
 
 
 ## Auto-closing write wrapper.

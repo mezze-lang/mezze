@@ -386,12 +386,61 @@ Rust-synchronous baggage. `Iter` is what shipped.
 
 ---
 
+## The runner effect — the question dissolved
+
+The agreed shape wanted "Sync / Async / Parallel as performers of one runner".
+That runner **already exists**: `std::effects::parallel` has a `Parallel`
+effect with five performers (`LoomParallel`, `LoomParallelWith`,
+`OSThreadParallel`, `OSThreadParallelWith`, `DeterministicSequential`). What
+was missing was not the runner but a lazy bounded-concurrency stage, and that
+turned out not to be worth building. Measured
+(`bench/cases/concurrent_map_compare`, identical checksums):
+
+```
+CPU-bound, 20000 items x 400 ops
+  chunk_fold        63ms
+  sequential       174ms
+  par_map(16)      241ms     <- SLOWER than not forking
+
+I/O-shaped, 160 items each parked 2ms
+  sequential                           336ms
+  chunk_fold, default min_chunk=1024   331ms   <- no parallelism at all
+  par_map(16)                           21ms
+  chunk_fold, min_chunk=1                6ms   <- fastest
+```
+
+Chunking expresses bounded concurrency over waits, and beats fork-per-element
+at it. So an `iter::map_concurrent` has **no performance case** in either
+regime. It has one remaining argument, which no benchmark can settle: a source
+that cannot be materialised at all — an endless `watch_events`, a paginated
+cursor, a 50GB file's lines — where `chunk_fold` and `par_map` are both
+unusable because chunking needs the whole sequence up front. That is a
+capability decision, not an optimisation.
+
+**The trap worth carrying away:** `min_chunk = 1024` is tuned for compute, so
+any workload under 1024 items is one chunk that never forks — 55x on the I/O
+half, silently, and the module header used to claim `LoomParallel` was "great
+for I/O-bound work". It now carries these numbers. There is deliberately no
+single default that serves both, because the right threshold is a property of
+the body the module cannot see.
+
 ## Remaining order of work
 
-1. The runner effect for `Iter` (Sync / Async / Parallel as performers of one
-   runner) — the last piece of the agreed streaming shape, and now unblocked.
-2. Retrofit `read_lines`, HTTP bodies and `FileWatch.poll` onto `Iter`.
-3. A durable-write `OpenMode`, or `OpenMode` as a flags record.
+1. **HTTP streaming bodies** — the one substantial piece left, and a design
+   pass rather than a retrofit. `Request.body` is `Option Bytes` and
+   `Response.body` is `Bytes`, both fully materialised, so this is introducing
+   a streaming body to the effect, the client AND the server. The earlier note
+   that this would have to invent `ServerBody = | Whole, Streamed |` still
+   stands.
+2. **`iter::map_concurrent`, only if the capability is wanted** — see above. It
+   buys unmaterialisable sources and nothing else.
+3. **Whether `min_chunk`'s default should change**, or gain an I/O-shaped
+   performer (`LoomParallelIO`?). Documented rather than decided, because
+   changing it would slow every CPU-bound caller.
+4. **`OpenMode` as a flags record** (`mode + sync + create_new +
+   delete_on_close`) rather than four arms, if a fifth combination ever shows
+   up.
 
-Done: the seven effects, the three signature changes, and the `Iter` boundary
-question.
+Done: the seven effects, the three signature changes, the `Iter` boundary
+question, `WriteSync`, the lazy FS sources (`lines_of` / `with_lines` /
+`watch_events`), and the JVM-vs-native parity guard.

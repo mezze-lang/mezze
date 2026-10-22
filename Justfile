@@ -182,6 +182,14 @@ test: (test-one "parser") (test-one "typechecker") (test-one "interpreter")
 lint-shell:
     bash scripts/lint-shell.sh
 
+# Differential test: the native binary must agree with the JVM one. The whole
+# interpreter suite runs on the JVM, so an AOT-only divergence is invisible to
+# all of it — one was, silently, for as long as `open` and `lock` have existed.
+# Needs both builds: `just build && just native`.
+[group('test')]
+aot-parity:
+    bash scripts/aot-parity-e2e.sh 2>&1 | tee logs/aot-parity.log
+
 # Full gate: the three above + cli, plus the shell lint
 [group('test')]
 gate: lint-shell test (test-one "cli")

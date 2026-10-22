@@ -11,9 +11,34 @@ use std::int
 ## to `min_chunk` (default 1024, tunable via the `With` variants)
 ## the leaf runs sequentially via the corresponding seq:: combinator.
 ##
+## ## `min_chunk` IS TUNED FOR COMPUTE, AND WILL SERIALISE YOUR I/O
+##
+## The 1024 default is right for CPU-bound work — splitting below it costs
+## more than it saves. It also means **any workload of fewer than 1024 items
+## is ONE chunk and never forks at all**, which for I/O-bound work is the
+## difference between waiting in parallel and waiting in series.
+##
+## Measured (`bench/cases/concurrent_map_compare`, 160 items each parked 2ms):
+##
+##     sequential                               336ms
+##     chunk_fold, default min_chunk = 1024     331ms   <- no parallelism
+##     async par_map, max_concurrent = 16        21ms
+##     chunk_fold, min_chunk = 1                  6ms   <- fastest
+##
+## Fifty-five times, from one field. So: `LoomParallelWith { max_concurrent =
+## 16, min_chunk = 1 }` for work that WAITS, and the plain `LoomParallel` for
+## work that computes. The same benchmark's CPU half is the other direction —
+## 20,000 items of 400 ops: chunk_fold 63ms, sequential 174ms, and
+## fork-per-element 241ms, i.e. SLOWER than not forking.
+##
+## There is deliberately no single default that serves both, because the right
+## threshold is a property of the body, which this module cannot see.
+##
 ## Backends (mirror the Async handler naming — pick your substrate):
 ##   - LoomParallel      — one Loom virtual thread per fork. Default;
-##     cheap forks, great for I/O-bound work and general use.
+##     cheap forks, and the right substrate for I/O-bound work — but only
+##     with `min_chunk` lowered, per the warning above. On the default
+##     threshold an I/O workload under 1024 items runs sequentially.
 ##   - OSThreadParallel  — one platform Truffle thread per fork.
 ##     Best for CPU-bound work where Loom carrier mounting overhead
 ##     would show up. More expensive per spawn (~50µs vs Loom's ~14µs)

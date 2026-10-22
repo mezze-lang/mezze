@@ -226,12 +226,11 @@ public final class MemoryFilesystemNatives {
     public static Object writeBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
         MezzeBytes bytes = getBytes(args, "bytes");
-        String mode = getVariantTag(args, "mode");
         String parent = parentOf(path);
         if (!isDir(parent)) return errNotFound(parent);
         if (isDir(path)) return errIO(path, "Is a directory");
 
-        if ("CreateNew".equals(mode)) {
+        if (variantIs(args, "mode", "CreateNew")) {
             Entry prior = files().putIfAbsent(path, new Entry(bytes.getData()));
             if (prior != null) return errAlreadyExists(path);
             directories().get(parent).add(basenameOf(path));
@@ -239,22 +238,38 @@ public final class MemoryFilesystemNatives {
             return ok(MezzeRecord.empty());
         }
 
-        if ("CreateOrAppend".equals(mode)) {
-            Entry existing = files().get(path);
-            if (existing != null) {
-                byte[] add = bytes.getData();
+        if (variantIs(args, "mode", "CreateOrAppend")) {
+            // `compute`, not get-then-mutate. O_APPEND on a real file makes
+            // each write atomic with respect to the end, so two concurrent
+            // appenders both keep their bytes. A read-modify-write here would
+            // not: both read the same old array, and whichever assigned last
+            // would erase the other's record. That is a backend DIVERGENCE in
+            // the worse direction — the program is correct on LocalFileSystem
+            // and silently loses data in its own tests.
+            //
+            // ConcurrentHashMap.compute is atomic per key, which is exactly
+            // the granularity O_APPEND gives.
+            byte[] add = bytes.getData();
+            boolean[] created = { false };
+            files().compute(path, (k, existing) -> {
+                if (existing == null) {
+                    created[0] = true;
+                    return new Entry(add.clone());
+                }
                 byte[] grown = new byte[existing.bytes.length + add.length];
                 System.arraycopy(existing.bytes, 0, grown, 0, existing.bytes.length);
                 System.arraycopy(add, 0, grown, existing.bytes.length, add.length);
                 existing.bytes = grown;
                 existing.modifiedMs = nowMs().get() > 0 ? nowMs().get() : System.currentTimeMillis();
+                return existing;
+            });
+            if (created[0]) {
+                // Append to a missing file creates it, like O_APPEND|O_CREAT.
+                directories().get(parent).add(basenameOf(path));
+                notifyWatchers(path, "Created");
+            } else {
                 notifyWatchers(path, "Modified");
-                return ok(MezzeRecord.empty());
             }
-            // Append to a missing file creates it, like O_APPEND|O_CREAT.
-            files().put(path, new Entry(bytes.getData()));
-            directories().get(parent).add(basenameOf(path));
-            notifyWatchers(path, "Created");
             return ok(MezzeRecord.empty());
         }
 
@@ -285,7 +300,21 @@ public final class MemoryFilesystemNatives {
         Entry direct = files().get(path);
         if (direct != null && direct.symlinkTarget != null) {
             if (!follow) return ok(fileStatRecord("Other", 0L, direct.modifiedMs));
-            path = normalize(direct.symlinkTarget);
+            // Follow the whole CHAIN, not one hop: NIO resolves link -> link
+            // -> file, so stopping after one would report NotFound here for a
+            // path LocalFileSystem reports as a File. Bounded, because a
+            // symlink cycle is legal to create and must not hang — NIO raises
+            // FileSystemLoopException at its own limit, and this reports the
+            // same shape of IO error.
+            int hops = 0;
+            Entry link = direct;
+            while (link != null && link.symlinkTarget != null) {
+                if (++hops > 64) {
+                    return errIO(path, "Too many levels of symbolic links");
+                }
+                path = normalize(link.symlinkTarget);
+                link = files().get(path);
+            }
         }
         if (isDir(path)) {
             return ok(fileStatRecord("Directory", 0L, 0L));
@@ -398,11 +427,18 @@ public final class MemoryFilesystemNatives {
         // faster than deriving read+write because we skip the
         // intermediate MezzeBytes allocation.
         Entry copy = new Entry(srcEntry.bytes.clone());
+        // The PERMISSION BITS come across whether or not preserve_attrs was
+        // asked for, because that is what the real backend does: NIO's
+        // UnixCopyFile creates the target with the source's mode & 0777, and
+        // COPY_ATTRIBUTES adds only timestamps and ownership on top. memfs
+        // used to reset the mode here, so a copy was executable on
+        // LocalFileSystem and not in its own tests — the fourth divergence of
+        // this shape, and the one a copy-then-exec script would hit.
+        //
+        // Cloned, not shared: a later chmod of one file must not silently
+        // change the other.
+        copy.mode = srcEntry.mode.clone();
         if (preserveAttrs) {
-            // Mode, owner and mtime, so a copy --preserve round-trips. The
-            // mode array is cloned: sharing it would make a later chmod of
-            // one file silently change the other.
-            copy.mode = srcEntry.mode.clone();
             copy.ownerUser = srcEntry.ownerUser;
             copy.ownerGroup = srcEntry.ownerGroup;
             copy.modifiedMs = srcEntry.modifiedMs;
@@ -422,12 +458,22 @@ public final class MemoryFilesystemNatives {
             return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
         boolean replaceExisting = getBool(args, "replace_existing");
-        // `require_atomic` is read and deliberately unused: a move here is
-        // two map operations on one context's state, with no window a
-        // reader of this filesystem can observe, so the guarantee always
-        // holds and refusing would be a lie in the other direction. Read
-        // anyway, so a caller that passes it gets the same signature.
+        // A move here is `put(dest)` then `remove(src)` on a
+        // ConcurrentHashMap, and between those two calls the entry is
+        // visible at BOTH paths. So this is NOT atomic, and a caller that
+        // asked for atomicity is told so rather than handed a guarantee
+        // that does not hold — the same honesty the whole capability split
+        // exists for. (An earlier comment here claimed the window was
+        // unobservable. It is observable: `Async` tasks are real threads.)
+        //
+        // Making it true would need a lock taken by every op that reads a
+        // path, not just by move, which is a cost the common case should not
+        // pay for a guarantee almost nothing asks for. If a caller ever
+        // needs it, a per-State ReadWriteLock is the shape.
         boolean requireAtomic = getBool(args, "require_atomic");
+        if (requireAtomic) {
+            return errNotSupported(src, "move_file (atomic; the in-memory backend is not)");
+        }
         boolean destExisted = isFile(dest) || isDir(dest);
         if (destExisted && !replaceExisting) return errAlreadyExists(dest);
         String destParent = parentOf(dest);
@@ -447,13 +493,25 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object open(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        String mode = getVariantTag(args, "mode");
+        // Resolve the mode to a CANONICAL name by tag, rather than recovering
+        // a name from the tag registry — which yields "Unknown(<tag>)" in an
+        // AOT image and sent every open down the default arm. The handle
+        // carries this string, so it has to be the real one.
+        String mode = variantIs(args, "mode", "Read") ? "Read"
+                    : variantIs(args, "mode", "Write") ? "Write"
+                    : variantIs(args, "mode", "Append") ? "Append"
+                    : variantIs(args, "mode", "WriteSync") ? "WriteSync"
+                    : null;
+        if (mode == null) return errIO(path, "Unrecognised OpenMode");
         MemFileHandle h = new MemFileHandle(path, mode);
         switch (mode) {
             case "Read":
                 if (!isFile(path)) return errNotFound(path);
                 h.pos = 0;
                 return ok(h);
+            case "WriteSync":
+                // Same open semantics as Write — truncate-or-create. What
+                // differs is write_chunk, which publishes immediately.
             case "Write":
                 if (isDir(path)) return errIO(path, "Is a directory");
                 String parentW = parentOf(path);
@@ -518,6 +576,17 @@ public final class MemoryFilesystemNatives {
         if (h.writeBuf == null) return errIO(h.path, "Handle not opened for writing");
         try {
             h.writeBuf.write(bytes.getData());
+            if ("WriteSync".equals(h.mode)) {
+                // Publish NOW. On LocalFileSystem a SYNC handle has the bytes on
+                // the device before write_chunk returns, so another reader sees
+                // them; buffering here until close would make the same program
+                // read back empty on one backend and full on the other. memfs
+                // has no device to force, so visibility is the whole of the
+                // durability it can honestly offer — and withholding it would
+                // be the divergence, not the honesty.
+                Entry published = publishSequential(h);
+                if (published == null) return errNotFound(parentOf(h.path));
+            }
             return ok(MezzeRecord.empty());
         } catch (Exception e) {
             return errIO(h.path, e.getMessage());
@@ -583,6 +652,39 @@ public final class MemoryFilesystemNatives {
      * has no buffer (write_chunk goes straight to the channel), so this is
      * what keeps the two backends meaning the same thing.
      */
+    /**
+     * Publish the pending buffer WITHOUT handing authority to the Entry.
+     *
+     * `publishAndGet` nulls `writeBuf` on purpose — a positional op has taken
+     * over, so `close` must not republish the sequential bytes over the top.
+     * A `WriteSync` handle needs the opposite: it is still sequential and
+     * still accumulating, so the buffer has to survive. Nulling it here made
+     * the second `write_chunk` fail with "Handle not opened for writing",
+     * which a caller writing `let _ = write_chunk {...}` never sees — the file
+     * just quietly held the first record only.
+     *
+     * Idempotent: the buffer holds everything written so far and the Entry
+     * takes a full replacement, so publishing twice is publishing once.
+     */
+    @TruffleBoundary
+    private static Entry publishSequential(MemFileHandle h) {
+        if (h.writeBuf == null) return files().get(h.path);
+        String parent = parentOf(h.path);
+        if (!isDir(parent)) return null;
+        byte[] pending = h.writeBuf.toByteArray();
+        Entry cur = files().get(h.path);
+        if (cur == null) {
+            cur = new Entry(pending);
+            files().put(h.path, cur);
+            directories().get(parent).add(basenameOf(h.path));
+            notifyWatchers(h.path, "Created");
+        } else {
+            cur.bytes = pending;
+            notifyWatchers(h.path, "Modified");
+        }
+        return cur;
+    }
+
     private static Entry publishAndGet(MemFileHandle h) {
         if (h.writeBuf != null) {
             String parent = parentOf(h.path);
@@ -983,8 +1085,7 @@ public final class MemoryFilesystemNatives {
     @TruffleBoundary
     public static Object lock(MezzeRecord args) {
         String path = getString(args, "path");
-        String kind = getVariantTag(args, "kind");
-        boolean shared = "Shared".equals(kind);
+        boolean shared = variantIs(args, "kind", "Shared");
         boolean blocking = getBool(args, "blocking");
         LockState st = locks().computeIfAbsent(path, p -> new LockState());
         synchronized (st) {
@@ -1173,11 +1274,34 @@ public final class MemoryFilesystemNatives {
         throw new NativeTypeMismatchException("Expected record for field '" + name + "'");
     }
 
-    private static String getVariantTag(MezzeRecord r, String name) {
-        int i = r.getFieldIndex(name);
-        if (i < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
-        Object v = r.getField(i);
-        if (v instanceof MezzeVariant vv) return vv.getConstructorName();
+
+    /**
+     * True iff the variant in field `name` is the constructor `ctor`.
+     *
+     * Compares TAGS. The obvious version — `getConstructorName()` then
+     * `equals` — looks identical and is not: it reverse-looks-up the tag in
+     * the registry and yields "Unknown(<tag>)" when the constructor was never
+     * registered there. In an AOT image the stdlib's constructors are not, so
+     * every switch over a recovered name fell to its default: a `write_bytes`
+     * asked to append silently truncated, and a Shared lock came out
+     * exclusive. Both tags are the same name-hash, so comparing them needs no
+     * registry round-trip and cannot fail that way.
+     */
+    @TruffleBoundary
+    private static boolean variantIs(MezzeRecord r, String name, String ctor) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new NativeTypeMismatchException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeVariant v) {
+            return v.getTag() == MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(ctor);
+        }
         throw new NativeTypeMismatchException("Expected variant for field '" + name + "'");
     }
+
+    // No `getVariantTag` here any more. It returned
+    // `getConstructorName()`, which reverse-looks-up the tag in the
+    // registry and yields "Unknown(<tag>)" when the constructor was never
+    // registered — which is every stdlib constructor in an AOT image. Use
+    // `variantIs`, which compares tags. Deleted rather than left unused,
+    // because the next caller would reach for it by name.
 }

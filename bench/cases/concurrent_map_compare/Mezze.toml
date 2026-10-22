@@ -1,0 +1,12 @@
+[package]
+name = "bench_concurrent_map_compare"
+version = "0.1.0"
+
+[[app]]
+name = "bench_concurrent_map_compare"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
