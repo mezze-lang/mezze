@@ -1,7 +1,5 @@
-package com.mezze.language.codebase
+package com.mezze.language.comptime
 
-import com.mezze.language.ast.MezzeType
-import com.mezze.language.comptime.HostValue
 import com.mezze.language.comptime.HostValue.Bool
 import com.mezze.language.comptime.HostValue.FloatV
 import com.mezze.language.comptime.HostValue.IntV
@@ -11,81 +9,32 @@ import com.mezze.language.comptime.HostValue.Str
 import com.mezze.language.comptime.HostValue.Variant
 import com.mezze.language.comptime.HostValue.Companion.record
 import com.mezze.language.parsedast.*
-import com.mezze.language.typedast.BindingRef
-import com.mezze.language.typedast.Hash
-import com.mezze.language.typedast.TypedBuildTime
-import com.mezze.language.typedast.TypedCall
-import com.mezze.language.typedast.TypedExpr
-import com.mezze.language.typedast.TypedFieldAccess
-import com.mezze.language.typedast.TypedPerformOp
-import com.mezze.language.typedast.TypedVar
-import com.mezze.language.typedast.forEachChild
 
 /**
- * A declaration as written, in the shapes `std/syntax.mz` declares, with what the
- * compiler made of each node attached as `facts`.
+ * A declaration as written, in the shapes `std/syntax.mz` declares.
  *
  * The tree is the parser's: an operator stays an operator, a pipe and its `@`
- * stay as written, parentheses and record shorthand are kept. The facts come
- * from the typed tree, joined by SPAN: the compiler keeps the span of what was
- * written on what it made of it, so `a > b`, which it turns into the call
- * `a.gt { r = b }`, still sits at the span of `a > b`. A node with no typed
- * counterpart at its span — parentheses, a newtype wrapper, anything in code
- * that did not type-check — has no facts, and says so.
+ * stay as written, parentheses and record shorthand are kept.
+ *
+ * [facts] is the `Option Facts` for the node written at a span: what the
+ * compiler made of it, joined from the typed tree by the codebase. A quote,
+ * which is code that has not been compiled, has none.
+ *
+ * The shapes are decided here and in `std/syntax.mz`, and nowhere else: the
+ * codebase's answers, a quote's value and the decoding of a macro's output all
+ * go through this one encoder, so they cannot drift apart.
  */
-internal class SyntaxEncoder(
-    private val typeShape: (MezzeType) -> HostValue,
-    private val declRef: (CodebaseQueries.DeclRef) -> HostValue,
-    private val reached: (Hash) -> CodebaseQueries.DeclRef?,
-    /** What a call through [ability] on [receiver] reaches (see [CodebaseQueries.dispatched]). */
-    private val dispatched: (ability: Hash, receiver: MezzeType) -> CodebaseQueries.DeclRef?,
-    typed: List<TypedExpr>,
-) {
-    private data class At(val startLine: Int, val startCol: Int, val endLine: Int, val endCol: Int)
+class SyntaxEncoder(private val facts: (Loc) -> HostValue) {
 
-    private fun at(loc: Loc) = At(loc.startLine, loc.startCol, loc.endLine, loc.endCol)
-
-    /** Every typed node, by the span it was written at, outermost first. */
-    private val bySpan: Map<At, List<TypedExpr>> = HashMap<At, MutableList<TypedExpr>>().also { index ->
-        fun walk(e: TypedExpr) {
-            index.getOrPut(at(e.loc)) { mutableListOf() } += e
-            e.forEachChild { walk(it) }
-        }
-        typed.forEach { walk(it) }
-    }
-
-    /** The facts at a span, for an occurrence found through the index. */
-    fun factsAt(startLine: Int, startCol: Int, endLine: Int, endCol: Int): HostValue =
-        facts(At(startLine, startCol, endLine, endCol))
-
-    private fun facts(loc: Loc): HostValue = facts(at(loc))
-
-    private fun facts(span: At): HostValue {
-        val nodes = bySpan[span] ?: return Opt(null)
-        val node = nodes.firstOrNull { it !is TypedBuildTime } ?: return Opt(null)
-        fun byHash(e: TypedExpr?): Hash? = ((e as? TypedVar)?.binding as? BindingRef.ByHash)?.hash
-        val refersTo = nodes.firstNotNullOfOrNull { byHash(it) }?.let(reached)
-        val calls = when (node) {
-            // A call by hash; or a method or operator dispatched through an
-            // ability, which reaches that ability's impl for the receiver's type.
-            is TypedCall -> byHash(node.function)?.let(reached)
-                ?: (node.function as? TypedFieldAccess)?.let { fa ->
-                    fa.dispatchedAbility?.let { dispatched(it, fa.record.type) }
-                }
-            is TypedPerformOp -> reached(node.effectHash)
-            else -> null
-        }
-        return Opt(record(
-            "ty" to typeShape(node.type),
-            "refers_to" to Opt(refersTo?.let(declRef)),
-            "calls" to Opt(calls?.let(declRef)),
-            "at_build" to Bool(nodes.any { it is TypedBuildTime }),
-        ))
+    companion object {
+        /** For code nothing has compiled: every node's facts are `None`. */
+        val WITHOUT_FACTS = SyntaxEncoder { HostValue.Opt(null) }
     }
 
     // ── declarations ─────────────────────────────────────────────────────
 
-    fun decl(module: String, d: ParsedDecl, ref: CodebaseQueries.DeclRef?): HostValue = record(
+    /** [d] as a `SyntaxDecl`, written in [module]; [ref] is its `Option DeclRef`. */
+    fun decl(module: String, d: ParsedDecl, ref: HostValue): HostValue = record(
         "decl" to declBody(d),
         "module" to Str(module),
         "span" to span(d.loc),
@@ -94,7 +43,7 @@ internal class SyntaxEncoder(
         "metadata" to metadata(d.metadata),
         "comments" to comments(d.leadingComments),
         "trailing" to Opt(d.trailingComment?.let(::comment)),
-        "ref" to Opt(ref?.let(declRef)),
+        "ref" to ref,
     )
 
     private fun declBody(d: ParsedDecl): HostValue = when (d) {
@@ -128,6 +77,7 @@ internal class SyntaxEncoder(
             Variant("ImplSyntax", record(
                 "ability_name" to HostValue.str(ability?.localName),
                 "ability_module" to HostValue.str(ability?.qualifier?.toString()),
+                "ability_span" to Opt(ability?.loc?.let(::span)),
                 "targets" to Seq(d.targetTypes.map(::type)),
                 "ability_args" to Seq(d.abilityTypeArgs.map(::type)),
                 "forall" to strs(d.forallVars),
@@ -155,6 +105,7 @@ internal class SyntaxEncoder(
             "name" to Str(d.performerName),
             "effect_name" to Str(d.effect.localName),
             "effect_module" to HostValue.str(d.effect.qualifier?.toString()),
+            "effect_span" to span(d.effect.loc),
             "params" to Seq(d.params.map { p -> record("name" to Str(p.name), "ty" to type(p.type), "span" to span(p.loc)) }),
             "associated" to assoc(d.associatedTypeBindings),
             "ops" to Seq(d.operations.map { op ->
@@ -273,12 +224,14 @@ internal class SyntaxEncoder(
                     "name" to Str(en.name),
                     "value" to Opt(en.value?.let(::expr)),
                     "span" to span(en.loc),
-                    "comments" to comments(en.leadingComments + listOfNotNull(en.trailingComment)),
+                    "comments" to comments(en.leadingComments),
+                    "trailing" to Opt(en.trailingComment?.let(::comment)),
                 ))
                 is ParsedRecordEntry.Spread -> Variant("SpreadEntry", record(
                     "expr" to expr(en.expr),
                     "span" to span(en.loc),
-                    "comments" to comments(en.leadingComments + listOfNotNull(en.trailingComment)),
+                    "comments" to comments(en.leadingComments),
+                    "trailing" to Opt(en.trailingComment?.let(::comment)),
                 ))
             }
         }))
@@ -307,11 +260,13 @@ internal class SyntaxEncoder(
             "span" to span(c.loc),
             "doc" to HostValue.str(c.docComment),
             "metadata" to metadata(c.metadata),
-            "comments" to comments(c.leadingComments + listOfNotNull(c.trailingComment)),
+            "comments" to comments(c.leadingComments),
+            "trailing" to Opt(c.trailingComment?.let(::comment)),
         ) }))
         is ParsedDo -> node(e,
             "statements" to Seq(e.statements.map(::statement)),
             "result" to expr(e.result),
+            "result_comments" to comments(e.resultLeadingComments),
         )
         is ParsedSeqLit -> node(e, "elements" to Seq(e.elements.map { el ->
             when (el) {
@@ -331,9 +286,25 @@ internal class SyntaxEncoder(
         is ParsedEffectCall -> node(e,
             "op" to Str(e.operation.localName),
             "effect_name" to HostValue.str(e.operation.qualifier?.toString()),
+            "op_span" to span(e.operation.loc),
             "arg" to expr(e.arguments),
         )
         is ParsedParens -> node(e, "inner" to expr(e.expr))
+        is ParsedQuote -> node(e, "quoted" to code(e.template), "splices" to Seq(e.splices.map(::expr)))
+        is ParsedMacroCall -> node(e,
+            "name" to Str(e.macro.localName),
+            "module" to HostValue.str(e.macro.qualifier?.toString()),
+            "name_span" to span(e.macro.loc),
+            "input" to Str(e.input),
+            "input_span" to span(e.inputLoc),
+            "expansion" to Opt(e.expansion?.let(::code)),
+        )
+    }
+
+    /** Code a quote holds or a macro produced, as `std::syntax`'s `Code`. */
+    fun code(c: ParsedCode): HostValue = when (c) {
+        is ParsedCode.Expr -> Variant("ExprCode", record("expr" to expr(c.expr)))
+        is ParsedCode.Decls -> Variant("DeclsCode", record("decls" to Seq(c.decls.map { decl("", it, Opt(null)) })))
     }
 
     private fun statement(st: ParsedStatement): HostValue = when (st) {
@@ -344,14 +315,16 @@ internal class SyntaxEncoder(
             "span" to span(st.loc),
             "doc" to HostValue.str(st.docComment),
             "metadata" to metadata(st.metadata),
-            "comments" to comments(st.leadingComments + listOfNotNull(st.trailingComment)),
+            "comments" to comments(st.leadingComments),
+            "trailing" to Opt(st.trailingComment?.let(::comment)),
         ))
         is ParsedStatement.Expr -> Variant("ExprStatement", record(
             "expr" to expr(st.expr),
             "span" to span(st.loc),
             "doc" to HostValue.str(st.docComment),
             "metadata" to metadata(st.metadata),
-            "comments" to comments(st.leadingComments + listOfNotNull(st.trailingComment)),
+            "comments" to comments(st.leadingComments),
+            "trailing" to Opt(st.trailingComment?.let(::comment)),
         ))
     }
 

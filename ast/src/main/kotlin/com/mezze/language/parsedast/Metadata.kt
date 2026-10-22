@@ -74,6 +74,38 @@ data class ParsedMetadata(
      */
     fun toJsonText(): String =
         kotlinx.serialization.json.JsonObject(fields.mapValues { (_, v) -> v.toJson() }).toString()
+
+    companion object {
+        /**
+         * The inverse of [toJsonText]: the block written at [loc]. A number with a
+         * fraction or an exponent is a float, any other number an int — the
+         * encoder writes a float's `.0`. Not an object, a `null`, or text that is
+         * not JSON → [IllegalArgumentException].
+         */
+        fun fromJsonText(text: String, loc: Loc): ParsedMetadata {
+            val json = try {
+                kotlinx.serialization.json.Json.parseToJsonElement(text)
+            } catch (e: kotlinx.serialization.SerializationException) {
+                throw IllegalArgumentException("metadata is not JSON: ${e.message}", e)
+            }
+            val obj = json as? kotlinx.serialization.json.JsonObject
+                ?: throw IllegalArgumentException("metadata is a JSON object, not `$json`")
+            return ParsedMetadata(obj.mapValues { (_, v) -> metadataValue(v) }, loc)
+        }
+    }
+}
+
+private fun metadataValue(j: kotlinx.serialization.json.JsonElement): ParsedMetadataValue = when (j) {
+    is kotlinx.serialization.json.JsonNull -> throw IllegalArgumentException("metadata has no `null`")
+    is kotlinx.serialization.json.JsonPrimitive -> when {
+        j.isString -> ParsedMetadataValue.StringVal(j.content)
+        j.content == "true" || j.content == "false" -> ParsedMetadataValue.BoolVal(j.content == "true")
+        j.content.any { it == '.' || it == 'e' || it == 'E' } || j.content == "NaN" || j.content.endsWith("Infinity") ->
+            ParsedMetadataValue.FloatVal(j.content.toDoubleOrNull() ?: throw IllegalArgumentException("`${j.content}` is not a number"))
+        else -> ParsedMetadataValue.IntVal(j.content.toLongOrNull() ?: throw IllegalArgumentException("`${j.content}` is not an Int"))
+    }
+    is kotlinx.serialization.json.JsonArray -> ParsedMetadataValue.ListVal(j.map(::metadataValue))
+    is kotlinx.serialization.json.JsonObject -> ParsedMetadataValue.RecordVal(j.mapValues { (_, v) -> metadataValue(v) })
 }
 
 private fun ParsedMetadataValue.toJson(): kotlinx.serialization.json.JsonElement = when (this) {

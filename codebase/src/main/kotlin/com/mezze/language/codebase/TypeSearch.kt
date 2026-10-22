@@ -182,7 +182,7 @@ object TypeSearch {
     private fun judge(store: MezzeStore, decl: DeclRow, query: MezzeType): Hit? {
         val rows = store.getSignature(decl.hash)
         if (rows.isEmpty) return null
-        val candidate = SignatureIndex.rebuild(rows)
+        val candidate = SignatureIndex.rebuild(rows, store::getTypeRows)
 
         // ORDER MATTERS, and it is not symmetry. `unify(a, b)` follows the
         // call-argument convention: `a` is the VALUE being offered and `b` is the
@@ -219,7 +219,7 @@ object TypeSearch {
         return Hit(
             decl = decl,
             quality = quality,
-            signature = SignatureIndex.render(rows),
+            signature = SignatureIndex.render(rows, store::getTypeRows),
             bindings = substantive.size,
         )
     }

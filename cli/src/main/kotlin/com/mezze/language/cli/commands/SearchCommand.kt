@@ -138,7 +138,7 @@ class SearchCommand {
                     TypeSearch.Hit(
                         decl = decl,
                         quality = TypeSearch.Quality.EXACT,
-                        signature = SignatureIndex.render(store.getSignature(decl.hash)),
+                        signature = SignatureIndex.render(store.getSignature(decl.hash), store::getTypeRows),
                         bindings = 0,
                     )
                 }

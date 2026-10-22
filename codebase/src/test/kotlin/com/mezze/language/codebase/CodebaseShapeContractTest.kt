@@ -160,12 +160,16 @@ class CodebaseShapeContractTest {
         // compiler-generated code (derived impls), which is never stored as
         // written. A boolean literal PATTERN has a parser branch, but the lexer
         // never emits the token it waits for: `True`/`False` are constructors.
-        val unreachable = setOf("CharExpr", "BoolLiteral")
+        // A macro call only expands with an evaluator, which this module does not
+        // have; its encoding is held by the parser's round trip, and its expansion
+        // by the interpreter's MacroExpansionTest.
+        val unreachable = setOf("CharExpr", "BoolLiteral", "MacroExpr")
         val missing = syntaxConstructors - produced - unreachable
         assertTrue(missing.isEmpty(), "never produced from source: ${missing.sorted()}")
     }
 
     private val everyForm = """
+        use std::syntax::{ Expr }
         use std::effects::log::{ println, Console, Log }
         use std::effects::noop::{ noop }
         use std::collections::seq
@@ -248,6 +252,8 @@ class CodebaseShapeContractTest {
           Circle { r = _ } -> "circle"
           Dot -> "dot"
         let local_types: { p: Point, s: std::syntax::Span, v: | On, Off | } -> Int = { p, s, v } -> p.x
+        let quoted: { e: Expr } -> Expr = { e } -> `(~e + 1)
+        let quoted_decls = {} -> `(let one = 1)
         main {}
         let main = {} -> perform Console in println { msg = shout { names = ["a"], extra = None } }
     """.trimIndent()

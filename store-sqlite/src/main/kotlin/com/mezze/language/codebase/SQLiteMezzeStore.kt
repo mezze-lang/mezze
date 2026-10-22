@@ -124,7 +124,10 @@ class SQLiteMezzeStore private constructor(
         //    store what type, ability and effect declarations define; and each
         //    usage records the declaration it is written in and whether it is
         //    a call — the SOURCE call graph; and `module_docs`.
-        const val SCHEMA_VERSION = 18
+        // 19: a declared record or variant inside a type is a REF node whose
+        //    structure is stored ONCE in type_nodes, under a key that is its
+        //    content (`ref_owner`); it was copied whole into every signature.
+        const val SCHEMA_VERSION = 19
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096
@@ -623,6 +626,7 @@ class SQLiteMezzeStore private constructor(
                     is_open     INTEGER NOT NULL DEFAULT 0,
                     performed   INTEGER NOT NULL DEFAULT 0,
                     is_residual INTEGER NOT NULL DEFAULT 0,
+                    ref_owner   TEXT,
                     PRIMARY KEY (owner_hash, node_id)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -669,6 +673,7 @@ class SQLiteMezzeStore private constructor(
                     is_open     INTEGER NOT NULL DEFAULT 0,
                     performed   INTEGER NOT NULL DEFAULT 0,
                     is_residual INTEGER NOT NULL DEFAULT 0,
+                    ref_owner   TEXT,
                     PRIMARY KEY (owner_hash, node_id)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -972,6 +977,7 @@ class SQLiteMezzeStore private constructor(
                     is_open     INTEGER NOT NULL DEFAULT 0,
                     performed   INTEGER NOT NULL DEFAULT 0,
                     is_residual INTEGER NOT NULL DEFAULT 0,
+                    ref_owner   TEXT,
                     PRIMARY KEY (owner_hash, node_id)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -1031,6 +1037,7 @@ class SQLiteMezzeStore private constructor(
                     is_open     INTEGER NOT NULL DEFAULT 0,
                     performed   INTEGER NOT NULL DEFAULT 0,
                     is_residual INTEGER NOT NULL DEFAULT 0,
+                    ref_owner   TEXT,
                     PRIMARY KEY (owner_hash, node_id)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -2935,8 +2942,8 @@ class SQLiteMezzeStore private constructor(
             conn.prepareStatement("""
                 INSERT OR REPLACE INTO $nodesTable
                     (owner_hash, node_id, parent_id, slot, ordinal, slot_label,
-                     kind, label, type_hash, is_open, performed, is_residual)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     kind, label, type_hash, is_open, performed, is_residual, ref_owner)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent())
         }
 
@@ -2957,6 +2964,11 @@ class SQLiteMezzeStore private constructor(
         }
 
         fun put(rows: SignatureRows) {
+            // The structures it refers to go to the signature tables, where every
+            // reference is resolved, and only once: a key IS its content.
+            for ((key, structure) in rows.shared) {
+                if (!signatureTables.has(key)) signatureTables.put(structure)
+            }
             val ownerHash = rows.nodes.firstOrNull()?.ownerHash ?: return
 
             // DELETE first, not INSERT OR REPLACE alone: a re-indexed decl whose type
@@ -2983,6 +2995,7 @@ class SQLiteMezzeStore private constructor(
                 setInt(10, if (n.isOpen) 1 else 0)
                 setInt(11, if (n.performed) 1 else 0)
                 setInt(12, if (n.isResidual) 1 else 0)
+                setString(13, n.refOwner?.hex)
                 executeUpdate()
             }
             for (e in rows.effects) putTypeNodeEffectStmt.apply {
@@ -3002,10 +3015,20 @@ class SQLiteMezzeStore private constructor(
             }
         }
 
+        private val hasStmt: PreparedStatement by lazy {
+            conn.prepareStatement("SELECT 1 FROM $nodesTable WHERE owner_hash = ? LIMIT 1")
+        }
+
+        /** Whether this database already holds rows owned by [ownerHash]. */
+        fun has(ownerHash: Hash): Boolean {
+            hasStmt.setString(1, ownerHash.hex)
+            return hasStmt.executeQuery().use { it.next() }
+        }
+
         private val getTypeNodesStmt: PreparedStatement by lazy {
             conn.prepareStatement(unionAll("""
                 SELECT owner_hash, node_id, parent_id, slot, ordinal, slot_label,
-                       kind, label, type_hash, is_open, performed, is_residual
+                       kind, label, type_hash, is_open, performed, is_residual, ref_owner
                 FROM <DB>.$nodesTable
                 WHERE owner_hash = ?
             """.trimIndent()) + " ORDER BY node_id")
@@ -3052,6 +3075,7 @@ class SQLiteMezzeStore private constructor(
                             isOpen = rs.getInt("is_open") != 0,
                             performed = rs.getInt("performed") != 0,
                             isResidual = rs.getInt("is_residual") != 0,
+                            refOwner = rs.getString("ref_owner")?.let { Hash(it) },
                         )
                     )
                 }

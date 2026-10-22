@@ -765,7 +765,11 @@ internal val MezzeParser.primaryExpression: Parser<ParsedExpr>
                     identifierExpression,
                     arrayLiteral,
                     lambdaOrRecordExpression,  // <-- THIS IS THE KEY!
-                    parenExpression
+                    parenExpression,
+                    // Last: it starts only at a backtick, and as the last
+                    // alternative its "expected '`'" never stands in for a
+                    // better message about what was really expected.
+                    quoteExpression,
                 )(stream)
             }
         }
@@ -1939,6 +1943,10 @@ internal fun countPipePlaceholders(expr: ParsedExpr): Int {
         // returning 0 and mis-reporting "missing placeholder".
         is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
         is ParsedCharLit, is ParsedIdentifier -> 0
+        // A quote's `@` belongs to the code it quotes; only its splices run here.
+        is ParsedQuote -> expr.splices.sumOf { countPipePlaceholders(it) }
+        // A macro's input is text, and its expansion never sees the pipe it sits in.
+        is ParsedMacroCall -> 0
     }
 }
 
@@ -1986,6 +1994,8 @@ internal fun findPipePlaceholderLocations(expr: ParsedExpr): List<Loc> {
         // Leaves — exhaustive, no `else` (see countPipePlaceholders).
         is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
         is ParsedCharLit, is ParsedIdentifier -> emptyList()
+        is ParsedQuote -> expr.splices.flatMap { findPipePlaceholderLocations(it) }
+        is ParsedMacroCall -> emptyList()
     }
 }
 
@@ -2039,6 +2049,8 @@ internal fun pipePlaceholderInReceiverPosition(expr: ParsedExpr): Loc? = when (e
     // receiver) — exhaustive, no `else`.
     is ParsedPipePlaceholder, is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit,
     is ParsedFracLit, is ParsedCharLit, is ParsedIdentifier -> null
+    is ParsedQuote -> expr.splices.firstNotNullOfOrNull { pipePlaceholderInReceiverPosition(it) }
+    is ParsedMacroCall -> null
 }
 
     // Pipe operator: |>
@@ -2755,10 +2767,8 @@ internal val MezzeParser.identifierExpression: Parser<ParsedExpr>
                             startToken
                         }
                         val loc = if (isQualified) spanLoc(startToken, lastToken, file) else tokenLoc(startToken, file)
-                        ParseResult.Success(
-                            ParsedIdentifier(localName = localName, qualifier = qualifier, loc = loc),
-                            currentStream
-                        )
+                        val name = ParsedIdentifier(localName = localName, qualifier = qualifier, loc = loc)
+                        macroCallAfter(name, currentStream) ?: ParseResult.Success(name, currentStream)
                     }
                 }
             }

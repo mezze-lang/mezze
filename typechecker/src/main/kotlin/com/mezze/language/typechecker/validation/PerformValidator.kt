@@ -133,6 +133,14 @@ class PerformValidator(
                 errors.addAll(validatePerformExpressionsInExpression(expr.expr, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
+            is ParsedQuote -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.value, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is ParsedMacroCall -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.compiled(), implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
             is ParsedBinaryOp -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.left, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.right, implDeclarations, effectDeclarations, functionDefinitions))
@@ -319,6 +327,8 @@ class PerformValidator(
                 }
 
                 is ParsedParens -> traverse(e.expr)
+                is ParsedQuote -> traverse(e.value)
+                is ParsedMacroCall -> traverse(e.compiled())
 
                 is ParsedBinaryOp -> { traverse(e.left); traverse(e.right) }
 

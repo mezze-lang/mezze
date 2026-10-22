@@ -1,0 +1,82 @@
+## Macros: functions that write code while the code that calls them is compiled.
+##
+## A macro is an ordinary function with the type `Macro`, exported from a module
+## and imported like any other name. Writing `name!( … )` calls it on the text
+## between the parentheses, and whatever it returns is compiled in the call's
+## place:
+##
+## ```
+## use shapes::{ point }
+##
+## let origin = point!(0, 0)
+## ```
+##
+## A macro's input is TEXT: the macro decides what it means, so the parentheses
+## can hold markup, SQL, a small language of its own, or Mezze that it reads with
+## `parse_expr` and `parse_decls`. What it returns is CODE, as `std::syntax`
+## values, most easily written as quotes: `` `(~a + ~b) ``.
+##
+## A macro runs whenever its caller is compiled — in the editor too — so it must
+## be pure: its type has no effects, and the compiler holds it to that. The result
+## is reused until the macro or its input changes.
+use std::syntax::{ Span, Expr, SyntaxDecl, Code }
+
+## What a macro is given: the text between the parentheses of `name!( … )`,
+## exactly as written, and where its first character is.
+pub type MacroInput = { text: Str, span: Span }
+
+## What a macro produces.
+##
+## `code` replaces the call: one expression where the call stands as an
+## expression (`ExprCode`), declarations where it stands as a declaration
+## (`DeclsCode`). Each of `errors` is reported at its span, and `code` is still
+## compiled, so a single mistake in the input does not hide every other one.
+pub type Expansion = { code: Code, errors: [MacroError] }
+
+## A mistake in a macro's input, reported where it is.
+pub type MacroError = { message: Str, span: Span, hints: [Str] }
+
+## Input that does not parse as Mezze.
+pub type SyntaxError = { message: Str, span: Span }
+
+## An expansion to the expression [e].
+pub let expand_to: { e: Expr } -> Expansion = { e } -> { code = ExprCode { expr = e }, errors = [] }
+
+## An expansion to the declarations [decls].
+pub let declare: { decls: [SyntaxDecl] } -> Expansion = { decls } -> { code = DeclsCode { decls = decls }, errors = [] }
+
+## [e], reporting [message] at [span]: what a macro returns when its input is
+## wrong, so the compiler still has code to check around the mistake.
+pub let reject: { e: Expr, message: Str, span: Span } -> Expansion = { e, message, span } ->
+  { code = ExprCode { expr = e }, errors = [{ message = message, span = span, hints = [] }] }
+
+## [input] read as one Mezze expression, with spans in the caller's file.
+pub let parse_expr: { input: MacroInput } -> Result Expr SyntaxError = { input } ->
+  match parse { input = input, declarations = False } is
+    Ok { val } -> match val is
+      ExprCode { expr } -> Ok { val = expr }
+      DeclsCode { ... } -> Err { error = { message = "expected an expression", span = input.span } }
+    Err { error } -> Err { error = error }
+
+## [input] read as Mezze declarations, with spans in the caller's file.
+pub let parse_decls: { input: MacroInput } -> Result [SyntaxDecl] SyntaxError = { input } ->
+  match parse { input = input, declarations = True } is
+    Ok { val } -> match val is
+      DeclsCode { decls } -> Ok { val = decls }
+      ExprCode { ... } -> Err { error = { message = "expected declarations", span = input.span } }
+    Err { error } -> Err { error = error }
+
+## The parser answers with a record rather than a `Result`: both halves are
+## plain data the compiler can write, and the `Result` is built here.
+let parse: { input: MacroInput, declarations: Bool } -> Result Code SyntaxError = { input, declarations } -> do
+  let file = match input.span.file is
+    Some { val } -> val
+    None -> ""
+  let answer: { code: Option Code, error: Option SyntaxError } = __native_syntax_parse {
+    text = input.text, file = file, line = input.span.start_line, column = input.span.start_col, declarations = declarations,
+  }
+  match answer.code is
+    Some { val } -> Ok { val = val }
+    None -> match answer.error is
+      Some { val } -> Err { error = val }
+      None -> Err { error = { message = "the parser gave no answer", span = input.span } }

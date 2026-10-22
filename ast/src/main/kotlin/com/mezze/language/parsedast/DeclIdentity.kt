@@ -535,6 +535,26 @@ private class Walker(
                 }
             }
             is ParsedIdentifier -> identifier(expr.qualifier?.segments, expr.localName, bound)
+            // A quote IS the code that builds it, and a macro call IS what it
+            // expanded to: identity is over what compiles.
+            is ParsedQuote -> expr(expr.value, bound)
+            is ParsedMacroCall -> when (val code = expr.expansion) {
+                is ParsedCode.Expr -> expr(code.expr, bound)
+                // A call that could not be expanded is identified as written: the
+                // type checker reports why, and that needs the module identified.
+                null -> {
+                    check(expr.diagnostics.isNotEmpty()) {
+                        "${expr.loc}: macro call `${expr.macro.localName}!( … )` reached identity unexpanded; " +
+                            "macros are expanded before a module is identified"
+                    }
+                    b.append(byteArrayOf(HashTags.FUNCTION_CALL, 0x7f))
+                    identifier(expr.macro.qualifier?.segments, expr.macro.localName, bound)
+                    b.append(expr.input)
+                }
+                is ParsedCode.Decls -> throw IllegalStateException(
+                    "${expr.loc}: macro call `${expr.macro.localName}!( … )` has declarations where an expression stands",
+                )
+            }
             is ParsedLambda -> {
                 b.append(byteArrayOf(HashTags.LAMBDA))
                 val params = when (val p = expr.params) {

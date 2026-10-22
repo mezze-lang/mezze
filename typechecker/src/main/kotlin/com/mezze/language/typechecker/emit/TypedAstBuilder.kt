@@ -1470,6 +1470,8 @@ class TypedAstBuilder(
                         ?: unreachedPosition("pipe placeholder with no piped-in type"), loc)
             }
             is ParsedParens -> buildExpr(expr.expr, file, contextType)
+            is ParsedQuote -> buildExpr(expr.value, file, contextType)
+            is ParsedMacroCall -> buildExpr(expr.compiled(), file, contextType)
             is ParsedPerform -> {
                 val handlers = expr.handlers.map { h ->
                     buildHandlerRef(h, file, loc)

@@ -73,12 +73,10 @@ class CodebaseHostAdapter(
         val rows = q.occurrences(kind, symbol)
         // One encoder per declaration: its typed tree is read once, for all of
         // its occurrences' facts.
-        val encoders = HashMap<Hash, SyntaxEncoder?>()
+        val joins = HashMap<Hash, SyntaxFacts?>()
         return Seq(rows.mapNotNull { r ->
             val decl = q.ref(r.ownerHash) ?: return@mapNotNull null
-            val encoder = encoders.getOrPut(r.ownerHash) {
-                q.written(r.ownerHash)?.let { SyntaxEncoder(::typeShape, ::declRef, q::reached, q::dispatched, it.typed) }
-            }
+            val join = joins.getOrPut(r.ownerHash) { q.written(r.ownerHash)?.let { factsOf(it) } }
             record(
                 "decl" to declRef(decl),
                 "kind" to Str(r.kind),
@@ -90,13 +88,15 @@ class CodebaseHostAdapter(
                     "end_line" to IntV(r.endLine.toLong()),
                     "end_col" to IntV(r.endCol.toLong()),
                 ),
-                "facts" to (encoder?.factsAt(r.startLine, r.startCol, r.endLine, r.endCol) ?: Opt(null)),
+                "facts" to (join?.factsAt(r.startLine, r.startCol, r.endLine, r.endCol) ?: Opt(null)),
             )
         })
     }
 
+    private fun factsOf(w: CodebaseQueries.Written) = SyntaxFacts(::typeShape, ::declRef, q::reached, q::dispatched, w.typed)
+
     private fun syntaxDecl(w: CodebaseQueries.Written) =
-        SyntaxEncoder(::typeShape, ::declRef, q::reached, q::dispatched, w.typed).decl(w.module, w.parsed, w.ref)
+        factsOf(w).encoder().decl(w.module, w.parsed, Opt(w.ref?.let(::declRef)))
 
     // ── reading a `DeclQuery` record ─────────────────────────────────────────
 
@@ -213,13 +213,33 @@ class CodebaseHostAdapter(
     private fun identityName(id: TypeIdentity): HostValue = HostValue.str(id.displayNameOrNull())
     private fun identityHash(id: TypeIdentity): HostValue = HostValue.str((id as? TypeIdentity.Declared)?.hash?.hex)
 
-    private fun field(name: String, type: MezzeType) = record("name" to Str(name), "ty" to typeShape(type))
+    private fun field(name: String, type: MezzeType) = record("name" to Str(name), "ty" to typeShape(type, nested = true))
 
     private fun constructor(name: String, payload: MezzeType?) =
-        record("name" to Str(name), "payload" to Opt(payload?.let { typeShape(it) }))
+        record("name" to Str(name), "payload" to Opt(payload?.let { typeShape(it, nested = true) }))
 
-    /** A [MezzeType] as `TypeShape`. */
-    fun typeShape(type: MezzeType): HostValue = when (type) {
+    /**
+     * A [MezzeType] as `TypeShape`.
+     *
+     * A declared record or variant is spelled out only as the whole [type]; inside
+     * it, one is named — `TApp` with its name and hash — and `Codebase.definition`
+     * gives its structure. Spelled out at every depth, a recursive type like
+     * `std::syntax::Expr` was copied whole into the facts of every node of that
+     * type, which ran a test out of memory.
+     */
+    fun typeShape(type: MezzeType, nested: Boolean = false): HostValue = when {
+        nested && type is MezzeType.RecordType && type.identity is TypeIdentity.Declared -> declaredRef(type.identity)
+        nested && type is MezzeType.VariantType && type.identity is TypeIdentity.Declared -> declaredRef(type.identity)
+        else -> spelled(type)
+    }
+
+    private fun declaredRef(identity: TypeIdentity) = Variant("TApp", record(
+        "name" to Str(identity.displayNameOrNull() ?: ""),
+        "hash" to identityHash(identity),
+        "args" to Seq(emptyList()),
+    ))
+
+    private fun spelled(type: MezzeType): HostValue = when (type) {
         MezzeType.IntType -> Variant("TInt", null)
         MezzeType.FloatType -> Variant("TFloat", null)
         MezzeType.StringType -> Variant("TStr", null)
@@ -242,16 +262,16 @@ class CodebaseHostAdapter(
         is MezzeType.TypeApplication -> Variant("TApp", record(
             "name" to Str(type.constructor),
             "hash" to identityHash(type.identity),
-            "args" to Seq(type.args.map { typeShape(it) }),
+            "args" to Seq(type.args.map { typeShape(it, nested = true) }),
         ))
         is MezzeType.NewtypeType -> Variant("TNewtype", record(
             "name" to Str(type.name),
             "hash" to identityHash(type.identity),
-            "wrapped" to typeShape(type.wrappedType),
+            "wrapped" to typeShape(type.wrappedType, nested = true),
         ))
         is MezzeType.FunctionType -> Variant("TFn", record(
-            "param" to typeShape(type.paramType),
-            "result" to typeShape(type.returnType),
+            "param" to typeShape(type.paramType, nested = true),
+            "result" to typeShape(type.returnType, nested = true),
             "effects" to Seq(type.effects?.allEffectNames.orEmpty().sorted().map { name ->
                 effectRef(CodebaseQueries.EffectRef(name, type.effects?.effectHashes?.get(name)?.let { q.ref(it) }))
             }),

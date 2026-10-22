@@ -81,7 +81,7 @@ object AbilitySearch {
                 implHash = row.hash,
                 module = row.module,
                 targets = store.getImplTargets(row.hash).mapNotNull { targetHash ->
-                    store.getTypeRows(targetHash).takeIf { !it.isEmpty }?.let { SignatureIndex.rebuild(it) }
+                    store.getTypeRows(targetHash).takeIf { !it.isEmpty }?.let { SignatureIndex.rebuild(it, store::getTypeRows) }
                 },
             )
         }.sortedBy { it.rendered }

@@ -86,13 +86,13 @@ class CodebaseQueries(private val store: MezzeStore) {
     /** The type a caller sees, for a `let`; null for anything without one. */
     fun signature(hash: Hash): MezzeType? {
         val rows = store.getSignature(hash)
-        return if (rows.isEmpty) null else SignatureIndex.rebuild(rows)
+        return if (rows.isEmpty) null else SignatureIndex.rebuild(rows, store::getTypeRows)
     }
 
     /** What a type, ability or effect defines; null for anything else. */
     fun definition(hash: Hash): Definition? {
         val rows = store.getDefinition(hash)
-        return if (rows.isEmpty) null else DefinitionIndex.rebuild(rows)
+        return if (rows.isEmpty) null else DefinitionIndex.rebuild(rows, store::getTypeRows)
     }
 
     /**

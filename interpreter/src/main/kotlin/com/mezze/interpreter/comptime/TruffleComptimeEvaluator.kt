@@ -5,6 +5,14 @@ import com.mezze.language.comptime.CodebaseHost
 import com.mezze.language.comptime.Comptime
 import com.mezze.language.comptime.ComptimeEvaluator
 import com.mezze.language.comptime.ComptimeOutcome
+import com.mezze.language.comptime.HostValue
+import com.mezze.language.comptime.InvokeOutcome
+import com.mezze.language.comptime.SyntaxHost
+import com.mezze.language.truffleir.CallDirectIR
+import com.mezze.language.truffleir.CallNativeIR
+import com.mezze.language.truffleir.FieldIR
+import com.mezze.language.truffleir.MakeRecordIR
+import com.mezze.language.truffleir.StringLitIR
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.truffleir.PrintType
 import com.mezze.language.truffleir.SourceInfo
@@ -56,7 +64,7 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
         origin: String,
         codebase: CodebaseHost?,
     ): ComptimeOutcome = synchronized(LOCK) {
-        Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers, origin, codebase) }
+        withOwnClassLoader { Comptime.whileEvaluating { evaluateLocked(functions, entry, resultShape, performers, origin, codebase) } }
     }
 
     /** The body of [evaluate]; split out only so the re-entrancy guard wraps it
@@ -142,6 +150,117 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
             ComptimeOutcome.Failed(e.message ?: "comptime result is not embeddable")
         } catch (e: Throwable) {
             ComptimeOutcome.Failed(describe(e), guestFramesOf(e))
+        } finally {
+            try { context.close(true) } catch (ignored: Exception) { }
+            try { engine.close() } catch (ignored: Exception) { }
+            MezzeLanguage.setLastExecutionResultForNestedEval(enclosingResult)
+        }
+    }
+
+    override fun invoke(
+        functions: List<FunctionIR>,
+        entry: Hash,
+        argument: HostValue.Record,
+        performers: List<Array<String>>,
+        origin: String,
+        syntax: SyntaxHost?,
+    ): InvokeOutcome = synchronized(LOCK) {
+        withOwnClassLoader { Comptime.whileEvaluating { invokeLocked(functions, entry, argument, performers, origin, syntax) } }
+    }
+
+    /**
+     * Run [body] with this evaluator's own class loader as the thread's context
+     * loader. Truffle finds languages through the CONTEXT loader, and a caller —
+     * the CLI, which loads this class from the runtime jar through a child loader
+     * — usually has a different one, which brings the engine up with no
+     * languages at all ("a language with id 'mezze' is not available"). Doing it
+     * here means no caller has to remember to.
+     */
+    private inline fun <T> withOwnClassLoader(body: () -> T): T {
+        val thread = Thread.currentThread()
+        val previous = thread.contextClassLoader
+        thread.contextClassLoader = TruffleComptimeEvaluator::class.java.classLoader
+        try {
+            return body()
+        } finally {
+            thread.contextClassLoader = previous
+        }
+    }
+
+    /**
+     * The body of [invoke]. The call is the program's whole entry: a synthetic
+     * `__entry__` that calls [entry] with a record whose every field is read,
+     * through a native, from [argument] — so the argument crosses as data, with
+     * no IR built for it however large it is.
+     */
+    private fun invokeLocked(
+        functions: List<FunctionIR>,
+        entry: Hash,
+        argument: HostValue.Record,
+        performers: List<Array<String>>,
+        origin: String,
+        syntax: SyntaxHost?,
+    ): InvokeOutcome {
+        invocations.incrementAndGet()
+        if (functions.none { it.hash == entry }) {
+            return InvokeOutcome.Failed("function ${entry.hex.take(8)} is not among the compiled functions")
+        }
+        val call = CallDirectIR(
+            targetHash = entry,
+            args = listOf(MakeRecordIR(
+                argument.fields.map { (name, _) ->
+                    FieldIR(name, CallNativeIR(
+                        CodebaseNatives.ARGUMENT_NATIVE,
+                        MakeRecordIR(listOf(FieldIR("field", StringLitIR(name, SYNTHETIC))), SYNTHETIC),
+                        SYNTHETIC,
+                    ))
+                },
+                SYNTHETIC,
+            )),
+            isTailCall = false,
+            src = SYNTHETIC,
+        )
+        val entryFn = FunctionIR(
+            // Its own identity, derived from what it calls, so it can never be
+            // mistaken for a function of the program.
+            hash = Hash(java.security.MessageDigest.getInstance("SHA-256")
+                .digest("invoke:${entry.hex}".toByteArray())
+                .joinToString("") { "%02x".format(it) }),
+            name = ENTRY_FN, qualifiedName = ENTRY_FN,
+            paramSlots = emptyList(), paramNames = emptyList(),
+            localSlots = emptyList(), localNames = emptyList(),
+            captureSlots = emptyList(), captureNames = emptyList(),
+            body = call, sourceFile = origin, sourceSection = SYNTHETIC,
+        )
+        val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
+        val engine = newEngine()
+        val context = Context.newBuilder(MezzeLanguage.ID)
+            .engine(engine)
+            .allowAllAccess(true)
+            .allowCreateThread(true)
+            .allowExperimentalOptions(true)
+            .build()
+        context.polyglotBindings.putMember(CodebaseNatives.ARGUMENT_BINDING, argument)
+        if (syntax != null) context.polyglotBindings.putMember(CodebaseNatives.SYNTAX_BINDING, syntax)
+        val enclosingResult = MezzeLanguage.getLastExecutionResult()
+        return try {
+            MezzeLanguage.clearLastResult()
+            MezzeLanguage.setFunctionsForDirectExecution(
+                functions.filterNot { it.name == ENTRY_FN } + entryFn, performers, projectRoot, null,
+            )
+            context.eval(Source.newBuilder(MezzeLanguage.ID, "", "<macro>").buildLiteral())
+            val value = MezzeLanguage.getLastExecutionResult()
+            if (value is com.mezze.interpreter.values.MezzeSuspend) {
+                InvokeOutcome.Failed(
+                    "this performs an effect that nothing handles while compiling. A macro runs " +
+                        "while its caller is compiled — in the editor too — so it must be pure: " +
+                        "handle the effect inside it, or compute the value with `comptime` instead."
+                )
+            } else {
+                InvokeOutcome.Returned(CodebaseNatives.plain(value))
+            }
+        } catch (e: Throwable) {
+            InvokeOutcome.Failed(describe(e), guestFramesOf(e))
         } finally {
             try { context.close(true) } catch (ignored: Exception) { }
             try { engine.close() } catch (ignored: Exception) { }
@@ -251,6 +370,11 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
          */
         @JvmStatic
         val evaluations = java.util.concurrent.atomic.AtomicLong()
+
+        /** How many functions this process has [invoke]d: macro expansions. Kept apart
+         *  from [evaluations], which counts `comptime` alone. */
+        @JvmStatic
+        val invocations = java.util.concurrent.atomic.AtomicLong()
 
         /**
          * An engine tuned for a handful of short runs — and one that still

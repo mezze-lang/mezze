@@ -68,6 +68,7 @@ enum class ErrorCode {
     P0133_TWO_EFFECT_ROWS, // `-> A -> B <E> <F>` — a second trailing row with no arrow of its own; parenthesise the returned function
     P0134_LET_NAME_UPPERCASE, // `let Max = 1` — an uppercase name is a constructor, so a use site would read it as a variant
     P0135_DO_BLOCK_INCONSISTENT_INDENT, // statements in a `do` block must all start at the same column; this one is indented differently
+    P0136_MALFORMED_QUOTE, // a quote `( … ) or a splice ~x / ~( … ) that is not well formed, or `~` outside a quote
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,
@@ -178,6 +179,18 @@ enum class ErrorCode {
     /** Evaluation failed at build time: the body crashed, or it called
      *  `compile_error`. */
     V0804_COMPTIME_EVAL_FAILED,
+
+    // ─── Validator: macros (V10xx) ────────────────────────────────────────
+    /** `name!( … )` names no macro: nothing by that name is imported, or it is
+     *  declared in the module that calls it, which is not compiled yet. */
+    V1001_MACRO_NOT_FOUND,
+    /** The name is a function, but not a macro: its type is not `Macro`, or it
+     *  performs an effect. */
+    V1002_NOT_A_MACRO,
+    /** The macro ran and failed: it raised, or returned code the compiler cannot read. */
+    V1003_MACRO_FAILED,
+    /** The macro reported a mistake in its input. */
+    V1004_MACRO_INPUT_ERROR,
 
     // ─── Validator: structural (V09xx) ────────────────────────────────────
     V0901_STRUCTURAL_VALIDATION,

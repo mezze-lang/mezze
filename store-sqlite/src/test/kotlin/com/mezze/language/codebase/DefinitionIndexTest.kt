@@ -55,7 +55,7 @@ abstract class DefinitionIndexContract {
 
     private fun definitionOf(kind: DeclKind, name: String): Definition {
         val hash = store.getDeclsForModule("app").single { it.declKind == kind && it.declName == name }.hash
-        return DefinitionIndex.rebuild(store.getDefinition(hash))
+        return DefinitionIndex.rebuild(store.getDefinition(hash), store::getTypeRows)
     }
 
     @Test
@@ -112,7 +112,7 @@ abstract class DefinitionIndexContract {
         // definition rows handed to the type reader fail loudly.
         val hash = store.getDeclsForModule("app").single { it.declName == "Total" }.hash
         assertTrue(store.getSignature(hash).isEmpty)
-        assertThrows<IllegalStateException> { SignatureIndex.rebuild(store.getDefinition(hash)) }
+        assertThrows<IllegalStateException> { SignatureIndex.rebuild(store.getDefinition(hash), store::getTypeRows) }
     }
 }
 

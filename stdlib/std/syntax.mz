@@ -80,20 +80,30 @@ pub type Expr = |
   NewtypeExpr { type_name: Str, value: Expr, span: Span, facts: Option Facts },
   IfExpr { cond: Expr, then_branch: Expr, else_branch: Expr, span: Span, facts: Option Facts },
   MatchExpr { scrutinee: Expr, arms: [Arm], span: Span, facts: Option Facts },
-  DoExpr { statements: [Statement], result: Expr, span: Span, facts: Option Facts },
+  ## `result_comments`: the comments written above `result`.
+  DoExpr { statements: [Statement], result: Expr, result_comments: [Comment], span: Span, facts: Option Facts },
   SeqExpr { elements: [SeqElement], span: Span, facts: Option Facts },
   PerformExpr { handlers: [Handler], body: Expr, span: Span, facts: Option Facts },
   ## `Effect.op { … }`.
-  EffectCallExpr { op: Str, effect_name: Option Str, arg: Expr, span: Span, facts: Option Facts },
+  EffectCallExpr { op: Str, effect_name: Option Str, op_span: Span, arg: Expr, span: Span, facts: Option Facts },
   ParensExpr { inner: Expr, span: Span, facts: Option Facts },
+  ## `` `( … ) ``: code as a value. Splices in it are names spelled `~x`, or
+  ## `~(0)`, `~(1)` … for a spliced expression, which is `splices` at that index.
+  QuoteExpr { quoted: Code, splices: [Expr], span: Span, facts: Option Facts },
+  ## `name!( … )`: `input` is the text between the parentheses, as written;
+  ## `expansion`, what the macro produced from it.
+  MacroExpr { name: Str, module: Option Str, name_span: Span, input: Str, input_span: Span, expansion: Option Code, span: Span, facts: Option Facts },
 |
+
+## Code as a quote holds it and a macro produces it.
+pub type Code = | ExprCode { expr: Expr }, DeclsCode { decls: [SyntaxDecl] } |
 
 pub type StrPart = | TextPart { text: Str }, InterpPart { expr: Expr } |
 
 ## A record entry. `value` is `None` for shorthand: `{ x }`.
 pub type Entry = |
-  FieldEntry { name: Str, value: Option Expr, span: Span, comments: [Comment] },
-  SpreadEntry { expr: Expr, span: Span, comments: [Comment] },
+  FieldEntry { name: Str, value: Option Expr, span: Span, comments: [Comment], trailing: Option Comment },
+  SpreadEntry { expr: Expr, span: Span, comments: [Comment], trailing: Option Comment },
 |
 
 pub type SeqElement = | ItemElement { expr: Expr }, SpreadElement { expr: Expr, span: Span } |
@@ -119,14 +129,16 @@ pub type Arm = {
   span: Span,
   doc: Option Str,
   metadata: Option Str,
+  ## The comments above the arm, and the one after it on its line.
   comments: [Comment],
+  trailing: Option Comment,
 }
 
 pub type IfLet = { pattern: Pattern, value: Expr, span: Span }
 
 pub type Statement = |
-  LetStatement { pattern: Pattern, annotation: Option TypeExpr, value: Expr, span: Span, doc: Option Str, metadata: Option Str, comments: [Comment] },
-  ExprStatement { expr: Expr, span: Span, doc: Option Str, metadata: Option Str, comments: [Comment] },
+  LetStatement { pattern: Pattern, annotation: Option TypeExpr, value: Expr, span: Span, doc: Option Str, metadata: Option Str, comments: [Comment], trailing: Option Comment },
+  ExprStatement { expr: Expr, span: Span, doc: Option Str, metadata: Option Str, comments: [Comment], trailing: Option Comment },
 |
 
 pub type Pattern = |
@@ -186,9 +198,9 @@ pub type Decl = |
   TypeSyntax { name: Str, params: [Str], def: TypeDefSyntax },
   AbilitySyntax { name: Str, params: [Str], receiver: Option Str, associated: [Str], ops: [AbilityOpSyntax] },
   ## `ability_name` is `None` for an inherent impl (`impl T where …`).
-  ImplSyntax { ability_name: Option Str, ability_module: Option Str, targets: [TypeExpr], ability_args: [TypeExpr], forall: [Str], associated: [AssocBinding], ops: [OpSyntax], derived: Bool },
+  ImplSyntax { ability_name: Option Str, ability_module: Option Str, ability_span: Option Span, targets: [TypeExpr], ability_args: [TypeExpr], forall: [Str], associated: [AssocBinding], ops: [OpSyntax], derived: Bool },
   EffectSyntax { name: Str, associated: [Str], ops: [EffectOpSyntax] },
-  PerformerSyntax { name: Str, effect_name: Str, effect_module: Option Str, params: [FieldType], associated: [AssocBinding], ops: [OpSyntax] },
+  PerformerSyntax { name: Str, effect_name: Str, effect_module: Option Str, effect_span: Span, params: [FieldType], associated: [AssocBinding], ops: [OpSyntax] },
   UseSyntax { module: Str, items: Option [ImportItem], alias: Option Str, reexport: Bool },
   TopLevelSyntax { expr: Expr },
 |
@@ -262,6 +274,11 @@ pub let children: { e: Expr } -> [Expr] = { e } -> match e is
     seq::push { x = body, xs = seq::flat_map { xs = handlers, f = { x } -> listed { o = x.params } } }
   EffectCallExpr { arg, ... } -> [arg]
   ParensExpr { inner, ... } -> [inner]
+  ## The code it quotes, as written; a macro call's input is text.
+  QuoteExpr { quoted, ... } -> match quoted is
+    ExprCode { expr } -> [expr]
+    DeclsCode { ... } -> []
+  MacroExpr { ... } -> []
 
 ## What a node is, in the terms the occurrence index uses: its kind (its tag
 ## here), each thing it spells, where it is, and its facts. Agrees with the
@@ -297,6 +314,8 @@ pub let node_info: { e: Expr } -> NodeInfo = { e } -> match e is
   }
   EffectCallExpr { op, effect_name, span, facts, ... } -> { kind = "EffectCallExpr", symbols = [qualified { name = op, module = effect_name }], span = span, facts = facts }
   ParensExpr { span, facts, ... } -> { kind = "ParensExpr", symbols = [], span = span, facts = facts }
+  QuoteExpr { span, facts, ... } -> { kind = "QuoteExpr", symbols = [], span = span, facts = facts }
+  MacroExpr { name, module, span, facts, ... } -> { kind = "MacroExpr", symbols = [qualified { name = name, module = module }], span = span, facts = facts }
 
 ## `a::b::name`, as written.
 let qualified: { name: Str, module: Option Str } -> Str = { name, module } -> match module is

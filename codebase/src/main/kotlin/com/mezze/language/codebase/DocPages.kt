@@ -69,7 +69,7 @@ object DocPages {
 
     fun of(store: MezzeStore, decl: DeclRow): DocPage {
         val rows = store.getSignature(decl.hash)
-        val type = if (rows.isEmpty) null else SignatureIndex.rebuild(rows)
+        val type = if (rows.isEmpty) null else SignatureIndex.rebuild(rows, store::getTypeRows)
 
         // Constraints come from the residual arrow: a constraint on an inner arrow
         // binds whoever applies that arrow, not the caller of this declaration.

@@ -275,6 +275,15 @@ class TypeChecker(
         val stamped = identityResolver.stampEntry(module, currentModulePath)
         // What each name was resolved to when the identities were computed; emit
         // checks its own bindings against it.
+        // A macro that could not be expanded, or that reported mistakes in its
+        // input, stops the check here: what the rest would report is about code
+        // that is missing or known to be wrong. Every macro problem is reported
+        // at once, each where it points.
+        com.mezze.language.typechecker.macro.MacroDiagnostics.of(stamped).takeIf { it.isNotEmpty() }?.let { found ->
+            return TypeCheckResult.Failure(found.map { d ->
+                TypeCheckError(phase = "macro", message = d.message, loc = d.loc, code = d.code, hints = d.hints)
+            })
+        }
         val identityNames = identityResolver.nameResolver(stamped, currentModulePath)
         @Suppress("NAME_SHADOWING")
         val module = desugarPipesInParsedModule(stamped)
@@ -1306,7 +1315,7 @@ class TypeChecker(
         @JvmStatic
         var cachedPreludeLoadedModules: Map<ModulePath, TypedModuleResult>? = null
 
-        private fun createInitialContext(): TypingContext {
+        internal fun createInitialContext(): TypingContext {
             val crashType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("msg" to MezzeType.StringType)),
                 MezzeType.VarType(TypeVar.fresh())

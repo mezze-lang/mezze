@@ -369,8 +369,14 @@ class InMemoryMezzeStore : MezzeStore {
     private val signatures = mutableMapOf<Hash, SignatureRows>()
 
     override fun putSignature(rows: SignatureRows) {
+        putShared(rows)
         val ownerHash = rows.nodes.firstOrNull()?.ownerHash ?: return
-        signatures[ownerHash] = rows
+        signatures[ownerHash] = rows.copy(shared = emptyMap())
+    }
+
+    /** The structures [rows] refer to, kept with the signatures, once each. */
+    private fun putShared(rows: SignatureRows) {
+        for ((key, structure) in rows.shared) signatures.putIfAbsent(key, structure)
     }
 
     override fun getSignature(ownerHash: Hash): SignatureRows =
@@ -379,8 +385,9 @@ class InMemoryMezzeStore : MezzeStore {
     private val definitions = mutableMapOf<Hash, SignatureRows>()
 
     override fun putDefinition(rows: SignatureRows) {
+        putShared(rows)
         val ownerHash = rows.nodes.firstOrNull()?.ownerHash ?: return
-        definitions[ownerHash] = rows
+        definitions[ownerHash] = rows.copy(shared = emptyMap())
     }
 
     override fun getDefinition(declHash: Hash): SignatureRows =

@@ -91,6 +91,10 @@ fun main(rawArgs: Array<String>) {
     // stdlib / project-root setup, which the dispatched binary redoes itself.
     com.mezze.language.cli.toolchain.ProxyDispatch.maybeReexecAndExit(rawArgs)
 
+    // Macros run while code is compiled, by every command that compiles; the
+    // interpreter that runs them is found only when one is called.
+    com.mezze.language.comptime.Comptime.installer = { com.mezze.language.cli.commands.ComptimeHost.macroEvaluator() }
+
     // A leading `+<version>` selects the toolchain and is consumed by the proxy
     // when it dispatches. If we reach here we're running in-process instead — a
     // toolchain's own binary, or a proxy-handled `toolchain` command — so drop a
@@ -743,6 +747,8 @@ private fun prettyPrintParsedExpr(expr: ParsedExpr): String {
         is ParsedIf -> "if ${prettyPrintParsedExpr(expr.condition)} then ${prettyPrintParsedExpr(expr.thenBranch)} else ${prettyPrintParsedExpr(expr.elseBranch)}"
         is ParsedMatch -> "match ${prettyPrintParsedExpr(expr.scrutinee)} is ..."
         is ParsedDo -> "do ... ${prettyPrintParsedExpr(expr.result)}"
+        is ParsedQuote -> "`( … )"
+        is ParsedMacroCall -> "${prettyPrintParsedExpr(expr.macro)}!(${expr.input})"
         is ParsedSeqLit -> "[${expr.elements.size} elements]"
         is ParsedPerform -> "perform ... in ${prettyPrintParsedExpr(expr.body)}"
         is ParsedEffectCall -> "${expr.operation} ${prettyPrintParsedExpr(expr.arguments)}"

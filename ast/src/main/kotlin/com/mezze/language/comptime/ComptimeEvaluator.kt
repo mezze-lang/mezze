@@ -70,6 +70,52 @@ interface ComptimeEvaluator {
          */
         codebase: CodebaseHost?,
     ): ComptimeOutcome
+
+    /**
+     * Call the function [entry] with [argument] as its whole argument record, and
+     * hand back what it returned, as plain data.
+     *
+     * This is how a macro runs: a function from an already-compiled module,
+     * called on its input while the module that uses it is being compiled.
+     * Unlike [evaluate] there is no thunk and no reification into IR: the
+     * argument and the result are both [HostValue]s, because the compiler reads
+     * the result as data (a `std::syntax` tree), never as a value to embed.
+     *
+     * [functions] must contain [entry] and everything reachable from it.
+     * [syntax] answers the macro's requests to parse Mezze.
+     */
+    fun invoke(
+        functions: List<FunctionIR>,
+        entry: Hash,
+        argument: HostValue.Record,
+        performers: List<Array<String>>,
+        origin: String,
+        syntax: SyntaxHost?,
+    ): InvokeOutcome
+}
+
+/** What [ComptimeEvaluator.invoke] produces. */
+sealed interface InvokeOutcome {
+    data class Returned(val value: HostValue) : InvokeOutcome
+
+    /** The function raised, or did something compile time cannot (an unhandled effect). */
+    data class Failed(val message: String, val guestFrames: List<String> = emptyList()) : InvokeOutcome
+}
+
+/**
+ * The parser, for code running at compile time: what lets a macro read part of
+ * its input as Mezze and keep everything else for itself.
+ *
+ * In `:ast` for the same reason as [CodebaseHost]: the parser lives above the
+ * interpreter, and neither may depend on the other.
+ */
+interface SyntaxHost {
+    /**
+     * [text] parsed as Mezze, placed so that its first character is at [line]
+     * and [column] of [file]: `Result Code SyntaxError` (`std::macro`). As
+     * declarations when [declarations], else as one expression.
+     */
+    fun parse(text: String, file: String, line: Int, column: Int, declarations: Boolean): HostValue
 }
 
 /** What [ComptimeEvaluator.evaluate] produces. */
@@ -114,6 +160,27 @@ object Comptime {
      * build needs to fold.
      */
     fun get(): ComptimeEvaluator? = installed
+
+    /**
+     * How this process gets an evaluator when it needs one and has none, set by
+     * whoever knows where the interpreter lives: the CLI, which loads it from the
+     * runtime jar (or finds it in its own native image).
+     */
+    @Volatile
+    var installer: (() -> ComptimeEvaluator?)? = null
+
+    /**
+     * The evaluator, installing one if this process can; null only when it
+     * cannot evaluate at all (a slim build with no interpreter anywhere).
+     *
+     * Macros need this where `comptime` does not: a macro is expanded before its
+     * module is even type checked, so every tool that compiles code — build,
+     * check, the editor — must be able to run one.
+     */
+    fun obtain(): ComptimeEvaluator? = installed ?: synchronized(this) {
+        installed ?: (installer?.invoke() ?: java.util.ServiceLoader.load(ComptimeEvaluator::class.java).firstOrNull())
+            ?.also { installed = it }
+    }
 
     /** Test hook: forget the installed evaluator. */
     fun uninstallForTest() {

@@ -92,6 +92,20 @@ internal object ComptimeHost {
         Comptime.install(evaluator)
     }
 
+    /**
+     * An evaluator for running macros, which happens while code is compiled — in
+     * `check` and the editor as much as in `build`. Installed as
+     * [Comptime.installer], so the interpreter is loaded only when a macro is
+     * actually called.
+     */
+    fun macroEvaluator(): ComptimeEvaluator? {
+        if (org.graalvm.nativeimage.ImageInfo.inImageRuntimeCode()) {
+            return java.util.ServiceLoader.load(ComptimeEvaluator::class.java).firstOrNull()
+        }
+        runtimeLoader() ?: return null
+        return Comptime.get()
+    }
+
     private var attempted = false
     private var loader: ClassLoader? = null
 

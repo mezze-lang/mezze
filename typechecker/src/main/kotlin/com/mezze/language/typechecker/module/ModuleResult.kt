@@ -193,6 +193,13 @@ data class TypedModuleResult(
      * mean an unchanged module: when a dependency changes, the fingerprint does.
      */
     val identity: Hash? = null,
+    /**
+     * The module lowered: its functions and everything of the program's they
+     * reach, as `TypeCheckResult.Success.loweredFunctions` has them. Empty for a
+     * stdlib module, whose IR is precompiled. What a macro from this module runs.
+     */
+    val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
+    val loweredPerformers: List<Array<String>> = emptyList(),
 )
 sealed class ImportResolutionResult {
     data class Success(

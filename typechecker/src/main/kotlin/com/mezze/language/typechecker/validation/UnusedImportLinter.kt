@@ -219,8 +219,13 @@ object UnusedImportLinter {
                 into.add(expr.operation.localName)
                 expr.operation.qualifier?.segments?.firstOrNull()?.let { into.add(it) }
             }
+            // A macro is used by its name; what it expanded to is reached below.
+            is ParsedMacroCall -> {
+                into.add(expr.macro.localName)
+                expr.macro.qualifier?.segments?.firstOrNull()?.let { into.add(it) }
+            }
             // Own no name; their sub-expressions are reached below.
-            is ParsedFunctionCall, is ParsedBinaryOp, is ParsedPipe, is ParsedParens,
+            is ParsedFunctionCall, is ParsedBinaryOp, is ParsedPipe, is ParsedParens, is ParsedQuote,
             is ParsedRecordLit, is ParsedSeqLit, is ParsedIf, is ParsedMatch,
             is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
             is ParsedStringLit, is ParsedCharLit, is ParsedPipePlaceholder -> {}

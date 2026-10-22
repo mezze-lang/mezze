@@ -34,6 +34,9 @@ enum class TokenType {
     ARROW, ASSIGN, ELLIPSIS,
     PLACEHOLDER,  // _ as expression placeholder
     AT,  // @ for pipe operator placeholder
+    BACKTICK,  // ` opens a quote: `( … )
+    TILDE,     // ~ splices a value into a quote: ~x, ~( … )
+    MACRO_INPUT,  // the raw text between the parentheses of `name!( … )`
 
     // Special
     NEWLINE, EOF, ERROR,
@@ -236,6 +239,14 @@ class Lexer(
             return Token(TokenType.NEQ, InternedTokens.NEQ, start, startLine, startColumn)
         }
 
+        // `name!( … )`: a macro call. Its input is not Mezze — it is whatever the
+        // macro reads (markup, SQL, a whole declaration) — so it is captured as
+        // raw text, balanced on parentheses, and never tokenized here. That is
+        // what lets a macro accept text the Mezze lexer would reject.
+        if (char == '!' && peek() == '(' && start > 0 && source[start - 1].let { it.isLetterOrDigit() || it == '_' }) {
+            return lexMacroInput()
+        }
+
         // Lone '!' has no meaning in Mezze — unary logical NOT is not a
         // prefix operator (use `.not{}` on Bool values or `bool::not{b=...}`).
         // Emit a descriptive ERROR token so `parseParsedModule`'s upfront
@@ -311,6 +322,8 @@ class Lexer(
             '.' -> TokenType.DOT to InternedTokens.DOT
             ':' -> TokenType.COLON to InternedTokens.COLON
             '=' -> TokenType.ASSIGN to InternedTokens.ASSIGN
+            '`' -> TokenType.BACKTICK to "`"
+            '~' -> TokenType.TILDE to "~"
             else -> TokenType.ERROR to char.toString()
         }
 
@@ -384,6 +397,43 @@ class Lexer(
 
         advance()  // skip closing quote
         return Token(TokenType.STRING, source.substring(start, position), start, startLine, startColumn)
+    }
+
+    /**
+     * The input of `name!( … )`, from just after `!(` to its matching `)`.
+     *
+     * The token's position is the input's first character, and its text is the
+     * input exactly as written, so a macro's spans line up with the file.
+     * Parentheses inside a string literal do not count: `sql!(… ")" …)` is one
+     * call.
+     */
+    private fun lexMacroInput(): Token {
+        val callStart = position
+        val callLine = line
+        val callColumn = column
+        advance(2)  // `!(`
+        val inputStart = position
+        val inputLine = line
+        val inputColumn = column
+        var depth = 1
+        while (!isAtEnd()) {
+            when (current()) {
+                '(' -> { depth++; advance() }
+                ')' -> { depth--; if (depth == 0) break; advance() }
+                '"' -> if (lexString(position, line, column).type == TokenType.ERROR) break
+                else -> advance()
+            }
+        }
+        if (isAtEnd()) {
+            return Token(
+                TokenType.ERROR,
+                "Unterminated macro call: this `!(` has no matching `)`",
+                callStart, callLine, callColumn,
+            )
+        }
+        val input = source.substring(inputStart, position)
+        advance()  // the closing `)`
+        return Token(TokenType.MACRO_INPUT, input, inputStart, inputLine, inputColumn)
     }
 
     private fun lexInterpolationContent() {

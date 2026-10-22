@@ -180,6 +180,60 @@ class MezzeParser {
         }
     }
 
+    /**
+     * [source] as Mezze — declarations when [declarations], else one expression —
+     * where [source] is a slice of [file] starting at [line] and [column]: what a
+     * macro reads part of its input with. Every location is in [file]'s own
+     * coordinates, so a mistake points at the macro's input where it was written.
+     *
+     * The whole slice must be consumed.
+     */
+    fun parseCode(source: String, file: String, line: Int, column: Int, declarations: Boolean): ParsedCode {
+        currentSource = source
+        currentFile = file
+        SyntaxMetadata.clear()
+        try {
+            val tokens = Lexer(source, line, column).tokenize()
+            initParseBudget(tokens.size)
+            tokens.find { it.type == TokenType.ERROR }?.let { bad ->
+                throw ParseException(
+                    if (bad.text.length == 1) "Unexpected character '${bad.text}'" else bad.text,
+                    bad.position, bad.line, bad.column, source, file,
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0002_UNEXPECTED_CHARACTER,
+                )
+            }
+            val stream = TokenStream(tokens)
+            if (declarations) {
+                return when (val result = parsedModuleParser(stream)) {
+                    is ParseResult.Success -> ParsedCode.Decls(resolveParsedImplDeclarations(result.value).decls)
+                    is ParseResult.Failure -> throw ParseException(
+                        result.message, result.position, result.line, result.column, source, file,
+                        code = result.code, hints = result.hints,
+                    )
+                }
+            }
+            return when (val result = expression(skipNewlines(stream))) {
+                is ParseResult.Success -> {
+                    val rest = skipNewlines(result.remaining).current()
+                    if (rest != null && rest.type != TokenType.EOF) {
+                        throw ParseException(
+                            "Unexpected `${rest.text}` after the expression",
+                            rest.position, rest.line, rest.column, source, file,
+                        )
+                    }
+                    ParsedCode.Expr(result.value)
+                }
+                is ParseResult.Failure -> throw ParseException(
+                    result.message, result.position, result.line, result.column, source, file,
+                    code = result.code, hints = result.hints,
+                )
+            }
+        } finally {
+            currentSource = null
+            currentFile = null
+        }
+    }
+
     private fun parseParsedModuleImpl(source: String, file: String): ParsedModule {
         currentSource = source
         currentFile = file
@@ -451,7 +505,7 @@ class MezzeParser {
     }
 
 
-    private val parsedModuleParser: Parser<ParsedModule> = { stream ->
+    internal val parsedModuleParser: Parser<ParsedModule> = { stream ->
         val (startStream, leadingBlock) = skipNewlinesCollectAnnotations(stream)
         var currentStream = startStream
         val decls = mutableListOf<ParsedDecl>()
@@ -1174,6 +1228,9 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.ELLIPSIS -> "'...'"
     TokenType.DOUBLE_COLON -> "'::'"
     TokenType.AT -> "'@'"
+    TokenType.BACKTICK -> "'`'"
+    TokenType.TILDE -> "'~'"
+    TokenType.MACRO_INPUT -> "a macro call's input"
     TokenType.PIPE -> "'|'"
     TokenType.PIPE_OP -> "'|>'"
     TokenType.PLACEHOLDER -> "'_'"

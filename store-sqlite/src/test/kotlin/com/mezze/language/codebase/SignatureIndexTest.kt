@@ -74,7 +74,7 @@ class SignatureIndexTest {
         val type = effectful("Log")
         val hash = decl("shout", type)
 
-        val rebuilt = SignatureIndex.rebuild(store.getSignature(hash))
+        val rebuilt = SignatureIndex.rebuild(store.getSignature(hash), store::getTypeRows)
         assertTrue(rebuilt is MezzeType.FunctionType, "got $rebuilt")
         rebuilt as MezzeType.FunctionType
         assertEquals(setOf("Log"), rebuilt.effects?.effects)
@@ -118,7 +118,7 @@ class SignatureIndexTest {
         assertTrue(stored.effects.isEmpty(),
             "the old arrow's <Log> must not still be attached — it would keep the " +
                 "decl answering an effect search it no longer performs")
-        assertEquals(MezzeType.IntType, SignatureIndex.rebuild(stored))
+        assertEquals(MezzeType.IntType, SignatureIndex.rebuild(stored, store::getTypeRows))
         assertTrue(store.findDeclsByEffect("Log").isEmpty(),
             "and the effect search must agree")
     }
@@ -265,7 +265,7 @@ class SignatureIndexTest {
             paramType = MezzeType.RecordType(linkedMapOf("a" to MezzeType.IntType), rowVar = RowVar.userOpen()),
             returnType = MezzeType.IntType,
         ))
-        val rebuilt = SignatureIndex.rebuild(store.getSignature(hash)) as MezzeType.FunctionType
+        val rebuilt = SignatureIndex.rebuild(store.getSignature(hash), store::getTypeRows) as MezzeType.FunctionType
         assertTrue((rebuilt.paramType as MezzeType.RecordType).rowVar != null,
             "`{ a: Int, ... }` must still be open after a trip through the database")
     }

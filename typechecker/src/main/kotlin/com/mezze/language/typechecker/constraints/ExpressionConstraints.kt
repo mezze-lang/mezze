@@ -113,6 +113,8 @@ class ExpressionConstraintGenerator {
         is ParsedPipePlaceholder -> generatePipePlaceholder(expr, context)
         is ParsedPipe -> generatePipeExpression(expr, context)
         is ParsedParens -> generate(expr.expr, context)
+        is ParsedQuote -> generate(expr.value, context)
+        is ParsedMacroCall -> generate(expr.compiled(), context)
         is ParsedRecordLit -> generateRecordLiteral(expr, context)
         is ParsedMemberAccess -> generateMemberAccess(expr, context)
         is ParsedVariantConstruct -> generateVariantConstruction(expr, context)

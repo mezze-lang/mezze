@@ -8,6 +8,7 @@ import com.mezze.interpreter.values.MezzeRecord
 import com.mezze.interpreter.values.MezzeVariant
 import com.mezze.language.comptime.CodebaseHost
 import com.mezze.language.comptime.HostValue
+import com.mezze.language.comptime.SyntaxHost
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.interop.InteropLibrary
 import java.util.function.BiConsumer
@@ -27,7 +28,33 @@ object CodebaseNatives {
     /** The polyglot-bindings key the evaluator stores the host under. */
     const val BINDING = "mezze.comptime.codebase"
 
+    /** Where [TruffleComptimeEvaluator.invoke] puts the argument record of the call it makes. */
+    const val ARGUMENT_BINDING = "mezze.comptime.argument"
+
+    /** Where [TruffleComptimeEvaluator.invoke] puts the [SyntaxHost] a macro parses through. */
+    const val SYNTAX_BINDING = "mezze.comptime.syntax"
+
+    /** Reads one field of the invoked call's argument; only the synthetic entry calls it. */
+    const val ARGUMENT_NATIVE = "__native_comptime_argument"
+
     fun register(put: BiConsumer<String, NativeDispatch.NativeHandler>) {
+        put.accept(ARGUMENT_NATIVE) { args, _ ->
+            val argument = bound(ARGUMENT_BINDING, ARGUMENT_NATIVE) as? HostValue.Record
+                ?: throw IllegalStateException("the value bound as $ARGUMENT_BINDING is not a record")
+            val field = str(args, "field")
+            answer(argument.fields.firstOrNull { it.first == field }?.second
+                ?: throw IllegalStateException("the invoked call's argument has no field `$field`"))
+        }
+        put.accept("__native_syntax_parse") { args, _ ->
+            val host = bound(SYNTAX_BINDING, "__native_syntax_parse") as? SyntaxHost
+                ?: throw IllegalStateException("the value bound as $SYNTAX_BINDING is not a SyntaxHost")
+            answer(host.parse(
+                str(args, "text"), str(args, "file"),
+                (args.getField("line") as Long).toInt(), (args.getField("column") as Long).toInt(),
+                args.getField("declarations") as Boolean,
+            ))
+        }
+
         fun native(name: String, ask: (CodebaseHost, MezzeRecord) -> HostValue) =
             put.accept(name) { args, _ -> answer(ask(host(name), args)) }
 
@@ -93,7 +120,17 @@ object CodebaseNatives {
     }
 
     @TruffleBoundary
-    private fun host(native: String): CodebaseHost {
+    private fun host(native: String): CodebaseHost =
+        bound(BINDING, native, "no codebase to answer it") as? CodebaseHost
+            ?: throw IllegalStateException("the value bound as $BINDING is not a CodebaseHost")
+
+    /**
+     * What this evaluation bound under [key], or a guest error naming [native]
+     * when nothing is: the native was called outside the compile-time evaluation
+     * that provides it.
+     */
+    @TruffleBoundary
+    private fun bound(key: String, native: String, missing: String = "nothing to answer it"): Any {
         val env = MezzeContext.get(null).env
         // Read through the bindings object rather than `importSymbol`: with no
         // bindings ever created, `importSymbol` dies inside Truffle with a
@@ -101,17 +138,16 @@ object CodebaseNatives {
         val bound = if (!env.isPolyglotBindingsAccessAllowed) null else {
             val bindings = env.polyglotBindings
             val interop = InteropLibrary.getUncached()
-            if (interop.isMemberReadable(bindings, BINDING)) interop.readMember(bindings, BINDING) else null
+            if (interop.isMemberReadable(bindings, key)) interop.readMember(bindings, key) else null
         }
         if (bound == null) {
             throw MezzeGuestException(
-                "`std::codebase` was asked a question ($native) with no codebase to answer it. " +
-                    "Codebase questions are answered only while compiling, inside a `comptime` " +
-                    "evaluation that `mez build` runs; this one ran somewhere else.",
+                "`$native` was called with $missing. It is answered only while " +
+                    "compiling — a `comptime` block that `mez build` folds, or a macro being " +
+                    "expanded; this ran somewhere else.",
             )
         }
-        return env.asHostObject(bound) as? CodebaseHost
-            ?: throw IllegalStateException("the value bound as $BINDING is not a CodebaseHost")
+        return env.asHostObject(bound)
     }
 
     private fun str(args: MezzeRecord, field: String): String =

@@ -163,9 +163,9 @@ object DefinitionIndex {
      * a definition read back smaller than it was written would let a derive
      * silently skip a field.
      */
-    fun rebuild(rows: SignatureRows): Definition {
+    fun rebuild(rows: SignatureRows, load: (com.mezze.language.typedast.Hash) -> SignatureRows): Definition {
         require(rows.nodes.isNotEmpty()) { "cannot rebuild a definition from zero nodes" }
-        val r = TypeTreeReader(rows)
+        val r = TypeTreeReader(rows, load)
         r.requireTree()
         val root = r.root
         val kids = r.kidsOf(root.nodeId)
@@ -214,7 +214,7 @@ object DefinitionIndex {
                 operations = ops(),
             )
             TypeNodeKind.EFFECT -> Definition.Effect(names(TypeSlot.ASSOC), ops())
-            TypeNodeKind.FN, TypeNodeKind.APP, TypeNodeKind.VAR, TypeNodeKind.INT, TypeNodeKind.FLOAT,
+            TypeNodeKind.FN, TypeNodeKind.APP, TypeNodeKind.VAR, TypeNodeKind.REF, TypeNodeKind.INT, TypeNodeKind.FLOAT,
             TypeNodeKind.STR, TypeNodeKind.CHAR, TypeNodeKind.FRAC, TypeNodeKind.BYTES ->
                 error("root of ${root.ownerHash.hex} is a ${root.kind.dbValue}, which is not a definition")
         }

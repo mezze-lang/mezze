@@ -151,8 +151,18 @@ object TypeAnnotationConverter {
         typeVarCache: MutableMap<String, TypeVar>,
         sharedRowVar: SharedRowVar,
         recursionGuard: MutableSet<String>,
+        /**
+         * Each alias's expansion, converted once per conversion and shared. The
+         * cycle guard alone stops a name repeating on ONE path, so a family of
+         * mutually recursive aliases — `std::syntax`'s `Expr`, `Arm`, `Pattern`,
+         * `TypeExpr`… — was expanded once per PATH: exponential, enough to run a
+         * test out of memory. Only an expansion with no variable in it is shared;
+         * one with a type or row variable is converted afresh each time, as each
+         * occurrence must have its own.
+         */
+        aliasMemo: AliasMemo = AliasMemo(),
     ): MezzeType {
-        fun recurse(ann: ParsedTypeAnnotation) = convertInternal(ann, config, typeVarCache, sharedRowVar, recursionGuard)
+        fun recurse(ann: ParsedTypeAnnotation) = convertInternal(ann, config, typeVarCache, sharedRowVar, recursionGuard, aliasMemo)
 
         return when (annotation) {
             is ParsedNamedType -> {
@@ -174,10 +184,14 @@ object TypeAnnotationConverter {
                     // the wall is an author-written ascription concern, not a
                     // decl one.
                     if (name !in recursionGuard) {
+                        aliasMemo.expansions[name]?.let { return it }
                         config.resolveTypeAlias(name)?.let { (aliased, _) ->
                             recursionGuard.add(name)
                             try {
-                                return withAliasIdentity(recurse(aliased), name, config.resolveTypeHash(name), emptyList())
+                                // Displayed by its declared name: a quote's hidden import
+                                // (`~Expr`) is a scoping device, never what a type is called.
+                                return withAliasIdentity(recurse(aliased), com.mezze.language.parsedast.QuoteTypes.declaredName(name), config.resolveTypeHash(name), emptyList())
+                                    .also { if (aliasMemo.isGround(it)) aliasMemo.expansions[name] = it }
                             } finally { recursionGuard.remove(name) }
                         }
                     }
@@ -310,7 +324,7 @@ object TypeAnnotationConverter {
                         recursionGuard.add(annotation.constructor)
                         try {
                             return withAliasIdentity(
-                                convertInternal(aliased, extendedConfig, typeVarCache, sharedRowVar, recursionGuard),
+                                convertInternal(aliased, extendedConfig, typeVarCache, sharedRowVar, recursionGuard, aliasMemo),
                                 annotation.constructor, config.resolveTypeHash(annotation.constructor),
                                 convertedArgs,
                             )
@@ -396,6 +410,25 @@ object TypeAnnotationConverter {
         ),
         typeVarCache = typeVarCache ?: mutableMapOf(),
     )
+
+    /** See `aliasMemo` on [convertInternal]. */
+    class AliasMemo {
+        val expansions = HashMap<String, MezzeType>()
+        private val ground = java.util.IdentityHashMap<MezzeType, Boolean>()
+
+        /** No type variable and no open row anywhere in [t]; memoized by object, as [t] shares subtrees. */
+        fun isGround(t: MezzeType): Boolean = ground[t] ?: run {
+            val own = when (t) {
+                is MezzeType.VarType -> false
+                is MezzeType.RecordType -> t.rowVar == null
+                is MezzeType.VariantType -> t.rowVar == null
+                is MezzeType.FunctionType -> t.effects?.rowVar == null
+                is MezzeType.EffectRow -> t.rowVar == null
+                else -> true
+            }
+            (own && !t.anyChild { !isGround(it) }).also { ground[t] = it }
+        }
+    }
 
     class SharedRowVar {
         private var rowVar: RowVar? = null

@@ -1,6 +1,6 @@
 package com.mezze.language.codebase
 
-import com.mezze.language.parsedast.children
+import com.mezze.language.parsedast.writtenChildren
 import com.mezze.language.parsedast.syntaxKind
 import com.mezze.language.parsedast.syntaxSymbols
 import com.mezze.language.store.*
@@ -456,7 +456,7 @@ object StorePopulator {
                     e.loc.startLine, e.loc.startCol, e.loc.endLine, e.loc.endCol,
                 )
             }
-            e.children().forEach { walk(owner, it) }
+            e.writtenChildren().forEach { walk(owner, it) }
         }
         for (decl in parsed.decls) {
             val owner = owners[decl.loc.startLine to decl.loc.startCol] ?: continue

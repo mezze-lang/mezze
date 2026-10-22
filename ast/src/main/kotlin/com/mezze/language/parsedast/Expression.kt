@@ -360,6 +360,69 @@ data class ParsedEffectCall(
  *
  * Preserved for the formatter to maintain user's grouping style.
  */
+/**
+ * A quote: `` `( … ) ``, code written as Mezze and used as a `std::syntax` value.
+ *
+ * [template] is what was written, kept for the formatter and for tools that show
+ * code as written. A splice inside it, `~x` or `~( … )`, is a name spelled with a
+ * leading `~`: `~x` for a spliced name, `~(0)`, `~(1)` … for the expressions in
+ * [splices]. Splices are names because a name can stand anywhere — an expression,
+ * a pattern, a type, a field — so no other node needs a splice form.
+ *
+ * [value] is the code that builds the quoted value, derived from [template] by the
+ * parser. Everything that compiles reads [value]; nothing compiles [template].
+ */
+@Serializable
+data class ParsedQuote(
+    val template: ParsedCode,
+    val splices: List<ParsedExpr>,
+    val value: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+/** Code as a quote holds it and a macro produces it: one expression, or declarations. */
+@Serializable
+sealed interface ParsedCode {
+    @Serializable data class Expr(val expr: ParsedExpr) : ParsedCode
+    @Serializable data class Decls(val decls: List<ParsedDecl>) : ParsedCode
+}
+
+/**
+ * A macro call, `name!( … )`.
+ *
+ * [input] is the text between the parentheses, exactly as written, starting at
+ * [inputLoc]. It is not parsed as Mezze: the macro decides what it means.
+ *
+ * [expansion] is what the macro produced, filled in before the module is
+ * identified and type checked: an expression where the call is an expression,
+ * declarations where it stands as a declaration. Everything that compiles reads
+ * the expansion; the call stays, so the code still reads as written.
+ */
+@Serializable
+data class ParsedMacroCall(
+    val macro: ParsedIdentifier,
+    val input: String,
+    val inputLoc: Loc,
+    val expansion: ParsedCode? = null,
+    override val loc: Loc,
+    /**
+     * What went wrong expanding it — the macro could not be found or run, or it
+     * reported mistakes in its input. Reported by the type checker at their own
+     * locations. A call with an [expansion] can still have some: a macro reports
+     * a mistake and still returns code, so one error does not hide the rest.
+     */
+    val diagnostics: List<MacroDiagnostic> = emptyList(),
+) : ParsedExpr
+
+/** A problem expanding a macro call, located where it is. */
+@Serializable
+data class MacroDiagnostic(
+    val code: com.mezze.language.parsedast.diagnostics.ErrorCode,
+    val message: String,
+    val loc: Loc,
+    val hints: List<String> = emptyList(),
+)
+
 @Serializable
 data class ParsedParens(
     val expr: ParsedExpr,

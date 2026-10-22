@@ -637,35 +637,7 @@ object NativeBuildPath {
     fun computeReachableClosure(
         loweredFunctions: List<FunctionIR>,
         fromStore: ((com.mezze.language.typedast.Hash) -> FunctionIR?)? = null,
-    ): List<FunctionIR> {
-        val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
-        val closureMap = HashMap<com.mezze.language.typedast.Hash, FunctionIR>()
-        for (fn in loweredFunctions) closureMap[fn.hash] = fn
-
-        val queue = ArrayDeque(
-            com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(loweredFunctions)
-        )
-        while (queue.isNotEmpty()) {
-            val hash = queue.removeFirst()
-            if (hash in closureMap) continue
-            val stdFn = stdlibFns[hash]
-            if (stdFn != null) {
-                closureMap[hash] = stdFn   // stdlib: leaf (resolved by the embedded runtime), as before
-                continue
-            }
-            // A cached dependency function: served from PrecompiledDeps (populated
-            // by the CLI from the dep stores) or the explicit fromStore fallback.
-            // Unlike stdlib it is NOT embedded in the runtime, so it must be
-            // carried in the closure and its own call targets walked transitively.
-            val depFn = com.mezze.language.typechecker.PrecompiledDeps.preloweredFunctions[hash]
-                ?: fromStore?.invoke(hash) ?: continue
-            closureMap[hash] = depFn
-            for (h in com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(listOf(depFn))) {
-                if (h !in closureMap) queue.add(h)
-            }
-        }
-        return closureMap.values.sortedBy { it.hash.hex }
-    }
+    ): List<FunctionIR> = com.mezze.language.typechecker.IrClosure.reachable(loweredFunctions, fromStore)
 
     /**
      * Step 3: extract the per-library runtime jars bundled inside the

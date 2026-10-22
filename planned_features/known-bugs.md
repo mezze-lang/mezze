@@ -2611,3 +2611,27 @@ inconsistent with `Hash`), and performance — hence D.2's proof, not a guess.
 
 Gates for every change: `:typechecker:test` and `:interpreter:test` SEPARATELY,
 `--no-daemon`; stdlib type changes need `:cli:clean :cli:compileStdlib`.
+
+---
+
+## OPEN (2026-10-22) — a module-qualified type annotation never resolves to its declaration
+
+**Symptom.** `let s: std::syntax::Expr = IntExpr { … }` fails with *declared as
+std::syntax::Expr but expression has type Expr*, while the same line with
+`use std::syntax::{ Expr }` and `let s: Expr = …` passes. Any value of the type
+fails against the qualified spelling, so a function written
+`{ e: std::syntax::Expr } -> std::syntax::Expr` cannot accept or return one.
+
+**Root cause.** `TypeAnnotationConverter` turns `ParsedQualifiedType` into
+`WellKnownTypeApp.of(constructor = "std::syntax::Expr", typeHash =
+resolveTypeHash("std::syntax::Expr"))`. No resolver knows a qualified name, so the
+result is a type application with no identity and a constructor no declaration
+has: it unifies only with itself. The unqualified path resolves the name through
+the module's imports to the declared type.
+
+**Fix direction.** Resolve the qualifier to a module, the name to that module's
+declaration, and produce exactly what the unqualified, imported name produces —
+one resolution for both spellings, not a second walker.
+
+**Found while** anchoring quotes to `std::syntax` types; quotes avoid it by
+bringing the types into scope under hidden names (`QuoteTypes`).

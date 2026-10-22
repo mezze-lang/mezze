@@ -763,10 +763,18 @@ class ModuleResolver(
     /** Stamp modules that import each other, as one group, and cache each. */
     private fun stampGroup(
         members: List<String>,
-        raws: Map<String, Raw>,
+        raws: MutableMap<String, Raw>,
         memo: MutableMap<String, Boolean>,
         stampedNow: MutableSet<String>,
     ) {
+        // Macros first: identities are taken of what the code compiles to. Every
+        // module outside the group is stamped by now, so a macro from one can run.
+        for (path in members) {
+            val raw = raws.getValue(path)
+            val expanded = com.mezze.language.typechecker.macro.MacroExpander(raw.resolver, members.toSet())
+                .expand(raw.parsed, path)
+            if (expanded !== raw.parsed) raws[path] = Raw(raw.source, expanded, raw.resolver)
+        }
         val group = IdentityGroup(members.map { raws.getValue(it).parsed })
         val memberIndex = members.withIndex().associate { it.value to it.index }
         val against = LinkedHashMap<String, Hash?>()
@@ -817,7 +825,9 @@ class ModuleResolver(
      */
     fun stampEntry(parsed: ParsedModule, modulePath: String?): ParsedModule {
         if (ModuleIdentity.isStamped(parsed)) return parsed
-        return DeclIdentity.stamp(parsed, scopeOf(parsed, modulePath), modulePath ?: "")
+        val expanded = com.mezze.language.typechecker.macro.MacroExpander(this, setOfNotNull(modulePath))
+            .expand(parsed, modulePath)
+        return DeclIdentity.stamp(expanded, scopeOf(expanded, modulePath), modulePath ?: "")
     }
 
     /** What each written name in a STAMPED module resolves to — see [DeclIdentity.NameResolver]. */

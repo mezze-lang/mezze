@@ -103,6 +103,13 @@ enum class TypeNodeKind(val dbValue: String) {
     // Definition roots (`DefinitionIndex`). Not types: the type reader refuses them.
 
     ALIAS("alias"),
+
+    /**
+     * A declared record or variant inside a larger type, by reference: `label` is
+     * its name, `typeHash` its identity, and `refOwner` the key its structure is
+     * stored under, once, however many signatures mention it.
+     */
+    REF("ref"),
     ABILITY("ability"),
     EFFECT("effect");
 
@@ -170,6 +177,8 @@ data class TypeNodeRow(
      * is marked at write time rather than guessed by a query.
      */
     val isResidual: Boolean = false,
+    /** REF only: the owner its structure's rows are stored under (see [TypeNodeKind.REF]). */
+    val refOwner: Hash? = null,
 )
 
 /** One effect on one arrow's effect row. */
@@ -196,6 +205,12 @@ data class SignatureRows(
     val nodes: List<TypeNodeRow>,
     val effects: List<TypeNodeEffectRow>,
     val constraints: List<TypeNodeConstraintRow>,
+    /**
+     * The structures this tree's REF nodes point at, by their key: written once,
+     * and only if not already stored — a key is the structure's content, so a
+     * stored one is the same one.
+     */
+    val shared: Map<Hash, SignatureRows> = emptyMap(),
 ) {
     val isEmpty: Boolean get() = nodes.isEmpty()
 
@@ -232,9 +247,9 @@ object SignatureIndex {
      * unifies more readily than the real signature, which is the whole failure
      * mode this index exists to avoid.
      */
-    fun rebuild(rows: SignatureRows): MezzeType {
+    fun rebuild(rows: SignatureRows, load: (Hash) -> SignatureRows): MezzeType {
         require(rows.nodes.isNotEmpty()) { "cannot rebuild a signature from zero nodes" }
-        val reader = TypeTreeReader(rows)
+        val reader = TypeTreeReader(rows, load)
         reader.requireTree()
         return reader.type(reader.root)
     }
@@ -247,8 +262,8 @@ object SignatureIndex {
      * a rendering is the point of the whole change: the type is the stored fact
      * and the string is derived from it, so the two can never disagree.
      */
-    fun render(rows: SignatureRows): String? =
-        if (rows.isEmpty) null else SignatureNormalizer.render(rebuild(rows))
+    fun render(rows: SignatureRows, load: (Hash) -> SignatureRows): String? =
+        if (rows.isEmpty) null else SignatureNormalizer.render(rebuild(rows, load))
 }
 
 /**
@@ -261,6 +276,10 @@ internal class TypeTreeWriter(
     private val ownerHash: Hash,
     /** The arrow whose row is the residual one; null when the tree is not a signature. */
     private val residual: MezzeType.FunctionType?,
+    /** Structures written once and referenced (see [TypeNodeKind.REF]), shared by every writer of one flatten. */
+    private val shared: MutableMap<Hash, SignatureRows> = LinkedHashMap(),
+    /** Each structure's key, by the very type object, so a type met twice is keyed once. */
+    private val keys: java.util.IdentityHashMap<MezzeType, Hash> = java.util.IdentityHashMap(),
 ) {
     private val nodes = mutableListOf<TypeNodeRow>()
     private val effects = mutableListOf<TypeNodeEffectRow>()
@@ -306,6 +325,24 @@ internal class TypeTreeWriter(
                     isResidual = isResidual,
                 )
             )
+        }
+
+        // A declared record or variant below the root is stored once, by content,
+        // and referenced: written inline it was copied whole into every signature
+        // that mentions it — 25,000 rows for each function over `std::syntax`'s
+        // `Expr`, and more for each macro.
+        if (parentId != null && (node is MezzeType.RecordType || node is MezzeType.VariantType)) {
+            val identity = when (node) {
+                is MezzeType.RecordType -> node.identity
+                is MezzeType.VariantType -> node.identity
+                else -> null
+            }
+            val declared = identity?.hashOrNull()
+            if (identity != null && declared != null) {
+                add(TypeNodeKind.REF, nodeLabel = identity.nameOrNull(), typeHash = declared)
+                nodes[id] = nodes[id].copy(refOwner = keyOf(node))
+                return id
+            }
         }
 
         when (node) {
@@ -388,7 +425,32 @@ internal class TypeTreeWriter(
         return id
     }
 
-    fun rows(): SignatureRows = SignatureRows(nodes.toList(), effects.toList(), constraints.toList())
+    fun rows(): SignatureRows = SignatureRows(nodes.toList(), effects.toList(), constraints.toList(), shared.toMap())
+
+    /** The key [node]'s structure is stored under: a hash of its rows, so equal structures share one. */
+    private fun keyOf(node: MezzeType): Hash = keys.getOrPut(node) {
+        val sub = TypeTreeWriter(PENDING, null, shared, keys)
+        sub.type(node, null, TypeSlot.ROOT, 0, null)
+        val rows = sub.rows()
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        fun put(vararg parts: Any?) { parts.forEach { digest.update((it?.toString() ?: "\u0000").toByteArray()); digest.update(0) } }
+        for (n in rows.nodes) put(n.nodeId, n.parentId, n.slot.dbValue, n.ordinal, n.slotLabel, n.kind.dbValue,
+            n.label, n.typeHash?.hex, n.isOpen, n.performed, n.refOwner?.hex)
+        for (e in rows.effects) put("e", e.nodeId, e.effectName, e.effectHash?.hex)
+        for (c in rows.constraints) put("c", c.nodeId, c.abilityName, c.abilityHash?.hex, c.ordinal)
+        val key = Hash(digest.digest().joinToString("") { "%02x".format(it) })
+        shared[key] = SignatureRows(
+            rows.nodes.map { it.copy(ownerHash = key) },
+            rows.effects.map { it.copy(ownerHash = key) },
+            rows.constraints.map { it.copy(ownerHash = key) },
+        )
+        key
+    }
+
+    private companion object {
+        /** The owner a structure is written under until its key is known. */
+        val PENDING = Hash("0".repeat(64))
+    }
 }
 
 /**
@@ -396,7 +458,14 @@ internal class TypeTreeWriter(
  * same way. One reader holds one variable table, so every occurrence of `'a` in
  * one tree — a signature, or a whole definition — is the same variable.
  */
-internal class TypeTreeReader(private val rows: SignatureRows) {
+internal class TypeTreeReader(
+    private val rows: SignatureRows,
+    /** The rows stored under a key, for a REF node's structure. */
+    private val load: (Hash) -> SignatureRows,
+    // ONE TypeVar per variable NAME across the whole type, structures read
+    // through a REF included: `{ b: Box 'a } -> 'a` has one `'a`.
+    val vars: MutableMap<String, TypeVar> = mutableMapOf(),
+) {
     val byId = rows.nodes.associateBy { it.nodeId }
     val children = rows.nodes.filter { it.parentId != null }.groupBy { it.parentId!! }
     val effectsByNode = rows.effects.groupBy { it.nodeId }
@@ -408,7 +477,6 @@ internal class TypeTreeReader(private val rows: SignatureRows) {
     // starts unifying with things it must not: `{x: 'a} -> Deque 'a` matched a
     // search for `{x: 'a} -> 'a`, which the occurs check exists to reject.
     // Instance seven of this codebase's most-repeated defect, introduced here.
-    val vars = mutableMapOf<String, TypeVar>()
 
     val root: TypeNodeRow = rows.nodes.singleOrNull { it.parentId == null }
         ?: error(
@@ -504,6 +572,15 @@ internal class TypeTreeReader(private val rows: SignatureRows) {
             row.label?.let { name -> vars.getOrPut(name) { TypeVar.freshWithName(name) } }
                 ?: TypeVar.fresh()
         )
+
+        TypeNodeKind.REF -> {
+            val key = row.refOwner ?: error("reference node ${row.nodeId} of ${row.ownerHash.hex} names no structure")
+            val stored = rows.shared[key] ?: load(key)
+            require(stored.nodes.isNotEmpty()) {
+                "the structure ${key.hex} that node ${row.nodeId} of ${row.ownerHash.hex} refers to is not stored"
+            }
+            TypeTreeReader(stored, load, vars).let { it.requireTree(); it.type(it.root) }
+        }
 
         TypeNodeKind.INT -> MezzeType.IntType
         TypeNodeKind.FLOAT -> MezzeType.FloatType

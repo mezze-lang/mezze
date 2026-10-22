@@ -32,7 +32,7 @@ class SignatureIndexRoundTripTest {
 
     private val hash = Hash("a".repeat(64))
     private fun roundTrip(type: MezzeType): MezzeType =
-        SignatureIndex.rebuild(SignatureIndex.flatten(hash, type))
+        SignatureIndex.rebuild(SignatureIndex.flatten(hash, type)) { SignatureRows.EMPTY }
 
     /** Same shape, ignoring which variables were minted. */
     private fun assertSameShape(expected: MezzeType, actual: MezzeType, hint: String = "") {
@@ -341,7 +341,7 @@ class SignatureIndexRoundTripTest {
 
     @Test
     fun `rebuilding zero nodes fails rather than inventing a type`() {
-        assertFailsWith<IllegalArgumentException> { SignatureIndex.rebuild(SignatureRows.EMPTY) }
+        assertFailsWith<IllegalArgumentException> { SignatureIndex.rebuild(SignatureRows.EMPTY) { SignatureRows.EMPTY } }
     }
 
     @Test
@@ -356,14 +356,14 @@ class SignatureIndexRoundTripTest {
                 slot = TypeSlot.ARG, ordinal = 0, kind = TypeNodeKind.INT,
             )
         )
-        assertFailsWith<IllegalArgumentException> { SignatureIndex.rebuild(withOrphan) }
+        assertFailsWith<IllegalArgumentException> { SignatureIndex.rebuild(withOrphan) { SignatureRows.EMPTY } }
     }
 
     @Test
     fun `an arrow missing its return type fails rather than rebuilding half`() {
         val good = SignatureIndex.flatten(hash, MezzeType.FunctionType(MezzeType.IntType, MezzeType.IntType))
         val truncated = good.copy(nodes = good.nodes.filter { it.slot != TypeSlot.RETURN })
-        assertFailsWith<IllegalStateException> { SignatureIndex.rebuild(truncated) }
+        assertFailsWith<IllegalStateException> { SignatureIndex.rebuild(truncated) { SignatureRows.EMPTY } }
     }
 
     // ---- the boundary: what is deliberately NOT indexed ---------------------

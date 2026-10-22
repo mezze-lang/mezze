@@ -349,7 +349,7 @@ class StorePopulatorTest {
         // not a signature.
         assertEquals(
             com.mezze.language.ast.MezzeType.IntType,
-            com.mezze.language.store.SignatureIndex.rebuild(store.getSignature(add.hash)),
+            com.mezze.language.store.SignatureIndex.rebuild(store.getSignature(add.hash), store::getTypeRows),
         )
         assertTrue(store.getSignature(typeHash).isEmpty, "a type declaration has no signature")
         assertEquals(letHash, add.hash)

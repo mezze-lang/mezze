@@ -363,6 +363,8 @@ class ModuleTypeChecker(
                         filePath = module.filePath,
                         sourceHash = module.sourceHash,
                         identity = module.identity,
+                        loweredFunctions = result.loweredFunctions.orEmpty(),
+                        loweredPerformers = result.loweredPerformers,
                     )
 
                     putInGlobalCache(world, module.modulePath, typedModule)

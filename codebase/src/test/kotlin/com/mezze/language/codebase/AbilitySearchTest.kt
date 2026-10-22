@@ -250,7 +250,7 @@ class AbilitySearchTest {
             .filter { it.module == "theirs" }.map { it.rendered })
         assertEquals(listOf(MezzeType.IntType), store.getAbilityImpls(mine)
             .flatMap { row -> store.getImplTargets(row.hash) }
-            .map { SignatureIndex.rebuild(store.getTypeRows(it)) })
+            .map { SignatureIndex.rebuild(store.getTypeRows(it), store::getTypeRows) })
     }
 
     @Test

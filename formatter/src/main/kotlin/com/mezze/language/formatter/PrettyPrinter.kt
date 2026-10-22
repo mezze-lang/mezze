@@ -9,6 +9,11 @@ import com.mezze.language.parsedast.*
  * Comments are attached to declarations via leadingComments/trailingComment fields.
  */
 class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
+    private companion object {
+        /** A `~( … )` splice's placeholder name in a quote's template. */
+        val SPLICE_NAME = Regex("""~\((\d+)\)""")
+    }
+
     private val output = StringBuilder()
     private var indentLevel = 0
     private var currentColumn = 0
@@ -556,7 +561,49 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
             is ParsedPipe -> printPipe(expr)
             is ParsedPipePlaceholder -> append("@")
             is ParsedParens -> { append("("); printExpr(expr.expr); append(")") }
+            is ParsedQuote -> printQuote(expr)
+            // A macro's input is the macro's own language: it is kept exactly as written.
+            is ParsedMacroCall -> { printIdentifier(expr.macro); append("!("); append(expr.input); append(")") }
         }
+    }
+
+    /**
+     * `` `( … ) ``, as written. A `~x` splice is a name and prints as one; a
+     * `~( … )` splice is the name `~(N)` in the template, so its expression is
+     * put back in its place once the template is printed.
+     */
+    private fun printQuote(expr: ParsedQuote) {
+        val start = output.length
+        append("`(")
+        when (val t = expr.template) {
+            is ParsedCode.Expr -> printExpr(t.expr)
+            is ParsedCode.Decls -> {
+                newLine()
+                indent {
+                    for (decl in t.decls) {
+                        printIndent()
+                        printDocComment(decl)
+                        printDecl(decl)
+                        if (!output.endsWith("\n")) newLine()
+                    }
+                }
+                printIndent()
+            }
+        }
+        append(")")
+        if (expr.splices.isEmpty()) return
+        val printed = SPLICE_NAME.replace(output.substring(start)) { m ->
+            "~(" + PrettyPrinter(config).exprText(expr.splices[m.groupValues[1].toInt()]) + ")"
+        }
+        output.setLength(start)
+        append(printed)
+    }
+
+    /** [expr] on its own, as text. */
+    internal fun exprText(expr: ParsedExpr): String {
+        output.clear()
+        printExpr(expr)
+        return output.toString()
     }
 
     private fun printStringLit(expr: ParsedStringLit) {

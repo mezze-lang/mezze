@@ -121,6 +121,30 @@ fun ErrorCode.explain(): String = when (this) {
         "Every statement in a `do` block must start at the same column. This line is " +
         "indented differently from the block's first statement — line them all up."
 
+    ErrorCode.P0136_MALFORMED_QUOTE ->
+        "A quote is a backtick and parentheses, `` `(a + ~b) ``: Mezze code that is a " +
+        "`std::syntax` value instead of being run. Inside it, `~x` splices the value of `x` " +
+        "and `~( … )` the value of an expression; `...~xs` splices a list into a sequence or " +
+        "a record. `~` means nothing outside a quote, and quotes do not nest."
+
+    ErrorCode.V1001_MACRO_NOT_FOUND ->
+        "`name!( … )` calls the macro `name`, which must be imported from another module " +
+        "(`use lib::{ name }`, or written `lib::name!( … )`). A macro cannot be declared in the " +
+        "module that uses it: it runs while that module is compiled, before it exists."
+
+    ErrorCode.V1002_NOT_A_MACRO ->
+        "A macro is a function of type `{ input: MacroInput } -> Expansion` (`std::macro`), with " +
+        "no effects: it runs whenever its caller is compiled, the editor included, so it must " +
+        "not touch the world. This name is something else."
+
+    ErrorCode.V1003_MACRO_FAILED ->
+        "The macro ran and failed — it raised an error, or returned something that is not " +
+        "code. This is a problem in the macro, reported here because this is the call that " +
+        "made it run."
+
+    ErrorCode.V1004_MACRO_INPUT_ERROR ->
+        "The macro read its input and reported a mistake in it, at the place it points to."
+
     ErrorCode.P0121_LAMBDA_BODY_BARE_LET ->
         "A lambda body cannot start with a bare `let`. " +
         "Wrap the body in a `do` block: `{x} -> do let y = ...; y`."

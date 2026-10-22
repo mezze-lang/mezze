@@ -25,6 +25,8 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
         is ParsedPerform -> hasPipes(expr.body)
         is ParsedMemberAccess -> hasPipes(expr.receiver)
         is ParsedParens -> hasPipes(expr.expr)
+        is ParsedQuote -> hasPipes(expr.value)
+        is ParsedMacroCall -> hasPipes(expr.compiled())
         is ParsedVariantConstruct -> expr.value?.let { hasPipes(it) } ?: false
         is ParsedSeqLit -> expr.elements.any { elem ->
             when (elem) {
@@ -78,6 +80,8 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
         is ParsedPerform -> expr.copy(body = desugar(expr.body))
         is ParsedMemberAccess -> expr.copy(receiver = desugar(expr.receiver))
         is ParsedParens -> expr.copy(expr = desugar(expr.expr))
+        is ParsedQuote -> expr.copy(value = desugar(expr.value))
+        is ParsedMacroCall -> expr.copy(expansion = ParsedCode.Expr(desugar(expr.compiled())))
         is ParsedVariantConstruct -> expr.copy(value = expr.value?.let { desugar(it) })
         is ParsedSeqLit -> expr.copy(elements = expr.elements.map { elem ->
             when (elem) {
@@ -125,6 +129,9 @@ private fun replaceParsedPlaceholder(expr: ParsedExpr, replacement: ParsedExpr):
         elseBranch = replaceParsedPlaceholder(expr.elseBranch, replacement)
     )
     is ParsedParens -> expr.copy(expr = replaceParsedPlaceholder(expr.expr, replacement))
+    // `@` in a quote's splices is this pipe's; a macro's expansion never sees it.
+    is ParsedQuote -> expr.copy(value = replaceParsedPlaceholder(expr.value, replacement))
+    is ParsedMacroCall -> expr
     is ParsedMemberAccess -> expr.copy(receiver = replaceParsedPlaceholder(expr.receiver, replacement))
     is ParsedMatch -> expr.copy(
         scrutinee = replaceParsedPlaceholder(expr.scrutinee, replacement),

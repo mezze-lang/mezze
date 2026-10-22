@@ -691,6 +691,8 @@ class TypeValidator(
             }
             is ParsedPipe -> { recurse(expr.left); recurse(expr.right) }
             is ParsedParens -> recurse(expr.expr)
+            is ParsedQuote -> recurse(expr.value)
+            is ParsedMacroCall -> recurse(expr.compiled())
             is ParsedBinaryOp -> { recurse(expr.left); recurse(expr.right) }
             is ParsedIdentifier, is ParsedIntLit, is ParsedNatLit,
             is ParsedFloatLit, is ParsedFracLit,
