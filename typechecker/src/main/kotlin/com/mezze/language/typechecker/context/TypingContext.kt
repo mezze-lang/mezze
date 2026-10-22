@@ -21,6 +21,12 @@ data class TypingContext(
     private val anonymousImplMethods: Map<String, InherentMethodInfo> = emptyMap(),
     private val anonymousImplMethodsByType: Map<String, List<String>> = emptyMap(),
     private val anonymousImplMethodsByHash: Map<Hash, InherentMethodInfo> = emptyMap(),
+    /**
+     * [anonymousImplMethods] by method name, kept up to date as methods are
+     * added: scanning every method of every import on each method call cost a
+     * tenth of all checking.
+     */
+    private val anonymousImplMethodsByName: Map<String, List<InherentMethodInfo>> = emptyMap(),
     val parent: TypingContext? = null
 ) {
     sealed class LookupResult {
@@ -102,7 +108,7 @@ data class TypingContext(
     fun lookup(name: String): LookupResult = lookup(BindingKey.unqualified(name))
 
     fun extend(key: BindingKey, binding: Binding): TypingContext {
-        return copy(bindings = bindings + (key to binding))
+        return copy(bindings = bindings.with(key, binding))
     }
 
     fun extend(name: String, binding: Binding): TypingContext {
@@ -126,7 +132,7 @@ data class TypingContext(
     }
 
     fun extendAll(newBindings: Map<BindingKey, Binding>): TypingContext {
-        return copy(bindings = bindings + newBindings)
+        return copy(bindings = com.mezze.language.ast.solving.PersistentHashMap.of(bindings).plusAll(newBindings))
     }
 
     /**
@@ -146,7 +152,7 @@ data class TypingContext(
         val existing = abilityImpls[key] ?: return this
         val merged = mergeOperationConstraints(existing.operationConstraints, extra)
         if (merged.size == existing.operationConstraints.size) return this
-        return copy(abilityImpls = abilityImpls + (key to existing.copy(operationConstraints = merged)))
+        return copy(abilityImpls = abilityImpls.with(key, existing.copy(operationConstraints = merged)))
     }
 
     private fun mergeOperationConstraints(
@@ -173,17 +179,17 @@ data class TypingContext(
 
     fun extendWithImpl(key: Hash, implInfo: AbilityImplInfo): TypingContext {
         val existingHashes = abilityImplsByName[implInfo.abilityName] ?: emptyList()
-        val newImplsByName = abilityImplsByName + (implInfo.abilityName to (existingHashes + key))
+        val newImplsByName = abilityImplsByName.with(implInfo.abilityName, (existingHashes + key))
 
         val newImplsByAbilityHash = if (implInfo.abilityDeclHash != null) {
             val existingByHash = abilityImplsByAbilityHash[implInfo.abilityDeclHash] ?: emptyList()
-            abilityImplsByAbilityHash + (implInfo.abilityDeclHash to (existingByHash + key))
+            abilityImplsByAbilityHash.with(implInfo.abilityDeclHash, (existingByHash + key))
         } else {
             abilityImplsByAbilityHash
         }
 
         return copy(
-            abilityImpls = abilityImpls + (key to implInfo),
+            abilityImpls = abilityImpls.with(key, implInfo),
             abilityImplsByName = newImplsByName,
             abilityImplsByAbilityHash = newImplsByAbilityHash
         )
@@ -223,12 +229,12 @@ data class TypingContext(
 
     fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType, abilityDeclHash: Hash? = null): TypingContext {
         val newHashIndex = if (abilityDeclHash != null) {
-            abilityOperationTypesByHash + (abilityDeclHash to operationType)
+            abilityOperationTypesByHash.with(abilityDeclHash, operationType)
         } else {
             abilityOperationTypesByHash
         }
         return copy(
-            abilityOperationTypes = abilityOperationTypes + (abilityName to operationType),
+            abilityOperationTypes = abilityOperationTypes.with(abilityName, operationType),
             abilityOperationTypesByHash = newHashIndex
         )
     }
@@ -249,12 +255,12 @@ data class TypingContext(
 
     fun extendWithEffectOperationType(effectName: String, operationType: MezzeType, effectDeclHash: Hash? = null): TypingContext {
         val newHashIndex = if (effectDeclHash != null) {
-            effectOperationTypesByHash + (effectDeclHash to operationType)
+            effectOperationTypesByHash.with(effectDeclHash, operationType)
         } else {
             effectOperationTypesByHash
         }
         return copy(
-            effectOperationTypes = effectOperationTypes + (effectName to operationType),
+            effectOperationTypes = effectOperationTypes.with(effectName, operationType),
             effectOperationTypesByHash = newHashIndex
         )
     }
@@ -282,14 +288,9 @@ data class TypingContext(
     }
 
     fun findAnonymousMethodsByName(methodName: String): List<InherentMethodInfo> {
-        val results = mutableListOf<InherentMethodInfo>()
-        for ((key, info) in anonymousImplMethods) {
-            if (info.methodName == methodName) {
-                results.add(info)
-            }
-        }
-        parent?.findAnonymousMethodsByName(methodName)?.let { results.addAll(it) }
-        return results
+        val own = anonymousImplMethodsByName[methodName].orEmpty()
+        val inherited = parent?.findAnonymousMethodsByName(methodName).orEmpty()
+        return if (inherited.isEmpty()) own else own + inherited
     }
 
     fun extendWithAnonymousMethod(info: InherentMethodInfo): TypingContext {
@@ -316,10 +317,15 @@ data class TypingContext(
         val key = "${info.implContentHash.hex}::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
         val newHashIndex =
-            anonymousImplMethodsByHash + (Hash.computeOpHash(info.implContentHash, info.methodName) to info)
+            anonymousImplMethodsByHash.with(Hash.computeOpHash(info.implContentHash, info.methodName), info)
         return copy(
-            anonymousImplMethods = anonymousImplMethods + (key to info),
-            anonymousImplMethodsByType = anonymousImplMethodsByType + (info.targetTypeName to (existingMethods + info.methodName)),
+            anonymousImplMethods = anonymousImplMethods.with(key, info),
+            anonymousImplMethodsByName = anonymousImplMethodsByName.with(
+                info.methodName,
+                // A method re-added under the same key replaces its earlier entry.
+                anonymousImplMethodsByName[info.methodName].orEmpty().filterNot { anonymousImplMethods[key] === it } + info,
+            ),
+            anonymousImplMethodsByType = anonymousImplMethodsByType.with(info.targetTypeName, (existingMethods + info.methodName)),
             anonymousImplMethodsByHash = newHashIndex
         )
     }
@@ -334,8 +340,8 @@ data class TypingContext(
     fun extendWithPerformerTypeInfo(contentHash: Hash, info: PerformerTypeInfo): TypingContext {
         val existingHashes = performerAssociatedTypesByName[info.performerName] ?: emptyList()
         return copy(
-            performerAssociatedTypes = performerAssociatedTypes + (contentHash to info),
-            performerAssociatedTypesByName = performerAssociatedTypesByName + (info.performerName to (existingHashes + contentHash))
+            performerAssociatedTypes = performerAssociatedTypes.with(contentHash, info),
+            performerAssociatedTypesByName = performerAssociatedTypesByName.with(info.performerName, (existingHashes + contentHash))
         )
     }
 
@@ -395,3 +401,11 @@ data class TypingContext(
         )
     }
 }
+
+/**
+ * [this] with [key] bound to [value], sharing the rest instead of copying it:
+ * a context is extended once per binding, and copying every map each time made
+ * building one quadratic in its size.
+ */
+private fun <K, V> Map<K, V>.with(key: K, value: V): Map<K, V> =
+    com.mezze.language.ast.solving.PersistentHashMap.of(this).plus(key, value)

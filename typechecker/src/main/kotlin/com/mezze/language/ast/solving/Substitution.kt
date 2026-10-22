@@ -384,8 +384,15 @@ data class Substitution(
     // while fixing clobbering.
     fun compose(other: Substitution): Substitution {
         val extras = collisionUnifications(other)
+        // [other] is the accumulated substitution, usually large; this step is
+        // small. Copying [other] at every step made solving a module quadratic in
+        // its size, so it is extended in place of copied: a persistent map shares
+        // all but the path to each new binding. Precedence is unchanged — this
+        // step's bindings over [other]'s over the collision extras.
+        var merged = PersistentHashMap.of(other.mappings)
+        if (extras != null) for ((v, t) in extras) if (v !in other.mappings) merged = merged.plus(v, t)
         return Substitution(
-            mappings = if (extras == null) other.mappings + mappings else extras + other.mappings + mappings,
+            mappings = merged.plusAll(mappings),
             rowVarMappings = other.rowVarMappings + rowVarMappings,
             recordRowMappings = other.recordRowMappings + recordRowMappings
         )

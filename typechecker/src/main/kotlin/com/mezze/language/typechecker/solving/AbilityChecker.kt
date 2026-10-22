@@ -608,6 +608,14 @@ class AbilityChecker internal constructor(
       *   auto-derivation failure below can be squiggled. An error the editor
       *   cannot place is an error the user has to go looking for.
       */
+    /**
+     * (ability, ground type arguments) already proved implemented. Impls are only
+     * ever added while a checker lives, so a "yes" stays true; asking again
+     * re-matched the type against every impl of the ability — one more per
+     * module checked, so the cost of `==` grew with the size of the project.
+     */
+    private val provedImplemented = HashSet<Triple<String, Hash?, List<MezzeType>>>()
+
     internal fun checkAbilityImplementation(
         abilityName: String,
         typeArgs: List<MezzeType>,
@@ -617,6 +625,22 @@ class AbilityChecker internal constructor(
         seen: MutableSet<Any> = mutableSetOf(),
     ): Boolean {
         val effectiveHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
+        // Only ground arguments: a type variable may yet be bound to anything.
+        val key = if (typeArgs.all { it.isGround }) Triple(abilityName, effectiveHash, typeArgs) else null
+        if (key != null && key in provedImplemented) return true
+        val implemented = checkAbilityImplementationUncached(abilityName, typeArgs, effectiveHash, abilityHash, loc, seen)
+        if (implemented && key != null) provedImplemented += key
+        return implemented
+    }
+
+    private fun checkAbilityImplementationUncached(
+        abilityName: String,
+        typeArgs: List<MezzeType>,
+        effectiveHash: Hash?,
+        abilityHash: Hash?,
+        loc: com.mezze.language.parsedast.Loc?,
+        seen: MutableSet<Any>,
+    ): Boolean {
         if (typeArgs.size == 1) {
             if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash, seen)) {
                 registerDerivedShapeImpl(effectiveHash, typeArgs.first())
