@@ -27,7 +27,17 @@ sealed interface ValidationError {
     data class TopLevelExpression(val loc: Loc? = null) : ValidationError {
         override val code: ErrorCode = ErrorCode.V0710_TOP_LEVEL_EXPRESSION
         override val hints: List<String>
-            get() = listOf("move it into `let main = {} -> ...` (or another function)")
+            // When the stray expression is INDENTED (not at the left margin), it is almost
+            // always a line stranded by a dedent: an enclosing `do`/block opener sits less
+            // indented than this line, so the block ended before reaching it. Point at that
+            // likely cause. A genuine column-1 top-level expression gets only the plain advice.
+            get() = listOfNotNull(
+                "move it into `let main = {} -> ...` (or another function)",
+                loc?.takeIf { it.startCol > 1 }?.let {
+                    "this line is indented — if it was meant to be inside a `do` block above, " +
+                        "that block ended before it because an earlier line dedented out; line them up"
+                },
+            )
         override fun message(): String =
             "A bare expression isn't valid at the top level of a program — the top level " +
                 "takes declarations (`let`, `type`, `effect`, `ability`, `impl`, `use`). This " +

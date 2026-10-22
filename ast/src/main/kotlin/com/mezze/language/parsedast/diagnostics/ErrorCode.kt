@@ -67,6 +67,7 @@ enum class ErrorCode {
     P0132_PARSER_LIMIT_EXCEEDED, // the parser hit its deterministic work budget on this input (pathological or malformed source) — a clean bail-out instead of ever hanging
     P0133_TWO_EFFECT_ROWS, // `-> A -> B <E> <F>` — a second trailing row with no arrow of its own; parenthesise the returned function
     P0134_LET_NAME_UPPERCASE, // `let Max = 1` — an uppercase name is a constructor, so a use site would read it as a variant
+    P0135_DO_BLOCK_INCONSISTENT_INDENT, // statements in a `do` block must all start at the same column; this one is indented differently
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

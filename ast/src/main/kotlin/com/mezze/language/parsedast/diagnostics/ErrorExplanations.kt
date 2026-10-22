@@ -117,6 +117,10 @@ fun ErrorCode.explain(): String = when (this) {
         "letter are constructors (`Some`, `Circle`), so `let Max = 100` could never be used: " +
         "`n > Max` would read `Max` as a variant. Write `let max = 100`."
 
+    ErrorCode.P0135_DO_BLOCK_INCONSISTENT_INDENT ->
+        "Every statement in a `do` block must start at the same column. This line is " +
+        "indented differently from the block's first statement — line them all up."
+
     ErrorCode.P0121_LAMBDA_BODY_BARE_LET ->
         "A lambda body cannot start with a bare `let`. " +
         "Wrap the body in a `do` block: `{x} -> do let y = ...; y`."

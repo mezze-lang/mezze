@@ -44,4 +44,26 @@ class TopLevelExprRejectTest {
             "eval/REPL mode must not flag a top-level expression"
         )
     }
+
+    @Test
+    fun `an indented top-level orphan hints at a dedented do block`() {
+        // `let y = 2` dedents to the margin, closing the do block; `3` is left indented
+        // at the top level. The V0710 should hint that it was likely stranded by the dedent.
+        val errors = errorsFor("let main = {} -> do\n  1\nlet y = 2\n  3\n", strict = true)
+        val v0710 = errors.first { it.code == ErrorCode.V0710_TOP_LEVEL_EXPRESSION }
+        assertTrue(
+            v0710.hints.any { it.contains("indented") },
+            "an indented orphan should hint at a dedented block, got: ${v0710.hints}",
+        )
+    }
+
+    @Test
+    fun `a margin-level top-level expression does not blame indentation`() {
+        val errors = errorsFor("let x = 1\n\nx\n", strict = true)
+        val v0710 = errors.first { it.code == ErrorCode.V0710_TOP_LEVEL_EXPRESSION }
+        assertTrue(
+            v0710.hints.none { it.contains("indented") },
+            "a margin-level top-level expression should not blame indentation, got: ${v0710.hints}",
+        )
+    }
 }

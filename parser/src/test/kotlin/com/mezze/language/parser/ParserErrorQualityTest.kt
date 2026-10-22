@@ -63,6 +63,9 @@ class ParserErrorQualityTest {
         // ── match / control ─────────────────────────────────────────────
         Bad("let x = match y", mustMention = "is"),
         Bad("let x = do", expectCode = ErrorCode.P0114_DO_BLOCK_EMPTY, mustMention = "empty"),
+        // A do-block statement indented differently from the first — the margin-then-
+        // indent shape that used to parse silently (over-indented members were swallowed).
+        Bad("let f = {} -> do\nx\n  y", expectCode = ErrorCode.P0135_DO_BLOCK_INCONSISTENT_INDENT, mustMention = "column"),
         Bad("let x = if true", mustMention = "then"),
         // ── imports ─────────────────────────────────────────────────────
         Bad("use ", mustMention = "identifier"),
@@ -109,6 +112,30 @@ class ParserErrorQualityTest {
             }
         }
         assertTrue(failures.isEmpty(), "Parser error-quality violations:\n  " + failures.joinToString("\n  "))
+    }
+
+    @Test
+    fun `a do block closed by a dedented line hints at the indentation`() {
+        // The 1-space `y` dedents below the block (col 2 < 3), closing it on the `let`.
+        // Most often a mis-indent, so the P0112 error adds a hint pointing at that line.
+        val e = errorFor("let f = {} -> do\n  let x = 1\n y")
+        assertEquals(ErrorCode.P0112_DO_BLOCK_LAST_STATEMENT_IS_LET, e.code)
+        assertTrue(
+            e.hints.any { it.contains("indented") },
+            "a dedent-closed do block should hint at the indentation, got: ${e.hints}",
+        )
+    }
+
+    @Test
+    fun `a do block that ends at EOF on a let does not blame indentation`() {
+        // No following line — the block ended at end of input, so the user really did
+        // forget the result expression; the indentation hint would be misleading here.
+        val e = errorFor("let f = {} -> do\n  let x = 1")
+        assertEquals(ErrorCode.P0112_DO_BLOCK_LAST_STATEMENT_IS_LET, e.code)
+        assertTrue(
+            e.hints.none { it.contains("indented") },
+            "an EOF-ended do block should not blame indentation, got: ${e.hints}",
+        )
     }
 
     @Test

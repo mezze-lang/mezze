@@ -1210,11 +1210,32 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                         startLine = doTok.line, startCol = doTok.column,
                         endLine = resultLoc.endLine, endCol = resultLoc.endCol,
                     )
-                    ParseResult.Success(
-                        ParsedDo(statements, finalResult.first, loc = doLoc,
-                            resultLeadingComments = finalResultComments),
-                        finalResult.second
-                    )
+                    // INDENTATION: every statement AND the result must start at the same
+                    // column. Membership is decided by `column >= the first statement's`
+                    // (see the loop above), so a MORE-indented statement is otherwise
+                    // swallowed silently — e.g. a body that opens at the margin and then
+                    // indents the next line. Reject a block whose statements don't line up,
+                    // pointing at the first one that breaks the alignment.
+                    val stmtLocs = statements.map { it.loc } + listOf(finalResult.first.loc)
+                    val blockCol = stmtLocs.first().startCol
+                    val misaligned = stmtLocs.drop(1).firstOrNull { it.startCol != blockCol }
+                    if (misaligned != null) {
+                        ParseResult.Failure(
+                            "Every statement in a `do` block must start at the same column. " +
+                                "This one starts at column ${misaligned.startCol}, but the block's first statement is at column $blockCol.",
+                            currentStream.getSourcePosition(),
+                            misaligned.startLine,
+                            misaligned.startCol,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0135_DO_BLOCK_INCONSISTENT_INDENT,
+                            hints = listOf("line up every statement in the `do` block at the same indentation"),
+                        )
+                    } else {
+                        ParseResult.Success(
+                            ParsedDo(statements, finalResult.first, loc = doLoc,
+                                resultLeadingComments = finalResultComments),
+                            finalResult.second
+                        )
+                    }
                 } else if (fatalFailure != null) {
                     // A statement parser produced a targeted error that was
                     // explicitly marked fatal (e.g. "'++' is not a valid operator"
@@ -1222,17 +1243,29 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                     // instead of the generic do-block-shape message.
                     fatalFailure!!
                 } else {
+                    // Did a dedented line close the block (vs. running out of input)?
+                    // If so the "ends with a let" error is most often a mis-indent — that
+                    // next line was meant to stay inside the block — so add a hint pointing
+                    // at it. When the block ended at EOF there is no such line; keep the
+                    // plain "add a result expression" advice (the user really did forget it).
+                    val dedentTok = currentStream.current()?.takeIf { it.type != TokenType.EOF }
+                    val letHints = listOfNotNull(
+                        "add a final expression after the let; e.g. `return-value`",
+                        dedentTok?.let {
+                            "or line ${it.line} is indented less than the block — if it belongs inside the `do`, line it up with the other statements"
+                        },
+                    )
                     val (errorMsg, errorCode, errorHints) = if (lastStatementWasLet && lastLetName != null) {
                         Triple(
                             "Do block must end with a result expression, not the 'let $lastLetName = ...' statement",
                             com.mezze.language.parsedast.diagnostics.ErrorCode.P0112_DO_BLOCK_LAST_STATEMENT_IS_LET,
-                            listOf("add a final expression after the let; e.g. `return-value`")
+                            letHints
                         )
                     } else if (lastStatementWasLet) {
                         Triple(
                             "Do block must end with a result expression, not a 'let' statement",
                             com.mezze.language.parsedast.diagnostics.ErrorCode.P0113_DO_BLOCK_LAST_STATEMENT_NEEDS_EXPR,
-                            listOf("add a final expression after the let; e.g. `return-value`")
+                            letHints
                         )
                     } else if (statements.isEmpty()) {
                         Triple(
