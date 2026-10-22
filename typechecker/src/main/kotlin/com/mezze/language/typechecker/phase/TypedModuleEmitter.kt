@@ -162,7 +162,7 @@ internal fun emitTypedModuleAndLower(
         validateAnonymousConstructorShapes(module, importContext, emittedTypedModule!!)
     }
 
-    if (!isStdlibModule && emittedTypedModule != null) try {
+    if (!isStdlibModule && emittedTypedModule != null && com.mezze.language.typechecker.Lowering.wanted()) try {
         // Per-call-site decoder wiring: `from_json` keeps a bare-var target through
         // solving, so codegen can't tell two different-shape decodes apart. Recover
         // each call's concrete target structurally (from usage) and map it to the

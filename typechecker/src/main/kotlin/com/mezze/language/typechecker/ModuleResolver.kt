@@ -348,6 +348,13 @@ class ModuleResolver(
         internal fun expansionStore(): MezzeStore? = store
 
         /**
+         * Where macro expansions are kept across compiles when there is no store:
+         * `mez check`, which opens no database, keeps them as files here.
+         */
+        @Volatile
+        var expansionDirectory: java.nio.file.Path? = null
+
+        /**
          * SHA-256 hex of source text — MUST match the scheme StorePopulator /
          * StoreParsedModuleCache.sha256Hex use to WRITE the parsed_modules /
          * typed_modules `source_hash` column. Previously this side computed a
@@ -509,6 +516,16 @@ class ModuleResolver(
 
                         @JvmStatic
         @JvmOverloads
+        /** Every cached module as STAMPED ([Module.source]), with its file and source hash. */
+        fun getAllStampedSources(world: World = World.DEFAULT): List<StampedModule> {
+            val c = caches(world)
+            synchronized(c.lock) {
+                return c.modules.mapNotNull { (key, m) ->
+                    m.source?.let { StampedModule(key, m.filePath, m.sourceHash, it) }
+                }
+            }
+        }
+
         fun getAllParsedModules(world: World = World.DEFAULT): Map<String, ParsedModule> {
             val c = caches(world)
             synchronized(c.lock) {
@@ -616,6 +633,7 @@ class ModuleResolver(
         // One stamping pass at a time per world: a pass stamps whole groups of
         // modules, so per-module locks could not keep two passes apart.
         synchronized(stampLock(world)) {
+            fromSnapshot(modulePath)?.let { return it }
             readSource(modulePath) ?: throw ModuleError.ModuleNotFound(
                 modulePath,
                 getSearchPaths(modulePath),
@@ -631,6 +649,35 @@ class ModuleResolver(
             return getFromCache(world, modulePath)
                 ?: error("internal: stamping $modulePath did not cache it")
         }
+    }
+
+    /**
+     * A stdlib module as the precompiled snapshot carries it, stamped, put in the
+     * cache — or null when it is not stdlib, is overlaid, or is not in the
+     * snapshot. Stdlib source cannot change while a process runs, and these are
+     * the stamps the precompiled checked modules were checked against, so the
+     * checker finds them current and checked.
+     */
+    private fun fromSnapshot(modulePath: String): Module? {
+        if (!ModulePathConventions.isStdlib(modulePath) || overlayFor(world, modulePath) != null) return null
+        // Precompiling the stdlib reads its source: the snapshot on the class
+        // path then is the PREVIOUS build's, and stamps from it would be stale.
+        if (System.getProperty("mezze.stdlib.force-recompile") == "1") return null
+        getFromCache(world, modulePath)?.let { return it }
+        val s = StdlibSnapshotData.stamped[modulePath] ?: return null
+        val module = s.module
+        StdlibIdentities.register(module)
+        return Module(
+            path = ModulePath.parse(modulePath),
+            filePath = s.filePath,
+            exports = extractExportsFromParsedModule(module, modulePath),
+            dependencies = extractDependenciesFromParsedModule(module),
+            sourceHash = s.sourceHash,
+            index = ProgramIndex.build(module),
+            parsedModule = module,
+            source = module,
+            identity = ModuleIdentity.fingerprint(module),
+        ).also { putInCache(world, modulePath, it) }
     }
 
     /** A module's text, wherever it comes from. */
@@ -655,8 +702,14 @@ class ModuleResolver(
     private fun parse(src: Source): ParsedModule = try {
         // A file a frontend reads is one call to it; the expander does the rest.
         frontends.forFile(src.filePath)?.let { com.mezze.language.typechecker.macro.Frontends.module(src.filePath, src.text, it) }
-            ?: tryLoadParsedFromStore(src.modulePath, src.hash)
-            ?: ParsedModuleCacheHolder.get(src.filePath, src.hash.hex)
+            // Never the stdlib: what the store holds for it is the type checker's
+            // RESOLVED module (impls of imported abilities already converted), and
+            // stamping that gives a different identity from stamping the source —
+            // so every precompiled stdlib module missed the checker's cache and
+            // was checked again, in every process.
+            ?: (if (ModulePathConventions.isStdlib(src.modulePath)) null else tryLoadParsedFromStore(src.modulePath, src.hash))
+            // The parse cache is the store too (StoreParsedModuleCache): same rule.
+            ?: (if (ModulePathConventions.isStdlib(src.modulePath)) null else ParsedModuleCacheHolder.get(src.filePath, src.hash.hex))
             ?: MezzeParser().parseParsedModule(src.text, file = src.filePath)
     } catch (e: ParseException) {
         throw ModuleError.ParseError(src.modulePath, e.message ?: "Unknown parse error")
@@ -724,7 +777,7 @@ class ModuleResolver(
             return Raw(src, parsed, via.resolverFor(src.filePath)).also { raws[path] = it }
         }
         fun needsStamp(path: String, via: ModuleResolver): Boolean =
-            getFromCache(world, path) == null || !via.isCurrent(path, memo)
+            (getFromCache(world, path) ?: fromSnapshot(path)) == null || !via.isCurrent(path, memo)
 
         load(root, this, isRoot = true)
         val index = HashMap<String, Int>()

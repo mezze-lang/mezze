@@ -35,6 +35,24 @@ data class StdlibSnapshot(
     val typedModules: Map<Hash, TypedModule> = emptyMap(),
     /** Every stdlib ability, effect and public type by identity — see [StdlibIdentities]. */
     val identities: StdlibIdentityTable? = null,
+    /**
+     * Every stdlib module as an importer reads it. Loaded into the checker's
+     * cache at start, so `use std::…` finds the module checked instead of
+     * checking it again from source in every process.
+     */
+    val modules: List<com.mezze.language.typechecker.module.CachedModule> = emptyList(),
+    /**
+     * Which stdlib functions take dictionary parameters, by hash. Derived from
+     * [typedModules] by a prescan that took 100 ms at every start; derived once,
+     * here, instead.
+     */
+    val dictMethods: Map<Hash, Set<String>> = emptyMap(),
+    /**
+     * Every stdlib module as STAMPED — the parse with its identities, before the
+     * checker transforms it. Served to the resolver as is, so a run never reads,
+     * parses or stamps stdlib source: that was 125 ms of every `mez check`.
+     */
+    val stamped: List<StampedModule> = emptyList(),
 ) {
     companion object {
         const val CURRENT_VERSION = 1
@@ -91,3 +109,13 @@ data class StdlibSnapshot(
         fun decode(bytes: ByteArray): StdlibSnapshot = cbor.decodeFromByteArray<StdlibSnapshot>(bytes)
     }
 }
+
+
+/** A stdlib module as the resolver stamped it, for [StdlibSnapshot.stamped]. */
+@Serializable
+data class StampedModule(
+    val modulePath: String,
+    val filePath: String,
+    val sourceHash: Hash?,
+    val module: com.mezze.language.parsedast.ParsedModule,
+)

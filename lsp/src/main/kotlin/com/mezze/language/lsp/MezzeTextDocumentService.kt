@@ -590,6 +590,8 @@ class MezzeTextDocumentService(
                 filePath?.parent ?: Paths.get(".")
             }
 
+            // The editor needs types, never IR: lowering is for build and dev.
+            com.mezze.language.typechecker.Lowering.enabled = false
             val result = typeChecker.checkParsedModule(parsedModule, projectRoot, null, enablePrelude = true)
 
             typeAliases = typeChecker.getTypeAliases()

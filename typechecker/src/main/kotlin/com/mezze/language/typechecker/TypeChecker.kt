@@ -281,7 +281,7 @@ class TypeChecker(
         // imported through the resolver arrives stamped; stamping again from the
         // same resolver gives the same answer, and an entry module arrives bare.
         val identityResolver = ModuleResolver(currentPath, world)
-        val stamped = identityResolver.stampEntry(module, currentModulePath)
+        val stamped = PhaseTiming.phase(currentModulePath, "stamp+expand") { identityResolver.stampEntry(module, currentModulePath) }
         // What each name was resolved to when the identities were computed; emit
         // checks its own bindings against it.
         // A macro that could not be expanded, or that reported mistakes in its
@@ -311,7 +311,7 @@ class TypeChecker(
         // and "no prelude" is not a usable degradation — every program then fails
         // on names the prelude provides, blaming the program. Measured at zero
         // firings across all four suites.
-        val precompiled = PrecompiledStdlib
+        val precompiled = PhaseTiming.phase(currentModulePath, "stdlib-init") { PrecompiledStdlib }
 
         val enhancedContext = if (!hasUserImports && shouldInjectPrelude) {
             importContext = precompiled.preludeImportContext
@@ -344,7 +344,7 @@ class TypeChecker(
             val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
             val importResult = if (hasUserImports) {
-                importResolver.resolveImports(module)
+                PhaseTiming.phase(currentModulePath, "imports") { importResolver.resolveImports(module) }
             } else {
                 ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
             }
@@ -360,7 +360,7 @@ class TypeChecker(
                         .toSet()
                     val builtinNames = BuiltinTypes.allBuiltinTypeNames
                     if (shouldInjectPrelude) {
-                        val preludeContext = loadPreludeModulesInternal(importResolver, importContext!!)
+                        val preludeContext = PhaseTiming.phase(currentModulePath, "prelude") { loadPreludeModulesInternal(importResolver, importContext!!) }
                         importContext = importContext!!.merge(preludeContext)
                     }
                     // Cross-module `from_json`/`to_json` wrapper hole: a wrapper such
@@ -378,7 +378,7 @@ class TypeChecker(
                     // never the precompiled prelude/stdlib — so derivation ordering
                     // for codec-importing code is untouched.
                     if (shouldInjectPrelude && !hasCodecInScope(importContext!!)) {
-                        loadCodecImplContext(importResolver)?.let {
+                        PhaseTiming.phase(currentModulePath, "codec-context") { loadCodecImplContext(importResolver) }?.let {
                             importContext = importContext!!.merge(it)
                         }
                     }
@@ -395,7 +395,7 @@ class TypeChecker(
         }
 
         val contextBuilder = ContextBuilder()
-        val buildResult = contextBuilder.build(
+        val buildResult = PhaseTiming.phase(currentModulePath, "context") { contextBuilder.build(
             module = module,
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
@@ -408,7 +408,7 @@ class TypeChecker(
             importedEffects = (importContext?.importedEffects ?: emptyMap()) +
                 (importContext?.effectsByHash?.values?.associateBy { it.name } ?: emptyMap()),
             currentModulePath = currentModulePath
-        )
+        ) }
         val context = buildResult.context
         val parsedModule = buildResult.resolvedModule ?: module
 
@@ -438,7 +438,7 @@ class TypeChecker(
         // at once: a handler may wrap one declared in a module it imports.
         importContext = importContext?.let { ctx ->
             val modules = loadedModules.values.mapNotNull { it.typedModule }
-            val found = com.mezze.language.typechecker.comptime.CompileTimePerformers.ofModules(modules)
+            val found = PhaseTiming.phase(currentModulePath, "comptime-performers") { com.mezze.language.typechecker.comptime.CompileTimePerformers.ofModules(modules) }
             val asking = com.mezze.language.typechecker.comptime.BuildTimeUnits.askingFunctions(
                 modules.flatMap { m -> m.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>() },
                 com.mezze.language.typechecker.comptime.BuildTimeUnits.Handlers(found.compileTime, found.leavesComptime),
@@ -450,7 +450,7 @@ class TypeChecker(
                 askingFunctions = asking,
             )
         }
-        val registry = buildFullRegistry(loadedModules, buildResult, importContext)
+        val registry = PhaseTiming.phase(currentModulePath, "registry") { buildFullRegistry(loadedModules, buildResult, importContext) }
 
         // Install the registry-backed hash resolver for the whole module check so
         // WellKnownTypeApp.of resolves a USER/LOCAL declared type's content hash in
@@ -500,9 +500,9 @@ class TypeChecker(
         val inScopeAliasNames = buildResult.registry.typeNames +
             (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
             BuiltinTypes.allBuiltinTypeNames
-        val programConstraintResult = withInScopeAliasNames(inScopeAliasNames) {
+        val programConstraintResult = PhaseTiming.phase(currentModulePath, "constraints") { withInScopeAliasNames(inScopeAliasNames) {
             constraintGenerator.generateProgram(parsedModule, context)
-        }
+        } }
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
@@ -528,14 +528,14 @@ class TypeChecker(
             })
         }
 
-        val undefinedVarErrors = checkUndefinedVariables(
+        val undefinedVarErrors = PhaseTiming.phase(currentModulePath, "undefined-vars") { checkUndefinedVariables(
             constraintResults = constraintResults,
             context = context,
             registry = registry,
             implDeclarations = buildResult.implDeclarations,
             loadedModules = loadedModules,
             importContext = importContext,
-        )
+        ) }
         collectedErrors.addAll(undefinedVarErrors)
 
         val duplicateBindings = constraintResults.values.flatMap { it.duplicateBindings }
@@ -568,9 +568,9 @@ class TypeChecker(
         }
 
         val solver = ConstraintSolver(solveContext, registry, sharedGeneratedCodecImpls = sharedGeneratedCodecImpls)
-        val solveResult = withInScopeAliasNames(inScopeAliasNames) {
+        val solveResult = PhaseTiming.phase(currentModulePath, "solve") { withInScopeAliasNames(inScopeAliasNames) {
             solver.solve(allConstraints)
-        }
+        } }
 
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
@@ -834,7 +834,7 @@ class TypeChecker(
                     lambdaParamTypes = aggregated.lambdaParamTypes,
                     performFullyDischarged = aggregated.performFullyDischarged,
                 )
-                val emitResult = emitTypedModuleAndLower(
+                val emitResult = PhaseTiming.phase(currentModulePath, "emit") { emitTypedModuleAndLower(
                     parsedModule = parsedModule, module = module,
                     solved = solvedModule,
                     constraintResults = globallyResolvedConstraintResults,
@@ -844,7 +844,7 @@ class TypeChecker(
                     isStdlibModule = isStdlibModule,
                     currentModulePath = currentModulePath,
                     identityNames = identityNames,
-                )
+                ) }
 
                 // S4.2 (#362): effect-conservation invariant — the emitted
                 // function-type effect row must be ⊇ the effects the body

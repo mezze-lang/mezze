@@ -18,6 +18,10 @@ object StdlibSnapshotData {
     val moduleHashes: Set<Hash>
     val typedModules: Map<Hash, TypedModule>
     val identities: StdlibIdentityTable?
+    val modules: List<com.mezze.language.typechecker.module.CachedModule>
+    val dictMethods: Map<com.mezze.language.typedast.Hash, Set<String>>
+    /** [StdlibSnapshot.stamped], by module path. */
+    val stamped: Map<String, StampedModule>
 
     init {
         //     stacktrace stays gated. See task #203 + #201.
@@ -74,6 +78,9 @@ object StdlibSnapshotData {
             moduleHashes = decoded.moduleHashes
             typedModules = decoded.typedModules
             identities = decoded.identities
+            modules = decoded.modules
+            dictMethods = decoded.dictMethods
+            stamped = decoded.stamped.associateBy { it.modulePath }
         } else {
             present = false
             importContext = null
@@ -85,6 +92,9 @@ object StdlibSnapshotData {
             moduleHashes = emptySet()
             typedModules = emptyMap()
             identities = null
+            modules = emptyList()
+            dictMethods = emptyMap()
+            stamped = emptyMap()
         }
     }
 }

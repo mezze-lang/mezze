@@ -93,6 +93,8 @@ class CheckCommand {
             // type errors at once, not just the first. The previous
             // checkParsedModuleToTyped path threw the first error and dropped
             // the rest, hiding any independent errors in sibling decls.
+            // Checking needs types, not IR: lowering is for build and dev.
+            com.mezze.language.typechecker.Lowering.enabled = false
             val result = typeChecker.checkParsedModule(parsedModule, projectRoot, enablePrelude = true)
             val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
@@ -261,11 +263,13 @@ class CheckCommand {
         }
 
         val source = appFile.readText()
-        // Opens + invalidates cache written by a different mez version — so a
-        // toolchain switch never type-checks against stale IR (see ProjectStore).
-        val store = ProjectStore.open(root)
-        com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
-        com.mezze.language.typechecker.ModuleResolver.setStore(store)
+        // `check` checks: it opens no database and indexes nothing (that is
+        // `mez index`). Opening the project store — three SQLite files, the
+        // native library, schema checks — and indexing into it cost more than
+        // checking a small module. What it keeps across runs is macro
+        // expansions, as files, per compiler build.
+        com.mezze.language.typechecker.ModuleResolver.expansionDirectory =
+            com.mezze.language.store.ProjectLayout.storeDir(root).toPath().resolveSibling("expansions").resolve(ProjectStore.binaryIdentity)
 
         try {
             val startTime = System.nanoTime()
@@ -286,7 +290,10 @@ class CheckCommand {
             // Run via the result-returning lower-level API so we can show
             // ALL collected errors (#218), not just the first one — sibling
             // declarations with independent failures used to be hidden.
-            val rawResult = typeChecker.checkParsedModule(ast, root.toPath(), enablePrelude = true)
+            com.mezze.language.typechecker.Lowering.enabled = false
+            val rawResult = com.mezze.language.typechecker.PhaseTiming.phase("app", "check-total") {
+                typeChecker.checkParsedModule(ast, root.toPath(), enablePrelude = true)
+            }
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
             when (rawResult) {
@@ -361,18 +368,6 @@ class CheckCommand {
                 kotlin.system.exitProcess(4)
             }
 
-            // Scatter into store, including the entry + per-import ParsedModules.
-            val sourceHash = sha256(source)
-            val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
-            StorePopulator.populate(
-                store, typeCheckResult,
-                com.mezze.language.cli.`package`.packageNameToModule(manifest.`package`.name),
-                appFile.absolutePath, sourceHash,
-                entrySource = source,
-                parsedModule = ast,
-                loadedParsedModules = depParsedModules
-            )
-
             if (jsonMode) {
                 emitJson(JsonDiagnosticFormatter.ok(null, appConfig.name, typeCheckResult.typedModule, rawResult.warnings))
             } else if (quiet) {
@@ -405,8 +400,6 @@ class CheckCommand {
             }
             println(ParseErrorFormatter.format(e))
             kotlin.system.exitProcess(3)
-        } finally {
-            store.close()
         }
     }
 

@@ -322,6 +322,23 @@ fun main(args: Array<String>) {
     // available). One file, one CBOR decode at boot, no JDBC anywhere.
     val snapshotFile = File(snapshotPath)
     snapshotFile.parentFile?.mkdirs()
+    // Every stdlib module checked while precompiling, as importers read it, so
+    // `use std::…` finds it checked instead of checking it in every process —
+    // except a module whose typed form is over [MAX_SHIPPED_MODULE_BYTES].
+    // `std::syntax` is 188 MB and `std::codebase` 39 MB: their types are carried
+    // fully expanded. Those are still checked per process until types are
+    // stored compactly; the build says which.
+    val sizer = kotlinx.serialization.cbor.Cbor { }
+    val (checked, tooLarge) = com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()
+        .filterKeys { it.startsWith(STDLIB_NAMESPACE_PREFIX) }.values
+        .filter { it.typedModule != null }
+        .partition { r ->
+            sizer.encodeToByteArray(com.mezze.language.typedast.TypedModule.serializer(), r.typedModule!!).size <= MAX_SHIPPED_MODULE_BYTES
+        }
+    if (tooLarge.isNotEmpty()) {
+        println("Not preloaded (typed form over ${MAX_SHIPPED_MODULE_BYTES / 1_000_000} MB): ${tooLarge.map { it.modulePath }.sorted()}")
+    }
+    val shippedTyped = precompiled.stdlibTypedModules + checked.associate { it.typedModule!!.hash to it.typedModule!! }
     val snapshot = com.mezze.language.typechecker.StdlibSnapshot(
         importContext = precompiled.preludeImportContext,
         functions = functions,
@@ -332,8 +349,12 @@ fun main(args: Array<String>) {
         moduleHashes = precompiled.stdlibModuleHashes,
         // #415: ship TypedModules so mono can specialize any callsite
         // that flows through a polymorphic stdlib decl.
-        typedModules = precompiled.stdlibTypedModules,
+        typedModules = shippedTyped,
         identities = com.mezze.language.typechecker.StdlibIdentities.table(),
+        modules = checked.mapNotNull { com.mezze.language.typechecker.module.CachedModule.of(it) },
+        dictMethods = precompiled.preloweredDictMethods,
+        stamped = com.mezze.language.typechecker.ModuleResolver.getAllStampedSources()
+            .filter { it.modulePath.startsWith(STDLIB_NAMESPACE_PREFIX) },
     )
     snapshotFile.writeBytes(com.mezze.language.typechecker.StdlibSnapshot.encode(snapshot))
     // Sibling fingerprint of THIS build's serialization schema, checked at load
@@ -361,3 +382,6 @@ private fun sha256Hex(s: String): String {
     val digest = java.security.MessageDigest.getInstance("SHA-256")
     return digest.digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 }
+
+/** The largest typed module the stdlib snapshot preloads; see where it is used. */
+private const val MAX_SHIPPED_MODULE_BYTES = 8_000_000

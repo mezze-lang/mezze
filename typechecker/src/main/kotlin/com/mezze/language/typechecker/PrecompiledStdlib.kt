@@ -170,8 +170,14 @@ object PrecompiledStdlib {
             stdlibTypedModules = fullCache.typedModules
             stdlibTypedModules.values.forEach { StdlibIdentities.register(it) }
             loadedModules = emptyMap()
+            // Every stdlib module, checked: an import of one is a cache hit
+            // (its identity still has to match) rather than a check from source.
+            for (m in fullCache.modules) {
+                val typed = stdlibTypedModules[m.typedModule] ?: continue
+                ModuleTypeChecker.preloadIntoGlobalCache(m.modulePath, m.toResult(typed))
+            }
             // Re-derive dict methods — the snapshot format doesn't store them.
-            preloweredDictMethods = prescanDictMethodsFromModules(stdlibTypedModules)
+            preloweredDictMethods = fullCache.dictMethods.ifEmpty { prescanDictMethodsFromModules(stdlibTypedModules) }
 
             moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
             val tc = TypeChecker()
@@ -419,6 +425,8 @@ object PrecompiledStdlib {
             declHashes = StdlibSnapshotData.declHashes,
             moduleHashes = StdlibSnapshotData.moduleHashes,
             typedModules = StdlibSnapshotData.typedModules,
+            modules = StdlibSnapshotData.modules,
+            dictMethods = StdlibSnapshotData.dictMethods,
         )
     }
 
@@ -621,7 +629,11 @@ object PrecompiledStdlib {
         val moduleHashes: Set<Hash>,
         // #415: TypedModules for mono. Empty on old snapshots (loader-side
         // default) — mono then behaves as before (skips stdlib specialization).
-        val typedModules: Map<Hash, TypedAstModule> = emptyMap()
+        val typedModules: Map<Hash, TypedAstModule> = emptyMap(),
+        /** Every stdlib module as importers read it; empty where the source does not carry them. */
+        val modules: List<com.mezze.language.typechecker.module.CachedModule> = emptyList(),
+        /** Precomputed dictionary methods; empty where the source does not carry them. */
+        val dictMethods: Map<Hash, Set<String>> = emptyMap(),
     )
 
     private data class PreloweredData(

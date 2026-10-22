@@ -116,6 +116,9 @@ jdk.incubator.vector
 # Stdlib snapshot — runs StdlibSnapshotData.<init> in the build JVM, the
 # decoded ModuleImportContext / FunctionIR graph lands in image heap.
 com.mezze.language.typechecker.StdlibSnapshotData
+com.mezze.language.typechecker.StampedModule
+com.mezze.language.stdlib.StdlibRuntimeData
+com.mezze.language.stdlib.StdlibRuntimeSnapshot
 com.mezze.language.typechecker.StdlibIdentityTable
 com.mezze.language.typechecker.module
 
