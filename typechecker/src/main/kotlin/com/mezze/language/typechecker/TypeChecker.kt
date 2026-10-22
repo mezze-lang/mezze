@@ -241,7 +241,16 @@ class TypeChecker(
         if (checkDepth.get() == 0) ModuleResolver.beginCheck(world)
         checkDepth.set(checkDepth.get() + 1)
         try {
-            checkParsedModuleInner(module, currentPath, currentModulePath, enablePrelude)
+            when (val r = checkParsedModuleInner(module, currentPath, currentModulePath, enablePrelude)) {
+                // Names the compiler hid (see QuoteTypes.readable) are shown as written.
+                is TypeCheckResult.Failure -> r.copy(errors = r.errors.map { e ->
+                    e.copy(
+                        message = com.mezze.language.parsedast.QuoteTypes.readable(e.message),
+                        hints = e.hints.map(com.mezze.language.parsedast.QuoteTypes::readable),
+                    )
+                })
+                is TypeCheckResult.Success -> r
+            }
         } finally {
             checkDepth.set(checkDepth.get() - 1)
         }

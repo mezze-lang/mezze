@@ -17,8 +17,31 @@ object QuoteTypes {
     /** `std::syntax::SyntaxDecl`, as a quote's code names it. */
     const val SYNTAX_DECL = "~SyntaxDecl"
 
+    /**
+     * Every `std::syntax` type a quote's code constructs a value of — not only
+     * the two it is annotated with. A constructor whose type is not in scope is
+     * taken as an anonymous one, inferred from each use alone, and two quotes then
+     * disagree about what `VarPat` holds.
+     */
+    private val CONSTRUCTED = listOf(
+        "Expr", "SyntaxDecl", "Code", "StrPart", "Entry", "SeqElement", "LambdaParams", "Statement",
+        "Pattern", "PatLiteral", "StrPatPart", "TypeExpr", "Decl", "TypeDefSyntax",
+    )
+
     /** The name [name] is declared under: a hidden quote name's, without its `~`; any other unchanged. */
-    fun declaredName(name: String): String = if (name == EXPR || name == SYNTAX_DECL) name.substring(1) else name
+    fun declaredName(name: String): String =
+        if (name.startsWith("~") && name.substring(1) in CONSTRUCTED) name.substring(1) else name
+
+    private val HIDDEN = Regex("""~([A-Za-z_][A-Za-z0-9_]*(?:~[A-Za-z_][A-Za-z0-9_]*)*)""")
+
+    /**
+     * [text] with every name the compiler hid — a quote's types (`~Expr`), a
+     * macro expansion's borrowed names (`~std~collections~seq~map`) — spelled as
+     * the author would write it: what a diagnostic must show.
+     */
+    fun readable(text: String): String = HIDDEN.replace(text) { m ->
+        m.groupValues[1].replace("~", MODULE_PATH_SEPARATOR)
+    }
 
     /** [module] with the import its quotes need, when it has any. */
     fun inScope(module: ParsedModule): ParsedModule {
@@ -27,7 +50,7 @@ object QuoteTypes {
         val import = ParsedUseDecl(
             path = ParsedUsePath.Selective(
                 ParsedModulePath(listOf("std", "syntax")),
-                listOf(ParsedImportItem("Expr", EXPR, at), ParsedImportItem("SyntaxDecl", SYNTAX_DECL, at)),
+                CONSTRUCTED.map { ParsedImportItem(it, "~$it", at) },
                 at,
             ),
             loc = at,

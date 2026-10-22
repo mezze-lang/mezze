@@ -28,8 +28,9 @@ import java.nio.file.Path
 class MacroExpansionTest {
 
     private val macros = """
-        use std::macro::{ MacroInput, Expansion, parse_expr, expand_to, reject }
-        use std::syntax::{ Expr, StrExpr }
+        use std::macro::{ MacroInput, Expansion, parse_expr, parse_decls, expand_to, declare, reject }
+        use std::syntax::{ Expr, StrExpr, SyntaxDecl, Decl, TypeDefSyntax, DeclsCode }
+        use std::collections::seq
 
         ## `double!(e)` is `e * 2`.
         pub let double: { input: MacroInput } -> Expansion = { input } ->
@@ -48,6 +49,59 @@ class MacroExpansionTest {
         ## Raises while expanding.
         pub let broken: { input: MacroInput } -> Expansion = { input } ->
           expand_to { e = crash { msg = "the macro broke" } }
+
+        ## `with_count!(type T = { … })` is the type, and `field_count`, the number of its fields.
+        pub let with_count: { input: MacroInput } -> Expansion = { input } ->
+          match parse_decls { input = input } is
+            Ok { val } -> do
+              let n = seq::size { xs = seq::flat_map { xs = val, f = { x } -> fields { d = x } } }
+              let count = IntExpr { value = n, span = input.span, facts = None }
+              declare { decls = seq::concat { xs = val, ys = `(let field_count = ~count) } }
+            Err { error } -> { code = DeclsCode { decls = [] }, errors = [{ message = error.message, span = error.span, hints = [] }] }
+
+        let fields: { d: SyntaxDecl } -> [Str] = { d } -> match d.decl is
+          TypeSyntax { def, ... } -> match def is
+            RecordDefSyntax { fields, ... } -> seq::map { xs = fields, f = { x } -> x.name }
+            _ -> []
+          _ -> []
+
+        ## Used by expansions, from the macro's own module.
+        pub let helper: { n: Int } -> Int = { n } -> n * 10
+        let hidden: { n: Int } -> Int = { n } -> n
+
+        ## `tenfold!(e)` is `helper { n = e }`: `helper` is this module's.
+        pub let tenfold: { input: MacroInput } -> Expansion = { input } ->
+          match parse_expr { input = input } is
+            Ok { val } -> expand_to { e = `(helper { n = ~val }) }
+            Err { error } -> reject { e = `(0), message = error.message, span = error.span }
+
+        ## `pair_size!(e)` counts `[e, e]` through this module's `seq`.
+        pub let pair_size: { input: MacroInput } -> Expansion = { input } ->
+          match parse_expr { input = input } is
+            Ok { val } -> expand_to { e = `(seq::size { xs = [~val, ~val] }) }
+            Err { error } -> reject { e = `(0), message = error.message, span = error.span }
+
+        ## Expands to a call of a function the caller cannot reach.
+        pub let leaky: { input: MacroInput } -> Expansion = { input } ->
+          match parse_expr { input = input } is
+            Ok { val } -> expand_to { e = `(hidden { n = ~val }) }
+            Err { error } -> reject { e = `(0), message = error.message, span = error.span }
+
+        ## Binds `helper` itself: that one is local, not this module's.
+        pub let local_helper: { input: MacroInput } -> Expansion = { input } ->
+          match parse_expr { input = input } is
+            Ok { val } -> expand_to { e = `(do
+              let helper = 1
+              helper + ~val - ~val) }
+            Err { error } -> reject { e = `(0), message = error.message, span = error.span }
+
+        ## Expands to a mistake in a call of this module's `seq`.
+        pub let bad_map: { input: MacroInput } -> Expansion = { input } ->
+          expand_to { e = `(seq::map { xs = [1], f = { y } -> y }) }
+
+        ## Never finishes.
+        pub let spin: { input: MacroInput } -> Expansion = { input } -> forever { n = 0 }
+        let forever: { n: Int } -> Expansion = { n } -> forever { n = n + 1 }
 
         ## A function, but not a macro.
         pub let plain: { x: Int } -> Int = { x } -> x
@@ -118,7 +172,8 @@ class MacroExpansionTest {
         val out = run("""
             use macros::{ text }
 
-            text!(<b>it's "quoted" (and nested)</b>)
+            let r = text!(<b>it's "quoted" (and nested)</b>)
+            r
         """.trimIndent())
         assertEquals("<b>it's \"quoted\" (and nested)</b>", out)
     }
@@ -129,7 +184,8 @@ class MacroExpansionTest {
         val out = run("""
             use macros
 
-            macros::double!(5)
+            let r = macros::double!(5)
+            r
         """.trimIndent())
         assertEquals(10L, out)
     }
@@ -158,7 +214,8 @@ class MacroExpansionTest {
         val e = errors("""
             use macros::{ double }
 
-            double!(1 +)
+            let r = double!(1 +)
+            r
         """.trimIndent()).single()
         assertEquals(ErrorCode.V1004_MACRO_INPUT_ERROR, e.code)
         assertEquals(3, e.loc!!.startLine)
@@ -197,11 +254,121 @@ class MacroExpansionTest {
 
     @Test
     @Timeout(240)
+    fun `a macro standing as a declaration declares what it returns`() {
+        val out = run("""
+            use macros::{ with_count }
+
+            with_count!(type Point = { x: Int, y: Int, z: Int })
+
+            let p: Point = { x = 1, y = 2, z = 3 }
+            p.y + field_count
+        """.trimIndent())
+        assertEquals(5L, out)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a declaration macro that returns an expression is refused`() {
+        val e = errors("""
+            use macros::{ double }
+
+            double!(1)
+            let main = {} -> 1
+        """.trimIndent())
+        assertTrue(e.any { it.code == ErrorCode.V1003_MACRO_FAILED && "stands as a declaration" in it.message }, e.map { it.message }.toString())
+    }
+
+    @Test
+    @Timeout(240)
+    fun `names a macro writes mean what they mean where it is written`() {
+        // Neither `helper` nor `seq` is imported here.
+        val out = run("""
+            use macros::{ tenfold, pair_size }
+
+            let a = tenfold!(4)
+            let b = pair_size!(1)
+            a + b
+        """.trimIndent())
+        assertEquals(42L, out)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a caller's own name does not capture the macro's`() {
+        val out = run("""
+            use macros::{ tenfold }
+
+            let helper: { n: Int } -> Int = { n } -> n + 1000
+            let a = tenfold!(4)
+            a
+        """.trimIndent())
+        assertEquals(40L, out)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a name the expansion binds itself stays local`() {
+        val out = run("""
+            use macros::{ local_helper }
+
+            let a = local_helper!(9)
+            a
+        """.trimIndent())
+        assertEquals(1L, out)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `an expansion using a private name says so`() {
+        val e = errors("""
+            use macros::{ leaky }
+
+            let a = leaky!(1)
+            a
+        """.trimIndent()).single()
+        assertEquals(ErrorCode.V1003_MACRO_FAILED, e.code)
+        assertTrue("`hidden`" in e.message && "private" in e.message, e.message)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a diagnostic in an expansion names things as the macro wrote them`() {
+        val e = errors("""
+            use macros::{ bad_map }
+
+            let a = bad_map!()
+            a
+        """.trimIndent())
+        val text = e.joinToString("\n") { it.message + " " + it.hints.joinToString(" ") }
+        assertTrue("std::collections::seq::map" in text, text)
+        assertTrue('~' !in text, text)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a macro that never finishes is stopped at its budget`() {
+        System.setProperty(TruffleComptimeEvaluator.BUDGET_PROPERTY, "1500")
+        try {
+            val e = errors("""
+                use macros::{ spin }
+
+                spin!(1)
+            """.trimIndent()).single()
+            assertEquals(ErrorCode.V1003_MACRO_FAILED, e.code)
+            assertTrue("did not finish" in e.message, e.message)
+        } finally {
+            System.clearProperty(TruffleComptimeEvaluator.BUDGET_PROPERTY)
+        }
+    }
+
+    @Test
+    @Timeout(240)
     fun `an unchanged call is expanded once`() {
         val app = """
             use macros::{ double }
 
-            double!(7)
+            let r = double!(7)
+            r
         """.trimIndent()
         assertEquals(14L, run(app))
         val before = TruffleComptimeEvaluator.invocations.get()
@@ -216,7 +383,8 @@ class MacroExpansionTest {
         val app = """
             use macros::{ double }
 
-            double!(7)
+            let r = double!(7)
+            r
         """.trimIndent()
         assertEquals(14L, run(app))
         Files.writeString(root.resolve("src/macros.mz"), macros.replace("`(~val * 2)", "`(~val * 3)"))

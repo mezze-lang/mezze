@@ -248,7 +248,34 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
             MezzeLanguage.setFunctionsForDirectExecution(
                 functions.filterNot { it.name == ENTRY_FN } + entryFn, performers, projectRoot, null,
             )
-            context.eval(Source.newBuilder(MezzeLanguage.ID, "", "<macro>").buildLiteral())
+            // A budget, unlike `comptime`'s never-a-kill policy: a macro runs
+            // while its caller is compiled — in the editor, on every change —
+            // so one that does not finish would hang the tool, not one build.
+            val budgetMs = macroBudgetMs()
+            val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+            val watchdog = Thread({
+                try {
+                    Thread.sleep(budgetMs)
+                    cancelled.set(true)
+                    context.close(true)
+                } catch (stopped: InterruptedException) {
+                    // Finished in time.
+                }
+            }, "mezze-macro-budget").apply { isDaemon = true; start() }
+            try {
+                context.eval(Source.newBuilder(MezzeLanguage.ID, "", "<macro>").buildLiteral())
+            } catch (e: Throwable) {
+                if (cancelled.get()) {
+                    return InvokeOutcome.Failed(
+                        "it did not finish within ${budgetMs / 1000.0}s. A macro runs whenever its caller " +
+                            "is compiled, the editor included, so it has a time budget " +
+                            "(-D$BUDGET_PROPERTY=<ms> to change it)."
+                    )
+                }
+                throw e
+            } finally {
+                watchdog.interrupt()
+            }
             val value = MezzeLanguage.getLastExecutionResult()
             if (value is com.mezze.interpreter.values.MezzeSuspend) {
                 InvokeOutcome.Failed(
@@ -370,6 +397,11 @@ class TruffleComptimeEvaluator : ComptimeEvaluator {
          */
         @JvmStatic
         val evaluations = java.util.concurrent.atomic.AtomicLong()
+
+        /** The system property that sets a macro's time budget, in milliseconds. */
+        const val BUDGET_PROPERTY = "mezze.macro.budget.ms"
+
+        private fun macroBudgetMs(): Long = System.getProperty(BUDGET_PROPERTY)?.toLongOrNull() ?: 10_000L
 
         /** How many functions this process has [invoke]d: macro expansions. Kept apart
          *  from [evaluations], which counts `comptime` alone. */

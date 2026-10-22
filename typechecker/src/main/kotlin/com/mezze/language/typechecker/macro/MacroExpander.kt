@@ -65,9 +65,32 @@ internal class MacroExpander(
         val module = QuoteTypes.inScope(parsed)
         if (module.decls.none { it.hasMacroCall() }) return module
         val imports = Imports(module)
-        return module.copy(decls = module.decls.map { d ->
-            d.mapExprs { e -> rewrite(e, imports, modulePath, depth = 0) }
-        })
+        val expanded = module.decls.flatMap { d ->
+            // `name!( … )` standing as a declaration: what it produces are
+            // declarations, put in its place. A derive is one of these.
+            val call = (d as? ParsedTopLevelExpr)?.expression as? ParsedMacroCall
+            if (call != null) declarations(d, call, imports, modulePath)
+            else listOf(d.mapExprs { e -> rewrite(e, imports, modulePath, depth = 0) })
+        }
+        val at = module.decls.first().loc.let { Loc(it.file, 1, 1, 1, 1) }
+        return module.copy(decls = Hygiene.imports(handedOver, at) + expanded)
+    }
+
+    /** Names expansions in this module use from their macros' modules, under hidden names (see [Hygiene]). */
+    private val handedOver = LinkedHashMap<Pair<String, String>, String>()
+
+    private fun declarations(
+        written: ParsedTopLevelExpr,
+        call: ParsedMacroCall,
+        imports: Imports,
+        modulePath: String?,
+    ): List<ParsedDecl> {
+        val expanded = expandCall(call.copy(expansion = null, diagnostics = emptyList()), imports, modulePath, asDeclarations = true)
+        val decls = (expanded.expansion as? ParsedCode.Decls)?.decls
+        // A call that could not be expanded stays, carrying why, for the type
+        // checker to report where it is written.
+        if (decls == null || expanded.diagnostics.isNotEmpty()) return listOf(written.copy(expression = expanded.copy(expansion = null)))
+        return decls.map { d -> d.mapExprs { e -> rewrite(e, imports, modulePath, depth = 1) } }
     }
 
     private fun rewrite(e: ParsedExpr, imports: Imports, modulePath: String?, depth: Int): ParsedExpr {
@@ -90,7 +113,12 @@ internal class MacroExpander(
         return expanded.copy(expansion = ParsedCode.Expr(rewrite(code.expr, imports, modulePath, depth + 1)))
     }
 
-    private fun expandCall(call: ParsedMacroCall, imports: Imports, modulePath: String?): ParsedMacroCall {
+    private fun expandCall(
+        call: ParsedMacroCall,
+        imports: Imports,
+        modulePath: String?,
+        asDeclarations: Boolean = false,
+    ): ParsedMacroCall {
         fun fail(code: ErrorCode, message: String, hints: List<String> = emptyList()) =
             call.copy(diagnostics = listOf(MacroDiagnostic(code, message, call.loc, hints)))
 
@@ -134,11 +162,32 @@ internal class MacroExpander(
                 )
             }
         }
-        return decode(call, output)
+        return hygienic(decode(call, output, asDeclarations), macro)
+    }
+
+    /** [call]'s expansion with the names its macro wrote meaning what they meant there (see [Hygiene]). */
+    private fun hygienic(call: ParsedMacroCall, macro: Found.Macro): ParsedMacroCall {
+        val code = call.expansion ?: return call
+        val hygiene = Hygiene(macro.module, macro.parsed) { loc -> macroWritten.containsKey(loc) }
+        val rewritten = when (code) {
+            is ParsedCode.Expr -> ParsedCode.Expr(hygiene.expr(code.expr, emptySet()))
+            is ParsedCode.Decls -> ParsedCode.Decls(code.decls.map(hygiene::decl))
+        }
+        if (hygiene.unreachable.isNotEmpty()) {
+            val names = hygiene.unreachable.joinToString(", ") { "`$it`" }
+            return call.copy(expansion = null, diagnostics = call.diagnostics + MacroDiagnostic(
+                ErrorCode.V1003_MACRO_FAILED,
+                "`${call.macro.localName}!` expands to code using $names, private to `${macro.module}`",
+                call.loc,
+                listOf("make ${names} `pub`: an expansion is compiled in its caller, which can reach only what `${macro.module}` exports"),
+            ))
+        }
+        handedOver.putAll(hygiene.handedOver)
+        return call.copy(expansion = rewritten)
     }
 
     /** The macro's [output] — an `Expansion` — read into the call. */
-    private fun decode(call: ParsedMacroCall, output: HostValue): ParsedMacroCall {
+    private fun decode(call: ParsedMacroCall, output: HostValue, asDeclarations: Boolean): ParsedMacroCall {
         val decoder = SyntaxDecoder(locate = { span -> place(span, call) })
         return try {
             val fields = (output as? HostValue.Record)?.fields?.toMap()
@@ -146,11 +195,14 @@ internal class MacroExpander(
             val code = decoder.code(fields["code"] ?: throw SyntaxDecoder.Malformed("the `Expansion` has no `code`"))
             val reported = ((fields["errors"] as? HostValue.Seq)
                 ?: throw SyntaxDecoder.Malformed("the `Expansion` has no `errors` list")).items.map { error(it, call) }
-            if (code !is ParsedCode.Expr) {
+            val wanted = if (asDeclarations) code is ParsedCode.Decls else code is ParsedCode.Expr
+            if (!wanted) {
                 return call.copy(diagnostics = reported + MacroDiagnostic(
                     ErrorCode.V1003_MACRO_FAILED,
-                    "`${call.macro.localName}!` returned declarations, where its call stands as an expression",
+                    if (asDeclarations) "`${call.macro.localName}!` returned an expression, where its call stands as a declaration"
+                    else "`${call.macro.localName}!` returned declarations, where its call stands as an expression",
                     call.loc,
+                    listOf(if (asDeclarations) "return `declare { decls = … }`" else "return `expand_to { e = … }`"),
                 ))
             }
             call.copy(expansion = code, diagnostics = reported)
@@ -180,9 +232,9 @@ internal class MacroExpander(
      * its own file — is the call: the caller sees the call that produced it.
      */
     private fun place(span: HostValue?, call: ParsedMacroCall): Loc {
-        val f = (span as? HostValue.Record)?.fields?.toMap() ?: return call.loc
+        val f = (span as? HostValue.Record)?.fields?.toMap() ?: return written(call)
         val file = ((f["file"] as? HostValue.Opt)?.value as? HostValue.Str)?.value
-        if (file != INPUT_FILE) return call.loc
+        if (file != INPUT_FILE) return written(call)
         fun int(k: String) = (f[k] as? HostValue.IntV)?.value?.toInt() ?: 1
         val at = call.inputLoc
         fun line(l: Int) = at.startLine + l - 1
@@ -190,6 +242,15 @@ internal class MacroExpander(
         return Loc(at.file, line(int("start_line")), col(int("start_line"), int("start_col")),
             line(int("end_line")), col(int("end_line"), int("end_col")))
     }
+
+    /**
+     * The call's location, as the location of code its macro wrote — a fresh
+     * object each time, remembered, so [Hygiene] can tell a name the macro wrote
+     * from one that came from the input, though both sit in the caller's file.
+     */
+    private fun written(call: ParsedMacroCall): Loc = call.loc.copy().also { macroWritten[it] = true }
+
+    private val macroWritten = java.util.IdentityHashMap<Loc, Boolean>()
 
     /** The span a macro is told its input has: a fixed origin, so the output does not depend on where the call is. */
     private fun inputOrigin(text: String): HostValue {
@@ -205,13 +266,22 @@ internal class MacroExpander(
     // ── finding the macro ────────────────────────────────────────────────
 
     private sealed interface Found {
-        class Macro(val hash: Hash, val functions: List<FunctionIR>, val performers: List<Array<String>>) : Found
+        class Macro(
+            val hash: Hash,
+            val functions: List<FunctionIR>,
+            val performers: List<Array<String>>,
+            /** Where it is declared: what [Hygiene] resolves its names against. */
+            val module: String,
+            val file: String,
+            val parsed: ParsedModule,
+        ) : Found
         class Problem(val code: ErrorCode, val message: String, val hints: List<String> = emptyList()) : Found
     }
 
     /** [name] in [module], type checked and lowered, if it is a macro. */
     private fun macroFunction(module: String, name: String): Found {
-        val typed: TypedModuleResult = when (val loaded = ModuleLoader(resolver).loadModule(module)) {
+        val loaded = ModuleLoader(resolver).loadModule(module)
+        val typed: TypedModuleResult = when (loaded) {
             is ModuleLoadResult.Success -> {
                 val checker = ModuleTypeChecker.withContextAndResolver(
                     TypeChecker.createInitialContext(), resolver, resolver.world,
@@ -239,7 +309,13 @@ internal class MacroExpander(
         val own = local[decl.hash] ?: PrecompiledStdlib.preloweredFunctions[decl.hash]
             ?: return Found.Problem(ErrorCode.V1003_MACRO_FAILED, "`$name` has no compiled form")
         val performers = typed.loweredPerformers + PrecompiledStdlib.preloweredPerformerRecords
-        return Found.Macro(decl.hash, IrClosure.reachable(listOf(own), local::get), performers)
+        val source = (loaded as ModuleLoadResult.Success).module
+        val parsed = source.parsedModule
+            ?: return Found.Problem(ErrorCode.V1003_MACRO_FAILED, "the module `$module` has no parsed form to resolve `$name`'s names in")
+        return Found.Macro(
+            decl.hash, IrClosure.reachable(listOf(own), local::get), performers,
+            module, source.filePath, parsed,
+        )
     }
 
     /** Why [type] is not a macro's, or null when it is. */

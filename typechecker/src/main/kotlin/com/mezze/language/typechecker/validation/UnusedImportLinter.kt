@@ -104,7 +104,10 @@ object UnusedImportLinter {
             is ParsedUsePath.Module -> emptyList()
             is ParsedUsePath.Selective -> path.items.mapNotNull { item ->
                 val local = item.alias ?: item.name
-                if (local in referenced) null else local
+                // A `~` name is the compiler's own import — for a quote, or for a
+                // name a macro's expansion uses — never written, so never the
+                // author's to remove.
+                if (local in referenced || local.startsWith("~")) null else local
             }
         }
 
