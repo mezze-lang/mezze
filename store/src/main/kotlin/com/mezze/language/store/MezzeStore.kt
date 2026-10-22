@@ -290,6 +290,16 @@ interface MezzeStore : AutoCloseable {
     /** Nodes of [kind]; with [symbol], only those spelling it. */
     fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow>
 
+    /**
+     * What the macro [macro] (its declaration's identity) produced from the input
+     * whose SHA-256 is [inputHash], encoded. True for as long as both exist: a
+     * macro is pure, and its identity covers its code and everything it calls.
+     */
+    fun putExpansion(macro: Hash, inputHash: String, output: ByteArray)
+
+    /** See [putExpansion]; null when it was never stored. */
+    fun getExpansion(macro: Hash, inputHash: String): ByteArray?
+
     // ====================================================================
     // METADATA
     // ====================================================================

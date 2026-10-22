@@ -127,7 +127,9 @@ class SQLiteMezzeStore private constructor(
         // 19: a declared record or variant inside a type is a REF node whose
         //    structure is stored ONCE in type_nodes, under a key that is its
         //    content (`ref_owner`); it was copied whole into every signature.
-        const val SCHEMA_VERSION = 19
+        // 20: macro_expansions — what a macro produced from an input, keyed by
+        //    the macro's identity, so an unchanged call never runs it again.
+        const val SCHEMA_VERSION = 20
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096
@@ -1211,6 +1213,19 @@ class SQLiteMezzeStore private constructor(
                 )
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_occurrences_kind ON syntax_occurrences(kind, symbol)")
+
+            // What a macro produced from an input. A macro is pure and its
+            // identity covers everything it calls, so a row is true for as long
+            // as the macro exists; an expansion is found here before the
+            // macro's module is even type checked.
+            s.executeUpdate("""
+                CREATE TABLE macro_expansions (
+                    macro_hash TEXT NOT NULL,
+                    input_hash TEXT NOT NULL,
+                    output     BLOB NOT NULL,
+                    PRIMARY KEY (macro_hash, input_hash)
+                ) WITHOUT ROWID
+            """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_occurrences_module ON syntax_occurrences(module_path)")
 
             // ----------------------------------------------------------------
@@ -2125,6 +2140,29 @@ class SQLiteMezzeStore private constructor(
     override fun clearUsagesForFile(filePath: String) {
         clearUsagesStmt.setString(1, filePath)
         clearUsagesStmt.executeUpdate()
+    }
+
+    private val putExpansionStmt: PreparedStatement by lazy {
+        conn.prepareStatement("INSERT OR REPLACE INTO macro_expansions (macro_hash, input_hash, output) VALUES (?, ?, ?)")
+    }
+
+    @Synchronized
+    override fun putExpansion(macro: Hash, inputHash: String, output: ByteArray) {
+        putExpansionStmt.setString(1, macro.hex)
+        putExpansionStmt.setString(2, inputHash)
+        putExpansionStmt.setBytes(3, StoredBytes.pack(output))
+        putExpansionStmt.executeUpdate()
+    }
+
+    private val getExpansionStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT output FROM macro_expansions WHERE macro_hash = ? AND input_hash = ?")
+    }
+
+    @Synchronized
+    override fun getExpansion(macro: Hash, inputHash: String): ByteArray? {
+        getExpansionStmt.setString(1, macro.hex)
+        getExpansionStmt.setString(2, inputHash)
+        return getExpansionStmt.executeQuery().use { rs -> if (rs.next()) StoredBytes.unpack(rs.getBytes(1)) else null }
     }
 
     @Synchronized

@@ -344,6 +344,9 @@ class ModuleResolver(
             this.store = store
         }
 
+        /** The store macro expansions are kept in across compiles, when there is one. */
+        internal fun expansionStore(): MezzeStore? = store
+
         /**
          * SHA-256 hex of source text — MUST match the scheme StorePopulator /
          * StoreParsedModuleCache.sha256Hex use to WRITE the parsed_modules /

@@ -24,6 +24,7 @@ import com.mezze.language.typechecker.module.ModuleTypeChecker
 import com.mezze.language.typechecker.module.TypedModuleResult
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLetDecl
+import com.mezze.language.store.HostValueCodec
 
 /**
  * `name!( … )`: runs each macro call in a module and puts what it produced in its
@@ -136,16 +137,22 @@ internal class MacroExpander(
                 listOf("move `$name` to a module of its own, that this one imports and that does not import this one"),
             )
         }
-        val macro = when (val m = macroFunction(macroModule, name)) {
-            is Found.Macro -> m
-            is Found.Problem -> return fail(m.code, m.message, m.hints)
+        // The macro's identity comes with its module's parse: enough to find an
+        // expansion made before, in this process or a past one, without type
+        // checking the macro's module or starting an interpreter. Those happen
+        // only for an input this macro has not seen.
+        val source = when (val s = macroSource(macroModule, name)) {
+            is Source.Found -> s
+            is Source.Problem -> return fail(s.code, s.message, s.hints)
         }
-
-        val evaluator = Comptime.obtain()
-            ?: return fail(ErrorCode.V1003_MACRO_FAILED, "this `mez` has no evaluator, so it cannot run macros")
-
-        val key = CacheKey(macro.hash, call.input)
-        val output = CACHE.get(key) ?: run {
+        val key = CacheKey(source.identity, call.input)
+        val output = CACHE.get(key) ?: stored(key)?.also { CACHE.put(key, it) } ?: run {
+            val macro = when (val m = macroFunction(macroModule, name)) {
+                is Found.Macro -> m
+                is Found.Problem -> return fail(m.code, m.message, m.hints)
+            }
+            val evaluator = Comptime.obtain()
+                ?: return fail(ErrorCode.V1003_MACRO_FAILED, "this `mez` has no evaluator, so it cannot run macros")
             val argument = record("input" to record(
                 "text" to HostValue.Str(call.input),
                 "span" to inputOrigin(call.input),
@@ -154,7 +161,7 @@ internal class MacroExpander(
                 macro.functions, macro.hash, argument, macro.performers,
                 origin = call.loc.toString(), syntax = Parsing,
             )) {
-                is InvokeOutcome.Returned -> outcome.value.also { CACHE.put(key, it) }
+                is InvokeOutcome.Returned -> outcome.value.also { CACHE.put(key, it); store(key, it) }
                 is InvokeOutcome.Failed -> return fail(
                     ErrorCode.V1003_MACRO_FAILED,
                     "`${call.macro.localName}!` failed: ${outcome.message}",
@@ -162,11 +169,45 @@ internal class MacroExpander(
                 )
             }
         }
-        return hygienic(decode(call, output, asDeclarations), macro)
+        return hygienic(decode(call, output, asDeclarations), source)
     }
 
+    /** Where a macro is declared, and its identity: what its module's parse alone says. */
+    private sealed interface Source {
+        class Found(val identity: Hash, val module: String, val parsed: ParsedModule) : Source
+        class Problem(val code: ErrorCode, val message: String, val hints: List<String> = emptyList()) : Source
+    }
+
+    private fun macroSource(module: String, name: String): Source {
+        val loaded = when (val l = ModuleLoader(resolver).loadModule(module)) {
+            is ModuleLoadResult.Success -> l.module
+            is ModuleLoadResult.Failure -> return Source.Problem(
+                ErrorCode.V1001_MACRO_NOT_FOUND, "the module `$module` could not be loaded",
+                l.errors.take(3).map { it.toString() },
+            )
+        }
+        val parsed = loaded.parsedModule
+            ?: return Source.Problem(ErrorCode.V1003_MACRO_FAILED, "the module `$module` has no parsed form")
+        val decl = parsed.decls.filterIsInstance<ParsedLetDecl>().firstOrNull { name in it.pattern.extractBindings() }
+            ?: return Source.Problem(ErrorCode.V1001_MACRO_NOT_FOUND, "`$module` declares no function `$name`")
+        val identity = decl.contentHash
+            ?: return Source.Problem(ErrorCode.V1003_MACRO_FAILED, "`$name` in `$module` has not been identified")
+        return Source.Found(identity, module, parsed)
+    }
+
+    /** An expansion a past compile stored, if any. */
+    private fun stored(key: CacheKey): HostValue? =
+        ModuleResolver.expansionStore()?.getExpansion(key.macro, sha256(key.input))?.let(HostValueCodec::decode)
+
+    private fun store(key: CacheKey, output: HostValue) {
+        ModuleResolver.expansionStore()?.putExpansion(key.macro, sha256(key.input), HostValueCodec.encode(output))
+    }
+
+    private fun sha256(s: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+
     /** [call]'s expansion with the names its macro wrote meaning what they meant there (see [Hygiene]). */
-    private fun hygienic(call: ParsedMacroCall, macro: Found.Macro): ParsedMacroCall {
+    private fun hygienic(call: ParsedMacroCall, macro: Source.Found): ParsedMacroCall {
         val code = call.expansion ?: return call
         val hygiene = Hygiene(macro.module, macro.parsed) { loc -> macroWritten.containsKey(loc) }
         val rewritten = when (code) {

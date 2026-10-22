@@ -109,6 +109,7 @@ data class Substitution(
     }
 
     private fun needsSubstitution(type: MezzeType): Boolean {
+        if (type.isGround) return false
         return when (type) {
             is MezzeType.VarType -> type.variable in mappings
 
@@ -194,6 +195,9 @@ data class Substitution(
         visitedVars: MutableSet<TypeVar>,
         chainCache: MutableMap<TypeVar, MezzeType>
     ): MezzeType {
+        // A ground type has nothing a substitution could change, whatever chain
+        // of variables led here.
+        if (type.isGround) return type
         if (visitedVars.isEmpty() && !needsSubstitution(type)) {
             return type
         }
@@ -641,6 +645,7 @@ private fun collectFreeTypeVarsInEffectRow(effectRow: MezzeType.EffectRow): Set<
  * [MezzeType.anyChild] is the structural reference for which positions exist.
  */
 fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
+    if (type.isGround) return emptySet()
     return when (type) {
         is MezzeType.VarType -> setOf(type.variable)
 

@@ -85,25 +85,26 @@ interface CodebaseHost {
  * could not be written down — the same rule `Embeddable` states for a comptime
  * result.
  */
+@kotlinx.serialization.Serializable
 sealed interface HostValue {
-    data class Str(val value: String) : HostValue
-    data class IntV(val value: Long) : HostValue
-    data class Bool(val value: Boolean) : HostValue
-    data class FloatV(val value: Double) : HostValue
-    data class Seq(val items: List<HostValue>) : HostValue
+    @kotlinx.serialization.Serializable data class Str(val value: String) : HostValue
+    @kotlinx.serialization.Serializable data class IntV(val value: Long) : HostValue
+    @kotlinx.serialization.Serializable data class Bool(val value: Boolean) : HostValue
+    @kotlinx.serialization.Serializable data class FloatV(val value: Double) : HostValue
+    @kotlinx.serialization.Serializable data class Seq(val items: List<HostValue>) : HostValue
 
     /** A record; fields in written order. */
-    data class Record(val fields: List<Pair<String, HostValue>>) : HostValue
+    @kotlinx.serialization.Serializable data class Record(val fields: List<Pair<String, HostValue>>) : HostValue
 
     /** A variant constructor. [payload] is its record, or null for one that carries nothing. */
-    data class Variant(val tag: String, val payload: Record?) : HostValue
+    @kotlinx.serialization.Serializable data class Variant(val tag: String, val payload: Record?) : HostValue
 
     /**
      * `Option`, explicitly. The runtime builds `Some`/`None` through dedicated
      * factories, and a generic variant spelled "Some" is not guaranteed to be
      * the same value, so an option is never encoded as a [Variant].
      */
-    data class Opt(val value: HostValue?) : HostValue
+    @kotlinx.serialization.Serializable data class Opt(val value: HostValue?) : HostValue
 
     companion object {
         fun record(vararg fields: Pair<String, HostValue>) = Record(fields.toList())

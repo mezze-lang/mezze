@@ -155,6 +155,48 @@ sealed interface MezzeType {
         }
     }
 
+    /**
+     * No type variable and no open row anywhere in this type: no substitution
+     * can change it, and it has no free variables.
+     *
+     * Cached on the type object (types are immutable), because the answer is
+     * asked of the same large types over and over — an imported `std::syntax`
+     * type is thousands of nodes, and substitution walked all of them each time
+     * it was applied.
+     */
+    val isGround: Boolean get() {
+        val memo: Byte = when (this) {
+            is RecordType -> groundMemo
+            is VariantType -> groundMemo
+            is NewtypeType -> groundMemo
+            is TypeApplication -> groundMemo
+            is FunctionType -> groundMemo
+            is EffectRow -> groundMemo
+            is VarType -> return false
+            IntType, FloatType, StringType, FracType, CharType, BytesType -> return true
+        }
+        if (memo != 0.toByte()) return memo == 1.toByte()
+        val own = when (this) {
+            is RecordType -> rowVar == null
+            is VariantType -> rowVar == null
+            is FunctionType -> effects?.rowVar == null
+            is EffectRow -> rowVar == null
+            else -> true
+        }
+        val ground = own && !anyChild { !it.isGround }
+        val b: Byte = if (ground) 1 else 2
+        when (this) {
+            is RecordType -> groundMemo = b
+            is VariantType -> groundMemo = b
+            is NewtypeType -> groundMemo = b
+            is TypeApplication -> groundMemo = b
+            is FunctionType -> groundMemo = b
+            is EffectRow -> groundMemo = b
+            else -> {}
+        }
+        return ground
+    }
+
     fun anyChild(predicate: (MezzeType) -> Boolean): Boolean = when (this) {
         is FunctionType -> predicate(paramType) || predicate(returnType) ||
             abilityConstraints.any { c -> c.typeArgs.any(predicate) || c.associatedTypeBindings.values.any(predicate) } ||
@@ -229,6 +271,17 @@ sealed interface MezzeType {
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val identity: TypeIdentity = TypeIdentity.Anonymous
     ) : MezzeType {
+        /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
+        @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
+        @kotlinx.serialization.Transient private var hashMemo: Int = 0
+        @kotlinx.serialization.Transient private var hashKnown: Boolean = false
+
+        /** The generated hash, over the same fields as `equals`, computed once: a
+         *  type is immutable, and a large one was rehashed in full on every lookup. */
+        override fun hashCode(): Int {
+            if (!hashKnown) { hashMemo = java.util.Objects.hash(fields, rowVar, identity); hashKnown = true }
+            return hashMemo
+        }
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
@@ -272,6 +325,17 @@ sealed interface MezzeType {
         // and unification's "walled" test consults that directly.
         val ascriptionWall: Boolean = false
     ) : MezzeType {
+        /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
+        @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
+        @kotlinx.serialization.Transient private var hashMemo: Int = 0
+        @kotlinx.serialization.Transient private var hashKnown: Boolean = false
+
+        /** The generated hash, over the same fields as `equals`, computed once: a
+         *  type is immutable, and a large one was rehashed in full on every lookup. */
+        override fun hashCode(): Int {
+            if (!hashKnown) { hashMemo = java.util.Objects.hash(constructors, rowVar, typeArgs, identity, ascriptionWall); hashKnown = true }
+            return hashMemo
+        }
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
@@ -302,6 +366,17 @@ sealed interface MezzeType {
         // pre-hash construction; unification falls back to name only then.
         val identity: TypeIdentity = TypeIdentity.Anonymous
     ) : MezzeType {
+        /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
+        @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
+        @kotlinx.serialization.Transient private var hashMemo: Int = 0
+        @kotlinx.serialization.Transient private var hashKnown: Boolean = false
+
+        /** The generated hash, over the same fields as `equals`, computed once: a
+         *  type is immutable, and a large one was rehashed in full on every lookup. */
+        override fun hashCode(): Int {
+            if (!hashKnown) { hashMemo = java.util.Objects.hash(name, constructor, wrappedType, identity); hashKnown = true }
+            return hashMemo
+        }
         override fun toString(): String = safeToString(
             name,
             truncatedContent = { "wraps ${wrappedType::class.simpleName}" },
@@ -326,6 +401,17 @@ sealed interface MezzeType {
     // This represents applying type arguments to a type constructor
     @Serializable
     data class TypeApplication(val constructor: String, val args: List<MezzeType>, val identity: TypeIdentity = TypeIdentity.Anonymous) : MezzeType {
+        /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
+        @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
+        @kotlinx.serialization.Transient private var hashMemo: Int = 0
+        @kotlinx.serialization.Transient private var hashKnown: Boolean = false
+
+        /** The generated hash, over the same fields as `equals`, computed once: a
+         *  type is immutable, and a large one was rehashed in full on every lookup. */
+        override fun hashCode(): Int {
+            if (!hashKnown) { hashMemo = java.util.Objects.hash(constructor, args, identity); hashKnown = true }
+            return hashMemo
+        }
         init {
             // #312 (reference-everywhere): a name-carrying identity IS the type's
             // reference, so `constructor` must never disagree with it — the name is
@@ -360,6 +446,17 @@ sealed interface MezzeType {
         val effects: EffectRow? = null,  // null = pure function, non-null = effectful function
         val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Ability constraints for this function
     ) : MezzeType {
+        /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
+        @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
+        @kotlinx.serialization.Transient private var hashMemo: Int = 0
+        @kotlinx.serialization.Transient private var hashKnown: Boolean = false
+
+        /** The generated hash, over the same fields as `equals`, computed once: a
+         *  type is immutable, and a large one was rehashed in full on every lookup. */
+        override fun hashCode(): Int {
+            if (!hashKnown) { hashMemo = java.util.Objects.hash(paramType, returnType, effects, abilityConstraints); hashKnown = true }
+            return hashMemo
+        }
         /**
          * The effect row on the LAST arrow of a (possibly curried) function —
          * i.e. what is still undischarged once every parameter has been applied.
@@ -444,6 +541,8 @@ sealed interface MezzeType {
         // is `{Exception}` — spawn catches Exception at runtime.
         val caughtByAncestor: Set<String> = emptySet()
     ) : MezzeType {
+        /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
+        @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 

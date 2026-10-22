@@ -414,20 +414,8 @@ object TypeAnnotationConverter {
     /** See `aliasMemo` on [convertInternal]. */
     class AliasMemo {
         val expansions = HashMap<String, MezzeType>()
-        private val ground = java.util.IdentityHashMap<MezzeType, Boolean>()
 
-        /** No type variable and no open row anywhere in [t]; memoized by object, as [t] shares subtrees. */
-        fun isGround(t: MezzeType): Boolean = ground[t] ?: run {
-            val own = when (t) {
-                is MezzeType.VarType -> false
-                is MezzeType.RecordType -> t.rowVar == null
-                is MezzeType.VariantType -> t.rowVar == null
-                is MezzeType.FunctionType -> t.effects?.rowVar == null
-                is MezzeType.EffectRow -> t.rowVar == null
-                else -> true
-            }
-            (own && !t.anyChild { !isGround(it) }).also { ground[t] = it }
-        }
+        fun isGround(t: MezzeType): Boolean = t.isGround
     }
 
     class SharedRowVar {

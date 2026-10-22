@@ -311,6 +311,14 @@ class InMemoryMezzeStore : MezzeStore {
         occurrences[modulePath] = rows
     }
 
+    private val expansions = java.util.concurrent.ConcurrentHashMap<Pair<Hash, String>, ByteArray>()
+
+    override fun putExpansion(macro: Hash, inputHash: String, output: ByteArray) {
+        expansions[macro to inputHash] = output
+    }
+
+    override fun getExpansion(macro: Hash, inputHash: String): ByteArray? = expansions[macro to inputHash]
+
     override fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow> =
         occurrences.values.flatten().filter { it.kind == kind && (symbol == null || it.symbol == symbol) }
 
