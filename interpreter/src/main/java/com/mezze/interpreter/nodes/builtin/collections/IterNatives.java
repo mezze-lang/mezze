@@ -129,7 +129,7 @@ public final class IterNatives {
     @TruffleBoundary
     public static long sum(MezzeIter it) {
         long[] acc = {0L};
-        walkElements(it.getDescriptor(), x -> { acc[0] += (Long) x; },
+        walkElements(it.getDescriptor(), x -> { acc[0] += (Long) x; return true; },
                      IndirectCallNode.getUncached());
         return acc[0];
     }
@@ -146,6 +146,7 @@ public final class IterNatives {
             walkElements(it.getDescriptor(), x -> {
                 args[closureLen] = x;
                 callNode.call(innerTarget, args);
+                return true;
             }, callNode);
         } else {
             CallTarget target = f.getCallTarget();
@@ -154,6 +155,7 @@ public final class IterNatives {
             walkElements(it.getDescriptor(), x -> {
                 args[closureLen] = MezzeRecord.wrapX(x);
                 callNode.call(target, args);
+                return true;
             }, callNode);
         }
         return MezzeRecord.empty();
@@ -173,6 +175,7 @@ public final class IterNatives {
                 args[closureLen] = x;
                 Object r = callNode.call(innerTarget, args);
                 if (r instanceof Boolean && (Boolean) r) acc[0]++;
+                return true;
             }, callNode);
         } else {
             CallTarget target = p.getCallTarget();
@@ -182,6 +185,7 @@ public final class IterNatives {
                 args[closureLen] = MezzeRecord.wrapX(x);
                 Object r = callNode.call(target, args);
                 if (r instanceof Boolean && (Boolean) r) acc[0]++;
+                return true;
             }, callNode);
         }
         return acc[0];
@@ -198,20 +202,26 @@ public final class IterNatives {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
             walkElements(it.getDescriptor(), x -> {
-                if (found[0]) return;
                 args[closureLen] = x;
                 Object r = callNode.call(innerTarget, args);
-                if (r instanceof Boolean && (Boolean) r) found[0] = true;
+                if (r instanceof Boolean && (Boolean) r) {
+                    found[0] = true;
+                    return false;
+                }
+                return true;
             }, callNode);
         } else {
             CallTarget target = p.getCallTarget();
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
             walkElements(it.getDescriptor(), x -> {
-                if (found[0]) return;
                 args[closureLen] = MezzeRecord.wrapX(x);
                 Object r = callNode.call(target, args);
-                if (r instanceof Boolean && (Boolean) r) found[0] = true;
+                if (r instanceof Boolean && (Boolean) r) {
+                    found[0] = true;
+                    return false;
+                }
+                return true;
             }, callNode);
         }
         return found[0];
@@ -228,20 +238,26 @@ public final class IterNatives {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
             walkElements(it.getDescriptor(), x -> {
-                if (!allTrue[0]) return;
                 args[closureLen] = x;
                 Object r = callNode.call(innerTarget, args);
-                if (!(r instanceof Boolean) || !((Boolean) r)) allTrue[0] = false;
+                if (!(r instanceof Boolean) || !((Boolean) r)) {
+                    allTrue[0] = false;
+                    return false;
+                }
+                return true;
             }, callNode);
         } else {
             CallTarget target = p.getCallTarget();
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
             walkElements(it.getDescriptor(), x -> {
-                if (!allTrue[0]) return;
                 args[closureLen] = MezzeRecord.wrapX(x);
                 Object r = callNode.call(target, args);
-                if (!(r instanceof Boolean) || !((Boolean) r)) allTrue[0] = false;
+                if (!(r instanceof Boolean) || !((Boolean) r)) {
+                    allTrue[0] = false;
+                    return false;
+                }
+                return true;
             }, callNode);
         }
         return allTrue[0];
@@ -258,20 +274,26 @@ public final class IterNatives {
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
             walkElements(it.getDescriptor(), x -> {
-                if (result[0] != null) return;
                 args[closureLen] = x;
                 Object r = callNode.call(innerTarget, args);
-                if (r instanceof Boolean && (Boolean) r) result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
+                if (r instanceof Boolean && (Boolean) r) {
+                    result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
+                    return false;
+                }
+                return true;
             }, callNode);
         } else {
             CallTarget target = p.getCallTarget();
             Object[] args = new Object[closureLen + 1];
             System.arraycopy(closure, 0, args, 0, closureLen);
             walkElements(it.getDescriptor(), x -> {
-                if (result[0] != null) return;
                 args[closureLen] = MezzeRecord.wrapX(x);
                 Object r = callNode.call(target, args);
-                if (r instanceof Boolean && (Boolean) r) result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
+                if (r instanceof Boolean && (Boolean) r) {
+                    result[0] = com.mezze.interpreter.values.MezzeVariant.some(x);
+                    return false;
+                }
+                return true;
             }, callNode);
         }
         return result[0] != null ? result[0] : com.mezze.interpreter.values.MezzeVariant.none();
@@ -301,6 +323,7 @@ public final class IterNatives {
                     args[elemSlot] = x;
                     acc[0] = callNode.call(innerTarget, args);
                 }
+                return true;
             }, callNode);
         } else {
             CallTarget target = f.getCallTarget();
@@ -314,6 +337,7 @@ public final class IterNatives {
                     args[closureLen] = MezzeRecord.wrapAccX(acc[0], x);
                     acc[0] = callNode.call(target, args);
                 }
+                return true;
             }, callNode);
         }
         return first[0] ? com.mezze.interpreter.values.MezzeVariant.none() : com.mezze.interpreter.values.MezzeVariant.some(acc[0]);
@@ -343,7 +367,7 @@ public final class IterNatives {
     @TruffleBoundary
     public static long countAll(MezzeIter it, IndirectCallNode callNode) {
         long[] acc = {0L};
-        walkElements(it.getDescriptor(), x -> acc[0]++, callNode);
+        walkElements(it.getDescriptor(), x -> { acc[0]++; return true; }, callNode);
         return acc[0];
     }
 
@@ -351,7 +375,8 @@ public final class IterNatives {
     public static Object first(MezzeIter it, IndirectCallNode callNode) {
         Object[] result = {null};
         walkElements(it.getDescriptor(), x -> {
-            if (result[0] == null) result[0] = MezzeVariant.some(x);
+            result[0] = MezzeVariant.some(x);
+            return false;
         }, callNode);
         return result[0] != null ? result[0] : MezzeVariant.none();
     }
@@ -359,7 +384,7 @@ public final class IterNatives {
     @TruffleBoundary
     public static Object last(MezzeIter it, IndirectCallNode callNode) {
         Object[] result = {null};
-        walkElements(it.getDescriptor(), x -> result[0] = x, callNode);
+        walkElements(it.getDescriptor(), x -> { result[0] = x; return true; }, callNode);
         return result[0] != null ? MezzeVariant.some(result[0]) : MezzeVariant.none();
     }
 
@@ -377,65 +402,83 @@ public final class IterNatives {
     // ===== ELEMENT WALKER =====
 
     @FunctionalInterface
+    /**
+     * A sink for walked elements.
+     *
+     * `accept` answers whether the walk should CONTINUE. It used to return
+     * void, which meant `take`, `find`, `any`, `all` and `take_while` could
+     * only stop processing: the source kept being walked to the end. On a
+     * finite source that is a silent O(n) where O(k) was asked for — `find`
+     * on a 10M range scanned 10M elements after matching the first. On an
+     * endless source it never returned at all, which is the case `unfold` is
+     * advertised for (trees, file handles, database cursors, paginated APIs).
+     *
+     * Returning false must stop the walk promptly, not eventually: a
+     * consumer that has its answer may be sitting in front of an infinite
+     * producer.
+     */
     private interface ElementConsumer {
-        void accept(Object element);
+        /** @return true to keep walking, false to stop now. */
+        boolean accept(Object element);
     }
 
+    /** @return false if a consumer stopped the walk early. */
     @TruffleBoundary
-    private static void walkElements(IterNode node, ElementConsumer consumer,
-                                     IndirectCallNode callNode) {
+    private static boolean walkElements(IterNode node, ElementConsumer consumer,
+                                        IndirectCallNode callNode) {
         if (node instanceof RangeIterNode range) {
             long i = range.start;
             long end = range.end;
             long step = range.step;
-            if (step == 0) return;
+            if (step == 0) return true;
             boolean asc = step > 0;
             while (asc ? (i < end) : (i > end)) {
-                consumer.accept((Object) i);
+                if (!consumer.accept((Object) i)) return false;
                 i += step;
             }
-            return;
+            return true;
         }
         if (node instanceof SeqIterNode seqNode) {
             for (int idx = 0; idx < seqNode.size(); idx++) {
-                consumer.accept(seqNode.get(idx));
+                if (!consumer.accept(seqNode.get(idx))) return false;
             }
-            return;
+            return true;
         }
         if (node instanceof ListIterNode listNode) {
             Object[] arr = listNode.list.toArray();
             for (Object x : arr) {
-                consumer.accept(x);
+                if (!consumer.accept(x)) return false;
             }
-            return;
+            return true;
         }
         if (node instanceof OnceIterNode once) {
-            consumer.accept(once.value);
-            return;
+            return consumer.accept(once.value);
         }
         if (node instanceof EmptyIterNode) {
-            return;
+            return true;
         }
         if (node instanceof TakeIterNode take) {
             long[] remaining = {take.n};
+            if (remaining[0] <= 0) return true;
             walkElements(take.src, x -> {
-                if (remaining[0] > 0) {
-                    consumer.accept(x);
-                    remaining[0]--;
-                }
+                // Stop the SOURCE once the quota is met, rather than walking
+                // on and discarding. This is the whole point: `take` in front
+                // of an endless producer has to be the thing that ends it.
+                if (!consumer.accept(x)) return false;
+                remaining[0]--;
+                return remaining[0] > 0;
             }, callNode);
-            return;
+            return true;
         }
         if (node instanceof DropIterNode drop) {
             long[] toSkip = {drop.n};
-            walkElements(drop.src, x -> {
+            return walkElements(drop.src, x -> {
                 if (toSkip[0] > 0) {
                     toSkip[0]--;
-                } else {
-                    consumer.accept(x);
+                    return true;
                 }
+                return consumer.accept(x);
             }, callNode);
-            return;
         }
         if (node instanceof TakeWhileIterNode tw) {
             boolean[] done = {false};
@@ -446,20 +489,22 @@ public final class IterNatives {
             Object[] pArgs = new Object[pClosureLen + 1];
             System.arraycopy(pClosure, 0, pArgs, 0, pClosureLen);
             walkElements(tw.src, x -> {
-                if (done[0]) return;
+                if (done[0]) return false;
                 if (predInner != null) {
                     pArgs[pClosureLen] = x;
                     Object r = callNode.call(predInner, pArgs);
-                    if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
-                    else done[0] = true;
+                    if (r instanceof Boolean && (Boolean) r) return consumer.accept(x);
+                    done[0] = true;
+                    return false;
                 } else {
                     pArgs[pClosureLen] = MezzeRecord.wrapX(x);
                     Object r = callNode.call(pred.getCallTarget(), pArgs);
-                    if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
-                    else done[0] = true;
+                    if (r instanceof Boolean && (Boolean) r) return consumer.accept(x);
+                    done[0] = true;
+                    return false;
                 }
             }, callNode);
-            return;
+            return true;
         }
         if (node instanceof DropWhileIterNode dw) {
             boolean[] dropping = {true};
@@ -469,55 +514,60 @@ public final class IterNatives {
             int pClosureLen = pClosure.length;
             Object[] pArgs = new Object[pClosureLen + 1];
             System.arraycopy(pClosure, 0, pArgs, 0, pClosureLen);
-            walkElements(dw.src, x -> {
+            return walkElements(dw.src, x -> {
                 if (dropping[0]) {
                     if (predInner != null) {
                         pArgs[pClosureLen] = x;
                         Object r = callNode.call(predInner, pArgs);
                         if (!(r instanceof Boolean && (Boolean) r)) {
                             dropping[0] = false;
-                            consumer.accept(x);
+                            return consumer.accept(x);
                         }
                     } else {
                         pArgs[pClosureLen] = MezzeRecord.wrapX(x);
                         Object r = callNode.call(pred.getCallTarget(), pArgs);
                         if (!(r instanceof Boolean && (Boolean) r)) {
                             dropping[0] = false;
-                            consumer.accept(x);
+                            return consumer.accept(x);
                         }
                     }
-                } else {
-                    consumer.accept(x);
+                    return true;
                 }
+                return consumer.accept(x);
             }, callNode);
-            return;
         }
         if (node instanceof EnumerateIterNode en) {
             long[] idx = {0L};
-            walkElements(en.src, x -> {
-                consumer.accept(MezzeRecord.fromFields(
+            return walkElements(en.src, x -> {
+                boolean go = consumer.accept(MezzeRecord.fromFields(
                     new String[]{"i", "val"}, new Object[]{idx[0], x}));
                 idx[0]++;
+                return go;
             }, callNode);
-            return;
         }
         if (node instanceof ChainIterNode chain) {
-            walkElements(chain.first, consumer, callNode);
-            walkElements(chain.second, consumer, callNode);
-            return;
+            // A stop in the first half must not start the second.
+            if (!walkElements(chain.first, consumer, callNode)) return false;
+            return walkElements(chain.second, consumer, callNode);
         }
         if (node instanceof ZipIterNode zip) {
             // Materialize both sides, zip by index
             java.util.ArrayList<Object> left = new java.util.ArrayList<>();
             java.util.ArrayList<Object> right = new java.util.ArrayList<>();
-            walkElements(zip.first, left::add, callNode);
-            walkElements(zip.second, right::add, callNode);
+            // NB both sides are MATERIALISED, so `zip` over an endless source
+            // exhausts memory rather than hanging. Left as-is: fixing it means
+            // interleaving two walks, which the push driver cannot express
+            // without a cursor on at least one side.
+            walkElements(zip.first, x -> { left.add(x); return true; }, callNode);
+            walkElements(zip.second, x -> { right.add(x); return true; }, callNode);
             int len = Math.min(left.size(), right.size());
             for (int idx = 0; idx < len; idx++) {
-                consumer.accept(MezzeRecord.fromFields(
-                    new String[]{"fst", "snd"}, new Object[]{left.get(idx), right.get(idx)}));
+                if (!consumer.accept(MezzeRecord.fromFields(
+                        new String[]{"fst", "snd"}, new Object[]{left.get(idx), right.get(idx)}))) {
+                    return false;
+                }
             }
-            return;
+            return true;
         }
         if (node instanceof FlatMapIterNode fm) {
             MezzeFunction fn = (MezzeFunction) fm.fn;
@@ -526,7 +576,7 @@ public final class IterNatives {
             CallTarget fmInner = ScalarBypass.tryResolve(fn);
             Object[] fmArgs = new Object[fmClosureLen + 1];
             System.arraycopy(fmClosure, 0, fmArgs, 0, fmClosureLen);
-            walkElements(fm.src, x -> {
+            return walkElements(fm.src, x -> {
                 MezzeIter inner;
                 if (fmInner != null) {
                     fmArgs[fmClosureLen] = x;
@@ -535,13 +585,14 @@ public final class IterNatives {
                     fmArgs[fmClosureLen] = MezzeRecord.wrapX(x);
                     inner = (MezzeIter) callNode.call(fn.getCallTarget(), fmArgs);
                 }
-                walkElements(inner.getDescriptor(), consumer, callNode);
+                // A stop inside the INNER iterator stops the outer walk too,
+                // or `take` behind a flat_map would keep pulling outer
+                // elements and discarding whole inner sequences.
+                return walkElements(inner.getDescriptor(), consumer, callNode);
             }, callNode);
-            return;
         }
         if (node instanceof UnfoldIterNode unfold) {
-            walkUnfold(unfold, consumer, callNode);
-            return;
+            return walkUnfold(unfold, consumer, callNode);
         }
         if (node instanceof UnaryOpIterNode unary) {
             MezzeFunction fn = (MezzeFunction) unary.fn;
@@ -552,15 +603,16 @@ public final class IterNatives {
                 Object[] args = new Object[closureLen + 1];
                 System.arraycopy(closure, 0, args, 0, closureLen);
                 if (unary.isMap()) {
-                    walkElements(unary.src, x -> {
+                    return walkElements(unary.src, x -> {
                         args[closureLen] = x;
-                        consumer.accept(callNode.call(innerTarget, args));
+                        return consumer.accept(callNode.call(innerTarget, args));
                     }, callNode);
                 } else {
-                    walkElements(unary.src, x -> {
+                    return walkElements(unary.src, x -> {
                         args[closureLen] = x;
                         Object r = callNode.call(innerTarget, args);
-                        if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
+                        if (r instanceof Boolean && (Boolean) r) return consumer.accept(x);
+                        return true;
                     }, callNode);
                 }
             } else {
@@ -568,19 +620,21 @@ public final class IterNatives {
                 Object[] args = new Object[closureLen + 1];
                 System.arraycopy(closure, 0, args, 0, closureLen);
                 if (unary.isMap()) {
-                    walkElements(unary.src, x -> {
+                    return walkElements(unary.src, x -> {
                         args[closureLen] = MezzeRecord.wrapX(x);
-                        consumer.accept(callNode.call(target, args));
+                        return consumer.accept(callNode.call(target, args));
                     }, callNode);
                 } else {
-                    walkElements(unary.src, x -> {
+                    return walkElements(unary.src, x -> {
                         args[closureLen] = MezzeRecord.wrapX(x);
                         Object r = callNode.call(target, args);
-                        if (r instanceof Boolean && (Boolean) r) consumer.accept(x);
+                        if (r instanceof Boolean && (Boolean) r) return consumer.accept(x);
+                        return true;
                     }, callNode);
                 }
             }
         }
+        return true;
     }
 
     /**
@@ -595,8 +649,8 @@ public final class IterNatives {
      *   Done                               — stop
      */
     @TruffleBoundary
-    private static void walkUnfold(UnfoldIterNode unfold, ElementConsumer consumer,
-                                   IndirectCallNode callNode) {
+    private static boolean walkUnfold(UnfoldIterNode unfold, ElementConsumer consumer,
+                                      IndirectCallNode callNode) {
         MezzeFunction stepFn = (MezzeFunction) unfold.stepFunction;
         Object[] closure = stepFn.getClosureValues();
         int closureLen = closure.length;
@@ -614,7 +668,7 @@ public final class IterNatives {
                 if (tag == YIELD_TAG) {
                     Object payload = step.getRawPayloadValue();
                     if (payload instanceof MezzeRecord rec) {
-                        consumer.accept(rec.getField("val"));
+                        if (!consumer.accept(rec.getField("val"))) return false;
                         state = rec.getField("next");
                     } else {
                         // Fused single-field — shouldn't happen for Yield (2 fields)
@@ -639,7 +693,7 @@ public final class IterNatives {
                 if (tag == YIELD_TAG) {
                     Object payload = step.getRawPayloadValue();
                     if (payload instanceof MezzeRecord rec) {
-                        consumer.accept(rec.getField("val"));
+                        if (!consumer.accept(rec.getField("val"))) return false;
                         state = rec.getField("next");
                     } else {
                         consumer.accept(payload);
@@ -652,6 +706,7 @@ public final class IterNatives {
                 }
             }
         }
+        return true;
     }
 
     /** Recursive walker. Each unary transform wraps the surrounding folder. */
