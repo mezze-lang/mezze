@@ -8,6 +8,7 @@ import com.mezze.language.typedast.PatternBinding
 import com.mezze.language.typedast.TypeInstantiation
 import com.mezze.language.typedast.TypedBlock
 import com.mezze.language.typedast.TypedBoolLit
+import com.mezze.language.typedast.TypedBuildTime
 import com.mezze.language.typedast.TypedCall
 import com.mezze.language.typedast.TypedCapture
 import com.mezze.language.typedast.TypedCase
@@ -180,6 +181,12 @@ object TypeSubstitution {
                 left = applyExpr(expr.left, sub),
                 right = applyExpr(expr.right, sub),
                 type = applyType(expr.type, sub)
+            )
+
+            is TypedBuildTime -> expr.copy(
+                expr = applyExpr(expr.expr, sub),
+                handlers = expr.handlers.map { it.copy(handler = applyHandlerRef(it.handler, sub)) },
+                type = applyType(expr.type, sub),
             )
         }
     }

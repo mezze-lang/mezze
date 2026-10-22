@@ -66,6 +66,23 @@ data class ParsedMetadata(
     /** The author's message for this effect performed with nothing handling it, if written. */
     val unhandled: String?
         get() = (fields[MetadataFields.UNHANDLED] as? ParsedMetadataValue.StringVal)?.value
+
+    /**
+     * The block as JSON text: what the store keeps and `std::codebase` hands a
+     * program to decode into its own type. Built with a JSON encoder, so any
+     * string the metadata syntax can write (`"\n"`, `"\\"`) stays valid JSON.
+     */
+    fun toJsonText(): String =
+        kotlinx.serialization.json.JsonObject(fields.mapValues { (_, v) -> v.toJson() }).toString()
+}
+
+private fun ParsedMetadataValue.toJson(): kotlinx.serialization.json.JsonElement = when (this) {
+    is ParsedMetadataValue.StringVal -> kotlinx.serialization.json.JsonPrimitive(value)
+    is ParsedMetadataValue.IntVal -> kotlinx.serialization.json.JsonPrimitive(value)
+    is ParsedMetadataValue.BoolVal -> kotlinx.serialization.json.JsonPrimitive(value)
+    is ParsedMetadataValue.FloatVal -> kotlinx.serialization.json.JsonPrimitive(value)
+    is ParsedMetadataValue.ListVal -> kotlinx.serialization.json.JsonArray(values.map { it.toJson() })
+    is ParsedMetadataValue.RecordVal -> kotlinx.serialization.json.JsonObject(fields.mapValues { (_, v) -> v.toJson() })
 }
 
 /**

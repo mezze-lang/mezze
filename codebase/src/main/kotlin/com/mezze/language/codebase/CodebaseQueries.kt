@@ -192,15 +192,108 @@ class CodebaseQueries(private val store: MezzeStore) {
             .distinct()
             .sortedWith(compareBy({ it.file }, { it.startLine }, { it.startCol }))
 
+    // ── a declaration as written ──────────────────────────────────────────
+
     /**
-     * A `let`'s body as the compiler typed it, from its stored blob; null for any
-     * other declaration, or one stored without its typed tree.
+     * A declaration as the parser read it, with the typed trees the compiler made
+     * of its code: a `let`'s value, an `impl`'s or a performer's operations.
+     * [ref] is null for what has no identity — a `use` line, a top-level
+     * expression.
      */
-    fun body(hash: Hash): com.mezze.language.typedast.TypedExpr? {
-        val blob = store.getBlob(hash) ?: return null
-        if (blob.kind != com.mezze.language.store.BlobKind.FUNCTION) return null
-        val typed = blob.typed ?: return null
-        return com.mezze.language.store.StoreSerialization.deserializeTypedLetDecl(typed).value
+    class Written(
+        val module: String,
+        val parsed: com.mezze.language.parsedast.ParsedDecl,
+        val ref: DeclRef?,
+        val typed: List<com.mezze.language.typedast.TypedExpr>,
+    )
+
+    /** [hash]'s declaration as written; null when its module's parse is not stored. */
+    fun written(hash: Hash): Written? {
+        val row = store.findDeclByHash(hash) ?: return null
+        return writtenIn(row.modulePath).firstOrNull { it.ref?.hash == hash }
+    }
+
+    /**
+     * Every declaration of [module] as written, in source order. A declaration is
+     * paired with its index row by where it starts: both come from one parse.
+     */
+    fun writtenIn(module: String): List<Written> {
+        val parsed = parsedModule(module) ?: return emptyList()
+        val rows = store.getDeclsForModule(module).associateBy { it.startLine to it.startCol }
+        return parsed.decls.map { decl ->
+            val row = rows[decl.loc.startLine to decl.loc.startCol]
+            Written(module, decl, row?.toRef(), row?.let { typedRoots(it.hash) }.orEmpty())
+        }
+    }
+
+    private fun parsedModule(module: String): com.mezze.language.parsedast.ParsedModule? {
+        val sourceHash = store.getModule(module)?.sourceHash ?: return null
+        val bytes = store.getParsedModule(module, sourceHash) ?: return null
+        return com.mezze.language.store.StoreSerialization.deserializeParsedModule(bytes)
+    }
+
+    private fun typedRoots(hash: Hash): List<com.mezze.language.typedast.TypedExpr> {
+        val blob = store.getBlob(hash) ?: return emptyList()
+        val typed = blob.typed ?: return emptyList()
+        return when (blob.kind) {
+            com.mezze.language.store.BlobKind.FUNCTION ->
+                listOf(com.mezze.language.store.StoreSerialization.deserializeTypedLetDecl(typed).value)
+            com.mezze.language.store.BlobKind.ABILITY_IMPL ->
+                com.mezze.language.store.StoreSerialization.deserializeTypedAbilityImpl(typed).operations.values.toList()
+            com.mezze.language.store.BlobKind.PERFORMER ->
+                com.mezze.language.store.StoreSerialization.deserializeTypedPerformerDecl(typed).operations.values.toList()
+            com.mezze.language.store.BlobKind.TYPE, com.mezze.language.store.BlobKind.ABILITY,
+            com.mezze.language.store.BlobKind.EFFECT -> emptyList()
+        }
+    }
+
+    /**
+     * The declaration a call by [hash] reaches: a declaration itself, a
+     * specialised copy of one, or an operation of an `impl` or a performer — an
+     * operator dispatched to `Ord for Money` calls that impl's `lt`, whose hash
+     * is the impl's and the operation's name together.
+     */
+    fun reached(hash: Hash): DeclRef? = refOfFunction(hash) ?: opOwners[hash]?.let { ref(it) }
+
+    /**
+     * What a method or operator dispatched through [ability] on a [receiver]
+     * reaches. A receiver of a declared type reaches that type's impl of the
+     * ability — one per ability and type, found by identity. A generic receiver
+     * is answered at run time through a dictionary, so the call reaches the
+     * ability itself. Null when the receiver's type has no impl stored here.
+     */
+    fun dispatched(ability: Hash, receiver: MezzeType): DeclRef? {
+        val typeHash = declaredIdentity(receiver) ?: return if (receiver is MezzeType.VarType) ref(ability) else null
+        return implsFor(typeHash).singleOrNull { it.abilityHash == ability }?.let { ref(it.hash) }
+    }
+
+    private fun declaredIdentity(t: MezzeType): Hash? = when (t) {
+        is MezzeType.RecordType -> (t.identity as? com.mezze.language.ast.TypeIdentity.Declared)?.hash
+        is MezzeType.VariantType -> (t.identity as? com.mezze.language.ast.TypeIdentity.Declared)?.hash
+        is MezzeType.TypeApplication -> (t.identity as? com.mezze.language.ast.TypeIdentity.Declared)?.hash
+        is MezzeType.NewtypeType -> (t.identity as? com.mezze.language.ast.TypeIdentity.Declared)?.hash
+        is MezzeType.FunctionType, is MezzeType.EffectRow, is MezzeType.VarType -> null
+        MezzeType.IntType, MezzeType.FloatType, MezzeType.StringType, MezzeType.CharType,
+        MezzeType.FracType, MezzeType.BytesType -> null
+    }
+
+    /**
+     * Where a node of [kind] — spelling [symbol], if given — is written, in file
+     * and position order: the occurrence index, across every tier.
+     */
+    fun occurrences(kind: String, symbol: String?): List<com.mezze.language.store.OccurrenceRow> =
+        store.findOccurrences(kind, symbol).distinct()
+            .sortedWith(compareBy({ it.filePath }, { it.startLine }, { it.startCol }, { it.symbol }))
+
+    private val opOwners: Map<Hash, Hash> by lazy {
+        buildMap {
+            for (row in store.getAllAbilityImpls()) {
+                val typed = store.getBlob(row.hash)?.typed ?: continue
+                for (op in com.mezze.language.store.StoreSerialization.deserializeTypedAbilityImpl(typed).operations.keys) {
+                    put(Hash.computeOpHash(row.hash, op), row.hash)
+                }
+            }
+        }
     }
 
     // ── a function value, and what applies to a type ─────────────────────
@@ -262,6 +355,8 @@ class CodebaseQueries(private val store: MezzeStore) {
         val mentions: Hash? = null,
         val shape: String? = null,
         val unusedOnly: Boolean = false,
+        /** Has a written node of this `std::syntax` kind, spelling this symbol if given. */
+        val uses: Pair<String, String?>? = null,
         val order: Order = Order.BY_MODULE,
         val limit: Int? = null,
     )
@@ -278,6 +373,9 @@ class CodebaseQueries(private val store: MezzeStore) {
             q.tagged?.let { store.findDeclsByMetadata(it) },
             if (q.deprecatedOnly) store.findDeclsByMetadata("deprecated") else null,
             q.shape?.let { s -> TypeSearch.search(store, s, limit = Int.MAX_VALUE).map { it.decl } },
+            q.uses?.let { (kind, symbol) ->
+                store.findOccurrences(kind, symbol).map { it.ownerHash }.distinct().mapNotNull { store.findDeclByHash(it) }
+            },
         )
         val candidates: List<DeclRow> = indexed.minByOrNull { it.size }
             ?: q.modulePrefix?.let { p -> modules(p).flatMap { store.getDeclsForModule(it) } }

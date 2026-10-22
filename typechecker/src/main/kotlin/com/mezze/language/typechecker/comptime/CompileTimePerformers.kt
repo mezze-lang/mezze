@@ -15,7 +15,8 @@ import com.mezze.language.typedast.forEachChild
  * installs a handler that is. Of those, some LEAVE `Comptime` for whoever handles
  * it outside (`EvalCodebase`), and some answer it themselves (`ComptimeEvalCodebase`,
  * which installs `ComptimeEval` around `EvalCodebase`). The difference decides
- * whether a lone `perform` of one can be answered where it stands.
+ * whether a request under one is answered there, or where `ComptimeEval` is
+ * written around it ([BuildTimeUnits]).
  *
  * `ComptimeEval` IMPLEMENTS `Comptime` and performs nothing, so it is neither —
  * which is what keeps the consent line at `main` from folding a whole program.
@@ -30,12 +31,6 @@ object CompileTimePerformers {
         val compileTime: Set<Hash>,
         /** Those whose `Comptime` is left to an outer handler. */
         val leavesComptime: Set<Hash>,
-        /**
-         * A handler of `Comptime` the module's bodies install (`ComptimeEval`), by
-         * identity. A question that leaves `Comptime` is folded where it stands,
-         * and its evaluation needs something to answer that `Comptime` with.
-         */
-        val answerer: com.mezze.language.typedast.TypedHandlerRef? = null,
     )
 
     /**
@@ -74,17 +69,7 @@ object CompileTimePerformers {
                 }
             }
         }
-        var answerer: com.mezze.language.typedast.TypedHandlerRef? = known.answerer
-        fun find(e: TypedExpr) {
-            if (answerer != null) return
-            if (e is TypedPerform) {
-                e.handlers.firstOrNull { it.effectHash == WellKnownHashConstants.EFFECT_COMPTIME && it.params == null }
-                    ?.let { answerer = it; return }
-            }
-            e.forEachChild { find(it) }
-        }
-        performers.forEach { p -> p.operations.values.forEach { find(it) } }
-        return Found(compileTime - known.compileTime, leaves - known.leavesComptime, answerer)
+        return Found(compileTime - known.compileTime, leaves - known.leavesComptime)
     }
 
     /** Whether [expr] performs `Comptime`, or installs a performer in [compileTime]. */

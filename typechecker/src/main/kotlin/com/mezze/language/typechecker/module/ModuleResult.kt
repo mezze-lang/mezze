@@ -245,10 +245,9 @@ data class ModuleImportContext(
     // The subset of those that leave `Comptime` to an outer handler
     // (`EvalCodebase`), as opposed to answering it themselves (`ComptimeEvalCodebase`).
     val comptimeLeavingPerformers: Set<Hash> = emptySet(),
-    // A handler of `Comptime` (`ComptimeEval`), by identity, found in an imported
-    // module's bodies: what answers a folded question's `Comptime` during the build.
-    val comptimeAnswererHash: Hash? = null,
-    val comptimeAnswererName: String? = null,
+    // Imported functions that ask the compiler a question and leave `<Comptime>`
+    // to their caller: a call to one, under `ComptimeEval`, is answered at build.
+    val askingFunctions: Set<Hash> = emptySet(),
     // The `#{ … }` metadata of every declaration an imported module exports, by
     // the declaration's identity. A use site names a declaration by hash, so this
     // is how `#{deprecated}` and the other author-written messages reach the
@@ -284,8 +283,7 @@ data class ModuleImportContext(
             inherentImplOpConstraints = inherentImplOpConstraints + other.inherentImplOpConstraints,
             compileTimePerformers = compileTimePerformers + other.compileTimePerformers,
             comptimeLeavingPerformers = comptimeLeavingPerformers + other.comptimeLeavingPerformers,
-            comptimeAnswererHash = comptimeAnswererHash ?: other.comptimeAnswererHash,
-            comptimeAnswererName = if (comptimeAnswererHash != null) comptimeAnswererName else other.comptimeAnswererName,
+            askingFunctions = askingFunctions + other.askingFunctions,
             metadataByHash = metadataByHash + other.metadataByHash,
         )
     }

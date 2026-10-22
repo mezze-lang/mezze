@@ -35,6 +35,7 @@ fun TypedExpr.withType(newType: MezzeType): TypedExpr = when (this) {
     is TypedPerform -> copy(type = newType)
     is TypedPerformOp -> copy(type = newType)
     is TypedPipe -> copy(type = newType)
+    is TypedBuildTime -> copy(type = newType)
 }
 
 /**
@@ -97,5 +98,63 @@ inline fun TypedExpr.forEachChild(f: (TypedExpr) -> Unit) {
         }
         is TypedPerformOp -> f(arg)
         is TypedPipe -> { f(left); f(right) }
+        // Only the expression: the handlers' parameters belong to the enclosing
+        // `perform`s they were taken from, and are visited there.
+        is TypedBuildTime -> f(expr)
     }
+}
+
+/**
+ * `this` with every direct child [TypedExpr] replaced by `f(child)`, everything
+ * else unchanged — the rebuilding counterpart of [forEachChild], visiting the
+ * same children. Returns `this` itself when no child changed.
+ */
+fun TypedExpr.mapChildren(transform: (TypedExpr) -> TypedExpr): TypedExpr {
+    var changed = false
+    val f: (TypedExpr) -> TypedExpr = { child -> transform(child).also { if (it !== child) changed = true } }
+    fun entry(e: TypedRecordEntry): TypedRecordEntry = when (e) {
+        is TypedRecordEntry.Field -> e.copy(value = f(e.value))
+        is TypedRecordEntry.Spread -> e.copy(expr = f(e.expr))
+    }
+    val out: TypedExpr = when (this) {
+        is TypedIntLit, is TypedNatLit, is TypedFloatLit, is TypedFracLit,
+        is TypedBoolLit, is TypedCharLit, is TypedVar -> this
+        is TypedStringLit -> copy(parts = parts.map { p ->
+            when (p) {
+                is TypedStringPart.Literal -> p
+                is TypedStringPart.Interpolation -> p.copy(expr = f(p.expr))
+            }
+        })
+        is TypedLambda -> copy(body = f(body))
+        is TypedCall -> copy(function = f(function), arg = f(arg))
+        is TypedRecord -> copy(entries = entries.map(::entry))
+        is TypedFieldAccess -> copy(record = f(record))
+        is TypedRecordUpdate -> copy(record = f(record), updates = updates.map(::entry))
+        is TypedVariantConstruct -> copy(payload = payload?.let(f))
+        is TypedMatch -> copy(scrutinee = f(scrutinee), cases = cases.map { c ->
+            c.copy(
+                guard = c.guard?.let(f),
+                body = f(c.body),
+                ifLetBindings = c.ifLetBindings.map { b -> b.copy(expr = f(b.expr)) },
+            )
+        })
+        is TypedIf -> copy(condition = f(condition), thenBranch = f(thenBranch), elseBranch = f(elseBranch))
+        is TypedBlock -> copy(statements = statements.map { st ->
+            when (st) {
+                is TypedStatement.Let -> st.copy(value = f(st.value))
+                is TypedStatement.Expr -> st.copy(expr = f(st.expr))
+            }
+        }, result = f(result))
+        is TypedSeq -> copy(elements = elements.map { e ->
+            when (e) {
+                is TypedSeqElement.Regular -> e.copy(expr = f(e.expr))
+                is TypedSeqElement.Spread -> e.copy(expr = f(e.expr))
+            }
+        })
+        is TypedPerform -> copy(handlers = handlers.map { h -> h.copy(params = h.params?.let(f)) }, body = f(body))
+        is TypedPerformOp -> copy(arg = f(arg))
+        is TypedPipe -> copy(left = f(left), right = f(right))
+        is TypedBuildTime -> copy(expr = f(expr))
+    }
+    return if (changed) out else this
 }

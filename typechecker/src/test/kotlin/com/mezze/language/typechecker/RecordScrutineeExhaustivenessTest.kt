@@ -326,4 +326,42 @@ class RecordScrutineeExhaustivenessTest {
             "a match with no enumerable missing cases must not offer a fill-arms fix",
         )
     }
+
+    // ── a big product covered by binding every field ─────────────────────
+
+    // Three fields of a seven-constructor type: 343 combinations, over the
+    // enumeration limit. An arm that binds each field covers all of them, so
+    // there is nothing to enumerate — a match over a syntax tree is written so.
+    private val sevens = """
+        type Dir = | A, B, C, D, E, F, G |
+        type Node = | Leaf, Branch { x: Dir, y: Dir, z: Dir } |
+    """.trimIndent()
+
+    @Test fun `binding every field covers a product too large to enumerate`() {
+        assertNull(err("""
+            $sevens
+            let f = { n: Node } -> match n is
+              Leaf -> 0
+              Branch { x, y, z } -> 1
+        """))
+    }
+
+    @Test fun `a missing constructor beside such an arm is still rejected`() {
+        assertNotNull(err("""
+            $sevens
+            let f = { n: Node } -> match n is
+              Branch { x, ... } -> 1
+        """))
+    }
+
+    @Test fun `a product too large to enumerate, covered by no single arm, is still refused`() {
+        val m = err("""
+            $sevens
+            let f = { n: Node } -> match n is
+              Leaf -> 0
+              Branch { x = A, y, z } -> 1
+              Branch { x = B, y, z } -> 2
+        """)
+        assertNotNull(m)
+    }
 }

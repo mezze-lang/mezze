@@ -50,7 +50,12 @@ object CodebaseNatives {
         native("__native_codebase_references") { h, a -> h.references(str(a, "hash")) }
         native("__native_codebase_usages") { h, a -> h.usages(str(a, "hash")) }
         native("__native_codebase_abilities_of") { h, a -> h.abilitiesOf(str(a, "hash")) }
-        native("__native_codebase_body") { h, a -> h.body(str(a, "hash")) }
+        native("__native_codebase_syntax") { h, a -> h.syntax(str(a, "hash")) }
+        native("__native_codebase_module_syntax") { h, a -> h.moduleSyntax(str(a, "module")) }
+        native("__native_codebase_occurrences") { h, a ->
+            val symbol = (plain(a.getField("symbol")) as HostValue.Opt).value as HostValue.Str?
+            h.occurrences(str(a, "kind"), symbol?.value)
+        }
         native("__native_codebase_search") { h, a -> h.search(plain(a.getField("q"))) }
         native("__native_codebase_ref") { h, a ->
             val fn = a.getField("of") as? com.mezze.interpreter.values.MezzeFunction

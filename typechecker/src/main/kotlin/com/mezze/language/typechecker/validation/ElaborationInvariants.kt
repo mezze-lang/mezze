@@ -273,6 +273,7 @@ object ElaborationInvariants {
                 walk(expr.body, where, bound, out)
             }
             is TypedPerformOp -> walk(expr.arg, where, bound, out)
+            is com.mezze.language.typedast.TypedBuildTime -> walk(expr.expr, where, bound, out)
             is TypedStringLit -> for (part in expr.parts) {
                 if (part is TypedStringPart.Interpolation) walk(part.expr, where, bound, out)
             }

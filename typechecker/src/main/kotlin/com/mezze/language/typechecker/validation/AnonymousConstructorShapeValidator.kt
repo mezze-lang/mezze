@@ -139,6 +139,7 @@ object AnonymousConstructorShapeValidator {
                 walk(expr.body, declaredConstructors, firstShape)
             }
             is TypedPerformOp -> walk(expr.arg, declaredConstructors, firstShape)
+            is com.mezze.language.typedast.TypedBuildTime -> walk(expr.expr, declaredConstructors, firstShape)
             is TypedPipe -> {
                 walk(expr.left, declaredConstructors, firstShape)
                 walk(expr.right, declaredConstructors, firstShape)

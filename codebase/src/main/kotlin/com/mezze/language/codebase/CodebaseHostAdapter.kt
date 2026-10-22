@@ -66,7 +66,37 @@ class CodebaseHostAdapter(
         )
     })
     override fun search(query: HostValue) = refs(q.search(decodeQuery(query)))
-    override fun body(hash: String) = Opt(q.body(Hash(hash))?.let { TypedBodyEncoder(::typeShape, { h -> q.ref(h)?.let { declRef(it) } }).expr(it) })
+    override fun syntax(hash: String) = Opt(q.written(Hash(hash))?.let(::syntaxDecl))
+    override fun moduleSyntax(module: String) = Seq(q.writtenIn(module).map(::syntaxDecl))
+
+    override fun occurrences(kind: String, symbol: String?): HostValue {
+        val rows = q.occurrences(kind, symbol)
+        // One encoder per declaration: its typed tree is read once, for all of
+        // its occurrences' facts.
+        val encoders = HashMap<Hash, SyntaxEncoder?>()
+        return Seq(rows.mapNotNull { r ->
+            val decl = q.ref(r.ownerHash) ?: return@mapNotNull null
+            val encoder = encoders.getOrPut(r.ownerHash) {
+                q.written(r.ownerHash)?.let { SyntaxEncoder(::typeShape, ::declRef, q::reached, q::dispatched, it.typed) }
+            }
+            record(
+                "decl" to declRef(decl),
+                "kind" to Str(r.kind),
+                "symbol" to HostValue.str(r.symbol),
+                "span" to record(
+                    "file" to HostValue.str(r.filePath),
+                    "start_line" to IntV(r.startLine.toLong()),
+                    "start_col" to IntV(r.startCol.toLong()),
+                    "end_line" to IntV(r.endLine.toLong()),
+                    "end_col" to IntV(r.endCol.toLong()),
+                ),
+                "facts" to (encoder?.factsAt(r.startLine, r.startCol, r.endLine, r.endCol) ?: Opt(null)),
+            )
+        })
+    }
+
+    private fun syntaxDecl(w: CodebaseQueries.Written) =
+        SyntaxEncoder(::typeShape, ::declRef, q::reached, q::dispatched, w.typed).decl(w.module, w.parsed, w.ref)
 
     // ── reading a `DeclQuery` record ─────────────────────────────────────────
 
@@ -113,6 +143,10 @@ class CodebaseHostAdapter(
             mentions = optStr("mentions")?.let { Hash(it) },
             shape = optStr("shape"),
             unusedOnly = bool("unused_only"),
+            uses = ((field("uses") as? HostValue.Opt)?.value as? HostValue.Record)?.fields?.toMap()?.let { u ->
+                ((u["kind"] as? Str)?.value ?: throw IllegalStateException("std::codebase search: `uses` has no kind")) to
+                    ((u["symbol"] as? HostValue.Opt)?.value as? Str)?.value
+            },
             order = order,
             limit = limit,
         )

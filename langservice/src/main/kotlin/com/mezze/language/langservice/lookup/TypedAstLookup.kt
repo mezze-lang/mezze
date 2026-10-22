@@ -195,6 +195,7 @@ object TypedAstLookup {
             }
             is TypedPerform -> walkExprs(expr.body, visit)
             is TypedPipe -> { walkExprs(expr.left, visit); walkExprs(expr.right, visit) }
+            is TypedBuildTime -> walkExprs(expr.expr, visit)
             is TypedStringLit -> expr.parts.filterIsInstance<TypedStringPart.Interpolation>()
                 .forEach { walkExprs(it.expr, visit) }
             is TypedVar, is TypedIntLit, is TypedNatLit, is TypedFloatLit,
@@ -290,6 +291,8 @@ object TypedAstLookup {
                 findInExpr(expr.left, line, col, expr)
                     ?: findInExpr(expr.right, line, col, expr)
             }
+            // Same span as what it marks; a position is in the marked expression.
+            is TypedBuildTime -> findInExpr(expr.expr, line, col, parent)
             is TypedStringLit -> {
                 expr.parts.filterIsInstance<TypedStringPart.Interpolation>().firstNotNullOfOrNull {
                     findInExpr(it.expr, line, col, expr)

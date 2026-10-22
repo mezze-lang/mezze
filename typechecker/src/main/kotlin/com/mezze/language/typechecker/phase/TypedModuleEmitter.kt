@@ -142,11 +142,12 @@ internal fun emitTypedModuleAndLower(
             }
         }
 
-        emittedTypedModule = if (extraImpls.isNotEmpty()) {
+        val withImpls = if (extraImpls.isNotEmpty()) {
             typed.copy(abilityImpls = typed.abilityImpls + extraImpls)
         } else {
             typed
         }
+        emittedTypedModule = markBuildTimeUnits(withImpls, importContext)
     } catch (e: com.mezze.language.typechecker.TypeCheckError) {
         // A TypeCheckError is a DIAGNOSTIC — a message written for the person
         // compiling, at a location they can act on. It propagates unchanged; the
@@ -194,6 +195,29 @@ internal fun emitTypedModuleAndLower(
     }
 
     return EmitResult(emittedTypedModule, loweredFns, loweredPerformers, internalFailure)
+}
+
+/**
+ * Mark what runs during the build: every question whose `Comptime` is answered
+ * by `ComptimeEval` ([com.mezze.language.typechecker.comptime.BuildTimeUnits]).
+ * Handlers and asking functions in reach are the imported ones plus this
+ * module's own.
+ */
+private fun markBuildTimeUnits(module: TypedModule, importContext: ModuleImportContext?): TypedModule {
+    val known = com.mezze.language.typechecker.comptime.CompileTimePerformers.Found(
+        importContext?.compileTimePerformers.orEmpty(),
+        importContext?.comptimeLeavingPerformers.orEmpty(),
+    )
+    val local = com.mezze.language.typechecker.comptime.CompileTimePerformers.of(module, known)
+    val handlers = com.mezze.language.typechecker.comptime.BuildTimeUnits.Handlers(
+        known.compileTime + local.compileTime,
+        known.leavesComptime + local.leavesComptime,
+    )
+    val importedAsking = importContext?.askingFunctions.orEmpty()
+    val asking = importedAsking + com.mezze.language.typechecker.comptime.BuildTimeUnits.askingFunctions(
+        module.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>(), handlers, importedAsking,
+    )
+    return com.mezze.language.typechecker.comptime.BuildTimeUnits.mark(module, handlers, asking)
 }
 
 /**

@@ -280,6 +280,16 @@ interface MezzeStore : AutoCloseable {
     /** Clear all usages recorded from a file. Called before re-indexing a changed file. */
     fun clearUsagesForFile(filePath: String)
 
+    /**
+     * Every expression node written in [modulePath]'s declarations, by its
+     * `std::syntax` kind and what it spells — replacing what the module had. What
+     * makes "every `==`", "every pipe", "every use of `x` as written" one lookup.
+     */
+    fun putOccurrences(modulePath: String, rows: List<OccurrenceRow>)
+
+    /** Nodes of [kind]; with [symbol], only those spelling it. */
+    fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow>
+
     // ====================================================================
     // METADATA
     // ====================================================================
@@ -652,6 +662,21 @@ data class ReachableRow(val hash: Hash, val depth: Int)
  */
 data class AbilityImplRow(val hash: Hash, val abilityHash: Hash, val module: String?)
 data class EffectPerformerRow(val hash: Hash, val effectHash: Hash, val performerName: String, val module: String?)
+/**
+ * One written expression node: the declaration it is in ([ownerHash]), its
+ * `std::syntax` kind (`BinaryExpr`), what it spells (`==`), and where.
+ */
+data class OccurrenceRow(
+    val ownerHash: Hash,
+    val kind: String,
+    val symbol: String?,
+    val filePath: String?,
+    val startLine: Int,
+    val startCol: Int,
+    val endLine: Int,
+    val endCol: Int,
+)
+
 data class UsageRow(
     val targetHash: Hash,
     val filePath: String,

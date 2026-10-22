@@ -535,6 +535,7 @@ class Monomorphizer(
                         com.mezze.language.typedast.TypedStringPart.Interpolation(go(part.expr))
                 }
             })
+            is com.mezze.language.typedast.TypedBuildTime -> e.copy(expr = go(e.expr))
             else -> e
         }
         return go(expr)
@@ -653,6 +654,7 @@ class Monomorphizer(
             is com.mezze.language.typedast.TypedPipe -> e.copy(left = rewrite(e.left), right = rewrite(e.right))
             is com.mezze.language.typedast.TypedPerform -> e.copy(body = rewrite(e.body))
             is com.mezze.language.typedast.TypedPerformOp -> e.copy(arg = rewrite(e.arg))
+            is com.mezze.language.typedast.TypedBuildTime -> e.copy(expr = rewrite(e.expr))
             else -> e
         }
         return rewrite(expr)
@@ -857,6 +859,7 @@ class Monomorphizer(
             }
             is com.mezze.language.typedast.TypedPerform -> collectBodyTypeVars(expr.body, visit)
             is com.mezze.language.typedast.TypedPerformOp -> collectBodyTypeVars(expr.arg, visit)
+            is com.mezze.language.typedast.TypedBuildTime -> collectBodyTypeVars(expr.expr, visit)
             // #225 companion: string-interpolation subexprs may carry TypeVars that
             // share a surface param name — traverse them so buildSubstitution maps
             // them. (Doesn't fix the #225 program itself — that var is name-mismatched —
@@ -1031,6 +1034,7 @@ class Monomorphizer(
                         com.mezze.language.typedast.TypedStringPart.Interpolation(rw(part.expr))
                 }
             })
+            is com.mezze.language.typedast.TypedBuildTime -> e.copy(expr = rw(e.expr))
             else -> e
         }
         return rw(expr)
@@ -1354,6 +1358,7 @@ class Monomorphizer(
                 },
             )
             // Leaves — no recursive children with TypedCalls.
+            is com.mezze.language.typedast.TypedBuildTime -> expr.copy(expr = rewriteCalls(expr.expr, opsByName))
             else -> expr
         }
     }

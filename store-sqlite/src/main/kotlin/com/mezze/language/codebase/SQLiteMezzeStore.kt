@@ -124,7 +124,7 @@ class SQLiteMezzeStore private constructor(
         //    store what type, ability and effect declarations define; and each
         //    usage records the declaration it is written in and whether it is
         //    a call — the SOURCE call graph; and `module_docs`.
-        const val SCHEMA_VERSION = 17
+        const val SCHEMA_VERSION = 18
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096
@@ -646,6 +646,13 @@ class SQLiteMezzeStore private constructor(
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE TABLE IF NOT EXISTS $alias.module_docs (path TEXT PRIMARY KEY, doc TEXT NOT NULL) WITHOUT ROWID")
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.syntax_occurrences (
+                    module_path TEXT NOT NULL, owner_hash TEXT NOT NULL, kind TEXT NOT NULL, symbol TEXT,
+                    file_path TEXT, start_line INTEGER NOT NULL, start_col INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL, end_col INTEGER NOT NULL
+                )
+            """.trimIndent())
             // Definitions: what a type, ability or effect declares. Mirrors the
             // primary schema below.
             s.executeUpdate("""
@@ -1180,6 +1187,24 @@ class SQLiteMezzeStore private constructor(
             s.executeUpdate("CREATE INDEX idx_usages_target ON usages(target_hash)")
             s.executeUpdate("CREATE INDEX idx_usages_from ON usages(from_hash)")
             s.executeUpdate("CREATE INDEX idx_usages_file ON usages(file_path)")
+            s.executeUpdate("""
+                -- syntax_occurrences: every written expression node, by its
+                -- std::syntax kind and what it spells, in the declaration it is
+                -- in. A module's rows are replaced when it is re-indexed.
+                CREATE TABLE syntax_occurrences (
+                    module_path TEXT NOT NULL,
+                    owner_hash  TEXT NOT NULL,
+                    kind        TEXT NOT NULL,
+                    symbol      TEXT,
+                    file_path   TEXT,
+                    start_line  INTEGER NOT NULL,
+                    start_col   INTEGER NOT NULL,
+                    end_line    INTEGER NOT NULL,
+                    end_col     INTEGER NOT NULL
+                )
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_occurrences_kind ON syntax_occurrences(kind, symbol)")
+            s.executeUpdate("CREATE INDEX idx_occurrences_module ON syntax_occurrences(module_path)")
 
             // ----------------------------------------------------------------
             // DISPATCH REGISTRIES — ability impls, effect performers
@@ -2095,6 +2120,65 @@ class SQLiteMezzeStore private constructor(
         clearUsagesStmt.executeUpdate()
     }
 
+    @Synchronized
+    override fun putOccurrences(modulePath: String, rows: List<OccurrenceRow>) {
+        conn.prepareStatement("DELETE FROM syntax_occurrences WHERE module_path = ?").use { st ->
+            st.setString(1, modulePath)
+            st.executeUpdate()
+        }
+        conn.prepareStatement("""
+            INSERT INTO syntax_occurrences
+                (module_path, owner_hash, kind, symbol, file_path, start_line, start_col, end_line, end_col)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent()).use { st ->
+            for (r in rows) {
+                st.setString(1, modulePath)
+                st.setString(2, r.ownerHash.hex)
+                st.setString(3, r.kind)
+                st.setString(4, r.symbol)
+                st.setString(5, r.filePath)
+                st.setInt(6, r.startLine)
+                st.setInt(7, r.startCol)
+                st.setInt(8, r.endLine)
+                st.setInt(9, r.endCol)
+                st.addBatch()
+            }
+            st.executeBatch()
+        }
+    }
+
+    // Every tier, like every other lookup: the stdlib's and the dependencies'
+    // code is searchable as written too.
+    private val findOccurrencesStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll(
+            "SELECT owner_hash, kind, symbol, file_path, start_line, start_col, end_line, end_col " +
+                "FROM <DB>.syntax_occurrences WHERE kind = ? AND (? IS NULL OR symbol = ?)"
+        ))
+    }
+
+    @Synchronized
+    override fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow> {
+        for (db in 0..2) {
+            findOccurrencesStmt.setString(db * 3 + 1, kind)
+            findOccurrencesStmt.setString(db * 3 + 2, symbol)
+            findOccurrencesStmt.setString(db * 3 + 3, symbol)
+        }
+        return findOccurrencesStmt.executeQuery().use { rs ->
+            buildList {
+                while (rs.next()) add(OccurrenceRow(
+                    ownerHash = Hash(rs.getString(1)),
+                    kind = rs.getString(2),
+                    symbol = rs.getString(3),
+                    filePath = rs.getString(4),
+                    startLine = rs.getInt(5),
+                    startCol = rs.getInt(6),
+                    endLine = rs.getInt(7),
+                    endCol = rs.getInt(8),
+                ))
+            }
+        }
+    }
+
     // ====================================================================
     // METADATA
     // ====================================================================
@@ -2597,6 +2681,7 @@ class SQLiteMezzeStore private constructor(
         // hash without a foreign key, and goes here.
         val keyed = listOf(
             "DELETE FROM usages WHERE from_hash = ?",
+            "DELETE FROM syntax_occurrences WHERE owner_hash = ?",
             "DELETE FROM type_nodes WHERE owner_hash = ?",
             "DELETE FROM type_node_effects WHERE owner_hash = ?",
             "DELETE FROM type_node_constraints WHERE owner_hash = ?",

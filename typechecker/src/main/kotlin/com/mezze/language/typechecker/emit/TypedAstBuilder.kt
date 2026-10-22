@@ -434,9 +434,7 @@ class TypedAstBuilder(
         val performerDeclsList = mutableListOf<TypedPerformerDecl>()
         val exports = mutableMapOf<String, ExportEntry>()
 
-        builtPerformers = performerDeclsList; localCompileTime = null
-        // Handlers first: a use of one declared further down must know whether it is compile-time.
-        for (decl in module.decls.sortedBy { if (it is ParsedPerformerDecl) 0 else 1 }) {
+        for (decl in module.decls) {
             enclosing = when (decl) {
                 is ParsedLetDecl -> decl.identity
                 is ParsedImplAbilityDecl -> decl.identity
@@ -451,10 +449,7 @@ class TypedAstBuilder(
                 is ParsedAbilityDecl -> buildAbilityDecl(decl, module.path, abilityDeclsList, exports)
                 is ParsedImplAbilityDecl -> buildAbilityImpl(decl, module.path, abilityImplsList)
                 is ParsedEffectDecl -> buildEffectDecl(decl, module.path, effectDeclsList, exports)
-                is ParsedPerformerDecl -> {
-                    insidePerformerBody++
-                    try { buildPerformerDecl(decl, module.path, performerDeclsList, exports) } finally { insidePerformerBody-- }
-                }
+                is ParsedPerformerDecl -> buildPerformerDecl(decl, module.path, performerDeclsList, exports)
                 is ParsedTopLevelExpr -> buildTopLevelExpr(decl, module.path, decls)
                 is ParsedUseDecl -> { /* resolved at import phase */ }
                 is ParsedPubUseDecl -> { /* resolved at import phase */ }
@@ -1476,12 +1471,10 @@ class TypedAstBuilder(
             }
             is ParsedParens -> buildExpr(expr.expr, file, contextType)
             is ParsedPerform -> {
-                val outerNames = lambdaParamScopes.flatMapTo(HashSet()) { it }  // see foldQuestion
                 val handlers = expr.handlers.map { h ->
                     buildHandlerRef(h, file, loc)
                 }
-                val answersComptime = answersComptime(handlers)
-                val body = buildPerformBody(expr, file, contextType, answersComptime)
+                val body = buildExpr(expr.body, file, contextType)
                 val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     ?: body.type
                 // Effect-model migration (docs/effect-model.md): source
@@ -1504,8 +1497,7 @@ class TypedAstBuilder(
                         h != null && h in handledHashes
                     }
                 }
-                val perform = TypedPerform(handlers, body, performType, loc, fullyDischarges, capturesIntoResult)
-                foldQuestion(perform, answersComptime, outerNames)
+                TypedPerform(handlers, body, performType, loc, fullyDischarges, capturesIntoResult)
             }
             is ParsedEffectCall -> {
                 val opName = expr.operation.localName
@@ -1711,13 +1703,6 @@ class TypedAstBuilder(
         }
         return false
     }
-
-    // Question-folding state; see QuestionEmit.kt.
-    internal var questionAnsweredOutside = 0
-    internal var insideComptimeBlock = 0
-    internal var insidePerformerBody = 0
-    internal var builtPerformers: List<TypedPerformerDecl> = emptyList()
-    internal var localCompileTime: com.mezze.language.typechecker.comptime.CompileTimePerformers.Found? = null
 
     private fun collectCaptures(body: TypedExpr, paramNames: Set<String>): List<TypedCapture> {
         val captures = mutableListOf<TypedCapture>()

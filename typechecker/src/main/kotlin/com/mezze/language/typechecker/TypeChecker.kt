@@ -419,13 +419,17 @@ class TypeChecker(
         // Which imported handlers answer at compile time, over every loaded module
         // at once: a handler may wrap one declared in a module it imports.
         importContext = importContext?.let { ctx ->
-            val found = com.mezze.language.typechecker.comptime.CompileTimePerformers
-                .ofModules(loadedModules.values.mapNotNull { it.typedModule })
+            val modules = loadedModules.values.mapNotNull { it.typedModule }
+            val found = com.mezze.language.typechecker.comptime.CompileTimePerformers.ofModules(modules)
+            val asking = com.mezze.language.typechecker.comptime.BuildTimeUnits.askingFunctions(
+                modules.flatMap { m -> m.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>() },
+                com.mezze.language.typechecker.comptime.BuildTimeUnits.Handlers(found.compileTime, found.leavesComptime),
+                emptySet(),
+            )
             ctx.copy(
                 compileTimePerformers = found.compileTime,
                 comptimeLeavingPerformers = found.leavesComptime,
-                comptimeAnswererHash = found.answerer?.performerHash,
-                comptimeAnswererName = found.answerer?.performerName,
+                askingFunctions = asking,
             )
         }
         val registry = buildFullRegistry(loadedModules, buildResult, importContext)
@@ -460,7 +464,11 @@ class TypeChecker(
         val constraintGenerator = ConstraintGenerator.create(
             registry = registry,
             performerToEffect = buildResult.performerToEffect,
-            performerAddedEffects = buildResult.performerAddedEffects,
+            // Imported performers' added effects, read off their typed bodies (an
+            // imported performer has no body validated here); this module's own
+            // performers come from validating their bodies, and win.
+            performerAddedEffects = com.mezze.language.typechecker.context.ImportedPerformerEffects
+                .ofModules(loadedModules.values.mapNotNull { it.typedModule }) + buildResult.performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
             // `isStdlibModule` here doubles as the "may reference `__native_*`

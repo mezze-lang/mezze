@@ -300,6 +300,7 @@ object TypedAstScopeWalker {
                 if (walk(expr.left, line, col, out)) return true
                 walk(expr.right, line, col, out)
             }
+            is TypedBuildTime -> walk(expr.expr, line, col, out)
             is TypedStringLit -> {
                 for (part in expr.parts) {
                     if (part is TypedStringPart.Interpolation) {

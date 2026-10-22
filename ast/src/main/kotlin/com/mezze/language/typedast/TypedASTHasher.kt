@@ -350,6 +350,10 @@ object TypedASTHasher {
                 appendExpr(b, expr.left)
                 appendExpr(b, expr.right)
             }
+            // Transparent: WHEN an expression runs is decided from the program
+            // itself, so it is not part of what the program IS. A declaration
+            // hashes the same before and after build-time units are marked.
+            is TypedBuildTime -> appendExpr(b, expr.expr)
         }
     }
 

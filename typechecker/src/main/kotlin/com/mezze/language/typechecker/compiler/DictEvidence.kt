@@ -324,6 +324,9 @@ internal fun TypedASTCompiler.scanExprForDictFunctionCalls(expr: TypedExpr, out:
             scanExprForDictFunctionCalls(expr.left, out)
             scanExprForDictFunctionCalls(expr.right, out)
         }
+        // The handler parameters are scanned where they were written, on the
+        // enclosing `perform`.
+        is TypedBuildTime -> scanExprForDictFunctionCalls(expr.expr, out)
         is TypedSeq -> {
             for (e in expr.elements) {
                 when (e) {
@@ -954,6 +957,7 @@ internal fun TypedASTCompiler.scanExprForVarTypeMethods(
             scanExprForVarTypeMethods(expr.left, out, arrowIsConstrained, arrowType, paramEnv)
             scanExprForVarTypeMethods(expr.right, out, arrowIsConstrained, arrowType, paramEnv)
         }
+        is TypedBuildTime -> scanExprForVarTypeMethods(expr.expr, out, arrowIsConstrained, arrowType, paramEnv)
         is TypedSeq -> {
             for (e in expr.elements) {
                 when (e) {

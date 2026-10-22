@@ -55,12 +55,7 @@ internal fun TypedAstBuilder.buildFunctionCall(expr: ParsedFunctionCall, file: S
             if (isEffect) {
                 val effectHash = resolveEffectHash(receiverName)
                 val opName = memberAccess.member
-                // Inside a `comptime` block everything already runs while compiling,
-                // so a question to the compiler there is asked in place, not folded
-                // again (TypedAstBuilder.foldQuestion).
-                val isComptimeBlock = com.mezze.language.typechecker.WellKnownHashConstants.isComptime(effectHash, opName)
-                if (isComptimeBlock) insideComptimeBlock++
-                val argExpr = try { buildExpr(expr.arguments, file) } finally { if (isComptimeBlock) insideComptimeBlock-- }
+                val argExpr = buildExpr(expr.arguments, file)
                 val effectDecl = registry.lookupEffect(receiverName)
                     ?: importContext?.importedEffects?.get(receiverName)
                 // The solver already unified this call's result var with the
@@ -645,6 +640,9 @@ internal fun TypedAstBuilder.buildMethodCall(
             receiverExpr, memberAccess.member, -1,
             closeGeneratedRowVars(calleeType, mustBeOpenRowVars), memberAccess.loc,
             abilityHash = ambiguousAbilityHash,
+            dispatchedAbility = methodInfo.abilityName?.let { name ->
+                registry.lookupAbility(name)?.identity ?: importContext?.importedAbilities?.get(name)?.identity
+            },
         )
     }
 

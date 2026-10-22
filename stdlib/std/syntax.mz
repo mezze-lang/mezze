@@ -1,0 +1,308 @@
+# Mezze code as written: the syntax tree, and what the compiler attached to it.
+#
+# Every node is what the parser read — operators as operators, a pipe and its
+# `@` as written, parentheses, record shorthand, comments, type annotations as
+# spelled. Where the compiler type-checked a node, `facts` says what it made of
+# it: the node's type, the declaration a name resolves to, what a call or an
+# operator dispatches to, and whether it runs while the program is built.
+#
+# `facts` is optional on every node: code that does not type-check still has a
+# syntax tree, and a node the compiler never saw (a comment, a type annotation)
+# has none.
+
+use std::collections::seq
+use std::int
+
+## Where something is written: 1-based lines and columns, the end column inclusive.
+pub type Span = { file: Option Str, start_line: Int, start_col: Int, end_line: Int, end_col: Int }
+
+## A declaration, by identity. `hash` IS the declaration: two declarations that
+## share a name never share a hash.
+pub type DeclRef = { hash: Str, name: Str, module: Str, kind: DeclKind }
+
+pub type DeclKind = | LetDecl, TypeDecl, AbilityDecl, EffectDecl, ImplDecl, PerformerDecl |
+
+## A type, as the compiler understands it.
+pub type TypeShape = |
+  TInt, TFloat, TStr, TChar, TFrac, TBytes,
+  TVar { name: Str },
+  TRecord { name: Option Str, hash: Option Str, fields: [FieldShape], is_open: Bool },
+  TVariant { name: Option Str, hash: Option Str, constructors: [ConstructorShape], is_open: Bool },
+  TApp { name: Str, hash: Option Str, args: [TypeShape] },
+  TNewtype { name: Str, hash: Option Str, wrapped: TypeShape },
+  TFn { param: TypeShape, result: TypeShape, effects: [EffectRef], requires: [RequiredAbility], open_effects: Bool },
+|
+
+pub type FieldShape = { name: Str, ty: TypeShape }
+pub type ConstructorShape = { name: Str, payload: Option TypeShape }
+pub type RequiredAbility = { name: Str, hash: Option Str }
+
+## An effect as it appears in a row; `decl` is its declaration, when known.
+pub type EffectRef = { name: Str, decl: Option DeclRef }
+
+## What the compiler made of a node.
+pub type Facts = {
+  ## The node's type.
+  ty: TypeShape,
+  ## A name: the declaration it resolves to.
+  refers_to: Option DeclRef,
+  ## A call, an operator or an effect operation: the declaration it reaches —
+  ## a function, or the impl an operator dispatched to. `None` for a built-in
+  ## operation (`>` on `Int`) and for one dispatched through a dictionary.
+  calls: Option DeclRef,
+  ## Evaluated while the program is built.
+  at_build: Bool,
+}
+
+## A `#` or `##` comment, where it is written.
+pub type Comment = { text: Str, is_doc: Bool, span: Span }
+
+pub type Expr = |
+  IntExpr { value: Int, span: Span, facts: Option Facts },
+  NatExpr { value: Int, span: Span, facts: Option Facts },
+  FloatExpr { value: Float, span: Span, facts: Option Facts },
+  FracExpr { num: Int, den: Int, span: Span, facts: Option Facts },
+  StrExpr { parts: [StrPart], span: Span, facts: Option Facts },
+  CharExpr { value: Str, span: Span, facts: Option Facts },
+  ## A name, possibly qualified: `module` is the `a::b` before it.
+  NameExpr { name: Str, module: Option Str, span: Span, facts: Option Facts },
+  LambdaExpr { params: LambdaParams, body: Expr, returns: Option TypeExpr, requires: [Constraint], span: Span, facts: Option Facts },
+  CallExpr { callee: Expr, arg: Expr, span: Span, facts: Option Facts },
+  ## `left <op> right`, with `op` as written: `>`, `==`, `&&`, …
+  BinaryExpr { op: Str, left: Expr, right: Expr, span: Span, facts: Option Facts },
+  PipeExpr { left: Expr, right: Expr, comments: [Comment], span: Span, facts: Option Facts },
+  ## `@`, the piped-in value.
+  PlaceholderExpr { span: Span, facts: Option Facts },
+  RecordExpr { entries: [Entry], span: Span, facts: Option Facts },
+  MemberExpr { receiver: Expr, member: Str, member_span: Span, span: Span, facts: Option Facts },
+  VariantExpr { constructor: Str, payload: Option Expr, span: Span, facts: Option Facts },
+  ## `T.(value)`.
+  NewtypeExpr { type_name: Str, value: Expr, span: Span, facts: Option Facts },
+  IfExpr { cond: Expr, then_branch: Expr, else_branch: Expr, span: Span, facts: Option Facts },
+  MatchExpr { scrutinee: Expr, arms: [Arm], span: Span, facts: Option Facts },
+  DoExpr { statements: [Statement], result: Expr, span: Span, facts: Option Facts },
+  SeqExpr { elements: [SeqElement], span: Span, facts: Option Facts },
+  PerformExpr { handlers: [Handler], body: Expr, span: Span, facts: Option Facts },
+  ## `Effect.op { … }`.
+  EffectCallExpr { op: Str, effect_name: Option Str, arg: Expr, span: Span, facts: Option Facts },
+  ParensExpr { inner: Expr, span: Span, facts: Option Facts },
+|
+
+pub type StrPart = | TextPart { text: Str }, InterpPart { expr: Expr } |
+
+## A record entry. `value` is `None` for shorthand: `{ x }`.
+pub type Entry = |
+  FieldEntry { name: Str, value: Option Expr, span: Span, comments: [Comment] },
+  SpreadEntry { expr: Expr, span: Span, comments: [Comment] },
+|
+
+pub type SeqElement = | ItemElement { expr: Expr }, SpreadElement { expr: Expr, span: Span } |
+
+## A handler in `perform … in`. `params` is its record of arguments.
+pub type Handler = { performer: Str, module: Option Str, span: Span, params: Option Expr }
+
+pub type LambdaParams = |
+  TypedParams { fields: [FieldType] },
+  NamedParams { names: [Str], is_open: Bool, spans: [Span] },
+|
+
+## `with Ability 'a`, as written.
+pub type Constraint = { ability_name: Str, args: [TypeExpr], bindings: [AssocBinding], span: Span }
+
+pub type AssocBinding = { name: Str, ty: TypeExpr }
+
+pub type Arm = {
+  patterns: [Pattern],
+  guard: Option Expr,
+  if_lets: [IfLet],
+  body: Expr,
+  span: Span,
+  doc: Option Str,
+  metadata: Option Str,
+  comments: [Comment],
+}
+
+pub type IfLet = { pattern: Pattern, value: Expr, span: Span }
+
+pub type Statement = |
+  LetStatement { pattern: Pattern, annotation: Option TypeExpr, value: Expr, span: Span, doc: Option Str, metadata: Option Str, comments: [Comment] },
+  ExprStatement { expr: Expr, span: Span, doc: Option Str, metadata: Option Str, comments: [Comment] },
+|
+
+pub type Pattern = |
+  WildcardPat { span: Span },
+  VarPat { name: Str, span: Span },
+  ConstructorPat { constructor: Str, payload: Option Pattern, span: Span },
+  NewtypePat { type_name: Str, inner: Pattern, span: Span },
+  RecordPat { fields: [FieldPat], is_open: Bool, span: Span },
+  LiteralPat { value: PatLiteral, span: Span },
+  SeqPat { elements: [Pattern], rest: Option Str, span: Span },
+  StrPat { parts: [StrPatPart], span: Span },
+|
+
+pub type FieldPat = { name: Str, pattern: Option Pattern, span: Span }
+
+pub type PatLiteral = | IntLiteral { value: Int }, NatLiteral { value: Int }, FloatLiteral { value: Float }, StrLiteral { value: Str }, BoolLiteral { value: Bool } |
+
+pub type StrPatPart = | TextPat { text: Str }, CapturePat { name: Str } |
+
+## A type as written.
+pub type TypeExpr = |
+  ## `Int`, `'a`, `Point`.
+  NamedType { name: Str, span: Span },
+  ## `a::b::T 'x`.
+  QualifiedType { module: Str, name: Str, args: [TypeExpr], span: Span },
+  ## `Box 'a`.
+  AppliedType { constructor: Str, args: [TypeExpr], span: Span },
+  RecordTypeExpr { fields: [FieldType], is_open: Bool, span: Span },
+  VariantTypeExpr { constructors: [CtorType], is_open: Bool, span: Span },
+  FnTypeExpr { param: TypeExpr, result: TypeExpr, effects: Option EffectRowExpr, requires: [Constraint], span: Span },
+  SeqTypeExpr { element: TypeExpr, span: Span },
+|
+
+pub type FieldType = { name: Str, ty: TypeExpr, span: Span }
+pub type CtorType = { name: Str, payload: Option TypeExpr, span: Span }
+pub type EffectRowExpr = { effects: [EffectUse], is_open: Bool, performed: Bool, span: Span }
+pub type EffectUse = { name: Str, associated: [AssocBinding], span: Span }
+
+## A declaration as written, with what surrounds it.
+pub type SyntaxDecl = {
+  decl: Decl,
+  ## The module it is written in.
+  module: Str,
+  span: Span,
+  is_public: Bool,
+  doc: Option Str,
+  ## The `#{...}` block, as JSON text.
+  metadata: Option Str,
+  comments: [Comment],
+  trailing: Option Comment,
+  ## The declaration this is, when it has an identity (a `use` line has none).
+  ref: Option DeclRef,
+}
+
+pub type Decl = |
+  LetSyntax { pattern: Pattern, annotation: Option TypeExpr, value: Expr },
+  TypeSyntax { name: Str, params: [Str], def: TypeDefSyntax },
+  AbilitySyntax { name: Str, params: [Str], receiver: Option Str, associated: [Str], ops: [AbilityOpSyntax] },
+  ## `ability_name` is `None` for an inherent impl (`impl T where …`).
+  ImplSyntax { ability_name: Option Str, ability_module: Option Str, targets: [TypeExpr], ability_args: [TypeExpr], forall: [Str], associated: [AssocBinding], ops: [OpSyntax], derived: Bool },
+  EffectSyntax { name: Str, associated: [Str], ops: [EffectOpSyntax] },
+  PerformerSyntax { name: Str, effect_name: Str, effect_module: Option Str, params: [FieldType], associated: [AssocBinding], ops: [OpSyntax] },
+  UseSyntax { module: Str, items: Option [ImportItem], alias: Option Str, reexport: Bool },
+  TopLevelSyntax { expr: Expr },
+|
+
+pub type TypeDefSyntax = |
+  RecordDefSyntax { fields: [FieldDefSyntax], is_open: Bool, span: Span },
+  VariantDefSyntax { constructors: [CtorDefSyntax], is_open: Bool, span: Span },
+  NewtypeDefSyntax { constructor: Str, wrapped: TypeExpr, span: Span },
+  AliasDefSyntax { aliased: TypeExpr, span: Span },
+|
+
+pub type FieldDefSyntax = { name: Str, ty: TypeExpr, doc: Option Str, metadata: Option Str, span: Span }
+pub type CtorDefSyntax = { name: Str, payload: Option TypeExpr, doc: Option Str, metadata: Option Str, span: Span }
+pub type AbilityOpSyntax = { name: Str, param: TypeExpr, result: TypeExpr, effects: Option EffectRowExpr, requires: [Constraint], doc: Option Str, span: Span }
+pub type EffectOpSyntax = { name: Str, param: TypeExpr, result: TypeExpr, effects: [Str], requires: [Constraint], doc: Option Str, span: Span }
+## An operation written in an `impl` or a performer.
+pub type OpSyntax = { name: Str, param: Option TypeExpr, result: Option TypeExpr, body: Expr, effects: Option EffectRowExpr, requires: [Constraint], doc: Option Str, span: Span }
+pub type ImportItem = { name: Str, alias: Option Str, span: Span }
+
+## ---- Walking -------------------------------------------------------------
+
+## Every expression in a declaration — each, and everything inside it, outermost
+## first: what a linter looks through. A `let`'s value, and the operations of an
+## `impl` or a performer; a type, an ability, an effect or a `use` line has none.
+pub let all_exprs: { decl: SyntaxDecl } -> [Expr] = { decl } -> match decl.decl is
+  LetSyntax { value, ... } -> with_inner { e = value }
+  ImplSyntax { ops, ... } -> seq::flat_map { xs = ops, f = { x } -> with_inner { e = x.body } }
+  PerformerSyntax { ops, ... } -> seq::flat_map { xs = ops, f = { x } -> with_inner { e = x.body } }
+  TopLevelSyntax { expr } -> with_inner { e = expr }
+  TypeSyntax { ... } -> []
+  AbilitySyntax { ... } -> []
+  EffectSyntax { ... } -> []
+  UseSyntax { ... } -> []
+
+## [e], then every expression inside it, outermost first.
+pub let with_inner: { e: Expr } -> [Expr] = { e } ->
+  seq::push_front { xs = seq::flat_map { xs = children { e = e }, f = { x } -> with_inner { e = x } }, x = e }
+
+## The expressions directly inside [e], in written order.
+pub let children: { e: Expr } -> [Expr] = { e } -> match e is
+  IntExpr { ... } -> []
+  NatExpr { ... } -> []
+  FloatExpr { ... } -> []
+  FracExpr { ... } -> []
+  CharExpr { ... } -> []
+  NameExpr { ... } -> []
+  PlaceholderExpr { ... } -> []
+  StrExpr { parts, ... } -> seq::flat_map { xs = parts, f = { x } -> match x is
+    TextPart { ... } -> []
+    InterpPart { expr } -> [expr] }
+  LambdaExpr { body, ... } -> [body]
+  CallExpr { callee, arg, ... } -> [callee, arg]
+  BinaryExpr { left, right, ... } -> [left, right]
+  PipeExpr { left, right, ... } -> [left, right]
+  RecordExpr { entries, ... } -> seq::flat_map { xs = entries, f = { x } -> match x is
+    FieldEntry { value, ... } -> listed { o = value }
+    SpreadEntry { expr, ... } -> [expr] }
+  MemberExpr { receiver, ... } -> [receiver]
+  VariantExpr { payload, ... } -> listed { o = payload }
+  NewtypeExpr { value, ... } -> [value]
+  IfExpr { cond, then_branch, else_branch, ... } -> [cond, then_branch, else_branch]
+  MatchExpr { scrutinee, arms, ... } -> seq::push_front { x = scrutinee, xs = seq::flat_map { xs = arms, f = { x } ->
+    seq::flatten { xss = [listed { o = x.guard }, seq::map { xs = x.if_lets, f = { x } -> x.value }, [x.body]] } } }
+  DoExpr { statements, result, ... } -> seq::push { x = result, xs = seq::map { xs = statements, f = { x } -> match x is
+    LetStatement { value, ... } -> value
+    ExprStatement { expr, ... } -> expr } }
+  SeqExpr { elements, ... } -> seq::map { xs = elements, f = { x } -> match x is
+    ItemElement { expr } -> expr
+    SpreadElement { expr, ... } -> expr }
+  PerformExpr { handlers, body, ... } ->
+    seq::push { x = body, xs = seq::flat_map { xs = handlers, f = { x } -> listed { o = x.params } } }
+  EffectCallExpr { arg, ... } -> [arg]
+  ParensExpr { inner, ... } -> [inner]
+
+## What a node is, in the terms the occurrence index uses: its kind (its tag
+## here), each thing it spells, where it is, and its facts. Agrees with the
+## compiler's index (`syntaxKind`, `syntaxSymbols`); a test checks the two
+## against each other.
+pub type NodeInfo = { kind: Str, symbols: [Str], span: Span, facts: Option Facts }
+
+pub let node_info: { e: Expr } -> NodeInfo = { e } -> match e is
+  IntExpr { value, span, facts } -> { kind = "IntExpr", symbols = [int::to_str { n = value }], span = span, facts = facts }
+  NatExpr { value, span, facts } -> { kind = "NatExpr", symbols = ["$(int::to_str { n = value })n"], span = span, facts = facts }
+  FloatExpr { span, facts, ... } -> { kind = "FloatExpr", symbols = [], span = span, facts = facts }
+  FracExpr { span, facts, ... } -> { kind = "FracExpr", symbols = [], span = span, facts = facts }
+  StrExpr { span, facts, ... } -> { kind = "StrExpr", symbols = [], span = span, facts = facts }
+  CharExpr { span, facts, ... } -> { kind = "CharExpr", symbols = [], span = span, facts = facts }
+  NameExpr { name, module, span, facts } -> { kind = "NameExpr", symbols = [qualified { name = name, module = module }], span = span, facts = facts }
+  LambdaExpr { span, facts, ... } -> { kind = "LambdaExpr", symbols = [], span = span, facts = facts }
+  CallExpr { span, facts, ... } -> { kind = "CallExpr", symbols = [], span = span, facts = facts }
+  BinaryExpr { op, span, facts, ... } -> { kind = "BinaryExpr", symbols = [op], span = span, facts = facts }
+  PipeExpr { span, facts, ... } -> { kind = "PipeExpr", symbols = [], span = span, facts = facts }
+  PlaceholderExpr { span, facts } -> { kind = "PlaceholderExpr", symbols = [], span = span, facts = facts }
+  RecordExpr { span, facts, ... } -> { kind = "RecordExpr", symbols = [], span = span, facts = facts }
+  MemberExpr { member, span, facts, ... } -> { kind = "MemberExpr", symbols = [member], span = span, facts = facts }
+  VariantExpr { constructor, span, facts, ... } -> { kind = "VariantExpr", symbols = [constructor], span = span, facts = facts }
+  NewtypeExpr { type_name, span, facts, ... } -> { kind = "NewtypeExpr", symbols = [type_name], span = span, facts = facts }
+  IfExpr { span, facts, ... } -> { kind = "IfExpr", symbols = [], span = span, facts = facts }
+  MatchExpr { span, facts, ... } -> { kind = "MatchExpr", symbols = [], span = span, facts = facts }
+  DoExpr { span, facts, ... } -> { kind = "DoExpr", symbols = [], span = span, facts = facts }
+  SeqExpr { span, facts, ... } -> { kind = "SeqExpr", symbols = [], span = span, facts = facts }
+  PerformExpr { handlers, span, facts, ... } -> {
+    kind = "PerformExpr",
+    symbols = seq::map { xs = handlers, f = { x } -> qualified { name = x.performer, module = x.module } },
+    span = span, facts = facts,
+  }
+  EffectCallExpr { op, effect_name, span, facts, ... } -> { kind = "EffectCallExpr", symbols = [qualified { name = op, module = effect_name }], span = span, facts = facts }
+  ParensExpr { span, facts, ... } -> { kind = "ParensExpr", symbols = [], span = span, facts = facts }
+
+## `a::b::name`, as written.
+let qualified: { name: Str, module: Option Str } -> Str = { name, module } -> match module is
+  Some { val } -> "$(val)::$(name)"
+  None -> name
+
+let listed: { o: Option Expr } -> [Expr] = { o } -> match o is
+  Some { val } -> [val]
+  None -> []

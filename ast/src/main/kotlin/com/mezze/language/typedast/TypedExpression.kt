@@ -158,6 +158,15 @@ data class TypedFieldAccess(
      * already unambiguous).
      */
     val abilityHash: Hash? = null,
+    /**
+     * When this is the callee of an ability method or operator, the ability it
+     * dispatches through, by identity — `m < n` through `Ord`. EVIDENCE, for
+     * tools: with the receiver's type it names the impl (one per ability and
+     * type), where otherwise a tool could only re-derive dispatch from names.
+     * The compiler dispatches from the receiver as before; not part of the hash.
+     * Null for a built-in operation no ability declares (`+` on `Int`).
+     */
+    val dispatchedAbility: Hash? = null,
 ) : TypedExpr
 
 @Serializable
@@ -317,6 +326,31 @@ data class TypedHandlerRef(
 )
 
 // TypedAbilityCall REMOVED — ability calls become TypedCall with BindingRef.ByHash.
+
+/**
+ * [expr], evaluated while the program is built. Not a rewrite: [expr] is exactly
+ * what was written, and this node only says WHEN it runs.
+ *
+ * It marks the smallest closed expression around a question whose `Comptime`
+ * is answered at build — by `ComptimeEval`, or by a handler that answers it
+ * itself (`ComptimeEvalCodebase`). [handlers] are the user's own handlers between
+ * [expr] and that answer, outermost first: the build evaluates [expr] under
+ * them, and the program gets the value in its place.
+ *
+ * Chosen after emit by `BuildTimeUnits`, from the program as written; nothing in
+ * the typed tree is fabricated to make it fold.
+ */
+@Serializable
+data class TypedBuildTime(
+    val expr: TypedExpr,
+    val handlers: List<BuildTimeHandler>,
+    override val type: MezzeType,
+    override val loc: Loc,
+) : TypedExpr
+
+/** One of a [TypedBuildTime]'s handlers, as its `perform` installed it. */
+@Serializable
+data class BuildTimeHandler(val handler: TypedHandlerRef, val fullyDischarges: Boolean)
 
 /** Effect operation — runtime dispatch. Can't be resolved at compile time
  *  because the performer depends on which `perform` block we're inside. */

@@ -1,5 +1,8 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.parsedast.children
+import com.mezze.language.parsedast.syntaxKind
+import com.mezze.language.parsedast.syntaxSymbols
 import com.mezze.language.store.*
 
 import com.mezze.language.typechecker.TypeCheckResult
@@ -121,6 +124,7 @@ object StorePopulator {
                 // so the entry's decls only land if `entrySource` was passed.
                 if (entrySource != null) {
                     scatterDecls(store, typedModule, modulePath, entrySource, parsedModule)
+                    scatterOccurrences(store, modulePath, parsedModule)
                 }
 
                 // Cross-file find-references index. Walks every TypedExpr
@@ -176,6 +180,7 @@ object StorePopulator {
 
                 // Per-decl index for the dep too. We have its source in hand.
                 scatterDecls(store, loadedTyped, loadedPath, depSource, depParsed)
+                scatterOccurrences(store, loadedPath, depParsed)
 
                 // Imports for the dep — only if we have its ParsedModule.
                 // Without the ParsedModule we don't have the use-decl source
@@ -357,6 +362,8 @@ object StorePopulator {
             is com.mezze.language.typedast.TypedFracLit,
             is com.mezze.language.typedast.TypedBoolLit,
             is com.mezze.language.typedast.TypedCharLit -> Unit
+            // Its handlers' parameters are walked on the `perform` they belong to.
+            is com.mezze.language.typedast.TypedBuildTime -> walkExpr(expr.expr, collect)
         }
     }
 
@@ -427,6 +434,43 @@ object StorePopulator {
      * Loc range. Slice F diffs these on recompile to find which decls actually
      * changed; today's slice just lays the rows down.
      */
+    /**
+     * Every expression node of [modulePath]'s declarations into the occurrence
+     * index, by its `std::syntax` kind and each thing it spells. A declaration
+     * is paired with its index row by where it starts — both come from this
+     * parse — so the rows [scatterDecls] just wrote must already be there.
+     */
+    private fun scatterOccurrences(
+        store: MezzeStore,
+        modulePath: String,
+        parsed: com.mezze.language.parsedast.ParsedModule?,
+    ) {
+        if (parsed == null) return
+        val owners = store.getDeclsForModule(modulePath).associate { (it.startLine to it.startCol) to it.hash }
+        val rows = mutableListOf<com.mezze.language.store.OccurrenceRow>()
+        fun walk(owner: Hash, e: com.mezze.language.parsedast.ParsedExpr) {
+            val symbols = e.syntaxSymbols()
+            for (symbol in symbols.ifEmpty { listOf(null) }) {
+                rows += com.mezze.language.store.OccurrenceRow(
+                    owner, e.syntaxKind(), symbol, e.loc.file.ifEmpty { null },
+                    e.loc.startLine, e.loc.startCol, e.loc.endLine, e.loc.endCol,
+                )
+            }
+            e.children().forEach { walk(owner, it) }
+        }
+        for (decl in parsed.decls) {
+            val owner = owners[decl.loc.startLine to decl.loc.startCol] ?: continue
+            val roots: List<com.mezze.language.parsedast.ParsedExpr> = when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> listOf(decl.value)
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> decl.operations.map { it.implementation }
+                is com.mezze.language.parsedast.ParsedPerformerDecl -> decl.operations.map { it.implementation }
+                else -> emptyList()
+            }
+            roots.forEach { walk(owner, it) }
+        }
+        store.putOccurrences(modulePath, rows)
+    }
+
     private fun scatterDecls(
         store: MezzeStore,
         module: TypedModule,
@@ -498,27 +542,8 @@ object StorePopulator {
         return result
     }
 
-    /**
-     * A declaration's `#{ … }` metadata as JSON text — what `std::codebase` hands
-     * a program, which decodes it into whatever type it declares. Built with a
-     * JSON encoder, not by concatenation: a hand-built string escaped only `"`,
-     * so a note holding a backslash or a newline was not JSON at all.
-     */
-    private fun serializeMetadata(metadata: com.mezze.language.parsedast.ParsedMetadata?): String? {
-        if (metadata == null || metadata.fields.isEmpty()) return null
-        return kotlinx.serialization.json.JsonObject(metadata.fields.mapValues { (_, v) -> metadataJson(v) }).toString()
-    }
-
-    private fun metadataJson(value: com.mezze.language.parsedast.ParsedMetadataValue): kotlinx.serialization.json.JsonElement =
-        when (value) {
-            is com.mezze.language.parsedast.ParsedMetadataValue.StringVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
-            is com.mezze.language.parsedast.ParsedMetadataValue.IntVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
-            is com.mezze.language.parsedast.ParsedMetadataValue.BoolVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
-            is com.mezze.language.parsedast.ParsedMetadataValue.FloatVal -> kotlinx.serialization.json.JsonPrimitive(value.value)
-            is com.mezze.language.parsedast.ParsedMetadataValue.ListVal -> kotlinx.serialization.json.JsonArray(value.values.map { metadataJson(it) })
-            is com.mezze.language.parsedast.ParsedMetadataValue.RecordVal ->
-                kotlinx.serialization.json.JsonObject(value.fields.mapValues { (_, v) -> metadataJson(v) })
-        }
+    private fun serializeMetadata(metadata: com.mezze.language.parsedast.ParsedMetadata?): String? =
+        metadata?.takeIf { it.fields.isNotEmpty() }?.toJsonText()
 
     private fun writeDecl(
         store: MezzeStore,

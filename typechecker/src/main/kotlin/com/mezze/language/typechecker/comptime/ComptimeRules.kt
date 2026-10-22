@@ -114,10 +114,9 @@ object ComptimeRules {
 
     // ── questions to the compiler (introspection §9.2) ─────────────────────
     //
-    // A `perform` of a compile-time handler (`ComptimeEvalCodebase`, or `ComptimeEval`
-    // around `EvalCodebase`) is folded during the build, exactly as a comptime
-    // block is. These are its rules, in its own words: the person wrote a
-    // `perform`, not a `comptime`.
+    // A question whose `Comptime` is answered by `ComptimeEval` runs during the
+    // build ([BuildTimeUnits]). These are its rules, in its own words: the person
+    // wrote a `perform`, not a `comptime`.
 
     /** The question reads a run-time value, so it cannot be answered while compiling. */
     fun checkQuestionIsClosed(capturedNames: List<String>, loc: Loc?) {
@@ -133,15 +132,19 @@ object ComptimeRules {
         )
     }
 
-    /** A compile-time handler whose `Comptime` nothing here answers. */
-    fun rejectUnansweredQuestion(loc: Loc?): Nothing {
+    /**
+     * A question answered at build whose smallest closed expression is a
+     * function, or that two different answers would have to share: there is no
+     * value to compute while compiling.
+     */
+    fun rejectUnfoldableQuestion(loc: Loc?): Nothing {
         throw TypeCheckError(
-            "this asks the compiler a question, but no handler of `Comptime` is in " +
-                "reach to answer it while compiling. Import `std::codebase` (whose " +
-                "handlers bring one), or answer it here: `perform ComptimeEval in …`.",
+            "this question to the compiler is answered while compiling, but what it " +
+                "computes is a function, or it is answered by two different handlers at " +
+                "once — there is no single value to compute at build. Ask for data, " +
+                "under one `ComptimeEval`.",
             loc,
             code = ErrorCode.V0801_COMPTIME_MISUSE,
         )
     }
-
 }

@@ -484,6 +484,7 @@ object MonoDriver {
             }
             is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is com.mezze.language.typedast.TypedBuildTime -> collectSeedsFromExpr(expr.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             is TypedStringLit -> for (part in expr.parts) {
                 if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }

@@ -35,7 +35,8 @@ class CodebaseEffectTest {
     private val declarations = """
         ## The app under test.
         use std::comptime::{ Comptime, ComptimeEval }
-        use std::codebase::{ Codebase, ComptimeEvalCodebase, EvalCodebase, FixtureCodebase, DeclRef, Definition, RecordDef, TypeShape, TFn, TInt, LetDecl, ByName, query, empty_fixture, LambdaExpr, FieldAccessExpr }
+        use std::codebase::{ Codebase, ComptimeEvalCodebase, EvalCodebase, FixtureCodebase, DeclRef, Definition, RecordDef, TypeShape, ByName, query, empty_fixture }
+        use std::syntax::{ TFn, TInt, LetDecl, LetSyntax, LambdaExpr, MemberExpr, NamedParams }
         use std::collections::seq
         use std::effects::log::{ println, Log }
         use std::effects::noop::{ noop }
@@ -292,14 +293,16 @@ class CodebaseEffectTest {
 
     @Test
     @Timeout(240)
-    fun `a question that also does run-time work fails the build`() {
-        val message = rejected("""
+    fun `a question beside run-time work, only the question runs at build`() {
+        // The smallest closed expression around the question is the question: the
+        // run-time work beside it stays where it is.
+        val out = run(bare("""
             let ask = {} -> perform ComptimeEvalCodebase in do
-              println { msg = "hi" }
-              Codebase.decls { module = "app" }
+              noop {}
+              seq::size { xs = Codebase.decls { module = "app" } }
             ask {}
-        """)
-        assertTrue(message.contains("nothing handles while compiling"), "got: $message")
+        """))
+        assertEquals(5L, out)
     }
 
     // ── handlers that wrap a question are compile-time too ───────────────────
@@ -405,17 +408,92 @@ class CodebaseEffectTest {
 
     @Test
     @Timeout(240)
-    fun `a body is a typed tree a program can walk`() {
+    fun `a declaration's syntax is a tree a program can walk`() {
         val out = run(bare("""
             let answer = {} -> perform ComptimeEvalCodebase in match Codebase.resolve { module = "app", name = "size" } is
-              Some { val } -> match Codebase.body { decl = val } is
-                Some { val = LambdaExpr { params, body = FieldAccessExpr { field, ... }, ... } } -> "$(field) of $(seq::size { xs = params }.to_str {})"
-                Some { val } -> "another shape"
-                None -> "no body"
+              Some { val } -> match Codebase.syntax { decl = val } is
+                Some { val = written } -> match written.decl is
+                  LetSyntax { value = LambdaExpr { params = NamedParams { names, ... }, body = MemberExpr { member, ... }, ... }, ... } ->
+                    "$(member) of $(seq::size { xs = names }.to_str {})"
+                  _ -> "another shape"
+                None -> "no syntax"
               None -> "unresolved"
             answer {}
         """))
         assertEquals("n of 1", out.toString())
+    }
+
+    /**
+     * The use a linter makes of it: every expression of a module, as written,
+     * searched for an operator the way it was spelled.
+     */
+    @Test
+    @Timeout(240)
+    fun `a linter finds every == written in a module`() {
+        val out = run(bare("""
+            let same = { a: Int, b: Int } -> a == b
+            let again = { s: Str } -> if s == "x" then 1 else 2
+            let count = {} -> perform ComptimeEvalCodebase in seq::size { xs = seq::filter {
+              xs = seq::flat_map { xs = Codebase.module_syntax { module = "app" }, f = { x } -> all_exprs { decl = x } },
+              p = { x } -> match x is
+                BinaryExpr { op, ... } -> op == "=="
+                _ -> False } }
+            count {}
+        """.trimIndent().let { "use std::syntax::{ all_exprs, BinaryExpr }\n$it" }))
+        // `same`, `again`, and the `op == "=="` in the filter itself.
+        assertEquals(3L, out)
+    }
+
+    private val everyKind = listOf(
+        "IntExpr", "NatExpr", "FloatExpr", "FracExpr", "StrExpr", "CharExpr", "NameExpr", "LambdaExpr",
+        "CallExpr", "BinaryExpr", "PipeExpr", "PlaceholderExpr", "RecordExpr", "MemberExpr", "VariantExpr",
+        "NewtypeExpr", "IfExpr", "MatchExpr", "DoExpr", "SeqExpr", "PerformExpr", "EffectCallExpr", "ParensExpr",
+    ).joinToString(", ") { "\"$it\"" }
+
+    /**
+     * Two implementations of "where is this kind of node written" must agree: the
+     * compiler's index (Kotlin, at indexing) and `std::syntax`'s `node_info`
+     * (Mezze, which `FixtureCodebase` answers from). Fed the module's own syntax
+     * tree, the fixture must answer exactly what the index does, for every kind.
+     */
+    @Test
+    @Timeout(240)
+    fun `the occurrence index and std syntax agree on every kind`() {
+        val out = run(bare("""
+            use std::syntax::{ SyntaxDecl }
+            use std::codebase::{ Occurrence }
+            use std::int
+
+            let kinds = [$everyKind]
+            let label = { o: Occurrence } -> "$(o.kind) $(match o.symbol is
+              Some { val } -> val
+              None -> "-") $(int::to_str { n = o.span.start_line })"
+            newtype Score = Int
+            let piped = {} -> [1n, 2n] |> seq::size { xs = @ }
+            let checks = { a: Int, b: Int } -> if (a == b) && a > 3 then Score.(a) else Score.(b)
+            let indexed = {} -> perform ComptimeEvalCodebase in seq::flat_map { xs = kinds, f = { x } ->
+              seq::map { xs = Codebase.occurrences { kind = x, symbol = None }, f = { x } -> label { o = x } } }
+            let written = {} -> perform ComptimeEvalCodebase in Codebase.module_syntax { module = "app" }
+            let from_syntax = {} -> do
+              let data = { ...empty_fixture, syntax = written {} }
+              perform FixtureCodebase { data = data } in seq::flat_map { xs = kinds, f = { x } ->
+                seq::map { xs = Codebase.occurrences { kind = x, symbol = None }, f = { x } -> label { o = x } } }
+            let agree = {} -> seq::sort { xs = indexed {} } == seq::sort { xs = from_syntax {} }
+            agree {}
+        """))
+        assertEquals(true, out)
+    }
+
+    @Test
+    @Timeout(240)
+    fun `a search finds the declarations that use an operator as written`() {
+        val out = run(bare("""
+            let same = { a: Int, b: Int } -> a == b
+            let names = {} -> perform ComptimeEvalCodebase in
+              seq::map { xs = Codebase.search { q = query {}.using { kind = "BinaryExpr", symbol = "==" } }, f = { x } -> x.name }
+            names {}
+        """))
+        assertEquals("[same]", out.toString())
     }
 
     @Test

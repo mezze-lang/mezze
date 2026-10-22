@@ -523,6 +523,16 @@ class MatchValidator(
         val axes: List<Pair<String, List<String>>> = finiteFields.entries.map { (name, type) ->
             name to resolveClosedVariant(type)!!.constructors.keys.sorted()
         }
+        // One (unguarded) arm that is irrefutable on every finite field covers the
+        // whole product by itself — `Node { left, right, ... }` binds or ignores
+        // each — so there is nothing to enumerate, however large the product. A
+        // match over a big recursive variant (a syntax tree) is written exactly
+        // this way, and used to be refused for its size.
+        val coversAll = armFieldPatterns.any { arm ->
+            axes.all { (field, _) -> subFor(arm, field).let { it == null || it.isIrrefutable() } }
+        }
+        if (coversAll) return ValidationResult.Success()
+
         val productSize = axes.fold(1L) { acc, (_, ctors) -> acc * ctors.size }
         if (productSize > MAX_RECORD_PRODUCT) {
             return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveRecordMatch(

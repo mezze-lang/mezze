@@ -8,18 +8,10 @@
 #   let names = {} -> perform ComptimeEval in perform EvalCodebase in Codebase.decls { module = "app" }
 
 use std::comptime::{ Comptime, ComptimeEval }
+use std::syntax::{ Span, DeclRef, DeclKind, TypeShape, FieldShape, ConstructorShape, RequiredAbility, EffectRef, SyntaxDecl, Facts, NodeInfo, all_exprs, node_info }
+pub use std::syntax::{ Span, DeclRef, DeclKind, TypeShape, FieldShape, ConstructorShape, RequiredAbility, EffectRef, SyntaxDecl, Facts }
 use std::collections::seq
 use std::str
-
-## A declaration, by identity. `hash` IS the declaration: two declarations that
-## share a name never share a hash, so every question below follows hashes, and
-## a name is turned into one only by `resolve`.
-pub type DeclRef = { hash: Str, name: Str, module: Str, kind: DeclKind }
-
-pub type DeclKind = | LetDecl, TypeDecl, AbilityDecl, EffectDecl, ImplDecl, PerformerDecl |
-
-## Where something is written: 1-based lines and columns, the end column inclusive.
-pub type Span = { file: Option Str, start_line: Int, start_col: Int, end_line: Int, end_col: Int }
 
 pub type DeclInfo = {
   decl: DeclRef,
@@ -34,9 +26,6 @@ pub type DeclInfo = {
 ## Where a declaration comes from.
 pub type Origin = | FromProject, FromDependency, FromStdlib |
 
-## An effect as it appears in a row; `decl` is its declaration, when known.
-pub type EffectRef = { name: Str, decl: Option DeclRef }
-
 ## An ability impl. `targets` are type hashes, the receiver LAST.
 pub type ImplInfo = {
   hash: Str,
@@ -45,21 +34,6 @@ pub type ImplInfo = {
   targets: [Str],
   module: Option Str,
 }
-
-## A type, as the compiler resolved it.
-pub type TypeShape = |
-  TInt, TFloat, TStr, TChar, TFrac, TBytes,
-  TVar { name: Str },
-  TRecord { name: Option Str, hash: Option Str, fields: [FieldShape], is_open: Bool },
-  TVariant { name: Option Str, hash: Option Str, constructors: [ConstructorShape], is_open: Bool },
-  TApp { name: Str, hash: Option Str, args: [TypeShape] },
-  TNewtype { name: Str, hash: Option Str, wrapped: TypeShape },
-  TFn { param: TypeShape, result: TypeShape, effects: [EffectRef], requires: [RequiredAbility], open_effects: Bool },
-|
-
-pub type FieldShape = { name: Str, ty: TypeShape }
-pub type ConstructorShape = { name: Str, payload: Option TypeShape }
-pub type RequiredAbility = { name: Str, hash: Option Str }
 
 ## What a type, ability or effect declaration DEFINES. Members are in the order
 ## they were written.
@@ -75,64 +49,19 @@ pub type Definition = |
 pub type Operation = { name: Str, param: TypeShape, result: TypeShape }
 pub type Requirement = { ability_hash: Str, args: [TypeShape] }
 
-## A function body as the compiler typed it: every node carries its type and
-## where it is written, and every name the declaration it resolves to. What a
-## tool reads a body through — `body { decl }` — to see what it tests, calls
-## and returns.
-pub type CodeExpr = |
-  LitExpr { lit: CodeLit, ty: TypeShape, span: Span },
-  StrExpr { parts: [StrPart], ty: TypeShape, span: Span },
-  VarExpr { name: Str, decl: Option DeclRef, ty: TypeShape, span: Span },
-  CallExpr { callee: CodeExpr, arg: CodeExpr, ty: TypeShape, span: Span },
-  LambdaExpr { params: [Str], body: CodeExpr, ty: TypeShape, span: Span },
-  RecordExpr { items: [CodeItem], ty: TypeShape, span: Span },
-  FieldAccessExpr { record: CodeExpr, field: Str, ty: TypeShape, span: Span },
-  UpdateExpr { record: CodeExpr, items: [CodeItem], ty: TypeShape, span: Span },
-  VariantExpr { constructor: Str, payload: Option CodeExpr, ty: TypeShape, span: Span },
-  MatchExpr { scrutinee: CodeExpr, arms: [CodeArm], ty: TypeShape, span: Span },
-  IfExpr { cond: CodeExpr, then_branch: CodeExpr, else_branch: CodeExpr, ty: TypeShape, span: Span },
-  BlockExpr { statements: [CodeStmt], result: CodeExpr, ty: TypeShape, span: Span },
-  SeqExpr { items: [CodeItem], ty: TypeShape, span: Span },
-  PerformExpr { handlers: [HandlerUse], body: CodeExpr, ty: TypeShape, span: Span },
-  OpExpr { effect_hash: Str, op: Str, arg: CodeExpr, ty: TypeShape, span: Span },
-  PipeExpr { left: CodeExpr, right: CodeExpr, ty: TypeShape, span: Span },
-|
-
-pub type CodeLit = | LInt { val: Int }, LNat { val: Int }, LFloat { val: Float }, LFrac { num: Int, den: Int }, LBool { val: Bool }, LChar { val: Str } |
-
-## An entry of a record or a sequence, in written order.
-pub type CodeItem = | NamedItem { name: Str, value: CodeExpr }, SpreadItem { value: CodeExpr }, PlainItem { value: CodeExpr } |
-
-pub type StrPart = | TextPart { text: Str }, InterpPart { expr: CodeExpr } |
-
-pub type CodeStmt = | LetStmt { name: Str, value: CodeExpr, span: Span }, ExprStmt { expr: CodeExpr, span: Span } |
-
-pub type CodeArm = { patterns: [CodePattern], guard: Option CodeExpr, if_lets: [IfLet], body: CodeExpr, span: Span }
-
-pub type IfLet = { pattern: CodePattern, value: CodeExpr }
-
-pub type HandlerUse = { performer: Str, performer_hash: Str, effect_hash: Str }
-
-pub type CodePattern = |
-  VarPat { name: Str, ty: TypeShape },
-  WildcardPat { ty: TypeShape },
-  LitPat { value: CodeExpr, ty: TypeShape },
-  VariantPat { constructor: Str, payload: Option CodePattern, ty: TypeShape },
-  RecordPat { fields: [FieldPat], is_open: Bool, ty: TypeShape },
-  SeqPat { elements: [CodePattern], rest: Option Str, ty: TypeShape },
-  StrPat { parts: [StrPatPart], ty: TypeShape },
-|
-
-pub type FieldPat = { name: Str, pattern: Option CodePattern }
-
-pub type StrPatPart = | TextPat { text: Str }, CapturePat { name: Str } |
-
 ## How an ability applies to a type.
 pub type ImplVia = | Written, Derived, Generic |
 
 pub type AbilityInfo = { ability_decl: Option DeclRef, ability_hash: Str, impl_hash: Str, via: ImplVia }
 
 pub type DeclOrder = | ByName, ByModule |
+
+## Where a node is written. `kind` is its tag in `std::syntax` (`"BinaryExpr"`),
+## `symbol` what it spells (`"=="`), and `facts` what the compiler made of it.
+pub type Occurrence = { decl: DeclRef, kind: Str, symbol: Option Str, span: Span, facts: Option Facts }
+
+## A kind of node to look for, and optionally what it spells.
+pub type NodeUse = { kind: Str, symbol: Option Str }
 
 ## A search over declarations. Build one with `query {}` and the methods below;
 ## every filter given must hold. Answers come back in `order`, at most `limit`.
@@ -158,6 +87,8 @@ pub type DeclQuery = {
   ## Its signature unifies with this type, written as Mezze: `{ xs: ['a] } -> Int`.
   shape: Option Str,
   unused_only: Bool,
+  ## Has a written node of this kind (and symbol): `uses` an operator, a pipe, a name.
+  uses: Option NodeUse,
   order: DeclOrder,
   limit: Option Int,
 }
@@ -167,7 +98,7 @@ pub let query: {} -> DeclQuery = {} -> {
   kind = None, name = None, name_prefix = None, text = None, module_prefix = None,
   public_only = False, tagged = None, deprecated_only = False, documented_only = False,
   performs = None, pure_only = False, requires = None, mentions = None, shape = None,
-  unused_only = False, order = ByModule, limit = None,
+  unused_only = False, uses = None, order = ByModule, limit = None,
 }
 
 impl DeclQuery where {
@@ -186,6 +117,10 @@ impl DeclQuery where {
   mentioning = { it, type_hash } -> { ...it, mentions = Some { val = type_hash } },
   with_shape = { it, shape } -> { ...it, shape = Some { val = shape } },
   only_unused = { it } -> { ...it, unused_only = True },
+  ## Has a written node of this `std::syntax` kind: `"PipeExpr"`, `"MatchExpr"`.
+  using_kind = { it, kind } -> { ...it, uses = Some { val = { kind = kind, symbol = None } } },
+  ## Has a written node of this kind spelling this: `"BinaryExpr"` and `"=="`.
+  using = { it, kind, symbol } -> { ...it, uses = Some { val = { kind = kind, symbol = Some { val = symbol } } } },
   order_by = { it, order } -> { ...it, order = order },
   take = { it, n } -> { ...it, limit = Some { val = n } },
 }
@@ -235,8 +170,14 @@ effect Codebase where {
   ## Every ability that applies to the type `of` (its declaration), and how.
   abilities_of: { of: DeclRef } -> [AbilityInfo] <Codebase>,
   search: { q: DeclQuery } -> [DeclRef] <Codebase>,
-  ## A `let`'s body, typed.
-  body: { decl: DeclRef } -> Option CodeExpr <Codebase>
+  ## A declaration as written, with what the compiler made of each node
+  ## (`std::syntax`).
+  syntax: { decl: DeclRef } -> Option SyntaxDecl <Codebase>,
+  ## Every declaration of a module as written, `use` lines included, in order.
+  module_syntax: { module: Str } -> [SyntaxDecl] <Codebase>,
+  ## Every written node of `kind` (a `std::syntax` tag), spelling `symbol` if
+  ## given, across the codebase, with what the compiler made of each.
+  occurrences: { kind: Str, symbol: Option Str } -> [Occurrence] <Codebase>
 }
 
 ## Answers from the compiler, and says so: each question becomes `<Comptime>`,
@@ -264,7 +205,9 @@ impl Codebase for EvalCodebase where {
   ref = { of } -> Comptime.codebase { run = {} -> __native_codebase_ref { of = of } },
   abilities_of = { of } -> Comptime.codebase { run = {} -> __native_codebase_abilities_of { hash = of.hash } },
   search = { q } -> Comptime.codebase { run = {} -> __native_codebase_search { q = q } },
-  body = { decl } -> Comptime.codebase { run = {} -> __native_codebase_body { hash = decl.hash } },
+  syntax = { decl } -> Comptime.codebase { run = {} -> __native_codebase_syntax { hash = decl.hash } },
+  module_syntax = { module } -> Comptime.codebase { run = {} -> __native_codebase_module_syntax { module = module } },
+  occurrences = { kind, symbol } -> Comptime.codebase { run = {} -> __native_codebase_occurrences { kind = kind, symbol = symbol } },
 }
 
 ## The same answers, with the `Comptime` they raise handled here: it handles
@@ -292,7 +235,9 @@ impl Codebase for ComptimeEvalCodebase where {
   ref = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.ref { of = of },
   abilities_of = { of } -> perform ComptimeEval in perform EvalCodebase in Codebase.abilities_of { of = of },
   search = { q } -> perform ComptimeEval in perform EvalCodebase in Codebase.search { q = q },
-  body = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.body { decl = decl },
+  syntax = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.syntax { decl = decl },
+  module_syntax = { module } -> perform ComptimeEval in perform EvalCodebase in Codebase.module_syntax { module = module },
+  occurrences = { kind, symbol } -> perform ComptimeEval in perform EvalCodebase in Codebase.occurrences { kind = kind, symbol = symbol },
 }
 
 ## ---- Testing without a compiler ----------------------------------------
@@ -311,18 +256,43 @@ pub type CodebaseFixture = {
   calls: [{ from: DeclRef, to: DeclRef }],
   references: [{ from: DeclRef, to: DeclRef }],
   usages: [{ hash: Str, spans: [Span] }],
-  bodies: [{ hash: Str, body: CodeExpr }],
+  syntax: [SyntaxDecl],
   module_docs: [{ module: Str, doc: Str }],
 }
 
 pub let empty_fixture: CodebaseFixture = {
   decls = [], signatures = [], definitions = [], sources = [], impls = [], effects = [],
-  requirements = [], performers = [], calls = [], references = [], usages = [], bodies = [], module_docs = [],
+  requirements = [], performers = [], calls = [], references = [], usages = [], syntax = [], module_docs = [],
 }
 
-## The helpers below take only the lists they read, never the whole fixture: a
-## typed body stamps every node's type, and `CodebaseFixture` holds every shape
-## in this file — threaded through a helper, it made one body's blob 475 MB.
+## The helpers below take only the lists they read, never the whole fixture.
+
+## The occurrences in one declaration of a fixture, as the compiler's index
+## would answer them: one per thing a node spells, or one for a node that spells
+## nothing.
+let fixture_occurrences: { written: SyntaxDecl, kind: Str, symbol: Option Str } -> [Occurrence] = { written, kind, symbol } ->
+  match written.ref is
+    Some { val = decl } -> seq::flat_map { xs = all_exprs { decl = written }, f = { x } ->
+      occurrences_of { decl = decl, info = node_info { e = x }, kind = kind, symbol = symbol } }
+    None -> []
+
+let occurrences_of: { decl: DeclRef, info: NodeInfo, kind: Str, symbol: Option Str } -> [Occurrence] = { decl, info, kind, symbol } ->
+  if info.kind != kind then [] else match symbol is
+    Some { val } -> if seq::contains { xs = info.symbols, x = val }
+      then [{ decl = decl, kind = kind, symbol = Some { val = val }, span = info.span, facts = info.facts }]
+      else []
+    None -> if seq::is_empty { xs = info.symbols }
+      then [{ decl = decl, kind = kind, symbol = None, span = info.span, facts = info.facts }]
+      else seq::map { xs = info.symbols, f = { x } -> { decl = decl, kind = kind, symbol = Some { val = x }, span = info.span, facts = info.facts } }
+
+let wants_use: { want: Option NodeUse, syntax: [SyntaxDecl], hash: Str } -> Bool = { want, syntax, hash } -> match want is
+  Some { val } -> seq::any { xs = seq::filter { xs = syntax, p = { x } -> is_decl { ref = x.ref, hash = hash } }, p = { x } ->
+    if seq::is_empty { xs = fixture_occurrences { written = x, kind = val.kind, symbol = val.symbol } } then False else True }
+  None -> True
+
+let is_decl: { ref: Option DeclRef, hash: Str } -> Bool = { ref, hash } -> match ref is
+  Some { val } -> val.hash == hash
+  None -> False
 
 let fixture_decl: { decls: [DeclInfo], hash: Str } -> Option DeclInfo = { decls, hash } ->
   seq::find { xs = decls, p = { x } -> x.decl.hash == hash }
@@ -394,9 +364,10 @@ let fixture_matches: {
   effects: [{ hash: Str, refs: [EffectRef] }],
   requirements: [{ hash: Str, abilities: [DeclRef] }],
   references: [{ from: DeclRef, to: DeclRef }],
+  syntax: [SyntaxDecl],
   q: DeclQuery,
   info: DeclInfo,
-} -> Bool = { effects, requirements, references, q, info } -> do
+} -> Bool = { effects, requirements, references, syntax, q, info } -> do
   let d = info.decl
   let doc = text_of { opt = info.doc }
   let meta = text_of { opt = info.metadata }
@@ -416,7 +387,8 @@ let fixture_matches: {
       (if q.documented_only then doc != "" else True) &&
       (if q.deprecated_only then str::contains { s = meta, substring = "\"deprecated\"" } else True) &&
       (if q.pure_only then seq::is_empty { xs = own_effects } else True) &&
-      (if q.unused_only then seq::is_empty { xs = refs_to { edges = references, hash = d.hash } } else True)
+      (if q.unused_only then seq::is_empty { xs = refs_to { edges = references, hash = d.hash } } else True) &&
+      wants_use { want = q.uses, syntax = syntax, hash = d.hash }
 
 ## Answers from data, for testing code that asks the codebase questions —
 ## a preprocessor, a lint — with no compiler involved. `ref` answers `None`:
@@ -467,9 +439,9 @@ impl Codebase for FixtureCodebase { data: CodebaseFixture } where {
   module_doc = { module } -> match seq::find { xs = data.module_docs, p = { x } -> x.module == module } is
     Some { val } -> Some { val = val.doc }
     None -> None,
-  body = { decl } -> match seq::find { xs = data.bodies, p = { x } -> x.hash == decl.hash } is
-    Some { val } -> Some { val = val.body }
-    None -> None,
+  syntax = { decl } -> seq::find { xs = data.syntax, p = { x } -> is_decl { ref = x.ref, hash = decl.hash } },
+  module_syntax = { module } -> seq::filter { xs = data.syntax, p = { x } -> x.module == module },
+  occurrences = { kind, symbol } -> seq::flat_map { xs = data.syntax, f = { x } -> fixture_occurrences { written = x, kind = kind, symbol = symbol } },
   abilities_of = { of } -> seq::map {
     xs = seq::filter { xs = data.impls, p = { x } -> receiver_is { impl_info = x, type_hash = of.hash } },
     f = { x } -> { ability_decl = x.ability_decl, ability_hash = x.ability_hash, impl_hash = x.hash, via = Written } },
@@ -477,8 +449,9 @@ impl Codebase for FixtureCodebase { data: CodebaseFixture } where {
     let effects = data.effects
     let requirements = data.requirements
     let references = data.references
+    let syntax = data.syntax
     let found = seq::map {
-      xs = seq::filter { xs = data.decls, p = { x } -> fixture_matches { effects = effects, requirements = requirements, references = references, q = q, info = x } },
+      xs = seq::filter { xs = data.decls, p = { x } -> fixture_matches { effects = effects, requirements = requirements, references = references, syntax = syntax, q = q, info = x } },
       f = { x } -> x.decl }
     let ordered = match q.order is
       ByName -> seq::sort_by { xs = found, cmp = { a, b } -> if a.name == b.name then a.module < b.module else a.name < b.name }

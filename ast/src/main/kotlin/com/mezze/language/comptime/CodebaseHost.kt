@@ -14,7 +14,8 @@ package com.mezze.language.comptime
  *
  * ## Why the answers are [HostValue]s
  *
- * Each answer is a value of a type declared in `std/codebase.mz`. The interpreter
+ * Each answer is a value of a type declared in `std/codebase.mz` or
+ * `std/syntax.mz`. The interpreter
  * turns a [HostValue] into a Mezze value without knowing what it means, so the
  * shapes are decided in exactly two places, which must agree: the Mezze types,
  * and the encoder that implements this interface. The end-to-end tests run the
@@ -69,8 +70,12 @@ interface CodebaseHost {
     fun abilitiesOf(typeHash: String): HostValue
     /** `[DeclRef]` for the `DeclQuery` record [query]. */
     fun search(query: HostValue): HostValue
-    /** `Option CodeExpr`: a `let`'s body, typed. */
-    fun body(hash: String): HostValue
+    /** `Option SyntaxDecl` (`std::syntax`): the declaration as written, with the compiler's facts on each node. */
+    fun syntax(hash: String): HostValue
+    /** `[SyntaxDecl]`: every declaration of [module] as written, `use` lines included, in order. */
+    fun moduleSyntax(module: String): HostValue
+    /** `[Occurrence]`: every written node of [kind] (a `std::syntax` tag), spelling [symbol] if given. */
+    fun occurrences(kind: String, symbol: String?): HostValue
 }
 
 /**

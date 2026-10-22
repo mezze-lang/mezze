@@ -2269,6 +2269,7 @@ object CompletionEngine {
                 }
                 is com.mezze.language.typedast.TypedPerformOp -> visit(e.arg)
                 is com.mezze.language.typedast.TypedPipe -> { visit(e.left); visit(e.right) }
+                is com.mezze.language.typedast.TypedBuildTime -> visit(e.expr)
                 else -> { /* leaves: literals, TypedVar, TypedStringLit, etc. */ }
             }
         }

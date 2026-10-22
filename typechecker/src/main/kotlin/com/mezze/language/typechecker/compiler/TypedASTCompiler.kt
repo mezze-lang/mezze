@@ -1051,6 +1051,9 @@ class TypedASTCompiler(
                 )
             }
 
+            // What runs during the build: lowered as a build site (see BuildTimeUnits.buildSite).
+            is TypedBuildTime -> compileExpr(com.mezze.language.typechecker.comptime.BuildTimeUnits.buildSite(expr))
+
             // Pipe (should be desugared, but handle gracefully)
             is TypedPipe -> {
                 val rightIR = compileExpr(expr.right)

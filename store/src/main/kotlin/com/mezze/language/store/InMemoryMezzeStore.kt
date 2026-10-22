@@ -305,6 +305,15 @@ class InMemoryMezzeStore : MezzeStore {
         decls.removeAll { it.modulePath == modulePath }
     }
 
+    private val occurrences = HashMap<String, List<OccurrenceRow>>()   // module → its nodes
+
+    override fun putOccurrences(modulePath: String, rows: List<OccurrenceRow>) {
+        occurrences[modulePath] = rows
+    }
+
+    override fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow> =
+        occurrences.values.flatten().filter { it.kind == kind && (symbol == null || it.symbol == symbol) }
+
     override fun clearNamesForModule(modulePath: String) {
         names.keys.removeAll { it.startsWith("$modulePath\u0000") }
     }
@@ -325,6 +334,7 @@ class InMemoryMezzeStore : MezzeStore {
         signatures.keys.removeAll(garbage)
         definitions.keys.removeAll(garbage)
         usages.removeAll { it.fromHash in garbage }
+        occurrences.replaceAll { _, rows -> rows.filter { it.ownerHash !in garbage } }
     }
 
     override fun getDeclsForModule(modulePath: String): List<DeclRow> =

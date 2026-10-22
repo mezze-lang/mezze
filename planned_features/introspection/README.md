@@ -518,7 +518,7 @@ hash.
 | modules | `modules { prefix }` · `exports` · `imports` · `importers` |
 | docs | `doc` · `loc` · `source` · `metadata` · module docs |
 | search | `search { q = query {} … }`, a builder (below) |
-| later | `body { of }` (typed view) · `generated_by` (provenance) |
+| later | `generated_by` (provenance) |
 
 `Query` is a plain record. Its inherent methods each return a modified copy:
 
@@ -607,17 +607,22 @@ MezzeStore                 SQLite · in-memory · chained
 - [x] **T7 `CodebaseQueries`:** the `:codebase` module, over `:store` only.
 - [x] **T8 One set of shapes:** `CodebaseShapeContractTest` checks every record and constructor the adapter produces against `std/codebase.mz`.
 - [x] **T9** `Comptime.codebase { run }`; `CodebaseHost` in `:ast`; `__native_codebase_*` natives. `mez build`, `mez dev` and `mez exec` fold in the CLI, which holds the store.
-- [x] **T10 Fold at `perform … in`.** A question folds where it stands.
-  - `EvalCodebase` keeps `<Comptime>` in its row, composing with other compile-time work under one `ComptimeEval`.
-  - Compile-time handlers are found across all loaded modules and in the module itself; questions inside a handler's own operations are forwarded, not folded.
-  - Reading a run-time value is a compile error (V0802).
-  - Like any `perform`, a question is written inside a function, never as a top-level value (V0502).
-  - Run-time work inside a question fails the build when the evaluation suspends on an unhandled effect.
+- [x] **T10 What runs at build** (`BuildTimeUnits`). A `Comptime` request answered by `ComptimeEval` runs at build; the build evaluates the smallest CLOSED expression around it (no local from outside it, and not a function), under the user's own handlers between it and the answer.
+  - `ComptimeEvalCodebase` is `ComptimeEval` around `EvalCodebase` for every operation, so it is the same rule; nothing is wrapped in `Comptime.comptime`, and no handler is inserted.
+  - A chain of questions grows the unit outward until it closes; a question in a lambda grows to the call that consumes it; run-time work beside a question stays at run time.
+  - `EvalCodebase` with no `ComptimeEval` leaves `<Comptime>` in the function's type — imported performers' added effects are read off their typed bodies, so it reaches `main`, where the entry rule refuses it.
+  - The typed tree marks the unit (`TypedBuildTime`) without rewriting it; lowering turns it into a build site.
+  - Reading a run-time value is a compile error naming it (V0802). Like any `perform`, a question is written inside a function (V0502).
 - [x] **T11 `std::codebase`:** `Codebase`, `EvalCodebase`, `ComptimeEvalCodebase`, `FixtureCodebase`, the `DeclQuery` builder.
-- [x] **T12 API:** resolve, info (with origin), decls, modules, signature, definition, source, impls_of, impls_for, effects_of, performing, requiring, performers_of, callers, callees, references, usages, `ref { of = fn }`, `abilities_of` (written, derived, generic), `body` (a typed `CodeExpr` tree).
+- [x] **T12 API:** resolve, info (with origin), decls, modules, signature, definition, source, impls_of, impls_for, effects_of, performing, requiring, performers_of, callers, callees, references, usages, `ref { of = fn }`, `abilities_of` (written, derived, generic).
 - [x] **T13 Search:** kind, name, prefix, text, module, public, tagged, deprecated, documented, performs, pure, requires, mentions, shape (type-directed), unused, order, limit.
-- [ ] **T14 Quotes as references** (with `std::syntax`).
-- [ ] **T15 Proofs:** sample branch analysis in Mezze (now possible through `body`); one derive in Mezze; delete the Kotlin.
+- [x] **T17 Code as written, with what the compiler made of it** (`std::syntax`).
+  - `Codebase.syntax { decl }` / `module_syntax { module }`: the parser's tree — every expression, pattern, type annotation and declaration form, `use` lines and comments — with `facts` on each node: its type, what a name refers to, what a call or an operator reaches (its function, or the impl it dispatches to, by identity), and whether it runs at build. Joined by span; a node the compiler rewrote or never saw (a pipe, `@`, parentheses) says so.
+  - Replaces the typed `body` view: one tree, two layers.
+  - `Codebase.occurrences { kind, symbol }` and the `using` search filter: an index of every written node by kind and spelling.
+  - `std::syntax` walks it in Mezze (`all_exprs`, `children`, `node_info`); a test holds the Mezze and compiler definitions to one answer.
+- [ ] **T14 Quotes as references** (with `std::syntax`): building syntax and splicing it back — the preprocessor.
+- [ ] **T15 Proofs:** sample branch analysis in Mezze (now possible through `syntax` and its facts); one derive in Mezze; delete the Kotlin.
 - [x] **T16 Author-written messages:** `#{missing}` on abilities, `#{unhandled}` on effects, warnings for `#{deprecated}`.
   - Metadata reaches an importing module by identity: `ModuleImportContext.metadataByHash`, filled from each imported module's exports (re-exports included).
   - `#{deprecated}`: W0501 at every use — values, performers in `perform`, effect operations — imported or local; not inside a deprecated declaration. The editor strikes the use through.

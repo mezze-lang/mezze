@@ -1784,6 +1784,7 @@ class MezzeTextDocumentService(
                 }
                 is com.mezze.language.typedast.TypedPerformOp -> visit(e.arg)
                 is com.mezze.language.typedast.TypedPipe -> { visit(e.left); visit(e.right) }
+                is com.mezze.language.typedast.TypedBuildTime -> visit(e.expr)
                 else -> { /* leaves */ }
             }
         }
@@ -1940,6 +1941,7 @@ class MezzeTextDocumentService(
                 }
                 is com.mezze.language.typedast.TypedPerformOp -> visit(e.arg)
                 is com.mezze.language.typedast.TypedPipe -> { visit(e.left); visit(e.right) }
+                is com.mezze.language.typedast.TypedBuildTime -> visit(e.expr)
                 is com.mezze.language.typedast.TypedStringLit -> {
                     for (part in e.parts) {
                         if (part is com.mezze.language.typedast.TypedStringPart.Interpolation) visit(part.expr)

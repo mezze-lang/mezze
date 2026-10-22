@@ -53,3 +53,55 @@ fun ParsedExpr.children(): List<ParsedExpr> = when (this) {
     is ParsedPerform -> handlers.mapNotNull { it.params } + body
     is ParsedEffectCall -> listOf(arguments)
 }
+
+/**
+ * The node's kind: its tag in `std/syntax.mz`'s `Expr`. One definition, read by
+ * the syntax encoder that builds the tree and by the occurrence index that makes
+ * kinds searchable, so the two cannot name a node differently.
+ */
+fun ParsedExpr.syntaxKind(): String = when (this) {
+    is ParsedIntLit -> "IntExpr"
+    is ParsedNatLit -> "NatExpr"
+    is ParsedFloatLit -> "FloatExpr"
+    is ParsedFracLit -> "FracExpr"
+    is ParsedStringLit -> "StrExpr"
+    is ParsedCharLit -> "CharExpr"
+    is ParsedIdentifier -> "NameExpr"
+    is ParsedLambda -> "LambdaExpr"
+    is ParsedFunctionCall -> "CallExpr"
+    is ParsedBinaryOp -> "BinaryExpr"
+    is ParsedPipe -> "PipeExpr"
+    is ParsedPipePlaceholder -> "PlaceholderExpr"
+    is ParsedRecordLit -> "RecordExpr"
+    is ParsedMemberAccess -> "MemberExpr"
+    is ParsedVariantConstruct -> "VariantExpr"
+    is ParsedNewtypeConstruct -> "NewtypeExpr"
+    is ParsedIf -> "IfExpr"
+    is ParsedMatch -> "MatchExpr"
+    is ParsedDo -> "DoExpr"
+    is ParsedSeqLit -> "SeqExpr"
+    is ParsedPerform -> "PerformExpr"
+    is ParsedEffectCall -> "EffectCallExpr"
+    is ParsedParens -> "ParensExpr"
+}
+
+/**
+ * What the node spells, as written: the operator, the name (qualified as
+ * written), the member, the constructor, the newtype, `Effect::op`, an integer's
+ * value — and for a `perform`, each handler. Empty for a node that spells
+ * nothing of its own (a call, a record, a block…), which is found by its kind.
+ */
+fun ParsedExpr.syntaxSymbols(): List<String> = when (this) {
+    is ParsedIntLit -> listOf(value.toString())
+    is ParsedNatLit -> listOf("${value}n")
+    is ParsedIdentifier -> listOf(qualifier?.let { "$it$MODULE_PATH_SEPARATOR$localName" } ?: localName)
+    is ParsedBinaryOp -> listOf(op.symbol)
+    is ParsedMemberAccess -> listOf(member)
+    is ParsedVariantConstruct -> listOf(constructor)
+    is ParsedNewtypeConstruct -> listOf(typeName)
+    is ParsedEffectCall -> listOf(operation.toString())
+    is ParsedPerform -> handlers.map { it.performer.toString() }
+    is ParsedFloatLit, is ParsedFracLit, is ParsedStringLit, is ParsedCharLit, is ParsedLambda,
+    is ParsedFunctionCall, is ParsedPipe, is ParsedPipePlaceholder, is ParsedRecordLit, is ParsedIf,
+    is ParsedMatch, is ParsedDo, is ParsedSeqLit, is ParsedParens -> emptyList()
+}

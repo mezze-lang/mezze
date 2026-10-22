@@ -257,6 +257,9 @@ class ChainedMezzeStore(
         doc, metadata)
     override fun clearDeclsForModule(modulePath: String) = primary.clearDeclsForModule(modulePath)
     override fun clearNamesForModule(modulePath: String) = primary.clearNamesForModule(modulePath)
+    override fun putOccurrences(modulePath: String, rows: List<OccurrenceRow>) = primary.putOccurrences(modulePath, rows)
+    override fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow> =
+        all.flatMap { it.findOccurrences(kind, symbol) }.distinct()
     override fun replaceBlobOwnership(owner: String, hashes: Set<Hash>) =
         primary.replaceBlobOwnership(owner, hashes)
     override fun getDeclsForModule(modulePath: String): List<DeclRow> =
