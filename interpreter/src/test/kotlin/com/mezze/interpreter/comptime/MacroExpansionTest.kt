@@ -344,6 +344,41 @@ class MacroExpansionTest {
         assertTrue('~' !in text, text)
     }
 
+    /**
+     * A file in a syntax of its own — `key = value` lines — read by a frontend
+     * written in Mezze, chosen by `Mezze.toml`, and imported like any module.
+     */
+    @Test
+    @Timeout(240)
+    fun `a file frontend turns a file in its own syntax into a module`() {
+        Files.writeString(root.resolve("Mezze.toml"), "[package]\nname = \"m\"\nversion = \"0.1.0\"\n\n[frontends]\n\"*.conf.mz\" = \"conf::parse\"\n")
+        Files.writeString(root.resolve("src/conf.mz"), """
+            use std::macro::{ MacroInput, Expansion, declare }
+            use std::syntax::{ Span, SyntaxDecl, Expr, Pattern }
+            use std::collections::seq
+            use std::str
+
+            pub let parse: { input: MacroInput } -> Expansion = { input } ->
+              declare { decls = seq::flat_map { xs = str::lines { s = input.text }, f = { x } -> entry { line = x, at = input.span } } }
+
+            let entry: { line: Str, at: Span } -> [SyntaxDecl] = { line, at } ->
+              match str::split { s = line, delimiter = "=" } is
+                [k, v] -> do
+                  let name = VarPat { name = str::trim { s = k }, span = at }
+                  let value = StrExpr { parts = [TextPart { text = str::trim { s = v } }], span = at, facts = None }
+                  `(pub let ~name = ~value)
+                _ -> []
+        """.trimIndent())
+        Files.writeString(root.resolve("src/settings.conf.mz"), "port = 8080\nhost = example.org\n")
+        val out = run("""
+            use settings::{ port, host }
+
+            let both = "${'$'}(host):${'$'}(port)"
+            both
+        """.trimIndent())
+        assertEquals("example.org:8080", out)
+    }
+
     @Test
     @Timeout(240)
     fun `a macro that never finishes is stopped at its budget`() {

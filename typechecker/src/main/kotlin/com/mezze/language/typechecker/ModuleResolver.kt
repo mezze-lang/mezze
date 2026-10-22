@@ -297,6 +297,9 @@ class ModuleResolver(
 ) {
     private val projectRoot: Path = findProjectRoot(currentPath)
 
+    /** This project's file frontends (`[frontends]` in its `Mezze.toml`). */
+    private val frontends by lazy { com.mezze.language.typechecker.macro.Frontends.of(projectRoot) }
+
     companion object {
         /**
          * One world's caches — the `(world, module)` key that replaced a bare path.
@@ -647,7 +650,9 @@ class ModuleResolver(
     }
 
     private fun parse(src: Source): ParsedModule = try {
-        tryLoadParsedFromStore(src.modulePath, src.hash)
+        // A file a frontend reads is one call to it; the expander does the rest.
+        frontends.forFile(src.filePath)?.let { com.mezze.language.typechecker.macro.Frontends.module(src.filePath, src.text, it) }
+            ?: tryLoadParsedFromStore(src.modulePath, src.hash)
             ?: ParsedModuleCacheHolder.get(src.filePath, src.hash.hex)
             ?: MezzeParser().parseParsedModule(src.text, file = src.filePath)
     } catch (e: ParseException) {
@@ -978,9 +983,12 @@ class ModuleResolver(
         )
 
         for (root in localSearchRoots) {
-            val filePath = root.resolve(segments.joinToString("/") + ".mz")
-            if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
-                return filePath
+            // `.mz`, then each suffix a frontend reads (`*.sql.mz`).
+            for (suffix in listOf(".mz") + frontends.suffixes) {
+                val filePath = root.resolve(segments.joinToString("/") + suffix)
+                if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
+                    return filePath
+                }
             }
         }
 
