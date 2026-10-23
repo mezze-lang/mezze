@@ -44,6 +44,18 @@ data class Substitution(
         if (mappings.isEmpty() && recordRowMappings.isEmpty() && isConcreteType(type)) {
             return type
         }
+        // The common answers, without allocating: applied to nearly every type
+        // the checker touches, this allocated a visited set and a chain cache on
+        // every call — a fifth of everything a check allocated.
+        if (type.isGround || !needsSubstitution(type)) return type
+        if (type is MezzeType.VarType) {
+            var v = type.variable
+            for (hop in 0 until 32) {
+                val mapped = mappings[v] ?: return if (v === type.variable) type else MezzeType.VarType(v)
+                if (mapped !is MezzeType.VarType) break
+                v = mapped.variable
+            }
+        }
 
         return applyWithVisited(type, mutableSetOf(), HashMap())
     }
@@ -65,10 +77,13 @@ data class Substitution(
         chainCache[startVar]?.let { return it }
 
         var current = startVar
-        val hops = ArrayList<TypeVar>()
-        val hopSet = HashSet<TypeVar>()
+        // Allocated only for a chain with hops; most variables map straight to
+        // their terminal.
+        var hops: ArrayList<TypeVar>? = null
+        var hopSet: HashSet<TypeVar>? = null   // past a few hops, a linear scan gets slow
         while (true) {
-            if (current in visitedVars || current in hopSet) {
+            val seenHop = hopSet?.contains(current) ?: (hops?.contains(current) == true)
+            if (current in visitedVars || seenHop) {
                 // Cyclic — either against the outer traversal's visitedVars, or
                 // a var-only cycle within this chain (a -> b -> a). Leave as the
                 // raw var. Do NOT cache: visitedVars membership is transient
@@ -83,12 +98,13 @@ data class Substitution(
                 // cache with path compression for the rest of this traversal.
                 val result = MezzeType.VarType(current)
                 chainCache[current] = result
-                for (v in hops) chainCache[v] = result
+                hops?.forEach { chainCache[it] = result }
                 return result
             }
             if (mapped is MezzeType.VarType) {
-                hops.add(current)
-                hopSet.add(current)
+                val list = hops ?: ArrayList<TypeVar>(4).also { hops = it }
+                list.add(current)
+                if (hopSet != null) hopSet.add(current) else if (list.size > 16) hopSet = HashSet(list)
                 current = mapped.variable
                 continue
             }

@@ -483,7 +483,13 @@ graalvmNative {
                 "--enable-native-access=ALL-UNNAMED",
 
                 // Optimization level (smaller binary + faster code)
-                "-O2"
+                "-O2",
+
+                // Start the heap at 1 GB (address space only: a small run never
+                // touches it). Serial GC grows a heap that starts small one full
+                // collection at a time: checking 100k lines spent 52% of its time
+                // collecting (24.6 s -> 14.1 s with this).
+                "-R:MinHeapSize=1g",
             )
 
             // C-compiler override + linker search paths are for unix/nix toolchains
