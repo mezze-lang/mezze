@@ -56,32 +56,26 @@ pub type Request = {
 ## out-of-band thread.
 pub type Response = {
   status: Int,
-  ## LOWERCASE-KEYED, always. Both natives lowercase what arrives off the wire
-  ## (`IONatives` for a client response, `HttpServerNatives` for a request),
-  ## and `get_header` lowercases only the NEEDLE — so a builder that stores
-  ## `"Content-Type"` makes an entry NOTHING can read. `response_json` did
-  ## exactly that: it set the header and its own `.content_type {}` answered
-  ## None. Every setter here lowercases the key; a hand-written literal must
-  ## too.
+  # Both natives lowercase what comes off the wire (IONatives for a client
+  # response, HttpServerNatives for a request), so a builder storing
+  # "Content-Type" makes an entry nothing can read — response_json did exactly
+  # that and its own .content_type {} answered None. Every setter here
+  # lowercases; a hand-written literal must too.
+  ## Lowercase-keyed, always: `get_header` lowercases only the needle.
   headers: Map Str Str,
   body: Bytes,
   url: Str,
-  ## A STREAMED body, pulled chunk by chunk as the response is written.
-  ##
-  ## `None` is the ordinary case and `body` carries the whole thing. `Some`
-  ## makes `body` ignored and the server writes each `Bytes` the iterator
-  ## yields straight to the socket, so serving a 2GB file costs one chunk of
-  ## heap instead of 2GB.
-  ##
-  ## An extra FIELD rather than making `body` a variant, deliberately: a
-  ## variant would change what every reader of `resp.body` gets back — the
-  ## client, the router, user code — while this only touches the few places
-  ## that construct a Response.
-  ##
-  ## Single-shot. The iterator is walked once as the response goes out, and a
-  ## source with effects in it performs during that walk, on the connection
-  ## thread. Only the server honours this; `HttpClient` responses always
-  ## arrive as `None` with a whole `body`.
+  # An extra FIELD rather than making `body` a variant, deliberately: a variant
+  # would change what every reader of resp.body gets back — the client, the
+  # router, user code — while this only touches the few places that construct a
+  # Response.
+  #
+  # The iterator is walked once as the response goes out, and a source with
+  # effects in it performs during that walk, on the connection thread. Only the
+  # server honours this; HttpClient responses always arrive as None with a
+  # whole body.
+  ## A streamed body, pulled chunk by chunk as the response is written, which
+  ## makes `body` ignored. Single-shot. `None` is the ordinary case.
   chunks: Option (Iter Bytes),
 }
 
@@ -511,27 +505,28 @@ impl Response where {
   content_type = { it } -> get_content_type { resp = it },
   content_length = { it } -> get_content_length { resp = it },
 
-  ## Builders, mirroring Request's so a response reads like a request:
-  ## `resp.with_status { code = 201 }.with_header { … }`. Order does not
-  ## matter — each one preserves every other field.
-  ##
-  ## `with_`-prefixed because a method may NOT share a name with a field
-  ## (V0419), and `status`, `headers`, `body` and `url` are all fields of
-  ## Response. The short names live as free builders (`no_content`,
-  ## `redirect`, …) where there is no receiver to collide with.
-  ## Each delegates to a `Response`-ANNOTATED free builder rather than
-  ## spreading `it` here. A method's receiver is `it: 'it`, so
-  ## `{ ...it, status = code }` answers the OPEN row `{ status: 'a, ... }`
-  ## — which is not a Response, so the next `.with_header {}` in the chain
-  ## has no inherent method to find and the record is short a field. Same
-  ## reason Request's setters are free functions.
+  # `with_`-prefixed because a method may not share a name with a FIELD
+  # (V0419), and status/headers/body/url are all fields. The short names live
+  # as free builders (no_content, redirect, …) where nothing collides.
+  #
+  # Each delegates to a Response-ANNOTATED free builder rather than spreading
+  # `it` here: a receiver is `it: 'it`, so `{ ...it, status = code }` answers
+  # the OPEN row `{ status: 'a, ... }` — not a Response — and the next
+  # `.with_header {}` in the chain then has no method to find. Same reason
+  # Request's setters are free functions.
+  ## Set the status, keeping every other field.
   with_status = { it: 'it, code: Int } -> resp_with_status { resp = it, code = code },
+  ## Set one header, lowercasing its key.
   with_header = { it: 'it, key: Str, value: Str } ->
     resp_with_header { resp = it, key = key, value = value },
+  ## Merge headers in; `headers` wins on a key both carry.
   with_headers = { it: 'it, headers: Map Str Str } ->
     resp_with_headers { resp = it, headers = headers },
+  ## Set the body, dropping a streamed one.
   with_body = { it: 'it, val: Bytes } -> resp_with_body { resp = it, body = val },
+  ## Set a text body.
   with_text = { it: 'it, val: Str } -> resp_with_text { resp = it, val = val },
+  ## Set a JSON body and the json content type.
   with_json = { it: 'it, val: Json } -> resp_with_json { resp = it, val = val },
 
   ## dot-chain parity: inherent method for every receiver-taking free
@@ -545,22 +540,19 @@ impl Response where {
   get_content_length = { it } -> get_content_length { resp = it },
 }
 
-## What a handler is allowed to return.
-##
-## A route handler's job is to answer, and most answers are a string or some
-## JSON — making every one of them spell out a five-field Response record is
-## the tax this removes:
-##
-##   on_get { path = "/ping",      handler = { m } -> "pong" }
-##   on_get { path = "/users/:id", handler = { m } -> user_json { m = m } }
-##   on_get { path = "/raw",       handler = { m } -> not_found { body = "" } }
-##
-## The ability is declared HERE, beside Response, rather than in the router:
-## converting a value to a Response is not a routing idea, and a client-side
-## caller (a mock rule, a test double) wants the same conversion.
-##
-## `Response` implements it as the identity, so a handler that builds its own
-## response keeps working unchanged and pays nothing.
+# A route handler's job is to answer, and most answers are a string or some
+# JSON — spelling out a five-field Response record for each was the tax this
+# removes:
+#
+#   on_get { path = "/ping",      handler = { m } -> "pong" }
+#   on_get { path = "/users/:id", handler = { m } -> user_json { m = m } }
+#   on_get { path = "/raw",       handler = { m } -> not_found { body = "" } }
+#
+# Declared here beside Response rather than in the router: converting a value
+# to a Response is not a routing idea, and a mock rule or test double wants the
+# same conversion. Response implements it as the identity, so a handler that
+# builds its own response is unchanged and pays nothing.
+## What a route handler may answer with.
 ability IntoResponse for 'a where {
   into_response: { it: 'a } -> Response
 }
@@ -575,6 +567,87 @@ impl IntoResponse for Str where {
 
 impl IntoResponse for Json where {
   into_response = { it } -> response_json { body = it },
+}
+
+# A separate ability from IntoResponse, because the two answer different
+# questions about the same type: Str means a 200 with that text when a handler
+# SUCCEEDS with it, and a 500 when a handler FAILS with it. One ability cannot
+# hold both meanings, and picking either would make the other silently wrong.
+# The split is what lets Result be a handler's return type — Ok through
+# IntoResponse, Err through this.
+## How a failure becomes a response.
+ability IntoErrorResponse for 'e where {
+  into_error_response: { it: 'e } -> Response
+}
+
+impl IntoErrorResponse for Str where {
+  into_error_response = { it } -> response_status { code = 500, body = it },
+}
+
+# An HttpError a handler got from calling something ELSE, so these are gateway
+# statuses: our failure to get an answer, not the upstream's own reply.
+#
+# RequestFailed deliberately does NOT pass its status through. An upstream 404
+# is not this service's 404, and conflating them makes a client retry or cache
+# against the wrong system. A handler wanting passthrough has the error in hand
+# and can match it.
+#
+# The bodies carry no url or upstream text either: these go to a CLIENT, and
+# the url in an HttpError is an internal endpoint. Match the error to log the
+# detail.
+## Gateway statuses for a failed upstream call.
+impl IntoErrorResponse for HttpError where {
+  into_error_response = { it } -> match it is
+    ConnectionFailed { url = _, reason = _ } ->
+      response_status { code = 502, body = "upstream connection failed" }
+    Timeout { url = _, ms = _ } ->
+      response_status { code = 504, body = "upstream timed out" }
+    TlsError { url = _, reason = _ } ->
+      response_status { code = 502, body = "upstream TLS failure" }
+    RequestFailed { url = _, status = _, body = _ } ->
+      response_status { code = 502, body = "upstream returned an error" }
+    DecodeError { url = _, message = _ } ->
+      response_status { code = 502, body = "could not decode the upstream reply" }
+    # The remaining three are THIS service's own mistakes, not the upstream's:
+    # a url we built wrong, a body we failed to encode, a request we gave up on.
+    InvalidUrl { url = _, reason = _ } ->
+      response_status { code = 500, body = "internal error" }
+    EncodeError { url = _, message = _ } ->
+      response_status { code = 500, body = "internal error" }
+    Cancelled -> response_status { code = 503, body = "request cancelled" },
+}
+
+# This is what carries the Exception sugar into a route. ExceptionToResult
+# turns a region's throws into an Err, so a handler writes straight-line code
+# and each failure picks its own status:
+#
+#   on_get { path = "/users/:id", handler = { m } -> do
+#     let outcome = perform ExceptionToResult in do
+#       let id   = unwrap { result = parse_id { m = m } }
+#       let user = unwrap { result = load { id = id } }
+#       Ok { val = user.name }
+#     outcome.into_response {}
+#   }
+#
+# Each unwrap early-returns the way `?` does. A thrown Str lands as a 500
+# carrying it; a thrown HttpError picks a gateway status. Failure stays a VALUE
+# the whole way — the region answers a Result and this impl reads it.
+#
+# Two things about that shape. The region's body ends in Ok, because the
+# handler only replaces the THROW path. And .into_response {} is called INSIDE
+# the handler rather than letting the route convert a Result return — that part
+# is a workaround, not a preference: returning the Result straight out
+# typechecks and then selects the wrong impl at run time, because the route's
+# `with IntoResponse 'r` hits the known `with C 'a` dictionary-plumbing family
+# (the Result comes back through impl IntoResponse for Str). Converting here
+# dispatches on a concrete Result, which works. Pinned by HttpIntoResponseTest;
+# when that test starts failing, this paragraph and the extra call can go.
+## Ok answers through IntoResponse, Err through IntoErrorResponse.
+impl IntoResponse for Result 'a 'e where {
+  into_response: { it: Result 'a 'e } with IntoResponse 'a, IntoErrorResponse 'e -> Response
+    = { it } -> match it is
+        Ok { val } -> val.into_response {}
+        Err { error } -> error.into_error_response {},
 }
 
 ## A reusable HTTP client value. Bind a service's base URL, default
@@ -918,14 +991,14 @@ pub let response_json: { body: Json } -> Response = { body } ->
     chunks = None,
   }
 
-## Response setters, each PRESERVING every other field, so a chain reads in
-## whatever order you think of it. Module-private: the public surface is the
-## `impl Response` methods (`resp.with_status { code = 201 }`), and keeping
-## these unexported leaves the short names free for the status builders below
-## — `with_header` as a free name already belongs to Request.
-##
-## Written field by field rather than with a spread because the ANNOTATION is
-## what keeps the result a Response; see the note in `impl Response`.
+# Response setters, each preserving every other field so a chain reads in
+# whatever order you think of it. Module-private: the public surface is the
+# `impl Response` methods, and keeping these unexported leaves the short names
+# free for the status builders below — `with_header` as a free name already
+# belongs to Request.
+#
+# Written field by field rather than with a spread because the annotation is
+# what keeps the result a Response; see the note in `impl Response`.
 let resp_with_status: { resp: Response, code: Int } -> Response = { resp, code } ->
   {
     status = code,
@@ -944,10 +1017,10 @@ let resp_with_header: { resp: Response, key: Str, value: Str } -> Response = { r
     chunks = resp.chunks,
   }
 
-## Merge, like Request's — `headers` wins on a key both carry. Incoming keys
-## are lowercased first, or a caller passing `{ "Content-Type": … }` would add
-## a SECOND entry alongside a lowercase one and `get_header` would read
-## whichever it found.
+# Merge, like Request's — `headers` wins on a key both carry. Incoming keys are
+# lowercased first, or a caller passing { "Content-Type": ... } would add a
+# second entry alongside a lowercase one and get_header would read whichever it
+# found.
 let resp_with_headers: { resp: Response, headers: Map Str Str } -> Response = { resp, headers } ->
   {
     status = resp.status,
@@ -960,9 +1033,9 @@ let resp_with_headers: { resp: Response, headers: Map Str Str } -> Response = { 
     chunks = resp.chunks,
   }
 
-## Setting a body DROPS a streamed one: `chunks` would otherwise win and the
-## bytes just set would never reach the socket. Silently keeping both is the
-## bug this avoids.
+# Setting a body drops a streamed one: chunks would otherwise win and the bytes
+# just set would never reach the socket. Silently keeping both is the bug this
+# avoids.
 let resp_with_body: { resp: Response, body: Bytes } -> Response = { resp, body } ->
   {
     status = resp.status,
@@ -982,14 +1055,14 @@ let resp_with_json: { resp: Response, val: Json } -> Response = { resp, val } ->
   }
   resp_with_header { resp = bodied, key = "Content-Type", value = "application/json" }
 
-## The statuses a handler reaches for by name. Free functions, not methods:
-## there is no receiver to chain from when you are CREATING the response, and
-## the short names are free here precisely because they would collide with
-## Response's own fields as methods.
-##
-##   not_found { body = "no such user" }
-##   redirect  { to = "/login" }
-##   no_content {}
+# The statuses a handler reaches for by name. Free functions, not methods:
+# there is no receiver to chain from when you are creating the response, and
+# the short names are free here precisely because they would collide with
+# Response's own fields as methods.
+#
+#   not_found { body = "no such user" }
+#   redirect  { to = "/login" }
+#   no_content {}
 
 ## 201 Created with a plain-text body.
 pub let created: { body: Str } -> Response = { body } ->
@@ -1203,9 +1276,10 @@ impl MockRule where {
       resp = { status = r.status, headers = r.headers, body = body, url = r.url, chunks = None },
     },
   ## Add one response header, keeping everything else.
-  ## The key is LOWERCASED, like every other Response header setter — a
-  ## mocked response has to answer `get_header` the same way a real one does,
-  ## or a test passes against a header the production reader cannot see.
+  # The key is lowercased, like every other Response header setter — a mocked
+  # response has to answer get_header the same way a real one does, or a test
+  # passes against a header the production reader cannot see.
+  ## Set a response header on the rule.
   header = { it: 'it, name: Str, value: Str } -> do
     let r = mock_response_of { rule = it }
     mock_with_response {

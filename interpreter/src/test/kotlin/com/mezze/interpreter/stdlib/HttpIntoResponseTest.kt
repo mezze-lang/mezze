@@ -20,8 +20,12 @@ class HttpIntoResponseTest {
 
     private val head = """
         use std::effects::http::{ Request, Response, Get, Post, Put, Delete, created, no_content, not_found, bad_request, server_error, redirect, redirect_with, response_ok_text, response_json, response_stream }
+        use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
+        use std::effects::exception::{ ExceptionToResult, unwrap, throw }
+        use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
+        use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, Matched, Routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, try_get, try_post, Matched, Routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -207,6 +211,324 @@ class HttpIntoResponseTest {
             """.trimIndent()
         )
         assertEquals(203L, r)
+    }
+
+    // ---- failure: Result and IntoErrorResponse --------------------------
+
+    @Test
+    fun `an Ok answers through IntoResponse`() {
+        val r = run(
+            """
+            let good: Result Str Str = Ok { val = "fine" }
+            good.into_response {}.status
+            """.trimIndent()
+        )
+        assertEquals(200L, r)
+    }
+
+    /**
+     * The reason `IntoErrorResponse` is a SECOND ability: `Str` means a 200
+     * with that text when a handler succeeds with it, and a 500 when it fails
+     * with it. One ability cannot hold both meanings.
+     */
+    @Test
+    fun `the same Str is a 200 as a value and a 500 as an error`() {
+        val ok = run(
+            """
+            let good: Result Str Str = Ok { val = "fine" }
+            good.into_response {}.status
+            """.trimIndent()
+        )
+        val err = run(
+            """
+            let bad: Result Str Str = Err { error = "broke" }
+            bad.into_response {}.status
+            """.trimIndent()
+        )
+        assertEquals(200L, ok)
+        assertEquals(500L, err)
+    }
+
+    @Test
+    fun `an Err carries its message as the body`() {
+        val r = run(
+            """
+            let bad: Result Str Str = Err { error = "broke" }
+            body_of { resp = bad.into_response {} }
+            """.trimIndent()
+        )
+        assertEquals("broke", r)
+    }
+
+    @Test
+    fun `an HttpError picks a gateway status, not the upstream's`() {
+        val r = run(
+            """
+            let statuses = [
+              Timeout { url = "http://u/x", ms = 50 }.into_error_response {}.status,
+              ConnectionFailed { url = "http://u/x", reason = "refused" }.into_error_response {}.status,
+              TlsError { url = "http://u/x", reason = "bad cert" }.into_error_response {}.status,
+              RequestFailed { url = "http://u/x", status = 404, body = "nope" }.into_error_response {}.status,
+              DecodeError { url = "http://u/x", message = "bad json" }.into_error_response {}.status,
+              InvalidUrl { url = "::", reason = "malformed" }.into_error_response {}.status,
+              EncodeError { url = "http://u/x", message = "bad body" }.into_error_response {}.status,
+              Cancelled.into_error_response {}.status,
+            ]
+            seq::join { xs = seq::map { xs = statuses, f = { x } -> int::to_str { n = x } }, sep = "," }
+            """.trimIndent()
+        )
+        assertEquals(
+            "504,502,502,502,502,500,500,503", r,
+            "an upstream 404 must NOT pass through as this service's 404",
+        )
+    }
+
+    @Test
+    fun `an error response leaks neither the url nor the upstream body`() {
+        val r = run(
+            """
+            body_of {
+              resp = RequestFailed { url = "http://internal.svc/secret", status = 404,
+                                     body = "row 7 missing" }.into_error_response {},
+            }
+            """.trimIndent()
+        )
+        assertEquals("upstream returned an error", r)
+    }
+
+    // ---- failure: the Exception sugar at a route -------------------------
+
+    /**
+     * The whole point: a handler writes straight-line code, each `unwrap`
+     * early-returns like `?`, and a throw picks its own status.
+     */
+    @Test
+    fun `a thrown Str becomes a 500 carrying its message`() {
+        val r = run(
+            """
+            let load: { id: Str } -> Result Str Str = { id } ->
+              if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+            let app = on_get {
+              path = "/u/:id",
+              handler = { m } -> do
+                let outcome = perform ExceptionToResult in do
+                  let name = unwrap { result = load { id = m.param_or { name = "id", default = "?" } } }
+                  Ok { val = name }
+                outcome.into_response {},
+            }.otherwise { fallback = fallback }
+            let resp = app { req = get_request { url = "/u/9" } }
+            str::concat { l = int::to_str { n = resp.status }, r = body_of { resp = resp } }
+            """.trimIndent()
+        )
+        assertEquals("500no such id", r)
+    }
+
+    @Test
+    fun `the same handler answers normally when nothing throws`() {
+        val r = run(
+            """
+            let load: { id: Str } -> Result Str Str = { id } ->
+              if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+            let app = on_get {
+              path = "/u/:id",
+              handler = { m } -> do
+                let outcome = perform ExceptionToResult in do
+                  let name = unwrap { result = load { id = m.param_or { name = "id", default = "?" } } }
+                  Ok { val = name }
+                outcome.into_response {},
+            }.otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/u/7" } } }
+            """.trimIndent()
+        )
+        assertEquals("seven", r)
+    }
+
+    @Test
+    fun `a thrown HttpError reaches the route as a gateway status`() {
+        val r = run(
+            """
+            let app = on_get {
+              path = "/gw",
+              handler = { m } -> do
+                let outcome = perform ExceptionToResult in do
+                  let v = unwrap { result = Err { error = Timeout { url = "http://u/x", ms = 50 } } }
+                  Ok { val = v }
+                outcome.into_response {},
+            }.otherwise { fallback = fallback }
+            app { req = get_request { url = "/gw" } }.status
+            """.trimIndent()
+        )
+        assertEquals(504L, r)
+    }
+
+    /**
+     * The shape a reader would write first — returning the Result straight out
+     * of the handler and letting the route convert it. It TYPECHECKS and then
+     * selects `impl IntoResponse for Str`, applies it to the Result, and dies
+     * in a native.
+     *
+     * Same `with C 'a` dictionary-plumbing family as [a bare response literal
+     * picks the wrong impl], and the reason `.into_response {}` is called
+     * inside the handler in every test above. Dispatching on a CONCRETE Result
+     * works — [an Ok answers through IntoResponse] is that control.
+     *
+     * Pinned so the workaround can be deleted when this starts failing.
+     */
+    @Test
+    fun `returning a Result straight out of a handler picks the wrong impl`() {
+        val outcome = runCatching {
+            run(
+                """
+                let app = on_get {
+                  path = "/u",
+                  handler = { m } -> perform ExceptionToResult in do
+                    let name = unwrap { result = Ok { val = "seven" } }
+                    Ok { val = name },
+                }.otherwise { fallback = fallback }
+                app { req = get_request { url = "/u" } }.status
+                """.trimIndent()
+            )
+        }
+        assertTrue(
+            outcome.exceptionOrNull() != null,
+            "expected the known dictionary-plumbing failure; got ${outcome.getOrNull()}. " +
+                "If this now answers 200, drop the in-handler .into_response {} from the docs.",
+        )
+    }
+
+    // ---- failure: throwing the response -------------------------------
+
+    private val throwingApp = """
+        let app = try_get {
+          path = "/u/:id",
+          handler = { m } -> do
+            let id = m.param_or { name = "id", default = "?" }
+            if id == "0" then throw { error = bad_request { body = "id must not be 0" } }
+            else if id == "7" then "seven"
+            else throw { error = not_found { body = "no such id" } },
+        }.otherwise { fallback = fallback }
+    """.trimIndent()
+
+    /**
+     * What a `try_` route is for: the handler THROWS the response it wants
+     * sent, with no perform of its own, no Ok wrap and no conversion call.
+     */
+    @Test
+    fun `a thrown Response is what gets sent`() {
+        val r = run(
+            """
+            $throwingApp
+            let resp = app { req = get_request { url = "/u/9" } }
+            str::concat { l = int::to_str { n = resp.status }, r = body_of { resp = resp } }
+            """.trimIndent()
+        )
+        assertEquals("404no such id", r)
+    }
+
+    @Test
+    fun `a different throw sends a different status`() {
+        val r = run(
+            """
+            $throwingApp
+            app { req = get_request { url = "/u/0" } }.status
+            """.trimIndent()
+        )
+        assertEquals(400L, r, "the thrown response decides, not one blanket error status")
+    }
+
+    /** The success side still goes through IntoResponse. */
+    @Test
+    fun `the same throwing handler answers 200 when it does not throw`() {
+        val r = run(
+            """
+            $throwingApp
+            let resp = app { req = get_request { url = "/u/7" } }
+            str::concat { l = int::to_str { n = resp.status }, r = body_of { resp = resp } }
+            """.trimIndent()
+        )
+        assertEquals("200seven", r)
+    }
+
+    /** A throw short-circuits: nothing after it in the handler runs. */
+    @Test
+    fun `a throw skips the rest of the handler`() {
+        val r = run(
+            """
+            let app = try_get {
+              path = "/x",
+              handler = { m } -> do
+                let stopped = throw { error = bad_request { body = "stop" } }
+                "reached-the-end",
+            }.otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/x" } } }
+            """.trimIndent()
+        )
+        assertEquals("stop", r)
+    }
+
+    /**
+     * The documented escape hatch for a DOMAIN error: convert at the throw
+     * site, where the error's meaning is known. This is what IntoErrorResponse
+     * is for now that the thrown channel is a concrete Response.
+     */
+    @Test
+    fun `a domain error converted at the throw site keeps its status`() {
+        val r = run(
+            """
+            let app = try_get {
+              path = "/gw",
+              handler = { m } -> do
+                let upstream = Timeout { url = "http://u/x", ms = 50 }
+                throw { error = upstream.into_error_response {} },
+            }.otherwise { fallback = fallback }
+            app { req = get_request { url = "/gw" } }.status
+            """.trimIndent()
+        )
+        assertEquals(504L, r)
+    }
+
+    /** try_ and on_ routes compose in one table. */
+    @Test
+    fun `a throwing route and a plain route live in the same table`() {
+        val r = run(
+            """
+            let app = try_get {
+              path = "/u/:id",
+              handler = { m } -> do
+                let id = m.param_or { name = "id", default = "?" }
+                if id == "7" then "seven" else throw { error = not_found { body = "no" } },
+            }
+              .or_else { b = on_post { path = "/u", handler = { m } -> created { body = "made" } } }
+              .otherwise { fallback = fallback }
+            app { req = { method = Post, url = "/u", headers = map::empty {}, body = None,
+                          timeout_ms = None } }.status
+            """.trimIndent()
+        )
+        assertEquals(201L, r)
+    }
+
+    /**
+     * A handler that never throws does NOT satisfy a row carrying Exception,
+     * which is why `try_*` is a separate family instead of `on_get` gaining
+     * the behaviour. Pinned: folding the two together would reject every pure
+     * handler, and this is the measurement that says so.
+     */
+    @Test
+    fun `a pure handler is rejected by a throwing route`() {
+        val outcome = runCatching {
+            run(
+                """
+                let app = try_get { path = "/p", handler = { m } -> "plain" }
+                  .otherwise { fallback = fallback }
+                app { req = get_request { url = "/p" } }.status
+                """.trimIndent()
+            )
+        }
+        val error = outcome.exceptionOrNull()
+        assertTrue(
+            error != null && error.toString().contains("Exception"),
+            "expected the row mismatch to be reported; got ${error ?: outcome.getOrNull()}",
+        )
     }
 
     // ---- Response builders ----------------------------------------------

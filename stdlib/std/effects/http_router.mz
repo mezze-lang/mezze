@@ -18,6 +18,7 @@
 ## receives the bindings as a `Map Str Str` alongside the request.
 
 use std::effects::http::{ Method, Request, Response, IntoResponse }
+use std::effects::exception::{ ExceptionToResult }
 use std::collections::map
 use std::collections::iter
 use std::collections::seq
@@ -193,21 +194,20 @@ pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response 
             Some { val = handler { m = { req = req, params = params } } },
     }
 
-## One route per method, taking a handler that may answer with ANYTHING
-## convertible to a Response — a `Str`, a `Json`, or a Response it built
-## itself. See `IntoResponse` in std::effects::http.
-##
-##   on_get  { path = "/ping",      handler = { m } -> "pong" }
-##   on_post { path = "/users",     handler = { m } -> created { body = "ok" } }
-##   on_get  { path = "/users/:id", handler = { m } -> m.param_or { name = "id", default = "?" } }
-##
-## `route` remains, and still takes a handler returning a Response exactly as
-## before: these are a layer over it, not a replacement, so nothing written
-## against `route` has to change.
-##
-## The conversion happens INSIDE the wrapped handler, not at table-build time,
-## because the handler has not run yet — and it runs under the handler's own
-## effect row, which is why the row stays open here.
+# A handler may answer with anything convertible to a Response — a Str, a
+# Json, or a Response it built itself:
+#
+#   on_get  { path = "/ping",      handler = { m } -> "pong" }
+#   on_post { path = "/users",     handler = { m } -> created { body = "ok" } }
+#   on_get  { path = "/users/:id", handler = { m } -> m.param_or { name = "id", default = "?" } }
+#
+# `route` remains and still takes a Response-returning handler: these are a
+# layer over it, not a replacement, so nothing written against it changes.
+#
+# The conversion happens INSIDE the wrapped handler, not at table-build time,
+# because the handler has not run yet — and it runs under the handler's own
+# effect row, which is why the row stays open here.
+## Route one method and path to a handler, converting whatever it answers.
 pub let on_method
   : { method: Method, path: Str, handler: { m: Matched } -> 'r <...> }
   with IntoResponse 'r
@@ -222,26 +222,122 @@ pub let on_method
         answer.into_response {},
     }
 
+## Route a GET at `path`.
 pub let on_get: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Get, path = path, handler = handler }
 
+## Route a POST at `path`.
 pub let on_post: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Post, path = path, handler = handler }
 
+## Route a PUT at `path`.
 pub let on_put: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Put, path = path, handler = handler }
 
+## Route a PATCH at `path`.
 pub let on_patch: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Patch, path = path, handler = handler }
 
+## Route a DELETE at `path`.
 pub let on_delete: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Delete, path = path, handler = handler }
 
+## Route a HEAD at `path`.
 pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Head, path = path, handler = handler }
 
+## Route a OPTIONS at `path`.
 pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Options, path = path, handler = handler }
+
+# The same routes for a handler that may THROW the response it wants sent:
+#
+#   try_get { path = "/users/:id", handler = { m } -> do
+#     let id = m.param_or { name = "id", default = "?" }
+#     if id == "0" then throw { error = bad_request { body = "id must not be 0" } }
+#     else load_name { id = id }
+#   }
+#
+# No perform in the handler and nothing to wrap — the route installs
+# ExceptionToResult, and a throw short-circuits straight to its response.
+#
+# WHY THE THROWN TYPE IS A RESPONSE, and not any error with an
+# IntoErrorResponse impl. Writing that signature means naming the error type —
+# `<Exception having 'error = 'e, ...>` plus `with IntoErrorResponse 'e` — and
+# the `'e` in the signature does not tie to the `'e` bound in the body's Err
+# arm (T0210, "applied to wrong type variable"; the recurring one-written-
+# typevar-two-typevars shape). A concrete channel has nothing to mis-bind.
+# Converting at the THROW site costs one call and happens where the error's
+# meaning is known: `throw { error = my_err.into_error_response {} }`.
+#
+# A separate family rather than folding this into on_get, because a handler
+# that never throws does NOT satisfy a row carrying Exception — measured: a
+# pure `{ m } -> "plain"` handler is rejected against this signature. So
+# `on_*` is for a handler that answers and `try_*` for one that may throw.
+## Route one method and path to a handler that may throw a Response.
+pub let try_method
+  : { method: Method, path: Str,
+      handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  =
+  { method, path, handler } ->
+    route {
+      method = method,
+      path = path,
+      # The conversion happens INSIDE the region, where the answer is still
+      # typed `'r`. Done outside, on the Ok payload, the constraint lands on a
+      # different variable and the annotation is rejected.
+      handler = { m } -> do
+        let outcome = perform ExceptionToResult in do
+          let answered = handler { m = m }
+          Ok { val = answered.into_response {} }
+        match outcome is
+          Ok { val } -> val
+          Err { error } -> error,
+    }
+
+## Route a GET whose handler may throw a Response.
+pub let try_get
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Get, path = path, handler = handler }
+
+## Route a POST whose handler may throw a Response.
+pub let try_post
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Post, path = path, handler = handler }
+
+## Route a PUT whose handler may throw a Response.
+pub let try_put
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Put, path = path, handler = handler }
+
+## Route a PATCH whose handler may throw a Response.
+pub let try_patch
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Patch, path = path, handler = handler }
+
+## Route a DELETE whose handler may throw a Response.
+pub let try_delete
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Delete, path = path, handler = handler }
+
+## Route a HEAD whose handler may throw a Response.
+pub let try_head
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Head, path = path, handler = handler }
+
+## Route an OPTIONS whose handler may throw a Response.
+pub let try_options
+  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r -> Routes =
+  { path, handler } -> try_method { method = Options, path = path, handler = handler }
 
 ## Try `a`, then `b`. First match wins, so declaration order is the priority.
 ##
