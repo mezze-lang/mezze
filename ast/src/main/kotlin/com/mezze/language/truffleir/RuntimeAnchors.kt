@@ -12,5 +12,5 @@ package com.mezze.language.truffleir
  */
 object RuntimeAnchors {
     const val MUT_EFFECT_HASH_HEX =
-        "b7c8d7273f200e6a3bcedd6330db64666ad497ddc81726c8c8bbc81cc1aa9ade11d5de3f3486b11b442f95b3c523fe7430f98bbe9922ad65f43fb4192f63e6f2"
+        "f268c6e39679f3b95091f75b959ae77d3fb48662021bbfb4daa9a36340ccdd8832d6bc6d15f84e657470ea87d2981c849ff1ca76e8fa6510f60019acd4d598c2"
 }

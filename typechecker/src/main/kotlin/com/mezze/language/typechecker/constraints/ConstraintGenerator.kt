@@ -1300,36 +1300,8 @@ class ConstraintGenerator(
         )
     }
 
-    /**
-     * Each binding type's free variables, by the type OBJECT. Generalising a `let`
-     * asks for the free variables of the whole context, and the context holds
-     * every imported binding — the same objects every time. Walking them afresh
-     * at each `let` made one `use std::syntax::{ Expr }` cost five seconds:
-     * those types are large, and a module has many lets. Types are immutable, so
-     * an object's answer never changes.
-     */
-    private val freeVarsOfType = java.util.IdentityHashMap<MezzeType, Set<TypeVar>>()
-
-    private fun freeVarsOf(type: MezzeType): Set<TypeVar> = freeVarsOfType.getOrPut(type) { collectFreeTypeVars(type) }
-
-    private fun getContextFreeVars(context: TypingContext, excludeBindings: Set<BindingKey> = emptySet()): Set<TypeVar> {
-        val freeVars = mutableSetOf<TypeVar>()
-        for ((key, binding) in context.getAllBindings()) {
-            if (key in excludeBindings) continue
-
-            when (binding) {
-                is TypingContext.Binding.Monomorphic -> {
-                    freeVars.addAll(collectFreeTypeVars(binding.type))
-                }
-                is TypingContext.Binding.Polymorphic -> {
-                    val typeFreeVars = freeVarsOf(binding.scheme.type)
-                    val unquantified = typeFreeVars - binding.scheme.quantifiedVars.toSet()
-                    freeVars.addAll(unquantified)
-                }
-            }
-        }
-        return freeVars
-    }
+    private fun getContextFreeVars(context: TypingContext, excludeBindings: Set<BindingKey> = emptySet()): Set<TypeVar> =
+        context.freeTypeVars(excludeBindings)
 
     internal fun addAbilityConstraintsToFunctionType(
         type: MezzeType,

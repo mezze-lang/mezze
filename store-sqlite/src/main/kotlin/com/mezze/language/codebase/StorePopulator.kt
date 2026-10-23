@@ -141,7 +141,7 @@ object StorePopulator {
             // inside the install dir, never a project file).
             //
             // The LoadedModule.sourceHash from ImportResolver is a MezzeHash
-            // (#-prefixed SHA3-512). Hydration uses SHA-256 of file bytes for
+            // (#-prefixed SHA-512). Hydration uses SHA-256 of file bytes for
             // compatibility with DevRunner's keying. Re-compute SHA-256 here
             // so both tools share the same `(modulePath, sourceHash)` keys.
             for ((loadedPathTyped, loadedTyped) in result.loadedModules) {

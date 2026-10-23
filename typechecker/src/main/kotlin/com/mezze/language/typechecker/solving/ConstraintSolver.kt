@@ -277,6 +277,7 @@ class ConstraintSolver(
         // reused across per-binding solves).
         poisonedVars.clear()
         deferredInherentLeftovers.clear()
+        abilityChecker.beginSolve()
         var substitution = Substitution.empty
         val errors = mutableListOf<ConstraintError>()
         val warnings = mutableListOf<String>()

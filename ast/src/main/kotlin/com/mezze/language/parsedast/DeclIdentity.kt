@@ -75,17 +75,19 @@ class IdentityGroup(val modules: List<ParsedModule>) {
         val owner = IntArray(size)
         modules.forEachIndexed { m, mod -> for (i in mod.decls.indices) owner[offsets[m] + i] = m }
         fun declOf(node: Int): ParsedDecl = modules[owner[node]].decls[node - offsets[owner[node]]]
-        fun hash(node: Int, ref: (Int) -> Ref): Hash {
+        fun walk(node: Int, ref: (Int) -> Ref): MezzeHashBuilder {
             val m = owner[node]
             val b = MezzeHashBuilder()
             Walker(b, locals[m], scopes[m], ref, modulePaths[m]).decl(declOf(node))
-            return b.buildHash()
+            return b
         }
+        fun hash(node: Int, ref: (Int) -> Ref): Hash = walk(node, ref).buildHash()
 
-        // Pass 1: which declarations of the group each declaration uses.
+        // Pass 1: which declarations of the group each declaration uses — a walk
+        // for its references only, never digested.
         val uses = (0 until size).map { n ->
             val found = sortedSetOf<Int>()
-            hash(n) { j -> found.add(j); Ref.InGroup }
+            walk(n) { j -> found.add(j); Ref.InGroup }
             found
         }
 

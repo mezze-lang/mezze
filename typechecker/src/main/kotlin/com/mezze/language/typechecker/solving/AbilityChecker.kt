@@ -76,6 +76,18 @@ class AbilityChecker internal constructor(
     private val deferredInference = mutableMapOf<TypeVar, MezzeType>()
     private val associatedTypeResolutionConstraints = mutableMapOf<TypeVar, MutableList<Constraint.AssociatedTypeResolution>>()
 
+    /**
+     * Forget the obligations of the previous solve. One solver checks every
+     * top-level binding of a module, one solve each; without this every solve
+     * re-validated and re-resolved the obligations of every binding before it —
+     * checking a module was quadratic in its bindings.
+     */
+    fun beginSolve() {
+        typeVarAbilityConstraints.clear()
+        deferredInference.clear()
+        associatedTypeResolutionConstraints.clear()
+    }
+
     fun getGeneratedCodecImpls(): Collection<GeneratedCodecImpl> = generatedCodecImpls.values
     fun getDeferredInference(): Map<TypeVar, MezzeType> = deferredInference
     fun getAssociatedTypeResolutionConstraints(): Map<TypeVar, MutableList<Constraint.AssociatedTypeResolution>> = associatedTypeResolutionConstraints

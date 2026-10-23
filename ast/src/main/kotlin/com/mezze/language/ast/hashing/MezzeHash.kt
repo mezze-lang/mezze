@@ -62,46 +62,74 @@ data class MezzeHash private constructor(
     }
 }
 
+/**
+ * Bytes to hash, appended a piece at a time and digested once by [build].
+ *
+ * Buffered: a hash is built from many small pieces (a tag, a length, a name),
+ * and feeding each to the digest separately — through a digest looked up from
+ * the security providers for every builder — was most of the cost of stamping
+ * a module's identities.
+ */
 class MezzeHashBuilder {
-    private val digest = try {
-        MessageDigest.getInstance("SHA3-512")
-    } catch (e: Exception) {
-        MessageDigest.getInstance("SHA-512")
+    private var buf = ByteArray(128)
+    private var len = 0
+
+    private fun room(n: Int) {
+        if (len + n > buf.size) buf = buf.copyOf(maxOf(buf.size * 2, len + n))
     }
 
-    fun append(bytes: ByteArray): MezzeHashBuilder { digest.update(bytes); return this }
+    private fun put(b: Byte) {
+        room(1)
+        buf[len++] = b
+    }
 
-    fun append(str: String): MezzeHashBuilder {
-        appendInt(str.length)
-        digest.update(str.toByteArray(Charsets.UTF_8))
+    fun append(bytes: ByteArray): MezzeHashBuilder {
+        room(bytes.size)
+        System.arraycopy(bytes, 0, buf, len, bytes.size)
+        len += bytes.size
         return this
     }
 
+    fun append(str: String): MezzeHashBuilder {
+        appendInt(str.length)
+        return append(str.toByteArray(Charsets.UTF_8))
+    }
+
     fun appendInt(value: Int): MezzeHashBuilder {
-        digest.update(byteArrayOf(
-            (value shr 24).toByte(), (value shr 16).toByte(),
-            (value shr 8).toByte(), value.toByte()
-        ))
+        room(4)
+        buf[len++] = (value shr 24).toByte(); buf[len++] = (value shr 16).toByte()
+        buf[len++] = (value shr 8).toByte(); buf[len++] = value.toByte()
         return this
     }
 
     fun appendLong(value: Long): MezzeHashBuilder {
-        digest.update(byteArrayOf(
-            (value shr 56).toByte(), (value shr 48).toByte(),
-            (value shr 40).toByte(), (value shr 32).toByte(),
-            (value shr 24).toByte(), (value shr 16).toByte(),
-            (value shr 8).toByte(), value.toByte()
-        ))
-        return this
+        appendInt((value shr 32).toInt())
+        return appendInt(value.toInt())
     }
 
-    fun appendBoolean(value: Boolean): MezzeHashBuilder { digest.update(if (value) 1 else 0); return this }
+    fun appendBoolean(value: Boolean): MezzeHashBuilder { put(if (value) 1 else 0); return this }
 
-    fun append(hash: MezzeHash): MezzeHashBuilder { digest.update(hash.toByteArray()); return this }
+    fun append(hash: MezzeHash): MezzeHashBuilder = append(hash.toByteArray())
 
-    fun build(): MezzeHash = MezzeHash.fromRawBytes(digest.digest())
+    /** The hash of everything appended since the last build; the builder starts empty again. */
+    fun build(): MezzeHash {
+        val d = DIGEST.get()
+        d.update(buf, 0, len)
+        len = 0
+        return MezzeHash.fromRawBytes(d.digest())
+    }
 
     fun buildHash(): com.mezze.language.typedast.Hash = com.mezze.language.typedast.Hash(build().toFullHexString())
+
+    private companion object {
+        /**
+         * One digest per thread: looking one up is slow, and a digest is not
+         * thread-safe. SHA-512, not SHA3-512: the JVM's SHA3 is five times
+         * slower on the small inputs identities are made of, and stamping hashes
+         * every declaration of every module.
+         */
+        val DIGEST: ThreadLocal<MessageDigest> = ThreadLocal.withInitial { MessageDigest.getInstance("SHA-512") }
+    }
 }
 
 object HashTags {

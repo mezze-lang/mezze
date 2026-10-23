@@ -53,11 +53,20 @@ data class Hash(val hex: String) {
         /** Derive operation hash from impl hash + operation name. Single source of truth. */
         @JvmStatic
         fun computeOpHash(implHash: Hash, opName: String): Hash {
+            val key = implHash to opName
+            opHashes[key]?.let { return it }
             val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
             builder.append(implHash.hex)
             builder.append(opName)
-            return Hash(builder.build().toFullHexString())
+            val hash = Hash(builder.build().toFullHexString())
+            // Every module that imports an impl registers its ops again, and the
+            // stdlib's are imported everywhere. Bounded for a long-lived process.
+            if (opHashes.size > 200_000) opHashes.clear()
+            opHashes[key] = hash
+            return hash
         }
+
+        private val opHashes = java.util.concurrent.ConcurrentHashMap<Pair<Hash, String>, Hash>()
 
         /**
          * The identity of an APPLIED type — a constructor's declaration hash

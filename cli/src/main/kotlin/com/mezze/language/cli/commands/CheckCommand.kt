@@ -271,7 +271,10 @@ class CheckCommand {
         val cacheStore = lazy { ProjectStore.open(root) }
         com.mezze.language.typechecker.ModuleResolver.cacheStore = cacheStore
         // `check` ends in exitProcess on most paths; the hook runs on all of them.
-        Runtime.getRuntime().addShutdownHook(Thread { if (cacheStore.isInitialized()) cacheStore.value.close() })
+        Runtime.getRuntime().addShutdownHook(Thread {
+            com.mezze.language.typechecker.module.CheckedModuleCache.flush()
+            if (cacheStore.isInitialized()) cacheStore.value.close()
+        })
 
         try {
             val startTime = System.nanoTime()

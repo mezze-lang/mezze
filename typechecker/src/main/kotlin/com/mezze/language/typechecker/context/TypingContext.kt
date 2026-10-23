@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.context
 
 import com.mezze.language.ast.BindingKey
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.ParsedFnAbilityConstraint
 import com.mezze.language.parsedast.ParsedNamedType
 import com.mezze.language.parsedast.ParsedTypeAnnotation
@@ -27,8 +28,38 @@ data class TypingContext(
      * tenth of all checking.
      */
     private val anonymousImplMethodsByName: Map<String, List<InherentMethodInfo>> = emptyMap(),
-    val parent: TypingContext? = null
+    val parent: TypingContext? = null,
+    /**
+     * The bindings of [bindings] that have free type variables, with them —
+     * kept as bindings are added, because generalization asks for the
+     * context's free variables at every `let`, and almost no binding has any:
+     * collecting them from every binding, imports included, made checking a
+     * module quadratic in its size. An entry counts only while it is still what
+     * its key looks up to (a later binding of the key may have no free vars).
+     */
+    private val openBindings: Map<BindingKey, OpenBinding> = openOf(bindings),
 ) {
+    /** A binding with free type variables, and those variables. */
+    data class OpenBinding(val binding: Binding, val freeVars: Set<TypeVar>)
+
+    /**
+     * The type variables free in this context: in any binding a lookup finds,
+     * minus a polymorphic binding's quantified ones — skipping [exclude].
+     */
+    fun freeTypeVars(exclude: Set<BindingKey> = emptySet()): Set<TypeVar> {
+        val out = HashSet<TypeVar>()
+        var level: TypingContext? = this
+        while (level != null) {
+            for ((key, open) in level.openBindings) {
+                if (key in exclude) continue
+                if ((lookup(key) as? LookupResult.Found)?.binding !== open.binding) continue
+                out.addAll(open.freeVars)
+            }
+            level = level.parent
+        }
+        return out
+    }
+
     sealed class LookupResult {
         data class Found(val binding: Binding) : LookupResult()
         data class NotFound(val key: BindingKey) : LookupResult() {
@@ -108,7 +139,11 @@ data class TypingContext(
     fun lookup(name: String): LookupResult = lookup(BindingKey.unqualified(name))
 
     fun extend(key: BindingKey, binding: Binding): TypingContext {
-        return copy(bindings = bindings.with(key, binding))
+        val open = openBinding(binding)
+        return copy(
+            bindings = bindings.with(key, binding),
+            openBindings = if (open != null) openBindings.with(key, open) else openBindings,
+        )
     }
 
     fun extend(name: String, binding: Binding): TypingContext {
@@ -132,7 +167,12 @@ data class TypingContext(
     }
 
     fun extendAll(newBindings: Map<BindingKey, Binding>): TypingContext {
-        return copy(bindings = com.mezze.language.ast.solving.PersistentHashMap.of(bindings).plusAll(newBindings))
+        var open = openBindings
+        for ((key, binding) in newBindings) openBinding(binding)?.let { open = open.with(key, it) }
+        return copy(
+            bindings = com.mezze.language.ast.solving.PersistentHashMap.of(bindings).plusAll(newBindings),
+            openBindings = open,
+        )
     }
 
     /**
@@ -409,3 +449,18 @@ data class TypingContext(
  */
 private fun <K, V> Map<K, V>.with(key: K, value: V): Map<K, V> =
     com.mezze.language.ast.solving.PersistentHashMap.of(this).plus(key, value)
+
+/** [binding] with its free type variables, or null when it has none. */
+private fun openBinding(binding: TypingContext.Binding): TypingContext.OpenBinding? {
+    val free = when (binding) {
+        is TypingContext.Binding.Monomorphic ->
+            if (binding.type.isGround) return null else com.mezze.language.ast.solving.collectFreeTypeVars(binding.type)
+        is TypingContext.Binding.Polymorphic ->
+            if (binding.scheme.type.isGround) return null
+            else com.mezze.language.ast.solving.collectFreeTypeVars(binding.scheme.type) - binding.scheme.quantifiedVars.toSet()
+    }
+    return if (free.isEmpty()) null else TypingContext.OpenBinding(binding, free)
+}
+
+private fun openOf(bindings: Map<BindingKey, TypingContext.Binding>): Map<BindingKey, TypingContext.OpenBinding> =
+    bindings.mapNotNull { (key, binding) -> openBinding(binding)?.let { key to it } }.toMap()

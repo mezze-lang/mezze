@@ -83,6 +83,7 @@ class CheckedModuleCacheTest {
     private fun check(): Map<String, String> {
         val parsed = MezzeParser().parseParsedModule(app, "app.mz")
         val result = TypeChecker().checkParsedModule(parsed, project, enablePrelude = true)
+        CheckedModuleCache.flush()
         val ok = result as? TypeChecker.TypeCheckResult.Success ?: error("did not type-check: $result")
         return ok.typedModule!!.decls.filterIsInstance<TypedLetDecl>()
             .associate { it.name to prettyPrintType(it.scheme.type) }

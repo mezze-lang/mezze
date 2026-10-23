@@ -38,7 +38,8 @@ object CheckedModuleCache {
 
     /** [module] as last checked, if it is unchanged since. */
     fun load(module: LoadedModule): TypedModuleResult? {
-        val (store, key) = entryFor(module) ?: return null
+        val (opened, key) = entryFor(module) ?: return null
+        val store = opened ?: return null
         val cached = PhaseTiming.phase(module.modulePath, "cache-interface") {
             store.getCheckedInterface(module.modulePath, key)?.let { read(it, CachedModule.serializer()) }
         } ?: return null
@@ -53,17 +54,37 @@ object CheckedModuleCache {
         })
     }
 
-    /** Keep [result], checked from [module], for later runs. */
+    /**
+     * Keep [result], checked from [module], for later runs — in the background:
+     * encoding a checked module was a tenth of checking a project cold, and
+     * nothing in this run reads it back. [flush] waits for what is pending.
+     */
     fun save(module: LoadedModule, result: TypedModuleResult) {
-        val (store, key) = entryFor(module) ?: return
+        if (entryFor(module, open = false) == null) return
         val typed = result.typedModule ?: return
-        val cached = CachedModule.of(result) ?: return
-        store.putCheckedModule(
-            module.modulePath, key,
-            write(CachedModule.serializer(), cached.copy(parsedModule = null)),
-            write(Body.serializer(), Body(typed, result.parsedModule)),
-        )
+        pending.add(writers.submit {
+            val (opened, key) = entryFor(module) ?: return@submit
+            val store = opened ?: return@submit
+            val cached = CachedModule.of(result) ?: return@submit
+            store.putCheckedModule(
+                module.modulePath, key,
+                write(CachedModule.serializer(), cached.copy(parsedModule = null)),
+                write(Body.serializer(), Body(typed, result.parsedModule)),
+            )
+        })
     }
+
+    /** Wait until every [save] so far is kept; a failed one is rethrown. */
+    fun flush() {
+        while (true) (pending.poll() ?: return).get()
+    }
+
+    private val pending = java.util.concurrent.ConcurrentLinkedQueue<java.util.concurrent.Future<*>>()
+
+    /** Daemon threads: a run that ends without [flush] keeps what it finished. */
+    private val writers = java.util.concurrent.Executors.newFixedThreadPool(
+        maxOf(1, Runtime.getRuntime().availableProcessors() / 2),
+    ) { r -> Thread(r, "checked-module-writer").apply { isDaemon = true } }
 
     private fun <T> read(bytes: ByteArray, serializer: KSerializer<T>): T? = try {
         TypeSharing.read { cbor.decodeFromByteArray(serializer, bytes) }
@@ -75,11 +96,12 @@ object CheckedModuleCache {
     private fun <T> write(serializer: KSerializer<T>, value: T): ByteArray =
         TypeSharing.write { cbor.encodeToByteArray(serializer, value) }
 
-    private fun entryFor(module: LoadedModule): Pair<MezzeStore, String>? {
+    /** Where [module] is kept, and under what key; with [open] false, only whether it would be. */
+    private fun entryFor(module: LoadedModule, open: Boolean = true): Pair<MezzeStore?, String>? {
         if (ModulePathConventions.isStdlib(module.modulePath)) return null
         val identity = module.identity ?: return null
         val source = module.sourceHash ?: return null
-        val store = ModuleResolver.cacheStore?.value ?: return null
-        return store to "${identity.hex}:${source.hex}"
+        val cacheStore = ModuleResolver.cacheStore ?: return null
+        return (if (open) cacheStore.value else null) to "${identity.hex}:${source.hex}"
     }
 }

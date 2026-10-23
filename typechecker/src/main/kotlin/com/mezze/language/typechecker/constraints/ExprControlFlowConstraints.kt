@@ -384,6 +384,9 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     // outer block's let name across the block boundary is legal (case B).
     val blockLets = mutableSetOf<String>()
 
+    // What each `let`'s local solve needs of everything the block accumulated.
+    val components = ConstraintComponents()
+
     for (stmt in expr.statements) {
         when (stmt) {
             is ParsedStatement.Let -> {
@@ -391,6 +394,10 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // type-checked in, and the one against which the RHS's solvability is
                 // judged (below, for solvableLetBindings).
                 val preLetContext = currentContext
+                // Where this statement's own constraints start in the collector.
+                val constraintsBefore = collector.constraints.size
+                val abilityBefore = collector.abilityConstraints.size
+                val associatedBefore = collector.associatedTypeConstraints.size
 
                 val annotatedType = stmt.typeAnnotation?.let { annotation ->
                     convertParsedTypeAnnotation(annotation)
@@ -558,9 +565,21 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // correctly infers `{ n: Int } -> Int`. (merge() keeps ability /
                 // associated-type constraints in separate lists from `constraints`,
                 // which is why they were omitted here.)
-                val localSolveConstraints = collector.constraints +
-                    collector.abilityConstraints +
-                    collector.associatedTypeConstraints
+                //
+                // Only the accumulated constraints connected to this statement's
+                // variables: no other can change what this binding solves to
+                // (see ConstraintComponents).
+                val seeds = HashSet<Any>()
+                collectVariables(bindingType, seeds)
+                annotatedType?.let { collectVariables(it, seeds) }
+                preBindType?.let { collectVariables(it, seeds) }
+                collector.constraints.subList(constraintsBefore, collector.constraints.size).forEach { it.collectVariables(seeds) }
+                collector.abilityConstraints.subList(abilityBefore, collector.abilityConstraints.size).forEach { it.collectVariables(seeds) }
+                collector.associatedTypeConstraints.subList(associatedBefore, collector.associatedTypeConstraints.size).forEach { it.collectVariables(seeds) }
+                val localSolveConstraints = components.relevant(
+                    collector.constraints + collector.abilityConstraints + collector.associatedTypeConstraints,
+                    seeds,
+                )
                 val localSolve = solveDoBlockBindingLocally(localSolveConstraints, currentContext)
                 val letResult = if (localSolve != null) {
                     bindLetFn(
