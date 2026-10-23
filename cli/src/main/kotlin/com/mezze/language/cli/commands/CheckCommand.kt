@@ -55,6 +55,21 @@ class CheckCommand {
         }
     }
 
+    /** Run [block], printing what it prints, and return that too. */
+    private fun printed(block: () -> Unit): String {
+        val original = System.out
+        val buffer = java.io.ByteArrayOutputStream()
+        System.setOut(java.io.PrintStream(buffer, true, Charsets.UTF_8))
+        try {
+            block()
+        } finally {
+            System.setOut(original)
+        }
+        val text = buffer.toString(Charsets.UTF_8)
+        print(text)
+        return text
+    }
+
     private fun checkFile(file: File, quiet: Boolean, jsonMode: Boolean) {
         if (!file.exists()) {
             if (jsonMode) {
@@ -280,6 +295,28 @@ class CheckCommand {
             if (cacheStore.isInitialized()) cacheStore.value.close()
         })
 
+        // Nothing changed since the last check that passed: say so again. Only
+        // where a check has kept something before — a one-file program has no
+        // store, and checks faster than opening one.
+        val manifestText = mezzeToml.readText()
+        if (!jsonMode && com.mezze.language.store.ProjectLayout.storeDir(root).exists()) {
+            val replayStart = System.nanoTime()
+            CheckReplay.replay(cacheStore.value, root, appConfig.name, quiet, manifestText)?.let { output ->
+                print(output)
+                val ms = String.format("%.1f", (System.nanoTime() - replayStart) / 1_000_000.0)
+                println(if (quiet) "OK (${ms}ms)" else "Check passed: ${appConfig.name} (${ms}ms)")
+                return
+            }
+        }
+        /** What a passing check printed, kept for [CheckReplay] where there is a store. */
+        fun remember(output: String) {
+            if (!cacheStore.isInitialized()) return
+            val read = com.mezze.language.typechecker.ModuleResolver.snapshot()
+                .filterKeys { !com.mezze.language.ast.ModulePathConventions.isStdlib(it) }
+                .values.map { File(it.filePath) }
+            CheckReplay.record(cacheStore.value, root, appConfig.name, quiet, manifestText, read + appFile, output)
+        }
+
         try {
             val startTime = System.nanoTime()
 
@@ -385,16 +422,20 @@ class CheckCommand {
             if (jsonMode) {
                 emitJson(JsonDiagnosticFormatter.ok(null, appConfig.name, typeCheckResult.typedModule, rawResult.warnings))
             } else if (quiet) {
-                printWarnings(rawResult.warnings, source)
+                val shown = printed { printWarnings(rawResult.warnings, source) }
                 println("OK (${String.format("%.1f", totalTime)}ms)")
+                remember(shown)
             } else {
-                printWarnings(rawResult.warnings, source)
-                val typedModule = typeCheckResult.typedModule
-                if (typedModule != null) {
-                    printTypedModuleSummary(typedModule)
+                val shown = printed {
+                    printWarnings(rawResult.warnings, source)
+                    val typedModule = typeCheckResult.typedModule
+                    if (typedModule != null) {
+                        printTypedModuleSummary(typedModule)
+                    }
+                    println()
                 }
-                println()
                 println("Check passed: ${appConfig.name} (${String.format("%.1f", totalTime)}ms)")
+                remember(shown)
             }
         } catch (e: TypeCheckError) {
             if (jsonMode) {

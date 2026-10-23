@@ -71,7 +71,10 @@ data class MezzeHash private constructor(
  * a module's identities.
  */
 class MezzeHashBuilder {
-    private var buf = ByteArray(128)
+    // This thread's spare buffer when it is free — a builder lives for one hash,
+    // and growing a fresh one for each was a tenth of what stamping allocated —
+    // or a new one when another builder on this thread holds it.
+    private var buf: ByteArray = SPARE.get()?.also { SPARE.set(null) } ?: ByteArray(1024)
     private var len = 0
 
     private fun room(n: Int) {
@@ -116,12 +119,18 @@ class MezzeHashBuilder {
         val d = DIGEST.get()
         d.update(buf, 0, len)
         len = 0
+        // Handed back for the next builder; this one, built, appends no more.
+        if (SPARE.get() == null) SPARE.set(buf)
+        buf = EMPTY
         return MezzeHash.fromRawBytes(d.digest())
     }
 
     fun buildHash(): com.mezze.language.typedast.Hash = com.mezze.language.typedast.Hash(build().toFullHexString())
 
     private companion object {
+        val SPARE = ThreadLocal<ByteArray?>()
+        val EMPTY = ByteArray(0)
+
         /**
          * One digest per thread: looking one up is slow, and a digest is not
          * thread-safe. SHA-512, not SHA3-512: the JVM's SHA3 is five times

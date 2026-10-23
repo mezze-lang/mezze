@@ -326,6 +326,13 @@ class ModuleResolver(
              * overlay) forgets this.
              */
             val current: MutableMap<String, Boolean> = java.util.concurrent.ConcurrentHashMap()
+            /**
+             * Each module's source as read in this check, by the root that resolved
+             * it and its path. Sources are taken not to change while a check runs —
+             * as [current] takes them — and every module was found, read and hashed
+             * again by each importer's currency question.
+             */
+            val sources = java.util.concurrent.ConcurrentHashMap<Pair<Path, String>, java.util.Optional<Any>>()
             val lock = Any()
 
             /**
@@ -342,6 +349,11 @@ class ModuleResolver(
         private val worlds = java.util.concurrent.ConcurrentHashMap<World, Caches>()
 
         private fun caches(world: World): Caches = worlds.computeIfAbsent(world) { Caches() }
+
+        /** Parses a stamping pass's modules ahead of it (see prefetch). Daemon threads, deep stacks. */
+        private val PARSERS = java.util.concurrent.Executors.newFixedThreadPool(
+            maxOf(1, Runtime.getRuntime().availableProcessors()),
+        ) { r -> Thread(null, r, "module-parser", 1L shl 28).apply { isDaemon = true } }
 
                 @Volatile
         private var store: MezzeStore? = null
@@ -421,7 +433,7 @@ class ModuleResolver(
             synchronized(c.lock) {
                 c.modules.clear()
                 c.exportsDerivedFrom.clear()
-                c.current.clear()
+                c.current.clear(); c.sources.clear()
             }
         }
 
@@ -433,7 +445,7 @@ class ModuleResolver(
         @JvmOverloads
         fun beginCheck(world: World = World.DEFAULT) {
             val c = caches(world)
-            synchronized(c.lock) { c.current.clear() }
+            synchronized(c.lock) { c.current.clear(); c.sources.clear() }
         }
 
         /**
@@ -451,7 +463,7 @@ class ModuleResolver(
                 c.sourceOverlay[modulePath] = source
                 c.modules.remove(modulePath)
                 c.exportsDerivedFrom.remove(modulePath)
-                c.current.clear()
+                c.current.clear(); c.sources.clear()
             }
         }
 
@@ -471,7 +483,7 @@ class ModuleResolver(
                     c.exportsDerivedFrom.remove(path)
                 }
                 c.sourceOverlay.clear()
-                c.current.clear()
+                c.current.clear(); c.sources.clear()
             }
         }
 
@@ -500,7 +512,7 @@ class ModuleResolver(
                     c.modules.remove(path)
                     c.exportsDerivedFrom.remove(path)
                 }
-                c.current.clear()
+                c.current.clear(); c.sources.clear()
             }
         }
 
@@ -703,7 +715,11 @@ class ModuleResolver(
     private class Source(val modulePath: String, val filePath: String, val text: String, val hash: Hash)
 
     /** Read [modulePath] without loading anything, or null when there is nothing to read. */
-    private fun readSource(modulePath: String): Source? {
+    private fun readSource(modulePath: String): Source? =
+        caches(world).sources.computeIfAbsent(projectRoot to modulePath) { java.util.Optional.ofNullable(readSourceNow(modulePath)) }
+            .orElse(null) as Source?
+
+    private fun readSourceNow(modulePath: String): Source? {
         // The overlay is consulted BEFORE the file is resolved, not after it is
         // read: a changeset that ADDS a module has no file to find.
         val overlaid = overlayFor(world, modulePath)
@@ -766,12 +782,20 @@ class ModuleResolver(
         return current
     }
 
+    /**
+     * Modules parsed ahead of the stamping pass that will need them (see
+     * [prefetch]), taken by the first pass that loads each.
+     */
+    private val prefetched = java.util.concurrent.ConcurrentHashMap<String, Raw>()
+
     /** What a stamping pass works on: a module's source, parsed, and who resolves its imports. */
     private class Raw(val source: Source, val parsed: ParsedModule, val resolver: ModuleResolver)
 
-    private fun dependencyPaths(raw: Raw): List<String> {
-        val imports = ModuleIdentity.dependencies(raw.parsed)
-        val prelude = if (ModulePathConventions.isStdlib(raw.source.modulePath)) emptyList() else PRELUDE_MODULES
+    private fun dependencyPaths(raw: Raw): List<String> = dependencyPaths(raw.parsed, raw.source.modulePath)
+
+    private fun dependencyPaths(parsed: ParsedModule, modulePath: String): List<String> {
+        val imports = ModuleIdentity.dependencies(parsed)
+        val prelude = if (ModulePathConventions.isStdlib(modulePath)) emptyList() else PRELUDE_MODULES
         return (imports + prelude).map { it.joinToString("::") }.filter { it !in coreTypeModules }.distinct()
     }
 
@@ -791,6 +815,7 @@ class ModuleResolver(
 
         fun load(path: String, via: ModuleResolver, isRoot: Boolean): Raw? {
             raws[path]?.let { return it }
+            prefetched.remove(path)?.let { raws[path] = it; return it }
             val src = via.readSource(path) ?: return null
             val parsed = try { PhaseTiming.phase(path, "parse") { via.parse(src) } } catch (e: ModuleError.ParseError) { if (isRoot) throw e else return null }
             return Raw(src, parsed, via.resolverFor(src.filePath)).also { raws[path] = it }
@@ -798,7 +823,7 @@ class ModuleResolver(
         fun needsStamp(path: String, via: ModuleResolver): Boolean =
             (getFromCache(world, path) ?: fromSnapshot(path)) == null || !via.isCurrent(path, memo)
 
-        load(root, this, isRoot = true)
+        load(root, this, isRoot = true)?.let { prefetch(listOf(Triple(it.parsed, root, it.resolver)), raws, memo) }
         val index = HashMap<String, Int>()
         val low = HashMap<String, Int>()
         val onStack = HashSet<String>()
@@ -840,6 +865,41 @@ class ModuleResolver(
         }
     }
 
+    /**
+     * Parse what this pass will stamp before it starts, many files at a time:
+     * level by level from [root] through the imports that need stamping. The
+     * pass below then finds each one parsed. Parsing was half of stamping a
+     * project, one file after another. Only reading and parsing run on other
+     * threads — what needs stamping is decided here, as the pass decides it.
+     */
+    private fun prefetch(
+        roots: List<Triple<ParsedModule, String, ModuleResolver>>,
+        raws: MutableMap<String, Raw>,
+        memo: MutableMap<String, Boolean>,
+    ) {
+        var frontier = roots
+        val seen = HashSet<String>().apply { roots.forEach { add(it.second) } }
+        while (frontier.isNotEmpty()) {
+            val wanted = frontier.flatMap { (parsed, path, resolver) ->
+                dependencyPaths(parsed, path)
+                    .filter { dep -> dep !in raws && seen.add(dep) }
+                    .filter { dep -> (getFromCache(world, dep) ?: fromSnapshot(dep)) == null || !resolver.isCurrent(dep, memo) }
+                    .map { dep -> dep to resolver }
+            }
+            if (wanted.isEmpty()) return
+            val parsed = wanted.map { (dep, via) ->
+                PARSERS.submit<Raw?> {
+                    val src = via.readSource(dep) ?: return@submit null
+                    // A module that does not parse is reported where the pass meets it.
+                    val module = try { PhaseTiming.phase(dep, "parse") { via.parse(src) } } catch (_: ModuleError.ParseError) { return@submit null }
+                    Raw(src, module, via.resolverFor(src.filePath))
+                }
+            }.mapNotNull { it.get() }
+            for (raw in parsed) raws.putIfAbsent(raw.source.modulePath, raw)
+            frontier = parsed.map { Triple(it.parsed, it.source.modulePath, it.resolver) }
+        }
+    }
+
     /** Stamp modules that import each other, as one group, and cache each. */
     private fun stampGroup(
         members: List<String>,
@@ -851,6 +911,11 @@ class ModuleResolver(
         // module outside the group is stamped by now, so a macro from one can run.
         for (path in members) {
             val raw = raws.getValue(path)
+            // A `.mz` file holds a macro call only where its text has `!(`, and a
+            // quote only where it has a backtick: one without either is left as
+            // it is, without walking it. A frontend's file has no such marks.
+            val text = raw.source.text
+            if (raw.resolver.frontends.forFile(raw.source.filePath) == null && "!(" !in text && '`' !in text) continue
             val expanded = PhaseTiming.phase(path, "expand") {
                 com.mezze.language.typechecker.macro.MacroExpander(raw.resolver, members.toSet()).expand(raw.parsed, path)
             }
@@ -907,6 +972,13 @@ class ModuleResolver(
      */
     fun stampEntry(parsed: ParsedModule, modulePath: String?): ParsedModule {
         if (ModuleIdentity.isStamped(parsed)) return parsed
+        // Everything the entry reaches, parsed at once before its imports are
+        // stamped one by one as its scope asks for them.
+        synchronized(stampLock(world)) {
+            val found = HashMap<String, Raw>()
+            prefetch(listOf(Triple(parsed, modulePath ?: "", this)), found, currency(world))
+            prefetched.putAll(found)
+        }
         val expanded = com.mezze.language.typechecker.macro.MacroExpander(this, setOfNotNull(modulePath))
             .expand(parsed, modulePath)
         return DeclIdentity.stamp(expanded, scopeOf(expanded, modulePath), modulePath ?: "")
