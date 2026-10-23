@@ -38,4 +38,17 @@ object ProjectStore {
         }
         return store
     }
+
+    /**
+     * [projectRoot]'s store worked on in memory and written back on close
+     * (SQLiteMezzeStore.openProjectInMemory) — for a command that reads and
+     * keeps a lot in one run, as `mez check` does per module.
+     */
+    fun openInMemory(projectRoot: File): SQLiteMezzeStore {
+        val store = SQLiteMezzeStore.openProjectInMemory(projectRoot)
+        store.transaction {
+            StoreHydration.invalidateOnVersionShift(store, binaryIdentity)
+        }
+        return store
+    }
 }

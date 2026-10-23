@@ -27,8 +27,25 @@ import java.sql.ResultSet
  */
 class SQLiteMezzeStore private constructor(
     private val conn: Connection,
-    private val readOnly: Boolean = false
+    private val readOnly: Boolean = false,
+    /** Where an in-memory project store is written back on close (see openProjectInMemory). */
+    private val flushTo: File? = null,
+    /** Whether [flushTo] held this store when it was read in — only then can rows be written back alone. */
+    private val flushIncrementally: Boolean = false,
 ) : MezzeStore {
+
+    /**
+     * In-memory mode: the rows written to the tables a write-back can copy one
+     * by one, and how many changes they were. Writing the whole store back for
+     * a run that changed a module and a metadata row took longer than the check.
+     */
+    private class Written {
+        val checked = LinkedHashSet<String>()
+        val expansions = LinkedHashSet<Pair<String, String>>()
+        val metadata = LinkedHashSet<String>()
+        var changes = 0
+    }
+    private val written: Written? = if (flushTo != null) Written() else null
 
     // ====================================================================
     // L1 IN-MEMORY CACHES — sit in front of every SQLite read.
@@ -228,6 +245,57 @@ class SQLiteMezzeStore private constructor(
                 wipeProjectFiles(projectRoot)
                 openProjectOnce(projectRoot) // if THIS fails it's a real problem — let it surface
             }
+
+        /**
+         * The project store, worked on in memory: its file read in once, every
+         * read and write after that against memory, and the whole written back
+         * once, on [close]. A command that keeps something per module wrote to
+         * the file each time. The stdlib and deps stores stay attached from
+         * their files — nothing writes them here.
+         *
+         * Another process writing the file meanwhile loses what it wrote to the
+         * write-back. Everything here is derived and keyed by content, so that
+         * costs an entry, never makes one wrong.
+         */
+        fun openProjectInMemory(projectRoot: File): SQLiteMezzeStore =
+            try {
+                openProjectInMemoryOnce(projectRoot)
+            } catch (e: java.sql.SQLException) {
+                System.err.println(
+                    "mez: cache at ${com.mezze.language.store.ProjectLayout.storeDir(projectRoot)} " +
+                        "was unreadable (${e.message?.take(80)}); rebuilding it from source.",
+                )
+                wipeProjectFiles(projectRoot)
+                openProjectInMemoryOnce(projectRoot)
+            }
+
+        private fun openProjectInMemoryOnce(projectRoot: File): SQLiteMezzeStore {
+            val srcFile = resolveSrcFile(projectRoot)
+            val stdlibFile = resolveStdlibFile(projectRoot)
+            val depsFile = resolveDepsFile(projectRoot)
+
+            srcFile.parentFile?.mkdirs()
+            ensureStdlibFile(stdlibFile)
+            ensureDepsFile(depsFile)
+
+            val conn = DriverManager.getConnection("jdbc:sqlite::memory:")
+            return try {
+                if (srcFile.isFile) {
+                    conn.createStatement().use { it.executeUpdate("restore from '${srcFile.absolutePath.replace("'", "''")}'") }
+                }
+                val store = SQLiteMezzeStore(conn, readOnly = false, flushTo = srcFile, flushIncrementally = srcFile.isFile)
+                store.configurePragmas()
+                store.initSchema()
+                store.attachAuxDb(DB_STDLIB, stdlibFile)
+                store.attachAuxDb(DB_DEPS, depsFile)
+                store.applyBaselineSchemaTo(DB_STDLIB)
+                store.applyBaselineSchemaTo(DB_DEPS)
+                store
+            } catch (e: Throwable) {
+                runCatching { conn.close() }
+                throw e
+            }
+        }
 
         private fun openProjectOnce(projectRoot: File): SQLiteMezzeStore {
             val srcFile = resolveSrcFile(projectRoot)
@@ -2165,7 +2233,8 @@ class SQLiteMezzeStore private constructor(
         putExpansionStmt.setString(1, macro.hex)
         putExpansionStmt.setString(2, inputHash)
         putExpansionStmt.setBytes(3, StoredBytes.pack(output))
-        putExpansionStmt.executeUpdate()
+        val n = putExpansionStmt.executeUpdate()
+        written?.let { it.expansions += macro.hex to inputHash; it.changes += n }
     }
 
     private val getExpansionStmt: PreparedStatement by lazy {
@@ -2194,7 +2263,8 @@ class SQLiteMezzeStore private constructor(
             putCheckedStmt.setString(2, key)
             putCheckedStmt.setBytes(3, packedInterface)
             putCheckedStmt.setBytes(4, packedBody)
-            putCheckedStmt.executeUpdate()
+            val n = putCheckedStmt.executeUpdate()
+            written?.let { it.checked += modulePath; it.changes += n }
         }
     }
 
@@ -2319,7 +2389,8 @@ class SQLiteMezzeStore private constructor(
             setString(1, key)
             if (value.length >= LARGE_METADATA) setBytes(2, StoredBytes.pack(value.toByteArray(Charsets.UTF_8)))
             else setString(2, value)
-            executeUpdate()
+            val n = executeUpdate()
+            written?.let { it.metadata += key; it.changes += n }
         }
     }
 
@@ -3598,7 +3669,45 @@ class SQLiteMezzeStore private constructor(
 
     @Synchronized
     override fun close() {
-        conn.close()
+        if (conn.isClosed) return
+        try {
+            flushTo?.let { writeBack(it) }
+        } finally {
+            conn.close()
+        }
+    }
+
+    /**
+     * Write an in-memory store back to [file]: nothing when nothing changed; the
+     * rows written, one by one, when every change was to a table [Written]
+     * follows and the file held this store; otherwise the whole store.
+     */
+    private fun writeBack(file: File) {
+        val total = conn.createStatement().use { s -> s.executeQuery("SELECT total_changes()").use { it.next(); it.getInt(1) } }
+        if (total == 0) return
+        val w = written ?: return
+        val path = file.absolutePath.replace("'", "''")
+        if (!flushIncrementally || total != w.changes) {
+            conn.createStatement().use { it.executeUpdate("backup to '$path'") }
+            return
+        }
+        conn.createStatement().use { it.executeUpdate("ATTACH DATABASE '$path' AS disk") }
+        try {
+            conn.autoCommit = false
+            conn.prepareStatement("INSERT OR REPLACE INTO disk.checked_modules SELECT * FROM main.checked_modules WHERE module_path = ?").use { st ->
+                for (m in w.checked) { st.setString(1, m); st.executeUpdate() }
+            }
+            conn.prepareStatement("INSERT OR REPLACE INTO disk.macro_expansions SELECT * FROM main.macro_expansions WHERE macro_hash = ? AND input_hash = ?").use { st ->
+                for ((macro, input) in w.expansions) { st.setString(1, macro); st.setString(2, input); st.executeUpdate() }
+            }
+            conn.prepareStatement("INSERT OR REPLACE INTO disk.metadata SELECT * FROM main.metadata WHERE key = ?").use { st ->
+                for (k in w.metadata) { st.setString(1, k); st.executeUpdate() }
+            }
+            conn.commit()
+        } finally {
+            conn.autoCommit = true
+            conn.createStatement().use { it.executeUpdate("DETACH DATABASE disk") }
+        }
     }
 
     // ====================================================================
