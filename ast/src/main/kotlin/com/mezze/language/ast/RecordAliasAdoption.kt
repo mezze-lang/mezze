@@ -48,6 +48,25 @@ fun adoptRecordAlias(
     val matches = sameNames.filter { (_, _, aliasFields) ->
         aliasFields.all { (name, ty) -> rendered[name] == prettyPrintType(ty) }
     }
+        // ONE declaration can reach us TWICE. Emit assembles its pool from the
+        // declaration registry AND the import context, and a `use`d alias sits in
+        // both — so an imported `type Boxed = { n: Int }` arrived as two entries
+        // carrying the SAME content hash. Identity is the hash, so that is one
+        // type seen twice, not two rivals; counting it as ambiguity made the
+        // uniqueness guard below reject the only candidate there was.
+        //
+        // What that cost: the literal in `{ n = 2 }.tag {}` kept Anonymous, and
+        // `impl Tag for Boxed` registers the nominal target `TypeApplication(Boxed)`
+        // — a pair `typeMatchesTarget` has no arm for. So the method call compiled
+        // to a plain field read and failed at RUNTIME with `Field not found: tag`,
+        // while `let b: Boxed = { n = 2 }` (annotated) and `let b = { n = 2 }`
+        // (solved through a type variable) both dispatched. Only an IMPORTED alias
+        // was affected, which is every alias a library exposes.
+        //
+        // Dedupe on the hash alone: two genuinely DIFFERENT declarations that share
+        // a shape keep their distinct hashes and stay ambiguous here, which is what
+        // the guard is for.
+        .distinctBy { (_, hash, _) -> hash }
     val (aliasName, hash, _) = matches.singleOrNull() ?: return record
     return record.copy(identity = TypeIdentity.declared(aliasName, hash))
 }
