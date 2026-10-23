@@ -35,6 +35,12 @@ data class CachedModule(
     val identity: Hash?,
     val loweredFunctions: List<FunctionIR>,
     val loweredPerformers: List<List<String>>,
+    /** What importers read off its inherent impls, so importing it never reads its body. */
+    val inherentOps: InherentImplOps? = null,
+    val buildTimeSummary: com.mezze.language.typechecker.comptime.BuildTimeSummary? = null,
+    val performerEffects: com.mezze.language.typechecker.context.ImportedPerformerEffects.Summary? = null,
+    /** Its type, ability and effect declarations (see TypedModuleResult.declarationHeaders). */
+    val headers: List<com.mezze.language.parsedast.ParsedDecl>? = null,
 ) {
     @Serializable
     data class Export(
@@ -48,21 +54,27 @@ data class CachedModule(
     )
 
     /** The result an importer reads, with [typed] the module [typedModule] names. */
-    fun toResult(typed: TypedModule): TypedModuleResult = TypedModuleResult(
+    fun toResult(typed: TypedModule): TypedModuleResult = toResult(lazyOf(typed to parsedModule))
+
+    /** The result an importer reads, its body read from [body] when first asked for. */
+    fun toResult(body: Lazy<Pair<TypedModule?, ParsedModule?>>): TypedModuleResult = TypedModuleResult(
         modulePath = modulePath,
         exports = exports.associate { e ->
             e.key to ExportedItem(e.name, e.type, e.mezzeType, e.originalName, e.visibility, e.contentHash)
         },
         context = TypingContext.empty,
         substitution = Substitution.empty,
-        typedModule = typed,
-        parsedModule = parsedModule,
+        body = body,
         typeContext = typeContext,
         filePath = filePath,
         sourceHash = sourceHash,
         identity = identity,
         loweredFunctions = loweredFunctions,
         loweredPerformers = loweredPerformers.map { it.toTypedArray() },
+        inherentOps = inherentOps,
+        buildTimeSummary = buildTimeSummary,
+        performerEffects = performerEffects,
+        headers = headers,
     )
 
     companion object {
@@ -82,6 +94,10 @@ data class CachedModule(
                 identity = result.identity,
                 loweredFunctions = result.loweredFunctions,
                 loweredPerformers = result.loweredPerformers.map { it.toList() },
+                inherentOps = harvestInherentImplOps(typed, result.exports),
+                buildTimeSummary = result.buildTimeSummary,
+                performerEffects = result.performerEffects,
+                headers = result.declarationHeaders,
             )
         }
     }

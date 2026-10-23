@@ -176,14 +176,14 @@ sealed class ModuleTypeCheckResult {
     )
 }
 
-data class TypedModuleResult(
+class TypedModuleResult(
     val modulePath: String,
     val exports: Map<String, ExportedItem>,
     val context: TypingContext,
     val substitution: Substitution,
     val dependencyGraph: DependencyGraph = DependencyGraph.EMPTY,
-    val typedModule: TypedModule? = null,
-    val parsedModule: ParsedModule? = null,
+    typedModule: TypedModule? = null,
+    parsedModule: ParsedModule? = null,
     val typeContext: Map<String, MezzeType> = emptyMap(),
     val filePath: String? = null,
     val sourceHash: Hash? = null,
@@ -200,7 +200,46 @@ data class TypedModuleResult(
      */
     val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
     val loweredPerformers: List<Array<String>> = emptyList(),
-)
+    /**
+     * The module's body — its typed and parsed modules — read when first asked
+     * for. A module read back from the cache is mostly needed for its interface
+     * (exports and their types); decoding every body was most of a cached run.
+     */
+    body: Lazy<Pair<TypedModule?, ParsedModule?>>? = null,
+    /** Its inherent impls' ops as importers read them, when kept; else harvested from [typedModule]. */
+    val inherentOps: InherentImplOps? = null,
+    /** Its build-time facts with its imports' (see BuildTimeSummary), when known. */
+    val buildTimeSummary: com.mezze.language.typechecker.comptime.BuildTimeSummary? = null,
+    /** What its performers, with its imports', add (see ImportedPerformerEffects.Summary), when known. */
+    val performerEffects: com.mezze.language.typechecker.context.ImportedPerformerEffects.Summary? = null,
+    /** Its type, ability and effect declarations, when kept apart from its body. */
+    headers: List<com.mezze.language.parsedast.ParsedDecl>? = null,
+) {
+    /**
+     * Its type, ability and effect declarations: what another module's registry
+     * reads of it. Kept apart from the body for a cached module, so reading them
+     * never reads the body.
+     */
+    val declarationHeaders: List<com.mezze.language.parsedast.ParsedDecl> by lazy {
+        // `this.`: in an initializer a bare `parsedModule` is the constructor
+        // parameter, which a cached module leaves null.
+        headers ?: this.parsedModule?.decls?.filter { it.isHeader() }.orEmpty()
+    }
+
+    private val body: Lazy<Pair<TypedModule?, ParsedModule?>> = body ?: lazyOf(typedModule to parsedModule)
+
+    val typedModule: TypedModule? get() = body.value.first
+    val parsedModule: ParsedModule? get() = body.value.second
+
+    /** Whether the body has been read — for measuring what forces it. */
+    val bodyRead: Boolean get() = body.isInitialized()
+}
+/** A type, ability or effect declaration: what [TypedModuleResult.declarationHeaders] keeps. */
+internal fun com.mezze.language.parsedast.ParsedDecl.isHeader(): Boolean =
+    this is com.mezze.language.parsedast.ParsedTypeDecl ||
+        this is com.mezze.language.parsedast.ParsedAbilityDecl ||
+        this is com.mezze.language.parsedast.ParsedEffectDecl
+
 sealed class ImportResolutionResult {
     data class Success(
         val importContext: ModuleImportContext,

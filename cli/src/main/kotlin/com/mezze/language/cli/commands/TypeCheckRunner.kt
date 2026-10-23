@@ -70,10 +70,14 @@ object TypeCheckRunner {
             loweredFunctions = success.loweredFunctions ?: emptyList(),
             typedModule = success.typedModule,
             performerRecords = success.loweredPerformers,
-            loadedModules = success.loadedModules
-                .mapValues { (_, m) -> m.typedModule }
-                .filterValues { it != null }
-                .mapValues { (_, v) -> v!! },
+            // Built when first read: a module loaded from the checked-module
+            // cache reads its body only when asked, and `check` never asks.
+            loadedModules = LazyMap {
+                success.loadedModules
+                    .mapValues { (_, m) -> m.typedModule }
+                    .filterValues { it != null }
+                    .mapValues { (_, v) -> v!! }
+            },
             loadedModuleSources = success.loadedModules
                 .mapNotNull { (path, m) ->
                     val fp = m.filePath ?: return@mapNotNull null
@@ -83,4 +87,13 @@ object TypeCheckRunner {
             expectedTypeAt = success.expectedTypeAt,
         )
     }
+}
+
+/** A map computed by [compute] when first read. */
+private class LazyMap<K, V>(compute: () -> Map<K, V>) : AbstractMap<K, V>() {
+    private val map by lazy(compute)
+    override val entries: Set<Map.Entry<K, V>> get() = map.entries
+    override fun get(key: K): V? = map[key]
+    override fun containsKey(key: K): Boolean = map.containsKey(key)
+    override val size: Int get() = map.size
 }

@@ -9,6 +9,7 @@ import com.mezze.language.typedast.TypedModule
 import com.mezze.language.typedast.TypedPerform
 import com.mezze.language.typedast.TypedPerformOp
 import com.mezze.language.typedast.forEachChild
+import kotlinx.serialization.Serializable
 
 /**
  * The effects an IMPORTED performer's operations add to every `perform` of it.
@@ -28,10 +29,75 @@ import com.mezze.language.typedast.forEachChild
  */
 object ImportedPerformerEffects {
 
+    /**
+     * What a module's performers, and those of everything it imports, add.
+     *
+     * Computed once, when the module is checked, on top of its imports' — so it
+     * is transitive — and kept with the module. An importer unions its imports'
+     * instead of reading their bodies: that read every imported body on every
+     * check, which a module loaded from the checked-module cache would otherwise
+     * not need.
+     */
+    @Serializable
+    data class Summary(
+        /** Every effect declared, by hash: what a `perform` of one names. */
+        val effectNames: Map<Hash, String>,
+        /** Every performer whose operations raise something, by hash. */
+        val added: Map<Hash, Set<String>>,
+        /** [added], by performer name: the constraint generator's table. */
+        val byName: Map<String, Set<String>>,
+    ) {
+        companion object {
+            val EMPTY = Summary(emptyMap(), emptyMap(), emptyMap())
+
+            fun union(summaries: Collection<Summary>): Summary =
+                if (summaries.size == 1) summaries.first()
+                else Summary(
+                    summaries.fold(HashMap()) { m, s -> m.apply { putAll(s.effectNames) } },
+                    summaries.fold(HashMap()) { m, s -> m.apply { putAll(s.added) } },
+                    summaries.fold(HashMap()) { m, s -> m.apply { putAll(s.byName) } },
+                )
+
+            /** [module]'s summary, given its imports': theirs plus what [module] adds. */
+            fun of(module: TypedModule, imports: Summary): Summary = of(listOf(module), imports)
+
+            /**
+             * The summary of [modules] together, given what they import: one
+             * fixpoint over all of them, for modules that carry no summary (the
+             * stdlib) and whose performers may install each other's.
+             */
+            fun of(modules: Collection<TypedModule>, imports: Summary): Summary {
+                if (modules.isEmpty()) return imports
+                val effectNames = imports.effectNames + modules.flatMap { it.effectDecls }.associate { it.hash to it.name }
+                val performers = modules.flatMap { it.performerDecls }
+                val own = addedBy(performers, effectNames, imports.added)
+                return Summary(
+                    effectNames,
+                    imports.added + own,
+                    imports.byName + performers.mapNotNull { p -> own[p.hash]?.let { p.name to it } },
+                )
+            }
+        }
+    }
+
     fun ofModules(modules: Collection<TypedModule>): Map<String, Set<String>> {
         val effectName: Map<Hash, String> = modules.flatMap { it.effectDecls }.associate { it.hash to it.name }
         val performers = modules.flatMap { it.performerDecls }
-        val added = HashMap<Hash, Set<String>>()
+        val added = addedBy(performers, effectName, emptyMap())
+        return performers.mapNotNull { p -> added[p.hash]?.let { p.name to it } }.toMap()
+    }
+
+    /**
+     * What each of [performers] adds, given what already-summarised performers
+     * add ([known]): one fixpoint, since a performer may install another. Only
+     * the performers that add something are in the answer.
+     */
+    private fun addedBy(
+        performers: List<com.mezze.language.typedast.TypedPerformerDecl>,
+        effectName: Map<Hash, String>,
+        known: Map<Hash, Set<String>>,
+    ): Map<Hash, Set<String>> {
+        val added = HashMap(known)
         var changed = true
         while (changed) {
             changed = false
@@ -48,7 +114,7 @@ object ImportedPerformerEffects {
                 }
             }
         }
-        return performers.mapNotNull { p -> added[p.hash]?.takeIf { it.isNotEmpty() }?.let { p.name to it } }.toMap()
+        return performers.mapNotNull { p -> added[p.hash]?.takeIf { it.isNotEmpty() }?.let { p.hash to it } }.toMap()
     }
 
     /**

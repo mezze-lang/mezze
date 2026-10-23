@@ -773,7 +773,7 @@ class ModuleResolver(
         fun load(path: String, via: ModuleResolver, isRoot: Boolean): Raw? {
             raws[path]?.let { return it }
             val src = via.readSource(path) ?: return null
-            val parsed = try { via.parse(src) } catch (e: ModuleError.ParseError) { if (isRoot) throw e else return null }
+            val parsed = try { PhaseTiming.phase(path, "parse") { via.parse(src) } } catch (e: ModuleError.ParseError) { if (isRoot) throw e else return null }
             return Raw(src, parsed, via.resolverFor(src.filePath)).also { raws[path] = it }
         }
         fun needsStamp(path: String, via: ModuleResolver): Boolean =
@@ -832,8 +832,9 @@ class ModuleResolver(
         // module outside the group is stamped by now, so a macro from one can run.
         for (path in members) {
             val raw = raws.getValue(path)
-            val expanded = com.mezze.language.typechecker.macro.MacroExpander(raw.resolver, members.toSet())
-                .expand(raw.parsed, path)
+            val expanded = PhaseTiming.phase(path, "expand") {
+                com.mezze.language.typechecker.macro.MacroExpander(raw.resolver, members.toSet()).expand(raw.parsed, path)
+            }
             if (expanded !== raw.parsed) raws[path] = Raw(raw.source, expanded, raw.resolver)
         }
         val group = IdentityGroup(members.map { raws.getValue(it).parsed })
@@ -854,13 +855,13 @@ class ModuleResolver(
                 else PRELUDE_MODULES.mapNotNull { loader.load(it) }
             ModuleIdentity.scope(raws.getValue(path).parsed, loader, prelude, group)
         }
-        val stamped = group.stamp(scopes, members)
+        val stamped = PhaseTiming.phase(members.first(), "stamp") { group.stamp(scopes, members) }
         val sources = members.associateWith { raws.getValue(it).source.hash }
 
         members.forEachIndexed { i, path ->
             val module = stamped[i]
             if (ModulePathConventions.isStdlib(path)) com.mezze.language.typechecker.StdlibIdentities.register(module)
-            putInCache(world, path, Module(
+            val built = PhaseTiming.phase(path, "module-record") { Module(
                 path = ModulePath.parse(path),
                 filePath = raws.getValue(path).source.filePath,
                 exports = extractExportsFromParsedModule(module, path),
@@ -872,7 +873,8 @@ class ModuleResolver(
                 identity = ModuleIdentity.fingerprint(module),
                 stampedAgainst = against.toMap(),
                 groupSources = sources - path,
-            ))
+            ) }
+            putInCache(world, path, built)
             stampedNow.add(path)
             memo[path] = true
         }

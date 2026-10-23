@@ -117,6 +117,12 @@ jdk.incubator.vector
 # decoded ModuleImportContext / FunctionIR graph lands in image heap.
 com.mezze.language.typechecker.StdlibSnapshotData
 com.mezze.language.typechecker.StampedModule
+com.mezze.language.typechecker.comptime.BuildTimeSummary
+com.mezze.language.typechecker.context.ImportedPerformerEffects$Summary
+com.mezze.language.typechecker.module.InherentImplOps
+com.mezze.language.typechecker.comptime.BuildTimeSummary$Companion
+com.mezze.language.typechecker.context.ImportedPerformerEffects$Summary$Companion
+com.mezze.language.typechecker.module.InherentImplOps$Companion
 com.mezze.language.stdlib.StdlibRuntimeData
 com.mezze.language.stdlib.StdlibRuntimeSnapshot
 com.mezze.language.typechecker.StdlibIdentityTable

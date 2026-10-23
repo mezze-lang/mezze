@@ -51,6 +51,17 @@ class ModuleTypeChecker(
             val modulesLock = Any()
 
             /**
+             * Every effect and ability declared by a cached module, by name, kept
+             * as modules are added: a registry needs them all, and collecting
+             * them by walking every cached module on every check made checking
+             * a project quadratic in its number of modules. Rebuilt from
+             * [modules] after a removal ([headersStale]).
+             */
+            val effects = HashMap<String, com.mezze.language.parsedast.ParsedEffectDecl>()
+            val abilities = HashMap<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+            var headersStale = false
+
+            /**
              * Modules currently being checked in THIS world, for cycle detection.
              *
              * Per-world is the whole point: shared, it meant two concurrent checks
@@ -105,7 +116,7 @@ class ModuleTypeChecker(
         @JvmOverloads
         fun clearCache(world: World = World.DEFAULT) {
             val c = caches(world)
-            synchronized(c.modulesLock) { c.modules.clear() }
+            synchronized(c.modulesLock) { c.modules.clear(); c.effects.clear(); c.abilities.clear(); c.headersStale = false }
             // The catch here read "PrecompiledStdlib not initialized yet". It is an
             // object: touching it initialises it. Swallowing the failure left the
             // global cache empty after a clear, so the next check re-typechecked the
@@ -140,7 +151,46 @@ class ModuleTypeChecker(
 
         private fun putInGlobalCache(world: World, modulePath: String, module: TypedModuleResult) {
             val c = caches(world)
-            synchronized(c.modulesLock) { c.modules[modulePath] = module }
+            synchronized(c.modulesLock) {
+                if (c.modules.put(modulePath, module) != null) c.headersStale = true
+                else addHeaders(c, module)
+            }
+        }
+
+        private fun addHeaders(c: Caches, module: TypedModuleResult) {
+            for (d in module.declarationHeaders) when (d) {
+                is com.mezze.language.parsedast.ParsedEffectDecl -> c.effects[d.name] = d
+                is com.mezze.language.parsedast.ParsedAbilityDecl -> c.abilities[d.name] = d
+                else -> {}
+            }
+        }
+
+        /** Every effect and ability declared by a module cached in [world] or the shared base, by name. */
+        @JvmStatic
+        @JvmOverloads
+        fun cachedEffectsAndAbilities(world: World = World.DEFAULT):
+            Pair<Map<String, com.mezze.language.parsedast.ParsedEffectDecl>, Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>> {
+            val base = synchronized(sharedBaseLock) { baseHeaders() }
+            val c = caches(world)
+            val own = synchronized(c.modulesLock) {
+                if (c.headersStale) {
+                    c.effects.clear(); c.abilities.clear()
+                    c.modules.values.forEach { addHeaders(c, it) }
+                    c.headersStale = false
+                }
+                HashMap(c.effects) to HashMap(c.abilities)
+            }
+            return (base.effects + own.first) to (base.abilities + own.second)
+        }
+
+        private val sharedHeaders = Caches()
+        private fun baseHeaders(): Caches {
+            if (sharedHeaders.headersStale) {
+                sharedHeaders.effects.clear(); sharedHeaders.abilities.clear()
+                sharedBase.values.forEach { addHeaders(sharedHeaders, it) }
+                sharedHeaders.headersStale = false
+            }
+            return sharedHeaders
         }
 
         /** Everything [world] can see, with its own entries shadowing the base. */
@@ -162,7 +212,10 @@ class ModuleTypeChecker(
          */
         @JvmStatic
         fun preloadIntoGlobalCache(modulePath: String, module: TypedModuleResult) {
-            synchronized(sharedBaseLock) { sharedBase[modulePath] = module }
+            synchronized(sharedBaseLock) {
+                if (sharedBase.put(modulePath, module) != null) sharedHeaders.headersStale = true
+                else addHeaders(sharedHeaders, module)
+            }
         }
 
 /**
@@ -222,6 +275,7 @@ class ModuleTypeChecker(
             val c = caches(world)
             synchronized(c.modulesLock) {
                 for (path in modulePaths) c.modules.remove(path)
+                c.headersStale = true
             }
             synchronized(c.checkingLock) {
                 for (path in modulePaths) c.checking.remove(path)
@@ -323,6 +377,21 @@ class ModuleTypeChecker(
             return ModuleTypeCheckResult.Success(cached)
         }
 
+        // Checked in an earlier run and unchanged since: read back, not checked.
+        // Only the default world — a speculative one (the editor's unsaved text)
+        // is never what was checked before.
+        // A kept module carries no IR (checking does not lower), so where IR is
+        // wanted — a macro's module, about to run — it is checked instead.
+        if (world == World.DEFAULT) CheckedModuleCache.load(module)
+            ?.takeIf { !com.mezze.language.typechecker.Lowering.wanted() || it.loweredFunctions.isNotEmpty() }
+            ?.let { cached ->
+            putInGlobalCache(world, module.modulePath, cached)
+            // The parse the resolver already has, not the kept one: reading that
+            // would read the whole body for the exports' sake.
+            module.parsedModule?.let { moduleResolver?.updateModuleExports(cached.modulePath, it, cached.typeContext) }
+            return ModuleTypeCheckResult.Success(cached)
+        }
+
         claimWorld(world)
         if (isTypeChecking(world, module.modulePath)) {
             val cycle = getTypeCheckingStack(world) + module.modulePath
@@ -365,9 +434,12 @@ class ModuleTypeChecker(
                         identity = module.identity,
                         loweredFunctions = result.loweredFunctions.orEmpty(),
                         loweredPerformers = result.loweredPerformers,
+                        buildTimeSummary = result.buildTimeSummary,
+                        performerEffects = result.performerEffects,
                     )
 
                     putInGlobalCache(world, module.modulePath, typedModule)
+                    if (world == World.DEFAULT) CheckedModuleCache.save(module, typedModule)
 
                     moduleResolver?.updateModuleExports(module.modulePath, resolvedModule, typeContext)
 

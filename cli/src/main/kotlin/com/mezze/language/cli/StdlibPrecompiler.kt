@@ -333,7 +333,9 @@ fun main(args: Array<String>) {
         .filterKeys { it.startsWith(STDLIB_NAMESPACE_PREFIX) }.values
         .filter { it.typedModule != null }
         .partition { r ->
-            sizer.encodeToByteArray(com.mezze.language.typedast.TypedModule.serializer(), r.typedModule!!).size <= MAX_SHIPPED_MODULE_BYTES
+            com.mezze.language.ast.TypeSharing.write {
+                sizer.encodeToByteArray(com.mezze.language.typedast.TypedModule.serializer(), r.typedModule!!)
+            }.size <= MAX_SHIPPED_MODULE_BYTES
         }
     if (tooLarge.isNotEmpty()) {
         println("Not preloaded (typed form over ${MAX_SHIPPED_MODULE_BYTES / 1_000_000} MB): ${tooLarge.map { it.modulePath }.sorted()}")

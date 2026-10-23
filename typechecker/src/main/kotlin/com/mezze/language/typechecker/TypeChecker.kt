@@ -158,6 +158,10 @@ class TypeChecker(
             val typedModule: TypedAstModule? = null,
             val loweredFunctions: List<FunctionIR>? = null,
             val loweredPerformers: List<Array<String>> = emptyList(),
+            /** This module's build-time facts, with its imports' — see BuildTimeSummary. */
+            val buildTimeSummary: com.mezze.language.typechecker.comptime.BuildTimeSummary? = null,
+            /** What this module's performers, with its imports', add — see ImportedPerformerEffects.Summary. */
+            val performerEffects: com.mezze.language.typechecker.context.ImportedPerformerEffects.Summary? = null,
             val typeContext: Map<String, MezzeType> = emptyMap(),
             val resolvedParsedModule: ParsedModule? = null,
             val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
@@ -436,18 +440,31 @@ class TypeChecker(
 
         // Which imported handlers answer at compile time, over every loaded module
         // at once: a handler may wrap one declared in a module it imports.
+        // Each import carries its summary (transitive, computed when it was
+        // checked); one without — the stdlib, a module from an older cache — is
+        // summarised from its typed module here.
+        val importsBuildTime = PhaseTiming.phase(currentModulePath, "comptime-performers") {
+            com.mezze.language.typechecker.comptime.BuildTimeSummary.union(loadedModules.values.mapNotNull { m ->
+                m.buildTimeSummary ?: m.typedModule?.let {
+                    com.mezze.language.typechecker.comptime.BuildTimeSummary.of(it, com.mezze.language.typechecker.comptime.BuildTimeSummary.EMPTY)
+                }
+            })
+        }
         importContext = importContext?.let { ctx ->
-            val modules = loadedModules.values.mapNotNull { it.typedModule }
-            val found = PhaseTiming.phase(currentModulePath, "comptime-performers") { com.mezze.language.typechecker.comptime.CompileTimePerformers.ofModules(modules) }
-            val asking = com.mezze.language.typechecker.comptime.BuildTimeUnits.askingFunctions(
-                modules.flatMap { m -> m.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>() },
-                com.mezze.language.typechecker.comptime.BuildTimeUnits.Handlers(found.compileTime, found.leavesComptime),
-                emptySet(),
-            )
             ctx.copy(
-                compileTimePerformers = found.compileTime,
-                comptimeLeavingPerformers = found.leavesComptime,
-                askingFunctions = asking,
+                compileTimePerformers = importsBuildTime.compileTime,
+                comptimeLeavingPerformers = importsBuildTime.leaves,
+                askingFunctions = importsBuildTime.asking,
+            )
+        }
+        // What imported performers add. Each import carries its summary
+        // (transitive, computed when it was checked); those without — the stdlib,
+        // a module from an older cache — are summarised here from their typed
+        // modules, together, since their performers may install each other's.
+        val importsPerformerEffects = loadedModules.values.partition { it.performerEffects != null }.let { (summarised, bare) ->
+            com.mezze.language.typechecker.context.ImportedPerformerEffects.Summary.of(
+                bare.mapNotNull { it.typedModule },
+                com.mezze.language.typechecker.context.ImportedPerformerEffects.Summary.union(summarised.map { it.performerEffects!! }),
             )
         }
         val registry = PhaseTiming.phase(currentModulePath, "registry") { buildFullRegistry(loadedModules, buildResult, importContext) }
@@ -485,8 +502,7 @@ class TypeChecker(
             // Imported performers' added effects, read off their typed bodies (an
             // imported performer has no body validated here); this module's own
             // performers come from validating their bodies, and win.
-            performerAddedEffects = com.mezze.language.typechecker.context.ImportedPerformerEffects
-                .ofModules(loadedModules.values.mapNotNull { it.typedModule }) + buildResult.performerAddedEffects,
+            performerAddedEffects = importsPerformerEffects.byName + buildResult.performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
             // `isStdlibModule` here doubles as the "may reference `__native_*`
@@ -904,6 +920,12 @@ class TypeChecker(
                     typedModule = emitResult.typedModule,
                     loweredFunctions = emitResult.loweredFunctions,
                     loweredPerformers = emitResult.loweredPerformers,
+                    buildTimeSummary = emitResult.typedModule?.let {
+                        com.mezze.language.typechecker.comptime.BuildTimeSummary.of(it, importsBuildTime)
+                    },
+                    performerEffects = emitResult.typedModule?.let {
+                        com.mezze.language.typechecker.context.ImportedPerformerEffects.Summary.of(it, importsPerformerEffects)
+                    },
                     typeContext = typeContext,
                     resolvedParsedModule = parsedModule,
                     expectedTypeAt = aggregated.expectedTypeAt,
@@ -985,17 +1007,14 @@ class TypeChecker(
         buildResult: ContextBuilder.BuildResult,
         importContext: ModuleImportContext?,
     ): DeclarationRegistry {
+        val (cachedEffects, cachedAbilities) = ModuleTypeChecker.cachedEffectsAndAbilities()
         val transitiveEffects = mutableMapOf<String, ParsedEffectDecl>()
         for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
+            mod.declarationHeaders.filterIsInstance<ParsedEffectDecl>().forEach {
                 transitiveEffects[it.name] = it
             }
         }
-        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
-            cached.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
-                transitiveEffects[it.name] = it
-            }
-        }
+        transitiveEffects.putAll(cachedEffects)
         val allEffectDeclarations = transitiveEffects +
             buildResult.registry.effectDeclarations +
             (importContext?.importedEffects ?: emptyMap())
@@ -1014,7 +1033,7 @@ class TypeChecker(
         // and shadow a same-named type/ability across independent typechecks.
         val transitiveTypesByHash = mutableMapOf<String, ParsedTypeDecl>()
         for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.forEach {
+            mod.declarationHeaders.filterIsInstance<ParsedTypeDecl>().forEach {
                 transitiveTypesByHash[it.name] = it
             }
         }
@@ -1024,15 +1043,11 @@ class TypeChecker(
         val importedAbilities = importContext?.importedAbilities ?: emptyMap()
         val transitiveAbilities = mutableMapOf<String, ParsedAbilityDecl>()
         for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
+            mod.declarationHeaders.filterIsInstance<ParsedAbilityDecl>().forEach {
                 transitiveAbilities[it.name] = it
             }
         }
-        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
-            cached.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
-                transitiveAbilities[it.name] = it
-            }
-        }
+        transitiveAbilities.putAll(cachedAbilities)
         // Built-in ability decls (NumAdd, Ord, Eq, …) go in at LOWEST precedence so
         // `2 + 3` resolves `.add` through the class-param-aware ability path even
         // with no `use`. Map-`+` is right-biased: any real decl of the same name on

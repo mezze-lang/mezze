@@ -83,7 +83,25 @@ private fun detectProjectRoot(): File? {
     return null
 }
 
+/**
+ * The stack every command runs on. Checking and lowering recurse once per level
+ * of an expression, and `a + b + c + …` is one level per term: a module summing
+ * two hundred calls overflowed the JVM's 1 MB main stack, and passed or failed
+ * depending on how deep the checker happened to be when a one-time parse ran.
+ */
+private const val MAIN_STACK_BYTES = 1L shl 30
+
 fun main(rawArgs: Array<String>) {
+    var failure: Throwable? = null
+    val thread = Thread(null, {
+        try { runMain(rawArgs) } catch (t: Throwable) { failure = t }
+    }, "mez-main", MAIN_STACK_BYTES)
+    thread.start()
+    thread.join()
+    failure?.let { throw it }
+}
+
+private fun runMain(rawArgs: Array<String>) {
     // Toolchain proxy: if this binary is running as ~/.mezze/bin/mez, resolve
     // the pinned toolchain and re-exec its own binary (then exit). A no-op for
     // a toolchain's own binary or a dev/JVM launch, so everything below runs

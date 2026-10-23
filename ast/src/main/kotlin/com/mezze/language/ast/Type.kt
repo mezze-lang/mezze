@@ -117,7 +117,7 @@ private fun mapEffectRowChildren(er: MezzeType.EffectRow, f: (MezzeType) -> Mezz
 private fun effectRowAnyChild(er: MezzeType.EffectRow, predicate: (MezzeType) -> Boolean): Boolean =
     er.effectInstances.any { inst -> inst.associatedTypes.values.any(predicate) }
 
-@Serializable
+@Serializable(with = MezzeTypeSerializer::class)
 @JsonClassDiscriminator("typeKind")
 sealed interface MezzeType {
     companion object {

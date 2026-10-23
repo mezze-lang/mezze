@@ -48,13 +48,12 @@ object StoreSerialization {
         return cbor.decodeFromByteArray(kotlinx.serialization.builtins.ListSerializer(MezzeType.serializer()), bytes)
     }
 
-    fun serializeTypedModule(module: com.mezze.language.typedast.TypedModule): ByteArray {
-        return cbor.encodeToByteArray(module)
-    }
+    fun serializeTypedModule(module: com.mezze.language.typedast.TypedModule): ByteArray =
+        // Types written once each (TypeSharing): a module's are mostly repeats.
+        com.mezze.language.ast.TypeSharing.write { cbor.encodeToByteArray(module) }
 
-    fun deserializeTypedModule(bytes: ByteArray): com.mezze.language.typedast.TypedModule {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedModule(bytes: ByteArray): com.mezze.language.typedast.TypedModule =
+        com.mezze.language.ast.TypeSharing.read { cbor.decodeFromByteArray(bytes) }
 
     fun serializeParsedModule(module: com.mezze.language.parsedast.ParsedModule): ByteArray {
         return cbor.encodeToByteArray(module)

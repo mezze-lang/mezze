@@ -72,7 +72,9 @@ data class StdlibSnapshot(
          * fingerprint changes automatically with the schema, so skew is DETECTED.
          */
         val schemaFingerprint: String by lazy {
-            val sb = StringBuilder()
+            // Types are written shared (TypeSharing): the descriptors below do not
+            // show it, so the format says so itself.
+            val sb = StringBuilder("types:shared-1;")
             val seen = HashSet<String>()
             fun walk(d: SerialDescriptor) {
                 if (!seen.add(d.serialName)) return
@@ -103,10 +105,12 @@ data class StdlibSnapshot(
             storedFingerprint != null && storedFingerprint != schemaFingerprint
 
         @OptIn(ExperimentalSerializationApi::class)
-        fun encode(snapshot: StdlibSnapshot): ByteArray = cbor.encodeToByteArray(snapshot)
+        fun encode(snapshot: StdlibSnapshot): ByteArray =
+            com.mezze.language.ast.TypeSharing.write { cbor.encodeToByteArray(snapshot) }
 
         @OptIn(ExperimentalSerializationApi::class)
-        fun decode(bytes: ByteArray): StdlibSnapshot = cbor.decodeFromByteArray<StdlibSnapshot>(bytes)
+        fun decode(bytes: ByteArray): StdlibSnapshot =
+            com.mezze.language.ast.TypeSharing.read { cbor.decodeFromByteArray<StdlibSnapshot>(bytes) }
     }
 }
 

@@ -270,6 +270,9 @@ class CheckCommand {
         // expansions, as files, per compiler build.
         com.mezze.language.typechecker.ModuleResolver.expansionDirectory =
             com.mezze.language.store.ProjectLayout.storeDir(root).toPath().resolveSibling("expansions").resolve(ProjectStore.binaryIdentity)
+        // And checked modules, so an unchanged one is read back, not checked.
+        com.mezze.language.typechecker.module.CheckedModuleCache.directory =
+            com.mezze.language.store.ProjectLayout.storeDir(root).toPath().resolveSibling("checked").resolve(ProjectStore.binaryIdentity)
 
         try {
             val startTime = System.nanoTime()
@@ -295,6 +298,11 @@ class CheckCommand {
                 typeChecker.checkParsedModule(ast, root.toPath(), enablePrelude = true)
             }
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
+            if (com.mezze.language.typechecker.PhaseTiming.on) {
+                val all = com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()
+                    .filterKeys { !it.startsWith("std::") }.values
+                System.err.println("[timing] bodies read: ${all.count { it.bodyRead }} of ${all.size}")
+            }
 
             when (rawResult) {
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
