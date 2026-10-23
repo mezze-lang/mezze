@@ -49,11 +49,21 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
     val isForeignKinded: Boolean get() = name == FOREIGN_KIND_NAME
 
     companion object {
-        private var globalCounter = 0
-        private var currentLevel = 0
-        private val scopeCounters = mutableMapOf<Int, Int>()
+        /**
+         * Ids are unique across threads — a variable's identity is its id, and
+         * modules are checked in parallel. Levels and the per-scope counters that
+         * name variables (`'a`, `'b`, …) belong to the check a thread is doing.
+         */
+        private val ids = java.util.concurrent.atomic.AtomicInteger()
+        private class Scopes {
+            var level = 0
+            val counters = mutableMapOf<Int, Int>()
+        }
+        private val scopes = ThreadLocal.withInitial { Scopes() }
+        private val thisLevel: Int get() = scopes.get().level
+        private val scopeCounters: MutableMap<Int, Int> get() = scopes.get().counters
 
-        fun fresh(level: Int = currentLevel): TypeVar {
+        fun fresh(level: Int = thisLevel): TypeVar {
             // Get or initialize counter for this level, starting from 0
             val scopeCounter = scopeCounters.getOrPut(level) { 0 }
 
@@ -64,16 +74,16 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
 
             // Increment counters
             scopeCounters[level] = scopeCounter + 1
-            val id = globalCounter++
+            val id = ids.getAndIncrement()
 
             return TypeVar(name, level, id)
         }
 
-        fun freshNamed(baseName: String, level: Int = currentLevel): TypeVar {
+        fun freshNamed(baseName: String, level: Int = thisLevel): TypeVar {
             val scopeCounter = scopeCounters.getOrPut(level) { 0 }
             val name = "'${baseName}${scopeCounter}"
             scopeCounters[level] = scopeCounter + 1
-            val id = globalCounter++
+            val id = ids.getAndIncrement()
             return TypeVar(name, level, id)
         }
 
@@ -93,8 +103,8 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
          * Keep this split: giving an internal placeholder a `'` (or dropping the
          * `'` from a real type var) silently changes instantiation behavior.
          */
-        fun freshWithName(name: String, level: Int = currentLevel): TypeVar {
-            val id = globalCounter++
+        fun freshWithName(name: String, level: Int = thisLevel): TypeVar {
+            val id = ids.getAndIncrement()
             return TypeVar(name, level, id)
         }
 
@@ -115,7 +125,7 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
          * calling [freshWithName], which is the honest signature for "the tick
          * comes from the input".
          */
-        fun freshInternal(name: String, level: Int = currentLevel): TypeVar {
+        fun freshInternal(name: String, level: Int = thisLevel): TypeVar {
             require(!name.startsWith("'")) {
                 "freshInternal is for compiler-invented positions, which must NOT carry " +
                     "the leading ' that marks an identity-preserving type variable; got '$name'. " +
@@ -145,8 +155,8 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
          *  begin with `'`, so this cannot be one of them. */
         const val UNKNOWN_NAME = "unknown"
 
-        fun unknown(reason: String, level: Int = currentLevel): TypeVar {
-            val id = globalCounter++
+        fun unknown(reason: String, level: Int = thisLevel): TypeVar {
+            val id = ids.getAndIncrement()
             unknownMinted.add(reason)
             return TypeVar(UNKNOWN_NAME, level, id)
         }
@@ -168,7 +178,7 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
         /** A fresh foreign-kinded variable — the `Polyglot` effect's associated
          *  type at a handler binding / call site. Flexible for inference but gated
          *  against structural types in unification. */
-        fun foreignKinded(level: Int = currentLevel): TypeVar =
+        fun foreignKinded(level: Int = thisLevel): TypeVar =
             freshWithName(FOREIGN_KIND_NAME, level)
 
         /** Reasons an unknown placeholder was minted, for the ratchet that bounds
@@ -176,22 +186,10 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
         private val minted = ThreadLocal.withInitial { LinkedHashSet<String>() }
         val unknownMinted: MutableSet<String> get() = minted.get()
 
+        /** Restart this thread's naming. Ids are never reset: one reused would alias two variables. */
         fun resetCounter() {
-            globalCounter = 0
-            currentLevel = 0
+            scopes.get().level = 0
             scopeCounters.clear()
-        }
-
-        /** Save TypeVar counter state so it can be restored after a side operation (e.g., prelude loading). */
-        data class State(val globalCounter: Int, val currentLevel: Int, val scopeCounters: Map<Int, Int>)
-
-        fun saveState(): State = State(globalCounter, currentLevel, scopeCounters.toMap())
-
-        fun restoreState(state: State) {
-            globalCounter = state.globalCounter
-            currentLevel = state.currentLevel
-            scopeCounters.clear()
-            scopeCounters.putAll(state.scopeCounters)
         }
 
         fun resetScope(level: Int = 0) {
@@ -200,22 +198,24 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
         }
 
         fun enterScope(): Int {
-            currentLevel++
+            val s = scopes.get()
+            s.level++
             // Each new scope starts fresh with 'a
-            scopeCounters[currentLevel] = 0
-            return currentLevel
+            s.counters[s.level] = 0
+            return s.level
         }
 
         fun exitScope() {
-            if (currentLevel > 0) {
-                scopeCounters.remove(currentLevel)
-                currentLevel--
+            val s = scopes.get()
+            if (s.level > 0) {
+                s.counters.remove(s.level)
+                s.level--
             }
         }
 
-        fun getCurrentLevel(): Int = currentLevel
+        fun getCurrentLevel(): Int = thisLevel
 
-        fun resetScopeCounter(level: Int = currentLevel) {
+        fun resetScopeCounter(level: Int = thisLevel) {
             scopeCounters[level] = 0
         }
     }
@@ -224,20 +224,13 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
 @Serializable
 data class RowVar(val name: String) {
     companion object {
-        private var counter = 0
+        /** A row variable IS its name, so the number must be unique across threads. */
+        private val counter = java.util.concurrent.atomic.AtomicInteger()
 
         // May be closed by closeGeneratedRowVars during finalization.
-        fun fresh(): RowVar {
-            val name = "row${counter}"
-            counter++
-            return RowVar(name)
-        }
+        fun fresh(): RowVar = RowVar("row${counter.getAndIncrement()}")
 
-        fun userOpen(): RowVar {
-            val name = "userOpen_row${counter}"
-            counter++
-            return RowVar(name)
-        }
+        fun userOpen(): RowVar = RowVar("userOpen_row${counter.getAndIncrement()}")
     }
 
     fun isUserSpecified(): Boolean = name.startsWith("userOpen_")

@@ -268,6 +268,10 @@ class CheckCommand {
         // expansions, checked modules — the first time it reads or keeps one.
         // Opening it (SQLite, the native library, schema checks) costs more than
         // checking a small module, so a check that keeps nothing never does.
+        // Project modules that do not import each other are checked at once.
+        // MEZZE_CHECK_THREADS=1 checks them one at a time.
+        com.mezze.language.typechecker.module.ParallelModuleChecker.threads =
+            System.getenv("MEZZE_CHECK_THREADS")?.toIntOrNull() ?: Runtime.getRuntime().availableProcessors()
         val cacheStore = lazy { ProjectStore.open(root) }
         com.mezze.language.typechecker.ModuleResolver.cacheStore = cacheStore
         // `check` ends in exitProcess on most paths; the hook runs on all of them.

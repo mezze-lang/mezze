@@ -637,6 +637,11 @@ class ModuleResolver(
         // modules, so per-module locks could not keep two passes apart.
         synchronized(stampLock(world)) {
             fromSnapshot(modulePath)?.let { return it }
+            // Already found current in this check: no file to read again. Every
+            // import of every module comes through here, under this lock, and
+            // reading and hashing the source each time made checking modules in
+            // parallel wait on it.
+            if (currency(world)[modulePath] == true) getFromCache(world, modulePath)?.let { return it }
             readSource(modulePath) ?: throw ModuleError.ModuleNotFound(
                 modulePath,
                 getSearchPaths(modulePath),

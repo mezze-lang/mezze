@@ -348,6 +348,12 @@ class TypeChecker(
             val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
             val importResult = if (hasUserImports) {
+                // The program's own check: its project modules first, in parallel.
+                if (checkDepth.get() == 1) PhaseTiming.phase(currentModulePath, "check-ahead") {
+                    com.mezze.language.typechecker.module.ParallelModuleChecker.checkAhead(module, world, moduleLoader) {
+                        ModuleTypeChecker.withContextAndResolver(parentContext, moduleLoader.getResolver(), world)
+                    }
+                }
                 PhaseTiming.phase(currentModulePath, "imports") { importResolver.resolveImports(module) }
             } else {
                 ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
@@ -1331,6 +1337,20 @@ class TypeChecker(
     companion object {
         /** How many checks are running on this thread — imports are checked inside their importer's check. */
         private val checkDepth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
+
+        /**
+         * Run [body] on this thread as part of a check already under way on
+         * another: it shares that check's view of the sources rather than
+         * starting a new one, which would clear what the other is reading.
+         */
+        internal fun <T> asPartOfCheck(body: () -> T): T {
+            checkDepth.set(checkDepth.get() + 1)
+            try {
+                return body()
+            } finally {
+                checkDepth.set(checkDepth.get() - 1)
+            }
+        }
 
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null

@@ -32,7 +32,7 @@ object ContentHashComputer {
     }
 
         private fun mezzeTypeToStringCached(type: MezzeType): String {
-        typeStringCache[type]?.let { return it }
+        synchronized(typeStringCache) { typeStringCache[type] }?.let { return it }
 
         val result = when (type) {
             is MezzeType.TypeApplication -> {
@@ -50,7 +50,7 @@ object ContentHashComputer {
             else -> type.toString()
         }
 
-        typeStringCache[type] = result
+        synchronized(typeStringCache) { typeStringCache[type] = result }
         return result
     }
 

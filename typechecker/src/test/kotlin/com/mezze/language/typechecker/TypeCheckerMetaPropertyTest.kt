@@ -89,10 +89,16 @@ class TypeCheckerMetaPropertyTest {
         return try {
             val parsed = parser.parseParsedModule(source, "meta.mz")
             val result = TypeChecker().typeCheck(parsed, Paths.get("."))
-            // Compare the printed forms of every top-level binding's inferred type.
-            // Print form is the stable, human-meaningful identity here.
+            // Compare the printed forms of every top-level binding's inferred type,
+            // up to the numbering of fresh variables: an id is a fresh name, unique
+            // across the process (modules are checked in parallel), so two runs
+            // number their variables differently while inferring the same types.
             val names = parsed.decls.mapNotNull { topLevelName(it) }
-            names.associateWith { n -> result.getVariableType(n)?.toString() ?: "<none>" }
+            val ids = HashMap<String, Int>()
+            names.associateWith { n ->
+                (result.getVariableType(n)?.toString() ?: "<none>")
+                    .replace(Regex("id=(\\d+)")) { m -> "id=" + ids.getOrPut(m.groupValues[1]) { ids.size } }
+            }
         } catch (_: TypeCheckError) {
             null
         } catch (_: ParseException) {

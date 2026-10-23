@@ -2183,35 +2183,45 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR REPLACE INTO checked_modules (module_path, key, interface, body) VALUES (?, ?, ?, ?)")
     }
 
-    @Synchronized
+    // Compressed and decompressed OUTSIDE the connection's lock: modules are
+    // checked in parallel, and every check looks itself up here while others
+    // are being kept — holding the lock to deflate a body made each wait on all.
     override fun putCheckedModule(modulePath: String, key: String, interfaceBytes: ByteArray, body: ByteArray) {
-        putCheckedStmt.setString(1, modulePath)
-        putCheckedStmt.setString(2, key)
-        putCheckedStmt.setBytes(3, StoredBytes.pack(interfaceBytes))
-        putCheckedStmt.setBytes(4, StoredBytes.pack(body))
-        putCheckedStmt.executeUpdate()
+        val packedInterface = StoredBytes.pack(interfaceBytes)
+        val packedBody = StoredBytes.pack(body)
+        synchronized(this) {
+            putCheckedStmt.setString(1, modulePath)
+            putCheckedStmt.setString(2, key)
+            putCheckedStmt.setBytes(3, packedInterface)
+            putCheckedStmt.setBytes(4, packedBody)
+            putCheckedStmt.executeUpdate()
+        }
     }
 
     private val getCheckedInterfaceStmt: PreparedStatement by lazy {
         conn.prepareStatement("SELECT interface FROM checked_modules WHERE module_path = ? AND key = ?")
     }
 
-    @Synchronized
     override fun getCheckedInterface(modulePath: String, key: String): ByteArray? {
-        getCheckedInterfaceStmt.setString(1, modulePath)
-        getCheckedInterfaceStmt.setString(2, key)
-        return getCheckedInterfaceStmt.executeQuery().use { rs -> if (rs.next()) StoredBytes.unpack(rs.getBytes(1)) else null }
+        val packed = synchronized(this) {
+            getCheckedInterfaceStmt.setString(1, modulePath)
+            getCheckedInterfaceStmt.setString(2, key)
+            getCheckedInterfaceStmt.executeQuery().use { rs -> if (rs.next()) rs.getBytes(1) else null }
+        }
+        return packed?.let { StoredBytes.unpack(it) }
     }
 
     private val getCheckedBodyStmt: PreparedStatement by lazy {
         conn.prepareStatement("SELECT body FROM checked_modules WHERE module_path = ? AND key = ?")
     }
 
-    @Synchronized
     override fun getCheckedBody(modulePath: String, key: String): ByteArray? {
-        getCheckedBodyStmt.setString(1, modulePath)
-        getCheckedBodyStmt.setString(2, key)
-        return getCheckedBodyStmt.executeQuery().use { rs -> if (rs.next()) StoredBytes.unpack(rs.getBytes(1)) else null }
+        val packed = synchronized(this) {
+            getCheckedBodyStmt.setString(1, modulePath)
+            getCheckedBodyStmt.setString(2, key)
+            getCheckedBodyStmt.executeQuery().use { rs -> if (rs.next()) rs.getBytes(1) else null }
+        }
+        return packed?.let { StoredBytes.unpack(it) }
     }
 
     @Synchronized
