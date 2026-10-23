@@ -110,6 +110,42 @@ pub let flat_map
   : { it: Iter 'a, f: { x: 'a } -> Iter 'b <...> } -> Iter 'b <...>
   = { it, f } -> __native_iter_flat_map { it = it, f = f }
 
+# Cursors (pull, resumable)
+
+## A resumable position in an `Iter`.
+##
+## `Iter` is a declarative descriptor tree walked by a PUSH driver: a sink owns
+## the loop and calls your callback per element. That is the fast path — it
+## fuses and allocates nothing per element — and it cannot be suspended, which
+## two things need:
+##
+##   - yielding an element downstream and coming back for the next one later,
+##   - zipping two sources without materialising either.
+##
+## A cursor is the pull view. It is a HANDLE, not a value: pulling twice gives
+## two different answers, and two cursors over one `Iter` are independent
+## positions. It is also not shareable across threads — a guest callback inside
+## a stage needs the handler chain of the thread that made the cursor.
+##
+## Prefer the sinks. Reach for a cursor when you need to suspend between
+## elements, and expect it to be slower per element than `fold` on the same
+## pipeline.
+pub newtype IterCursor 'a = __NativeIterCursor
+
+## Open a cursor at the start of `it`.
+pub let cursor: { it: Iter 'a } -> IterCursor 'a = { it } ->
+  __native_iter_cursor { it = it }
+
+## Pull the next element, or `None` once the source is exhausted.
+##
+## Carries `<...>` because advancing a cursor runs the pipeline's stages, and
+## those may perform: an `unfold` reading a file, a `filter` asking the
+## filesystem. The effects surface here rather than at `cursor`, because that
+## is where the work happens.
+pub let cursor_next: { c: IterCursor 'a } -> Option 'a <...> = { c } ->
+  __native_iter_cursor_next { cursor = c }
+
+
 # Sinks (terminal — force evaluation)
 
 ## Left fold — the canonical terminal. All other sinks are fold variants.

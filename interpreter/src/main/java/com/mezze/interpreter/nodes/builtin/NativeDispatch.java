@@ -965,6 +965,10 @@ public final class NativeDispatch extends MezzeNode {
             IterNatives.fromList(getList(r, "xs")));
         HANDLERS.put("__native_iter_unfold", (r, c) ->
             IterNatives.unfold(getField(r, "state"), getFunction(r, "step")));
+        HANDLERS.put("__native_iter_cursor", (r, c) ->
+            IterNatives.cursor(getIter(r, "it"), c));
+        HANDLERS.put("__native_iter_cursor_next", (r, c) ->
+            IterNatives.cursorNext(getField(r, "cursor")));
         HANDLERS.put("__native_iter_once", (r, c) ->
             IterNatives.once(getField(r, "val")));
         HANDLERS.put("__native_iter_empty", (r, c) ->

@@ -501,11 +501,10 @@ pub let par_map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError
 ## drift above `max_in_flight`, which is what makes it safe to point at a
 ## directory of unknown size.
 ##
-## NOT a lazy `Iter 'b` out. Producing one would need to suspend the walk
-## between elements, and the walk is a push driver — it calls a consumer per
-## element and cannot be resumed from the middle. A pull cursor over the
-## descriptor tree would fix that and is a much larger change; see
-## `planned_features/runtime/filesystem-effects-and-streaming.md`.
+## `map_concurrent_lazy` below answers a lazy `Iter 'b`, built on
+## `iter::cursor`. The two eager forms stay because they are the common case
+## and cheaper: a fold over the push walk fuses, while the lazy form pays for a
+## cursor frame per stage and a window record per element.
 
 ## Walk `it`, running `f` on each element with at most `max_in_flight`
 ## concurrent tasks, for side effects.
@@ -570,6 +569,67 @@ pub let map_concurrent
     }
     ## `all` awaits the remaining window in order, so the tail keeps its place.
     seq::concat { xs = final.done, ys = all { ps = final.window } }
+
+
+## Map concurrently and yield LAZILY — bounded in flight, bounded in memory,
+## and finite output is never required.
+##
+## The difference from `map_concurrent` is which side is lazy. That one
+## consumes an `Iter` lazily and answers a Seq, so the output has to fit in
+## memory and the whole source is drained before the caller sees anything.
+## This one answers an `Iter`, so a consumer can `take` from it, stop early,
+## and never pay for the rest — which is what makes it usable against an
+## endless source on both sides.
+##
+## How it works: the source is opened as a CURSOR, because a push walk owns
+## its loop and cannot hand an element out and be resumed. Each step tops the
+## in-flight window up to `max_in_flight` by pulling from the cursor and
+## spawning, then awaits the OLDEST promise and yields its result. When the
+## cursor is exhausted the window drains; when both are empty it is `Done`.
+##
+## Source order, like the eager forms. `Skip` is never needed: every step
+## either yields a settled result or finishes, because a step that has a
+## non-empty window always has something to await.
+##
+## The cost is real — a cursor frame per stage and a window record per element,
+## against a fused fold for the eager forms. Reach for this when the output
+## must stream, and for `map_concurrent` when it need not.
+pub let map_concurrent_lazy
+  : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int }
+  -> Iter (Result 'b AsyncError) <Async, ...>
+  = { it, f, max_in_flight } -> iter::unfold {
+    state = { c = iter::cursor { it = it }, window = [], drained = False },
+    step = { s } -> do
+      ## Top the window up first, so the limit is what is in flight rather
+      ## than what has been asked for.
+      let filled = fill_window { c = s.c, window = s.window, drained = s.drained, f = f, want = max_in_flight }
+      match seq::first { xs = filled.window } is
+        None -> Done
+        Some { val = oldest } -> Yield {
+          val = await { p = oldest },
+          next = { c = s.c, window = seq::tail { xs = filled.window }, drained = filled.drained },
+        }
+  }
+
+
+## Pull from the cursor until the window holds `want` promises or the source
+## runs out. Separate because `unfold`'s step is one expression and this needs
+## to loop.
+let fill_window
+  : { c: IterCursor 'a, window: [Promise 'b], drained: Bool, f: { x: 'a } -> 'b <...>, want: Int }
+  -> { window: [Promise 'b], drained: Bool } <Async, ...>
+  = { c, window, drained, f, want } ->
+    if drained then { window = window, drained = True }
+    else if seq::size { xs = window } >= want then { window = window, drained = False }
+    else match iter::cursor_next { c = c } is
+      None -> { window = window, drained = True }
+      Some { val = x } -> fill_window {
+        c = c,
+        window = seq::push { xs = window, x = Async.spawn { f = {} -> f { x = x } } },
+        drained = False,
+        f = f,
+        want = want,
+      }
 
 
 ## Run f over each element concurrently for side effects; per-element

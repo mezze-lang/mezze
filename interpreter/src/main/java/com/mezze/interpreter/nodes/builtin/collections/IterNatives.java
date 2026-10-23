@@ -25,9 +25,9 @@ public final class IterNatives {
 
     // Step variant tags — computed once, same as TagRegistry.getOrCreateTag
     // THE definition, not a restatement of it — see BuiltinTypes.computeVariantTag.
-    private static final int YIELD_TAG =
+    static final int YIELD_TAG =
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag("Yield", null);
-    private static final int SKIP_TAG =
+    static final int SKIP_TAG =
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag("Skip", null);
     private static final int DONE_TAG =
         com.mezze.language.ast.BuiltinTypes.INSTANCE.computeVariantTag("Done", null);
@@ -132,6 +132,33 @@ public final class IterNatives {
         walkElements(it.getDescriptor(), x -> { acc[0] += (Long) x; return true; },
                      IndirectCallNode.getUncached());
         return acc[0];
+    }
+
+    // ==================== Cursors (pull, resumable) ====================
+
+    /**
+     * A resumable pull view over `it`. See {@link IterCursor} for why this is
+     * a second mechanism rather than a replacement for the push walk.
+     *
+     * The cursor is MUTABLE POSITION, so it is a handle like a FileHandle
+     * rather than a value: pulling from it twice gives two different answers.
+     * That is also why it is not thread-safe — a guest callback needs the
+     * handler chain of the thread that created it.
+     */
+    @TruffleBoundary
+    public static Object cursor(MezzeIter it, IndirectCallNode callNode) {
+        return IterCursor.of(it, callNode);
+    }
+
+    /** The next element as `Some`, or `None` once the source is exhausted. */
+    @TruffleBoundary
+    public static Object cursorNext(Object cursor) {
+        if (!(cursor instanceof IterCursor c)) {
+            throw new com.mezze.interpreter.runtime.NativeTypeMismatchException(
+                "Expected an Iter cursor");
+        }
+        Object x = c.next();
+        return x == IterCursor.END ? MezzeVariant.none() : MezzeVariant.some(x);
     }
 
     @TruffleBoundary
@@ -551,23 +578,26 @@ public final class IterNatives {
             return walkElements(chain.second, consumer, callNode);
         }
         if (node instanceof ZipIterNode zip) {
-            // Materialize both sides, zip by index
-            java.util.ArrayList<Object> left = new java.util.ArrayList<>();
-            java.util.ArrayList<Object> right = new java.util.ArrayList<>();
-            // NB both sides are MATERIALISED, so `zip` over an endless source
-            // exhausts memory rather than hanging. Left as-is: fixing it means
-            // interleaving two walks, which the push driver cannot express
-            // without a cursor on at least one side.
-            walkElements(zip.first, x -> { left.add(x); return true; }, callNode);
-            walkElements(zip.second, x -> { right.add(x); return true; }, callNode);
-            int len = Math.min(left.size(), right.size());
-            for (int idx = 0; idx < len; idx++) {
+            // A CURSOR per side, not two materialised lists.
+            //
+            // This used to walk both sides into ArrayLists and index them,
+            // which meant zipping anything endless exhausted memory — and
+            // `zip { a = finite, b = endless }` is an ordinary thing to write.
+            // Interleaving two pushes is what a push driver cannot do, so each
+            // side gets a resumable pull view instead and this holds one pair
+            // at a time. Stops at the shorter side, as before.
+            IterCursor left = IterCursor.of(zip.first, callNode);
+            IterCursor right = IterCursor.of(zip.second, callNode);
+            while (true) {
+                Object a = left.next();
+                if (a == IterCursor.END) return true;
+                Object b = right.next();
+                if (b == IterCursor.END) return true;
                 if (!consumer.accept(MezzeRecord.fromFields(
-                        new String[]{"fst", "snd"}, new Object[]{left.get(idx), right.get(idx)}))) {
+                        new String[]{"fst", "snd"}, new Object[]{a, b}))) {
                     return false;
                 }
             }
-            return true;
         }
         if (node instanceof FlatMapIterNode fm) {
             MezzeFunction fn = (MezzeFunction) fm.fn;
