@@ -6,6 +6,9 @@ import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.solving.UnificationResult
 import com.mezze.language.typechecker.solving.unify
 
+/** How many answers a substitution keeps (see Substitution.memo). */
+private const val MEMO_LIMIT = 4096
+
 data class Substitution(
     val mappings: Map<TypeVar, MezzeType> = emptyMap(),
     // #274-B: Row-var bindings for effect rows. When an EffectRow's
@@ -37,6 +40,15 @@ data class Substitution(
     // preferring the existing entry is both safe and cheap.
     val recordRowMappings: Map<RowVar, MezzeType.RecordType> = emptyMap()
 ) {
+    /**
+     * [apply]'s answers for compound types, made on first need. A substitution
+     * never changes, so its answer for a type never does — and the same types
+     * are applied to the same substitution over and over (every validation pass
+     * re-applies it to every obligation). Bounded; locked, as a module's
+     * substitution may be read from another thread.
+     */
+    private var memo: HashMap<MezzeType, MezzeType>? = null
+
     fun apply(type: MezzeType): MezzeType {
         if (mappings.isEmpty() && rowVarMappings.isEmpty() && recordRowMappings.isEmpty()) {
             return type
@@ -56,8 +68,13 @@ data class Substitution(
                 v = mapped.variable
             }
         }
-
-        return applyWithVisited(type, HashSet(), HashMap())
+        synchronized(this) { memo?.get(type) }?.let { return it }
+        val result = applyWithVisited(type, HashSet(), HashMap())
+        synchronized(this) {
+            val m = memo ?: HashMap<MezzeType, MezzeType>().also { memo = it }
+            if (m.size < MEMO_LIMIT) m[type] = result
+        }
+        return result
     }
 
     // Resolve a variable chain (var -> var -> ... -> terminal) with path
