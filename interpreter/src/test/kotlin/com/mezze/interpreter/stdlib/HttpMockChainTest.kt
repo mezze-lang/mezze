@@ -22,6 +22,12 @@ import kotlin.test.assertEquals
  * The flat builders are now one-liners over the chain, so the last tests here
  * pin that they did not drift — `mock_post` still answers 201, `mock_json`
  * still sets Content-Type.
+ *
+ * Header assertions go through `.header {}` rather than reading the raw map:
+ * a Response's header map is LOWERCASE-KEYED (both natives lowercase what
+ * comes off the wire, and `get_header` lowercases only the needle), so a raw
+ * `map::get { k = "Content-Type" }` asserted against a convention the
+ * production reader does not use.
  */
 class HttpMockChainTest {
 
@@ -193,7 +199,7 @@ class HttpMockChainTest {
                   mock { url = "**" }.header { name = "Content-Type", value = "text/csv" }.text { body = "a,b" },
                 ] } in
                   match request { url = "http://x/y" }.send {} is
-                    Ok { val } -> match map::get { m = val.headers, k = "Content-Type" } is
+                    Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
                       None -> "absent"
                     Err { error = _ } -> "unmatched"
@@ -272,7 +278,7 @@ class HttpMockChainTest {
                   mock { url = "**" }.post {}.json { body = json::JString { val = "hi" } },
                 ] } in
                   match request { url = "http://x/y" }.with_method { val = Post }.send {} is
-                    Ok { val } -> match map::get { m = val.headers, k = "Content-Type" } is
+                    Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
                       None -> "absent"
                     Err { error = _ } -> "unmatched"
@@ -339,7 +345,7 @@ class HttpMockChainTest {
                   mock_json { url = "**", body = json::JString { val = "hi" } },
                 ] } in
                   match request { url = "http://x/y" }.send {} is
-                    Ok { val } -> match map::get { m = val.headers, k = "Content-Type" } is
+                    Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
                       None -> "absent"
                     Err { error = _ } -> "unmatched"

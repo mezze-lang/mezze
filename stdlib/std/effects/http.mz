@@ -56,6 +56,13 @@ pub type Request = {
 ## out-of-band thread.
 pub type Response = {
   status: Int,
+  ## LOWERCASE-KEYED, always. Both natives lowercase what arrives off the wire
+  ## (`IONatives` for a client response, `HttpServerNatives` for a request),
+  ## and `get_header` lowercases only the NEEDLE — so a builder that stores
+  ## `"Content-Type"` makes an entry NOTHING can read. `response_json` did
+  ## exactly that: it set the header and its own `.content_type {}` answered
+  ## None. Every setter here lowercases the key; a hand-written literal must
+  ## too.
   headers: Map Str Str,
   body: Bytes,
   url: Str,
@@ -504,6 +511,29 @@ impl Response where {
   content_type = { it } -> get_content_type { resp = it },
   content_length = { it } -> get_content_length { resp = it },
 
+  ## Builders, mirroring Request's so a response reads like a request:
+  ## `resp.with_status { code = 201 }.with_header { … }`. Order does not
+  ## matter — each one preserves every other field.
+  ##
+  ## `with_`-prefixed because a method may NOT share a name with a field
+  ## (V0419), and `status`, `headers`, `body` and `url` are all fields of
+  ## Response. The short names live as free builders (`no_content`,
+  ## `redirect`, …) where there is no receiver to collide with.
+  ## Each delegates to a `Response`-ANNOTATED free builder rather than
+  ## spreading `it` here. A method's receiver is `it: 'it`, so
+  ## `{ ...it, status = code }` answers the OPEN row `{ status: 'a, ... }`
+  ## — which is not a Response, so the next `.with_header {}` in the chain
+  ## has no inherent method to find and the record is short a field. Same
+  ## reason Request's setters are free functions.
+  with_status = { it: 'it, code: Int } -> resp_with_status { resp = it, code = code },
+  with_header = { it: 'it, key: Str, value: Str } ->
+    resp_with_header { resp = it, key = key, value = value },
+  with_headers = { it: 'it, headers: Map Str Str } ->
+    resp_with_headers { resp = it, headers = headers },
+  with_body = { it: 'it, val: Bytes } -> resp_with_body { resp = it, body = val },
+  with_text = { it: 'it, val: Str } -> resp_with_text { resp = it, val = val },
+  with_json = { it: 'it, val: Json } -> resp_with_json { resp = it, val = val },
+
   ## dot-chain parity: inherent method for every receiver-taking free
   ## function not already covered by an ability, so `x.op {}` works.
   body_str = { it } -> body_str { resp = it },
@@ -513,6 +543,38 @@ impl Response where {
   get_header = { it, name } -> get_header { resp = it, name = name },
   get_content_type = { it } -> get_content_type { resp = it },
   get_content_length = { it } -> get_content_length { resp = it },
+}
+
+## What a handler is allowed to return.
+##
+## A route handler's job is to answer, and most answers are a string or some
+## JSON — making every one of them spell out a five-field Response record is
+## the tax this removes:
+##
+##   on_get { path = "/ping",      handler = { m } -> "pong" }
+##   on_get { path = "/users/:id", handler = { m } -> user_json { m = m } }
+##   on_get { path = "/raw",       handler = { m } -> not_found { body = "" } }
+##
+## The ability is declared HERE, beside Response, rather than in the router:
+## converting a value to a Response is not a routing idea, and a client-side
+## caller (a mock rule, a test double) wants the same conversion.
+##
+## `Response` implements it as the identity, so a handler that builds its own
+## response keeps working unchanged and pays nothing.
+ability IntoResponse for 'a where {
+  into_response: { it: 'a } -> Response
+}
+
+impl IntoResponse for Response where {
+  into_response = { it } -> it,
+}
+
+impl IntoResponse for Str where {
+  into_response = { it } -> response_ok_text { body = it },
+}
+
+impl IntoResponse for Json where {
+  into_response = { it } -> response_json { body = it },
 }
 
 ## A reusable HTTP client value. Bind a service's base URL, default
@@ -848,10 +910,126 @@ pub let response_json: { body: Json } -> Response = { body } ->
     status = 200,
     headers = map::insert {
       m = map::empty {},
-      k = "Content-Type",
+      k = "content-type",
       v = "application/json",
     },
     body = bytes::from_str { s = to_str { json = body } },
+    url = "",
+    chunks = None,
+  }
+
+## Response setters, each PRESERVING every other field, so a chain reads in
+## whatever order you think of it. Module-private: the public surface is the
+## `impl Response` methods (`resp.with_status { code = 201 }`), and keeping
+## these unexported leaves the short names free for the status builders below
+## — `with_header` as a free name already belongs to Request.
+##
+## Written field by field rather than with a spread because the ANNOTATION is
+## what keeps the result a Response; see the note in `impl Response`.
+let resp_with_status: { resp: Response, code: Int } -> Response = { resp, code } ->
+  {
+    status = code,
+    headers = resp.headers,
+    body = resp.body,
+    url = resp.url,
+    chunks = resp.chunks,
+  }
+
+let resp_with_header: { resp: Response, key: Str, value: Str } -> Response = { resp, key, value } ->
+  {
+    status = resp.status,
+    headers = map::insert { m = resp.headers, k = str::to_lower { s = key }, v = value },
+    body = resp.body,
+    url = resp.url,
+    chunks = resp.chunks,
+  }
+
+## Merge, like Request's — `headers` wins on a key both carry. Incoming keys
+## are lowercased first, or a caller passing `{ "Content-Type": … }` would add
+## a SECOND entry alongside a lowercase one and `get_header` would read
+## whichever it found.
+let resp_with_headers: { resp: Response, headers: Map Str Str } -> Response = { resp, headers } ->
+  {
+    status = resp.status,
+    headers = map::merge {
+      m1 = resp.headers,
+      m2 = map::map_keys { m = headers, f = { val } -> str::to_lower { s = val } },
+    },
+    body = resp.body,
+    url = resp.url,
+    chunks = resp.chunks,
+  }
+
+## Setting a body DROPS a streamed one: `chunks` would otherwise win and the
+## bytes just set would never reach the socket. Silently keeping both is the
+## bug this avoids.
+let resp_with_body: { resp: Response, body: Bytes } -> Response = { resp, body } ->
+  {
+    status = resp.status,
+    headers = resp.headers,
+    body = body,
+    url = resp.url,
+    chunks = None,
+  }
+
+let resp_with_text: { resp: Response, val: Str } -> Response = { resp, val } ->
+  resp_with_body { resp = resp, body = bytes::from_str { s = val } }
+
+let resp_with_json: { resp: Response, val: Json } -> Response = { resp, val } -> do
+  let bodied = resp_with_body {
+    resp = resp,
+    body = bytes::from_str { s = to_str { json = val } },
+  }
+  resp_with_header { resp = bodied, key = "Content-Type", value = "application/json" }
+
+## The statuses a handler reaches for by name. Free functions, not methods:
+## there is no receiver to chain from when you are CREATING the response, and
+## the short names are free here precisely because they would collide with
+## Response's own fields as methods.
+##
+##   not_found { body = "no such user" }
+##   redirect  { to = "/login" }
+##   no_content {}
+
+## 201 Created with a plain-text body.
+pub let created: { body: Str } -> Response = { body } ->
+  response_status { code = 201, body = body }
+
+## 204 No Content — no body, which is what 204 MEANS, so there is no
+## `body` parameter to get wrong.
+pub let no_content: {} -> Response = {} ->
+  {
+    status = 204,
+    headers = map::empty {},
+    body = bytes::empty {},
+    url = "",
+    chunks = None,
+  }
+
+## 400 Bad Request with a plain-text body.
+pub let bad_request: { body: Str } -> Response = { body } ->
+  response_status { code = 400, body = body }
+
+## 404 Not Found with a plain-text body.
+pub let not_found: { body: Str } -> Response = { body } ->
+  response_status { code = 404, body = body }
+
+## 500 Internal Server Error with a plain-text body.
+pub let server_error: { body: Str } -> Response = { body } ->
+  response_status { code = 500, body = body }
+
+## A redirect. 302 by default — `redirect_with` takes the code for a 301
+## or a 307, so the common case needs no number and the uncommon one is
+## still one call.
+pub let redirect: { to: Str } -> Response = { to } ->
+  redirect_with { to = to, code = 302 }
+
+## A redirect with an explicit status code.
+pub let redirect_with: { to: Str, code: Int } -> Response = { to, code } ->
+  {
+    status = code,
+    headers = map::insert { m = map::empty {}, k = "location", v = to },
+    body = bytes::empty {},
     url = "",
     chunks = None,
   }
@@ -1011,7 +1189,7 @@ impl MockRule where {
       rule = it,
       resp = {
         status = r.status,
-        headers = map::insert { m = r.headers, k = "Content-Type", v = "application/json" },
+        headers = map::insert { m = r.headers, k = "content-type", v = "application/json" },
         body = bytes::from_str { s = to_str { json = body } },
         url = r.url,
         chunks = None,
@@ -1025,13 +1203,16 @@ impl MockRule where {
       resp = { status = r.status, headers = r.headers, body = body, url = r.url, chunks = None },
     },
   ## Add one response header, keeping everything else.
+  ## The key is LOWERCASED, like every other Response header setter — a
+  ## mocked response has to answer `get_header` the same way a real one does,
+  ## or a test passes against a header the production reader cannot see.
   header = { it: 'it, name: Str, value: Str } -> do
     let r = mock_response_of { rule = it }
     mock_with_response {
       rule = it,
       resp = {
         status = r.status,
-        headers = map::insert { m = r.headers, k = name, v = value },
+        headers = map::insert { m = r.headers, k = str::to_lower { s = name }, v = value },
         body = r.body, url = r.url, chunks = None,
       },
     },

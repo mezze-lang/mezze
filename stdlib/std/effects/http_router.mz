@@ -17,7 +17,7 @@
 ## it. `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
 ## receives the bindings as a `Map Str Str` alongside the request.
 
-use std::effects::http::{ Method, Request, Response }
+use std::effects::http::{ Method, Request, Response, IntoResponse }
 use std::collections::map
 use std::collections::iter
 use std::collections::seq
@@ -192,6 +192,56 @@ pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response 
           Some { val = params } ->
             Some { val = handler { m = { req = req, params = params } } },
     }
+
+## One route per method, taking a handler that may answer with ANYTHING
+## convertible to a Response — a `Str`, a `Json`, or a Response it built
+## itself. See `IntoResponse` in std::effects::http.
+##
+##   on_get  { path = "/ping",      handler = { m } -> "pong" }
+##   on_post { path = "/users",     handler = { m } -> created { body = "ok" } }
+##   on_get  { path = "/users/:id", handler = { m } -> m.param_or { name = "id", default = "?" } }
+##
+## `route` remains, and still takes a handler returning a Response exactly as
+## before: these are a layer over it, not a replacement, so nothing written
+## against `route` has to change.
+##
+## The conversion happens INSIDE the wrapped handler, not at table-build time,
+## because the handler has not run yet — and it runs under the handler's own
+## effect row, which is why the row stays open here.
+pub let on_method
+  : { method: Method, path: Str, handler: { m: Matched } -> 'r <...> }
+  with IntoResponse 'r
+  -> Routes
+  =
+  { method, path, handler } ->
+    route {
+      method = method,
+      path = path,
+      handler = { m } -> do
+        let answer = handler { m = m }
+        answer.into_response {},
+    }
+
+pub let on_get: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Get, path = path, handler = handler }
+
+pub let on_post: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Post, path = path, handler = handler }
+
+pub let on_put: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Put, path = path, handler = handler }
+
+pub let on_patch: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Patch, path = path, handler = handler }
+
+pub let on_delete: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Delete, path = path, handler = handler }
+
+pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Head, path = path, handler = handler }
+
+pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Options, path = path, handler = handler }
 
 ## Try `a`, then `b`. First match wins, so declaration order is the priority.
 ##
