@@ -804,7 +804,9 @@ internal fun ExpressionConstraintGenerator.receiverHasSolvableType(receiver: Par
         // A call `f {..}` or a parenthesized `(e)` produces a value whose type is
         // pinned by solving, so deferring inherent-method dispatch to emit time is
         // safe.
-        is ParsedFunctionCall, is ParsedParens -> true
+        // A macro call likewise: its value is its expansion's, and the
+        // expansion's type is pinned by solving, as a parenthesized one is.
+        is ParsedFunctionCall, is ParsedParens, is ParsedMacroCall -> true
         // A field access `r.f` is solvable ONLY when its BASE is — recurse. A chain
         // rooted at a concrete value (`point.x.neg {}`, point a monomorphic local)
         // is solvable: getReceiverConcreteType resolves it and the caller never even
@@ -980,6 +982,8 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
         // reported the receiver as "unresolved" and fell through to a HasField
         // constraint on the concrete type → T0205 (#194 follow-up).
         is ParsedParens -> return getReceiverConcreteType(receiver.expr, context)
+        // `m!( … ).method` — the receiver is what the macro expands to.
+        is ParsedMacroCall -> return getReceiverConcreteType(receiver.compiled(), context)
         // `f { … }.method` — the receiver is a call whose result type is
         // concrete even though the syntax isn't a literal/identifier. Resolve
         // the callee's return type so e.g. `help { a = 5, b = 6 }.to_str {}`

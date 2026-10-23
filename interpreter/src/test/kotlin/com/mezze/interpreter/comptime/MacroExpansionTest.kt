@@ -173,6 +173,20 @@ class MacroExpansionTest {
 
     @Test
     @Timeout(240)
+    fun `a method called on a macro call is called on its expansion`() {
+        // The receiver's type is the expansion's: `double!(21)` is an Int, so
+        // `.to_str` is Int's, not a field of a record nobody declared.
+        val out = run("""
+            use macros::{ double }
+
+            let r = double!(21).to_str {}
+            r
+        """.trimIndent())
+        assertEquals("42", out)
+    }
+
+    @Test
+    @Timeout(240)
     fun `a macro's input need not be Mezze`() {
         val out = run("""
             use macros::{ text }

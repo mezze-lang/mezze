@@ -56,6 +56,7 @@ object DeadCodeLinter {
         is ParsedIdentifier -> true
         is ParsedBinaryOp -> isPureValue(e.left) && isPureValue(e.right)
         is ParsedParens -> isPureValue(e.expr)
+        is ParsedMacroCall -> isPureValue(e.compiled())
         is ParsedMemberAccess -> isPureValue(e.receiver) // plain field access
         is ParsedRecordLit -> e.entries.all { entry ->
             when (entry) {
@@ -131,7 +132,11 @@ object DeadCodeLinter {
         }
     }
 
-    private fun unwrap(e: ParsedExpr): ParsedExpr = if (e is ParsedParens) unwrap(e.expr) else e
+    private fun unwrap(e: ParsedExpr): ParsedExpr = when (e) {
+        is ParsedParens -> unwrap(e.expr)
+        is ParsedMacroCall -> unwrap(e.compiled())
+        else -> e
+    }
 
     /** True when `e` is a `<recv>.not {}` method call (the boolean-negation form). */
     private fun isBoolNot(e: ParsedExpr): Boolean {
