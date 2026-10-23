@@ -1055,55 +1055,35 @@ impl MockRule where {
 }
 
 
-# ─── Mock rule builders ───────────────────────────────────────────────
+# ─── Mock rule builders (shorthands over the chain) ───────────────────
 #
-# Collapse a hand-built `MockRule` (methods + Glob url + Ok/Response
-# record) into one call. Give them to a `MockHttpClient`:
+# One-call forms of the commonest rules:
 #
 #   perform MockHttpClient { rules = [ mock_get { url = "*", body = "pong" } ] } in ...
 #
-# `url` is a glob (`*` matches anything). For non-2xx or custom methods
-# use `mock_status`.
+# Each is a one-liner over the chain above, so the two surfaces cannot drift.
+# Anything these do not cover — headers, a failure, a non-GET JSON reply — is
+# the chain's job: `mock { url = "*" }.post {}.json { body = payload }`.
 ## A rule: any GET matching `url` returns a 200 text `body`.
 pub let mock_get: { url: Str, body: Str } -> MockRule = { url, body } ->
-  {
-    methods = [Get],
-    url = Glob { pattern = url },
-    response = Ok { val = response_ok_text { body = body } },
-  }
+  mock { url = url }.get {}.text { body = body }
 
 ## A rule: any POST matching `url` returns a 201 text `body`.
 pub let mock_post: { url: Str, body: Str } -> MockRule = { url, body } ->
-  {
-    methods = [Post],
-    url = Glob { pattern = url },
-    response = Ok { val = response_status { code = 201, body = body } },
-  }
+  mock { url = url }.post {}.status { code = 201 }.text { body = body }
 
 ## A rule: any PUT matching `url` returns a 200 text `body`.
 pub let mock_put: { url: Str, body: Str } -> MockRule = { url, body } ->
-  {
-    methods = [Put],
-    url = Glob { pattern = url },
-    response = Ok { val = response_ok_text { body = body } },
-  }
+  mock { url = url }.put {}.text { body = body }
 
 ## A rule: any DELETE matching `url` returns a 200 text `body`.
 pub let mock_delete: { url: Str, body: Str } -> MockRule = { url, body } ->
-  {
-    methods = [Delete],
-    url = Glob { pattern = url },
-    response = Ok { val = response_ok_text { body = body } },
-  }
+  mock { url = url }.delete {}.text { body = body }
 
 ## A rule: any GET matching `url` returns a 200 JSON `body`
 ## (`Content-Type: application/json`).
 pub let mock_json: { url: Str, body: Json } -> MockRule = { url, body } ->
-  {
-    methods = [Get],
-    url = Glob { pattern = url },
-    response = Ok { val = response_json { body = body } },
-  }
+  mock { url = url }.get {}.json { body = body }
 
 ## A rule: any of `methods` matching `url` returns `code` with a text `body`.
 ## The general form — the verb helpers above are shorthands for it.
@@ -1111,11 +1091,7 @@ pub let mock_status
   : { url: Str, methods: [Method], code: Int, body: Str }
   -> MockRule
   = { url, methods, code, body } ->
-    {
-      methods = methods,
-      url = Glob { pattern = url },
-      response = Ok { val = response_status { code = code, body = body } },
-    }
+    mock { url = url }.for_methods { methods = methods }.status { code = code }.text { body = body }
 
 # ─── Result chain terminals ───────────────────────────────────────────
 #
