@@ -51,7 +51,11 @@ object ConstraintSimplifier {
 
     /** `Equality(t, t)` — both sides identical, so it imposes no constraint. */
     private fun isReflexive(c: Constraint): Boolean =
-        c is Constraint.Equality && c.left == c.right
+        // The cached hashes first: two different types almost always differ in
+        // them, and comparing two large types structurally to find that out was
+        // most of what simplifying a constraint list cost.
+        c is Constraint.Equality &&
+            (c.left === c.right || (c.left.hashCode() == c.right.hashCode() && c.left == c.right))
 
     /**
      * The constraint with diagnostic-only fields (`loc`, `context`) normalized to

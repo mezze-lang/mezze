@@ -20,6 +20,29 @@ class DeclarationRegistry(
     private val allTypeHashesByName: Map<String, Hash> = emptyMap(),
 ) {
     /**
+     * Every variant constructor by name, with the type declaring it — including
+     * transitive and auto-imported types: a value's type identity flows with it
+     * from the declaration, so `NoneFound` in a pattern must find `OptErr` even
+     * where `OptErr` was never named. Import controls what can be NAMED, not
+     * what values' types ARE.
+     *
+     * Kept here, built once per registry: it was built by every solver, and a
+     * module's checking makes tens of thousands of them.
+     */
+    val variantConstructorIndex: Map<String, List<Pair<ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>> by lazy {
+        val index = LinkedHashMap<String, MutableList<Pair<ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>>()
+        for (typeDecl in allTypeDeclsIncludingTransitive) {
+            val definition = typeDecl.definition
+            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
+                for (constructor in definition.constructors) {
+                    index.getOrPut(constructor.name) { mutableListOf() }.add(typeDecl to definition)
+                }
+            }
+        }
+        index
+    }
+
+    /**
      * The single declaration-resolution rule: HASH-FIRST, name-only-as-fallback.
      *
      * A hash — when the caller has one — is authoritative identity and decides

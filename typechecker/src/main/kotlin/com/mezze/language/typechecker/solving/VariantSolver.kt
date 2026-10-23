@@ -19,28 +19,8 @@ internal class VariantSolver(
     private val mustBeOpenRowVars: MutableSet<RowVar>,
 ) {
 
-    private val constructorIndex: Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>> by lazy {
-        buildConstructorIndex()
-    }
-
-    private fun buildConstructorIndex(): Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>> {
-        val index = mutableMapOf<String, MutableList<Pair<ParsedTypeDecl, ParsedVariantDef>>>()
-        // Include transitive / auto-imported type decls too: a value's type
-        // identity flows with it from the decl side, so `NoneFound` inside a
-        // pattern must find `OptErr`'s decl even if the caller never wrote
-        // `use opt_err::{OptErr}`. Import controls what the user can NAME in
-        // annotations, not what the values' types ARE.
-        for (typeDecl in registry.allTypeDeclsIncludingTransitive) {
-            val definition = typeDecl.definition
-            if (definition is ParsedVariantDef) {
-                for (constructor in definition.constructors) {
-                    index.getOrPut(constructor.name) { mutableListOf() }
-                        .add(Pair(typeDecl, definition))
-                }
-            }
-        }
-        return index
-    }
+    private val constructorIndex: Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>>
+        get() = registry.variantConstructorIndex
 
     private sealed class VariantInferenceResult {
         data class Success(
