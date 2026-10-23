@@ -715,9 +715,16 @@ class ModuleResolver(
     private class Source(val modulePath: String, val filePath: String, val text: String, val hash: Hash)
 
     /** Read [modulePath] without loading anything, or null when there is nothing to read. */
-    private fun readSource(modulePath: String): Source? =
-        caches(world).sources.computeIfAbsent(projectRoot to modulePath) { java.util.Optional.ofNullable(readSourceNow(modulePath)) }
-            .orElse(null) as Source?
+    private fun readSource(modulePath: String): Source? {
+        val sources = caches(world).sources
+        val key = projectRoot to modulePath
+        sources[key]?.let { return it.orElse(null) as Source? }
+        // Read outside the map: not computeIfAbsent, whose lock on the entry would
+        // be held while reading takes the world's lock — which a new check holds
+        // while it clears this map. Two checks in one world deadlocked on that.
+        val read: java.util.Optional<Any> = java.util.Optional.ofNullable(readSourceNow(modulePath))
+        return (sources.putIfAbsent(key, read) ?: read).orElse(null) as Source?
+    }
 
     private fun readSourceNow(modulePath: String): Source? {
         // The overlay is consulted BEFORE the file is resolved, not after it is
