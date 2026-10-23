@@ -1,4 +1,5 @@
 use std::collections::seq
+use std::collections::iter
 use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::result
 use std::effects::exception::{ Exception, unwrap }
@@ -478,6 +479,98 @@ pub let par_map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError
   do
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     all { ps = ps }
+
+## ---------- Bounded concurrency over a LAZY source ----------
+##
+## `par_map` takes a Seq, so the whole input has to exist before any work
+## starts. These take an `Iter` and never materialise it: the source is walked
+## ONCE, at most `max_in_flight` tasks are alive at a time, and a window of
+## that many promises is the only thing held.
+##
+## That is the case `par_map` and `chunk_fold` cannot serve — a source you
+## cannot materialise. Walk a directory tree and read every file sixteen at a
+## time without first building a list of two million paths; drain a paginated
+## cursor whose page N+1 needs page N; follow a log. Measured for the finite
+## case in `bench/cases/concurrent_map_compare`: `chunk_fold` with `min_chunk`
+## lowered is the fastest option when the input fits in memory, so reach for
+## these when it does NOT, or when the source is effectful and must be walked
+## exactly once.
+##
+## Bounded means bounded: the window fills, the oldest promise is awaited, and
+## only then is another task spawned. Nothing here lets the in-flight count
+## drift above `max_in_flight`, which is what makes it safe to point at a
+## directory of unknown size.
+##
+## NOT a lazy `Iter 'b` out. Producing one would need to suspend the walk
+## between elements, and the walk is a push driver — it calls a consumer per
+## element and cannot be resumed from the middle. A pull cursor over the
+## descriptor tree would fix that and is a much larger change; see
+## `planned_features/runtime/filesystem-effects-and-streaming.md`.
+
+## Walk `it`, running `f` on each element with at most `max_in_flight`
+## concurrent tasks, for side effects.
+##
+## Results are discarded, so a task that fails fails silently — use
+## `map_concurrent` when you need to see per-element outcomes. Pair with
+## `iter::take` to bound an endless source.
+pub let for_each_concurrent
+  : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int } -> {} <Async, ...>
+  = { it, f, max_in_flight } -> do
+    ## The fold threads the WINDOW as its accumulator: a Seq of in-flight
+    ## promises, oldest first. One walk, no materialised input.
+    let leftover = iter::fold {
+      it = it,
+      init = [],
+      f = { acc, x } -> do
+        let w = seq::push { xs = acc, x = Async.spawn { f = {} -> f { x = x } } }
+        if seq::size { xs = w } < max_in_flight then w
+        else match seq::first { xs = w } is
+          Some { val = oldest } -> do
+            ## Await the OLDEST before spawning the next, which is what keeps
+            ## the count at the limit rather than merely near it.
+            let _ = await { p = oldest }
+            seq::tail { xs = w }
+          None -> w
+    }
+    ## Drain what the window still holds when the source ran out.
+    seq::for_each { xs = leftover, f = { x } -> do
+      let _ = await { p = x }
+      {}
+    }
+
+
+## Walk `it`, running `f` on each element with at most `max_in_flight`
+## concurrent tasks, and collect the results IN SOURCE ORDER.
+##
+## Ordered, not completion-ordered: a slow element holds up the ones behind it
+## in the output, exactly as `par_map` does. Unordered yielding would be a
+## different combinator — it needs to return results as they settle, which
+## means it cannot also be a fold.
+##
+## The INPUT is never materialised; the output is a Seq, so it is bounded by
+## the number of elements. For an endless source, bound it with `iter::take`.
+## Per-element failures are visible as `Err`, like `par_map`.
+pub let map_concurrent
+  : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int }
+  -> [Result 'b AsyncError] <Async, ...>
+  = { it, f, max_in_flight } -> do
+    ## `window` is the in-flight promises, `done` the settled results so far.
+    let final = iter::fold {
+      it = it,
+      init = { window = [], done = [] },
+      f = { acc, x } -> do
+        let w = seq::push { xs = acc.window, x = Async.spawn { f = {} -> f { x = x } } }
+        if seq::size { xs = w } < max_in_flight then { window = w, done = acc.done }
+        else match seq::first { xs = w } is
+          Some { val = oldest } -> {
+            window = seq::tail { xs = w },
+            done = seq::push { xs = acc.done, x = await { p = oldest } },
+          }
+          None -> { window = w, done = acc.done }
+    }
+    ## `all` awaits the remaining window in order, so the tail keeps its place.
+    seq::concat { xs = final.done, ys = all { ps = final.window } }
+
 
 ## Run f over each element concurrently for side effects; per-element
 ## Results returned (any failures visible to the caller). Use
