@@ -662,6 +662,23 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
 
     val receiverType: MezzeType = receiverResult.type
 
+    // Bidirectional, receiver side: a bare record literal receiving an ability
+    // op has no annotation to read, so take the expectation from the ability's
+    // own impl target and REQUIRE the literal to be it. Unifying rather than
+    // merely labelling is what pins a field the literal left open (`chunks =
+    // None` → `Option (Iter Bytes)`); once the fields are determined, emit's
+    // existing `adoptRecordAlias` labels the literal on its own. Null whenever
+    // nothing determines the receiver, so this adds no constraint at all in
+    // every shape that already worked.
+    abilityImplTargetForAnonymousReceiver(receiverType, resolvedAbilityName, context)?.let { target ->
+        constraints.add(Constraint.Equality(
+            left = receiverType,
+            right = target,
+            context = "Ability receiver literal is its impl's target type",
+            loc = expr.loc,
+        ))
+    }
+
     constraints.add(Constraint.Equality(
         left = receiverType,
         right = receiverConstraintType,
@@ -1640,6 +1657,68 @@ internal fun ExpressionConstraintGenerator.findMatchingRecordTypeAliases(
         }
     }
     return matches
+}
+
+/**
+ * The declared type an ability op's ANONYMOUS record receiver is being used as,
+ * or null when nothing determines it.
+ *
+ * `adoptRecordAlias` already labels a bare literal with a matching alias, but it
+ * compares field TYPES exactly, so it only serves a literal that already
+ * determines itself. A literal can be LESS determined than the declaration:
+ *
+ *     { status = 201, headers = …, body = …, url = "", chunks = None }
+ *
+ * gives `chunks: Option 'a` where `Response` declares `Option (Iter Bytes)`.
+ * Nothing is wrong with either type — the literal simply has not been told which
+ * one it is, so adoption finds no match, the receiver stays Anonymous, and the
+ * nominal `impl … for Response` target never matches it. The call then compiles
+ * to a field read that fails at RUNTIME with `Field not found`.
+ *
+ * Adoption works OUTWARD from the literal and structurally cannot close that
+ * case. Every other position already supplies the expectation from the other
+ * side — a parameter annotation, a return annotation, a callback's declared
+ * return — and this is the one position that has no annotation to read: the
+ * receiver. What determines it there is the ability's own impls, which say
+ * which declared type this operation is written for.
+ *
+ * Matching on field NAMES is the point: the literal's field types are exactly
+ * what may still be open, so requiring them to agree would beg the question.
+ * The caller unifies against the result, which pins them.
+ *
+ * Narrow by construction. Only a closed, anonymous, non-empty record receiver;
+ * only when EXACTLY ONE in-scope impl of THIS ability targets a declared closed
+ * record with the receiver's field names. Two candidates are left alone rather
+ * than guessed — a literal that could be either is not evidence for one.
+ */
+internal fun ExpressionConstraintGenerator.abilityImplTargetForAnonymousReceiver(
+    receiverType: MezzeType,
+    abilityName: String?,
+    context: ConstraintContext
+): MezzeType? {
+    if (abilityName == null) return null
+    if (receiverType !is MezzeType.RecordType) return null
+    if (receiverType.rowVar != null || receiverType.fields.isEmpty()) return null
+    if (receiverType.identity != TypeIdentity.Anonymous) return null
+
+    val byFieldNames = findMatchingRecordTypeAliases(receiverType, context)
+    if (byFieldNames.isEmpty()) return null
+
+    // The receiver ("self") is LAST in an impl's class-arg tuple — extra class
+    // params come first. See project_classparam_runtime_dispatch_tuple.
+    val implTargets = context.typingContext.getAbilityImpls(abilityName)
+        .mapNotNull { it.targetTypes.lastOrNull() }
+        .toSet()
+    val aliasName = byFieldNames.filter { it in implTargets }.distinct().singleOrNull() ?: return null
+
+    val decl = context.typeDeclarations[aliasName] ?: return null
+    val def = decl.definition as? ParsedRecordDef ?: return null
+    if (def.isOpen) return null
+    val hash = decl.contentHash ?: return null
+    return MezzeType.RecordType(
+        fields = def.fields.associate { it.name to convertParsedFieldType(it.type) },
+        identity = TypeIdentity.declared(aliasName, hash),
+    )
 }
 
 /**
