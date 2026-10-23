@@ -26,6 +26,7 @@ class HttpServerEffectTest {
             $head
             let handler: { req: Request } -> Response = { req } -> {
               status = 200, headers = map::empty {}, body = bytes::from_str { s = "hi" }, url = req.url,
+              chunks = None,
             }
             let resp = handler { req = get_request { url = "/x" } }
             resp.status
@@ -39,6 +40,7 @@ class HttpServerEffectTest {
             $head
             let handler: { req: Request } -> Response = { req } -> {
               status = 204, headers = map::empty {}, body = bytes::from_str { s = "" }, url = req.url,
+              chunks = None,
             }
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
               let h = HttpServer.serve { handler = handler }
@@ -54,6 +56,7 @@ class HttpServerEffectTest {
             $head
             let handler: { req: Request } -> Response = { req } -> {
               status = 200, headers = map::empty {}, body = bytes::from_str { s = req.url }, url = req.url,
+              chunks = None,
             }
             let resp = handler { req = incoming { method = Get, url = "/users/7" } }
             match bytes::to_str { b = resp.body } is

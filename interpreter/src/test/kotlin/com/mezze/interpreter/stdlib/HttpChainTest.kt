@@ -41,8 +41,9 @@ class HttpChainTest {
                 status = 200,
                 headers = map::empty {},
                 body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -71,8 +72,9 @@ class HttpChainTest {
                 status = 201,
                 headers = map::empty {},
                 body = bytes::from_str { s = "created" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [Post], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -99,8 +101,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "got it" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -126,8 +129,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -157,8 +161,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 204, headers = map::empty {}, body = bytes::empty {},
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -181,8 +186,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 503, headers = map::empty {}, body = bytes::empty {},
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -205,8 +211,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "hello!" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -237,7 +244,7 @@ class HttpChainTest {
             }
             let mock_response: Response = {
                 status = 200, headers = headers, body = bytes::from_str { s = "{}" },
-                url = ""
+                url = "", chunks = None,
             }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
@@ -265,8 +272,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -310,8 +318,9 @@ class HttpChainTest {
 
             let mock_response: Response = {
                 status = 201, headers = map::empty {}, body = bytes::from_str { s = "made" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [Post], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -375,7 +384,8 @@ class HttpChainTest {
             perform MockHttpClient { rules = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Ok { val = { status = 200, headers = map::empty {},
-                    body = bytes::from_str { s = "{\"name\":\"Ada\",\"age\":36}" }, url = "http://test.com/u" } } }
+                    body = bytes::from_str { s = "{\"name\":\"Ada\",\"age\":36}" }, url = "http://test.com/u",
+                    chunks = None } } }
             ] } in do
               let u: Result { name: Str, age: Int } HttpError =
                 request { url = "http://test.com/u" }.send {}.from_json {}
@@ -396,7 +406,9 @@ class HttpChainTest {
             perform MockHttpClient { rules = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Ok { val = { status = 200, headers = map::empty {},
-                    body = bytes::from_str { s = "not json at all" }, url = "http://test.com/u" } } }
+                    body = bytes::from_str { s = "not json at all" }, url = "http://test.com/u",
+                    chunks = None,
+                  } } }
             ] } in do
               let u: Result { name: Str } HttpError =
                 request { url = "http://test.com/u" }.send {}.from_json {}
@@ -453,7 +465,9 @@ class HttpChainTest {
             perform MockHttpClient { rules = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Ok { val = { status = 200, headers = map::empty {},
-                    body = bytes::from_str { s = "the-body" }, url = "" } } }
+                    body = bytes::from_str { s = "the-body" }, url = "",
+                    chunks = None,
+                  } } }
             ] } in do
               let req = request { url = "http://test.com/x" }
               # Inline chain: `HttpClient.request{...}` is a TypedPerformOp receiver

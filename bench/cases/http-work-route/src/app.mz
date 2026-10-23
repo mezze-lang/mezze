@@ -51,6 +51,7 @@ let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } 
   headers = map::empty {},
   body = bytes::from_str { s = text },
   url = url,
+  chunks = None,
 }
 
 ## The encode is behind an ability constraint, exactly as application code puts

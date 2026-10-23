@@ -23,6 +23,7 @@ class HttpRouterChainTest {
 
         let not_found: { req: Request } -> Response = { req } -> {
           status = 404, headers = map::empty {}, body = bytes::from_str { s = "nope" }, url = req.url,
+          chunks = None,
         }
         let body_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val

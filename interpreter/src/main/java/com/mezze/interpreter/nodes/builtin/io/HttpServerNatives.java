@@ -155,8 +155,29 @@ public final class HttpServerNatives {
     }
 
     /** One handler result, on its way back to a Helidon thread. */
-    private record Reply(int status, Map<String, String> headers, byte[] body) {
+    /**
+     * A reply is EITHER a complete byte[] or a guest iterator of chunks.
+     *
+     * The streaming arm exists because `res.send(byte[])` needs the whole body
+     * in heap first: serving a 2GB file cost 2GB. With chunks, the handler
+     * yields `Bytes` at a time and this writes each one to Helidon's output
+     * stream, so the peak is one chunk.
+     *
+     * The guest iterator is safe to hold here ONLY because the handler now runs
+     * on the Helidon connection thread, entered into the Truffle context
+     * (4bc94b1b1) — pulling from it happens on the same thread that built it.
+     * Under the old queue-and-worker design this field could not have existed:
+     * the Helidon thread was not Truffle-owned, and "no guest value crosses a
+     * thread Truffle does not own" was the invariant.
+     */
+    private record Reply(int status, Map<String, String> headers, byte[] body, Object chunks) {
+        Reply(int status, Map<String, String> headers, byte[] body) {
+            this(status, headers, body, null);
+        }
+
+        boolean isStreamed() { return chunks != null; }
     }
+
 
     // ==================== Natives ====================
 
@@ -297,7 +318,11 @@ public final class HttpServerNatives {
         for (Map.Entry<String, String> h : reply.headers().entrySet()) {
             res.header(h.getKey(), h.getValue());
         }
-        res.send(reply.body());
+        if (reply.isStreamed()) {
+            sendChunks(truffleCtx, res, reply.chunks());
+        } else {
+            res.send(reply.body());
+        }
     }
 
     /** One guest handler call straight off a {@link ServerRequest}. */
@@ -389,6 +414,49 @@ public final class HttpServerNatives {
         return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), methodTag(constructor));
     }
 
+    /**
+     * Pull chunks from the guest iterator and write each to Helidon's output
+     * stream, so the peak heap is one chunk rather than the whole body.
+     *
+     * Re-enters the context: `dispatch` has already left it by the time the
+     * response is written, and advancing a guest iterator runs guest code —
+     * the pipeline's stages, which may themselves perform.
+     *
+     * A chunk that is not Bytes is a type error rather than something to
+     * coerce: a body is bytes, and silently stringifying whatever arrived
+     * would send a plausible-looking wrong response.
+     */
+    @TruffleBoundary
+    private static void sendChunks(TruffleContext truffleCtx, ServerResponse res, Object chunks) {
+        Object prev = truffleCtx.enter(null);
+        try (java.io.OutputStream out = res.outputStream()) {
+            com.mezze.interpreter.nodes.builtin.collections.IterCursor cursor =
+                com.mezze.interpreter.nodes.builtin.collections.IterCursor.of(
+                    (com.mezze.datastructures.iter.MezzeIter) chunks,
+                    com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
+            while (true) {
+                Object chunk = cursor.next();
+                if (chunk == com.mezze.interpreter.nodes.builtin.collections.IterCursor.END) break;
+                if (chunk instanceof BytesNatives.MezzeBytes mb) {
+                    out.write(mb.getData());
+                } else if (chunk instanceof String str) {
+                    out.write(utf8(str));
+                } else {
+                    throw new NativeTypeMismatchException(
+                        "A streamed response body must yield Bytes, got "
+                            + (chunk == null ? "null" : chunk.getClass().getSimpleName()));
+                }
+            }
+        } catch (java.io.IOException e) {
+            // The peer went away mid-body. Nothing can be said on the wire now
+            // — the status and headers are long gone — so this is dropped
+            // rather than turned into a 500 that cannot be delivered.
+            System.err.println("[mezze] streamed response aborted: " + e.getMessage());
+        } finally {
+            truffleCtx.leave(null, prev);
+        }
+    }
+
     /** Read a guest `Response` back out into plain Java. */
     private static Reply replyOf(MezzeRecord response) {
         int status = (int) getLongOrDefault(response, "status", 200L);
@@ -398,6 +466,23 @@ public final class HttpServerNatives {
         if (headersField instanceof MezzeMap<?, ?> m) {
             for (MezzeMap.Entry<?, ?> entry : m) {
                 headers.put(String.valueOf(entry.key()), String.valueOf(entry.value()));
+            }
+        }
+
+        // `chunks: Option (Iter Bytes)` decides the shape. An ADDITIVE field
+        // rather than turning `body` into a variant: that would change what
+        // every READER of `resp.body` gets back, across the client, the router
+        // and user code, where this only touches the handful of places that
+        // CONSTRUCT a Response.
+        //
+        // isSome() on the precomputed tag, not getConstructorName() — a
+        // recovered name is "Unknown(<tag>)" in an AOT image for anything the
+        // registry has not seen.
+        Object chunksField = getField(response, "chunks");
+        if (chunksField instanceof MezzeVariant maybe && maybe.isSome()) {
+            Object chunks = maybe.getPayloadFieldByName("val");
+            if (chunks != null) {
+                return new Reply(status, headers, new byte[0], chunks);
             }
         }
 

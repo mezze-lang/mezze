@@ -530,8 +530,9 @@ public final class IONatives {
             return createOk(mockResponse);
         }
         return createOk(MezzeRecord.fromFields(
-            new String[]{"status", "headers", "body", "url"},
-            new Object[]{200L, MezzeMap.empty(), new BytesNatives.MezzeBytes(new byte[0]), url}
+            new String[]{"status", "headers", "body", "url", "chunks"},
+            new Object[]{200L, MezzeMap.empty(), new BytesNatives.MezzeBytes(new byte[0]), url,
+                          MezzeVariant.none()}
         ));
     }
 
@@ -564,8 +565,8 @@ public final class IONatives {
         if (headers == null) headers = MezzeMap.empty();
         if (body == null) body = new BytesNatives.MezzeBytes(new byte[0]);
         MezzeRecord injected = MezzeRecord.fromFields(
-            new String[]{"status", "headers", "body", "url"},
-            new Object[]{status, headers, body, url}
+            new String[]{"status", "headers", "body", "url", "chunks"},
+            new Object[]{status, headers, body, url, MezzeVariant.none()}
         );
         return MezzeVariant.ok(injected);
     }
@@ -1081,7 +1082,7 @@ public final class IONatives {
         }
 
         return MezzeRecord.fromFields(
-            new String[]{"status", "headers", "body", "url"},
+            new String[]{"status", "headers", "body", "url", "chunks"},
             new Object[]{
                 (long) response.status().code(),
                 MezzeMap.fromJavaMap(headersOut),
@@ -1091,7 +1092,10 @@ public final class IONatives {
                 // `bytes::to_str { b = resp.body }` throw
                 // "Expected MezzeBytes for field 'b'".
                 new BytesNatives.MezzeBytes(bodyBytes),
-                url
+                url,
+                // A client response is never streamed — the native already has
+                // the whole body in hand by the time it builds this.
+                MezzeVariant.none()
             }
         );
     }

@@ -24,7 +24,8 @@ let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } 
     headers = map::empty {},
     body = bytes::from_str { s = text },
     url = url,
-}
+    chunks = None,
+  }
 
 let not_found: { req: Request } -> Response = { req } ->
     reply { code = 404, text = "nope", url = req.url }

@@ -457,6 +457,7 @@ class SqliteDbTest {
 
         let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } -> {
           status = code, headers = map::empty {}, body = bytes::from_str { s = text }, url = url,
+          chunks = None,
         }
         let get: { port: Int, path: Str } -> Str <HttpClient> = { port, path } ->
           match request { url = "http://127.0.0.1:$(int::to_str { n = port })$(path)" }.send {} is

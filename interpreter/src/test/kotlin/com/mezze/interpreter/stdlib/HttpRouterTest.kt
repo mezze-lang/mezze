@@ -22,6 +22,7 @@ class HttpRouterTest {
 
         let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } -> {
           status = code, headers = map::empty {}, body = bytes::from_str { s = text }, url = url,
+          chunks = None,
         }
         let not_found: { req: Request } -> Response = { req } -> reply { code = 404, text = "nope", url = req.url }
         let body_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is

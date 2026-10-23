@@ -1,4 +1,6 @@
 use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
+use std::collections::iter
+use std::effects::filesystem::{ FileStreaming, FsError, Read }
 use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
 ## Re-exported, not merely imported: `with_query` is constrained on `ToQuery`,
 ## and that constraint is settled at the CALL SITE, so the blanket impl has to be
@@ -57,6 +59,23 @@ pub type Response = {
   headers: Map Str Str,
   body: Bytes,
   url: Str,
+  ## A STREAMED body, pulled chunk by chunk as the response is written.
+  ##
+  ## `None` is the ordinary case and `body` carries the whole thing. `Some`
+  ## makes `body` ignored and the server writes each `Bytes` the iterator
+  ## yields straight to the socket, so serving a 2GB file costs one chunk of
+  ## heap instead of 2GB.
+  ##
+  ## An extra FIELD rather than making `body` a variant, deliberately: a
+  ## variant would change what every reader of `resp.body` gets back — the
+  ## client, the router, user code — while this only touches the few places
+  ## that construct a Response.
+  ##
+  ## Single-shot. The iterator is walked once as the response goes out, and a
+  ## source with effects in it performs during that walk, on the connection
+  ## thread. Only the server honours this; `HttpClient` responses always
+  ## arrive as `None` with a whole `body`.
+  chunks: Option (Iter Bytes),
 }
 
 ## HTTP error variants.
@@ -815,6 +834,7 @@ pub let response_status: { code: Int, body: Str } -> Response = { code, body } -
     headers = map::empty {},
     body = bytes::from_str { s = body },
     url = "",
+    chunks = None,
   }
 
 ## A 200 OK response with a plain-text body.
@@ -833,7 +853,207 @@ pub let response_json: { body: Json } -> Response = { body } ->
     },
     body = bytes::from_str { s = to_str { json = body } },
     url = "",
+    chunks = None,
   }
+
+## A response whose body is STREAMED from an iterator of chunks.
+##
+## `body` is ignored when `chunks` is `Some`, so it is left empty here. The
+## server pulls one `Bytes` at a time and writes each straight to the socket:
+## peak heap is one chunk, not the whole body. Serving a 2GB file with
+## `response_ok_text` costs 2GB; with this it costs a chunk.
+##
+## The iterator is walked ONCE, as the response goes out, on the connection
+## thread. A source with effects in it performs during that walk — which is
+## how `with_lines` or a `map_concurrent_lazy` pipeline can feed a response
+## directly.
+##
+## Only the server honours `chunks`. A `MockHttpServer` reply and every
+## `HttpClient` response are whole bodies.
+pub let response_stream
+  : { status: Int, headers: Map Str Str, chunks: Iter Bytes } -> Response
+  = { status, headers, chunks } ->
+    {
+      status = status,
+      headers = headers,
+      body = bytes::from_str { s = "" },
+      url = "",
+      chunks = Some { val = chunks },
+    }
+
+
+## A 200 whose body streams a file from disk, a chunk at a time.
+##
+## The motivating case for `response_stream`: a download handler that does not
+## read the file into memory first. `chunk_bytes` is the read size, so the peak
+## is one chunk plus the socket buffer regardless of the file's size.
+##
+## Needs `<FileStreaming>` because it holds a handle for the life of the
+## response — which is also why the handle cannot be closed here: the body is
+## written after this function returns. A caller that needs the close
+## guaranteed should use `with_lines`-style scoping and buffer, or accept that
+## the handle is released when the context goes (see `OpenResources`).
+pub let response_file
+  : { path: Str, chunk_bytes: Int } -> Result Response FsError <FileStreaming>
+  = { path, chunk_bytes } -> match FileStreaming.open { path = path, mode = Read } is
+    Err { error } -> Err { error = error }
+    Ok { val = h } -> Ok {
+      val = response_stream {
+        status = 200,
+        headers = map::empty {},
+        chunks = iter::unfold {
+          state = {},
+          step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = chunk_bytes } is
+            Err { error = _ } -> Done
+            Ok { val = b } -> if bytes::size { b = b } == 0 then Done
+              else Yield { val = b, next = {} }
+        },
+      },
+    }
+
+
+# ─── Mock rules, chained ──────────────────────────────────────────────
+#
+# A hand-built `MockRule` is a nested literal with a `Response` inside it, and
+# the `Response` has five fields:
+#
+#     { methods = [Get], url = Glob { pattern = "**" },
+#       response = Ok { val = {
+#         status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
+#         url = "", chunks = None,
+#       } } }
+#
+# Six lines to say "a GET returns 200 ok", and every field added to `Response`
+# makes it longer — `chunks` did exactly that. The chain says the same thing in
+# one line and reads in the order you think of it: WHICH requests, then WHAT
+# comes back.
+#
+#     mock { url = "**" }.get {}.text { body = "ok" }
+#     mock { url = "/users/*" }.post {}.status { code = 201 }.json { body = payload }
+#     mock { url = "**" }.times_out { ms = 30 }
+#
+# Every step answers a `MockRule`, so there is no terminal call to forget and a
+# half-built rule is still a usable one. `mock` on its own matches ANY method
+# and returns an empty 200.
+
+## Start a rule matching any method whose URL matches the glob `url`.
+##
+## `*` matches within a path segment and `**` across segments, as
+## `UrlPattern.Glob` defines. Narrow it with `.get {}` and friends; shape the
+## reply with `.status`, `.text`, `.json`, `.raw`, `.header`; or replace the
+## reply with a transport failure using `.fails`, `.times_out`,
+## `.unreachable`.
+pub let mock: { url: Str } -> MockRule = { url } ->
+  {
+    methods = [],
+    url = Glob { pattern = url },
+    response = Ok { val = response_status { code = 200, body = "" } },
+  }
+
+
+## The response a rule currently answers with, or a bare 200 if the rule is
+## set to fail. Used by the chain so `.status` can keep the body and `.text`
+## can keep the status, rather than each one resetting the other.
+let mock_response_of: { rule: MockRule } -> Response = { rule } ->
+  match rule.response is
+    Ok { val } -> val
+    Err { error = _ } -> response_status { code = 200, body = "" }
+
+
+let mock_with_response: { rule: MockRule, resp: Response } -> MockRule = { rule, resp } ->
+  { methods = rule.methods, url = rule.url, response = Ok { val = resp } }
+
+
+let mock_with_methods: { rule: MockRule, methods: [Method] } -> MockRule = { rule, methods } ->
+  { methods = methods, url = rule.url, response = rule.response }
+
+
+impl MockRule where {
+  ## ---- which requests this rule answers ----
+  ## Restrict to one method. Replaces any previous restriction rather than
+  ## adding to it: `.get {}.post {}` matches POST, which is what reading it
+  ## left to right suggests. Use `.for_methods` for a set.
+  get = { it: 'it } -> mock_with_methods { rule = it, methods = [Get] },
+  post = { it: 'it } -> mock_with_methods { rule = it, methods = [Post] },
+  put = { it: 'it } -> mock_with_methods { rule = it, methods = [Put] },
+  delete = { it: 'it } -> mock_with_methods { rule = it, methods = [Delete] },
+  patch = { it: 'it } -> mock_with_methods { rule = it, methods = [Patch] },
+  head = { it: 'it } -> mock_with_methods { rule = it, methods = [Head] },
+  options = { it: 'it } -> mock_with_methods { rule = it, methods = [Options] },
+  ## Match any of several methods.
+  for_methods = { it: 'it, methods: [Method] } ->
+    mock_with_methods { rule = it, methods = methods },
+  ## Match every method — the default a bare `mock` starts with.
+  any_method = { it: 'it } -> mock_with_methods { rule = it, methods = [] },
+
+  ## ---- what comes back ----
+  ## Set the status, keeping the body and headers.
+  status = { it: 'it, code: Int } -> do
+    let r = mock_response_of { rule = it }
+    mock_with_response {
+      rule = it,
+      resp = { status = code, headers = r.headers, body = r.body, url = r.url, chunks = None },
+    },
+  ## Set a UTF-8 text body, keeping the status and headers.
+  text = { it: 'it, body: Str } -> do
+    let r = mock_response_of { rule = it }
+    mock_with_response {
+      rule = it,
+      resp = {
+        status = r.status, headers = r.headers,
+        body = bytes::from_str { s = body }, url = r.url, chunks = None,
+      },
+    },
+  ## Set a JSON body AND `Content-Type: application/json`, keeping the status.
+  json = { it: 'it, body: Json } -> do
+    let r = mock_response_of { rule = it }
+    mock_with_response {
+      rule = it,
+      resp = {
+        status = r.status,
+        headers = map::insert { m = r.headers, k = "Content-Type", v = "application/json" },
+        body = bytes::from_str { s = to_str { json = body } },
+        url = r.url,
+        chunks = None,
+      },
+    },
+  ## Set a raw byte body, keeping the status and headers.
+  raw = { it: 'it, body: Bytes } -> do
+    let r = mock_response_of { rule = it }
+    mock_with_response {
+      rule = it,
+      resp = { status = r.status, headers = r.headers, body = body, url = r.url, chunks = None },
+    },
+  ## Add one response header, keeping everything else.
+  header = { it: 'it, name: Str, value: Str } -> do
+    let r = mock_response_of { rule = it }
+    mock_with_response {
+      rule = it,
+      resp = {
+        status = r.status,
+        headers = map::insert { m = r.headers, k = name, v = value },
+        body = r.body, url = r.url, chunks = None,
+      },
+    },
+
+  ## ---- failing instead of answering ----
+  ## These were impossible before. `MockRule.response` is a
+  ## `Result Response HttpError`, so a rule could always have carried an
+  ## error — but no builder produced one, which left every error path in
+  ## every caller untestable without hand-writing the literal.
+  ## Answer with a transport error rather than a response.
+  fails = { it: 'it, error: HttpError } ->
+    { methods = it.methods, url = it.url, response = Err { error = error } },
+  ## Answer with a timeout after `ms`. The url is filled in by the client, so
+  ## it is left empty here.
+  times_out = { it: 'it, ms: Int } ->
+    { methods = it.methods, url = it.url, response = Err { error = Timeout { url = "", ms = ms } } },
+  ## Answer as though the connection never opened.
+  unreachable = { it: 'it, reason: Str } ->
+    { methods = it.methods, url = it.url,
+      response = Err { error = ConnectionFailed { url = "", reason = reason } } },
+}
+
 
 # ─── Mock rule builders ───────────────────────────────────────────────
 #

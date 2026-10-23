@@ -147,8 +147,9 @@ class HttpStageDTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -173,8 +174,9 @@ class HttpStageDTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -196,8 +198,9 @@ class HttpStageDTest {
 
             let mock_response: Response = {
                 status = 404, headers = map::empty {}, body = bytes::from_str { s = "not found" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -224,8 +227,9 @@ class HttpStageDTest {
 
             let mock_response: Response = {
                 status = 500, headers = map::empty {}, body = bytes::from_str { s = "boom" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -268,8 +272,9 @@ class HttpStageDTest {
 
             let mock_response: Response = {
                 status = 500, headers = map::empty {}, body = bytes::from_str { s = "boom" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
@@ -301,8 +306,9 @@ class HttpStageDTest {
 
             let mock_response: Response = {
                 status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]

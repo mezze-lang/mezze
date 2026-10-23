@@ -34,8 +34,9 @@ class HttpMockTest {
                 status = 200,
                 headers = map::empty {},
                 body = bytes::from_str { s = "hello" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
 
             let rules: [MockRule] = [
                 { methods = [Get], url = Glob { pattern = "/test" }, response = Ok { val = mock_response } }
@@ -81,8 +82,12 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let get_response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "get" }, url = ""  }
-            let post_response: Response = { status = 201, headers = map::empty {}, body = bytes::from_str { s = "post" }, url = ""  }
+            let get_response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "get" }, url = "",
+ chunks = None,
+}
+            let post_response: Response = { status = 201, headers = map::empty {}, body = bytes::from_str { s = "post" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [Get], url = Glob { pattern = "/resource" }, response = Ok { val = get_response } },
@@ -105,8 +110,12 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let get_response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "get" }, url = ""  }
-            let post_response: Response = { status = 201, headers = map::empty {}, body = bytes::from_str { s = "post" }, url = ""  }
+            let get_response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "get" }, url = "",
+ chunks = None,
+}
+            let post_response: Response = { status = 201, headers = map::empty {}, body = bytes::from_str { s = "post" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [Get], url = Glob { pattern = "/resource" }, response = Ok { val = get_response } },
@@ -132,7 +141,9 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "/any-method" }, response = Ok { val = response } }
@@ -172,7 +183,9 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "/users/*" }, response = Ok { val = response } }
@@ -194,7 +207,9 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "/users/*" }, response = Ok { val = response } }
@@ -220,7 +235,9 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "/api/**/health" }, response = Ok { val = response } }
@@ -242,7 +259,9 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = response } }
@@ -268,8 +287,12 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let first: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
-            let second: Response = { status = 201, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let first: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
+            let second: Response = { status = 201, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "/users/*" }, response = Ok { val = first } },
@@ -300,8 +323,9 @@ class HttpMockTest {
                 status = 200,
                 headers = map::empty {},
                 body = bytes::from_str { s = "hello world" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = response } }
@@ -334,8 +358,9 @@ class HttpMockTest {
                 status = 200,
                 headers = headers,
                 body = bytes::from_str { s = "" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = response } }
@@ -407,7 +432,9 @@ class HttpMockTest {
             use std::collections::map
             use std::collections::bytes
 
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = ""  }
+            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_str { s = "" }, url = "",
+ chunks = None,
+}
 
             let rules: [MockRule] = [
                 { methods = [Post], url = Glob { pattern = "/users" }, response = Ok { val = response } }
@@ -467,8 +494,9 @@ class HttpMockTest {
                 status = 200,
                 headers = map::empty {},
                 body = bytes::from_str { s = "hello body" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = response } }

@@ -329,6 +329,7 @@ impl Matched where {
     headers = map::empty {},
     body = bytes::from_str { s = text },
     url = it.req.url,
+    chunks = None,
   },
   ## Any status carrying `text`.
   reply = { it: 'it, status: Int, text: Str } -> {
@@ -336,5 +337,6 @@ impl Matched where {
     headers = map::empty {},
     body = bytes::from_str { s = text },
     url = it.req.url,
+    chunks = None,
   },
 }

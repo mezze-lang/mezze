@@ -47,7 +47,9 @@ class HttpClientTest {
 
         let slow: { req: Request } -> Response <Time> = { req } -> do
           Time.sleep { d = duration_millis { n = 400 } }
-          { status = 200, headers = map::empty {}, body = bytes::from_str { s = "slow" }, url = req.url }
+          { status = 200, headers = map::empty {}, body = bytes::from_str { s = "slow" }, url = req.url,
+ chunks = None,
+}
 
         let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
         let impatient = { ...default_http_config, timeout_ms = 60 }
@@ -68,8 +70,9 @@ class HttpClientTest {
                 status = 200,
                 headers = map::empty {},
                 body = bytes::from_str { s = "ok" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
@@ -155,17 +158,20 @@ class HttpClientTest {
                 },
                 body = bytes::from_str { s = "go to /dest" },
                 url = m.req.url,
+                chunks = None,
               } },
               b = route { method = Get, path = "/dest", handler = { m } -> {
                 status = 200,
                 headers = map::empty {},
                 body = bytes::from_str { s = "arrived" },
                 url = m.req.url,
+                chunks = None,
               } },
             },
             fallback = { req } -> {
               status = 404, headers = map::empty {},
               body = bytes::from_str { s = "nope" }, url = req.url,
+              chunks = None,
             },
           }
     """.trimIndent()
@@ -248,8 +254,9 @@ class HttpClientTest {
                 status = 201,
                 headers = map::empty {},
                 body = bytes::from_str { s = "created" },
-                url = ""
-            }
+                url = "",
+                chunks = None,
+              }
 
             let rules: [MockRule] = [
                 { methods = [Post], url = Glob { pattern = "/create" }, response = Ok { val = mock_response } }
