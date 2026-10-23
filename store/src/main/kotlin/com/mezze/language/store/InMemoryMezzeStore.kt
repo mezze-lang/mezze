@@ -319,6 +319,19 @@ class InMemoryMezzeStore : MezzeStore {
 
     override fun getExpansion(macro: Hash, inputHash: String): ByteArray? = expansions[macro to inputHash]
 
+    private class Checked(val key: String, val interfaceBytes: ByteArray, val body: ByteArray)
+    private val checked = java.util.concurrent.ConcurrentHashMap<String, Checked>()
+
+    override fun putCheckedModule(modulePath: String, key: String, interfaceBytes: ByteArray, body: ByteArray) {
+        checked[modulePath] = Checked(key, interfaceBytes, body)
+    }
+
+    override fun getCheckedInterface(modulePath: String, key: String): ByteArray? =
+        checked[modulePath]?.takeIf { it.key == key }?.interfaceBytes
+
+    override fun getCheckedBody(modulePath: String, key: String): ByteArray? =
+        checked[modulePath]?.takeIf { it.key == key }?.body
+
     override fun findOccurrences(kind: String, symbol: String?): List<OccurrenceRow> =
         occurrences.values.flatten().filter { it.kind == kind && (symbol == null || it.symbol == symbol) }
 
@@ -554,6 +567,7 @@ class InMemoryMezzeStore : MezzeStore {
         decls.clear()
         typedModules.clear()
         monoSpecializations.clear()
+        checked.clear()
         // Preserved: modules, parsedModules, metadata.
     }
 

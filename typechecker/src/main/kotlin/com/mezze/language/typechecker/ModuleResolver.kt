@@ -345,14 +345,17 @@ class ModuleResolver(
         }
 
         /** The store macro expansions are kept in across compiles, when there is one. */
-        internal fun expansionStore(): MezzeStore? = store
+        internal fun expansionStore(): MezzeStore? = store ?: cacheStore?.value
 
         /**
-         * Where macro expansions are kept across compiles when there is no store:
-         * `mez check`, which opens no database, keeps them as files here.
+         * The store a command that reads nothing else from one keeps what it
+         * derives across runs in — macro expansions, checked modules — opened
+         * the first time one is read or kept. `mez check` sets it: opening a
+         * store costs more than checking a small module, so a check that keeps
+         * nothing never opens it.
          */
         @Volatile
-        var expansionDirectory: java.nio.file.Path? = null
+        var cacheStore: Lazy<MezzeStore>? = null
 
         /**
          * SHA-256 hex of source text — MUST match the scheme StorePopulator /

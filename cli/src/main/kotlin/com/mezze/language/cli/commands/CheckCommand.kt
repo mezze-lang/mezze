@@ -263,16 +263,15 @@ class CheckCommand {
         }
 
         val source = appFile.readText()
-        // `check` checks: it opens no database and indexes nothing (that is
-        // `mez index`). Opening the project store — three SQLite files, the
-        // native library, schema checks — and indexing into it cost more than
-        // checking a small module. What it keeps across runs is macro
-        // expansions, as files, per compiler build.
-        com.mezze.language.typechecker.ModuleResolver.expansionDirectory =
-            com.mezze.language.store.ProjectLayout.storeDir(root).toPath().resolveSibling("expansions").resolve(ProjectStore.binaryIdentity)
-        // And checked modules, so an unchanged one is read back, not checked.
-        com.mezze.language.typechecker.module.CheckedModuleCache.directory =
-            com.mezze.language.store.ProjectLayout.storeDir(root).toPath().resolveSibling("checked").resolve(ProjectStore.binaryIdentity)
+        // `check` checks: it indexes nothing (that is `mez index`), and opens the
+        // project store only to keep what it derives across runs — macro
+        // expansions, checked modules — the first time it reads or keeps one.
+        // Opening it (SQLite, the native library, schema checks) costs more than
+        // checking a small module, so a check that keeps nothing never does.
+        val cacheStore = lazy { ProjectStore.open(root) }
+        com.mezze.language.typechecker.ModuleResolver.cacheStore = cacheStore
+        // `check` ends in exitProcess on most paths; the hook runs on all of them.
+        Runtime.getRuntime().addShutdownHook(Thread { if (cacheStore.isInitialized()) cacheStore.value.close() })
 
         try {
             val startTime = System.nanoTime()

@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.module
 
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.store.InMemoryMezzeStore
 import com.mezze.language.typechecker.Lowering
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.TypeChecker
@@ -27,10 +28,12 @@ class CheckedModuleCacheTest {
     @TempDir
     lateinit var project: Path
 
+    private val store = InMemoryMezzeStore()
+
     @BeforeEach
     fun setUp() {
         TypeChecker.clearCache()
-        CheckedModuleCache.directory = project.resolve(".cache")
+        ModuleResolver.cacheStore = lazyOf(store)
         // As `mez check` runs: nothing is lowered.
         Lowering.enabled = false
         project.resolve("lib.mz").writeText(
@@ -62,7 +65,7 @@ class CheckedModuleCacheTest {
 
     @AfterEach
     fun tearDown() {
-        CheckedModuleCache.directory = null
+        ModuleResolver.cacheStore = null
         Lowering.enabled = true
         TypeChecker.clearCache()
     }
@@ -85,14 +88,19 @@ class CheckedModuleCacheTest {
             .associate { it.name to prettyPrintType(it.scheme.type) }
     }
 
+    /** The key lib is kept under: what it was last checked from. */
+    private fun key(): String {
+        val lib = ModuleResolver(project).resolveModule("lib")
+        return "${lib.identity!!.hex}:${lib.sourceHash!!.hex}"
+    }
+
     private fun lib(): TypedModuleResult =
         ModuleTypeChecker.getAllCachedModules().getValue("lib")
 
     @Test
     fun `an importer of a cached module is checked without reading its body`() {
         check()
-        assertTrue(Files.walk(project.resolve(".cache")).use { s -> s.anyMatch { it.toString().endsWith(".i") } },
-            "the first check keeps lib in the cache")
+        assertTrue(store.getCheckedInterface("lib", key()) != null, "the first check keeps lib in the store")
 
         TypeChecker.clearCache()
         check()

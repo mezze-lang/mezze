@@ -300,6 +300,22 @@ interface MezzeStore : AutoCloseable {
     /** See [putExpansion]; null when it was never stored. */
     fun getExpansion(macro: Hash, inputHash: String): ByteArray?
 
+    /**
+     * [modulePath] as last checked, so an unchanged module is read back instead
+     * of checked again. [key] names what it was checked from (its source and
+     * identity); a read under any other key finds nothing. Kept as two parts:
+     * its INTERFACE (what importing it needs) and its BODY (its typed and parsed
+     * modules), read only when something asks for it. One per module: keeping a
+     * newer one replaces the older.
+     */
+    fun putCheckedModule(modulePath: String, key: String, interfaceBytes: ByteArray, body: ByteArray)
+
+    /** The interface [putCheckedModule] kept for [modulePath] under [key]; null if none. */
+    fun getCheckedInterface(modulePath: String, key: String): ByteArray?
+
+    /** The body [putCheckedModule] kept for [modulePath] under [key]; null if none. */
+    fun getCheckedBody(modulePath: String, key: String): ByteArray?
+
     // ====================================================================
     // METADATA
     // ====================================================================

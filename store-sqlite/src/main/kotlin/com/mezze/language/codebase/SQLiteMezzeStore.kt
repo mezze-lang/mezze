@@ -129,7 +129,9 @@ class SQLiteMezzeStore private constructor(
         //    content (`ref_owner`); it was copied whole into every signature.
         // 20: macro_expansions — what a macro produced from an input, keyed by
         //    the macro's identity, so an unchanged call never runs it again.
-        const val SCHEMA_VERSION = 20
+        // 21: checked_modules — a module as last checked (interface + body), so
+        //    an unchanged module is read back instead of checked again.
+        const val SCHEMA_VERSION = 21
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096
@@ -1228,6 +1230,18 @@ class SQLiteMezzeStore private constructor(
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_occurrences_module ON syntax_occurrences(module_path)")
 
+            // A module as last checked: its interface, and its body, read only
+            // when asked for. One row per module; `key` is what it was checked
+            // from. Compiler-derived, so a new `mez` wipes it with the rest.
+            s.executeUpdate("""
+                CREATE TABLE checked_modules (
+                    module_path TEXT PRIMARY KEY,
+                    key         TEXT NOT NULL,
+                    interface   BLOB NOT NULL,
+                    body        BLOB NOT NULL
+                )
+            """.trimIndent())
+
             // ----------------------------------------------------------------
             // DISPATCH REGISTRIES — ability impls, effect performers
             // ----------------------------------------------------------------
@@ -2163,6 +2177,41 @@ class SQLiteMezzeStore private constructor(
         getExpansionStmt.setString(1, macro.hex)
         getExpansionStmt.setString(2, inputHash)
         return getExpansionStmt.executeQuery().use { rs -> if (rs.next()) StoredBytes.unpack(rs.getBytes(1)) else null }
+    }
+
+    private val putCheckedStmt: PreparedStatement by lazy {
+        conn.prepareStatement("INSERT OR REPLACE INTO checked_modules (module_path, key, interface, body) VALUES (?, ?, ?, ?)")
+    }
+
+    @Synchronized
+    override fun putCheckedModule(modulePath: String, key: String, interfaceBytes: ByteArray, body: ByteArray) {
+        putCheckedStmt.setString(1, modulePath)
+        putCheckedStmt.setString(2, key)
+        putCheckedStmt.setBytes(3, StoredBytes.pack(interfaceBytes))
+        putCheckedStmt.setBytes(4, StoredBytes.pack(body))
+        putCheckedStmt.executeUpdate()
+    }
+
+    private val getCheckedInterfaceStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT interface FROM checked_modules WHERE module_path = ? AND key = ?")
+    }
+
+    @Synchronized
+    override fun getCheckedInterface(modulePath: String, key: String): ByteArray? {
+        getCheckedInterfaceStmt.setString(1, modulePath)
+        getCheckedInterfaceStmt.setString(2, key)
+        return getCheckedInterfaceStmt.executeQuery().use { rs -> if (rs.next()) StoredBytes.unpack(rs.getBytes(1)) else null }
+    }
+
+    private val getCheckedBodyStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT body FROM checked_modules WHERE module_path = ? AND key = ?")
+    }
+
+    @Synchronized
+    override fun getCheckedBody(modulePath: String, key: String): ByteArray? {
+        getCheckedBodyStmt.setString(1, modulePath)
+        getCheckedBodyStmt.setString(2, key)
+        return getCheckedBodyStmt.executeQuery().use { rs -> if (rs.next()) StoredBytes.unpack(rs.getBytes(1)) else null }
     }
 
     @Synchronized

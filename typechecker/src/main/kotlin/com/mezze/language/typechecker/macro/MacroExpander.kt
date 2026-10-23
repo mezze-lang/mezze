@@ -195,28 +195,13 @@ internal class MacroExpander(
         return Source.Found(identity, module, parsed)
     }
 
-    /** An expansion a past compile stored, if any: in the store, or as a file. */
-    private fun stored(key: CacheKey): HostValue? {
-        val input = sha256(key.input)
-        ModuleResolver.expansionStore()?.getExpansion(key.macro, input)?.let { return HostValueCodec.decode(it) }
-        val file = expansionFile(key.macro, input) ?: return null
-        return if (java.nio.file.Files.isRegularFile(file)) HostValueCodec.decode(java.nio.file.Files.readAllBytes(file)) else null
-    }
+    /** An expansion a past compile stored, if any. */
+    private fun stored(key: CacheKey): HostValue? =
+        ModuleResolver.expansionStore()?.getExpansion(key.macro, sha256(key.input))?.let { HostValueCodec.decode(it) }
 
     private fun store(key: CacheKey, output: HostValue) {
-        val input = sha256(key.input)
-        val bytes = HostValueCodec.encode(output)
-        ModuleResolver.expansionStore()?.let { it.putExpansion(key.macro, input, bytes); return }
-        val file = expansionFile(key.macro, input) ?: return
-        // Written beside and moved into place, so a reader never sees half of one.
-        java.nio.file.Files.createDirectories(file.parent)
-        val partial = java.nio.file.Files.createTempFile(file.parent, "expansion", ".partial")
-        java.nio.file.Files.write(partial, bytes)
-        java.nio.file.Files.move(partial, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        ModuleResolver.expansionStore()?.putExpansion(key.macro, sha256(key.input), HostValueCodec.encode(output))
     }
-
-    private fun expansionFile(macro: Hash, input: String): java.nio.file.Path? =
-        ModuleResolver.expansionDirectory?.resolve(macro.hex.take(2))?.resolve("${macro.hex}-$input")
 
     private fun sha256(s: String): String =
         java.security.MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
