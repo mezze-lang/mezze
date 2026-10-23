@@ -291,9 +291,15 @@ internal fun ExpressionConstraintGenerator.adoptRecordAlias(
 ): MezzeType.RecordType {
     // S3.1: materialize the in-scope CLOSED record aliases this constraint context
     // knows about, then hand off to THE canonical adoption rule (shared with emit).
+    // Only declarations with this record's field names can match, and converting
+    // every in-scope record type's fields for every record literal was most of
+    // what typing one allocated.
+    if (record.rowVar != null || record.fields.isEmpty()) return record
+    val names = record.fields.keys
     val aliases = context.typeDeclarations.entries.mapNotNull { (aliasName, typeDecl) ->
         val def = typeDecl.definition as? ParsedRecordDef ?: return@mapNotNull null
         if (def.isOpen) return@mapNotNull null
+        if (def.fields.size != names.size || def.fields.any { it.name !in names }) return@mapNotNull null
         val hash = typeDecl.identity
         Triple(aliasName, hash, def.fields.associate { it.name to convertParsedFieldType(it.type) })
     }

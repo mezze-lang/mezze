@@ -39,10 +39,14 @@ fun adoptRecordAlias(
     if (record.identity != TypeIdentity.Anonymous) return record
     if (record.fields.isEmpty()) return record
 
+    // The field names first: almost no record has an alias with its names, and
+    // rendering every field of every record literal to find that out was the
+    // most of what printing types allocated during a check.
+    val sameNames = aliases.filter { (_, _, aliasFields) -> aliasFields.keys == record.fields.keys }
+    if (sameNames.isEmpty()) return record
     val rendered = record.fields.mapValues { (_, ty) -> prettyPrintType(ty) }
-    val matches = aliases.filter { (_, _, aliasFields) ->
-        aliasFields.keys == record.fields.keys &&
-            aliasFields.all { (name, ty) -> rendered[name] == prettyPrintType(ty) }
+    val matches = sameNames.filter { (_, _, aliasFields) ->
+        aliasFields.all { (name, ty) -> rendered[name] == prettyPrintType(ty) }
     }
     val (aliasName, hash, _) = matches.singleOrNull() ?: return record
     return record.copy(identity = TypeIdentity.declared(aliasName, hash))

@@ -609,31 +609,73 @@ data class ConstraintResult(
         ): ConstraintResult = ConstraintResult(
             type = type,
             constraints = constraints,
-            effects = subs.flatMapTo(mutableSetOf()) { it.effects },
-            effectInstances = subs.flatMapTo(mutableSetOf()) { it.effectInstances },
+            effects = union(subs) { it.effects },
+            effectInstances = union(subs) { it.effectInstances },
             performed = subs.any { it.performed },
-            effectRowVars = subs.flatMapTo(mutableSetOf()) { it.effectRowVars },
-            abilityConstraints = subs.flatMap { it.abilityConstraints },
-            associatedTypeConstraints = subs.flatMap { it.associatedTypeConstraints },
-            undefinedVariables = subs.flatMap { it.undefinedVariables },
-            duplicateBindings = subs.flatMap { it.duplicateBindings },
-            tailCalls = subs.flatMapTo(mutableSetOf()) { it.tailCalls },
-            usedVariables = subs.flatMapTo(mutableSetOf()) { it.usedVariables },
-            unusedVariables = subs.flatMap { it.unusedVariables },
-            unusedHandlers = subs.flatMap { it.unusedHandlers },
-            patternWarnings = subs.flatMap { it.patternWarnings },
-            referencedBindings = subs.flatMapTo(mutableSetOf()) { it.referencedBindings },
-            methodCallResolutions = subs.fold(emptyMap()) { acc, r -> acc + r.methodCallResolutions },
-            callReturnTypes = subs.fold(emptyMap()) { acc, r -> acc + r.callReturnTypes },
-            expectedTypeAt = subs.fold(emptyMap()) { acc, r -> acc + r.expectedTypeAt },
-            matchCaseBindings = subs.fold(emptyMap()) { acc, r -> acc + r.matchCaseBindings },
-            matchScrutineeTypes = subs.fold(emptyMap()) { acc, r -> acc + r.matchScrutineeTypes },
-            pendingClosureArgEffects = subs.flatMap { it.pendingClosureArgEffects },
-            doBindingEffects = subs.flatMap { it.doBindingEffects },
-            doBindingSolvedTypes = subs.fold(emptyMap()) { acc, r -> acc + r.doBindingSolvedTypes },
-            performFullyDischarged = subs.fold(emptyMap()) { acc, r -> acc + r.performFullyDischarged },
-            lambdaParamTypes = subs.fold(emptyMap()) { acc, r -> acc + r.lambdaParamTypes },
+            effectRowVars = union(subs) { it.effectRowVars },
+            abilityConstraints = concat(subs) { it.abilityConstraints },
+            associatedTypeConstraints = concat(subs) { it.associatedTypeConstraints },
+            undefinedVariables = concat(subs) { it.undefinedVariables },
+            duplicateBindings = concat(subs) { it.duplicateBindings },
+            tailCalls = union(subs) { it.tailCalls },
+            usedVariables = union(subs) { it.usedVariables },
+            unusedVariables = concat(subs) { it.unusedVariables },
+            unusedHandlers = concat(subs) { it.unusedHandlers },
+            patternWarnings = concat(subs) { it.patternWarnings },
+            referencedBindings = union(subs) { it.referencedBindings },
+            methodCallResolutions = overlay(subs) { it.methodCallResolutions },
+            callReturnTypes = overlay(subs) { it.callReturnTypes },
+            expectedTypeAt = overlay(subs) { it.expectedTypeAt },
+            matchCaseBindings = overlay(subs) { it.matchCaseBindings },
+            matchScrutineeTypes = overlay(subs) { it.matchScrutineeTypes },
+            pendingClosureArgEffects = concat(subs) { it.pendingClosureArgEffects },
+            doBindingEffects = concat(subs) { it.doBindingEffects },
+            doBindingSolvedTypes = overlay(subs) { it.doBindingSolvedTypes },
+            performFullyDischarged = overlay(subs) { it.performFullyDischarged },
+            lambdaParamTypes = overlay(subs) { it.lambdaParamTypes },
         )
+
+        // Merging is done at every expression, and most fields of most results are
+        // empty: a field only one result has is that result's own collection, and
+        // one none has is the shared empty one. Building fresh collections for all
+        // 26 fields each time was a large share of what checking allocated.
+
+        private inline fun <T> union(subs: Array<out ConstraintResult>, field: (ConstraintResult) -> Set<T>): Set<T> {
+            var only: Set<T>? = null
+            var many = false
+            for (r in subs) {
+                val f = field(r)
+                if (f.isEmpty()) continue
+                if (only == null) only = f else { many = true; break }
+            }
+            return if (!many) only ?: emptySet() else subs.flatMapTo(LinkedHashSet()) { field(it) }
+        }
+
+        private inline fun <T> concat(subs: Array<out ConstraintResult>, field: (ConstraintResult) -> List<T>): List<T> {
+            var only: List<T>? = null
+            var many = false
+            for (r in subs) {
+                val f = field(r)
+                if (f.isEmpty()) continue
+                if (only == null) only = f else { many = true; break }
+            }
+            return if (!many) only ?: emptyList() else subs.flatMap { field(it) }
+        }
+
+        /** Later results' entries over earlier ones', as `fold(+)` gave. */
+        private inline fun <K, V> overlay(subs: Array<out ConstraintResult>, field: (ConstraintResult) -> Map<K, V>): Map<K, V> {
+            var only: Map<K, V>? = null
+            var many = false
+            for (r in subs) {
+                val f = field(r)
+                if (f.isEmpty()) continue
+                if (only == null) only = f else { many = true; break }
+            }
+            if (!many) return only ?: emptyMap()
+            val out = LinkedHashMap<K, V>()
+            for (r in subs) out.putAll(field(r))
+            return out
+        }
     }
 }
 

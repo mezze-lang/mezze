@@ -310,6 +310,13 @@ class ModuleResolver(
          */
         private class Caches {
             val modules = mutableMapOf<String, Module>()
+            /**
+             * The parse and type context each module's exports were last derived
+             * from, by identity: a module is handed back the same pair by every
+             * importer that finds it checked, and re-deriving its exports each time
+             * converted every annotation in it once per import.
+             */
+            val exportsDerivedFrom = HashMap<String, Pair<ParsedModule, Map<String, MezzeType>?>>()
             /** Held for a whole stamping pass, which may stamp many modules at once. */
             val stampLock = Any()
             /**
@@ -413,6 +420,7 @@ class ModuleResolver(
             val c = caches(world)
             synchronized(c.lock) {
                 c.modules.clear()
+                c.exportsDerivedFrom.clear()
                 c.current.clear()
             }
         }
@@ -442,6 +450,7 @@ class ModuleResolver(
             synchronized(c.lock) {
                 c.sourceOverlay[modulePath] = source
                 c.modules.remove(modulePath)
+                c.exportsDerivedFrom.remove(modulePath)
                 c.current.clear()
             }
         }
@@ -459,6 +468,7 @@ class ModuleResolver(
             synchronized(c.lock) {
                 for (path in c.sourceOverlay.keys) {
                     c.modules.remove(path)
+                    c.exportsDerivedFrom.remove(path)
                 }
                 c.sourceOverlay.clear()
                 c.current.clear()
@@ -488,6 +498,7 @@ class ModuleResolver(
             synchronized(c.lock) {
                 for (path in modulePaths) {
                     c.modules.remove(path)
+                    c.exportsDerivedFrom.remove(path)
                 }
                 c.current.clear()
             }
@@ -1409,6 +1420,12 @@ class ModuleResolver(
         }
 
         val module = getFromCache(world, modulePath)
+        val c = caches(world)
+        synchronized(c.lock) {
+            val last = c.exportsDerivedFrom[modulePath]
+            if (module != null && last != null && last.first === parsedModule && last.second === typeContext &&
+                module.parsedModule === parsedModule) return
+        }
 
         if (module != null) {
             // Re-derived, not patched: the module handed back is the one the
@@ -1423,6 +1440,7 @@ class ModuleResolver(
                 index = updatedIndex
             )
             putInCache(world, modulePath, updatedModule)
+            synchronized(c.lock) { c.exportsDerivedFrom[modulePath] = parsedModule to typeContext }
 
             DebugLogger.debug(Category.ModuleResolver) {
                 "Cached module (updated types+index) with ${updatedModule.exports.size} exports"

@@ -32,4 +32,30 @@ class TypeSharingTest {
         val plain = json.encodeToString(MezzeTypeSerializer, big)
         assertEquals(big, json.decodeFromString(MezzeTypeSerializer, plain))
     }
+
+    private val locs = listOf(
+        com.mezze.language.parsedast.Loc("src/a.mz", 1, 2, 3, 4),
+        com.mezze.language.parsedast.Loc("src/a.mz", 5, 6, 7, 8),
+        com.mezze.language.parsedast.Loc("", 1, 1, 1, 1),
+        com.mezze.language.parsedast.Loc("", 2, 2, 2, 2),
+        com.mezze.language.parsedast.Loc("src/b.mz", 9, 9, 9, 9),
+        com.mezze.language.parsedast.Loc("src/a.mz", 1, 1, 1, 1),
+    )
+    private val locList = kotlinx.serialization.builtins.ListSerializer(com.mezze.language.parsedast.Loc.serializer())
+
+    @Test
+    fun `locations written shared carry each file once and read back equal`() {
+        val plain = json.encodeToString(locList, locs)
+        val shared = TypeSharing.write { json.encodeToString(locList, locs) }
+        assertEquals(1, Regex("src/a.mz").findAll(shared).count() - 1, "a.mz written again only after b.mz: $shared")
+        assertTrue(shared.length < plain.length)
+        assertEquals(locs, TypeSharing.read { json.decodeFromString(locList, shared) })
+    }
+
+    @Test
+    fun `outside a sharing scope locations are written in full`() {
+        val plain = json.encodeToString(locList, locs)
+        assertEquals(3, Regex("src/a.mz").findAll(plain).count())
+        assertEquals(locs, json.decodeFromString(locList, plain))
+    }
 }

@@ -33,10 +33,10 @@ object DebugLogger {
         sink = DebugSink { _, message -> println(message) }
     }
 
-    private val isEnabled: Boolean by lazy {
+    // A plain field: asked at every debug site, on the checker's hottest paths.
+    private val isEnabled: Boolean =
         System.getProperty("mezze.typecheck.debug") == "true" ||
         System.getenv("MEZZE_TYPECHECK_DEBUG") == "true"
-    }
 
     private val enabledCategories: Set<Category>? by lazy {
         val categoriesStr = System.getProperty("mezze.typecheck.debug.categories")

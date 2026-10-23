@@ -270,7 +270,9 @@ sealed interface UsePath
 // Structured module path — eliminates string-based `path.split("::")`.
 @Serializable
 data class ModulePath(val segments: List<String>) : UsePath {
-    val fullPath: String get() = segments.joinToString("::")
+    /** Joined once: module paths are map keys asked for constantly. */
+    @kotlinx.serialization.Transient
+    val fullPath: String = segments.joinToString("::")
 
     val shortName: String get() = segments.lastOrNull() ?: ""
 

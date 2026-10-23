@@ -57,7 +57,7 @@ data class Substitution(
             }
         }
 
-        return applyWithVisited(type, mutableSetOf(), HashMap())
+        return applyWithVisited(type, HashSet(), HashMap())
     }
 
     // Resolve a variable chain (var -> var -> ... -> terminal) with path
@@ -237,10 +237,19 @@ data class Substitution(
                 }
             }
 
-            is MezzeType.FunctionType -> MezzeType.FunctionType(
-                paramType = applyWithVisited(type.paramType, visitedVars, chainCache),
-                returnType = applyWithVisited(type.returnType, visitedVars, chainCache),
-                effects = type.effects?.let { applyToEffectRowWithVisited(it, visitedVars, chainCache) },
+            is MezzeType.FunctionType -> {
+                val param = applyWithVisited(type.paramType, visitedVars, chainCache)
+                val ret = applyWithVisited(type.returnType, visitedVars, chainCache)
+                val effects = type.effects?.let { applyToEffectRowWithVisited(it, visitedVars, chainCache) }
+                // Unchanged, the type itself: most of a type a substitution is
+                // applied to is untouched, and rebuilding it all was a large share
+                // of what checking allocated.
+                if (param === type.paramType && ret === type.returnType && effects === type.effects &&
+                    type.abilityConstraints.isEmpty()) return type
+                MezzeType.FunctionType(
+                paramType = param,
+                returnType = ret,
+                effects = effects,
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
@@ -259,11 +268,15 @@ data class Substitution(
                     )
                 }
             )
+            }
 
             is MezzeType.RecordType -> {
-                var fields = type.fields.mapValues { (_, fieldType) ->
-                    applyWithVisited(fieldType, visitedVars, chainCache)
+                var changed = false
+                val applied = type.fields.mapValues { (_, fieldType) ->
+                    applyWithVisited(fieldType, visitedVars, chainCache).also { if (it !== fieldType) changed = true }
                 }
+                if (!changed && (type.rowVar == null || type.rowVar !in recordRowMappings)) return type
+                var fields = applied
                 // Splice row extensions, chasing tails: r ↦ {b, ...r2}, r2 ↦ {c}
                 // yields {…, b, c}. The seen-set guards a cyclic tail chain, and
                 // existing fields win — shared fields were unified when the row
@@ -287,27 +300,31 @@ data class Substitution(
             }
 
             is MezzeType.VariantType -> {
+                var changed = false
                 val appliedConstructors = type.constructors.mapValues { (_, dataType) ->
-                    dataType?.let { applyWithVisited(it, visitedVars, chainCache) }
+                    dataType?.let { applyWithVisited(it, visitedVars, chainCache).also { a -> if (a !== it) changed = true } }
                 }
+                val appliedArgs = type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) }
+                if (!changed && appliedArgs.indices.all { appliedArgs[it] === type.typeArgs[it] }) return type
                 MezzeType.VariantType(
                     constructors = appliedConstructors,
                     rowVar = type.rowVar,
-                    typeArgs = type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
+                    typeArgs = appliedArgs,
                     identity = type.identity,
                     ascriptionWall = type.ascriptionWall
                 )
             }
 
-            is MezzeType.TypeApplication -> MezzeType.TypeApplication(
-                constructor = type.constructor,
-                args = type.args.map { applyWithVisited(it, visitedVars, chainCache) },
-                identity = type.identity
-            )
+            is MezzeType.TypeApplication -> {
+                val args = type.args.map { applyWithVisited(it, visitedVars, chainCache) }
+                if (args.indices.all { args[it] === type.args[it] }) return type
+                MezzeType.TypeApplication(constructor = type.constructor, args = args, identity = type.identity)
+            }
 
-            is MezzeType.NewtypeType -> type.copy(
-                wrappedType = applyWithVisited(type.wrappedType, visitedVars, chainCache)
-            )
+            is MezzeType.NewtypeType -> {
+                val wrapped = applyWithVisited(type.wrappedType, visitedVars, chainCache)
+                if (wrapped === type.wrappedType) type else type.copy(wrappedType = wrapped)
+            }
 
             is MezzeType.EffectRow -> applyToEffectRowWithVisited(type, visitedVars, chainCache)
 
@@ -408,10 +425,17 @@ data class Substitution(
         var merged = PersistentHashMap.of(other.mappings)
         if (extras != null) for ((v, t) in extras) if (v !in other.mappings) merged = merged.plus(v, t)
         return Substitution(
-            mappings = merged.plusAll(mappings),
-            rowVarMappings = other.rowVarMappings + rowVarMappings,
-            recordRowMappings = other.recordRowMappings + recordRowMappings
+            mappings = if (mappings.isEmpty()) merged else merged.plusAll(mappings),
+            rowVarMappings = union(other.rowVarMappings, rowVarMappings),
+            recordRowMappings = union(other.recordRowMappings, recordRowMappings)
         )
+    }
+
+    /** [base] with [top]'s entries over it — sharing, not copying, the accumulated side. */
+    private fun <K, V> union(base: Map<K, V>, top: Map<K, V>): Map<K, V> = when {
+        top.isEmpty() -> base
+        base.isEmpty() -> top
+        else -> PersistentHashMap.of(base).plusAll(top)
     }
 
     /**

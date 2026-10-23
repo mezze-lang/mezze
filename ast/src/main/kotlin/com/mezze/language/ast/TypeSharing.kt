@@ -51,18 +51,30 @@ object TypeSharing {
     }
     internal val reading = ThreadLocal<ArrayList<MezzeType>?>()
 
+    /**
+     * The file of the location last written, or read, in this scope. A location
+     * in the same file writes no file at all ([Loc]'s serializer): every node of
+     * a module carries one, and its file's full path was a fifth of the bytes a
+     * checked module was written as.
+     */
+    internal val lastFile = ThreadLocal<Array<String?>?>()
+
     /** Run [body] writing types shared; the bytes must be read inside [read]. */
     fun <T> write(body: () -> T): T {
         val outer = writing.get()
+        val outerFile = lastFile.get()
         writing.set(Table())
-        try { return body() } finally { writing.set(outer) }
+        lastFile.set(arrayOfNulls(1))
+        try { return body() } finally { writing.set(outer); lastFile.set(outerFile) }
     }
 
     /** Run [body] reading types written inside [write]. */
     fun <T> read(body: () -> T): T {
         val outer = reading.get()
+        val outerFile = lastFile.get()
         reading.set(ArrayList())
-        try { return body() } finally { reading.set(outer) }
+        lastFile.set(arrayOfNulls(1))
+        try { return body() } finally { reading.set(outer); lastFile.set(outerFile) }
     }
 }
 

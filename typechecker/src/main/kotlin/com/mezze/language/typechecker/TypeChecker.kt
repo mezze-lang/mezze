@@ -953,47 +953,51 @@ class TypeChecker(
         val lambdaParamTypes: Map<Loc, Map<String, MezzeType>>,
     )
 
+    /** Every result's entries of [field], later results over earlier — one map, not a copy per result. */
+    private inline fun <K, V> Collection<ConstraintResult>.overlayAll(field: (ConstraintResult) -> Map<K, V>): Map<K, V> {
+        val out = LinkedHashMap<K, V>()
+        for (r in this) out.putAll(field(r))
+        return out
+    }
+
     private fun aggregateConstraintResults(
         constraintResults: Map<String, ConstraintResult>,
         substitution: Substitution,
     ): AggregatedConstraintResults {
         val tailCallLocations = constraintResults.values.flatMap { it.tailCalls }.filterNotNull().toSet()
         val methodCallResolutions = constraintResults.values
-            .fold(emptyMap<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r -> acc + r.methodCallResolutions }
+            .overlayAll { it.methodCallResolutions }
         // Deliberately NOT substitution-applied here, unlike every sibling table
         // below. Emit applies the module substitution to these itself, and adding
         // it here as well was MEASURED to change nothing at all — the elaboration
         // row counts are identical with and without. It was tried on the theory
         // that a per-binding solve's bindings were being lost; they are not.
         val callReturnTypes = constraintResults.values
-            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.callReturnTypes }
+            .overlayAll { it.callReturnTypes }
         val matchCaseBindings = constraintResults.values
-            .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r ->
-                acc + r.matchCaseBindings.mapValues { (_, bindings) ->
-                    bindings.mapValues { (_, ty) -> substitution.apply(ty) }
-                }
-            }
+            .overlayAll { it.matchCaseBindings }
+            .mapValues { (_, bindings) -> bindings.mapValues { (_, ty) -> substitution.apply(ty) } }
         val matchScrutineeTypes = constraintResults.values
-            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.matchScrutineeTypes }
+            .overlayAll { it.matchScrutineeTypes }
             .mapValues { (_, type) -> substitution.apply(type) }
         val expectedTypeAt = constraintResults.values
-            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
+            .overlayAll { it.expectedTypeAt }
             .mapValues { (_, type) -> substitution.apply(type) }
         // #396: solved do-block let RHS value types, keyed by loc. bindLet already
         // substitution-applied these; re-applying the final module substitution is
         // idempotent and pins any var the local incremental solve left open.
         val doBindingSolvedTypes = constraintResults.values
-            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.doBindingSolvedTypes }
+            .overlayAll { it.doBindingSolvedTypes }
             .mapValues { (_, type) -> substitution.apply(type) }
         // Effect-model migration (S2): per-perform fully-discharged flags (Boolean,
         // no substitution needed).
         val performFullyDischarged = constraintResults.values
-            .fold(emptyMap<Loc, Boolean>()) { acc, r -> acc + r.performFullyDischarged }
+            .overlayAll { it.performFullyDischarged }
         // Per-lambda solved param types. Substitution-applied here for the same
         // reason doBindingSolvedTypes is: the local incremental solve may have left
         // a variable open that the module solve pinned.
         val lambdaParamTypes = constraintResults.values
-            .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r -> acc + r.lambdaParamTypes }
+            .overlayAll { it.lambdaParamTypes }
             .mapValues { (_, fields) -> fields.mapValues { (_, t) -> substitution.apply(t) } }
         return AggregatedConstraintResults(
             tailCallLocations = tailCallLocations,

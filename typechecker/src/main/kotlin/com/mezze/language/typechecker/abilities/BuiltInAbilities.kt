@@ -11,6 +11,9 @@ import com.mezze.language.typechecker.util.TypeAnnotationConverter
 object BuiltInAbilities {
     private val boolType = PrimitiveTypes.BOOL_TYPE
 
+    /** Stands for the implementing type in an operation's converted signature. */
+    private val SELF = MezzeType.VarType(com.mezze.language.ast.TypeVar.freshInternal("self"))
+
         private val abilities: Map<String, Map<String, (MezzeType.VarType) -> MezzeType>> by lazy {
         buildAbilitiesFromMzFiles()
     }
@@ -86,10 +89,15 @@ object BuiltInAbilities {
         forEachBuiltInAbilityDecl { decl ->
             val methods = mutableMapOf<String, (MezzeType.VarType) -> MezzeType>()
             for (op in decl.operations) {
+                // Converted once, against a placeholder for the implementing type,
+                // which each use replaces: converting the annotations again for every
+                // use was a large share of what checking a module allocated.
+                val template = MezzeType.FunctionType(
+                    paramType = convertAnnotationToType(op.paramType, SELF),
+                    returnType = convertAnnotationToType(op.returnType, SELF),
+                )
                 methods[op.name] = { typeVar: MezzeType.VarType ->
-                    val paramType = convertAnnotationToType(op.paramType, typeVar)
-                    val returnType = convertAnnotationToType(op.returnType, typeVar)
-                    MezzeType.FunctionType(paramType = paramType, returnType = returnType)
+                    com.mezze.language.ast.solving.Substitution(mapOf(SELF.variable to typeVar)).apply(template)
                 }
             }
             result[decl.name] = methods
