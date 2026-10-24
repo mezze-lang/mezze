@@ -68,6 +68,27 @@ object WellKnownHashConstants {
     private fun among(hash: Hash?, names: List<String>): Boolean =
         hash != null && names.any { StdlibIdentities.ability(it) == hash }
 
+    /**
+     * The abilities an OPERATOR desugars to.
+     *
+     * `a + b` becomes `a.add { r = b }` and `a < b` becomes `a.lt { r = b }`, so
+     * these operation names arrive at the compiler from the desugarer and from a
+     * user's own method call alike. Asking the ABILITY and not the name is the
+     * difference: a user ability declaring `add` is a different declaration with
+     * a different identity, and must not inherit the treatment the arithmetic
+     * intrinsics get.
+     *
+     * `neg` and `not` are deliberately absent — no ability declares them, so
+     * they exist only as intrinsics and there is nothing to confuse them with.
+     */
+    private val OPERATOR = listOf(
+        "Eq", "Ord", "LogicalAnd", "LogicalOr",
+        "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
+    )
+
+    /** True for an ability an operator desugars to. See [OPERATOR]. */
+    fun isOperatorAbility(hash: Hash?): Boolean = among(hash, OPERATOR)
+
     fun isCodecAbility(hash: Hash?): Boolean = among(hash, CODEC)
     /** Encode-flavored codec: codec auto-gen emits an encode-shaped impl body. */
     fun isEncodeFlavoredCodec(hash: Hash?): Boolean = among(hash, ENCODE_FLAVORED)

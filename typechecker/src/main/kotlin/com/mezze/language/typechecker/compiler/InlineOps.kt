@@ -25,15 +25,40 @@ import com.mezze.language.truffleir.SourceInfo
  * uses them.
  */
 
-/** Method names that resolve to a single Truffle node when invoked on
- *  a primitive receiver. Public to the compiler package — used by
- *  call-site dispatch to gate the dict-passing fallback (no need to
- *  emit a dict-method call for an op we'll inline anyway). */
-internal val inlineableOps = setOf(
-    "add", "sub", "mul", "div", "mod",
-    "eq", "neq", "lt", "le", "gt", "ge",
-    "and", "or", "neg", "not"
+/**
+ * The machine op each desugared operation name lowers to.
+ *
+ * These names come from the OPERATOR DESUGARER — `+` becomes `add`, `<` becomes
+ * `lt` — so recognising them here is the compiler reading back its own output,
+ * not dispatching on a user-facing name. The tie from a name to a machine
+ * instruction cannot be derived from anything, so it is written once, here.
+ *
+ * Anywhere the question is "which ABILITY is this operation from", ask
+ * [com.mezze.language.typechecker.WellKnownHashConstants.isOperatorAbility]
+ * instead: a user ability may declare its own `add`, and this map must not
+ * speak for it.
+ */
+private val inlineOpByName = mapOf(
+    "add" to InlineOp.ADD,
+    "sub" to InlineOp.SUB,
+    "mul" to InlineOp.MUL,
+    "div" to InlineOp.DIV,
+    "mod" to InlineOp.MOD,
+    "eq" to InlineOp.EQ,
+    "neq" to InlineOp.NEQ,
+    "lt" to InlineOp.LT,
+    "le" to InlineOp.LE,
+    "gt" to InlineOp.GT,
+    "ge" to InlineOp.GE,
+    "and" to InlineOp.AND,
+    "or" to InlineOp.OR,
+    "neg" to InlineOp.NEG,
+    "not" to InlineOp.NOT,
 )
+
+/** The desugared names of [inlineOpByName], for callers that only ask whether
+ *  a name is one of them. */
+internal val inlineableOps: Set<String> = inlineOpByName.keys
 
 private val primitiveTypes = setOf(
     IntType::class, FloatType::class,
@@ -50,26 +75,8 @@ private fun inlinesAsPrimitive(type: MezzeType): Boolean =
     type::class in primitiveTypes || PrimitiveTypes.isBoolVariant(type)
 
 internal fun tryInlineOp(methodName: String, receiverType: MezzeType): InlineOp? {
-    if (methodName !in inlineableOps) return null
     if (!inlinesAsPrimitive(receiverType)) return null
-    return when (methodName) {
-        "add" -> InlineOp.ADD
-        "sub" -> InlineOp.SUB
-        "mul" -> InlineOp.MUL
-        "div" -> InlineOp.DIV
-        "mod" -> InlineOp.MOD
-        "eq" -> InlineOp.EQ
-        "neq" -> InlineOp.NEQ
-        "lt" -> InlineOp.LT
-        "le" -> InlineOp.LE
-        "gt" -> InlineOp.GT
-        "ge" -> InlineOp.GE
-        "and" -> InlineOp.AND
-        "or" -> InlineOp.OR
-        "neg" -> InlineOp.NEG
-        "not" -> InlineOp.NOT
-        else -> null
-    }
+    return inlineOpByName[methodName]
 }
 
 /** Build the IR node for an inlined binary op, extracting the right

@@ -860,30 +860,39 @@ internal fun TypedASTCompiler.shouldDictDispatchVarTypeOp(
     if (isInspectSugar) return false
     val opCandidates = abilityOpIndex[methodName]
     val hasRealOp = opCandidates != null && opCandidates.isNotEmpty()
-    // Inlineable ops (comparisons / arithmetic) only dict-dispatch when a
-    // real ability op backs them — otherwise a VarType `'a` with no impl
-    // takes the structural/native default (matching the old behavior of
-    // never entering this branch for inlineable ops).
+    // An OPERATOR op: one whose candidates come from an ability an operator
+    // desugars to (Eq, Ord, LogicalAnd/Or, Num*). Asked by ABILITY IDENTITY,
+    // not by name: the guards below change dictionary behaviour, and keying
+    // them on the spelling gave a user ability declaring its own `add` the
+    // arithmetic intrinsics' treatment.
+    val isOperatorOp = opCandidates.orEmpty().any {
+        com.mezze.language.typechecker.WellKnownHashConstants.isOperatorAbility(it.abilityHash)
+    }
+    // No ability of this name exists at all, so nothing can answer a dict for
+    // it and only the intrinsic can — asked by NAME here on purpose, since
+    // with no declaration in play there is no ability to ask and no user
+    // declaration to be confused with. Keeps a VarType `'a` with no impl on
+    // the structural/native default.
     if (methodName in inlineableOps && !hasRealOp) return false
-    // #18 guard: in user compilation (!isStdlibMode), only flag inlineable
-    // ops when the enclosing arrow explicitly carries an ability constraint
+    // #18 guard: in user compilation (!isStdlibMode), only flag operator ops
+    // when the enclosing arrow explicitly carries an ability constraint
     // (`with Ord 'a`, `with NumMul 'a`, etc.). Without the constraint guard,
     // every generalized user function like `{x} -> x * 2` gets `__dict_mul`
     // in its frame — and CallIndirect callers (HOF callbacks, closures)
     // crash because they can't inject dicts.
     //
-    // During stdlib compilation (isStdlibMode), we allow inlineable ops
+    // During stdlib compilation (isStdlibMode), we allow operator ops
     // unconditionally because stdlib functions (sort, min, max) are always
     // called via CallDirect, which can inject dicts at the call site.
-    if (methodName in inlineableOps && !isStdlibMode && !arrowIsConstrained) return false
+    if (isOperatorOp && !isStdlibMode && !arrowIsConstrained) return false
     return when {
         arrowIsConstrained -> true
         opCandidates != null && opCandidates.size > 1 -> true
-        // For a non-inlineable op the historical rule required >1 candidate.
-        // For an inlineable op backed by a real ability (Ord/Eq/Num), a
-        // single candidate still needs the dict at a polymorphic call site,
-        // since the receiver stays generic until mono specializes it.
-        methodName in inlineableOps && hasRealOp -> true
+        // For a non-operator op the historical rule required >1 candidate.
+        // For an operator op backed by a real ability (Ord/Eq/Num), a single
+        // candidate still needs the dict at a polymorphic call site, since the
+        // receiver stays generic until mono specializes it.
+        isOperatorOp -> true
         else -> false
     }
 }
