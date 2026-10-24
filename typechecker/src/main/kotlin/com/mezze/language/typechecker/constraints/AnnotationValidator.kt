@@ -363,9 +363,15 @@ internal class AnnotationValidator(
                         .filterIsInstance<MezzeType.VarType>()
                         .map { it.variable.name }
                         .distinct()
+                    // The variable the body used is NOT one the annotation names
+                    // — that is why this branch was reached — so there is nothing
+                    // a reader could look up, and the solver's own name for it
+                    // (`'o1002`) only asks them to account for something they
+                    // never wrote. Describe its position instead of naming it.
                     throw TypeCheckError(
-                        "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
-                        "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'.",
+                        "Type annotation mismatch for '$varName': the annotation constrains " +
+                        "`with ${usage.abilityName} ${declaredVars.joinToString()}`, but the body " +
+                        "applies ${usage.abilityName} to a type the annotation does not name.",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                         hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
@@ -377,8 +383,9 @@ internal class AnnotationValidator(
                 }
                 if (isOnAnnotationTypeVar) {
                     throw TypeCheckError(
-                        "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +
-                        "but the annotation does not declare this constraint.",
+                        "Type annotation mismatch for '$varName': the body requires " +
+                        "`${usage.abilityName} ${usage.typeVar.name}`, but the annotation does not " +
+                        "declare that constraint.",
                         sourceLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                         hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
