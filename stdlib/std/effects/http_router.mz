@@ -250,101 +250,211 @@ pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoRes
 pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Options, path = path, handler = handler }
 
-# The same routes for a handler that may THROW the response it wants sent:
+# ---- handler-side adapters ------------------------------------------------
 #
-#   try_get { path = "/users/:id", handler = { m } -> do
-#     let id = m.param_or { name = "id", default = "?" }
-#     if id == "0" then throw { error = bad_request { body = "id must not be 0" } }
-#     else load_name { id = id }
-#   }
+# A route takes a handler answering a Response. These adapt the two other
+# things a handler might do, and they are FREE FUNCTIONS for a reason: both
+# carry `with IntoResponse 'r`, and a constraint on an inherent impl METHOD
+# does not get its dictionary (it silently selects the wrong impl). Keeping
+# the conversion here is what lets the group's `.get`/`.post` methods carry no
+# constraint at all — and it is why there is no `try_get` beside `get`: what
+# changes is the HANDLER, not the verb.
 #
-# No perform in the handler and nothing to wrap — the route installs
-# ExceptionToResult, and a throw short-circuits straight to its response.
+#   .get { path = "/ping",  handler = respond  { handler = { m } -> "pong" } }
+#   .get { path = "/u/:id", handler = catching { handler = { m } -> … throws … } }
 #
-# WHY THE THROWN TYPE IS A RESPONSE, and not any error with an
-# IntoErrorResponse impl. Writing that signature means naming the error type —
-# `<Exception having 'error = 'e, ...>` plus `with IntoErrorResponse 'e` — and
-# the `'e` in the signature does not tie to the `'e` bound in the body's Err
-# arm (T0210, "applied to wrong type variable"; the recurring one-written-
-# typevar-two-typevars shape). A concrete channel has nothing to mis-bind.
-# Converting at the THROW site costs one call and happens where the error's
-# meaning is known: `throw { error = my_err.into_error_response {} }`.
-#
-# A separate family rather than folding this into on_get, because a handler
-# that never throws does NOT satisfy a row carrying Exception — measured: a
-# pure `{ m } -> "plain"` handler is rejected against this signature. So
-# `on_*` is for a handler that answers and `try_*` for one that may throw.
-## Route one method and path to a handler that may throw a Response.
-pub let try_method
-  : { method: Method, path: Str,
-      handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+# A handler that already answers a Response needs neither.
+
+## Adapt a handler answering any `IntoResponse` value into one answering a Response.
+pub let respond
+  : { handler: { m: Matched } -> 'r <...> }
   with IntoResponse 'r
-  -> Routes
+  -> { m: Matched } -> Response <...>
   =
-  { method, path, handler } ->
-    route {
-      method = method,
-      path = path,
-      # The conversion happens INSIDE the region, where the answer is still
-      # typed `'r`. Done outside, on the Ok payload, the constraint lands on a
-      # different variable and the annotation is rejected.
-      handler = { m } -> do
-        let outcome = perform ExceptionToResult in do
-          let answered = handler { m = m }
-          Ok { val = answered.into_response {} }
-        match outcome is
-          Ok { val } -> val
-          Err { error } -> error,
+  { handler } -> { m } -> do
+    let answered = handler { m = m }
+    answered.into_response {}
+
+# The handler runs inside ExceptionToResult, so a throw short-circuits to the
+# Response it threw. The conversion happens INSIDE the region, where the answer
+# is still typed `'r`: done outside, on the Ok payload, the IntoResponse
+# constraint lands on a different variable and the annotation is rejected.
+#
+# The thrown channel is a concrete Response rather than any error with an
+# IntoErrorResponse impl, because naming that error type here means
+# `having 'error = 'e` plus `with IntoErrorResponse 'e` — and the signature's
+# `'e` does not tie to the one bound in the body's Err arm (T0210). Convert at
+# the throw site instead: `throw { error = e.into_error_response {} }`, or let
+# `or_throw` do it for a Result.
+## Adapt a handler that may THROW a Response into one answering a Response.
+pub let catching
+  : { handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> do
+    let outcome = perform ExceptionToResult in do
+      let answered = handler { m = m }
+      Ok { val = answered.into_response {} }
+    match outcome is
+      Ok { val } -> val
+      Err { error } -> error
+
+# ---- route groups --------------------------------------------------------
+#
+# A group is a path prefix plus the routes under it, and groups NEST:
+#
+#   let users = group { prefix = "/users" }
+#     .get  { path = "/:id", handler = catching { handler = show } }
+#     .post { path = "",     handler = respond  { handler = create } }
+#
+#   let app = group { prefix = "/api" }
+#     .nest { group = users }
+#     .get { path = "/health", handler = respond { handler = { m } -> "ok" } }
+#     .otherwise { fallback = fallback }
+#
+# giving /api/users/:id, /api/users and /api/health.
+#
+# Entries are kept as DATA rather than folded into a Routes as they are added,
+# because `nest` has to re-prefix a child's routes and a folded Routes is an
+# opaque function by then.
+#
+# A NEWTYPE, not a record alias, and that is load-bearing. `get` is declared by
+# a dozen inherent impls (Seq, List, Map, Deque, SortedMap, NonEmptyList,
+# Bytes, Client, MockRule, …), so the receiver has to carry a nominal identity
+# for `.get {}` to reach THIS one. As a record alias it does not: the receiver
+# arrives as an anonymous record (a field whose type never solved is enough to
+# stop alias adoption labelling it), no candidate matches, and the call
+# compiles to a field read that fails at RUNTIME with `Field not found: get`.
+# A newtype is nominal by construction.
+
+## One route in a group: a method, a full path, and a Response-answering handler.
+pub type RouteEntry = {
+  method: Method,
+  path: Str,
+  handler: { m: Matched } -> Response <...>,
+}
+
+## A path prefix and the routes under it. Build with `group`, nest with `nest`.
+pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry] }
+
+## An empty group rooted at `prefix`. Use `""` for no prefix.
+pub let group: { prefix: Str } -> RouteGroup = { prefix } ->
+  RouteGroup.({ prefix = prefix, entries = [] })
+
+let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = { g } ->
+  match g is
+    RouteGroup.(v) -> v
+
+# Join a prefix and a path with exactly one slash between them, so "/users" and
+# "/:id" give "/users/:id" and "/users" with "" stays "/users".
+let join_prefix: { prefix: Str, path: Str } -> Str = { prefix, path } ->
+  if str::is_empty { s = prefix } then path
+  else if str::is_empty { s = path } then prefix
+  else if str::ends_with { s = prefix, suffix = "/" } && str::starts_with { s = path, prefix = "/" }
+  then str::concat {
+    l = prefix,
+    r = str::substring { s = path, start = 1, end = str::size { s = path } },
+  }
+  else if str::ends_with { s = prefix, suffix = "/" } || str::starts_with { s = path, prefix = "/" }
+  then str::concat { l = prefix, r = path }
+  else str::concat { l = str::concat { l = prefix, r = "/" }, r = path }
+
+let group_add
+  : { g: RouteGroup, method: Method, path: Str, handler: { m: Matched } -> Response <...> }
+  -> RouteGroup
+  =
+  { g, method, path, handler } -> do
+    let inner = group_inner { g = g }
+    RouteGroup.({
+      prefix = inner.prefix,
+      entries = seq::push {
+        xs = inner.entries,
+        x = {
+          method = method,
+          path = join_prefix { prefix = inner.prefix, path = path },
+          handler = handler,
+        },
+      },
+    })
+
+impl RouteGroup where {
+  ## Append a GET under this group's prefix.
+  get = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Get, path = path, handler = handler },
+  ## Append a POST under this group's prefix.
+  post = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Post, path = path, handler = handler },
+  ## Append a PUT under this group's prefix.
+  put = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Put, path = path, handler = handler },
+  ## Append a PATCH under this group's prefix.
+  patch = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Patch, path = path, handler = handler },
+  ## Append a DELETE under this group's prefix.
+  delete = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Delete, path = path, handler = handler },
+  ## Append a HEAD under this group's prefix.
+  head = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Head, path = path, handler = handler },
+  ## Append an OPTIONS under this group's prefix.
+  options = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
+    group_add { g = it, method = Options, path = path, handler = handler },
+
+  # The child's entries already carry the child's own prefix, so one more
+  # prepend nests them — and nesting a group that itself nested one works for
+  # the same reason, to any depth.
+  ## Mount another group's routes under this group's prefix.
+  nest = { it: 'it, group: RouteGroup } -> do
+    let outer = group_inner { g = it }
+    let child = group_inner { g = group }
+    RouteGroup.({
+      prefix = outer.prefix,
+      entries = seq::concat {
+        xs = outer.entries,
+        ys = seq::map {
+          xs = child.entries,
+          f = { x } -> {
+            method = x.method,
+            path = join_prefix { prefix = outer.prefix, path = x.path },
+            handler = x.handler,
+          },
+        },
+      },
+    }),
+
+  ## Fold this group into a route table. First added wins.
+  table = { it: 'it } -> do
+    let inner = group_inner { g = it }
+    seq::fold {
+      xs = inner.entries,
+      init = { run = { req } -> None },
+      f = { acc, x } -> or_else {
+        a = acc,
+        b = route { method = x.method, path = x.path, handler = x.handler },
+      },
+    },
+
+  ## Close the group with a fallback, producing the handler `serve` takes.
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } -> do
+    let inner = group_inner { g = it }
+    let folded = seq::fold {
+      xs = inner.entries,
+      init = { run = { req } -> None },
+      f = { acc, x } -> or_else {
+        a = acc,
+        b = route { method = x.method, path = x.path, handler = x.handler },
+      },
     }
-
-## Route a GET whose handler may throw a Response.
-pub let try_get
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Get, path = path, handler = handler }
-
-## Route a POST whose handler may throw a Response.
-pub let try_post
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Post, path = path, handler = handler }
-
-## Route a PUT whose handler may throw a Response.
-pub let try_put
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Put, path = path, handler = handler }
-
-## Route a PATCH whose handler may throw a Response.
-pub let try_patch
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Patch, path = path, handler = handler }
-
-## Route a DELETE whose handler may throw a Response.
-pub let try_delete
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Delete, path = path, handler = handler }
-
-## Route a HEAD whose handler may throw a Response.
-pub let try_head
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Head, path = path, handler = handler }
-
-## Route an OPTIONS whose handler may throw a Response.
-pub let try_options
-  : { path: Str, handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
-  with IntoResponse 'r -> Routes =
-  { path, handler } -> try_method { method = Options, path = path, handler = handler }
+    otherwise { routes = folded, fallback = fallback },
+}
 
 # A route table is a LIST, and reads like one:
 #
 #   let app = routes { of = [
 #     on_get    { path = "/ping",      handler = { m } -> "pong" },
 #     on_post   { path = "/users",     handler = { m } -> created { body = "made" } },
-#     try_get   { path = "/users/:id", handler = { m } -> or_throw { result = load { m = m } } },
+#     on_get    { path = "/users/:id", handler = catching { handler = show } },
 #   ] }.otherwise { fallback = fallback }
 #
 # rather than the first route bare and every later one wrapped in

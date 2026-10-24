@@ -652,24 +652,25 @@ impl IntoResponse for Result 'a 'e where {
 }
 
 # Failure is a VALUE in Mezze, so a fallible call answers a Result. Inside a
-# `try_` route the thrown channel is a Response, which is why plain
+# `catching` handler the thrown channel is a Response, which is why plain
 # `exception::unwrap` does not fit there: it rethrows the RAW error. This is
 # the bridge — unwrap the Ok, or turn the Err into its response and throw that:
 #
-#   try_get { path = "/users/:id", handler = { m } -> do
+#   .get { path = "/:id", handler = catching { handler = { m } -> do
 #     let id   = m.param_or { name = "id", default = "?" }
 #     let user = or_throw { result = load { id = id } }
 #     user.name
-#   }
+#   } } }
 #
 # Each or_throw reads like `?`: the happy path continues on one line and the
 # failure leaves as the status its own type chose.
 #
-# Note why this one CAN name `'e` while try_method cannot. Here `'e` is bound
-# by a PARAMETER (`result: Result 'a 'e`), so the constraint and the body
-# agree on the variable. In try_method it would be bound only through the
-# effect row's associated type, and the signature's `'e` then names a
-# different variable than the body's (T0210).
+# Note why this one CAN name `'e` while `http_router::catching` cannot. Here
+# `'e` is bound by a PARAMETER (`result: Result 'a 'e`), so the constraint and
+# the body agree on the variable. In `catching` it would be bound only through
+# the effect row's associated type, and the signature's `'e` then names a
+# different variable than the body's (T0210) — which is why the thrown channel
+# there is a concrete Response.
 ## Unwrap a Result, or throw the Err's response.
 pub let or_throw
   : { result: Result 'a 'e }

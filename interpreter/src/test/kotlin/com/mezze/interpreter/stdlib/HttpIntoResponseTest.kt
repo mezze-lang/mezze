@@ -25,7 +25,7 @@ class HttpIntoResponseTest {
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, try_get, try_post, Matched, Routes, routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, respond, catching, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -399,13 +399,13 @@ class HttpIntoResponseTest {
     // ---- failure: throwing the response -------------------------------
 
     private val throwingApp = """
-        let app = try_get {
+        let app = group { prefix = "" }.get {
           path = "/u/:id",
-          handler = { m } -> do
+          handler = catching { handler = { m } -> do
             let id = m.param_or { name = "id", default = "?" }
             if id == "0" then throw { error = bad_request { body = "id must not be 0" } }
             else if id == "7" then "seven"
-            else throw { error = not_found { body = "no such id" } },
+            else throw { error = not_found { body = "no such id" } } },
         }.otherwise { fallback = fallback }
     """.trimIndent()
 
@@ -454,11 +454,11 @@ class HttpIntoResponseTest {
     fun `a throw skips the rest of the handler`() {
         val r = run(
             """
-            let app = try_get {
+            let app = group { prefix = "" }.get {
               path = "/x",
-              handler = { m } -> do
+              handler = catching { handler = { m } -> do
                 let stopped = throw { error = bad_request { body = "stop" } }
-                "reached-the-end",
+                "reached-the-end" },
             }.otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/x" } } }
             """.trimIndent()
@@ -475,11 +475,11 @@ class HttpIntoResponseTest {
     fun `a domain error converted at the throw site keeps its status`() {
         val r = run(
             """
-            let app = try_get {
+            let app = group { prefix = "" }.get {
               path = "/gw",
-              handler = { m } -> do
+              handler = catching { handler = { m } -> do
                 let upstream = Timeout { url = "http://u/x", ms = 50 }
-                throw { error = upstream.into_error_response {} },
+                throw { error = upstream.into_error_response {} } },
             }.otherwise { fallback = fallback }
             app { req = get_request { url = "/gw" } }.status
             """.trimIndent()
@@ -492,13 +492,14 @@ class HttpIntoResponseTest {
     fun `a throwing route and a plain route live in the same table`() {
         val r = run(
             """
-            let app = try_get {
-              path = "/u/:id",
-              handler = { m } -> do
-                let id = m.param_or { name = "id", default = "?" }
-                if id == "7" then "seven" else throw { error = not_found { body = "no" } },
-            }
-              .or_else { b = on_post { path = "/u", handler = { m } -> created { body = "made" } } }
+            let app = group { prefix = "" }
+              .get {
+                path = "/u/:id",
+                handler = catching { handler = { m } -> do
+                  let id = m.param_or { name = "id", default = "?" }
+                  if id == "7" then "seven" else throw { error = not_found { body = "no" } } },
+              }
+              .post { path = "/u", handler = respond { handler = { m } -> created { body = "made" } } }
               .otherwise { fallback = fallback }
             app { req = { method = Post, url = "/u", headers = map::empty {}, body = None,
                           timeout_ms = None } }.status
@@ -518,7 +519,8 @@ class HttpIntoResponseTest {
         val outcome = runCatching {
             run(
                 """
-                let app = try_get { path = "/p", handler = { m } -> "plain" }
+                let app = group { prefix = "" }
+                  .get { path = "/p", handler = catching { handler = { m } -> "plain" } }
                   .otherwise { fallback = fallback }
                 app { req = get_request { url = "/p" } }.status
                 """.trimIndent()
@@ -538,12 +540,12 @@ class HttpIntoResponseTest {
           if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
         let upstream: { id: Str } -> Result Str HttpError = { id } ->
           Err { error = Timeout { url = "http://u/x", ms = 50 } }
-        let app = try_get {
+        let app = group { prefix = "" }.get {
           path = "/u/:id",
-          handler = { m } -> do
+          handler = catching { handler = { m } -> do
             let id = m.param_or { name = "id", default = "?" }
             if id == "gw" then or_throw { result = upstream { id = id } }
-            else or_throw { result = load { id = id } },
+            else or_throw { result = load { id = id } } },
         }.otherwise { fallback = fallback }
     """.trimIndent()
 
@@ -619,11 +621,11 @@ class HttpIntoResponseTest {
         let app = routes { of = [
           on_get { path = "/ping", handler = { m } -> "pong" },
           on_post { path = "/users", handler = { m } -> created { body = "made" } },
-          try_get {
+          on_get {
             path = "/u/:id",
-            handler = { m } -> or_throw {
+            handler = catching { handler = { m } -> or_throw {
               result = load { id = m.param_or { name = "id", default = "?" } },
-            },
+            } },
           },
         ] }.otherwise { fallback = fallback }
     """.trimIndent()
@@ -706,6 +708,171 @@ class HttpIntoResponseTest {
             """.trimIndent()
         )
         assertEquals(404L, r)
+    }
+
+    // ---- route groups ---------------------------------------------------
+
+    private val nestedGroups = """
+        let users = group { prefix = "/users" }
+          .get { path = "/:id", handler = respond { handler = { m } ->
+            m.param_or { name = "id", default = "?" } } }
+          .post { path = "", handler = respond { handler = { m } -> created { body = "made" } } }
+        let app = group { prefix = "/api" }
+          .nest { group = users }
+          .get { path = "/health", handler = respond { handler = { m } -> "ok" } }
+          .otherwise { fallback = fallback }
+    """.trimIndent()
+
+    /**
+     * `.get` on a group has to reach THIS impl past the dozen other inherent
+     * `get`s in scope (Seq, List, Map, Deque, SortedMap, NonEmptyList, Bytes,
+     * Client, MockRule, …). It does because RouteGroup is a NEWTYPE: nominal by
+     * construction, so the receiver carries an identity the matcher can use. As
+     * a record alias the same code compiled to a field read and died at runtime
+     * with `Field not found: get`.
+     */
+    @Test
+    fun `a group route answers under its own prefix`() {
+        val r = run(
+            """
+            $nestedGroups
+            body_of { resp = app { req = get_request { url = "/api/health" } } }
+            """.trimIndent()
+        )
+        assertEquals("ok", r)
+    }
+
+    /** A nested group's prefix composes with its parent's. */
+    @Test
+    fun `a nested group answers under both prefixes`() {
+        val r = run(
+            """
+            $nestedGroups
+            body_of { resp = app { req = get_request { url = "/api/users/7" } } }
+            """.trimIndent()
+        )
+        assertEquals("7", r)
+    }
+
+    /** An empty path means the prefix itself — /api + /users + "" = /api/users. */
+    @Test
+    fun `an empty path routes the prefix itself`() {
+        val r = run(
+            """
+            $nestedGroups
+            app { req = { method = Post, url = "/api/users", headers = map::empty {},
+                          body = None, timeout_ms = None } }.status
+            """.trimIndent()
+        )
+        assertEquals(201L, r)
+    }
+
+    /** The un-prefixed path must NOT match once the group is nested. */
+    @Test
+    fun `a nested route is not reachable without the parent prefix`() {
+        val r = run(
+            """
+            $nestedGroups
+            app { req = get_request { url = "/users/7" } }.status
+            """.trimIndent()
+        )
+        assertEquals(404L, r)
+    }
+
+    /** Groups nest to any depth, for the same reason one level works. */
+    @Test
+    fun `groups nest three deep`() {
+        val r = run(
+            """
+            let inner = group { prefix = "/c" }
+              .get { path = "/leaf", handler = respond { handler = { m } -> "deep" } }
+            let mid = group { prefix = "/b" }.nest { group = inner }
+            let app = group { prefix = "/a" }.nest { group = mid }
+              .otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/a/b/c/leaf" } } }
+            """.trimIndent()
+        )
+        assertEquals("deep", r)
+    }
+
+    /** One slash between prefix and path, however each is written. */
+    @Test
+    fun `prefix joining does not double or drop slashes`() {
+        val r = run(
+            """
+            let app = group { prefix = "/a/" }
+              .get { path = "/x", handler = respond { handler = { m } -> "slashy" } }
+              .otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/a/x" } } }
+            """.trimIndent()
+        )
+        assertEquals("slashy", r)
+    }
+
+    /** A prefixless group is the plain case, and still works. */
+    @Test
+    fun `an empty prefix leaves paths alone`() {
+        val r = run(
+            """
+            let app = group { prefix = "" }
+              .get { path = "/bare", handler = respond { handler = { m } -> "bare" } }
+              .otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/bare" } } }
+            """.trimIndent()
+        )
+        assertEquals("bare", r)
+    }
+
+    /** `table {}` hands back a Routes, so a group composes with or_else. */
+    @Test
+    fun `a group converts to a table that composes with or_else`() {
+        val r = run(
+            """
+            let g = group { prefix = "/g" }
+              .get { path = "/x", handler = respond { handler = { m } -> "from-group" } }
+            let app = g.table {}
+              .or_else { b = on_get { path = "/plain", handler = { m } -> "from-route" } }
+              .otherwise { fallback = fallback }
+            str::concat {
+              l = body_of { resp = app { req = get_request { url = "/g/x" } } },
+              r = body_of { resp = app { req = get_request { url = "/plain" } } },
+            }
+            """.trimIndent()
+        )
+        assertEquals("from-groupfrom-route", r)
+    }
+
+    /** First added wins inside a group, as in a list. */
+    @Test
+    fun `an earlier group route shadows a later one`() {
+        val r = run(
+            """
+            let app = group { prefix = "/u" }
+              .get { path = "/:id", handler = respond { handler = { m } -> "wildcard" } }
+              .get { path = "/me", handler = respond { handler = { m } -> "specific" } }
+              .otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/u/me" } } }
+            """.trimIndent()
+        )
+        assertEquals("wildcard", r, "declaration order decides; put the specific route first")
+    }
+
+    /** respond and catching mix freely in one group — the handler side varies. */
+    @Test
+    fun `a group mixes answering and throwing handlers`() {
+        val r = run(
+            """
+            let app = group { prefix = "/m" }
+              .get { path = "/plain", handler = respond { handler = { m } -> "plain" } }
+              .get { path = "/boom", handler = catching { handler = { m } ->
+                throw { error = bad_request { body = "boom" } } } }
+              .otherwise { fallback = fallback }
+            let a = app { req = get_request { url = "/m/plain" } }
+            let b = app { req = get_request { url = "/m/boom" } }
+            str::concat { l = int::to_str { n = a.status }, r = int::to_str { n = b.status } }
+            """.trimIndent()
+        )
+        assertEquals("200400", r)
     }
 
     // ---- Response builders ----------------------------------------------
