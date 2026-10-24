@@ -17,7 +17,7 @@
 ## it. `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
 ## receives the bindings as a `Map Str Str` alongside the request.
 
-use std::effects::http::{ Method, Request, Response, IntoResponse }
+use std::effects::http::{ Method, Request, Response, IntoResponse, not_found }
 use std::effects::exception::{ ExceptionToResult }
 use std::collections::map
 use std::collections::iter
@@ -339,6 +339,10 @@ pub type RouteEntry = {
 }
 
 ## A path prefix and the routes under it. Build with `group`, nest with `nest`.
+##
+## A group is a route TABLE, not yet a handler. Close it with `handler` for a
+## 404 on anything unmatched, or `otherwise` to answer that yourself. Passing
+## the group itself to `serve` is a type error naming this.
 pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry] }
 
 ## An empty group rooted at `prefix`. Use `""` for no prefix.
@@ -348,6 +352,18 @@ pub let group: { prefix: Str } -> RouteGroup = { prefix } ->
 let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = { g } ->
   match g is
     RouteGroup.(v) -> v
+
+# Every entry folded into one table, first added winning. `table`, `otherwise`
+# and `handler` all want exactly this, and each had its own copy.
+let fold_entries: { g: RouteGroup } -> Routes = { g } ->
+  seq::fold {
+    xs = group_inner { g = g }.entries,
+    init = { run = { req } -> None },
+    f = { acc, x } -> or_else {
+      a = acc,
+      b = route { method = x.method, path = x.path, handler = x.handler },
+    },
+  }
 
 # Join a prefix and a path with exactly one slash between them, so "/users" and
 # "/:id" give "/users/:id" and "/users" with "" stays "/users".
@@ -476,29 +492,17 @@ impl RouteGroup where {
     }),
 
   ## Fold this group into a route table. First added wins.
-  table = { it: 'it } -> do
-    let inner = group_inner { g = it }
-    seq::fold {
-      xs = inner.entries,
-      init = { run = { req } -> None },
-      f = { acc, x } -> or_else {
-        a = acc,
-        b = route { method = x.method, path = x.path, handler = x.handler },
-      },
-    },
+  table = { it: 'it } -> fold_entries { g = it },
+
+  ## Close the group, answering anything unmatched with 404.
+  # The only answer a table has for a request it does not match, so requiring
+  # every group to spell out a fallback is ceremony. `otherwise` says otherwise.
+  handler = { it: 'it } ->
+    otherwise { routes = fold_entries { g = it }, fallback = { req } -> not_found { body = "no route matched" } },
 
   ## Close the group with a fallback, producing the handler `serve` takes.
-  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } -> do
-    let inner = group_inner { g = it }
-    let folded = seq::fold {
-      xs = inner.entries,
-      init = { run = { req } -> None },
-      f = { acc, x } -> or_else {
-        a = acc,
-        b = route { method = x.method, path = x.path, handler = x.handler },
-      },
-    }
-    otherwise { routes = folded, fallback = fallback },
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
+    otherwise { routes = fold_entries { g = it }, fallback = fallback },
 }
 
 # A route table is a LIST, and reads like one:
