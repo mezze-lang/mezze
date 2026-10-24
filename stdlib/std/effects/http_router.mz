@@ -252,36 +252,33 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 
 # ---- handler-side adapters ------------------------------------------------
 #
-# A route takes a handler answering a Response. These adapt the other things a
-# handler might do, and what changes is always the HANDLER, never the verb —
-# which is why there is no `try_get` beside `get`.
+# A group's verbs take the handler DIRECTLY and convert whatever it answers:
 #
-#   .get { path = "/ping",  handler = respond  { handler = { m } -> "pong" } }
-#   .get { path = "/u/:id", handler = fallible { handler = load_user } }
-#   .get { path = "/x",     handler = catching { handler = throws_a_response } }
+#   .get { path = "/ping",   handler = { m } -> "pong" }           # Str
+#   .get { path = "/made",   handler = { m } -> created { … } }    # Response
+#   .get { path = "/j",      handler = { m } -> payload }          # Json
 #
-# FAILURE IS A VALUE, so `fallible` is the ordinary one: a handler answers a
-# Result, the Ok becomes a response through IntoResponse and the Err through
-# IntoErrorResponse. Nothing performs an effect, and an error's own type picks
-# its status. `catching` is the opt-in for code that would rather throw —
-# Exception is a shortcut here, not the norm.
+# all in ONE chain, each route answering a different type. Nothing wraps
+# anything, and there is no `try_get` beside `get`.
 #
-# A handler that already answers a Response needs none of them.
+# Two shapes the verbs cannot take, and an adapter for each:
 #
-# All three are FREE FUNCTIONS for one reason: they carry ability constraints,
-# and a constraint on an inherent impl METHOD does not get its dictionary (it
-# silently selects the wrong impl). Keeping the conversion out here is what
-# lets the group's `.get`/`.post` methods carry no constraint at all.
-
-## Adapt a handler answering any `IntoResponse` value into one answering a Response.
-pub let respond
-  : { handler: { m: Matched } -> 'r <...> }
-  with IntoResponse 'r
-  -> { m: Matched } -> Response <...>
-  =
-  { handler } -> { m } -> do
-    let answered = handler { m = m }
-    answered.into_response {}
+#   fallible — a handler answering `Result 'a 'e` where 'a and 'e DIFFER.
+#              Not a design choice: the verb's generic `with IntoResponse 'r`
+#              does not deliver the nested dictionaries that
+#              `impl IntoResponse for Result` needs, so a
+#              `Result Str HttpError` handler dies in a native. A
+#              `Result Str Str` survives only because one Str dictionary
+#              happens to fit both slots. Delete this adapter when that is
+#              fixed.
+#   catching — a handler that THROWS a Response. A handler that never throws
+#              does not satisfy a row carrying Exception and vice versa, so
+#              this one is inherent to the effect system, not a workaround.
+#
+# Both are free functions because they carry ability constraints, and a
+# constraint on an inherent impl method only works for an IMPORTED impl (a
+# locally declared one is not re-instantiated per call, so its constrained
+# variable collapses to the first use's type).
 
 # Why this takes `Result 'a 'e` CONCRETELY rather than relying on `respond`
 # plus `impl IntoResponse for Result`: through `respond` the constraint is
@@ -409,27 +406,76 @@ let group_add
     })
 
 impl RouteGroup where {
-  ## Append a GET under this group's prefix.
-  get = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Get, path = path, handler = handler },
-  ## Append a POST under this group's prefix.
-  post = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Post, path = path, handler = handler },
-  ## Append a PUT under this group's prefix.
-  put = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Put, path = path, handler = handler },
-  ## Append a PATCH under this group's prefix.
-  patch = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Patch, path = path, handler = handler },
-  ## Append a DELETE under this group's prefix.
-  delete = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Delete, path = path, handler = handler },
-  ## Append a HEAD under this group's prefix.
-  head = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Head, path = path, handler = handler },
-  ## Append an OPTIONS under this group's prefix.
-  options = { it: 'it, path: Str, handler: { m: Matched } -> Response <...> } ->
-    group_add { g = it, method = Options, path = path, handler = handler },
+  ## Append a GET under this group's prefix, answering whatever the handler returns.
+  get: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Get,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a POST under this group's prefix, answering whatever the handler returns.
+  post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Post,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a PUT under this group's prefix, answering whatever the handler returns.
+  put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Put,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a PATCH under this group's prefix, answering whatever the handler returns.
+  patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Patch,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a DELETE under this group's prefix, answering whatever the handler returns.
+  delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Delete,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a HEAD under this group's prefix, answering whatever the handler returns.
+  head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Head,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append an OPTIONS under this group's prefix, answering whatever the handler returns.
+  options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Options,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
 
   # The child's entries already carry the child's own prefix, so one more
   # prepend nests them — and nesting a group that itself nested one works for

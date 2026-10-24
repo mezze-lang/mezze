@@ -25,7 +25,7 @@ class HttpIntoResponseTest {
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, respond, fallible, catching, Matched, Routes, routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, fallible, catching, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -500,7 +500,7 @@ class HttpIntoResponseTest {
                   let id = m.param_or { name = "id", default = "?" }
                   if id == "7" then "seven" else throw { error = not_found { body = "no" } } },
               }
-              .post { path = "/u", handler = respond { handler = { m } -> created { body = "made" } } }
+              .post { path = "/u", handler = { m } -> created { body = "made" } }
               .otherwise { fallback = fallback }
             app { req = { method = Post, url = "/u", headers = map::empty {}, body = None,
                           timeout_ms = None } }.status
@@ -765,18 +765,20 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * Why `fallible` names `Result 'a 'e` instead of leaning on `respond` plus
-     * `impl IntoResponse for Result`: through the generic constraint the Result
-     * is only incidentally the type, and the nested dictionaries are lost.
+     * A `Result Str Str` answers correctly with no adapter — but BY
+     * COINCIDENCE, which is why this test exists next to the one below rather
+     * than as a feature. `impl IntoResponse for Result` needs nested
+     * dictionaries (IntoResponse for the Ok, IntoErrorResponse for the Err) and
+     * the generic `with IntoResponse 'r` does not deliver them; one `Str`
+     * dictionary simply fits both slots here.
      *
-     * The boundary is narrow enough to mislead, which is why both sides are
-     * pinned: a `Result Str Str` SURVIVES the generic path (both slots are one
-     * type), and a `Result Str HttpError` does not. I first claimed "returning
-     * a Result never works", which was wrong in one direction, and nearly
-     * shipped "a Result needs no adapter", which is wrong in the other.
+     * Change the error type and it dies — see below. I claimed "returning a
+     * Result never works" (wrong), then nearly shipped "a Result needs no
+     * adapter" (also wrong). The truth is this narrow, so both halves are
+     * pinned.
      */
     @Test
-    fun `a same-typed Result survives the generic path`() {
+    fun `a same-typed Result answers without an adapter, by coincidence`() {
         val r = run(
             """
             $resultRoutes
@@ -809,16 +811,89 @@ class HttpIntoResponseTest {
         )
     }
 
+    // ---- wrapper-free handlers ------------------------------------------
+
+    /**
+     * THE point of the group surface: the verb takes the handler directly and
+     * converts whatever it answers, so four routes in ONE chain can each
+     * answer a different type with nothing wrapping anything.
+     *
+     * This needs the verb methods to carry `with IntoResponse 'r` AND to be
+     * re-instantiated per call. Both hold for an IMPORTED impl; a locally
+     * declared one collapses `'r` to the first use's type, which is what made
+     * me report mixing as impossible.
+     */
+    @Test
+    fun `one chain mixes four handler return types`() {
+        val r = run(
+            """
+            let load: { id: Str } -> Result Str Str = { id } ->
+              if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+            let app = group { prefix = "/api" }
+              .get { path = "/health", handler = { m } -> "ok" }
+              .get { path = "/made", handler = { m } -> created { body = "made" } }
+              .get { path = "/j", handler = { m } -> JString { val = "jay" } }
+              .get { path = "/u/:id",
+                     handler = { m } -> load { id = m.param_or { name = "id", default = "?" } } }
+              .otherwise { fallback = fallback }
+            let parts = [
+              body_of { resp = app { req = get_request { url = "/api/health" } } },
+              int::to_str { n = app { req = get_request { url = "/api/made" } }.status },
+              body_of { resp = app { req = get_request { url = "/api/j" } } },
+              body_of { resp = app { req = get_request { url = "/api/u/7" } } },
+            ]
+            seq::join { xs = parts, sep = "|" }
+            """.trimIndent()
+        )
+        assertEquals("ok|201|\"jay\"|seven", r)
+    }
+
+    /**
+     * The one shape the verb cannot take, and why `fallible` still exists: a
+     * Result whose Ok and Err types DIFFER needs the nested dictionaries the
+     * generic constraint does not deliver.
+     */
+    @Test
+    fun `a distinct-error Result needs fallible in a chain`() {
+        val broken = runCatching {
+            run(
+                """
+                let upstream: { id: Str } -> Result Str HttpError = { id } ->
+                  Err { error = Timeout { url = "http://u/x", ms = 50 } }
+                let app = group { prefix = "" }
+                  .get { path = "/gw", handler = { m } -> upstream { id = "x" } }
+                  .otherwise { fallback = fallback }
+                app { req = get_request { url = "/gw" } }.status
+                """.trimIndent()
+            )
+        }
+        assertTrue(
+            broken.exceptionOrNull() != null,
+            "expected the nested-dictionary failure; got ${broken.getOrNull()}",
+        )
+
+        val fixed = run(
+            """
+            let upstream: { id: Str } -> Result Str HttpError = { id } ->
+              Err { error = Timeout { url = "http://u/x", ms = 50 } }
+            let app = group { prefix = "" }
+              .get { path = "/gw", handler = fallible { handler = { m } -> upstream { id = "x" } } }
+              .otherwise { fallback = fallback }
+            app { req = get_request { url = "/gw" } }.status
+            """.trimIndent()
+        )
+        assertEquals(504L, fixed, "fallible names the Result, so its dictionaries arrive")
+    }
+
     // ---- route groups ---------------------------------------------------
 
     private val nestedGroups = """
         let users = group { prefix = "/users" }
-          .get { path = "/:id", handler = respond { handler = { m } ->
-            m.param_or { name = "id", default = "?" } } }
-          .post { path = "", handler = respond { handler = { m } -> created { body = "made" } } }
+          .get { path = "/:id", handler = { m } -> m.param_or { name = "id", default = "?" } }
+          .post { path = "", handler = { m } -> created { body = "made" } }
         let app = group { prefix = "/api" }
           .nest { group = users }
-          .get { path = "/health", handler = respond { handler = { m } -> "ok" } }
+          .get { path = "/health", handler = { m } -> "ok" }
           .otherwise { fallback = fallback }
     """.trimIndent()
 
@@ -884,7 +959,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let inner = group { prefix = "/c" }
-              .get { path = "/leaf", handler = respond { handler = { m } -> "deep" } }
+              .get { path = "/leaf", handler = { m } -> "deep" }
             let mid = group { prefix = "/b" }.nest { group = inner }
             let app = group { prefix = "/a" }.nest { group = mid }
               .otherwise { fallback = fallback }
@@ -900,7 +975,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let app = group { prefix = "/a/" }
-              .get { path = "/x", handler = respond { handler = { m } -> "slashy" } }
+              .get { path = "/x", handler = { m } -> "slashy" }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/a/x" } } }
             """.trimIndent()
@@ -914,7 +989,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let app = group { prefix = "" }
-              .get { path = "/bare", handler = respond { handler = { m } -> "bare" } }
+              .get { path = "/bare", handler = { m } -> "bare" }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/bare" } } }
             """.trimIndent()
@@ -928,7 +1003,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let g = group { prefix = "/g" }
-              .get { path = "/x", handler = respond { handler = { m } -> "from-group" } }
+              .get { path = "/x", handler = { m } -> "from-group" }
             let app = g.table {}
               .or_else { b = on_get { path = "/plain", handler = { m } -> "from-route" } }
               .otherwise { fallback = fallback }
@@ -947,8 +1022,8 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let app = group { prefix = "/u" }
-              .get { path = "/:id", handler = respond { handler = { m } -> "wildcard" } }
-              .get { path = "/me", handler = respond { handler = { m } -> "specific" } }
+              .get { path = "/:id", handler = { m } -> "wildcard" }
+              .get { path = "/me", handler = { m } -> "specific" }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/u/me" } } }
             """.trimIndent()
@@ -962,7 +1037,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let app = group { prefix = "/m" }
-              .get { path = "/plain", handler = respond { handler = { m } -> "plain" } }
+              .get { path = "/plain", handler = { m } -> "plain" }
               .get { path = "/boom", handler = catching { handler = { m } ->
                 throw { error = bad_request { body = "boom" } } } }
               .otherwise { fallback = fallback }
