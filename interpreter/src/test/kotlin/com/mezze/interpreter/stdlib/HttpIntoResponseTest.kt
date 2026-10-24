@@ -25,7 +25,7 @@ class HttpIntoResponseTest {
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, respond, catching, Matched, Routes, routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, respond, fallible, catching, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -362,20 +362,21 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * The shape a reader would write first — returning the Result straight out
-     * of the handler and letting the route convert it. It TYPECHECKS and then
-     * selects `impl IntoResponse for Str`, applies it to the Result, and dies
-     * in a native.
+     * The narrow shape that still fails: a Result produced by a `perform`
+     * REGION, returned straight out of the handler. It typechecks, then selects
+     * `impl IntoResponse for Str`, applies it to the Result and dies in a
+     * native — the `with C 'a` dictionary-plumbing family again.
      *
-     * Same `with C 'a` dictionary-plumbing family as [a bare response literal
-     * picks the wrong impl], and the reason `.into_response {}` is called
-     * inside the handler in every test above. Dispatching on a CONCRETE Result
-     * works — [an Ok answers through IntoResponse] is that control.
+     * The boundary matters and I first stated it too broadly. Returning a
+     * Result is FINE when its type is concretely known at the call site:
+     * [a Result-returning handler needs no adapter] routes a
+     * `Result Str Str` with no wrapper at all. It is the region's
+     * less-determined result type that loses the dictionary, not Results.
      *
-     * Pinned so the workaround can be deleted when this starts failing.
+     * Pinned so the remaining gap is noticed when it closes.
      */
     @Test
-    fun `returning a Result straight out of a handler picks the wrong impl`() {
+    fun `a Result out of a perform region picks the wrong impl`() {
         val outcome = runCatching {
             run(
                 """
@@ -708,6 +709,104 @@ class HttpIntoResponseTest {
             """.trimIndent()
         )
         assertEquals(404L, r)
+    }
+
+    // ---- Result as the ordinary error path ------------------------------
+
+    private val resultRoutes = """
+        let load: { id: Str } -> Result Str Str = { id } ->
+          if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+        let upstream: { id: Str } -> Result Str HttpError = { id } ->
+          Err { error = Timeout { url = "http://u/x", ms = 50 } }
+    """.trimIndent()
+
+    /**
+     * The ordinary error path: failure is a VALUE, the handler answers a
+     * Result, and `fallible` converts it — `Ok` through IntoResponse, `Err`
+     * through IntoErrorResponse. No Exception anywhere.
+     */
+    @Test
+    fun `fallible answers both arms of a Result`() {
+        val r = run(
+            """
+            $resultRoutes
+            let app = group { prefix = "" }
+              .get { path = "/u/:id", handler = fallible {
+                handler = { m } -> load { id = m.param_or { name = "id", default = "?" } },
+              } }
+              .otherwise { fallback = fallback }
+            let ok = app { req = get_request { url = "/u/7" } }
+            let err = app { req = get_request { url = "/u/9" } }
+            str::concat {
+              l = str::concat { l = int::to_str { n = ok.status }, r = body_of { resp = ok } },
+              r = str::concat { l = int::to_str { n = err.status }, r = body_of { resp = err } },
+            }
+            """.trimIndent()
+        )
+        assertEquals("200seven500no such id", r)
+    }
+
+    /**
+     * The error's own type picks the status, so one adapter serves every error
+     * type — and THIS is the case the generic path cannot do (below).
+     */
+    @Test
+    fun `fallible gives a distinct error type its own status`() {
+        val r = run(
+            """
+            $resultRoutes
+            let app = group { prefix = "" }
+              .get { path = "/gw", handler = fallible { handler = { m } -> upstream { id = "x" } } }
+              .otherwise { fallback = fallback }
+            app { req = get_request { url = "/gw" } }.status
+            """.trimIndent()
+        )
+        assertEquals(504L, r)
+    }
+
+    /**
+     * Why `fallible` names `Result 'a 'e` instead of leaning on `respond` plus
+     * `impl IntoResponse for Result`: through the generic constraint the Result
+     * is only incidentally the type, and the nested dictionaries are lost.
+     *
+     * The boundary is narrow enough to mislead, which is why both sides are
+     * pinned: a `Result Str Str` SURVIVES the generic path (both slots are one
+     * type), and a `Result Str HttpError` does not. I first claimed "returning
+     * a Result never works", which was wrong in one direction, and nearly
+     * shipped "a Result needs no adapter", which is wrong in the other.
+     */
+    @Test
+    fun `a same-typed Result survives the generic path`() {
+        val r = run(
+            """
+            $resultRoutes
+            let app = on_get {
+              path = "/u/:id",
+              handler = { m } -> load { id = m.param_or { name = "id", default = "?" } },
+            }.otherwise { fallback = fallback }
+            app { req = get_request { url = "/u/9" } }.status
+            """.trimIndent()
+        )
+        assertEquals(500L, r)
+    }
+
+    @Test
+    fun `a distinct-error Result does NOT survive the generic path`() {
+        val outcome = runCatching {
+            run(
+                """
+                $resultRoutes
+                let app = on_get { path = "/gw", handler = { m } -> upstream { id = "x" } }
+                  .otherwise { fallback = fallback }
+                app { req = get_request { url = "/gw" } }.status
+                """.trimIndent()
+            )
+        }
+        assertTrue(
+            outcome.exceptionOrNull() != null,
+            "expected the generic path to mis-dispatch; got ${outcome.getOrNull()}. " +
+                "If this now answers 504, `fallible` no longer needs to name the Result.",
+        )
     }
 
     // ---- route groups ---------------------------------------------------

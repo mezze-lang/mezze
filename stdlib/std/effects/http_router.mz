@@ -17,7 +17,7 @@
 ## it. `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
 ## receives the bindings as a `Map Str Str` alongside the request.
 
-use std::effects::http::{ Method, Request, Response, IntoResponse }
+use std::effects::http::{ Method, Request, Response, IntoResponse, IntoErrorResponse }
 use std::effects::exception::{ ExceptionToResult }
 use std::collections::map
 use std::collections::iter
@@ -252,18 +252,26 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 
 # ---- handler-side adapters ------------------------------------------------
 #
-# A route takes a handler answering a Response. These adapt the two other
-# things a handler might do, and they are FREE FUNCTIONS for a reason: both
-# carry `with IntoResponse 'r`, and a constraint on an inherent impl METHOD
-# does not get its dictionary (it silently selects the wrong impl). Keeping
-# the conversion here is what lets the group's `.get`/`.post` methods carry no
-# constraint at all — and it is why there is no `try_get` beside `get`: what
-# changes is the HANDLER, not the verb.
+# A route takes a handler answering a Response. These adapt the other things a
+# handler might do, and what changes is always the HANDLER, never the verb —
+# which is why there is no `try_get` beside `get`.
 #
 #   .get { path = "/ping",  handler = respond  { handler = { m } -> "pong" } }
-#   .get { path = "/u/:id", handler = catching { handler = { m } -> … throws … } }
+#   .get { path = "/u/:id", handler = fallible { handler = load_user } }
+#   .get { path = "/x",     handler = catching { handler = throws_a_response } }
 #
-# A handler that already answers a Response needs neither.
+# FAILURE IS A VALUE, so `fallible` is the ordinary one: a handler answers a
+# Result, the Ok becomes a response through IntoResponse and the Err through
+# IntoErrorResponse. Nothing performs an effect, and an error's own type picks
+# its status. `catching` is the opt-in for code that would rather throw —
+# Exception is a shortcut here, not the norm.
+#
+# A handler that already answers a Response needs none of them.
+#
+# All three are FREE FUNCTIONS for one reason: they carry ability constraints,
+# and a constraint on an inherent impl METHOD does not get its dictionary (it
+# silently selects the wrong impl). Keeping the conversion out here is what
+# lets the group's `.get`/`.post` methods carry no constraint at all.
 
 ## Adapt a handler answering any `IntoResponse` value into one answering a Response.
 pub let respond
@@ -274,6 +282,28 @@ pub let respond
   { handler } -> { m } -> do
     let answered = handler { m = m }
     answered.into_response {}
+
+# Why this takes `Result 'a 'e` CONCRETELY rather than relying on `respond`
+# plus `impl IntoResponse for Result`: through `respond` the constraint is
+# `with IntoResponse 'r` and `'r` is only incidentally a Result, which loses
+# the nested dictionaries. Measured — `respond` carries a
+# `Result Str HttpError` handler to `impl IntoResponse for Str`, hands it the
+# Result and dies in a native, while `Result Str Str` happens to survive
+# because both slots are the same type. Naming the Result here binds `'a` and
+# `'e` through the PARAMETER, which is the binding that works (same reason
+# `or_throw` can name its error type and `catching` cannot).
+#
+# So this is the robust shape, and the one to reach for whenever a handler can
+# fail.
+## Adapt a handler answering `Result` into one answering a Response.
+pub let fallible
+  : { handler: { m: Matched } -> Result 'a 'e <...> }
+  with IntoResponse 'a, IntoErrorResponse 'e
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> match handler { m = m } is
+    Ok { val } -> val.into_response {}
+    Err { error } -> error.into_error_response {}
 
 # The handler runs inside ExceptionToResult, so a throw short-circuits to the
 # Response it threw. The conversion happens INSIDE the region, where the answer
