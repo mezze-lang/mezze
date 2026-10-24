@@ -20,7 +20,7 @@ class HttpIntoResponseTest {
 
     private val head = """
         use std::effects::http::{ Request, Response, Get, Post, Put, Delete, created, no_content, not_found, bad_request, server_error, redirect, redirect_with, response_ok_text, response_json, response_stream }
-        use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
+        use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse, or_throw }
         use std::effects::exception::{ ExceptionToResult, unwrap, throw }
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
@@ -528,6 +528,86 @@ class HttpIntoResponseTest {
         assertTrue(
             error != null && error.toString().contains("Exception"),
             "expected the row mismatch to be reported; got ${error ?: outcome.getOrNull()}",
+        )
+    }
+
+    // ---- failure: a Result inside a throwing route ----------------------
+
+    private val orThrowApp = """
+        let load: { id: Str } -> Result Str Str = { id } ->
+          if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+        let upstream: { id: Str } -> Result Str HttpError = { id } ->
+          Err { error = Timeout { url = "http://u/x", ms = 50 } }
+        let app = try_get {
+          path = "/u/:id",
+          handler = { m } -> do
+            let id = m.param_or { name = "id", default = "?" }
+            if id == "gw" then or_throw { result = upstream { id = id } }
+            else or_throw { result = load { id = id } },
+        }.otherwise { fallback = fallback }
+    """.trimIndent()
+
+    /**
+     * `or_throw` is the bridge from Mezze's failure model to a route: failure
+     * is a VALUE, so a fallible call answers a Result, and this unwraps the Ok
+     * or throws the Err's own response. Reads like `?`.
+     */
+    @Test
+    fun `or_throw passes an Ok straight through`() {
+        val r = run(
+            """
+            $orThrowApp
+            body_of { resp = app { req = get_request { url = "/u/7" } } }
+            """.trimIndent()
+        )
+        assertEquals("seven", r)
+    }
+
+    @Test
+    fun `or_throw turns a Str error into its 500`() {
+        val r = run(
+            """
+            $orThrowApp
+            let resp = app { req = get_request { url = "/u/9" } }
+            str::concat { l = int::to_str { n = resp.status }, r = body_of { resp = resp } }
+            """.trimIndent()
+        )
+        assertEquals("500no such id", r)
+    }
+
+    /**
+     * The error's own type picks the status — the SAME or_throw call site
+     * yields 500 for a Str and 504 for a Timeout, because IntoErrorResponse
+     * decides, not the route.
+     */
+    @Test
+    fun `or_throw gives an HttpError its gateway status`() {
+        val r = run(
+            """
+            $orThrowApp
+            app { req = get_request { url = "/u/gw" } }.status
+            """.trimIndent()
+        )
+        assertEquals(504L, r)
+    }
+
+    @Test
+    fun `or_throw outside a route is just a Result unwrap`() {
+        val r = run(
+            """
+            let run_it = {} -> do
+              let outcome = perform ExceptionToResult in do
+                let v = or_throw { result = Err { error = "plain" } }
+                Ok { val = v }
+              match outcome is
+                Ok { val = _ } -> 0
+                Err { error = resp } -> resp.status
+            run_it {}
+            """.trimIndent()
+        )
+        assertEquals(
+            500L, r,
+            "the thrown value is the Response, so a handler outside a route sees it too",
         )
     }
 

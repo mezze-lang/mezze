@@ -15,6 +15,7 @@ use std::str
 use std::int
 use std::bool
 use std::result::{ flat_map, map_err }
+use std::effects::exception::{ throw }
 
 ## HTTP request methods.
 pub type Method = | Get, Post, Put, Delete, Patch, Head, Options |
@@ -649,6 +650,35 @@ impl IntoResponse for Result 'a 'e where {
         Ok { val } -> val.into_response {}
         Err { error } -> error.into_error_response {},
 }
+
+# Failure is a VALUE in Mezze, so a fallible call answers a Result. Inside a
+# `try_` route the thrown channel is a Response, which is why plain
+# `exception::unwrap` does not fit there: it rethrows the RAW error. This is
+# the bridge — unwrap the Ok, or turn the Err into its response and throw that:
+#
+#   try_get { path = "/users/:id", handler = { m } -> do
+#     let id   = m.param_or { name = "id", default = "?" }
+#     let user = or_throw { result = load { id = id } }
+#     user.name
+#   }
+#
+# Each or_throw reads like `?`: the happy path continues on one line and the
+# failure leaves as the status its own type chose.
+#
+# Note why this one CAN name `'e` while try_method cannot. Here `'e` is bound
+# by a PARAMETER (`result: Result 'a 'e`), so the constraint and the body
+# agree on the variable. In try_method it would be bound only through the
+# effect row's associated type, and the signature's `'e` then names a
+# different variable than the body's (T0210).
+## Unwrap a Result, or throw the Err's response.
+pub let or_throw
+  : { result: Result 'a 'e }
+  with IntoErrorResponse 'e
+  -> 'a <Exception having 'error = Response, ...>
+  =
+  { result } -> match result is
+    Ok { val } -> val
+    Err { error } -> throw { error = error.into_error_response {} }
 
 ## A reusable HTTP client value. Bind a service's base URL, default
 ## headers (auth, accept, etc.), and default timeout once — derive
