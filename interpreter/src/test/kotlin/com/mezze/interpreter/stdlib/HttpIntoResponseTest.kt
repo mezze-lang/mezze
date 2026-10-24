@@ -362,21 +362,32 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * The narrow shape that still fails: a Result produced by a `perform`
-     * REGION, returned straight out of the handler. It typechecks, then selects
-     * `impl IntoResponse for Str`, applies it to the Result and dies in a
-     * native — the `with C 'a` dictionary-plumbing family again.
+     * The one Result shape left: one whose ERROR TYPE IS NEVER DETERMINED.
      *
-     * The boundary matters and I first stated it too broadly. Returning a
-     * Result is FINE when its type is concretely known at the call site:
-     * [a Result-returning handler needs no adapter] routes a
-     * `Result Str Str` with no wrapper at all. It is the region's
-     * less-determined result type that loses the dictionary, not Results.
+     * `Ok { val = "seven" }` with no `Err` anywhere is a `Result Str 'e` with
+     * `'e` free, so there is no type for `IntoErrorResponse` to resolve
+     * against and no dictionary can be supplied. That is a property of the
+     * PROGRAM, not of the route: nothing in it says what an error would be.
      *
-     * Pinned so the remaining gap is noticed when it closes.
+     * I had this test named for the `perform` region and that was wrong — the
+     * region is fine, as [a perform region's Result answers when its types are
+     * known] shows. What the two cases differ in is whether anything pins the
+     * error type.
+     *
+     * It fails two different ways depending on the route, and BOTH are wrong
+     * because neither is a compile error:
+     *   - through the free verbs (here): silently runs
+     *     `impl IntoResponse for Str` and dies in a native,
+     *     `Expected String for field 's'`;
+     *   - through a group's `.get`: loudly, naming the operation —
+     *     "no dictionary was supplied for ability operation `into_response`".
+     *
+     * The right answer is to reject it while compiling, and the diagnostic for
+     * exactly this already exists ("takes no receiver, so the type it produces
+     * is what chooses the implementation"); it is simply not routed here.
      */
     @Test
-    fun `a Result out of a perform region picks the wrong impl`() {
+    fun `a Result with an undetermined error type has no dictionary`() {
         val outcome = runCatching {
             run(
                 """
@@ -390,10 +401,12 @@ class HttpIntoResponseTest {
                 """.trimIndent()
             )
         }
+        val err = outcome.exceptionOrNull()
         assertTrue(
-            outcome.exceptionOrNull() != null,
-            "expected the known dictionary-plumbing failure; got ${outcome.getOrNull()}. " +
-                "If this now answers 200, drop the in-handler .into_response {} from the docs.",
+            err != null,
+            "expected an under-determined error type to fail; got ${outcome.getOrNull()}. " +
+                "If this now answers 200, or fails at COMPILE time naming the undetermined " +
+                "error type, update this test — the latter is the wanted outcome.",
         )
     }
 
@@ -712,6 +725,37 @@ class HttpIntoResponseTest {
     }
 
     // ---- Result as the ordinary error path ------------------------------
+
+    /**
+     * A Result out of a `perform` REGION, returned straight out of the
+     * handler, with its types known. This is the case I had wrongly pinned as
+     * broken; the region was never the problem.
+     */
+    @Test
+    fun `a perform region's Result answers when its types are known`() {
+        val r = run(
+            """
+            let load: { id: Str } -> Result Str Str = { id } ->
+              if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+            let app = group { prefix = "" }
+              .get {
+                path = "/u/:id",
+                handler = { m } -> perform ExceptionToResult in do
+                  let name = unwrap { result = load { id = m.param_or { name = "id", default = "?" } } }
+                  Ok { val = name },
+              }
+              .otherwise { fallback = fallback }
+            let ok = app { req = get_request { url = "/u/7" } }
+            let err = app { req = get_request { url = "/u/9" } }
+            str::concat {
+              l = body_of { resp = ok },
+              r = str::concat { l = int::to_str { n = err.status }, r = body_of { resp = err } },
+            }
+            """.trimIndent()
+        )
+        assertEquals("seven500no such id", r)
+    }
+
 
     private val resultRoutes = """
         let load: { id: Str } -> Result Str Str = { id } ->
