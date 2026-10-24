@@ -2653,20 +2653,10 @@ class TypedASTCompiler(
         // variantNestedSeqEq, variantNestedLt, nested3Lt, newtypeNested3Eq …).
         // For `[[P]]` the inner seq's dict must come from P, not from Seq.
         val deeper = elementFirst(concreteTypes)
-        val resolvedDicts = mutableListOf<Pair<String, NodeIR>>()
-        for (methodName in needed.sorted()) {
-            val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
-            val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(methodName)
-            val subTypes = deeper
-            val subHash = resolveOpHashFromConcreteTypes(dictMethod, subTypes)
-            if (subHash != null) {
-                resolvedDicts.add(dictParamName to refToDictedOp(subHash, subTypes, src, onPath + opHash))
-            } else {
-                // Unresolvable concretely; forwarding from the enclosing frame would
-                // be invalid inside the wrapper's own frame — leave the op bare.
-                return ReadGlobalFnByHashIR(opHash, src)
+        val resolvedDicts = planWrappedDictSlots(opHash, needed, deeper, concreteTypes)
+            .map { (dictParamName, subHash, subTypes) ->
+                dictParamName to refToDictedOp(subHash, subTypes, src, onPath + opHash)
             }
-        }
         // The wrapper's params = the op's regular params (prelowered FunctionIR is
         // authoritative for stdlib ops; drop the synthetic __dict_* params).
         //
@@ -2681,7 +2671,13 @@ class TypedASTCompiler(
         val regularParamNames = if (preParams != null) {
             preParams.filterNot { com.mezze.language.ast.MagicParams.isDict(it) }
         } else {
+            // `declIndex` holds TOP-LEVEL declarations only, never an ability
+            // impl's operations, and `hashToFunctionIR` has an impl op only once
+            // prelowered. For a user impl both miss, so the wrapper was DISCARDED
+            // — dictionaries and all — and the op ran bare. The impl table knows
+            // these params.
             (declIndex?.get(opHash)?.value as? TypedLambda)?.params?.map { it.name }
+                ?: implOpLambdaForHash(opHash)?.params?.map { it.name }
                 ?: return ReadGlobalFnByHashIR(opHash, src)
         }
         val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()

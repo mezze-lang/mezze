@@ -675,6 +675,66 @@ internal fun TypedASTCompiler.resolveDictOp(
     return resolveOpHashFromConcreteTypes(dictMethod, concreteTypes)
 }
 
+/** One dictionary slot of a wrapped op, resolved: its param name and the op to put there. */
+internal data class WrappedDictSlot(
+    val dictParamName: String,
+    val opHash: Hash,
+    val subTypes: List<MezzeType>,
+)
+
+/**
+ * The dictionary slots to give a wrapper around [opHash].
+ *
+ * Applies the per-constraint rule the call site uses ([resolveDictOp]) to the op
+ * being WRAPPED. [deeper] is ONE list shared by every slot, so resolving an
+ * operation name against it can hand a slot another constraint's impl — and here
+ * that means the WRAPPED OP ITSELF. `impl Show for Result 'p 'q` whose `Ok` arm
+ * calls `val.show {}` got the Result impl as its own `'p` dictionary, recursed,
+ * and matched a Str against Ok/Err:
+ *
+ *     TAG-READ tag=… value=Ok({val = seven})   ← the Ok arm matched
+ *     TAG-READ-NONVARIANT got=String value=seven
+ *     Non-exhaustive match: no variant tag matched
+ *
+ * which reads like a broken match and is a misdirected dictionary.
+ *
+ * A slot that cannot be resolved is simply ABSENT, and the slots that did
+ * resolve are kept. Returning the bare op instead threw away every dictionary
+ * that DID resolve, so one undeterminable slot broke a sibling that was
+ * perfectly determined:
+ *
+ *     impl A for Box 'p 'q  with A 'p, C 'q   at Box Str 'a
+ *     needed=[fa, fc]  own={fa=Str}
+ *
+ * `fc` cannot be resolved — nothing says what `'q` is, and with it free no
+ * Empty value can exist, so it can never be called. But its miss discarded
+ * `fa`'s dictionary too, the op ran bare, `fv.fa {}` fell back to a name
+ * lookup, found the Box impl again, recursed, and matched a Str against
+ * Full/Empty — reported as a non-exhaustive match. DictConstraintCrossingTest
+ * has that shape. An absent slot still fails loudly IF it is ever demanded,
+ * which is the honest outcome for a type nothing determines.
+ */
+internal fun TypedASTCompiler.planWrappedDictSlots(
+    opHash: Hash,
+    needed: Set<String>,
+    deeper: List<MezzeType>,
+    concreteTypes: List<MezzeType>,
+): List<WrappedDictSlot> {
+    val arrow = implOpLambdaForHash(opHash)?.type as? MezzeType.FunctionType
+    val ownTypes = ownTypePerMethod(
+        arrow?.abilityConstraints.orEmpty(),
+        bindImplVarsForOp(opHash, concreteTypes),
+    )
+    return needed.sorted().mapNotNull { key ->
+        val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(key)
+        val own = ownTypes[dictMethod]
+        val subTypes = own?.let { listOf(it.first) } ?: deeper
+        resolveOpHashFromConcreteTypes(dictMethod, subTypes, own?.second)?.let { subHash ->
+            WrappedDictSlot(com.mezze.language.ast.MagicParams.dictParamName(key), subHash, subTypes)
+        }
+    }
+}
+
 /** The concrete type a qualified dict key's variable is bound to, or null. */
 internal fun TypedASTCompiler.boundTypeForKey(key: String, bindings: Map<String, MezzeType>): MezzeType? =
     com.mezze.language.ast.MagicParams.typeVarOfKey(key)?.let { v -> bindings[v] ?: bindings["'$v"] }

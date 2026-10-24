@@ -62,6 +62,27 @@ class DictConstraintCrossingTest {
             R { rv } -> rv.fb {},
         }
 
+        impl A for Result 'p 'q where {
+          fa: { it: Result 'p 'q } with A 'p, B 'q -> Str = { it } -> match it is
+            Ok { val } -> str::concat { l = "R-ok-", r = val.fa {} }
+            Err { error } -> str::concat { l = "R-err-", r = error.fb {} },
+        }
+
+        ability C for 'z where { fc: { it: 'z } -> Str }
+        impl C for Bool where { fc = { it } -> "C-Bool" }
+        impl C for Int where { fc = { it } -> "C-Int" }
+
+        type Box 'p 'q = |
+          Full { fv: 'p },
+          Empty { ev: 'q },
+        |
+
+        impl A for Box 'p 'q where {
+          fa: { it: Box 'p 'q } with A 'p, C 'q -> Str = { it } -> match it is
+            Full { fv } -> str::concat { l = "X-full-", r = fv.fa {} }
+            Empty { ev } -> str::concat { l = "X-empty-", r = ev.fc {} },
+        }
+
         let via: { v: 'v } with A 'v -> Str = { v } -> v.fa {}
     """.trimIndent()
 
@@ -138,6 +159,98 @@ class DictConstraintCrossingTest {
             """.trimIndent()
         )
         assertEquals("A-StrB-Str", r)
+    }
+
+    /**
+     * A Result whose ERROR type is never determined — `Result Str 'a`, which is
+     * what inference gives an `Ok { … }` with no `Err` anywhere. No error can
+     * exist, so the `B` dictionary can never be called; demanding it is wrong.
+     *
+     * Two things had to hold for this to work, and each was a separate bug:
+     *
+     *  - an unresolvable slot must not discard the wrapper. `fb` cannot be
+     *    resolved (nothing says what the error type is) and its miss used to
+     *    throw away `fa`'s dictionary too, which WAS resolved. The op then ran
+     *    bare, `val.fa {}` fell back to a name lookup, found THIS impl again,
+     *    recursed, and matched a Str against Ok/Err — surfacing as
+     *    "Non-exhaustive match", which reads like a broken match and is a
+     *    misdirected dictionary;
+     *  - the wrapper's parameter names must be found. `declIndex` holds
+     *    top-level declarations only, so for an impl operation it found none
+     *    and discarded the wrapper for that reason instead.
+     *
+     * The marked outputs are load-bearing: this impl's `Ok` arm calls
+     * `val.fa {}` on a Str, so without the "R-ok-" prefix the right and wrong
+     * impl both print "A-Str" and the test proves nothing. That is how I first
+     * mis-read this case.
+     */
+    @Test
+    fun `a Result with an undetermined error type dispatches through a dictionary`() {
+        val r = run(
+            """
+            let free: Result Str 'a = Ok { val = "x" }
+            via { v = free }
+            """.trimIndent()
+        )
+        assertEquals("R-ok-A-Str", r)
+    }
+
+    /** The control: the same value with its error type pinned. */
+    @Test
+    fun `a Result with a pinned error type dispatches through a dictionary`() {
+        val r = run(
+            """
+            let pinned: Result Str Str = Ok { val = "x" }
+            via { v = pinned }
+            """.trimIndent()
+        )
+        assertEquals("R-ok-A-Str", r)
+    }
+
+    /** And the Err arm, which needs the error type to be known. */
+    @Test
+    fun `a pinned Err arm uses its own ability`() {
+        val r = run(
+            """
+            let bad: Result Str Str = Err { error = "boom" }
+            via { v = bad }
+            """.trimIndent()
+        )
+        assertEquals("R-err-B-Str", r)
+    }
+
+    /**
+     * The slot with NO candidate at all, which is what pins keeping the rest of
+     * the wrapper. `C` is implemented for `Bool` only, so at `Box Str 'a` the
+     * `fc` slot cannot be filled by anything — not by its own constraint's type,
+     * which is undetermined, and not by any of the impl's other type arguments.
+     *
+     * A miss used to discard the WHOLE wrapper, `fa`'s resolved dictionary
+     * included. The operation then ran bare, `fv.fa {}` fell back to a name
+     * lookup, found this same impl again and matched a Str against Full/Empty,
+     * reported as "Non-exhaustive match" — a misdirected dictionary wearing a
+     * broken match's error.
+     *
+     * TWO `C` impls are load-bearing, and not for the reason they look like.
+     * With only one, `tryResolveAbilityOp` takes its sole-candidate fallback —
+     * one candidate and a variant receiver returns that candidate whatever its
+     * target — and the slot gets filled with `C for Bool` at `Str`. Wrong, but
+     * never called, so the miss this test is about never happens. A second impl
+     * removes the guess and the slot is genuinely unfillable.
+     *
+     * The free-error `Result` above does not pin this either: `B` has a `Str`
+     * impl, so its unreachable slot resolves from the impl's other type
+     * argument.
+     */
+    @Test
+    fun `an unfillable slot does not discard the slots that resolved`() {
+        val r = run(
+            """
+            let free: Box Str 'a = Full { fv = "x" }
+            via { v = free }
+            """.trimIndent()
+        )
+        assertEquals("X-full-A-Str", r)
     }
 
     /** Swapping which parameter is which must swap the answer, not keep it. */
