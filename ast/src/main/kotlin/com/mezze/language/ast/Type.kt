@@ -539,7 +539,19 @@ sealed interface MezzeType {
         // row var. Example: in `spawn : {f: {} -> 'a <Exception, ...>} ->
         // Promise 'a <Async, ...>`, the callback row's `caughtByAncestor`
         // is `{Exception}` — spawn catches Exception at runtime.
-        val caughtByAncestor: Set<String> = emptySet()
+        val caughtByAncestor: Set<String> = emptySet(),
+        // True when this row was WRITTEN on a callback position — a function
+        // type inside a parameter. `...` means zero or more effects, so a
+        // NAMED effect before it is mandatory: `<Boom, ...>` is `<Boom>` or
+        // `<Boom, Bang>`, never `<>`. Enforcing that needs to know the row is a
+        // declaration rather than an actual, and the unifier is symmetric.
+        //
+        // `caughtByAncestor` used to serve as that marker, but it is only
+        // non-empty when the enclosing function HANDLES the effect
+        // (`callbackEffects − outerReturnEffects`). When the enclosing row
+        // names the same effect the set is empty, no marker existed, and the
+        // lower bound went unenforced — a pure callback satisfied `<Boom, ...>`.
+        val declaredOnCallback: Boolean = false
     ) : MezzeType {
         /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
         @kotlinx.serialization.Transient internal var groundMemo: Byte = 0

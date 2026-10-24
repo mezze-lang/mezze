@@ -642,7 +642,7 @@ pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { pa
 ## Auto-closing read wrapper. `f` receives the handle; on return or
 ## error, the handle is closed.
 pub let with_read
-  : { path: Str, f: { handle: FileHandle } -> 'a <FileStreaming, ...> }
+  : { path: Str, f: { handle: FileHandle } -> 'a <...> }
   -> Result 'a FsError <FileStreaming, ...>
   = { path, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
@@ -703,7 +703,7 @@ pub let lines_of
 ## FROM the callback would be reading a closed handle, which reports
 ## `FsClosedHandle` rather than silently yielding nothing.
 pub let with_lines
-  : { path: Str, chunk_bytes: Int, f: { lines: Iter Str } -> 'a <FileStreaming, ...> }
+  : { path: Str, chunk_bytes: Int, f: { lines: Iter Str } -> 'a <...> }
   -> Result 'a FsError <FileStreaming, ...>
   = { path, chunk_bytes, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
@@ -744,7 +744,7 @@ pub let watch_events
 
 ## Auto-closing write wrapper.
 pub let with_write
-  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <FileStreaming, ...> }
+  : { path: Str, mode: OpenMode, f: { handle: FileHandle } -> 'a <...> }
   -> Result 'a FsError <FileStreaming, ...>
   = { path, mode, f } -> match FileStreaming.open { path = path, mode = mode } is
     Ok { val = h } -> do

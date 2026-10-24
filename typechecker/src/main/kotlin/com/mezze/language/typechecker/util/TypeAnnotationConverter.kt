@@ -278,7 +278,7 @@ object TypeAnnotationConverter {
                 // Promise 'a <Async, ...>` — Exception is on the callback
                 // row but not the return, so it's caught by spawn.
                 val outerReturnEffectNames = effectRow?.allEffectNames ?: emptySet()
-                val paramWithCaughtStamped = stampCaughtOnCallbackRows(convertedParam, outerReturnEffectNames)
+                val paramWithCaughtStamped = stampCaughtOnCallbackRows(convertedParam, outerReturnEffectNames, inParam = true)
                 MezzeType.FunctionType(
                     paramType = paramWithCaughtStamped,
                     returnType = convertedReturn,
@@ -480,7 +480,7 @@ object TypeAnnotationConverter {
     fun stampCaughtOnCallbackRowsPublic(
         type: MezzeType,
         outerReturnEffectNames: Set<String>
-    ): MezzeType = stampCaughtOnCallbackRows(type, outerReturnEffectNames)
+    ): MezzeType = stampCaughtOnCallbackRows(type, outerReturnEffectNames, inParam = true)
 
     /**
      * Collect ALL `caughtByAncestor` effect names accumulated on any
@@ -561,35 +561,40 @@ object TypeAnnotationConverter {
      */
     private fun stampCaughtOnCallbackRows(
         type: MezzeType,
-        outerReturnEffectNames: Set<String>
+        outerReturnEffectNames: Set<String>,
+        // True once we are inside a PARAMETER, where a function type's row is a
+        // callback declaration rather than this declaration's own return row.
+        inParam: Boolean = false
     ): MezzeType = when (type) {
         is MezzeType.FunctionType -> {
             val cbEffects = type.effects
             val newCbEffects = if (cbEffects != null) {
                 val extras = cbEffects.allEffectNames - outerReturnEffectNames
-                if (extras.isNotEmpty()) {
-                    cbEffects.copy(caughtByAncestor = cbEffects.caughtByAncestor + extras)
-                } else cbEffects
+                val caught = if (extras.isNotEmpty()) cbEffects.caughtByAncestor + extras
+                    else cbEffects.caughtByAncestor
+                // Marked whether or not anything is caught: being a callback
+                // declaration is what makes its named effects a lower bound.
+                cbEffects.copy(caughtByAncestor = caught, declaredOnCallback = inParam)
             } else null
             // Recurse into this nested function's own params and returns
             // in case there are further nested callbacks.
             val newReturnEffectNames = newCbEffects?.allEffectNames ?: emptySet()
             type.copy(
-                paramType = stampCaughtOnCallbackRows(type.paramType, newReturnEffectNames),
-                returnType = stampCaughtOnCallbackRows(type.returnType, outerReturnEffectNames),
+                paramType = stampCaughtOnCallbackRows(type.paramType, newReturnEffectNames, inParam = true),
+                returnType = stampCaughtOnCallbackRows(type.returnType, outerReturnEffectNames, inParam),
                 effects = newCbEffects
             )
         }
         is MezzeType.RecordType -> type.copy(
-            fields = type.fields.mapValues { (_, v) -> stampCaughtOnCallbackRows(v, outerReturnEffectNames) }
+            fields = type.fields.mapValues { (_, v) -> stampCaughtOnCallbackRows(v, outerReturnEffectNames, inParam) }
         )
         is MezzeType.VariantType -> type.copy(
-            constructors = type.constructors.mapValues { (_, v) -> v?.let { stampCaughtOnCallbackRows(it, outerReturnEffectNames) } }
+            constructors = type.constructors.mapValues { (_, v) -> v?.let { stampCaughtOnCallbackRows(it, outerReturnEffectNames, inParam) } }
         )
         is MezzeType.TypeApplication -> type.copy(
-            args = type.args.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames) }
+            args = type.args.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames, inParam) }
         )
-        is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames))
+        is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames, inParam))
         is MezzeType.EffectRow, is MezzeType.VarType,
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.FracType,

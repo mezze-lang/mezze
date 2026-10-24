@@ -1260,7 +1260,7 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     // actual body. If declared has effects the actual doesn't perform,
     // that's an error regardless of which side of the unification the
     // declared row lands on.
-    if (eff1.caughtByAncestor.isNotEmpty()) {
+    if (eff1.caughtByAncestor.isNotEmpty() || eff1.declaredOnCallback) {
         // eff1 is declared, eff2 is actual.
         val missing = allEffects1 - allEffects2
         if (missing.isNotEmpty()) {
@@ -1274,7 +1274,7 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
             )
         }
     }
-    if (eff2.caughtByAncestor.isNotEmpty()) {
+    if (eff2.caughtByAncestor.isNotEmpty() || eff2.declaredOnCallback) {
         // eff2 is declared, eff1 is actual.
         val missing = allEffects2 - allEffects1
         if (missing.isNotEmpty()) {
