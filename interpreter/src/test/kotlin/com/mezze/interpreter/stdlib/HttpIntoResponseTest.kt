@@ -25,7 +25,7 @@ class HttpIntoResponseTest {
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, try_get, try_post, Matched, Routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, try_get, try_post, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -609,6 +609,103 @@ class HttpIntoResponseTest {
             500L, r,
             "the thrown value is the Response, so a handler outside a route sees it too",
         )
+    }
+
+    // ---- the table as a list -------------------------------------------
+
+    private val listTable = """
+        let load: { id: Str } -> Result Str Str = { id } ->
+          if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
+        let app = routes { of = [
+          on_get { path = "/ping", handler = { m } -> "pong" },
+          on_post { path = "/users", handler = { m } -> created { body = "made" } },
+          try_get {
+            path = "/u/:id",
+            handler = { m } -> or_throw {
+              result = load { id = m.param_or { name = "id", default = "?" } },
+            },
+          },
+        ] }.otherwise { fallback = fallback }
+    """.trimIndent()
+
+    /**
+     * A route table is a LIST, so `routes { of = [ … ] }` replaces the first
+     * route bare plus every later one wrapped in `.or_else { b = … }`.
+     */
+    @Test
+    fun `a list table routes its first entry`() {
+        val r = run(
+            """
+            $listTable
+            body_of { resp = app { req = get_request { url = "/ping" } } }
+            """.trimIndent()
+        )
+        assertEquals("pong", r)
+    }
+
+    @Test
+    fun `a list table routes a later entry, by method too`() {
+        val r = run(
+            """
+            $listTable
+            app { req = { method = Post, url = "/users", headers = map::empty {}, body = None,
+                          timeout_ms = None } }.status
+            """.trimIndent()
+        )
+        assertEquals(201L, r)
+    }
+
+    /** on_* and try_* entries sit in the same list. */
+    @Test
+    fun `a throwing entry works inside a list table`() {
+        val r = run(
+            """
+            $listTable
+            let resp = app { req = get_request { url = "/u/9" } }
+            str::concat { l = int::to_str { n = resp.status }, r = body_of { resp = resp } }
+            """.trimIndent()
+        )
+        assertEquals("500no such id", r)
+    }
+
+    @Test
+    fun `a list table falls through to the fallback`() {
+        val r = run(
+            """
+            $listTable
+            app { req = get_request { url = "/zzz" } }.status
+            """.trimIndent()
+        )
+        assertEquals(404L, r)
+    }
+
+    /** First match wins, so list order is the priority — not specificity. */
+    @Test
+    fun `an earlier entry shadows a later one`() {
+        val r = run(
+            """
+            let app = routes { of = [
+              on_get { path = "/u/:id", handler = { m } -> "wildcard" },
+              on_get { path = "/u/me", handler = { m } -> "specific" },
+            ] }.otherwise { fallback = fallback }
+            body_of { resp = app { req = get_request { url = "/u/me" } } }
+            """.trimIndent()
+        )
+        assertEquals(
+            "wildcard", r,
+            "declaration order decides; put the specific route first",
+        )
+    }
+
+    @Test
+    fun `an empty list matches nothing and falls through`() {
+        val r = run(
+            """
+            let app = routes { of = [] }.otherwise { fallback = fallback }
+            app { req = get_request { url = "/anything" } }.status
+            """.trimIndent()
+        )
+        assertEquals(404L, r)
     }
 
     // ---- Response builders ----------------------------------------------

@@ -339,6 +339,33 @@ pub let try_options
   with IntoResponse 'r -> Routes =
   { path, handler } -> try_method { method = Options, path = path, handler = handler }
 
+# A route table is a LIST, and reads like one:
+#
+#   let app = routes { of = [
+#     on_get    { path = "/ping",      handler = { m } -> "pong" },
+#     on_post   { path = "/users",     handler = { m } -> created { body = "made" } },
+#     try_get   { path = "/users/:id", handler = { m } -> or_throw { result = load { m = m } } },
+#   ] }.otherwise { fallback = fallback }
+#
+# rather than the first route bare and every later one wrapped in
+# `.or_else { b = … }`. First match still wins, so order is still the priority.
+#
+# This is a free function taking a seq, NOT a chain of `.get {}.post {}`
+# methods on Routes. I built the chain first and it does not work: those
+# methods need `with IntoResponse 'r`, and a constraint on an inherent impl
+# method does not get its dictionary — the call silently selects
+# `impl IntoResponse for Str`, hands it a Response and dies in a native
+# (`Expected String for field 's'`). The known `with C 'a` dict-plumbing
+# family again. Here every constraint stays on the free `on_*`/`try_*`
+# functions, where it already works, and this only folds finished Routes.
+## Fold routes into one table; the first to match wins.
+pub let routes: { of: [Routes] } -> Routes = { of } ->
+  seq::fold {
+    xs = of,
+    init = { run = { req } -> None },
+    f = { acc, x } -> or_else { a = acc, b = x },
+  }
+
 ## Try `a`, then `b`. First match wins, so declaration order is the priority.
 ##
 ## Named `or_else`, not `or`: `or` is the infix boolean operator's name and the
@@ -441,6 +468,7 @@ pub let query_decoded = { url: Str } -> query_of { url = url }.from_query {}
 impl Routes where {
   ## Try this table, then `b`. First match wins.
   or_else = { it: 'it, b: Routes } -> or_else { a = it, b = b },
+
   ## Close the table with a fallback, producing the handler `serve` takes.
   otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
     otherwise { routes = it, fallback = fallback },
