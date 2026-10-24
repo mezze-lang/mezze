@@ -1176,6 +1176,18 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                     } else null
                 }
                 collector.abilityConstraints.addAll(methodLevelConstraints)
+                collector.constraints.addAll(
+                    anonymousAbilityArgumentTargets(
+                        functionType.paramType,
+                        argumentResult.type,
+                        functionType.abilityConstraints.mapNotNull { c ->
+                            (c.typeArgs.firstOrNull() as? MezzeType.VarType)
+                                ?.variable?.let { c.abilityName to it }
+                        },
+                        context,
+                        expr.loc,
+                    )
+                )
             }
 
             val (resultType, _, _) = wrapCallResultWithEffects(functionType.returnType, effectRow)
@@ -1218,6 +1230,18 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             )
         )
     )
+
+    (functionResult.type as? MezzeType.FunctionType)?.let { pureFn ->
+        collector.constraints.addAll(
+            anonymousAbilityArgumentTargets(
+                pureFn.paramType,
+                argumentResult.type,
+                functionResult.abilityConstraints.map { it.abilityName to it.typeVar },
+                context,
+                expr.loc,
+            )
+        )
+    }
 
     // #312: when calling an effect operation (functionResult.effects is
     // non-empty — set by tryGenerateEffectOperationCall), the operation's
@@ -1317,3 +1341,89 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     return collector.toResult(returnType)
 }
 
+
+/**
+ * Bidirectional, ARGUMENT side: equalities pinning a bare record literal passed
+ * for a constrained type variable to the declared type its impl is written for.
+ *
+ * A literal passed where the callee's parameter is a CONSTRAINED type variable
+ * has nothing to read its identity from, exactly like a receiver:
+ *
+ *     take: { v: 'v } with Into 'v -> Str
+ *     take { v = { status = 203, url = "", chunks = None } }
+ *
+ * `'v` is solved to the anonymous record, the nominal `impl Into for Resp`
+ * target never matches it, and dispatch fell through to a FIELD's impl —
+ * `Into Str`, off `url: Str`. A silent wrong answer, and the shape a handler
+ * returning a bare Response-shaped literal hits.
+ *
+ * Both callers run this: a call to a pure function and a call to an effectful
+ * one are two separate paths through [generateFunctionCall]. They also hold the
+ * demands differently — the effectful path still has them on the callee's TYPE,
+ * while instantiating a polymorphic callee lifts them off the type into the
+ * result's own `abilityConstraints` — so [demands] is passed in rather than
+ * read off a type here.
+ *
+ * All the narrowing lives in [abilityImplTargetForAnonymousReceiver] — closed
+ * anonymous non-empty record, exactly one in-scope impl of this ability
+ * targeting a declared record with those field names.
+ */
+internal fun ExpressionConstraintGenerator.anonymousAbilityArgumentTargets(
+    paramType: MezzeType,
+    argumentType: MezzeType,
+    demands: List<Pair<String, TypeVar>>,
+    context: ConstraintContext,
+    loc: Loc,
+): List<Constraint.Equality> =
+    demands.mapNotNull { (abilityName, constrainedVar) ->
+        val supplied = concreteTypeSupplying(paramType, argumentType, constrainedVar)
+            ?: return@mapNotNull null
+        val target = abilityImplTargetForAnonymousReceiver(supplied, abilityName, context)
+            ?: return@mapNotNull null
+        Constraint.Equality(
+            left = supplied,
+            right = target,
+            context = "Ability argument literal is its impl's target type",
+            loc = loc,
+        )
+    }
+
+/**
+ * The concrete type the argument supplies for [variable], or null when nothing
+ * does or two places disagree.
+ *
+ * Walks the callee's DECLARED parameter type beside the actual argument type and
+ * reads off the position where the declaration is exactly this variable. A
+ * constraint names a variable, not a field, so there is no other way to say
+ * which part of the argument it is about — and guessing "the first record field"
+ * would break the moment a constrained variable sits inside a container.
+ */
+internal fun concreteTypeSupplying(
+    declared: MezzeType,
+    actual: MezzeType,
+    variable: TypeVar,
+): MezzeType? {
+    val found = mutableListOf<MezzeType>()
+
+    fun walk(d: MezzeType, a: MezzeType) {
+        if (d is MezzeType.VarType && d.variable == variable) {
+            found.add(a)
+            return
+        }
+        when {
+            d is MezzeType.RecordType && a is MezzeType.RecordType ->
+                for ((name, dField) in d.fields) a.fields[name]?.let { walk(dField, it) }
+            d is MezzeType.TypeApplication && a is MezzeType.TypeApplication &&
+                d.args.size == a.args.size ->
+                d.args.zip(a.args).forEach { (dArg, aArg) -> walk(dArg, aArg) }
+            d is MezzeType.FunctionType && a is MezzeType.FunctionType -> {
+                walk(d.paramType, a.paramType)
+                walk(d.returnType, a.returnType)
+            }
+            else -> {}
+        }
+    }
+
+    walk(declared, actual)
+    return found.distinct().singleOrNull()
+}

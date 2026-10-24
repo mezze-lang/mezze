@@ -83,4 +83,46 @@ class AliasImplTargetTest {
         """.trimIndent()
         assertEquals("@dev", eval(src))
     }
+
+    /**
+     * The ARGUMENT position, with a field nothing determines.
+     *
+     * `chunks = None` is `Option 'a`, so adoption — which compares field types
+     * exactly — cannot label the literal, and it reaches `take` as an ANONYMOUS
+     * record. The nominal `impl Into for Resp` target does not match it, and
+     * resolution fell through to a FIELD's impl: `Into Str`, off `url: Str`.
+     * It answered "str" with no error anywhere.
+     *
+     * Two impls are load-bearing. With only `Into Resp`, the sole-candidate
+     * fallback in `tryResolveAbilityOp` answers correctly by accident and the
+     * test proves nothing.
+     *
+     * The minimal form of the HTTP case: a handler returning a bare
+     * Response-shaped literal. See HttpIntoResponseTest.
+     */
+    @Test
+    fun `undetermined literal in the argument position finds its alias impl`() {
+        val src = """
+            ability Into for 'x where { conv: { it: 'x } -> Str }
+            type Resp = { status: Int, url: Str, chunks: Option Str }
+            impl Into for Resp where { conv = { it } -> "resp" }
+            impl Into for Str where { conv = { it } -> "str" }
+            let take: { v: 'v } with Into 'v -> Str = { v } -> v.conv {}
+            take { v = { status = 203, url = "", chunks = None } }
+        """.trimIndent()
+        assertEquals("resp", eval(src))
+    }
+
+    /** The sibling position, fixed earlier: the same literal as a RECEIVER. */
+    @Test
+    fun `undetermined literal as a receiver finds its alias impl`() {
+        val src = """
+            ability Into for 'x where { conv: { it: 'x } -> Str }
+            type Resp = { status: Int, url: Str, chunks: Option Str }
+            impl Into for Resp where { conv = { it } -> "resp" }
+            impl Into for Str where { conv = { it } -> "str" }
+            { status = 203, url = "", chunks = None }.conv {}
+        """.trimIndent()
+        assertEquals("resp", eval(src))
+    }
 }

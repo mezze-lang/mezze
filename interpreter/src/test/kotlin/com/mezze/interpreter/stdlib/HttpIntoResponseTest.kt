@@ -13,8 +13,8 @@ import kotlin.test.assertTrue
  * handler no longer has to spell out a five-field Response record. `route`
  * itself is unchanged and still takes a Response-returning handler.
  *
- * One shape does NOT work and is pinned below: a handler returning a BARE
- * record literal. See [a bare response literal picks the wrong impl].
+ * A handler returning a BARE record literal works too, and took a fix of its
+ * own: see [a bare response literal is recognised as a Response].
  */
 class HttpIntoResponseTest {
 
@@ -153,43 +153,73 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * A handler returning a BARE record literal answers WRONGLY — it crashes
-     * in a native having selected `impl IntoResponse for Str` and handed it the
-     * record.
+     * A handler returning a BARE record literal, with nothing anywhere saying
+     * it is a Response.
      *
-     * This is the known `with C 'a` dictionary-plumbing family, not something
-     * `IntoResponse` introduced: the constraint's type variable is solved to an
-     * anonymous record (the literal leaves `chunks` undetermined, so alias
-     * adoption cannot label it), and impl selection then guesses instead of
-     * either resolving or failing loudly. The same shape with an annotation
-     * works, and is the control below.
+     * This answered WRONGLY for a long time — it selected `impl IntoResponse
+     * for Str` and handed it the record, dying in a native with `Expected
+     * String for field 's'`. The literal leaves `chunks` undetermined
+     * (`Option 'a` against `Option (Iter Bytes)`), so alias adoption — which
+     * compares field types exactly — cannot label it, the constraint's type
+     * variable is solved to an ANONYMOUS record, the nominal `impl … for
+     * Response` target does not match it, and resolution fell through to a
+     * FIELD's impl: `IntoResponse for Str`, off `url: Str`.
      *
-     * Pinned so a fix is NOTICED: this test fails the day dictionary selection
-     * stops guessing, whether it starts answering correctly or starts erroring.
-     * The builders exist precisely so a handler never has to write this literal.
+     * Fixed on the argument side the way the receiver side already was: a
+     * literal passed for a constrained type variable takes its expectation from
+     * the ability's own impl target, matching on field NAMES, since the field
+     * types are exactly what is still open. Unification then pins `chunks` and
+     * adoption labels the record by itself.
+     *
+     * A record matching NO alias is untouched and still fails — `{ name, age }`
+     * has no `IntoResponse` impl and says so.
      */
     @Test
-    fun `a bare response literal picks the wrong impl`() {
+    fun `a bare response literal is recognised as a Response`() {
+        val r = run(
+            """
+            let app = on_get {
+              path = "/lit",
+              handler = { m } -> {
+                status = 203, headers = map::empty {},
+                body = bytes::from_str { s = "bare" }, url = "", chunks = None,
+              },
+            }.otherwise { fallback = fallback }
+            let resp = app { req = get_request { url = "/lit" } }
+            str::concat { l = int::to_str { n = resp.status }, r = body_of { resp = resp } }
+            """.trimIndent()
+        )
+        assertEquals("203bare", r)
+    }
+
+    /**
+     * The other half of the same rule: a record matching NO alias is left alone.
+     *
+     * `{ name, age }` is not a Response and has no `IntoResponse` impl, so it
+     * must be rejected — the argument-side promotion only fires when exactly
+     * one in-scope impl of THIS ability targets a declared record with these
+     * field names. Making a bare Response work must not make everything work.
+     *
+     * Turning a record into JSON and JSON into a response is a conversion the
+     * user asks for, not one the compiler guesses.
+     */
+    @Test
+    fun `a record matching no alias is still rejected`() {
         val outcome = runCatching {
             run(
                 """
                 let app = on_get {
-                  path = "/lit",
-                  handler = { m } -> {
-                    status = 203, headers = map::empty {},
-                    body = bytes::from_str { s = "bare" }, url = "", chunks = None,
-                  },
+                  path = "/who",
+                  handler = { m } -> { name = "Shriyans", age = 31 },
                 }.otherwise { fallback = fallback }
-                app { req = get_request { url = "/lit" } }.status
+                app { req = get_request { url = "/who" } }.status
                 """.trimIndent()
             )
         }
         val error = outcome.exceptionOrNull()
         assertTrue(
             error != null,
-            "a bare literal handler is expected to still fail; got ${outcome.getOrNull()}. " +
-                "If it now answers 203, dictionary selection was fixed — delete this test " +
-                "and keep the annotated control.",
+            "an arbitrary record is not a Response and must be rejected; got ${outcome.getOrNull()}",
         )
     }
 
