@@ -1,10 +1,10 @@
 // Live weather for the "Effects" playground sample — 100% client-side, no server.
 //
-// The sample's code shows a wttr.in URL (`https://wttr.in/<City>?format=3`), but
-// a browser can't reproduce that one-liner: wttr.in only returns the plain text
-// to a curl-style User-Agent, which a browser `fetch` cannot set. So we read the
-// City out of that URL and build the same line from open-meteo, whose JSON API is
-// CORS-enabled and callable straight from the browser. No proxy, no adapter.
+// The sample fetches `https://wttr.in/<City>?format=3`. A browser can't get that
+// text one-liner: wttr.in only returns it to a curl User-Agent, which `fetch`
+// can't send (the custom header fails wttr.in's CORS preflight). But wttr.in's
+// JSON format (`format=j1`) IS served to a browser and is CORS-enabled — same
+// service, same city. So we fetch j1 and render the same one-liner ourselves.
 //
 // Cached per URL (in memory + localStorage, short TTL) so a repeat Run reuses the
 // value instead of re-fetching.
@@ -42,19 +42,18 @@ function store(url: string, v: string): void {
   }
 }
 
-/** WMO weather code → an emoji, in the spirit of wttr.in's one-liner. */
-function icon(code: number): string {
-  if (code === 0) return '☀️'
-  if (code === 1 || code === 2) return '⛅️'
-  if (code === 3) return '☁️'
-  if (code === 45 || code === 48) return '🌫️'
-  if (code >= 51 && code <= 57) return '🌦️'
-  if (code >= 61 && code <= 67) return '🌧️'
-  if (code >= 71 && code <= 77) return '❄️'
-  if (code >= 80 && code <= 82) return '🌦️'
-  if (code === 85 || code === 86) return '❄️'
-  if (code >= 95) return '⛈️'
-  return '🌡️'
+// wttr.in's WWO weather code → emoji (its WEATHER_SYMBOL table), so the rendered
+// line matches what `format=3` would have shown.
+const SYMBOL: Record<string, string> = {
+  '113': '☀️', '116': '⛅️', '119': '☁️', '122': '☁️',
+  '143': '🌫', '248': '🌫', '260': '🌫',
+  '176': '🌦', '263': '🌦', '266': '🌦', '293': '🌦', '296': '🌦', '353': '🌦',
+  '179': '🌧', '182': '🌧', '185': '🌧', '281': '🌧', '284': '🌧',
+  '299': '🌧', '302': '🌧', '305': '🌧', '308': '🌧', '311': '🌧', '314': '🌧',
+  '317': '🌧', '350': '🌧', '356': '🌧', '359': '🌧', '362': '🌧', '365': '🌧', '374': '🌧', '377': '🌧',
+  '200': '⛈', '386': '⛈', '389': '⛈', '392': '⛈',
+  '227': '🌨', '320': '🌨', '323': '🌨', '326': '🌨', '368': '🌨',
+  '230': '❄️', '329': '❄️', '332': '❄️', '335': '❄️', '338': '❄️', '371': '❄️', '395': '❄️',
 }
 
 /** The city from a `…/wttr.in/<City>?…` URL, decoded; null if it isn't one. */
@@ -69,9 +68,9 @@ function cityFromUrl(url: string): string | null {
 }
 
 /**
- * The weather one-liner for [url]'s city (e.g. `Amsterdam: ⛅️ +9°C`), from cache
- * when fresh, else fetched once and cached. Returns null if it can't be built
- * (caller keeps its own fallback). All fetches are plain CORS browser calls.
+ * The weather one-liner for [url]'s city (e.g. `Amsterdam: 🌦 +10°C`), from cache
+ * when fresh, else fetched once from wttr.in's JSON and cached. Returns null if
+ * it can't be built — the caller keeps its own fallback.
  */
 export async function liveWeather(url: string): Promise<string | null> {
   const hit = cached(url)
@@ -81,24 +80,18 @@ export async function liveWeather(url: string): Promise<string | null> {
   if (!city) return null
 
   try {
-    const geo = await fetch(
-      'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=' +
-        encodeURIComponent(city),
-    )
-    if (!geo.ok) return null
-    const loc = (await geo.json())?.results?.[0]
-    if (!loc) return null
+    // Same wttr.in URL, but the JSON format a browser is allowed to read.
+    const j = new URL(url)
+    j.searchParams.set('format', 'j1')
+    const r = await fetch(j.toString())
+    if (!r.ok) return null
+    const cur = (await r.json())?.current_condition?.[0]
+    if (!cur || cur.temp_C == null) return null
 
-    const fc = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}` +
-        '&current=temperature_2m,weather_code',
-    )
-    if (!fc.ok) return null
-    const cur = (await fc.json())?.current
-    if (!cur || typeof cur.temperature_2m !== 'number') return null
-
-    const t = Math.round(cur.temperature_2m)
-    const line = `${city}: ${icon(cur.weather_code)} ${t >= 0 ? '+' : ''}${t}°C`
+    const t = parseInt(cur.temp_C, 10)
+    if (Number.isNaN(t)) return null
+    const emoji = SYMBOL[String(cur.weatherCode)] ?? '🌡️'
+    const line = `${city}: ${emoji} ${t >= 0 ? '+' : ''}${t}°C`
     store(url, line)
     return line
   } catch {
