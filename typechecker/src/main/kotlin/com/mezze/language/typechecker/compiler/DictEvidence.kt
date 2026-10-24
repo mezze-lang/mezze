@@ -570,6 +570,24 @@ internal fun TypedASTCompiler.resolveOpFromObligation(method: String, abilityHas
     }?.opHash
 }
 
+/**
+ * The lambda of the ability-impl operation with this hash, or null.
+ *
+ * `declIndex` does NOT hold impl operations — only top-level declarations — so
+ * reading an op's declared arrow (and with it its `with` constraints) has to go
+ * through the impl table, the same lookup `structuralConstraintTypesFor` does.
+ */
+internal fun TypedASTCompiler.implOpLambdaForHash(opHash: Hash): TypedLambda? {
+    for (impl in abilityImpls) {
+        for ((opName, body) in impl.operations) {
+            if (TypedASTCompiler.computeOpHash(impl.hash, opName) == opHash) {
+                return body as? TypedLambda
+            }
+        }
+    }
+    return null
+}
+
 internal fun TypedASTCompiler.bindImplVarsForOp(opHash: Hash, types: List<MezzeType>): Map<String, MezzeType> {
     val op = abilityOpIndex.values.asSequence().flatten().firstOrNull { it.opHash == opHash } ?: return emptyMap()
     val pattern = op.targetTypes.lastOrNull() ?: return emptyMap()
@@ -577,6 +595,86 @@ internal fun TypedASTCompiler.bindImplVarsForOp(opHash: Hash, types: List<MezzeT
     for (t in types) harvestVarBindings(pattern, substitution.apply(t), bindings)
     return bindings
 }
+/**
+ * Operation name → the type ITS OWN constraint is about, for a callee whose
+ * declared [constraints] these are and whose impl variables are bound by
+ * [varBindings].
+ *
+ * Without this every dict slot is filled by resolving the operation NAME
+ * against one flat list of the callee's constraint types, in order, and the
+ * first impl claiming any of them wins. For
+ *
+ *     impl A for Either 'p 'q  with A 'p, B 'q
+ *
+ * at `Either Str Bool` the list is `[Str, Bool]`, so `fb` found `impl B for
+ * Str` and the WRONG OPERATION RAN — "A-StrB-Str" where "A-StrB-Bool" was
+ * meant. It surfaces as a crash only when the wrong impl's body rejects the
+ * value, which is what `Result Str HttpError` does through http's
+ * IntoResponse/IntoErrorResponse pair; a `Result Str Str` "works" because both
+ * slots hold one type.
+ *
+ * Keyed on WHICH ABILITY declares the operation, not on the dict key's
+ * variable: a key raised inside a match arm names a FRESH variable
+ * (`fb@j654`) rather than the impl's `'q`, and the substitution does not
+ * relate the two, so a name lookup misses exactly where it is needed.
+ *
+ * Declines rather than guesses when one ability would answer twice with
+ * different types (`with Eq 'a, Eq 'b`), leaving the existing path to decide.
+ */
+internal fun TypedASTCompiler.ownTypePerMethod(
+    constraints: List<MezzeType.FunctionAbilityConstraint>,
+    varBindings: Map<String, MezzeType>,
+): Map<String, Pair<MezzeType, Hash?>> {
+    if (constraints.isEmpty()) return emptyMap()
+    val found = HashMap<String, Pair<MezzeType, Hash?>>()
+    val declined = HashSet<String>()
+    for (c in constraints) {
+        val ops = c.abilityHash?.let { abilityOpNames[it] } ?: continue
+        val bound = c.typeArgs.asSequence()
+            .mapNotNull { arg ->
+                (arg as? VarType)?.variable?.name?.let { v -> varBindings[v] ?: varBindings["'$v"] }
+                    ?: substitution.apply(arg).takeIf { it !is VarType && !containsVarType(it) }
+            }
+            .firstOrNull() ?: continue
+        for (op in ops) {
+            val prev = found[op]
+            if (prev != null && prev.first != bound) declined.add(op) else found[op] = bound to c.abilityHash
+        }
+    }
+    declined.forEach { found.remove(it) }
+    return found
+}
+
+/**
+ * The operation to put in a dictionary slot for [dictMethod].
+ *
+ * Order matters and is the whole fix: the type THIS operation's own constraint
+ * is about comes first. The fallbacks resolve against FLATTENED lists, tried in
+ * order, taking the first impl of this operation name that claims ANY element —
+ * which fills one constraint's slot from another's type whenever they differ.
+ * See [ownTypePerMethod] for the measured failure.
+ */
+internal fun TypedASTCompiler.resolveDictOp(
+    dictMethod: String,
+    methodOwnType: Map<String, Pair<MezzeType, Hash?>>,
+    keyAbilityHash: Hash?,
+    constraintTypes: List<MezzeType>,
+    concreteTypes: List<MezzeType>,
+): Hash? {
+    // THIS operation's own constraint first.
+    methodOwnType[dictMethod]?.let { (own, ability) ->
+        resolveOpHashFromConcreteTypes(dictMethod, listOf(own), keyAbilityHash ?: ability)
+            ?.let { return it }
+    }
+    // Then the callee's constraint types, then the argument types — both
+    // flattened, so these are the orderings that can cross. Kept because they
+    // answer every shape where nothing says which constraint a slot is for.
+    if (constraintTypes.isNotEmpty()) {
+        resolveOpHashFromConcreteTypes(dictMethod, constraintTypes)?.let { return it }
+    }
+    return resolveOpHashFromConcreteTypes(dictMethod, concreteTypes)
+}
+
 /** The concrete type a qualified dict key's variable is bound to, or null. */
 internal fun TypedASTCompiler.boundTypeForKey(key: String, bindings: Map<String, MezzeType>): MezzeType? =
     com.mezze.language.ast.MagicParams.typeVarOfKey(key)?.let { v -> bindings[v] ?: bindings["'$v"] }
@@ -1128,7 +1226,17 @@ internal fun TypedASTCompiler.dictEnrichedArg(
         rawFnType?.let { harvestVarBindings(it.paramType, substitution.apply(expr.arg.type), fromArrow) }
         fromArrow
     }
-    return injectDictFields(argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src, calleeVarBindings)
+    // The callee's `with` constraints. `fn.type` carries them for an ordinary
+    // function, but at an ABILITY-OP call site it arrives already instantiated
+    // with none left — and an impl op is exactly where the per-constraint
+    // question matters, so fall back to the op's DECLARED arrow from the impl
+    // table (`declIndex` holds top-level declarations only).
+    val calleeConstraints = rawFnType?.abilityConstraints?.takeIf { it.isNotEmpty() }
+        ?: (implOpLambdaForHash(calleeHash)?.type as? MezzeType.FunctionType)?.abilityConstraints.orEmpty()
+    return injectDictFields(
+        argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src,
+        calleeVarBindings, ownTypePerMethod(calleeConstraints, calleeVarBindings),
+    )
 }
 
 /**

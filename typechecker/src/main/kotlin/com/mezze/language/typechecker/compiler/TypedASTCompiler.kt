@@ -2275,6 +2275,7 @@ class TypedASTCompiler(
         // Callee type var → type at this site (instance head / declared arrow
         // unified against the actuals); serves the per-var dict slots.
         varBindings: Map<String, MezzeType> = emptyMap(),
+        methodOwnType: Map<String, Pair<MezzeType, Hash?>> = emptyMap(),  // ownTypePerMethod
     ): NodeIR {
         // Collect concrete types from the argument record as fallback. Refresh
         // each field's type against the final substitution and, for a nullary
@@ -2385,13 +2386,9 @@ class TypedASTCompiler(
                 }
             }
 
-            // 2. Resolve from concrete types
-            val opHash = if (constraintTypes.isNotEmpty()) {
-                resolveOpHashFromConcreteTypes(dictMethod, constraintTypes)
-                    ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypes)
-            } else {
-                resolveOpHashFromConcreteTypes(dictMethod, concreteTypes)
-            }
+            // 2. From concrete types; see `resolveDictOp` for the order.
+            val opHash = resolveDictOp(
+                dictMethod, methodOwnType, keyAbilityHash, constraintTypes, concreteTypes)
             if (opHash != null) {
                 // refToDictedOp wraps the resolved op when IT needs its own dicts —
                 // e.g. `sort { xs = [[P]] }`: sort's Ord dict is the seq Ord op

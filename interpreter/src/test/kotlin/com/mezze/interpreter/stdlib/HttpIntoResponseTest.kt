@@ -25,7 +25,7 @@ class HttpIntoResponseTest {
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, fallible, catching, Matched, Routes, routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, catching, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -722,18 +722,17 @@ class HttpIntoResponseTest {
 
     /**
      * The ordinary error path: failure is a VALUE, the handler answers a
-     * Result, and `fallible` converts it — `Ok` through IntoResponse, `Err`
-     * through IntoErrorResponse. No Exception anywhere.
+     * Result, and the route converts it — `Ok` through IntoResponse, `Err`
+     * through IntoErrorResponse. No Exception, and no adapter.
      */
     @Test
-    fun `fallible answers both arms of a Result`() {
+    fun `a Result handler answers both arms`() {
         val r = run(
             """
             $resultRoutes
             let app = group { prefix = "" }
-              .get { path = "/u/:id", handler = fallible {
-                handler = { m } -> load { id = m.param_or { name = "id", default = "?" } },
-              } }
+              .get { path = "/u/:id",
+                     handler = { m } -> load { id = m.param_or { name = "id", default = "?" } } }
               .otherwise { fallback = fallback }
             let ok = app { req = get_request { url = "/u/7" } }
             let err = app { req = get_request { url = "/u/9" } }
@@ -747,16 +746,18 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * The error's own type picks the status, so one adapter serves every error
-     * type — and THIS is the case the generic path cannot do (below).
+     * The error's OWN type picks the status, with the Ok and Err types
+     * DIFFERING — which is exactly what used to die in a native, one dictionary
+     * slot being filled from the sibling constraint's type. The minimal shape
+     * of that bug is DictConstraintCrossingTest.
      */
     @Test
-    fun `fallible gives a distinct error type its own status`() {
+    fun `a distinct error type picks its own status`() {
         val r = run(
             """
             $resultRoutes
             let app = group { prefix = "" }
-              .get { path = "/gw", handler = fallible { handler = { m } -> upstream { id = "x" } } }
+              .get { path = "/gw", handler = { m } -> upstream { id = "x" } }
               .otherwise { fallback = fallback }
             app { req = get_request { url = "/gw" } }.status
             """.trimIndent()
@@ -765,20 +766,14 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * A `Result Str Str` answers correctly with no adapter — but BY
-     * COINCIDENCE, which is why this test exists next to the one below rather
-     * than as a feature. `impl IntoResponse for Result` needs nested
-     * dictionaries (IntoResponse for the Ok, IntoErrorResponse for the Err) and
-     * the generic `with IntoResponse 'r` does not deliver them; one `Str`
-     * dictionary simply fits both slots here.
-     *
-     * Change the error type and it dies — see below. I claimed "returning a
-     * Result never works" (wrong), then nearly shipped "a Result needs no
-     * adapter" (also wrong). The truth is this narrow, so both halves are
-     * pinned.
+     * A `Result Str Str` through the free verbs. This USED to be the only
+     * Result that worked, and only by coincidence: both slots holding one type
+     * hid the crossing, so the wrong dictionary was indistinguishable from the
+     * right one. Kept beside the distinct-error case below so the pair states
+     * what is now true of both.
      */
     @Test
-    fun `a same-typed Result answers without an adapter, by coincidence`() {
+    fun `a same-typed Result answers without an adapter`() {
         val r = run(
             """
             $resultRoutes
@@ -792,23 +787,21 @@ class HttpIntoResponseTest {
         assertEquals(500L, r)
     }
 
+    /**
+     * This test pinned the bug, asserting that a distinct-error Result mis-
+     * dispatched. It is now its regression test, asserting the opposite.
+     */
     @Test
-    fun `a distinct-error Result does NOT survive the generic path`() {
-        val outcome = runCatching {
-            run(
-                """
-                $resultRoutes
-                let app = on_get { path = "/gw", handler = { m } -> upstream { id = "x" } }
-                  .otherwise { fallback = fallback }
-                app { req = get_request { url = "/gw" } }.status
-                """.trimIndent()
-            )
-        }
-        assertTrue(
-            outcome.exceptionOrNull() != null,
-            "expected the generic path to mis-dispatch; got ${outcome.getOrNull()}. " +
-                "If this now answers 504, `fallible` no longer needs to name the Result.",
+    fun `a distinct-error Result survives the free verbs too`() {
+        val r = run(
+            """
+            $resultRoutes
+            let app = on_get { path = "/gw", handler = { m } -> upstream { id = "x" } }
+              .otherwise { fallback = fallback }
+            app { req = get_request { url = "/gw" } }.status
+            """.trimIndent()
         )
+        assertEquals(504L, r)
     }
 
     // ---- wrapper-free handlers ------------------------------------------
@@ -849,40 +842,27 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * The one shape the verb cannot take, and why `fallible` still exists: a
-     * Result whose Ok and Err types DIFFER needs the nested dictionaries the
-     * generic constraint does not deliver.
+     * The chain's regression test for the crossing: a `Result Str HttpError`
+     * route sitting beside one answering a Str, nothing wrapping anything.
+     * This shape needed an adapter until the dictionary fix.
      */
     @Test
-    fun `a distinct-error Result needs fallible in a chain`() {
-        val broken = runCatching {
-            run(
-                """
-                let upstream: { id: Str } -> Result Str HttpError = { id } ->
-                  Err { error = Timeout { url = "http://u/x", ms = 50 } }
-                let app = group { prefix = "" }
-                  .get { path = "/gw", handler = { m } -> upstream { id = "x" } }
-                  .otherwise { fallback = fallback }
-                app { req = get_request { url = "/gw" } }.status
-                """.trimIndent()
-            )
-        }
-        assertTrue(
-            broken.exceptionOrNull() != null,
-            "expected the nested-dictionary failure; got ${broken.getOrNull()}",
-        )
-
-        val fixed = run(
+    fun `a distinct-error Result works in a mixed chain`() {
+        val r = run(
             """
             let upstream: { id: Str } -> Result Str HttpError = { id } ->
               Err { error = Timeout { url = "http://u/x", ms = 50 } }
             let app = group { prefix = "" }
-              .get { path = "/gw", handler = fallible { handler = { m } -> upstream { id = "x" } } }
+              .get { path = "/ok", handler = { m } -> "fine" }
+              .get { path = "/gw", handler = { m } -> upstream { id = "x" } }
               .otherwise { fallback = fallback }
-            app { req = get_request { url = "/gw" } }.status
+            str::concat {
+              l = body_of { resp = app { req = get_request { url = "/ok" } } },
+              r = int::to_str { n = app { req = get_request { url = "/gw" } }.status },
+            }
             """.trimIndent()
         )
-        assertEquals(504L, fixed, "fallible names the Result, so its dictionaries arrive")
+        assertEquals("fine504", r)
     }
 
     // ---- route groups ---------------------------------------------------
