@@ -191,21 +191,33 @@ pub let make_full_request
     }
 
 ## Add a single header to a request.
-pub let with_header: { req: Request, key: Str, value: Str } -> Request = { req, key, value } ->
+## Set a header. The name is matched case-insensitively.
+# The map is lowercase-keyed, and this is one of the two places that is made
+# true. The server lowercases every inbound name before a handler sees it, so a
+# handler reads `x-trace` in production; `with_header { k = "X-Trace" }` used to
+# put a second, differently-keyed entry in the same map and the handler found
+# nothing. Lowercasing an outgoing name is also correct: HTTP/1.1 names are
+# case-insensitive and HTTP/2 requires them lowercase.
+pub let with_header: { req: Request, k: Str, v: Str } -> Request = { req, k, v } ->
   {
     method = req.method,
     url = req.url,
-    headers = map::insert { m = req.headers, k = key, v = value },
+    headers = map::insert { m = req.headers, k = str::to_lower { s = k }, v = v },
     body = req.body,
     timeout_ms = req.timeout_ms,
   }
 
-## Merge additional headers into a request.
+## Merge headers into a request. Names are matched case-insensitively.
+##
+##   req.with_headers { headers = map::of { of = [{ k = "x-trace", v = "abc" }] } }
 pub let with_headers: { req: Request, headers: Map Str Str } -> Request = { req, headers } ->
   {
     method = req.method,
     url = req.url,
-    headers = map::merge { m1 = req.headers, m2 = headers },
+    headers = map::merge {
+      m1 = req.headers,
+      m2 = map::map_keys { m = headers, f = { val } -> str::to_lower { s = val } },
+    },
     body = req.body,
     timeout_ms = req.timeout_ms,
   }
@@ -232,11 +244,11 @@ pub let with_timeout: { req: Request, ms: Int } -> Request = { req, ms } ->
 
 ## Set the Content-Type header.
 pub let with_content_type: { req: Request, content_type: Str } -> Request = { req, content_type } ->
-  with_header { req = req, key = "Content-Type", value = content_type }
+  with_header { req = req, k = "Content-Type", v = content_type }
 
 ## Set the Accept header.
 pub let with_accept: { req: Request, accept: Str } -> Request = { req, accept } ->
-  with_header { req = req, key = "Accept", value = accept }
+  with_header { req = req, k = "Accept", v = accept }
 
 ## An authentication scheme. `with_auth` renders it to the right header;
 ## the `with_bearer` / `with_basic` / `with_api_key` shortcuts build the
@@ -251,22 +263,22 @@ pub type Auth =
 ## `Bearer` and `Basic` set `Authorization`; `ApiKey` sets a custom header
 ## (e.g. `X-API-Key`). `Basic` base64-encodes `username:password` via the
 ## bytes codec.
-pub let auth_header: { auth: Auth } -> { key: Str, value: Str } = { auth } ->
+pub let auth_header: { auth: Auth } -> { k: Str, v: Str } = { auth } ->
   match auth is
     Bearer { token } ->
-      { key = "Authorization", value = str::concat { l = "Bearer ", r = token } }
+      { k = "Authorization", v = str::concat { l = "Bearer ", r = token } }
     Basic { username, password } -> do
       let credentials =
         str::concat { l = username, r = str::concat { l = ":", r = password } }
       let encoded = bytes::to_base64 { b = bytes::from_str { s = credentials } }
-      { key = "Authorization", value = str::concat { l = "Basic ", r = encoded } }
+      { k = "Authorization", v = str::concat { l = "Basic ", r = encoded } }
     ApiKey { name, val } ->
-      { key = name, value = val }
+      { k = name, v = val }
 
 ## Set the request's authentication from a typed `Auth`.
 pub let with_auth: { req: Request, auth: Auth } -> Request = { req, auth } -> do
   let h = auth_header { auth = auth }
-  with_header { req = req, key = h.key, value = h.value }
+  with_header { req = req, k = h.k, v = h.v }
 
 ## Shortcut: Bearer-token auth.
 pub let with_bearer: { req: Request, token: Str } -> Request = { req, token } ->
@@ -339,6 +351,11 @@ pub let is_server_error: { resp: Response } -> Bool = { resp } ->
 ## Get a response header by name (case-insensitive).
 pub let get_header: { resp: Response, name: Str } -> Option Str = { resp, name } ->
   map::get { m = resp.headers, k = str::to_lower { s = name } }
+
+## Get a request header by name (case-insensitive).
+# The counterpart to `get_header`: a Request could only be written to, not read.
+pub let request_header: { req: Request, name: Str } -> Option Str = { req, name } ->
+  map::get { m = req.headers, k = str::to_lower { s = name } }
 
 ## Get the Content-Type header.
 pub let get_content_type: { resp: Response } -> Option Str = { resp } ->
@@ -456,8 +473,9 @@ impl Request where {
       body = it.body,
       timeout_ms = it.timeout_ms,
     },
-  with_header = { it: 'it, key: Str, value: Str } ->
-    with_header { req = it, key = key, value = value },
+  with_header = { it: 'it, k: Str, v: Str } -> with_header { req = it, k = k, v = v },
+  ## Read a header, case-insensitively.
+  header = { it: 'it, name: Str } -> request_header { req = it, name = name },
   with_headers = { it: 'it, headers: Map Str Str } -> with_headers { req = it, headers = headers },
   with_body = { it: 'it, val: Bytes } -> with_body { req = it, body = val },
   with_text = { it: 'it, val: Str } -> with_text { req = it, val = val },
@@ -472,6 +490,13 @@ impl Request where {
   with_accept = { it: 'it, val: Str } -> with_accept { req = it, accept = val },
   ## Terminal — perform the request via the ambient HttpClient handler.
   send = { it } -> HttpClient.request { req = it, config = default_http_config },
+  ## Terminal for a handler rather than a client — apply this request to it.
+  ##
+  ##   post_request { url = "/users" }.with_text { val = "ada" }.to { app = app }
+  # The seam MockHttpServer leaves open: it binds no socket and does not call
+  # the handler, because a handler needs no server to exercise. The row is the
+  # handler's own, so whatever it performs escapes to the caller, as via serve.
+  to = { it: 'it, app: { req: Request } -> Response <...> } -> app { req = it },
   ## Terminal with config override.
   send_with = { it: 'it, config: HttpConfig } -> HttpClient.request { req = it, config = config },
 
@@ -518,8 +543,7 @@ impl Response where {
   ## Set the status, keeping every other field.
   with_status = { it: 'it, code: Int } -> resp_with_status { resp = it, code = code },
   ## Set one header, lowercasing its key.
-  with_header = { it: 'it, key: Str, value: Str } ->
-    resp_with_header { resp = it, key = key, value = value },
+  with_header = { it: 'it, k: Str, v: Str } -> resp_with_header { resp = it, k = k, v = v },
   ## Merge headers in; `headers` wins on a key both carry.
   with_headers = { it: 'it, headers: Map Str Str } ->
     resp_with_headers { resp = it, headers = headers },
@@ -726,10 +750,10 @@ impl Client where {
       default_headers = it.default_headers,
       default_timeout_ms = it.default_timeout_ms,
     },
-  with_default_header = { it: 'it, key: Str, value: Str } ->
+  with_default_header = { it: 'it, k: Str, v: Str } ->
     {
       base_url = it.base_url,
-      default_headers = map::insert { m = it.default_headers, k = key, v = value },
+      default_headers = map::insert { m = it.default_headers, k = str::to_lower { s = k }, v = v },
       default_timeout_ms = it.default_timeout_ms,
     },
   with_default_headers = { it: 'it, headers: Map Str Str } ->
@@ -751,7 +775,7 @@ impl Client where {
     let h = auth_header { auth = auth }
     {
       base_url = it.base_url,
-      default_headers = map::insert { m = it.default_headers, k = h.key, v = h.value },
+      default_headers = map::insert { m = it.default_headers, k = h.k, v = h.v },
       default_timeout_ms = it.default_timeout_ms,
     },
   ## Verb shortcuts — return a Request pre-filled with the client's defaults.
@@ -1039,10 +1063,10 @@ let resp_with_status: { resp: Response, code: Int } -> Response = { resp, code }
     chunks = resp.chunks,
   }
 
-let resp_with_header: { resp: Response, key: Str, value: Str } -> Response = { resp, key, value } ->
+let resp_with_header: { resp: Response, k: Str, v: Str } -> Response = { resp, k, v } ->
   {
     status = resp.status,
-    headers = map::insert { m = resp.headers, k = str::to_lower { s = key }, v = value },
+    headers = map::insert { m = resp.headers, k = str::to_lower { s = k }, v = v },
     body = resp.body,
     url = resp.url,
     chunks = resp.chunks,
@@ -1084,7 +1108,7 @@ let resp_with_json: { resp: Response, val: Json } -> Response = { resp, val } ->
     resp = resp,
     body = bytes::from_str { s = to_str { json = val } },
   }
-  resp_with_header { resp = bodied, key = "Content-Type", value = "application/json" }
+  resp_with_header { resp = bodied, k = "Content-Type", v = "application/json" }
 
 # The statuses a handler reaches for by name. Free functions, not methods:
 # there is no receiver to chain from when you are creating the response, and
@@ -1306,18 +1330,17 @@ impl MockRule where {
       rule = it,
       resp = { status = r.status, headers = r.headers, body = body, url = r.url, chunks = None },
     },
-  ## Add one response header, keeping everything else.
-  # The key is lowercased, like every other Response header setter — a mocked
-  # response has to answer get_header the same way a real one does, or a test
-  # passes against a header the production reader cannot see.
   ## Set a response header on the rule.
-  header = { it: 'it, name: Str, value: Str } -> do
+  # The name is lowercased, like every other Response header setter: a mocked
+  # response has to answer get_header the way a real one does, or a test passes
+  # against a header the production reader cannot see.
+  header = { it: 'it, k: Str, v: Str } -> do
     let r = mock_response_of { rule = it }
     mock_with_response {
       rule = it,
       resp = {
         status = r.status,
-        headers = map::insert { m = r.headers, k = str::to_lower { s = name }, v = value },
+        headers = map::insert { m = r.headers, k = str::to_lower { s = k }, v = v },
         body = r.body, url = r.url, chunks = None,
       },
     },

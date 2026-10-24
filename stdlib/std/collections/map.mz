@@ -64,8 +64,24 @@ pub let remove_with_evidence:
   { m: Map 'k 'v, k: 'k, hash: { it: 'k } -> Int, eq: { it: 'k, r: 'k } -> Bool } -> Map 'k 'v =
   { m, k, hash, eq } -> __native_map_remove_with_evidence { m = m, k = k, hash = hash, eq = eq }
 
+pub let of_with_evidence:
+  { of: [{ k: 'k, v: 'v }], hash: { it: 'k } -> Int, eq: { it: 'k, r: 'k } -> Bool } -> Map 'k 'v =
+  { of, hash, eq } -> __native_map_from_seq_with_evidence { xs = of, hash = hash, eq = eq }
+
 pub let insert: { m: Map 'k 'v, k: 'k, v: 'v } with Eq 'k, Hash 'k -> Map 'k 'v = { m, k, v } ->
   __native_map_insert { m = m, k = k, v = v }
+
+## A map from its entries — the inverse of `to_seq`.
+##
+##   map::of { of = [{ k = "a", v = 1 }, { k = "b", v = 2 }] }
+#
+# A map had NO literal form: building one meant nesting `insert` inside
+# `insert` inside `empty`, once per entry. The native was already here, added
+# so a codec could decode INTO a map, and simply was not exposed.
+# A later entry wins over an earlier one with the same key, as repeated
+# `insert` would.
+pub let of: { of: [{ k: 'k, v: 'v }] } with Eq 'k, Hash 'k -> Map 'k 'v = { of } ->
+  __native_map_from_seq { xs = of }
 
 ## Returns the value for the given key, or None.
 pub let get: { m: Map 'k 'v, k: 'k } with Eq 'k, Hash 'k -> Option 'v = { m, k } -> __native_map_get { m = m, k = k }

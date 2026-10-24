@@ -18,6 +18,71 @@ class MapModuleTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
+    // ===== Construction from entries =====
+
+    /**
+     * A map had no literal form: building one meant nesting `insert` inside
+     * `insert` inside `empty`, once per entry, which is why every caller that
+     * wanted to hand over a few pairs wrote a paragraph. `__native_map_from_seq`
+     * was already there — added so a codec could decode INTO a map — and simply
+     * was not exposed.
+     */
+    @Test
+    fun `test map of builds from entries`() {
+        val result = eval("""
+            use std::collections::map
+            let m = map::of { of = [{ k = "a", v = 1 }, { k = "b", v = 2 }] }
+            match map::get { m = m, k = "b" } is
+              Some { val } -> val
+              None -> 0
+        """)
+        assertEquals(2L, result)
+    }
+
+    /** Exactly the entries given, and no others. */
+    @Test
+    fun `test map of has only the entries given`() {
+        val result = eval("""
+            use std::collections::map
+            map::size { m = map::of { of = [{ k = "a", v = 1 }, { k = "b", v = 2 }] } }
+        """)
+        assertEquals(2L, result)
+    }
+
+    /** `of` is the inverse of `to_seq`, so a round trip is the same map. */
+    @Test
+    fun `test map of round trips through to_seq`() {
+        val result = eval("""
+            use std::collections::map
+            let m = map::of { of = [{ k = "a", v = 1 }, { k = "b", v = 2 }] }
+            map::size { m = map::of { of = map::to_seq { m = m } } }
+        """)
+        assertEquals(2L, result)
+    }
+
+    /** A repeated key takes the later entry, as repeated `insert` would. */
+    @Test
+    fun `test map of takes the last of a repeated key`() {
+        val result = eval("""
+            use std::collections::map
+            let m = map::of { of = [{ k = "a", v = 1 }, { k = "a", v = 9 }] }
+            match map::get { m = m, k = "a" } is
+              Some { val } -> val
+              None -> 0
+        """)
+        assertEquals(9L, result)
+    }
+
+    /** No entries is the empty map, not a failure. */
+    @Test
+    fun `test map of with no entries is empty`() {
+        val result = eval("""
+            use std::collections::map
+            map::is_empty { m = map::of { of = [] } }
+        """)
+        assertEquals(true, result)
+    }
+
     // ===== Basic Operations =====
 
     @Test

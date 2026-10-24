@@ -31,7 +31,7 @@
 ## Effects other than async always escape through `serve` to whoever installed
 ## the server.
 
-use std::effects::http::{ Method, Get, Request, Response }
+use std::effects::http::{ Method, Get, Post, Put, Delete, Patch, Head, Options, Request, Response }
 use std::collections::map
 use std::str
 
@@ -73,6 +73,24 @@ pub let incoming: { method: Method, url: Str } -> Request = { method, url } -> {
 ## `incoming` for a GET, which is most of what tests want.
 pub let get_request: { url: Str } -> Request = { url } ->
   incoming { method = Get, url = url }
+
+## `incoming` for each remaining method.
+# Each returns a plain Request, so Request's own chain carries on from here
+# (`.with_text {}`, `.with_header {}`, `.with_json {}`) and `.to {}` applies the
+# result to a handler — one left-to-right line instead of a call nested inside a
+# call inside a record.
+pub let post_request: { url: Str } -> Request = { url } ->
+  incoming { method = Post, url = url }
+pub let put_request: { url: Str } -> Request = { url } ->
+  incoming { method = Put, url = url }
+pub let delete_request: { url: Str } -> Request = { url } ->
+  incoming { method = Delete, url = url }
+pub let patch_request: { url: Str } -> Request = { url } ->
+  incoming { method = Patch, url = url }
+pub let head_request: { url: Str } -> Request = { url } ->
+  incoming { method = Head, url = url }
+pub let options_request: { url: Str } -> Request = { url } ->
+  incoming { method = Options, url = url }
 
 ## ── A server that binds a socket ────────────────────────────────────────────
 

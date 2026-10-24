@@ -1166,7 +1166,7 @@ class HttpIntoResponseTest {
     fun `a chained header is readable`() {
         val r = run(
             """
-            let resp = response_ok_text { body = "x" }.with_header { key = "X-Trace", value = "abc" }
+            let resp = response_ok_text { body = "x" }.with_header { k = "X-Trace", v = "abc" }
             header_of { resp = resp, name = "x-trace" }
             """.trimIndent()
         )
@@ -1177,7 +1177,7 @@ class HttpIntoResponseTest {
     fun `merged headers are readable whatever case they were given in`() {
         val r = run(
             """
-            let extra = map::insert { m = map::empty {}, k = "X-Rate-Limit", v = "60" }
+            let extra = map::of { of = [{ k = "X-Rate-Limit", v = "60" }] }
             let resp = response_ok_text { body = "x" }.with_headers { headers = extra }
             header_of { resp = resp, name = "x-rate-limit" }
             """.trimIndent()

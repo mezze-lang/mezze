@@ -196,7 +196,7 @@ class HttpMockChainTest {
             run(
                 """
                 perform MockHttpClient { rules = [
-                  mock { url = "**" }.header { name = "Content-Type", value = "text/csv" }.text { body = "a,b" },
+                  mock { url = "**" }.header { k = "Content-Type", v = "text/csv" }.text { body = "a,b" },
                 ] } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> match val.header { name = "content-type" } is

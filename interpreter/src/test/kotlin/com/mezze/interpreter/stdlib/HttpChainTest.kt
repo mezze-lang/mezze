@@ -51,7 +51,7 @@ class HttpChainTest {
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/api" }
                 .with_method { val = Get }
-                .with_header { key = "X-Trace", value = "abc" }
+                .with_header { k = "X-Trace", v = "abc" }
                 .send {}
               match resp is
                 Ok { val } -> val.status
