@@ -342,11 +342,11 @@ class HttpRouterTest {
         // at all, because the router's `pub use` carries the instance.
         val r = MezzeTestHelper.run("""
             $head
-            use std::codec::core::{ DecodeError }
+            use std::effects::http_router::{ BadInput }
             use std::int
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
-                let q: Result { q: Str, page: Int } DecodeError = m.query_as {}
+                let q: Result { q: Str, page: Int } BadInput = m.query_as {}
                 match q is
                   Ok { val } -> reply { code = 200, text = "$(val.q)/$(int::to_str { n = val.page })", url = m.req.url }
                   Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url } },
@@ -361,10 +361,10 @@ class HttpRouterTest {
     fun `a query that does not fit the asked-for type is a 400, not a crash`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::codec::core::{ DecodeError }
+            use std::effects::http_router::{ BadInput }
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
-                let q: Result { page: Int } DecodeError = m.query_as {}
+                let q: Result { page: Int } BadInput = m.query_as {}
                 match q is
                   Ok { val } -> reply { code = 200, text = "decoded", url = m.req.url }
                   Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url } },

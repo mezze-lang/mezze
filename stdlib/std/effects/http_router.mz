@@ -17,7 +17,7 @@
 ## it. `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
 ## receives the bindings as a `Map Str Str` alongside the request.
 
-use std::effects::http::{ Method, Request, Response, IntoResponse, not_found }
+use std::effects::http::{ Method, Request, Response, IntoResponse, IntoErrorResponse, not_found, response_status }
 use std::effects::exception::{ ExceptionToResult }
 use std::collections::map
 use std::collections::iter
@@ -26,6 +26,7 @@ use std::collections::bytes
 use std::str
 use std::codec::url::{ url_decode_component }
 pub use std::codec::query::{ FromQuery }
+use std::codec::core::{ DecodeError }
 ## `path_of` does index arithmetic, and `+` on Int needs int's `NumAdd` impl in
 ## scope — an impl arrives with its module, not with the prelude.
 use std::int
@@ -268,10 +269,10 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 # — one dictionary slot was filled from a sibling constraint's type. Fixed in
 # the compiler's dict evidence, not worked around.)
 #
-# ONE shape the verbs cannot take, because the reason is the effect system
-# rather than a gap: a handler that THROWS a Response. A handler that never
-# throws does not satisfy a row carrying Exception, and one that throws does
-# not satisfy a pure signature, so `catching` adapts it.
+# A handler that THROWS a Response needs adapting: one that never throws does
+# not satisfy a row carrying Exception, and one that throws does not satisfy a
+# pure signature. The verbs apply this adapter themselves, so the shape they
+# "cannot take" is one a caller never has to think about.
 #
 # It is a free function because it carries an ability constraint, and a
 # constraint on an inherent impl method only works for an IMPORTED impl (a
@@ -290,6 +291,11 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 # the throw site instead: `throw { error = e.into_error_response {} }`, or let
 # `or_throw` do it for a Result.
 ## Adapt a handler that may THROW a Response into one answering a Response.
+##
+## Every verb already runs its handler through this, so a route never needs to
+## say it: `handler = { m } -> …` may throw. Kept public for a handler built
+## outside a route table, and because a handler already wrapped is simply
+## caught twice, which is harmless.
 pub let catching
   : { handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
   with IntoResponse 'r
@@ -404,9 +410,7 @@ impl RouteGroup where {
       g = it,
       method = Get,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a POST under this group's prefix, answering whatever the handler returns.
   post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -414,9 +418,7 @@ impl RouteGroup where {
       g = it,
       method = Post,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a PUT under this group's prefix, answering whatever the handler returns.
   put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -424,9 +426,7 @@ impl RouteGroup where {
       g = it,
       method = Put,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a PATCH under this group's prefix, answering whatever the handler returns.
   patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -434,9 +434,7 @@ impl RouteGroup where {
       g = it,
       method = Patch,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a DELETE under this group's prefix, answering whatever the handler returns.
   delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -444,9 +442,7 @@ impl RouteGroup where {
       g = it,
       method = Delete,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a HEAD under this group's prefix, answering whatever the handler returns.
   head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -454,9 +450,7 @@ impl RouteGroup where {
       g = it,
       method = Head,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append an OPTIONS under this group's prefix, answering whatever the handler returns.
   options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -464,9 +458,7 @@ impl RouteGroup where {
       g = it,
       method = Options,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
 
   # The child's entries already carry the child's own prefix, so one more
@@ -616,7 +608,75 @@ pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
 ## `FromQuery` is re-exported from this module, and a `pub use` carries the
 ## instance as well as the name — so importing anything from here is enough to
 ## call this.
-pub let query_decoded = { url: Str } -> query_of { url = url }.from_query {}
+## What the request carried where something else was wanted.
+##
+## Decoding a path parameter or a query is the one failure a handler meets
+## without asking for it: it reads what the caller sent, and what the caller
+## sent is whatever they liked.
+pub type BadInput = {
+  at: [Str],
+  message: Str,
+  expected: Str,
+  found: Option Str,
+}
+
+# The codec's DecodeError says the same thing, and an impl for it would be the
+# obvious move — but it reaches this module under a `use … as` alias, and an
+# impl whose target arrived aliased registers under the LOCAL spelling and
+# never matches the declaration. So the router states its own input error,
+# which is better anyway: it knows the parameter's NAME, which a scalar
+# decode's empty path does not.
+let bad_input_of: { e: DecodeError, at: [Str] } -> BadInput = { e, at } -> {
+  at = if seq::is_empty { xs = e.path } then at else e.path,
+  message = e.message,
+  expected = e.expected,
+  found = e.found,
+}
+
+## 400, naming where, what was wanted and what arrived.
+# A 400 whose body is only "bad request" sends the caller to read the route's
+# source.
+impl IntoErrorResponse for BadInput where {
+  into_error_response = { it } -> do
+    let where_ = if seq::is_empty { xs = it.at } then ""
+      else str::concat { l = str::join { strings = it.at, separator = "." }, r = ": " }
+    let got = match it.found is
+      Some { val } -> str::concat { l = ", found ", r = val }
+      None -> ""
+    response_status {
+      code = 400,
+      body = str::concat {
+        l = where_,
+        r = str::concat { l = str::concat { l = "expected ", r = it.expected }, r = got },
+      },
+    },
+}
+
+pub let query_decoded = { url: Str } ->
+  match query_of { url = url }.from_query {} is
+    Ok { val } -> Ok { val = val }
+    Err { error = e } -> Err { error = bad_input_of { e = e, at = [] } }
+
+## One value, decoded into whatever the use site asks for.
+#
+# A path parameter is a Str, so a handler wanting `/users/:id` as an Int parsed
+# it by hand. No new ability is needed for that: QueryC already decodes a
+# SCALAR, and a scalar is a pair whose key is relative to nothing — `k = ""`.
+# So one value is a one-pair list, and the existing
+# `impl FromQuery 'a for [{ k: Str, v: Str }]` does the rest, which is why this
+# gets Int, Bool, a newtype and anything else with a QueryC decoder for free.
+pub let one_decoded = { v: Str, at: [Str] } ->
+  match [{ k = "", v = v }].from_query {} is
+    Ok { val } -> Ok { val = val }
+    Err { error = e } -> Err { error = bad_input_of { e = e, at = at } }
+
+## The error for a name the route never bound.
+let no_such_param: { name: Str } -> BadInput = { name } -> {
+  at = [name],
+  message = "the route bound no parameter by this name",
+  expected = "a path parameter the pattern declares",
+  found = None,
+}
 
 ## ── Dot-chaining surface ──────────────────────────────────────────────────
 ##
@@ -654,6 +714,16 @@ impl Matched where {
   query_all = { it: 'it, name: Str } -> query_all { url = it.req.url, name = name },
   ## The query, decoded into whatever the use site asks for.
   query_as = { it } -> query_decoded { url = it.req.url },
+  ## A bound path parameter, decoded into whatever the use site asks for.
+  ##
+  ##   let show = { id: Int } -> …
+  ##   .get { path = "/users/:id", handler = { m } -> match m.param_as { name = "id" } is
+  ##     Ok { val } -> show { id = val }
+  ##     Err { error = _ } -> bad_request { body = "id must be a number" } }
+  param_as = { it: 'it, name: Str } -> match map::get { m = it.params, k = name } is
+    Some { val } -> one_decoded { v = val, at = [name] }
+    None -> Err { error = no_such_param { name = name } },
+
   ## A bound path parameter, or `default` when the pattern bound none.
   ##
   ## Most handlers want this: a `:name` in the pattern always binds, so the
