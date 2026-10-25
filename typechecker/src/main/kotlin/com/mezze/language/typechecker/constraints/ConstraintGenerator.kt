@@ -205,7 +205,64 @@ class ConstraintGenerator(
 
                     results[getBindingName(item)] = resultWithDuplicates
 
-                    val allBindingConstraints = result.constraints + result.abilityConstraints + result.associatedTypeConstraints + patternResult.constraints
+                    // A RECURSIVE binding's self-reference IS this binding. Say so.
+                    //
+                    // An unannotated `let f = { … }` is pre-registered as a bare
+                    // monomorphic placeholder so its own body can mention it. A
+                    // self-call then binds that placeholder WHOLE —
+                    // `'P ~ ({ xs: [Int] } -> 'c)` — while the lambda being inferred
+                    // has its own result variable, and nothing relates the two. So
+                    // the self-call's result never pins:
+                    //
+                    //     let length = { xs: [Int] } ->
+                    //       match xs is
+                    //         [] -> 0
+                    //         [_, ...tail] -> 1 + length { xs = tail }
+                    //
+                    // inferred as `{ xs: [Int] } with NumAdd 'a Int having 'out = Int
+                    // -> Int` — a constraint on a variable the signature does not
+                    // mention, carried on a plain recursive function and visible in
+                    // its hover. With this equation `'c` unifies with the result,
+                    // `NumAdd Int Int` discharges, and the signature comes out clean.
+                    //
+                    // This is the ordinary treatment of a recursive binding: the
+                    // self-reference is monomorphic and is the binding's own type.
+                    // Only for a placeholder we MINTED — an annotated binding was
+                    // pre-registered with its declared type, which already relates
+                    // the two, and `dependencyOrderedDecls` handles the non-recursive
+                    // forward reference by inferring the callee first (#126).
+                    val selfReference = if (item.isSimpleBinding && item.value is ParsedLambda) {
+                        val found = currentContext.lookup(item.variableName)
+                            as? TypingContext.LookupResult.Found
+                        val placeholder =
+                            (found?.binding as? TypingContext.Binding.Monomorphic)?.type
+                        // PURE bodies only. Unifying the self-reference unifies the
+                        // whole arrow, effect row included, and a row is not a set to
+                        // be equated through a recursive reference: `<*>` says "the
+                        // body performs effects and handles them itself", so equating
+                        // it with the row the self-call site produced reports
+                        // "declared `<*>` … but this body performs none"
+                        // (RecursiveArbitraryDerivationTest). The leak this equation
+                        // closes is an ability constraint, which an effectful
+                        // recursive function can still carry; that is the narrower
+                        // follow-up, and it needs the row question answered first.
+                        val valueRow = (result.type as? MezzeType.FunctionType)?.effects
+                        val pureBody = valueRow == null ||
+                            (!valueRow.performed && valueRow.allEffectNames.isEmpty())
+                        if (placeholder is MezzeType.VarType && annotationTypes[item] == null && pureBody) {
+                            listOf(
+                                Constraint.Equality(
+                                    left = placeholder,
+                                    right = result.type,
+                                    context = "`${item.variableName}` refers to itself, so that reference " +
+                                        "has this binding's own type",
+                                    loc = item.loc,
+                                )
+                            )
+                        } else emptyList()
+                    } else emptyList()
+
+                    val allBindingConstraints = result.constraints + result.abilityConstraints + result.associatedTypeConstraints + patternResult.constraints + selfReference
                     val solveResult = solver.solve(allBindingConstraints)
                     when (solveResult) {
                         is ConstraintSolver.SolveResult.Failure -> {
@@ -349,6 +406,220 @@ class ConstraintGenerator(
                             // finds them. Reported here because this is the binding
                             // that would have absorbed it.
                             perBindingSolveErrors.addAll(letResult.absorbedUnsatisfiable)
+
+                            // An ability constraint on a type variable the SIGNATURE
+                            // does not mention is one no caller can ever discharge.
+                            //
+                            //     ability Into2 'b for 'a where { conv2: {} -> 'b }
+                            //     impl Into2 Str  for Int where { … }
+                            //     impl Into2 Bool for Int where { … }
+                            //
+                            //     let f = {} -> do
+                            //       let s = 5.conv2 {}
+                            //       0
+                            //
+                            // infers `{} with Into2 'b Int -> Int`: the body picks an
+                            // implementation by `'b`, and `'b` appears in neither the
+                            // parameters nor the result, so the caller has nothing to
+                            // choose with either. Mono then "specialized" such a
+                            // function at the first use's type and a second use at
+                            // another type ran the first one's impl.
+                            //
+                            // Asked HERE, on the solved signature, and deliberately
+                            // not at emit. At emit the question cannot be answered
+                            // for a decode ability at all: `decodeTargetVars` are
+                            // withheld from the substitution on purpose, so
+                            // `from_json`'s `'a` is BARE there for every correct
+                            // program (see the note on this file's per-binding
+                            // substitution, and UndeterminedCodecTargetTest). Here
+                            // the solve has just finished and the variable is still
+                            // related to the signature's own, so a discharged
+                            // obligation is simply absent and only a genuinely
+                            // undeterminable one is left.
+                            for ((key, binding) in letResult.contextBindings) {
+                                val scheme = (binding as? TypingContext.Binding.Polymorphic)?.scheme ?: continue
+                                val fnType = scheme.type as? MezzeType.FunctionType ?: continue
+                                if (fnType.abilityConstraints.isEmpty()) continue
+
+                                // PARAMETERS, RESULT and EFFECT ROW — never the
+                                // ability constraints themselves. Walking the whole
+                                // FunctionType counts a constraint's own variable as
+                                // "mentioned", which is exactly the occurrence that
+                                // makes it phantom, and the check then passes
+                                // everything. An effect row DOES count: a caller who
+                                // handles `<Exception having 'error = 'e>` determines
+                                // `'e`.
+                                //
+                                // By ID. Both sides come out of this one FunctionType,
+                                // so the ids ARE the relation; comparing the written
+                                // names instead would be the fallback that
+                                // `AnnotationValidator.resolveToSameType` kept and
+                                // that nothing needs (the whole suite passes with it
+                                // disabled).
+                                val namedBySignature = (
+                                    com.mezze.language.ast.solving.collectFreeTypeVars(fnType.paramType) +
+                                        com.mezze.language.ast.solving.collectFreeTypeVars(fnType.returnType) +
+                                        fnType.effects?.effectInstances.orEmpty().flatMap { inst ->
+                                            inst.associatedTypes.values.flatMap {
+                                                com.mezze.language.ast.solving.collectFreeTypeVars(it)
+                                            }
+                                        }
+                                    ).mapTo(mutableSetOf()) { it.id }
+
+                                // An ASSOCIATED TYPE is a functional dependency:
+                                // `NumAdd 'r for 'l having 'out` says `out` is a
+                                // function of `l` and `r`. So determining a
+                                // constraint's class arguments determines its
+                                // associated types, and those count as determined in
+                                // turn. Closed to a fixpoint, because the chain can be
+                                // any length:
+                                //
+                                //     let complex = { x, y, z } -> do
+                                //       let sum     = x + y     # NumAdd 'b 'a → 'd
+                                //       let product = sum * z   # NumMul 'c 'd → 'e
+                                //       "Result: $(int::to_str { n = product })"
+                                //
+                                // returns `Str`, so neither `'d` nor `'e` is in the
+                                // signature — and both are determined the moment a
+                                // caller passes concrete `x`, `y` and `z`. Without
+                                // this closure the rule refuses that function, and
+                                // nine others like it.
+                                fun assocVarsOf(c: MezzeType.FunctionAbilityConstraint) =
+                                    c.associatedTypeBindings.values.flatMap {
+                                        com.mezze.language.ast.solving.collectFreeTypeVars(it)
+                                    }.mapTo(mutableSetOf()) { it.id }
+                                // The RECEIVER's position is not this rule's business,
+                                // and the codebase already says why: an operation that
+                                // takes the value can only ever run on a value that
+                                // exists, so a receiver nothing determines is
+                                // unreachable code rather than a missing dictionary
+                                // (`dispatchesWithoutAValue`, and the note on
+                                // `requirementReachesHiddenVar`). What chooses an
+                                // implementation is the NON-receiver argument.
+                                //
+                                // That distinction is what separates the two shapes.
+                                // A recursive `length` carries
+                                // `with NumAdd 'c Int having 'out = Int` — a leak from
+                                // its own forward reference, where `'c` is the
+                                // self-call's result and sits in NumAdd's RECEIVER
+                                // slot. `5.conv2 {}` carries `with Into2 'b Int`,
+                                // where `'b` is the type converted INTO: the receiver
+                                // is the `Int` in hand and `'b` is what picks the impl.
+                                fun receiverIndexOf(c: MezzeType.FunctionAbilityConstraint): Int? {
+                                    val decl = registry.lookupAbility(c.abilityName) ?: return 0
+                                    if (c.typeArgs.size != decl.typeParams.size) return null
+                                    val rp = decl.receiverTypeParam ?: return 0
+                                    return decl.typeParams
+                                        .indexOfFirst { it.removePrefix("'") == rp.removePrefix("'") }
+                                        .takeIf { it >= 0 }
+                                }
+                                fun classArgVarsOf(c: MezzeType.FunctionAbilityConstraint): Set<Int> {
+                                    val assoc = assocVarsOf(c)
+                                    val recv = receiverIndexOf(c)
+                                    // Through THIS binding's substitution. The stored
+                                    // tuple keeps the variable a RECURSIVE self-call
+                                    // was instantiated with — `length` records
+                                    // `NumAdd Int 'c` while its own result type is
+                                    // still being inferred — and the solve has since
+                                    // bound it to `Int`. Resolving here asks "is this
+                                    // still open after the solve", which is the
+                                    // question; reading the stored tuple raw refuses
+                                    // every recursive arithmetic function.
+                                    return c.typeArgs
+                                        .filterIndexed { i, _ -> i != recv }
+                                        .flatMap {
+                                            com.mezze.language.ast.solving
+                                                .collectFreeTypeVars(substitution.apply(it))
+                                        }
+                                        .mapTo(mutableSetOf()) { it.id } - assoc
+                                }
+                                // Only a class argument the operation PRODUCES.
+                                //
+                                // This is the doctrine T0215 already states for a
+                                // receiver-less op — "the type it produces is what
+                                // chooses the implementation" — and it is what
+                                // separates a real ambiguity from a type that is
+                                // undetermined because nothing ever computes it:
+                                //
+                                //   conv2: {} -> 'b                  'b is PRODUCED
+                                //   from_query: {} -> Result 'a _    'a is PRODUCED
+                                //   add: { it: 'l, r: 'r } -> 'out   'r is CONSUMED
+                                //
+                                // A consumed argument left open means the value was
+                                // never produced, and Mezze has no bottom type to say
+                                // so. All three shapes that reach here are that:
+                                //
+                                //   let f = { y } -> x + y        # never called
+                                //   sum + will_fail {}            # will_fail throws
+                                //
+                                // Legitimate programs, undetermined operand types,
+                                // and nothing to choose at runtime because the
+                                // operation never runs. Refusing them would be wrong;
+                                // a produced type that nothing determines is the case
+                                // where an implementation must be chosen and cannot
+                                // be.
+                                fun producesParam(abilityName: String, paramName: String): Boolean {
+                                    val decl = registry.lookupAbility(abilityName) ?: return false
+                                    return decl.operations.any { op ->
+                                        fun mentions(t: com.mezze.language.parsedast.ParsedTypeAnnotation) =
+                                            com.mezze.language.ast.solving
+                                                .collectFreeTypeVars(convertTypeAnnotation(t))
+                                                .any { it.name.removePrefix("'") == paramName }
+                                        mentions(op.returnType) && !mentions(op.paramType)
+                                    }
+                                }
+                                fun producedOpenSlots(c: MezzeType.FunctionAbilityConstraint): Boolean {
+                                    val decl = registry.lookupAbility(c.abilityName) ?: return true
+                                    if (c.typeArgs.size != decl.typeParams.size) return true
+                                    val open = classArgVarsOf(c)
+                                    return c.typeArgs.withIndex().any { (i, arg) ->
+                                        com.mezze.language.ast.solving
+                                            .collectFreeTypeVars(substitution.apply(arg))
+                                            .any { it.id in open } &&
+                                            producesParam(c.abilityName, decl.typeParams[i].removePrefix("'"))
+                                    }
+                                }
+
+                                val determined = namedBySignature.toMutableSet()
+                                var grew = true
+                                while (grew) {
+                                    grew = false
+                                    for (c in fnType.abilityConstraints) {
+                                        if (!determined.containsAll(classArgVarsOf(c))) continue
+                                        if (determined.addAll(assocVarsOf(c))) grew = true
+                                    }
+                                }
+
+                                for (c in fnType.abilityConstraints) {
+                                    // `addAbilityConstraintsToFunctionType` stores what
+                                    // SOLVING worked out (`resolveArgs`), so a tuple
+                                    // with no variables left is already determined and
+                                    // has nothing to ask about. That is what a
+                                    // recursive `length` reduces to: it records
+                                    // `NumAdd Int 'c` while its own result is still a
+                                    // variable, `'c` resolves to `Int`, and the stored
+                                    // constraint reads `NumAdd Int Int`. Ten functions
+                                    // (`sum`, `fib`, `is_pythagorean`, …) are the
+                                    // reason this is read from the resolved tuple and
+                                    // not from the scheme's name-keyed `typeParam`,
+                                    // which keeps the variable it started from.
+                                    if (determined.containsAll(classArgVarsOf(c))) continue
+                                    if (!producedOpenSlots(c)) continue
+                                    throw TypeCheckError(
+                                        "'${c.abilityName}' is needed at a type `${key.localName}` does not " +
+                                            "mention: the body chooses an implementation by a type that appears " +
+                                            "in neither its parameters nor its result, so no caller can choose " +
+                                            "it either. Use the value so its type is fixed, or return it so the " +
+                                            "caller fixes it.",
+                                        item.loc,
+                                        code = ErrorCode.T0215_AMBIGUOUS_ABILITY_TYPE,
+                                        hints = listOf(
+                                            "consume the value at a known type, or give the function a result " +
+                                                "type that mentions it",
+                                        ),
+                                    )
+                                }
+                            }
 
                             currentContext = currentContext.extendAll(letResult.contextBindings)
 

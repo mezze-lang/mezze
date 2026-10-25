@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 
@@ -131,7 +132,7 @@ class EmptySeqsInRecordTest {
     }
 
     @Test
-    fun `minimal recursive function accessing single field`() {
+    fun `minimal recursive function whose arms disagree is rejected`() {
         val code = """
             let f = {n: Int} ->
                 match n is
@@ -150,8 +151,23 @@ class EmptySeqsInRecordTest {
         val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
-        println("Type checked successfully!")
+        // The arms DISAGREE: `0` returns a record, `_` returns `rest.no`, a
+        // list. This used to be accepted, because a recursive self-reference was
+        // pre-registered as a bare placeholder that nothing related to the
+        // binding's own type — so the self-call's result never pinned and the two
+        // arms were never compared. The sibling test below is the well-typed
+        // shape, returning a record from both arms.
+        val message = try {
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
+            null
+        } catch (e: TypeCheckError) {
+            e.message
+        }
+        assertNotNull(message, "the two arms disagree, so this must be refused")
+        assertTrue(
+            message!!.contains("not compatible with"),
+            "the two arms' types must be compared; got: $message",
+        )
     }
 
     @Test

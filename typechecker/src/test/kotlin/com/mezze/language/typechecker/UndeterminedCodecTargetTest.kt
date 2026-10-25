@@ -130,56 +130,30 @@ class UndeterminedCodecTargetTest {
      * same strip that hid the soundness hole in
      * [VariantPayloadCheckedAtCallSiteTest].
      *
-     * CORRECTION, and this is the real finding: for a decode ability the
-     * question CANNOT BE ASKED AT EMIT AT ALL, by design. Running the whole rule
-     * against the full suite turned up 9 false positives, 7 of them one stdlib
-     * site — `std::effects::http::from_json_result`, which declares
-     * `with FromJson 'a Str -> Result 'a HttpError`, so the type is written in
-     * its own signature and no policy could justify refusing it. Measured:
+     * REFUSED as of this commit — and NOT by asking at emit, which is where four
+     * attempts failed and why. For a decode ability the question cannot be asked
+     * there at all: `ConstraintGenerator` filters `decodeTargetVars` out of the
+     * substitution it hands on, deliberately, because `from_json`'s `'a` "must
+     * stay BARE where emit reads it — codegen resolves each call's `.decode`
+     * dictionary per call site (DecodeTargetResolver), and a call node carrying
+     * the record instead of the variable wires the wrong decoder". So bare at
+     * emit is the guaranteed state for every CORRECT decode and says nothing
+     * about determinability. Measured on `std::effects::http::from_json_result`,
+     * which declares `with FromJson 'a Str -> Result 'a HttpError`:
      *
      *     per-binding : annotation #18708 → #21126, body usage #21162 → #21126
      *     emit        : visible {18708, 21126}, demand carries #21162 (bare)
      *
-     * One written `'a`, related correctly while the binding is being solved, and
-     * bare by the time emit looks. `ConstraintGenerator` says why, in its own
-     * words, where it builds the accumulated per-binding substitution:
+     * The rule is a property of the SOLVED SIGNATURE instead, asked in the
+     * per-binding step where the variable is still related — see
+     * [UndeterminedClassArgTest] for its four refinements. `from_json_result`
+     * passes it on the first condition: `'a` is in the result.
      *
-     *     One EXCLUSION, and it is structural: a decode target. `from_json`
-     *     returns `Result 'a DecodeError` where `'a` is inferred from the fields
-     *     the program later reads, and that variable must stay BARE where emit
-     *     reads it — codegen resolves each call's `.decode` dictionary per call
-     *     site (DecodeTargetResolver), and a call node carrying the record
-     *     instead of the variable wires the wrong decoder.
-     *
-     * `decodeTargetVars` are filtered OUT of that substitution deliberately, and
-     * `isDecodeEntryAbility` is exactly `["FromJson"]`. So "bare at emit" carries
-     * no information about whether the program determines the type — it is the
-     * guaranteed state for every correct decode. An emit-time judge therefore
-     * false-positives on all of them, and no amount of resolving helps: resolving
-     * through the per-binding substitution was tried and the mapping is not in
-     * there either, because it was removed on purpose.
-     *
-     * SO THE QUESTION BELONGS IN THE PER-BINDING STEP, where the variable is
-     * still related — the same place `AnnotationValidator`
-     * `.validateAbilityOnCorrectTypeVar` already compares a body's ability usage
-     * against the declared constraints, and already has `collectTypeVars(`
-     * `annotationType)` for "what this signature names". That is where to build
-     * it, and it explains why four attempts at emit all failed.
-     *
-     * Two earlier conclusions in this file were WRONG and are corrected above:
-     * that the blocker was codec policy, and that it was the HasConstructor
-     * strip. The strip findings still stand on their own (see
-     * [[project_stripped_constraint_is_an_unchecked_obligation]]) — letting those
-     * constraints into the global solve breaks 11 tests even when the solver
-     * branch is completely inert, which is worth knowing — but the strip is not
-     * what blocks THIS rule.
-     *
-     * The other two false positives have their own causes and are NOT this one:
-     * the `FromQuery` case below (FromQuery is neither decode-flavored nor a
-     * decode entry ability, so the exclusion does not apply to it), and
-     * `NumAdd` at `'a 'a` inside `impl Hashable for MyRecord where { digest =`
-     * `{ it } -> it.x + it.y }`, which is unmeasured — note that the same filter
-     * also drops `methodGrownReceiverVars`, one line away.
+     * Two conclusions recorded here earlier were WRONG, and are withdrawn: that
+     * this was a codec-policy decision, and that it was blocked by the
+     * HasConstructor strip. The strip findings stand on their own (see
+     * [[project_stripped_constraint_is_an_unchecked_obligation]]) and are not
+     * what blocked this.
      *
      * Two things that were suspected and are NOT the problem, measured:
      *  - the codec exemption (`isCodecAbility`) is never reached for this call;
@@ -189,13 +163,18 @@ class UndeterminedCodecTargetTest {
      *    scrutinee. See [VariantPayloadCheckedAtCallSiteTest], which came out of
      *    chasing that and found a real soundness hole at the call site instead.
      */
-    @Test fun `a method-call decode with no target type is accepted today`() {
-        assertNull(err("""
+    @Test fun `a method-call decode with no target type is refused`() {
+        val e = err("""
             use std::codec::query::{ FromQuery }
             let f = {} -> do
               let q = "a=1".from_query {}
               0
             f {}
-        """), "when this starts failing, the judge learned to ask about a non-receiver class argument — invert this test")
+        """)
+        assertNotNull(e, "nothing says what `\"a=1\".from_query {}` decodes into")
+        assertTrue(
+            e!!.contains("appears in neither its parameters nor its result"),
+            "should name the position, not ask for an annotation; got: $e",
+        )
     }
 }

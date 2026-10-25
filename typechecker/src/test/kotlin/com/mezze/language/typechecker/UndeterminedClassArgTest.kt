@@ -27,34 +27,40 @@ import java.nio.file.Paths
  * This is the non-codec face of [UndeterminedCodecTargetTest] — read that for
  * the codec instance, which has a further obstacle of its own.
  *
- * Asking the question needs three changes. All three are written and were run;
- * none is landed, because of the fourth thing below.
+ * REFUSED as of this commit, and the rule is a property of the SOLVED SIGNATURE,
+ * asked in the per-binding step: an ability constraint on a type variable that
+ * appears in neither the parameters nor the result is one no caller can ever
+ * discharge. `f` infers `{} with Into2 'b Int -> Int`.
  *
- *  1. RECORDING. A receiver-taking ability op carries only its RECEIVER to emit
- *     (`MethodCallInfo.typeArgs`, the monomorphizer's thread), so no dictionary
- *     demand is recorded for it at all. Carrying the whole class-arg tuple
- *     beside it, populated from `abilityTypeVars` in `ExprMethodConstraints`,
- *     puts the demand in front of the judge.
- *  2. THE RECEIVER'S POSITION. `requirementReachesHiddenVar` reads
- *     `typeArgs.first()` as the receiver. That is wrong whenever `for` names a
- *     later parameter, and the tuple may not hold the receiver at all — a `with`
- *     clause on an operation omits it, so `with Decode QueryC 'a` carries only
- *     the non-receiver slots, and reading slot 2 there finds nothing and gives
- *     up before asking anything.
- *  3. NOT ASKING THE RECEIVER QUESTION of a method call, which holds a receiver
- *     value by construction. It answers wrongly: `dispatchesWithoutAValue` reads
- *     "no operation declares `it`" as "can dispatch with no value", and an
- *     ability whose receiver is implicit in `for` declares none. The last test
- *     is refused without this.
+ * Four refinements, each pinned by a test here or named by the case that forced
+ * it, and each measured against the full suite:
  *
- * AND WITH ALL THREE IN PLACE THE FIRST TEST STILL PASSES, for a reason that has
- * nothing to do with the judge: the obligation LEAKS ONTO `f`'s own signature
- * (`{} with Into2 'b Int -> Int`), so `'b` becomes one of the enclosing
- * function's variables and the judge then correctly declines — a caller is meant
- * to supply it. Measured: the demand reaches the judge with the variable listed
- * as VISIBLE. The refusal would have to come at `f {}` instead. That leak is a
- * known shape, pinned by `generalizeDoBlockBinding`'s third guard, and it is the
- * prerequisite here.
+ *  1. PARAMETERS, RESULT and EFFECT ROW only — never the constraint list itself,
+ *     which contains the very occurrence that makes a variable phantom. An
+ *     effect row counts: a caller handling `<Exception having 'error = 'e>`
+ *     determines `'e`.
+ *  2. The ASSOCIATED-TYPE CLOSURE. `having 'out` is a functional dependency, so
+ *     determining a constraint's class arguments determines its associated
+ *     types, and those count in turn — closed to a fixpoint. Without it,
+ *     `{ x, y, z } -> do let sum = x + y; let product = sum * z; …` is refused
+ *     although a caller determines everything (ten such functions).
+ *  3. RESOLVED through the binding's own substitution, because the stored tuple
+ *     keeps the variable it started from.
+ *  4. Only a class argument the operation PRODUCES, which is the doctrine T0215
+ *     already states for a receiver-less op. `conv2: {} -> 'b` produces `'b`;
+ *     `add: { it: 'l, r: 'r } -> 'out` CONSUMES `'r`. A consumed argument left
+ *     open means the value was never produced and Mezze has no bottom type to
+ *     say so — `let f = { y } -> x + y` never called, or `sum + will_fail {}`
+ *     where `will_fail` throws. Both are legitimate; refusing them was wrong.
+ *
+ * And one PREREQUISITE, fixed in the same commit: a recursive binding's
+ * self-reference is pre-registered as a bare placeholder that nothing relates to
+ * the binding's own type, so the self-call's result never pins and the leak
+ * lands on the signature. `length` inferred
+ * `{ xs: [Int] } with NumAdd 'a Int having 'out = Int -> Int`, junk visible in
+ * its own hover. See `EmptySeqsInRecordTest`, where tying the two also caught a
+ * program whose match arms disagree.
+ *
  */
 class UndeterminedClassArgTest {
     private lateinit var parser: MezzeParser
@@ -87,17 +93,18 @@ class UndeterminedClassArgTest {
         }
     """.trimIndent()
 
-    /** THE GAP. When this starts failing the question is being asked — invert it. */
-    @Test fun `a class argument nothing determines is accepted today`() {
-        assertNull(
-            err("""
-                $head
-                let f = {} -> do
-                  let s = 5.conv2 {}
-                  0
-                f {}
-            """),
-            "when this is refused, read the class doc and invert this test",
+    @Test fun `a class argument nothing determines is refused`() {
+        val e = err("""
+            $head
+            let f = {} -> do
+              let s = 5.conv2 {}
+              0
+            f {}
+        """)
+        assertNotNull(e, "nothing says what `5.conv2 {}` converts into")
+        assertTrue(
+            e!!.contains("appears in neither its parameters nor its result"),
+            "should name the position, not ask for an annotation; got: $e",
         )
     }
 
