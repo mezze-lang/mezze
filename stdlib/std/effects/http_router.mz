@@ -269,10 +269,20 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 # — one dictionary slot was filled from a sibling constraint's type. Fixed in
 # the compiler's dict evidence, not worked around.)
 #
-# A handler that THROWS a Response needs adapting: one that never throws does
-# not satisfy a row carrying Exception, and one that throws does not satisfy a
-# pure signature. The verbs apply this adapter themselves, so the shape they
-# "cannot take" is one a caller never has to think about.
+# ONE shape the verbs cannot take, because the reason is the effect system
+# rather than a gap: a handler that THROWS a Response. A handler that never
+# throws does not satisfy a row carrying Exception, and one that throws does
+# not satisfy a pure signature, so `catching` adapts it.
+#
+# The verbs DID apply this themselves for a while, so a route read
+# `handler = { m } -> …` even when it threw. That was reverted: the verb's own
+# handler row has to be a bare `<...>` for a pure handler to pass, and a bare
+# row absorbs the thrown type without checking it — so a handler throwing a
+# NON-Response compiled and died at runtime with `Field not found`, where the
+# explicit form rejects it. The wrapper is verbose; a silent runtime failure is
+# worse. It can come back when a row can say "MAY perform Exception, and if so
+# with `'error = Response`" — an upper bound `<E, ...>` cannot express, since it
+# means AT LEAST.
 #
 # It is a free function because it carries an ability constraint, and a
 # constraint on an inherent impl method only works for an IMPORTED impl (a
@@ -292,10 +302,7 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 # `or_throw` do it for a Result.
 ## Adapt a handler that may THROW a Response into one answering a Response.
 ##
-## Every verb already runs its handler through this, so a route never needs to
-## say it: `handler = { m } -> …` may throw. Kept public for a handler built
-## outside a route table, and because a handler already wrapped is simply
-## caught twice, which is harmless.
+##   .get { path = "/u/:id", handler = catching { handler = { m } -> … } }
 pub let catching
   : { handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
   with IntoResponse 'r
@@ -410,7 +417,9 @@ impl RouteGroup where {
       g = it,
       method = Get,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
   ## Append a POST under this group's prefix, answering whatever the handler returns.
   post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -418,7 +427,9 @@ impl RouteGroup where {
       g = it,
       method = Post,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
   ## Append a PUT under this group's prefix, answering whatever the handler returns.
   put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -426,7 +437,9 @@ impl RouteGroup where {
       g = it,
       method = Put,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
   ## Append a PATCH under this group's prefix, answering whatever the handler returns.
   patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -434,7 +447,9 @@ impl RouteGroup where {
       g = it,
       method = Patch,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
   ## Append a DELETE under this group's prefix, answering whatever the handler returns.
   delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -442,7 +457,9 @@ impl RouteGroup where {
       g = it,
       method = Delete,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
   ## Append a HEAD under this group's prefix, answering whatever the handler returns.
   head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -450,7 +467,9 @@ impl RouteGroup where {
       g = it,
       method = Head,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
   ## Append an OPTIONS under this group's prefix, answering whatever the handler returns.
   options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
@@ -458,7 +477,9 @@ impl RouteGroup where {
       g = it,
       method = Options,
       path = path,
-      handler = catching { handler = handler },
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
     },
 
   # The child's entries already carry the child's own prefix, so one more

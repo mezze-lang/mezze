@@ -3,6 +3,7 @@ package com.mezze.interpreter.stdlib
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Reading typed input off a request, and failing usefully when it is not there.
@@ -30,6 +31,7 @@ class HttpTypedInputTest {
 
     private val head = """
         use std::effects::http::{ Request, Response, IntoResponse, IntoErrorResponse, or_throw, not_found, body_str }
+        use std::effects::exception::{ throw }
         use std::effects::http_server::{ get_request }
         use std::effects::http_router::{ group, catching, BadInput }
         use std::str
@@ -63,19 +65,20 @@ class HttpTypedInputTest {
     """.trimIndent()
 
     /**
-     * The app under test: one route, and nothing in the handler but the work.
+     * The app under test: one route, no `match` and no `Result` in the handler.
      *
-     * No `match`, no `Result`, and no wrapper — the verb runs every handler
-     * inside the exception region, so a handler that throws needs nothing said
-     * about it at the call site. It used to read
-     * `handler = catching { handler = { m } -> … }`, which says "handler" twice
-     * and put the adapter in front of the thing a reader came to read.
+     * `catching` is what lets a handler throw. The verbs applied it themselves
+     * for a while, so this read `handler = { m } -> …` even when it threw —
+     * which was nicer and unsound: the verb's own handler row must be a bare
+     * `<...>` for a pure handler to pass, and a bare row absorbs the THROWN
+     * type without checking it. A handler throwing a non-Response then compiled
+     * and died at runtime, where this form rejects it while compiling.
      */
     private val throwingApp = """
         let api = group { prefix = "" }
-          .get { path = "/users/:id", handler = { m } -> do
+          .get { path = "/users/:id", handler = catching { handler = { m } -> do
             let id = or_throw { result = m.param_as { name = "id" } }
-            show { id = id } }
+            show { id = id } } }
           .handler {}
     """.trimIndent()
 
@@ -101,9 +104,9 @@ class HttpTypedInputTest {
     fun `an unbound parameter name is a 400 naming it`() {
         val app = """
             let api = group { prefix = "" }
-              .get { path = "/users/:id", handler = { m } -> do
+              .get { path = "/users/:id", handler = catching { handler = { m } -> do
                 let other = or_throw { result = m.param_as { name = "nope" } }
-                show { id = other } }
+                show { id = other } } }
               .handler {}
         """.trimIndent()
         val r = run(parts(answer, app, """answer { url = "/users/7", app = api }"""))
@@ -138,33 +141,37 @@ class HttpTypedInputTest {
     }
 
     /**
-     * The explicit wrapper still works, because it has to: it is what the verbs
-     * now use internally, and a handler already wrapped is simply caught twice
-     * — the inner catch answers a Response, so the outer one has nothing to do.
-     * Kept so folding `catching` into the verbs cannot silently break code that
-     * still spells it out.
+     * Throwing something that is NOT a Response is refused while compiling.
+     *
+     * This is why the verbs do not wrap the handler themselves. `catching`
+     * declares `<Exception having 'error = Response, ...>`, so the handler's own
+     * thrown type meets `Response` here and a mismatch is a type error. Routed
+     * through a verb whose row is a bare `<...>`, that row absorbs the thrown
+     * type unchecked and the same program died at runtime with
+     * `Field not found: status`.
+     *
+     * The wrapper can go away again when a row can say "MAY perform Exception,
+     * and if so with `'error = Response`" — an upper bound that `<E, ...>`
+     * cannot express, because it means AT LEAST.
      */
     @Test
-    fun `an explicitly wrapped handler still answers`() {
-        val app = """
-            let api = group { prefix = "" }
-              .get { path = "/users/:id", handler = catching { handler = { m } -> do
-                let id = or_throw { result = m.param_as { name = "id" } }
-                show { id = id } } }
-              .handler {}
-        """.trimIndent()
-        val r = run(
-            parts(
-                answer, app,
+    fun `throwing a non-Response is a compile error`() {
+        val outcome = runCatching {
+            run(
                 """
-                str::concat {
-                  l = answer { url = "/users/7", app = api },
-                  r = str::concat { l = " | ", r = answer { url = "/users/abc", app = api } },
-                }
-                """.trimIndent(),
+                let api = group { prefix = "" }
+                  .get { path = "/x", handler = catching { handler = { m } ->
+                    throw { error = { why = "not a response" } } } }
+                  .handler {}
+                get_request { url = "/x" }.to { app = api }.status
+                """.trimIndent()
             )
+        }
+        val err = outcome.exceptionOrNull()
+        assertTrue(
+            err != null,
+            "throwing a non-Response must be refused; got ${outcome.getOrNull()}",
         )
-        assertEquals("200 user #7 | 400 id: expected Int, found abc", r)
     }
 
     /**
@@ -185,9 +192,9 @@ class HttpTypedInputTest {
         val app = """
             let page_of = { p: { page: Int } } -> int::to_str { n = p.page }
             let api = group { prefix = "" }
-              .get { path = "/list", handler = { m } -> do
+              .get { path = "/list", handler = catching { handler = { m } -> do
                 let q = or_throw { result = m.query_as {} }
-                page_of { p = q } }
+                page_of { p = q } } }
               .handler {}
         """.trimIndent()
         val r = run(
