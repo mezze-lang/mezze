@@ -28,17 +28,18 @@ import java.nio.file.Paths
  *     the annotation constrains `with Into 'e`, but the body applies Into to a
  *     type the annotation does not name
  *
- * The `Err` arm binds a variable of its own, related to the signature's `'e`
- * only through the substitution, and the ability constraint lands on that one.
+ * The `Err` arm bound a variable of its own, related to the signature's `'e`
+ * only through the substitution, and the ability constraint landed on that one.
  *
- * Layer 4 is fixed here. Layer 5 is architectural and pinned below with the
- * two hypotheses that were measured and disproved, so the next attempt does
- * not pay for them again.
+ * FIXED, in two places: the performer's associated-type key (layer 4 below) and
+ * the do-block binding's local solve (layer 5). The measured chain is kept on
+ * the first test, because five of its six layers were dead ends and the next
+ * person should not pay for them again.
  *
- * This is the gap behind three separate things in std::effects::http_router:
- * `catching` can only accept a thrown `Response` rather than any convertible
- * error; a route cannot therefore let a handler throw its own domain error;
- * and the verbs cannot apply `catching` themselves, because naming the error
+ * This was the gap behind three separate things in std::effects::http_router:
+ * `catching` could only accept a thrown `Response` rather than any convertible
+ * error; a route could not therefore let a handler throw its own domain error;
+ * and the verbs could not apply `catching` themselves, because naming the error
  * type is what makes the thrown type checkable.
  */
 class ThrownErrorTypeThreadsTest {
@@ -62,63 +63,56 @@ class ThrownErrorTypeThreadsTest {
     """.trimIndent()
 
     /**
-     * STILL FAILS, and the chain is recorded so the next attempt starts at the
-     * end of it. Each layer was measured, not reasoned:
+     * The chain, as measured. Layers 1-3 are dead ends, recorded so they are
+     * not re-walked; 4 and 5 are the two real defects.
      *
-     *  1. the `Err` arm's binding and the signature's `'e` are two DISTINCT,
-     *     UNRESOLVED variables (`'y48#3316` vs `'e#3277`) — the documented
-     *     "one written typevar, two TypeVars" shape;
-     *  2. the perform region is NOT at fault: it binds `'error -> 'e#3277`,
-     *     the signature's own variable;
-     *  3. nor is the pattern solver: by the time it runs, the scrutinee is
-     *     already `Result Str 'z47#3285` — the PERFORMER's fresh variable — so
-     *     the wrong type arrived before the match;
-     *  4. the binding was keyed `'error` while the performer's field is keyed
-     *     `error`, so `performerAssocTypes.fields[assocTypeName]` missed and the
-     *     result was keyed by the wrong name. FIXED here (one `removePrefix`).
-     *     Measured after: `resolved=Result('u47#3276, 'e#3277)` — the
-     *     signature's own variable now reaches the suspension type, and `'e`
-     *     resolves instead of staying free;
-     *  5. and it is STILL not enough, for a reason none of the above explains.
-     *     Two hypotheses were measured and BOTH are wrong, so do not re-try
-     *     them: the performer does NOT split its variable (its suspension slot
-     *     and its associated-type map are both `'e#3275`), and `outcome` is NOT
-     *     generalized (`bindLet` generalizes only a lambda or a function type,
-     *     and already subtracts `getContextFreeVars`).
+     *  1. the `Err` arm's binding and the signature's `'e` were two DISTINCT,
+     *     UNRESOLVED variables — the documented "one written typevar, two
+     *     TypeVars" shape, here in its ninth known instance;
+     *  2. the perform region was not at fault, nor the pattern solver: by the
+     *     time the match ran, the scrutinee was ALREADY wrong, so the wrong
+     *     type arrived before the match;
+     *  3. nor was it the performer splitting its own variable, nor `outcome`
+     *     being generalized (it is bound MONOMORPHIC), nor the method-call
+     *     path (`the Err arm through a free constrained function` fails
+     *     identically), nor the arm binding (it IS the scrutinee's error slot),
+     *     nor constraint merging (a match arm's ability constraints DO reach
+     *     the enclosing collector). All measured, all negative.
      *
-     *     It is the intermediate `let`. Two tests below settle it without any
-     *     id archaeology: `an inlined perform threads the error type` is this
-     *     same program with the perform INLINED into the match and it COMPILES,
-     *     while the version that binds `let outcome = …` first does not. And
-     *     `a match arm binds a constrained error type argument` is the same
-     *     question with no effects at all, which also compiles — so neither the
-     *     match arm nor the effect machinery is at fault.
+     *  4. the suspension binding was keyed `'error` while the performer's field
+     *     is keyed `error`, so `performerAssocTypes.fields[assocTypeName]`
+     *     missed and the result was keyed by the wrong name. One
+     *     `removePrefix` in ExprPerformConstraints. After it, the signature's
+     *     own variable reaches the suspension type.
      *
-     *     Measured in ONE run, so the ids are comparable (they are per-run —
-     *     comparing them across runs is meaningless and cost me a wrong
+     *  5. and that was still not enough, because of the do-block `let`. A
+     *     do-block binding runs its OWN local solve
+     *     (`solveDoBlockBindingLocally`), and solving instantiates schemes — so
+     *     the local solve minted fresh variables that the enclosing solve,
+     *     instantiating the same schemes separately, never created. The type it
+     *     handed back was written in those variables, and that type is what the
+     *     binding carried, so the match on it, the arm's bindings and the arm
+     *     body's obligations all spoke of variables the enclosing substitution
+     *     had no equation for. Measured in ONE run (the ids are per-run;
+     *     comparing them across runs is meaningless and cost a wrong
      *     conclusion):
      *
-     *         PERFORM  resolved      = Result #3276 #3277   ← the signature's var
-     *         PATTERN  scrutineeArgs = Result Str  #3285    ← a different one
-     *         VALIDATE usage=#3316 unresolved, annotated #3277 -> #3320
+     *         perform's own type   = Result #3276 #3278   ← `'e` IS #3278
+     *         `outcome` registered = Result Str  #3306    ← an orphan
+     *         arm binding          = #3314, usage = #3316
      *
-     *     So the perform's resolved type does not reach the binding. A do-block
-     *     `let` runs its own LOCAL solve (`solveDoBlockBindingLocally`) and
-     *     hands that substitution to `bindLet`; the source already records the
-     *     consequence, in `doBlockLambdaCapturesFreeVarBinding` — "the
-     *     do-block's LOCAL solve gives the binding a fresh var identity …
-     *     different var instances across the local-solve boundary".
+     *     Fixed by emitting the equation the fresh variables broke — see
+     *     ExprControlFlowConstraints, where the binding's solved type is
+     *     recorded. The source had already written down the consequence, in
+     *     `doBlockLambdaCapturesFreeVarBinding`: "the do-block's LOCAL solve
+     *     gives the binding a fresh var identity".
      *
-     *     That boundary is where to pick this up: either the local solve keeps
-     *     enclosing variable identity, or the block's variables are re-linked
-     *     to the enclosing ones afterwards, the way
-     *     `TypedAstBuilder.linkDeclaredVars` does for declared-vs-inferred.
-     *
-     * A CONCRETE `having 'error = Denied` works throughout, because the thrown
-     * value unifies the slot from the call site; only a VARIABLE has nothing
-     * else to tie it. That contrast is the control below.
+     * A CONCRETE `having 'error = Denied` worked throughout, because the thrown
+     * value unifies the slot from the call site; only a VARIABLE had nothing
+     * else to tie it. That contrast is the control below — and note it is why
+     * the two do-block controls pass even unfixed.
      */
-    @Test fun `a declared thrown error type does not yet thread into the Err arm`() {
+    @Test fun `a declared thrown error type threads into the Err arm`() {
         val e = err("""
             $head
             let adapt
@@ -134,19 +128,22 @@ class ThrownErrorTypeThreadsTest {
                   Err { error } -> error.conv {}
             adapt { f = {} -> throw { error = { who = "bob" } } }
         """)
-        assertNotNull(e, "when this starts passing, the do-block local solve shares identities — flip to assertNull")
+        assertNull(e, "the declared `'e` reaches the Err arm; got: $e")
     }
 
     /**
-     * Annotating the intermediate binding does not help, and that is itself a
-     * finding: the `'e` written in a BODY annotation is a different variable
-     * from the `'e` in the enclosing signature. A function's type variables are
-     * not in scope over its body, so this `Result Str 'e` names a fresh one.
+     * Annotating the intermediate binding works as well. The `'e` written in a
+     * BODY annotation is NOT the `'e` of the enclosing signature — a function's
+     * type variables are not in scope over its body, so this `Result Str 'e`
+     * names a fresh variable — and that is fine: the bridge equation ties the
+     * binding to the perform's own type, which carries the signature's `'e`, so
+     * the body's fresh one unifies with it rather than competing.
      *
-     * Worth separating from layer 5 above — it is the same shape in a different
-     * place, and fixing one will not fix the other.
+     * Before the layer-5 fix this was rejected, which is the better reason to
+     * keep it: an annotation must not be able to break a body that compiles
+     * without one. See [[no_annot]].
      */
-    @Test fun `annotating the handled outcome does not thread the error type`() {
+    @Test fun `annotating the handled outcome also threads the error type`() {
         val e = err("""
             $head
             let adapt
@@ -162,7 +159,7 @@ class ThrownErrorTypeThreadsTest {
                   Err { error } -> error.conv {}
             adapt { f = {} -> throw { error = { who = "bob" } } }
         """)
-        assertNotNull(e, "a body annotation's `'e` is its own variable — see the doc above")
+        assertNull(e, "an annotation on the binding must not break it; got: $e")
     }
 
     /**
@@ -203,6 +200,55 @@ class ThrownErrorTypeThreadsTest {
             adapt { f = {} -> throw { error = { who = "bob" } } }
         """)
         assertNull(e, "inlined perform; got: $e")
+    }
+
+    /**
+     * The SMALLEST form: a do-block `let` whose value carries the enclosing
+     * function's type variable, then a match on it. No effects, no perform, no
+     * associated types — just a binding across the do-block's local solve.
+     *
+     * If this fails, the subject is "a do-block let loses the enclosing
+     * function's type variable", which has nothing to do with effects and is a
+     * far smaller thing to fix.
+     */
+    @Test fun `a do-block let keeps the enclosing type variable`() {
+        val e = err("""
+            $head
+            let describe: { r: Result Str 'e } with Into 'e -> Str = { r } -> do
+              let outcome = r
+              match outcome is
+                Ok { val } -> val
+                Err { error } -> error.conv {}
+            describe { r = Err { error = { who = "bob" } } }
+        """)
+        assertNull(e, "the binding keeps `'e`; got: $e")
+    }
+
+    /**
+     * The same program with the Err arm's use routed through a FREE constrained
+     * function instead of a method call. It failed identically before the
+     * layer-5 fix, which is what cleared the method-call path: the obligation
+     * was not being recorded against the receiver by mistake, the variable it
+     * named was an orphan whichever way the arm used it.
+     */
+    @Test fun `the Err arm through a free constrained function`() {
+        val e = err("""
+            $head
+            let describe_err: { e: 'x } with Into 'x -> Str = { e } -> e.conv {}
+            let adapt
+              : { f: {} -> 'r <Exception having 'error = 'e, ...> }
+              with Into 'e
+              -> Str <*>
+              = { f } -> do
+                let outcome = perform ExceptionToResult in do
+                  let answered = f {}
+                  Ok { val = "ok" }
+                match outcome is
+                  Ok { val } -> val
+                  Err { error } -> describe_err { e = error }
+            adapt { f = {} -> throw { error = { who = "bob" } } }
+        """)
+        assertNull(e, "free function in the Err arm; got: $e")
     }
 
     /** The control: the same shape with the thrown type written out works. */

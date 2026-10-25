@@ -625,6 +625,54 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     val varName = (stmt.pattern as ParsedVariablePattern).name
                     letResult.solvedBindingsWithEffects[varName]?.let { solvedValueType ->
                         collector.doBindingSolvedTypes[stmt.value.loc] = solvedValueType
+
+                        // Bridge the LOCAL solve's variables back into the enclosing
+                        // one. The local solve above re-solves this statement on its
+                        // own, and solving instantiates schemes — so it mints FRESH
+                        // variables that the enclosing solve, instantiating the same
+                        // schemes separately, never creates. The type it hands back
+                        // is written in those variables, and that type is what the
+                        // binding carries: everything downstream of the name (a match
+                        // on it, the arm's bindings, the ability obligations the arm's
+                        // body records) then speaks of variables the enclosing
+                        // substitution has no equation for.
+                        //
+                        //     let adapt : { f: {} -> 'r <Exception having 'error = 'e, ...> }
+                        //       with Into 'e -> Str <*>
+                        //       = { f } -> do
+                        //         let outcome = perform ExceptionToResult in do …
+                        //         match outcome is
+                        //           Err { error } -> error.conv {}
+                        //
+                        // `outcome` solved to `Result Str #3306` where the perform's
+                        // own type was `Result #3276 #3278` and `'e` IS #3278; the arm
+                        // bound #3306's descendant and recorded `Into` on it, so the
+                        // annotation check saw an obligation on a variable it could
+                        // not relate to the `'e` it declared and reported "the body
+                        // applies Into to a type the annotation does not name".
+                        // Inlining the perform into the `match` subject compiled,
+                        // because then there is no local solve to cross.
+                        //
+                        // The equation is already IMPLIED by the enclosing set — the
+                        // local solve ran on `collector`'s own constraints — so this
+                        // adds no information; it only names the bridge the fresh
+                        // variables broke. MONOMORPHIC bindings only: a generalized
+                        // local owns its variables in its scheme (they are quantified
+                        // and re-instantiated per use), and tying those to this one
+                        // expression's type would defeat the polymorphism.
+                        val isMonomorphic = letResult.contextBindings[BindingKey.unqualified(varName)] is
+                            TypingContext.Binding.Monomorphic
+                        if (isMonomorphic && solvedValueType != exprResult.type) {
+                            collector.constraints.add(
+                                Constraint.Equality(
+                                    left = exprResult.type,
+                                    right = solvedValueType,
+                                    context = "do-block `let $varName` solved locally; " +
+                                        "its type must mean the same in the enclosing function",
+                                    loc = stmt.value.loc,
+                                )
+                            )
+                        }
                     }
                 }
 
