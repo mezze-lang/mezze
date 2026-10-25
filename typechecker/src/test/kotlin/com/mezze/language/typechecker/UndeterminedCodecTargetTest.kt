@@ -130,37 +130,56 @@ class UndeterminedCodecTargetTest {
      * same strip that hid the soundness hole in
      * [VariantPayloadCheckedAtCallSiteTest].
      *
-     * TWO WAYS OF LIFTING THAT STRIP WERE TRIED AND BOTH FAIL. Do not repeat
-     * them:
+     * CORRECTION, and this is the real finding: for a decode ability the
+     * question CANNOT BE ASKED AT EMIT AT ALL, by design. Running the whole rule
+     * against the full suite turned up 9 false positives, 7 of them one stdlib
+     * site — `std::effects::http::from_json_result`, which declares
+     * `with FromJson 'a Str -> Result 'a HttpError`, so the type is written in
+     * its own signature and no policy could justify refusing it. Measured:
      *
-     *  - LETTING THE CONSTRAINTS INTO THE GLOBAL SOLVE breaks 11 tests, and NOT
-     *    because of anything they compute. Measured with the solver branch made
-     *    completely INERT — returning Deferred always, publishing nothing at all
-     *    — and the same 11 failed identically ("Bool does not implement 'Show'"
-     *    printed beside "Available impls: impl Show for Bool"; "'Pink' is not a
-     *    valid constructor"). Their mere PRESENCE is what matters:
-     *    `solveHasConstructorFixpoint` partitions every other constraint around
-     *    them and runs a different number of rounds. So the earlier guess that
-     *    publishing an expanded variant was the cause is WRONG, and filtering
-     *    what gets published does not help.
+     *     per-binding : annotation #18708 → #21126, body usage #21162 → #21126
+     *     emit        : visible {18708, 21126}, demand carries #21162 (bare)
      *
-     *  - COMPUTING THE LINK AND INJECTING IT AS A PLAIN EQUALITY (pattern
-     *    contexts only, only where the variant is already concrete under the
-     *    per-binding substitution, so the partition is untouched) clears all 11
-     *    — and still does not fix this call: `'a` reads as open at emit exactly
-     *    as before. It also opens a NEW elaboration gap, at `let:flatten`
-     *    (`ElaborationInvariantGateTest`, and `ConstructorInMatchArmElaboration`
-     *    `Test > bare constructor last …` goes 0 → 1). That is the area
-     *    [[project_one_written_typevar_two_typevars]] #5 warns about by name:
-     *    closing `flatten` opens five other rows.
+     * One written `'a`, related correctly while the binding is being solved, and
+     * bare by the time emit looks. `ConstraintGenerator` says why, in its own
+     * words, where it builds the accumulated per-binding substitution:
      *
-     * What is left to find out: WHY the link does not arrive even when the
-     * equality is in the solve. The next measurement is the one not taken — the
-     * `HasField` that ties the arm's binding to the payload record's field runs
-     * in `completionOnly` mode, which acts only when its receiver is ALREADY a
-     * concrete record, and it may simply never be retried after the equality
-     * lands. That is a question about the fixpoint's retry order, and it is
-     * where to start.
+     *     One EXCLUSION, and it is structural: a decode target. `from_json`
+     *     returns `Result 'a DecodeError` where `'a` is inferred from the fields
+     *     the program later reads, and that variable must stay BARE where emit
+     *     reads it — codegen resolves each call's `.decode` dictionary per call
+     *     site (DecodeTargetResolver), and a call node carrying the record
+     *     instead of the variable wires the wrong decoder.
+     *
+     * `decodeTargetVars` are filtered OUT of that substitution deliberately, and
+     * `isDecodeEntryAbility` is exactly `["FromJson"]`. So "bare at emit" carries
+     * no information about whether the program determines the type — it is the
+     * guaranteed state for every correct decode. An emit-time judge therefore
+     * false-positives on all of them, and no amount of resolving helps: resolving
+     * through the per-binding substitution was tried and the mapping is not in
+     * there either, because it was removed on purpose.
+     *
+     * SO THE QUESTION BELONGS IN THE PER-BINDING STEP, where the variable is
+     * still related — the same place `AnnotationValidator`
+     * `.validateAbilityOnCorrectTypeVar` already compares a body's ability usage
+     * against the declared constraints, and already has `collectTypeVars(`
+     * `annotationType)` for "what this signature names". That is where to build
+     * it, and it explains why four attempts at emit all failed.
+     *
+     * Two earlier conclusions in this file were WRONG and are corrected above:
+     * that the blocker was codec policy, and that it was the HasConstructor
+     * strip. The strip findings still stand on their own (see
+     * [[project_stripped_constraint_is_an_unchecked_obligation]]) — letting those
+     * constraints into the global solve breaks 11 tests even when the solver
+     * branch is completely inert, which is worth knowing — but the strip is not
+     * what blocks THIS rule.
+     *
+     * The other two false positives have their own causes and are NOT this one:
+     * the `FromQuery` case below (FromQuery is neither decode-flavored nor a
+     * decode entry ability, so the exclusion does not apply to it), and
+     * `NumAdd` at `'a 'a` inside `impl Hashable for MyRecord where { digest =`
+     * `{ it } -> it.x + it.y }`, which is unmeasured — note that the same filter
+     * also drops `methodGrownReceiverVars`, one line away.
      *
      * Two things that were suspected and are NOT the problem, measured:
      *  - the codec exemption (`isCodecAbility`) is never reached for this call;
