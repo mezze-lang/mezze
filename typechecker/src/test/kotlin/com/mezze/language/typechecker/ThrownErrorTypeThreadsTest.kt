@@ -86,24 +86,33 @@ class ThrownErrorTypeThreadsTest {
      *     generalized (`bindLet` generalizes only a lambda or a function type,
      *     and already subtracts `getContextFreeVars`).
      *
-     *     What the numbering shows: the pattern solver sees `'y47#3285` /
-     *     `'x48#3316` while the validator sees `'e#3277` / `'b49#3320`. Those
-     *     are DIFFERENT SOLVE PASSES. A do-block has its own local solve, which
-     *     gives fresh identities to the enclosing function's variables — the
-     *     file says so itself, in `doBlockLambdaCapturesFreeVarBinding`: "an
-     *     enclosing MONO var that the do-block's local solve gives a fresh
-     *     identity to". So a constraint raised inside the block names a
-     *     variable the signature can never match, and no amount of fixing the
-     *     effect machinery will bridge it.
+     *     It is the intermediate `let`. Two tests below settle it without any
+     *     id archaeology: `an inlined perform threads the error type` is this
+     *     same program with the perform INLINED into the match and it COMPILES,
+     *     while the version that binds `let outcome = …` first does not. And
+     *     `a match arm binds a constrained error type argument` is the same
+     *     question with no effects at all, which also compiles — so neither the
+     *     match arm nor the effect machinery is at fault.
      *
-     *     That is architectural. The honest routes are to have the local solve
-     *     preserve enclosing variable identity, or to re-link the block's
-     *     variables to the enclosing ones afterwards the way
+     *     Measured in ONE run, so the ids are comparable (they are per-run —
+     *     comparing them across runs is meaningless and cost me a wrong
+     *     conclusion):
+     *
+     *         PERFORM  resolved      = Result #3276 #3277   ← the signature's var
+     *         PATTERN  scrutineeArgs = Result Str  #3285    ← a different one
+     *         VALIDATE usage=#3316 unresolved, annotated #3277 -> #3320
+     *
+     *     So the perform's resolved type does not reach the binding. A do-block
+     *     `let` runs its own LOCAL solve (`solveDoBlockBindingLocally`) and
+     *     hands that substitution to `bindLet`; the source already records the
+     *     consequence, in `doBlockLambdaCapturesFreeVarBinding` — "the
+     *     do-block's LOCAL solve gives the binding a fresh var identity …
+     *     different var instances across the local-solve boundary".
+     *
+     *     That boundary is where to pick this up: either the local solve keeps
+     *     enclosing variable identity, or the block's variables are re-linked
+     *     to the enclosing ones afterwards, the way
      *     `TypedAstBuilder.linkDeclaredVars` does for declared-vs-inferred.
-     *
-     *     Corroborating: `a match arm binds a constrained error type argument`
-     *     below is the same question with no `perform` and no do-block binding,
-     *     and it PASSES. The match arm is not at fault.
      *
      * A CONCRETE `having 'error = Denied` works throughout, because the thrown
      * value unifies the slot from the call site; only a VARIABLE has nothing
@@ -171,6 +180,29 @@ class ThrownErrorTypeThreadsTest {
             describe { r = Err { error = { who = "bob" } } }
         """)
         assertNull(e, "the Err arm binds the `'e` of `Result Str 'e`; got: $e")
+    }
+
+    /**
+     * The same program with the perform INLINED into the match, so there is no
+     * intermediate `let` binding. If this compiles while the bound version does
+     * not, the do-block binding is what loses the connection.
+     */
+    @Test fun `an inlined perform threads the error type`() {
+        val e = err("""
+            $head
+            let adapt
+              : { f: {} -> 'r <Exception having 'error = 'e, ...> }
+              with Into 'e
+              -> Str <*>
+              = { f } -> match perform ExceptionToResult in do
+                  let answered = f {}
+                  Ok { val = "ok" }
+                is
+                  Ok { val } -> val
+                  Err { error } -> error.conv {}
+            adapt { f = {} -> throw { error = { who = "bob" } } }
+        """)
+        assertNull(e, "inlined perform; got: $e")
     }
 
     /** The control: the same shape with the thrown type written out works. */
