@@ -88,59 +88,51 @@ class UndeterminedCodecTargetTest {
      * ACCEPTED TODAY, and the remaining step is now a DIFFERENT one from the
      * recording that used to be missing.
      *
-     * THREE STEPS, all three measured, NONE of them in the tree — because the
-     * first two cannot be tested until the third lands, and landing the first
-     * one alone regresses three tests. Each was built and run, so this is a
-     * record of working code, not a sketch.
+     * IT WAS BUILT, IT WORKS ON THIS CALL, AND IT IS NOT LANDED. Written and
+     * run end to end: with the three changes [UndeterminedClassArgTest] lists
+     * (carry the whole class-arg tuple to emit; read the receiver's DECLARED
+     * position, which a `with` clause may omit entirely; do not ask the receiver
+     * question of a method call) plus the narrowing below, this exact call is
+     * refused — the test above fires, as its own marker predicted.
      *
-     *  1. RECORDING, which is what used to be missing. A receiver-taking ability
-     *     op carries only its RECEIVER to emit (`MethodCallInfo.typeArgs`, the
-     *     monomorphizer's thread), so no dictionary demand was recorded at all.
-     *     Carrying the whole class-arg tuple beside it — populated in
-     *     `ExprMethodConstraints` from `abilityTypeVars`, which is already built
-     *     there for the `AbilityRequired` — and recording it in
-     *     `buildMethodCall` puts the demand in front of the judge:
+     * THE NARROWING. `requirementReachesHiddenVar` short-circuits on its second
+     * line for any codec ability: "Codec abilities are decided per call site by
+     * their own resolver and are not judged here." That resolver does not decide
+     * this one. `checkCodecAbilityImplementation` returns false the moment any
+     * of its types holds a variable (`allTypes.any { containsVarType(it) }`) and
+     * the obligation is then DEFERRED — right for a polymorphic function, since
+     * `{ s: Str } with Decode QueryC 'a Str -> …` carries it to a caller who
+     * determines `'a`. Nothing then asks whether a caller exists. Since a codec
+     * impl is generated per CONCRETE tuple, a non-receiver slot holding a
+     * variable no enclosing function names has no impl anyone could supply, so
+     * the exemption becomes: refuse exactly that, keep it otherwise. `Format for
+     * 'config having 'out` has nothing but a receiver and is asked nothing.
      *
-     *         SITE   FromQuery.from_query classArgs=['a, Str]
-     *         DEMAND FromQuery args=['a, Str] frame=ok holdsVar=true
+     * WHY IT CANNOT LAND: it produces one false positive, on `a decode consumed
+     * at a known type is accepted` below — a WORKING program. There `'a` is
+     * determined, by the `Ok` arm feeding `want { s = val }`, and the judge
+     * cannot see it. Measured, with both substitutions in hand:
      *
-     *  2. THE RECEIVER'S POSITION, a real bug in the judge.
-     *     `requirementReachesHiddenVar` reads `typeArgs.first()` as the
-     *     receiver, which is wrong for any ability declaring `for` on a later
-     *     parameter — `FromQuery 'a 'in` has `recv = 'in` — and is harmless only
-     *     because every caller today passes a single argument, where the two
-     *     orders coincide. The position is available from the declaration
-     *     (`receiverTypeParam` indexed into `typeParams`), and the same "nothing
-     *     can supply this" question then applies to a hidden NON-receiver
-     *     argument the impls discriminate on. Step 1 WITHOUT this refuses a
-     *     legitimate program: `MethodLevelAbilityConstraintTest > chained
-     *     ability methods with constraints`, "'Inner' is needed at `'a`".
+     *     JUDGE FromQuery args=['a, Str] visible=[] perBinding=[#5987->'a]
      *
-     *  3. THE CODEC EXEMPTION, which is a decision rather than an
-     *     investigation, and is why 1 and 2 are not landed. With both in place
-     *     this call is still accepted: the chain from `FromQuery` reaches its
-     *     blanket impl, whose `with Decode QueryC 'a Str` is what actually
-     *     discriminates, and the judge short-circuits on its second line for any
-     *     codec ability — "Codec abilities are decided per call site by their
-     *     own resolver and are not judged here."
+     * so the variable is open in the composed substitution AND in the
+     * per-binding one. The link that carries `Search` runs through the `Ok`
+     * pattern — a `HasConstructor` constraint — and `collectGlobalConstraints`
+     * STRIPS those before the global solve. The information is lost, not merely
+     * masked, so no amount of asking at the judge can recover it. Consulting the
+     * per-binding substitution was tried for exactly this and does not help.
      *
-     *     That resolver does not decide this one.
-     *     `checkCodecAbilityImplementation` returns false the moment any of its
-     *     types holds a variable (`allTypes.any { containsVarType(it) }`), and
-     *     the obligation is then DEFERRED — correctly, because a polymorphic
-     *     function legitimately carries `with Decode QueryC 'a Str` to its
-     *     caller. Nobody asks the one question that separates that case from
-     *     this one: whether any enclosing function carries it.
+     * The contrast that proves it: `a decode consumed by a direct call is
+     * accepted` passes, and resolves to `[Search, Str]` at emit. Same program
+     * shape, no pattern in the middle.
      *
-     *     So the exemption has to narrow — a codec ability whose DATA slot is a
-     *     hidden variable has no impl any caller could supply — and with 1 and 2
-     *     already built, that narrowing is the whole remaining change. It is
-     *     also the risky part: it decides codec policy and can refuse working
-     *     polymorphic codec code, and two of the three regressions step 1 showed
-     *     on its own were `undefined_variable` error-message tests, i.e. this
-     *     demand firing on programs that already have an error and changing
-     *     which diagnostic is reported. That needs the full suite and a decision
-     *     about precedence, not a rider on another fix.
+     * So the prerequisite is the HasConstructor strip, not codec policy — the
+     * same strip that hid the soundness hole in
+     * [VariantPayloadCheckedAtCallSiteTest]. That fix deliberately only CHECKS
+     * and publishes no substitution, because letting these constraints into the
+     * global solve perturbs it rather than completing it (25 regressions,
+     * measured). Making the pattern's linkage SURVIVE to the global solve is the
+     * open piece, and it is a solver change, not a codec one.
      *
      * Two things that were suspected and are NOT the problem, measured:
      *  - the codec exemption (`isCodecAbility`) is never reached for this call;
