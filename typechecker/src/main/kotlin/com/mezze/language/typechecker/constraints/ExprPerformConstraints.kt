@@ -302,7 +302,30 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
             val concreteBindings: Map<String, MezzeType> = if (effectInstance != null && effectInstance.associatedTypes.isNotEmpty() && performerAssocTypes != null) {
                 val result = mutableMapOf<String, MezzeType>()
                 for ((assocTypeName, concreteType) in effectInstance.associatedTypes) {
+                    // Either side may carry the leading `'`: an effect instance's
+                    // associated-type keys do (`'error`) and a performer's field
+                    // keys do not (`error`). The lookup missed, so the `else`
+                    // below keyed the result by `'error` — a name
+                    // `substituteAssociatedTypesInType` then could not match
+                    // against the performer's own variable, which stayed in the
+                    // suspension type.
+                    //
+                    // The effect: `perform ExceptionToResult in …` produced
+                    // `Result _ 'z47` (the performer's fresh variable) instead of
+                    // `Result _ 'e` (the type the handled effect declares), so an
+                    // `Err` arm bound a variable unrelated to the signature's:
+                    //
+                    //     let adapt : { f: {} -> 'r <Exception having 'error = 'e, ...> }
+                    //       with Into 'e -> Str <*>
+                    //
+                    //     "the annotation constrains `with Into 'e`, but the body
+                    //      applies Into to a type the annotation does not name"
+                    //
+                    // A CONCRETE `having 'error = Denied` survived this because
+                    // the thrown value unifies the slot from the call site; only a
+                    // VARIABLE had nothing else to tie it.
                     val performerBinding = performerAssocTypes.fields[assocTypeName]
+                        ?: performerAssocTypes.fields[assocTypeName.removePrefix("'")]
                     if (performerBinding is MezzeType.VarType) {
                         result[performerBinding.variable.name.removePrefix("'")] = concreteType
                     } else {

@@ -1127,6 +1127,83 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             // caughtByAncestor. These are effects the enclosing function
             // catches (e.g., spawn catches Exception). Filter them from
             // the harvested effects — they should NOT flow to the caller.
+            // A callback's `...` tail must not escape a CLOSED enclosing row.
+            //
+            //     let runs: { f: { x: Int } -> Str <Boom, ...> } -> Str <Boom> = { f } -> f { x = 1 }
+            //     runs { f = { x } -> do … Noise.shout { … } … }
+            //
+            // `runs` calls its callback INLINE, in its own frame, so whatever
+            // the callback performs `runs` performs. Its row names Boom and
+            // nothing else, so Noise reached the caller through a function
+            // whose type never mentions it. `<Boom, ...>` means at least Boom
+            // AND the rest, and the rest has to go somewhere: named, passed on
+            // with the callee's own `...`, or handled and marked `*`.
+            //
+            // Judged HERE because this is the only place both halves are in
+            // hand — the callee's declared type and the actual callback.
+            // `unifyEffectRows` sees the two callback rows and not the return
+            // row, which is why this could not live there.
+            //
+            // A plain function is the right subject: it calls its callback in
+            // the caller's frame. An effect OPERATION is performed instead, and
+            // its performer decides where the callback runs and under which
+            // handlers — `Async.spawn` captures the chain and runs the task
+            // elsewhere, so its closed `<Async>` is honest. Effect-op calls do
+            // not come through here, so that case is excluded by construction
+            // rather than by a list.
+            if (functionType.effects?.rowVar == null && functionType.effects?.performed != true) {
+                val calleeNames = functionType.effects?.allEffectNames.orEmpty()
+                val declaredFields = (functionType.paramType as? MezzeType.RecordType)?.fields.orEmpty()
+                val actualFields = (argumentResult.type as? MezzeType.RecordType)?.fields.orEmpty()
+                for ((fieldName, declaredType) in declaredFields) {
+                    val declaredFn = declaredType as? MezzeType.FunctionType ?: continue
+                    val declaredRow = declaredFn.effects ?: continue
+                    if (declaredRow.rowVar == null) continue
+                    // Only a row that NAMES an effect. `<E, ...>` is a claim
+                    // about what the callback does where it is called, so the
+                    // author who wrote it is saying the callback runs HERE. A
+                    // bare `<...>` claims nothing, and that is the shape a
+                    // FORWARDER uses — a function that passes the callback on
+                    // instead of calling it:
+                    //
+                    //     let spawn = { f } -> Async.spawn { f = f }
+                    //
+                    // Its callback's effects run in the spawned task, under the
+                    // chain captured there, so its own `<Async>` is honest. The
+                    // interpreter suite caught this: eight tests define exactly
+                    // that wrapper and pass it a `Time`-performing lambda.
+                    //
+                    // Forwarding and calling are indistinguishable from a call
+                    // site — both are plain functions taking an open-rowed
+                    // callback — so the named row is what separates a
+                    // declaration that commits from one that does not. The
+                    // stdlib already follows that line: `spawn`, `with_lines`
+                    // and `with_read` all take a bare `<...>`.
+                    if (declaredRow.allEffectNames.isEmpty()) continue
+                    val actualRow = (actualFields[fieldName] as? MezzeType.FunctionType)?.effects ?: continue
+                    val escaping = actualRow.allEffectNames -
+                        declaredRow.allEffectNames -
+                        declaredRow.caughtByAncestor -
+                        calleeNames
+                    if (escaping.isEmpty()) continue
+                    val shown = escaping.sorted().joinToString(", ")
+                    val functionName = (expr.function as? ParsedIdentifier)?.localName
+                    throw TypeCheckError(
+                        "This callback performs <$shown>, and ${functionName?.let { "`$it`" } ?: "the function"} " +
+                            "calls it without carrying those effects: its row is " +
+                            "<${calleeNames.sorted().joinToString(", ")}>, which is closed. The callback's " +
+                            "`...` has to go somewhere — a caller would perform <$shown> through a type that " +
+                            "never mentions it.",
+                        expr.loc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf(
+                            "let the row flow out: declare the result `<${(calleeNames.sorted() + "...").joinToString(", ")}>`",
+                            "or name the effect there: `<${(calleeNames + escaping).sorted().joinToString(", ")}>`",
+                            "or, if that function handles it, say so with `*`",
+                        ),
+                    )
+                }
+            }
             val caughtByOp = collectCaughtByAncestor(functionType.paramType)
             val rowVarEffects: Set<String> = if (effectRow.rowVar != null) {
                 // BUG C (#331): defer a post-solve re-harvest of the SAME argument.
