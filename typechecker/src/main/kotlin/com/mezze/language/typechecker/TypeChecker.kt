@@ -644,6 +644,11 @@ class TypeChecker(
                     .compose(implOpSubstitution)
                     .saturate()
                 InvariantChecker.checkSubstitution(substitution, "post-solve")
+                collectedErrors.addAll(
+                    withInScopeAliasNames(inScopeAliasNames) {
+                        checkConstructorPayloads(constraintResults, substitution, registry)
+                    }
+                )
                 // S0.4/#373 — POST-SOLVE SUBSTITUTION IDEMPOTENCE, now that
                 // saturate() above establishes it. `apply(apply(t)) == apply(t)`: no
                 // stored RHS still mentions a var the same substitution rewrites.
@@ -1100,10 +1105,135 @@ class TypeChecker(
         return unusedVarWarnings + patternWarnings + unusedHandlerWarnings
     }
 
+    /**
+     * The payload check that [collectGlobalConstraints] strips out, run once the
+     * solve has finished and against its final substitution.
+     *
+     * A constructor whose variant is still a type VARIABLE defers in the
+     * per-binding solve, and the stripped constraint meant nothing ever came back
+     * to it. In ARGUMENT position that is always the case — the parameter's
+     * declared type arrives through the application's own equality, after the
+     * constructor has already deferred — so the payload went unchecked:
+     *
+     *     let want = { r: Result Search Str } -> 0
+     *     want { r = Ok { val = 5 } }          // accepted; an Int reached Search
+     *
+     * The same constructor under an annotated binding WAS rejected, which is what
+     * made this look like a variant-unification problem rather than a missing
+     * pass. It also hid a second thing: a `match` arm's requirement on its binding
+     * refines the scrutinee correctly, and only the call site failed to check it.
+     *
+     * Deliberately NARROW, because the solve is finished and must not be reopened:
+     * it checks a constructor that is PRESENT on an ALREADY-CONCRETE variant and
+     * whose payload is given on both sides, and it publishes no substitution. An
+     * absent constructor is left alone (an open variant legitimately grows one —
+     * see VariantStructuralAliasExtTest), and arity is reported elsewhere in its
+     * own words.
+     */
+    private fun checkConstructorPayloads(
+        constraintResults: Map<String, ConstraintResult>,
+        substitution: Substitution,
+        registry: com.mezze.language.typechecker.context.DeclarationRegistry,
+    ): List<TypeChecker.TypeCheckError> {
+        val errors = mutableListOf<TypeChecker.TypeCheckError>()
+        // Receivers a method call may have GROWN into a record of its own
+        // operation: `x.to_str {}` on a genuinely polymorphic receiver becomes
+        // `{ to_str: {} -> 'a }` so the call can be typed, and the runtime
+        // dispatches on the value instead. That shape is not a record the program
+        // has, so a payload must never be compared against it — it reads as
+        // "expected Int, got { to_str: {} -> 'a }"
+        // (InspectPolymorphicReceiverTest). `HasField.methodCallee` marks exactly
+        // those receivers. Reading them from the CONSTRAINTS rather than from
+        // `ConstraintSolver.methodGrownReceiverVars` is deliberate: the grow can
+        // happen in a PER-BINDING solve, whose solver instance is gone by the time
+        // this runs, so that field is empty here for the case that needs it.
+        // A receiver GROWN for a method call is not a record the program has.
+        // `x.to_str {}` on a genuinely polymorphic receiver becomes
+        // `{ to_str: {} -> 'a }` so the call can be typed, and the runtime
+        // dispatches on the value instead; comparing a payload against that shape
+        // reads as "expected Int, got { to_str: {} -> 'a }"
+        // (InspectPolymorphicReceiverTest).
+        //
+        // Recognised by its SHAPE, and that is the only thing that works here.
+        // Tracking the variable does not: the grow happens in a PER-BINDING solve
+        // and is deliberately withheld from the shared substitution — measured,
+        // the receiver resolves to `'a`, itself — while the record still reaches
+        // the enclosing type, so `let show = { a } -> match a is Grams { n } ->
+        // n.to_str {}` infers `{ a: | Grams { n: { to_str: {} -> 'a } } | }` with
+        // no variable left anywhere to flag.
+        //
+        // The shape is a non-empty record whose every field is a FUNCTION named
+        // after an operation this module actually calls as a method
+        // (`HasField.methodCallee` marks those). Erring here can only mean
+        // skipping a check, never inventing a rejection.
+        val methodCalleeFieldNames: Set<String> = constraintResults.values
+            .flatMap { it.constraints }
+            .filterIsInstance<Constraint.HasField>()
+            .filter { it.methodCallee }
+            .map { it.fieldName }
+            .toSet()
+
+        fun isGrownReceiverShape(t: MezzeType): Boolean =
+            t is MezzeType.RecordType && t.fields.isNotEmpty() &&
+                t.fields.all { (name, type) ->
+                    type is MezzeType.FunctionType && name in methodCalleeFieldNames
+                }
+
+        fun mentionsGrownShape(t: MezzeType): Boolean =
+            isGrownReceiverShape(t) || t.anyChild { mentionsGrownShape(it) }
+        for (result in constraintResults.values) {
+            for (constraint in result.constraints) {
+                if (constraint !is Constraint.HasConstructor) continue
+                // A PATTERN's payload is a partial VIEW of the value, not a
+                // construction of it: `Range { min }` names one field of a
+                // two-field payload on purpose, and `PatternConstraints` says so
+                // in as many words. Unifying it strictly reads as "missing
+                // 'max'". Only a CONSTRUCTOR EXPRESSION claims to build the whole
+                // payload, and that is the case this pass is for.
+                if (constraint.isPatternContext) continue
+                val expected = constraint.payloadType ?: continue
+                val applied = substitution.apply(constraint.variantType)
+                if (methodCalleeFieldNames.isNotEmpty() && mentionsGrownShape(applied)) continue
+                val concrete = when (applied) {
+                    is MezzeType.VariantType -> applied
+                    is MezzeType.TypeApplication ->
+                        com.mezze.language.typechecker.solving.expandTypeApplicationToVariant(applied, registry)
+                    else -> null
+                } ?: continue
+                if (!concrete.constructors.containsKey(constraint.constructorName)) continue
+                val actual = concrete.constructors[constraint.constructorName] ?: continue
+                val unified = com.mezze.language.typechecker.solving.unify(
+                    substitution.apply(actual), substitution.apply(expected), registry,
+                )
+                if (unified is com.mezze.language.typechecker.solving.UnificationResult.Failure) {
+                    errors.add(
+                        TypeChecker.TypeCheckError(
+                            phase = "ConstructorPayload",
+                            message = "'${constraint.constructorName}' payload does not match " +
+                                "${com.mezze.language.ast.prettyPrintType(applied)}: ${unified.message}",
+                            loc = constraint.loc,
+                            code = ErrorCode.T0201_TYPE_MISMATCH,
+                        )
+                    )
+                }
+            }
+        }
+        return errors
+    }
+
     private fun collectGlobalConstraints(
         constraintResults: Map<String, ConstraintResult>,
     ): List<Constraint> {
         return constraintResults.values.flatMap { it.constraints }
+            // HasConstructor is kept OUT of the global solve, and deliberately.
+            // Letting it in perturbs the solve rather than completing it: the
+            // fixpoint partitions the other constraints around it, a constructor
+            // on a still-open variant DEFERS forever, and expanding a nominal
+            // type to its variant shape puts a second `Bool` into circulation —
+            // measured as 25 regressions, among them "Bool does not implement
+            // 'Show'" printed beside "Available impls: impl Show for Bool".
+            // The payload check these constraints carry runs AFTER the solve
+            // instead, in `checkConstructorPayloads`, where it publishes nothing.
             .filter { constraint ->
                 constraint !is Constraint.HasConstructor
             }
