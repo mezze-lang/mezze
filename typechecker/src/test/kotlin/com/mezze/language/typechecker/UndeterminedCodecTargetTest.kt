@@ -128,11 +128,39 @@ class UndeterminedCodecTargetTest {
      *
      * So the prerequisite is the HasConstructor strip, not codec policy — the
      * same strip that hid the soundness hole in
-     * [VariantPayloadCheckedAtCallSiteTest]. That fix deliberately only CHECKS
-     * and publishes no substitution, because letting these constraints into the
-     * global solve perturbs it rather than completing it (25 regressions,
-     * measured). Making the pattern's linkage SURVIVE to the global solve is the
-     * open piece, and it is a solver change, not a codec one.
+     * [VariantPayloadCheckedAtCallSiteTest].
+     *
+     * TWO WAYS OF LIFTING THAT STRIP WERE TRIED AND BOTH FAIL. Do not repeat
+     * them:
+     *
+     *  - LETTING THE CONSTRAINTS INTO THE GLOBAL SOLVE breaks 11 tests, and NOT
+     *    because of anything they compute. Measured with the solver branch made
+     *    completely INERT — returning Deferred always, publishing nothing at all
+     *    — and the same 11 failed identically ("Bool does not implement 'Show'"
+     *    printed beside "Available impls: impl Show for Bool"; "'Pink' is not a
+     *    valid constructor"). Their mere PRESENCE is what matters:
+     *    `solveHasConstructorFixpoint` partitions every other constraint around
+     *    them and runs a different number of rounds. So the earlier guess that
+     *    publishing an expanded variant was the cause is WRONG, and filtering
+     *    what gets published does not help.
+     *
+     *  - COMPUTING THE LINK AND INJECTING IT AS A PLAIN EQUALITY (pattern
+     *    contexts only, only where the variant is already concrete under the
+     *    per-binding substitution, so the partition is untouched) clears all 11
+     *    — and still does not fix this call: `'a` reads as open at emit exactly
+     *    as before. It also opens a NEW elaboration gap, at `let:flatten`
+     *    (`ElaborationInvariantGateTest`, and `ConstructorInMatchArmElaboration`
+     *    `Test > bare constructor last …` goes 0 → 1). That is the area
+     *    [[project_one_written_typevar_two_typevars]] #5 warns about by name:
+     *    closing `flatten` opens five other rows.
+     *
+     * What is left to find out: WHY the link does not arrive even when the
+     * equality is in the solve. The next measurement is the one not taken — the
+     * `HasField` that ties the arm's binding to the payload record's field runs
+     * in `completionOnly` mode, which acts only when its receiver is ALREADY a
+     * concrete record, and it may simply never be retried after the equality
+     * lands. That is a question about the fixpoint's retry order, and it is
+     * where to start.
      *
      * Two things that were suspected and are NOT the problem, measured:
      *  - the codec exemption (`isCodecAbility`) is never reached for this call;
