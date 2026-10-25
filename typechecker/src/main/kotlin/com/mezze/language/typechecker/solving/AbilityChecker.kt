@@ -700,7 +700,36 @@ class AbilityChecker internal constructor(
 
             val typeVarBindings = mutableMapOf<String, MezzeType>()
 
-            val matches = unwrappedTypeArgs.zip(annotations).all { (actualType, annotation) ->
+            // IDENTITY first, because the annotation path cannot answer this one.
+            // It matches the impl's SOURCE SPELLING against `registry.typeDeclarations`
+            // — the CONSUMER's — and a `use … as` alias lives only in the module that
+            // WROTE the impl. So `impl Describe for Widget` looked up "Widget" in a
+            // registry that only knows "Thing", found nothing, and fell to comparing
+            // display names: "Thing" != "Widget".
+            //
+            //     "Thing does not implement 'Describe'.
+            //      Available impls: impl Describe for Widget"
+            //
+            // naming the very impl it refused. `targetTypeHashes` was resolved at
+            // REGISTRATION, in the module where that spelling means something, so it
+            // travels. One declaration, one content hash, any number of local names.
+            val identityMatches = run {
+                val hashes = implInfo.targetTypeHashes
+                if (hashes.size != unwrappedTypeArgs.size || hashes.any { it == null }) return@run false
+                // BARE nominals only. A declaration hash names the DECLARATION,
+                // not the application: `Wrap 'a` and `Wrap Color` are both the
+                // `Wrap` declaration, so matching on it alone let an impl for
+                // `Wrap 'a with Ord 'a` serve `Wrap Color` with no `Ord Color`
+                // anywhere — OrdDerivationSoundness and DerivedEqRequiresFieldEq
+                // stopped rejecting. Anything applied to arguments, on either
+                // side, is left to the annotation matcher, which compares them.
+                if (annotations.any { it !is ParsedNamedType }) return@run false
+                if (unwrappedTypeArgs.any { appliedArgsOf(it).isNotEmpty() }) return@run false
+                val wanted = unwrappedTypeArgs.map { declaredHashOf(it) }
+                wanted.none { it == null } && wanted == hashes
+            }
+
+            val matches = identityMatches || unwrappedTypeArgs.zip(annotations).all { (actualType, annotation) ->
                 TypeAnnotationMatcher.typeMatchesAnnotation(actualType, annotation, registry.typeDeclarations, implInfo.typeVars, typeVarBindings)
             }
 
@@ -1588,6 +1617,25 @@ class AbilityChecker internal constructor(
             // so its variables must unify with the caller's types rather than
             // persisting across unrelated conversions.
         )
+
+    /** The type arguments a nominal type was applied to, empty when none. */
+    private fun appliedArgsOf(type: MezzeType): List<MezzeType> = when (type) {
+        is MezzeType.TypeApplication -> type.args
+        is MezzeType.VariantType -> type.typeArgs
+        else -> emptyList()
+    }
+
+    /** A type's declaration hash, for the nominal shapes that carry one. */
+    private fun declaredHashOf(type: MezzeType): Hash? {
+        val identity = when (type) {
+            is MezzeType.RecordType -> type.identity
+            is MezzeType.VariantType -> type.identity
+            is MezzeType.TypeApplication -> type.identity
+            is MezzeType.NewtypeType -> type.identity
+            else -> null
+        }
+        return (identity as? TypeIdentity.Declared)?.hash
+    }
 
     private fun typeMatchesMezzeType(expected: MezzeType, actual: MezzeType): Boolean {
         if (expected == actual) return true

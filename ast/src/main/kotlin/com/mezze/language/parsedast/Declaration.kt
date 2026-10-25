@@ -259,6 +259,25 @@ data class ParsedImplAbilityDecl(
     override val loc: Loc,
     /** Identity — stamped by [DeclIdentity] once names are resolved, never by the parser. */
     val contentHash: com.mezze.language.typedast.Hash? = null,
+    /**
+     * What this impl's targets RESOLVE to, stamped where the impl was written.
+     *
+     * `targetTypes` keeps the spelling, and `use … as` makes that a local alias:
+     * `impl Describe for Widget` recorded "Widget", an importer looked that name
+     * up in ITS table, found nothing, and the impl was unfindable — the
+     * diagnostic even listed it ("Thing does not implement 'Describe'.
+     * Available impls: impl Describe for Widget").
+     *
+     * A name resolves only in the module that wrote it, so it is resolved there,
+     * once, and carried. Positional with `allTypeArgs` (or `targetTypes` for an
+     * inherent impl), the same lists `AbilityImplFactory` builds from. An entry
+     * is null when its target names no declaration: a type variable, a
+     * structural record, a builtin.
+     *
+     * The sibling of the effect rows `IdentityGroup.stampRows` resolves onto a
+     * type declaration, and for the same reason.
+     */
+    val targetTypeHashes: List<com.mezze.language.typedast.Hash?>? = null,
     /** Compiler-DERIVED instance (structural `Eq` for a record / variant — the
      *  `#[derive]` the compiler writes itself). Never produced by the parser. It is
      *  the type's one instance, so coherence validation must not treat it as a

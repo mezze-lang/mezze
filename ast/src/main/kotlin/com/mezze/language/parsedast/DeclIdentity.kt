@@ -132,6 +132,29 @@ class IdentityGroup(val modules: List<ParsedModule>) {
             node.copy(effects = row.copy(resolved = row.allEffectNames.mapNotNull { n -> effectIn(m, n)?.let { n to it } }.toMap()))
         }
 
+        // An impl's TARGET types, resolved the same way its effect rows are:
+        // through the writing module's own scope. Without this the target
+        // survives only as a spelling, and a `use … as` alias means nothing to
+        // an importer.
+        fun typeIn(m: Int, written: String): Hash? {
+            val parts = written.split("::")
+            val qualifier = parts.dropLast(1).takeIf { it.isNotEmpty() }
+            val name = parts.last()
+            if (name.startsWith("'")) return null
+            val own = if (qualifier == null) locals[m].byName[RefKind.TYPE to name] else null
+            return when (val r = if (own != null) Referent.Pending(own) else scopes[m].resolve(RefKind.TYPE, qualifier, name)) {
+                is Referent.Known -> r.hash
+                is Referent.Pending -> identity[r.node]
+                null -> null
+            }
+        }
+        fun targetHead(t: ParsedTypeAnnotation): String? = when (t) {
+            is ParsedNamedType -> t.name
+            is ParsedTypeApp -> t.constructor
+            is ParsedQualifiedType -> (t.modulePath + t.typeName).joinToString("::")
+            else -> null
+        }
+
         return modules.mapIndexed { m, mod ->
             mod.copy(decls = mod.decls.mapIndexed { i, d ->
                 val withRows = if (d is ParsedTypeDecl) d.copy(definition = when (val def = d.definition) {
@@ -139,7 +162,10 @@ class IdentityGroup(val modules: List<ParsedModule>) {
                     is ParsedNewtypeDef -> def.copy(wrappedType = stampRows(m, def.wrappedType))
                     is ParsedRecordDef -> def.copy(fields = def.fields.map { it.copy(type = stampRows(m, it.type)) })
                     is ParsedVariantDef -> def.copy(constructors = def.constructors.map { c -> c.copy(dataType = c.dataType?.let { stampRows(m, it) }) })
-                }) else d
+                }) else if (d is ParsedImplAbilityDecl) {
+                    val targets = if (d.isInherent) d.targetTypes else d.allTypeArgs
+                    d.copy(targetTypeHashes = targets.map { targetHead(it)?.let { h -> typeIn(m, h) } })
+                } else d
                 withIdentity(withRows, identity[offsets[m] + i])
             })
         }

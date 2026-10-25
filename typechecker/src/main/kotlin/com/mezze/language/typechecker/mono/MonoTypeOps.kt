@@ -122,12 +122,53 @@ private fun typeArgsMatch(
     }
 }
 
+/** The type arguments a nominal type was applied to, empty when none. */
+private fun typeArgsOf(type: MezzeType): List<MezzeType> = when (type) {
+    is MezzeType.TypeApplication -> type.args
+    is MezzeType.VariantType -> type.typeArgs
+    else -> emptyList()
+}
+
+/** A type's declaration hash, for the nominal shapes that carry one. */
+private fun declaredIdentityHash(type: MezzeType): com.mezze.language.typedast.Hash? {
+    val identity = when (type) {
+        is MezzeType.RecordType -> type.identity
+        is MezzeType.VariantType -> type.identity
+        is MezzeType.TypeApplication -> type.identity
+        is MezzeType.NewtypeType -> type.identity
+        else -> null
+    }
+    return (identity as? TypeIdentity.Declared)?.hash
+}
+
 internal fun typeMatchesTarget(
     concrete: MezzeType,
     target: MezzeType,
     variantDeclHasConstructors: (String, Set<String>) -> Boolean,
 ): Boolean {
     if (concrete == target) return true
+    // IDENTITY first, whatever shape each side arrived as. One declaration has
+    // one content hash however it is spelled locally, and an impl's target is
+    // recorded with the spelling it was WRITTEN with — which `use … as` makes a
+    // local alias. Without this an `impl Describe for Widget` never matched a
+    // receiver typed `Thing`, the same declaration, and the method call compiled
+    // to a field read that failed at runtime with `Field not found: describe`.
+    //
+    // Only ADDS matches. The TypeApplication arm below still vetoes a pair whose
+    // hashes DIFFER, which is distinctness and stays a reject.
+    //
+    // ONLY when neither side carries type ARGUMENTS. A declaration hash names
+    // the declaration, not the application: `Wrap 'a` and `Wrap Color` are both
+    // the `Wrap` declaration, and short-circuiting on that alone made an impl
+    // for `Wrap 'a with Ord 'a` match `Wrap Color` without `Ord Color` ever
+    // existing — three soundness tests stopped rejecting (OrdDerivationSoundness,
+    // DerivedEqRequiresFieldEq). Applications are left to the arm below, which
+    // compares the arguments.
+    val concreteHash = declaredIdentityHash(concrete)
+    val targetHash = declaredIdentityHash(target)
+    if (concreteHash != null && targetHash != null && concreteHash == targetHash &&
+        typeArgsOf(concrete).isEmpty() && typeArgsOf(target).isEmpty()
+    ) return true
     return when {
         concrete is MezzeType.IntType && target is MezzeType.IntType -> true
         concrete is MezzeType.FloatType && target is MezzeType.FloatType -> true

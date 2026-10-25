@@ -294,6 +294,7 @@ class TypeValidator(
             val abilityImpls = context.getAbilityImpls(abilityName)
 
             if (hasStructuralMatch(abilityImpls, concreteTypes)) continue
+            if (hasIdentityMatch(abilityImpls, concreteTypes)) continue
             if (abilityImpls.any { it.targetTypes == implTypeParts }) continue
             if (hasAliasMatch(implTypeParts, concreteType, abilityImpls)) continue
             if (implTypeParts.size == 1 && constraint.typeArgs.isNotEmpty() &&
@@ -321,6 +322,61 @@ class TypeValidator(
         concreteTypes.zip(annotations).all { (t, a) ->
             TypeAnnotationMatcher.typeMatchesAnnotation(t, a, typeDeclarations, implInfo.typeVars, bindings)
         }
+    }
+
+    /**
+     * The impl's targets and the demanded types are the same DECLARATIONS.
+     *
+     * Every other rung of this ladder compares spellings, and `use … as` makes
+     * the spelling local: an `impl IntoErrorResponse for CodecDecodeError`
+     * registered under that alias while a demand for the same declaration
+     * arrived as `DecodeError`, so the impl was unfindable and the diagnostic
+     * listed it in the same breath — "DecodeError does not implement
+     * 'IntoErrorResponse' … Available impls: … for CodecDecodeError".
+     *
+     * One declaration has one content hash whatever it is called locally.
+     *
+     * Only ADDS a match: a target or a demanded type with no declared identity
+     * (a type variable, a structural record, a declaration absent from the
+     * registry when the impl was registered) answers false and leaves the
+     * name-based rungs to decide exactly as before.
+     */
+    private fun hasIdentityMatch(
+        impls: List<TypingContext.AbilityImplInfo>,
+        concreteTypes: List<MezzeType>
+    ): Boolean {
+        val wanted = concreteTypes.map { declaredHashOf(it) }
+        if (wanted.isEmpty() || wanted.any { it == null }) return false
+        // BARE nominals only — a declaration hash names the declaration, not the
+        // application, so `Wrap Color` must not be served by `Wrap 'a`'s impl on
+        // the strength of both being `Wrap`. See the sibling note in
+        // AbilityChecker.
+        if (concreteTypes.any { appliedArgsOf(it).isNotEmpty() }) return false
+        return impls.any { impl ->
+            impl.targetTypeAnnotations?.all { it is ParsedNamedType } == true &&
+                impl.targetTypeHashes.size == wanted.size &&
+                impl.targetTypeHashes.none { it == null } &&
+                impl.targetTypeHashes == wanted
+        }
+    }
+
+    /** The type arguments a nominal type was applied to, empty when none. */
+    private fun appliedArgsOf(type: MezzeType): List<MezzeType> = when (type) {
+        is MezzeType.TypeApplication -> type.args
+        is MezzeType.VariantType -> type.typeArgs
+        else -> emptyList()
+    }
+
+    /** A type's declaration hash, when it has one. */
+    private fun declaredHashOf(type: MezzeType): Hash? {
+        val identity = when (type) {
+            is MezzeType.RecordType -> type.identity
+            is MezzeType.VariantType -> type.identity
+            is MezzeType.TypeApplication -> type.identity
+            is MezzeType.NewtypeType -> type.identity
+            else -> null
+        }
+        return (identity as? TypeIdentity.Declared)?.hash
     }
 
     private fun hasAliasMatch(

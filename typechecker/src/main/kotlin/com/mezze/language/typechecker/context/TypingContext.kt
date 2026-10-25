@@ -85,6 +85,11 @@ data class TypingContext(
         val abilityName: String?,  // null for inherent impls — for error messages and fallback
         val abilityDeclHash: Hash? = null,
         val targetTypes: List<String>,
+        // The same targets by IDENTITY, resolved in the module that wrote the
+        // impl and carried on the declaration. `targetTypes` is the SPELLING,
+        // and a `use … as` alias means nothing to an importer — see
+        // ParsedImplAbilityDecl.targetTypeHashes.
+        val targetTypeHashes: List<Hash?> = emptyList(),
         val targetTypeAnnotations: List<ParsedTypeAnnotation>? = null,
         val associatedTypeBindings: Map<String, ParsedTypeAnnotation> = emptyMap(),
         val sourceModule: String? = null,

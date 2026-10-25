@@ -40,6 +40,11 @@ internal object AbilityImplFactory {
             implDecl.allTypeArgs
         }
         val targetTypes = annotations.map { typeNameOf(it) }
+        // Resolved where the impl was WRITTEN (IdentityGroup), so an aliased
+        // target still names its declaration here. Positional with `annotations`.
+        val targetTypeHashes = implDecl.targetTypeHashes
+            ?.takeIf { it.size == annotations.size }
+            ?: List(annotations.size) { null }
 
         val typeVars = if (implDecl.isInherent) emptySet() else {
             implDecl.forallVars.toSet()
@@ -51,6 +56,7 @@ internal object AbilityImplFactory {
             abilityName = implDecl.abilityName,
             abilityDeclHash = abilityDeclHash,
             targetTypes = targetTypes,
+            targetTypeHashes = targetTypeHashes,
             targetTypeAnnotations = annotations,
             associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = sourceModule,
