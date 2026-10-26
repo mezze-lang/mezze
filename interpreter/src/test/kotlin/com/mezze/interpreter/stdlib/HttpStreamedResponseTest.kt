@@ -42,7 +42,7 @@ class HttpStreamedResponseTest {
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
           Err { error = _ } -> "could not decode"
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4 }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
     """.trimIndent()
 
     private val fetch = """

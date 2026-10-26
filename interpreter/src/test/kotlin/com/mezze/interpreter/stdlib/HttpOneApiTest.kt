@@ -142,7 +142,7 @@ class HttpOneApiTest {
     fun `the same table answers over a real socket`() {
         val r = run(
             """
-            perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4 } } in
+            perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
               perform SimpleHttpClient in do
                 let h = HttpServer.serve { handler = api }
                 let c = client { base_url = "http://127.0.0.1:${'$'}(int::to_str { n = h.port })" }

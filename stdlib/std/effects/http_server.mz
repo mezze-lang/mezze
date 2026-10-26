@@ -33,6 +33,8 @@
 
 use std::effects::http::{ Method, Get, Post, Put, Delete, Patch, Head, Options, Request, Response }
 use std::collections::map
+use std::collections::iter
+use std::collections::bytes
 use std::str
 
 ## A running server. `stop` shuts it down; `port` is the bound port, which
@@ -68,7 +70,28 @@ pub let incoming: { method: Method, url: Str } -> Request = { method, url } -> {
   headers = map::empty {},
   body = None,
   timeout_ms = None,
+  chunks = None,
 }
+
+## `incoming` carrying a STREAMED body, for exercising a streaming handler
+## without a socket.
+##
+## The test seam has to cover both shapes or a streaming handler is only ever
+## tested against a real server — which is the position `MockHttpServer` exists
+## to avoid. `chunks` is any `Iter Bytes`, so a test says what the chunk
+## boundaries are, and boundaries are the whole difficulty of streaming: a
+## reader that happens to work on one chunk is not a reader.
+pub let incoming_streamed
+  : { method: Method, url: Str, chunks: Iter Bytes }
+  -> Request
+  = { method, url, chunks } -> {
+    method = method,
+    url = url,
+    headers = map::empty {},
+    body = None,
+    timeout_ms = None,
+    chunks = Some { val = chunks },
+  }
 
 ## `incoming` for a GET, which is most of what tests want.
 pub let get_request: { url: Str } -> Request = { url } ->
@@ -104,10 +127,22 @@ pub let options_request: { url: Str } -> Request = { url } ->
 ## that runs handlers, so the default is wide rather than core-count-sized: a
 ## handler that performs a request of its own occupies its worker while it
 ## waits.
+## `stream_bodies` hands each handler its request body as `chunks` instead of
+## reading it into `body` first, so an upload's peak cost is one chunk rather
+## than its whole size.
+##
+## It is a server-wide switch and OFF by default, which is a decision worth
+## stating. A per-request rule — stream when Content-Length is over some
+## threshold — sounds better and is worse: every handler would then have to read
+## BOTH shapes, and a handler that reads only `body` would silently find `None`
+## exactly for the large uploads it was meant to handle. One switch means a
+## handler knows which shape it gets, and `body_bytes` covers the handler that
+## wants the whole thing anyway.
 pub type ServerConfig = {
   port: Int,
   host: Str,
   workers: Int,
+  stream_bodies: Bool,
 }
 
 ## Port 8080 on the loopback address, with the default worker count.
@@ -118,18 +153,70 @@ pub let default_server_config: ServerConfig = {
   port = 8080,
   host = "127.0.0.1",
   workers = 0,
+  stream_bodies = False,
 }
+
+## ── Streamed request bodies ─────────────────────────────────────────────────
+
+## A single-shot reader over one request's body.
+##
+## Opaque, like `FileHandle`: the value is whatever the server put behind it,
+## and the only thing to do with one is read the next chunk. It is SINGLE-SHOT —
+## the body is consumed as it is read, so two walks of the same `chunks` see the
+## first one's leftovers.
+##
+## It outlives the handler. Helidon keeps the connection's content readable
+## while the response is written, so a handler may hand its request's `chunks`
+## straight on as the response's and get a pass-through that buffers nothing —
+## measured at 20 B, 40 KB and 400 KB. `HttpStreamedUploadTest` pins it.
+pub newtype BodyReader = __NativeBodyReader
+
+## How much is asked for per read. One chunk is the peak cost of streaming, so
+## this is the number that makes an upload cheap; 64 KiB is a socket read that
+## is worth making.
+let chunk_bytes: Int = 65536
+
+## The reader as an `Iter Bytes`, pulled a chunk at a time.
+##
+## `iter::unfold` over a native read, which is exactly `response_file`'s shape
+## one direction over — and the reason this is written in Mezze rather than
+## built by the native: `unfold`'s step has to be a Mezze function.
+##
+## A read error THROWS rather than ending the iterator. `response_file` maps its
+## `Err` to `Done`, which for a download means a short file; for an UPLOAD the
+## same choice would make a client that vanished mid-body look like one that
+## finished, and a handler would commit a truncated upload believing it whole.
+let chunks_of_reader: { reader: BodyReader } -> Iter Bytes = { reader } ->
+  iter::unfold {
+    state = {},
+    step = { s } -> do
+      let b = __native_http_request_read_chunk { reader = reader, max_bytes = chunk_bytes }
+      if bytes::size { b = b } == 0 then Done else Yield { val = b, next = {} }
+  }
+
+## Give the request its `chunks` when the server handed over a reader.
+##
+## The native always passes a `reader` field, `None` unless the server was asked
+## to stream, so one wrapper serves both and the handler sees an ordinary
+## `Request` either way. `serve`'s own type is unchanged — this wrapper lives
+## inside `start_socket` and is not part of what a caller provides.
+let attach_reader: { req: Request, reader: Option BodyReader } -> Request = { req, reader } ->
+  match reader is
+    None -> req
+    Some { val = r } -> { ...req, chunks = Some { val = chunks_of_reader { reader = r } } }
 
 ## Bind the socket, start the workers, hand back the handle.
 let start_socket
   : { handler: { req: Request } -> Response <...>, config: ServerConfig }
   -> ServerHandle
   = { handler, config } -> do
+    let wrapped = { req, reader } -> handler { req = attach_reader { req = req, reader = reader } }
     let s = __native_http_server_start {
-      handler = handler,
+      handler = wrapped,
       port = config.port,
       host = config.host,
       workers = config.workers,
+      stream_bodies = config.stream_bodies,
     }
     {
       stop = {} -> __native_http_server_stop { server = s },

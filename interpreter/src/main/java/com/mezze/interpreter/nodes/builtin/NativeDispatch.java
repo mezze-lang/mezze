@@ -3242,6 +3242,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_server_start", (r, c) -> HttpServerNatives.httpServerStart(r));
         HANDLERS.put("__native_http_server_port", (r, c) -> HttpServerNatives.httpServerPort(r));
         HANDLERS.put("__native_http_server_stop", (r, c) -> HttpServerNatives.httpServerStop(r));
+        HANDLERS.put("__native_http_request_read_chunk", (r, c) -> HttpServerNatives.requestReadChunk(r));
 
         // === Database ===
         HANDLERS.put("__native_db_sqlite_scope_open", (r, c) -> DbNatives.dbSqliteScopeOpen(r));

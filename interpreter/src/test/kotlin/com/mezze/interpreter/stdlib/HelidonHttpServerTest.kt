@@ -41,7 +41,7 @@ class HelidonHttpServerTest {
             Ok { val = s } -> s
             Err { error = _ } -> "could not decode"
           None -> "<empty>"
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4 }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
     """.trimIndent()
 
     /** `GET` a url and give back the body text, or the error, as a Str. */
@@ -90,7 +90,7 @@ class HelidonHttpServerTest {
             """
             $head
             $fetch
-            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1 }
+            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1, stream_bodies = False }
             let app = otherwise {
               routes = route { method = Get, path = "/users/:id",
                 handler = { m } -> reply { code = 200, text = m.param_or { name = "id", default = "?" }, url = m.req.url } },

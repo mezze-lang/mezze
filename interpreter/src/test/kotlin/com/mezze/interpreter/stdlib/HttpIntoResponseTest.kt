@@ -104,7 +104,7 @@ class HttpIntoResponseTest {
             let app = on_post { path = "/users", handler = { m } -> created { body = "made" } }
               .otherwise { fallback = fallback }
             app { req = { method = Post, url = "/users", headers = map::empty {}, body = None,
-                          timeout_ms = None } }.status
+                          timeout_ms = None, chunks = None } }.status
             """.trimIndent()
         )
         assertEquals(201L, r)
@@ -133,7 +133,7 @@ class HttpIntoResponseTest {
               .or_else { b = on_delete { path = "/thing", handler = { m } -> "gone" } }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = { method = Delete, url = "/thing",
-              headers = map::empty {}, body = None, timeout_ms = None } } }
+              headers = map::empty {}, body = None, timeout_ms = None, chunks = None } } }
             """.trimIndent()
         )
         assertEquals("gone", r)
@@ -146,7 +146,7 @@ class HttpIntoResponseTest {
             let app = on_get { path = "/thing", handler = { m } -> "got" }
               .otherwise { fallback = fallback }
             app { req = { method = Post, url = "/thing", headers = map::empty {}, body = None,
-                          timeout_ms = None } }.status
+                          timeout_ms = None, chunks = None } }.status
             """.trimIndent()
         )
         assertEquals(404L, r)
@@ -546,7 +546,7 @@ class HttpIntoResponseTest {
               .post { path = "/u", handler = { m } -> created { body = "made" } }
               .otherwise { fallback = fallback }
             app { req = { method = Post, url = "/u", headers = map::empty {}, body = None,
-                          timeout_ms = None } }.status
+                          timeout_ms = None, chunks = None } }.status
             """.trimIndent()
         )
         assertEquals(201L, r)
@@ -739,7 +739,7 @@ class HttpIntoResponseTest {
             """
             $listTable
             app { req = { method = Post, url = "/users", headers = map::empty {}, body = None,
-                          timeout_ms = None } }.status
+                          timeout_ms = None, chunks = None } }.status
             """.trimIndent()
         )
         assertEquals(201L, r)
@@ -1033,7 +1033,7 @@ class HttpIntoResponseTest {
             """
             $nestedGroups
             app { req = { method = Post, url = "/api/users", headers = map::empty {},
-                          body = None, timeout_ms = None } }.status
+                          body = None, timeout_ms = None, chunks = None } }.status
             """.trimIndent()
         )
         assertEquals(201L, r)

@@ -198,6 +198,7 @@ public final class HttpServerNatives {
         String host = getString(args, "host");
         int workerCount = (int) getLongOrDefault(args, "workers", 0);
         if (workerCount <= 0) workerCount = DEFAULT_WORKERS;
+        boolean streamBodies = getBool(args, "stream_bodies");
 
         MezzeContext context = MezzeContext.get(null);
         Env env = context.getEnv();
@@ -216,7 +217,7 @@ public final class HttpServerNatives {
             .host(host)
             .port(port)
             .routing(rules -> rules.any((req, res) ->
-                dispatch(truffleCtx, handler, chain, scope, inFlight, req, res)))
+                dispatch(truffleCtx, handler, chain, scope, inFlight, streamBodies, req, res)))
             .build();
 
         server.start();
@@ -284,6 +285,7 @@ public final class HttpServerNatives {
         HandlerChainEntry[] chain,
         Object scope,
         Semaphore inFlight,
+        boolean streamBodies,
         ServerRequest req,
         ServerResponse res
     ) {
@@ -309,7 +311,7 @@ public final class HttpServerNatives {
                 if (chain.length > 0) HandlerChainRegistry.installHandlerChainEntries(chain);
                 INSTALLED_CHAIN.set(chain);
             }
-            reply = runHandler(handler, req);
+            reply = runHandler(handler, req, streamBodies);
         } finally {
             truffleCtx.leave(null, prev);
             inFlight.release();
@@ -326,10 +328,13 @@ public final class HttpServerNatives {
     }
 
     /** One guest handler call straight off a {@link ServerRequest}. */
-    private static Reply runHandler(MezzeFunction handler, ServerRequest req) {
+    private static Reply runHandler(MezzeFunction handler, ServerRequest req, boolean streamBodies) {
+        MezzeBodyReader reader = streamBodies
+            ? new MezzeBodyReader(req.content().inputStream())
+            : null;
         try {
             Object result = callOneArg(handler, IndirectCallNode.getUncached(),
-                                       requestRecord(req));
+                                       handlerArg(req, reader));
             if (!(result instanceof MezzeRecord response)) {
                 return new Reply(500,
                     Map.of("content-type", "text/plain"),
@@ -350,27 +355,124 @@ public final class HttpServerNatives {
      * on the Helidon thread, into a second one in {@code requestRecord}, then
      * into a {@code MezzeMap}. This builds the guest map once.
      */
-    private static MezzeRecord requestRecord(ServerRequest req) {
+    /**
+     * What the guest handler is called with: the request, and a reader for its
+     * body when the server was asked to stream.
+     *
+     * The handler here is NOT the one a caller passed to `serve` — it is the
+     * wrapper `start_socket` builds, which turns a `Some` reader into the
+     * request's `chunks` and hands an ordinary `Request` on. Two fields, always,
+     * so there is one calling convention rather than two.
+     *
+     * A body can only be read once, so streaming and buffering are exclusive:
+     * taking the bytes drains the stream, and handing over the stream means the
+     * bytes were never taken. That is why `stream_bodies` is a decision made
+     * before the socket is bound and not per request.
+     */
+    private static MezzeRecord handlerArg(ServerRequest req, MezzeBodyReader reader) {
+        if (reader == null) {
+            return MezzeRecord.fromFields(
+                new String[]{"req", "reader"},
+                new Object[]{requestRecord(req, true), MezzeVariant.none()});
+        }
+        // The reader outlives the handler on purpose: Helidon keeps the
+        // connection's content readable while the response is written, so a
+        // handler may pass its request's `chunks` on as the response's.
+        return MezzeRecord.fromFields(
+            new String[]{"req", "reader"},
+            new Object[]{requestRecord(req, false), MezzeVariant.some(reader)});
+    }
+
+    /**
+     * Single-shot reader over one request's body, behind the guest's opaque
+     * `BodyReader` newtype — the same arrangement as `FileHandle` over a
+     * FileChannel.
+     */
+    public static final class MezzeBodyReader {
+        private final java.io.InputStream in;
+
+        MezzeBodyReader(java.io.InputStream in) {
+            this.in = in;
+        }
+    }
+
+    /**
+     * The next chunk, or empty Bytes once the body is done.
+     *
+     * A SHORT read is not the end — a socket hands over what has arrived, so a
+     * chunk smaller than `max_bytes` is ordinary and the iterator keeps pulling.
+     * Only 0 or -1 ends it.
+     *
+     * A read failure THROWS. Ending the iterator instead would make a client
+     * that vanished mid-upload indistinguishable from one that finished, and a
+     * handler would commit a truncated upload believing it whole.
+     */
+    @TruffleBoundary
+    public static Object requestReadChunk(MezzeRecord args) {
+        Object r = getField(args, "reader");
+        if (!(r instanceof MezzeBodyReader reader)) {
+            throw new NativeTypeMismatchException("Expected 'reader' to be a request body reader");
+        }
+        long maxBytes = getLong(args, "max_bytes");
+        if (maxBytes <= 0) {
+            throw new NativeTypeMismatchException("'max_bytes' must be positive, got " + maxBytes);
+        }
+        // The body is readable only while the handler runs — Helidon owns the
+        // connection's content and is done with it once dispatch returns. The
+        // tempting thing to write is an echo: hand the request's `chunks`
+        // straight back as the response's. That walks them AFTER the handler
+        // returned, and without this check the reads would answer nothing and
+        // the client would get a 200 with an empty body, silently. Collect with
+        // `body_bytes` inside the handler and answer those bytes instead.
+        // No check that the handler is still running. It is fair to assume one
+        // is needed and it is not: Helidon keeps the connection's content
+        // readable while the response is written, so a handler MAY hand its
+        // request's `chunks` on as the response's and have them walked
+        // afterwards. Measured at 20 B, 40 KB and 400 KB — all echoed back
+        // byte-for-byte. A guard here was written on the assumption that this
+        // could not work, and it only removed the capability.
+        int cap = (int) Math.min(maxBytes, 1 << 20);
+        byte[] buf = new byte[cap];
+        try {
+            int n = reader.in.read(buf, 0, cap);
+            if (n <= 0) return new BytesNatives.MezzeBytes(new byte[0]);
+            byte[] out = new byte[n];
+            System.arraycopy(buf, 0, out, 0, n);
+            return new BytesNatives.MezzeBytes(out);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("The request body could not be read: " + message(e), e);
+        }
+    }
+
+    private static MezzeRecord requestRecord(ServerRequest req, boolean withBody) {
         Map<Object, Object> headers = new HashMap<>();
         req.headers().forEach(h -> headers.put(h.name().toLowerCase(), h.get()));
 
-        byte[] raw;
-        try {
-            raw = req.content().hasEntity() ? req.content().as(byte[].class) : null;
-        } catch (RuntimeException e) {
-            raw = null;
+        Object body = MezzeVariant.none();
+        if (withBody) {
+            byte[] raw;
+            try {
+                raw = req.content().hasEntity() ? req.content().as(byte[].class) : null;
+            } catch (RuntimeException e) {
+                raw = null;
+            }
+            if (raw != null && raw.length > 0) {
+                body = MezzeVariant.some(new BytesNatives.MezzeBytes(raw));
+            }
         }
-        Object body = (raw == null || raw.length == 0)
-            ? MezzeVariant.none()
-            : MezzeVariant.some(new BytesNatives.MezzeBytes(raw));
 
+        // `chunks` is always None HERE. The guest wrapper fills it from the
+        // reader, because `iter::unfold`'s step has to be a Mezze function —
+        // IterCursor casts it to MezzeFunction — so a native cannot build the
+        // iterator this field wants.
         return MezzeRecord.fromFields(
-            new String[]{"method", "url", "headers", "body", "timeout_ms"},
+            new String[]{"method", "url", "headers", "body", "timeout_ms", "chunks"},
             new Object[]{
                 methodVariant(req.prologue().method().text()),
                 requestTarget(req),
                 MezzeMap.fromJavaMap(headers),
                 body,
+                MezzeVariant.none(),
                 MezzeVariant.none(),
             }
         );
@@ -537,6 +639,25 @@ public final class HttpServerNatives {
         if (value instanceof Long l) return l;
         if (value instanceof Integer i) return i.longValue();
         return fallback;
+    }
+
+    /**
+     * A guest `Bool` arrives as a java.lang.Boolean, which is the only shape
+     * accepted here — the same as FilesystemNatives.getBool and IONatives.
+     *
+     * Deliberately NOT falling back to a variant's constructor NAME: a
+     * stdlib-built variant reads back as "Unknown(tag)" under native-image, so
+     * such a fallback would quietly answer `false` in AOT and nowhere else, and
+     * every interpreter test is JVM-only and blind to it. `stream_bodies` is a
+     * required ServerConfig field, so a missing or ill-typed one is a defect
+     * worth saying out loud rather than defaulting past.
+     */
+    private static boolean getBool(MezzeRecord args, String fieldName) {
+        Object value = getField(args, fieldName);
+        if (value instanceof Boolean b) return b;
+        throw new NativeTypeMismatchException(
+            "Expected Bool for field '" + fieldName + "'"
+                + (value == null ? " but it was absent" : ", got " + value.getClass().getSimpleName()));
     }
 
     private static String getString(MezzeRecord args, String fieldName) {

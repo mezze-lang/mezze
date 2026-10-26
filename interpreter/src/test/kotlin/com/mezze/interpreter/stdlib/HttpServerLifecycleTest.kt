@@ -30,7 +30,7 @@ class HttpServerLifecycleTest {
           status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" }, url = req.url,
           chunks = None,
         }
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False }
     """.trimIndent()
 
     private fun serveAndWalkAway(): Int =

@@ -52,7 +52,7 @@ let fetch: { url: Str } -> Str <HttpClient> = { url } ->
             Err { error = e } -> format_error { err = e }
         Err { error = e } -> format_error { err = e }
 
-let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
+let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False }
 
 let main = {} -> perform Console in
     perform HelidonHttpServerWith { config = any_port } in

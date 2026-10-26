@@ -51,7 +51,7 @@ class HttpClientTest {
  chunks = None,
 }
 
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False }
         let impatient = { ...default_http_config, timeout_ms = 60 }
     """.trimIndent()
 
@@ -134,7 +134,7 @@ class HttpClientTest {
         use std::collections::bytes
         use std::int
 
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2 }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False }
 
         let text_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
@@ -268,7 +268,8 @@ class HttpClientTest {
                     url = "http://test.com/create",
                     headers = map::empty {},
                     body = Some { val = bytes::from_str { s = "{}" } },
-                    timeout_ms = None
+                    timeout_ms = None,
+                    chunks = None
                 }
                 let config: HttpConfig = {
                     timeout_ms = 30000,

@@ -43,12 +43,30 @@ pub let default_http_config: HttpConfig = {
 }
 
 ## HTTP request record.
+##
+## `chunks` is the inbound mirror of `Response.chunks`, and a FIELD for the same
+## reason: making `body` a variant would change what every reader of `req.body`
+## gets back — the router, the client, user code — while this touches only the
+## few places that CONSTRUCT a Request.
+##
+## The two are exclusive, and the server says which one it filled. A body can be
+## read once: taking the bytes consumes the stream, and walking the stream means
+## the bytes were never collected. So `body = Some …, chunks = None` is a
+## buffered request and `body = None, chunks = Some …` is a streamed one. A
+## server streams only when asked (`ServerConfig.stream_bodies`), which is why
+## every handler written before this still reads `body` and still finds it.
+##
+## `body_bytes` collects a streamed body when a handler wants the whole thing
+## and answers a buffered one unchanged, so a handler that does not care which
+## it was handed has one thing to call. A CLIENT response never streams inbound
+## (see `Response.chunks`), so this is a server-side field in practice.
 pub type Request = {
   method: Method,
   url: Str,
   headers: Map Str Str,
   body: Option Bytes,
   timeout_ms: Option Int,
+  chunks: Option (Iter Bytes),
 }
 
 ## HTTP response record. `url` is the URL of the request that produced
@@ -172,6 +190,7 @@ pub let make_request: { method: Method, url: Str } -> Request = { method, url } 
     headers = map::empty {},
     body = None,
     timeout_ms = None,
+    chunks = None,
   }
 
 ## Build a fully specified request. Used by impl Client's verb shortcuts;
@@ -188,6 +207,32 @@ pub let make_full_request
       headers = headers,
       body = body,
       timeout_ms = timeout_ms,
+      chunks = None,
+    }
+
+## The request's whole body, whichever way the server handed it over.
+##
+## A buffered request answers its bytes; a streamed one is WALKED and collected,
+## which is a single-shot read — the stream is consumed, so a second call sees
+## an exhausted iterator and answers empty. A request with neither answers
+## empty, which is what a GET is.
+##
+## This exists so a handler that wants the whole body does not have to care
+## which shape it was given, and so `stream_bodies = True` does not force every
+## route to be rewritten. A handler that genuinely streams — hashing, or writing
+## straight to disk — should walk `chunks` itself and never call this, because
+## collecting defeats the point: the peak cost is the body's full size again.
+##
+## The row is open because walking the chunks performs whatever the source
+## performs. On a server that is socket reads on the connection thread.
+pub let body_bytes: { req: Request } -> Bytes <...> = { req } -> match req.body is
+  Some { val } -> val
+  None -> match req.chunks is
+    None -> bytes::empty {}
+    Some { val = cs } -> iter::fold {
+      it = cs,
+      init = bytes::empty {},
+      f = { acc, x } -> bytes::concat { b1 = acc, b2 = x },
     }
 
 ## Add a single header to a request.
@@ -205,6 +250,7 @@ pub let with_header: { req: Request, k: Str, v: Str } -> Request = { req, k, v }
     headers = map::insert { m = req.headers, k = str::to_lower { s = k }, v = v },
     body = req.body,
     timeout_ms = req.timeout_ms,
+    chunks = req.chunks,
   }
 
 ## Merge headers into a request. Names are matched case-insensitively.
@@ -220,6 +266,7 @@ pub let with_headers: { req: Request, headers: Map Str Str } -> Request = { req,
     },
     body = req.body,
     timeout_ms = req.timeout_ms,
+    chunks = req.chunks,
   }
 
 ## Set the body of a request.
@@ -230,6 +277,9 @@ pub let with_body: { req: Request, body: Bytes } -> Request = { req, body } ->
     headers = req.headers,
     body = Some { val = body },
     timeout_ms = req.timeout_ms,
+    # Setting the body drops a streamed one: the two cannot both be read, and
+    # the explicit bytes are the later word. `Response.with_body` does the same.
+    chunks = None,
   }
 
 ## Set a per-request timeout in milliseconds.
@@ -240,6 +290,7 @@ pub let with_timeout: { req: Request, ms: Int } -> Request = { req, ms } ->
     headers = req.headers,
     body = req.body,
     timeout_ms = Some { val = ms },
+    chunks = req.chunks,
   }
 
 ## Set the Content-Type header.
@@ -404,6 +455,7 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
     headers = req.headers,
     body = req.body,
     timeout_ms = req.timeout_ms,
+    chunks = req.chunks,
   }
 
 ## Append `?k1=v1&k2=v2&...` (or `&...` if the URL already has a query) from
@@ -436,6 +488,7 @@ pub let with_query: { req: Request, params: 'a } with ToQuery 'a -> Request = { 
       headers = req.headers,
       body = req.body,
       timeout_ms = req.timeout_ms,
+      chunks = req.chunks,
     }
 
 ## Promote a non-2xx Response to an HttpError. Used to short-circuit
