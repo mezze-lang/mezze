@@ -2228,6 +2228,9 @@ class TypedASTCompiler(
             is FunctionType -> if (value is FunctionType) {
                 harvestVarBindings(pattern.paramType, value.paramType, out)
                 harvestVarBindings(pattern.returnType, value.returnType, out)
+                // …and the row's associated types, where a constraint variable can
+                // live alone — see [harvestEffectRowBindings].
+                harvestEffectRowBindings(pattern.effects, value.effects, out)
             }
             is RecordType -> if (value is RecordType) {
                 for ((k, t) in pattern.fields) value.fields[k]?.let { harvestVarBindings(t, it, out) }

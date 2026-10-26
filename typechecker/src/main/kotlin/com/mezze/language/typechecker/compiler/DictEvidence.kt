@@ -1244,6 +1244,53 @@ internal fun TypedASTCompiler.structuralConstraintTypesFor(calleeHash: Hash, exp
  * function called by hash and a constrained LOCAL lambda called through its
  * closure resolve their dictionaries identically.
  */
+/**
+ * Bind a pattern row's associated types from the actual row's, for
+ * [TypedASTCompiler.harvestVarBindings].
+ *
+ * A constraint variable can live ONLY in an effect row. `http_router`'s
+ * `catching_any` takes a handler typed
+ * `{ m: Matched } -> 'r <Exception having 'error = 'e, ...>` and declares
+ * `with IntoErrorResponse 'e` — about the THROWN type, which the row names and
+ * the parameter and result never mention. Walking params and result alone left
+ * `'e` unbound at the call site, so `calleeConstraintsAreGeneric` went true,
+ * dict injection preferred forwarding from a caller that has nothing to
+ * forward, and the slot reached `DictFallbackRootNode`: "no dictionary was
+ * supplied for ability operation `into_error_response`" — for a program that
+ * determines the type perfectly well, by throwing a `Str`.
+ *
+ * Matched by effect NAME, accepting a suffix either way, because one side may
+ * carry the module path (`std::effects::exception::Exception`) and the other
+ * the local spelling.
+ *
+ * This is necessary and not sufficient: an INLINE argument lambda is stamped
+ * with the row from the pushed CONTEXT — the callee's own declared row, with
+ * the callee's variable — so there is nothing concrete on the value side to
+ * bind. A NAMED handler carries its own solved row and works. `HttpCatchingAnyTest`
+ * pins both halves.
+ */
+internal fun TypedASTCompiler.harvestEffectRowBindings(
+    pattern: MezzeType.EffectRow?,
+    value: MezzeType.EffectRow?,
+    out: MutableMap<String, MezzeType>,
+) {
+    if (pattern == null || value == null) return
+    if (pattern.effectInstances.isEmpty() || value.effectInstances.isEmpty()) return
+    fun sameEffect(a: String, b: String) =
+        a == b || a.endsWith("::$b") || b.endsWith("::$a")
+    for (pi in pattern.effectInstances) {
+        if (pi.associatedTypes.isEmpty()) continue
+        val vi = value.effectInstances.firstOrNull { sameEffect(pi.name, it.name) } ?: continue
+        for ((assoc, pt) in pi.associatedTypes) {
+            val vt = vi.associatedTypes[assoc]
+                ?: vi.associatedTypes[assoc.removePrefix("'")]
+                ?: vi.associatedTypes["'" + assoc.removePrefix("'")]
+                ?: continue
+            harvestVarBindings(pt, vt, out)
+        }
+    }
+}
+
 internal fun TypedASTCompiler.dictEnrichedArg(
     calleeHash: Hash,
     fn: TypedExpr,

@@ -316,6 +316,52 @@ pub let catching
       Ok { val } -> val
       Err { error } -> error
 
+## Like `catching`, for a handler that throws its OWN error type.
+##
+## `catching` takes a handler that throws a `Response` — it has already decided
+## the status and the body. This one takes a handler that throws whatever its
+## domain uses and converts it on the way out, so a route can speak in
+## `NotFound { id }` and let `IntoErrorResponse` decide what that is on the wire:
+##
+##   impl IntoErrorResponse for NotFound where {
+##     into_error_response = { it } -> response_status { code = 404, body = it.id },
+##   }
+##
+##   .get { path = "/u/:id", handler = catching_any { handler = { m } -> do
+##     let id = m.params.get_or { k = "id", default = "" }
+##     if id == "" then throw { error = NotFound { id = id } } else show { id = id }
+##   } }
+##
+## NAME THE HANDLER. An INLINE lambda does not work yet:
+##
+##   let h = { m } -> throw { error = NotFound { id = "7" } }
+##   .get { path = "/u/:id", handler = catching_any { handler = h } }      # works
+##   .get { path = "/u/:id", handler = catching_any { handler = { m } -> … } }  # fails
+##
+## The inline form fails LOUDLY, at run time, with "no dictionary was supplied
+## for ability operation `into_error_response`". The cause is measured: an
+## argument lambda's type is stamped with the row from the PUSHED CONTEXT — the
+## callee's declared `<Exception having 'error = 'e, ...>`, carrying the
+## CALLEE's variable — while a named binding gets its own solved row, where the
+## thrown type is `Str`/`NotFound`/whatever the body threw. So the call site has
+## nothing concrete to resolve `IntoErrorResponse` against. See
+## `HttpCatchingAnyTest`, which pins both halves.
+##
+## `catching` has no such restriction: its error type is the concrete
+## `Response`, so it needs no dictionary at all.
+pub let catching_any
+  : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
+  with IntoResponse 'r, IntoErrorResponse 'e
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> do
+    let outcome = perform ExceptionToResult in do
+      let answered = handler { m = m }
+      Ok { val = answered.into_response {} }
+    match outcome is
+      Ok { val } -> val
+      Err { error } -> error.into_error_response {}
+
 # ---- route groups --------------------------------------------------------
 #
 # A group is a path prefix plus the routes under it, and groups NEST:
