@@ -33,7 +33,7 @@ class HttpTypedInputTest {
         use std::effects::http::{ Request, Response, IntoResponse, IntoErrorResponse, or_throw, not_found, body_str }
         use std::effects::exception::{ throw }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ group, on_get, catching, BadInput }
+        use std::effects::http_router::{ group, catching, BadInput }
         use std::str
         use std::int
 
@@ -143,67 +143,34 @@ class HttpTypedInputTest {
     /**
      * Throwing something that is NOT a Response is refused while compiling.
      *
-     * This used to be the reason the verbs did not wrap the handler themselves.
-     * `catching` declares the thrown type, so a mismatch meets `Response` and
-     * is a type error; routed through a verb whose row was a bare `<...>`, that
-     * row absorbed the thrown type unchecked and the same program died at
-     * runtime with `Field not found: status`. The note here said the wrapper
-     * could go away "when a row can say MAY perform Exception, and if so with
-     * `'error = Response`" — and that row now exists, written
-     * `<Exception? having 'error = Response, ...>`.
+     * This is why the verbs do not wrap the handler themselves. `catching`
+     * declares `<Exception having 'error = Response, ...>`, so the handler's own
+     * thrown type meets `Response` here and a mismatch is a type error. Routed
+     * through a verb whose row is a bare `<...>`, that row absorbs the thrown
+     * type unchecked and the same program died at runtime with
+     * `Field not found: status`.
      *
-     * So the rejection is pinned THREE ways: with the wrapper, without it on a
-     * group verb, and without it on a free verb. The middle two are what the
-     * revert was protecting, and they are the measurement that says the fold is
-     * safe rather than merely convenient.
+     * The wrapper can go away again when a row can say "MAY perform Exception,
+     * and if so with `'error = Response`" — an upper bound that `<E, ...>`
+     * cannot express, because it means AT LEAST.
      */
     @Test
     fun `throwing a non-Response is a compile error`() {
-        assertRefused(
-            "with an explicit catching wrapper",
-            """
-            let api = group { prefix = "" }
-              .get { path = "/x", handler = catching { handler = { m } ->
-                throw { error = { why = "not a response" } } } }
-              .handler {}
-            get_request { url = "/x" }.to { app = api }.status
-            """,
-        )
-    }
-
-    /** The same, on a group verb carrying the row itself. */
-    @Test
-    fun `throwing a non-Response through a group verb is a compile error`() {
-        assertRefused(
-            "on group.get, no wrapper",
-            """
-            let api = group { prefix = "" }
-              .get { path = "/x", handler = { m } -> throw { error = { why = "not a response" } } }
-              .handler {}
-            get_request { url = "/x" }.to { app = api }.status
-            """,
-        )
-    }
-
-    /** And on the free verb, which is a separate signature for the same job. */
-    @Test
-    fun `throwing a non-Response through a free verb is a compile error`() {
-        assertRefused(
-            "on on_get, no wrapper",
-            """
-            let api = on_get { path = "/x", handler = { m } ->
-              throw { error = { why = "not a response" } } }
-              .otherwise { fallback = { req } -> not_found { body = "nope" } }
-            api { req = get_request { url = "/x" } }.status
-            """,
-        )
-    }
-
-    private fun assertRefused(what: String, src: String) {
-        val outcome = runCatching { run(src.trimIndent()) }
+        val outcome = runCatching {
+            run(
+                """
+                let api = group { prefix = "" }
+                  .get { path = "/x", handler = catching { handler = { m } ->
+                    throw { error = { why = "not a response" } } } }
+                  .handler {}
+                get_request { url = "/x" }.to { app = api }.status
+                """.trimIndent()
+            )
+        }
+        val err = outcome.exceptionOrNull()
         assertTrue(
-            outcome.exceptionOrNull() != null,
-            "throwing a non-Response must be refused ($what); got ${outcome.getOrNull()}",
+            err != null,
+            "throwing a non-Response must be refused; got ${outcome.getOrNull()}",
         )
     }
 

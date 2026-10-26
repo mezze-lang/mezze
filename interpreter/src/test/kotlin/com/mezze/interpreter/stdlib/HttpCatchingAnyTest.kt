@@ -79,10 +79,22 @@ class HttpCatchingAnyTest {
 
     /**
      * STILL OPEN, and a different family: a RECORD-typed thrown error does not
-     * dispatch. It fails at run time, loudly, and the program should not have
-     * compiled at all — the receiver is an ANONYMOUS record, `into_error_response`
-     * resolves against it as a FIELD rather than as an ability op, and a record's
-     * open row lets the missing field through the checker.
+     * dispatch, and fails at run time.
+     *
+     * The MESSAGE is not the property. It has been seen two ways —
+     * `Field not found: into_error_response`, the operation read as a field off
+     * the record, and `Expected String for field 's'`, the Str impl handed a
+     * record — and it moved between them without this test's program changing.
+     * Measured NOT to be the cause: folding `catching` into the verbs (that
+     * work is reverted and `http_router.mz` is byte-identical to before it), and
+     * the captured-function fix in `compileCall` (turning its guard off leaves
+     * the message unchanged). What did move it is unisolated; the remaining
+     * suspect is the set of declarations in `http.mz`, which grew, since D-9 is
+     * about picking the wrong impl among competing ones.
+     *
+     * So this asserts only that it fails LOUDLY, which is the property worth
+     * keeping while the bug is open. A narrow assertion on one message has
+     * already cost two re-investigations.
      *
      * Not about records as such: the identical shape in ONE module works (see
      * `ThrownErrorTypeRunsTest.a record thrown error is converted in the Err
@@ -94,21 +106,7 @@ class HttpCatchingAnyTest {
      * Giving `Response` an identity impl so this would subsume `catching` was
      * tried and hits the same wall, so the two combinators stay distinct.
      *
-     * TWO loud shapes are accepted here, because folding `catching` into the
-     * verbs moved it from one to the other and the move was MEASURED, not
-     * guessed: with the pre-fold router this test saw `Field not found:
-     * into_error_response` (the field read, reached through
-     * `DictFallbackRootNode`); with the fold it sees a wrong impl run instead
-     * (`Expected String for field 's'` — the Str impl handed a record). The
-     * fold does not cause the bug and does not widen it: a crossing of the
-     * verb's `'error = Response` into `catching_any`'s `'e` was the obvious
-     * suspect and does NOT happen — a standalone reproduction with that exact
-     * row shape type-checks with the Str impl DELETED, so `'e` is not Str.
-     * What the fold does cost is the better message, which named the operation.
-     *
-     * When this starts answering 400, invert it. When D-9 is fixed the right
-     * answer is a COMPILE error naming the ability and the record type, and
-     * then this becomes a rejection test.
+     * When this starts answering 400, invert it.
      */
     @Test fun `a record thrown error does not dispatch yet`() {
         val outcome = runCatching {
@@ -132,7 +130,8 @@ class HttpCatchingAnyTest {
         assertTrue(
             err != null &&
                 (message.contains("into_error_response") || message.contains("Expected String")),
-            "expected one of the two loud shapes; got ${outcome.getOrNull() ?: message}",
+            "a record thrown error must still fail loudly, in one of the two shapes seen so " +
+                "far; got ${outcome.getOrNull() ?: message}",
         )
     }
 }

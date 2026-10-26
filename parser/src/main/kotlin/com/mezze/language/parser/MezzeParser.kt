@@ -1237,7 +1237,6 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.RBRACKET -> "']'"
     TokenType.COMMA -> "','"
     TokenType.DOT -> "'.'"
-    TokenType.QUESTION -> "'?'"
     TokenType.COLON -> "':'"
     TokenType.ARROW -> "'->'"
     TokenType.ASSIGN -> "'='"

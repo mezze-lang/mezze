@@ -404,15 +404,7 @@ data class Substitution(
                 effectHashes = current.effectHashes + targetHashes,
                 rowVar = target.rowVar,
                 performed = current.performed || target.performed,
-                caughtByAncestor = current.caughtByAncestor + target.caughtByAncestor,
-                // `Name?` survives the splice. It rides along with
-                // `declaredOnCallback`, which this construction does NOT carry,
-                // so today the lower-bound check is already off by the time a
-                // spliced row reaches it and keeping this changes no outcome.
-                // It is kept so the pair stays consistent: whoever carries
-                // `declaredOnCallback` through here next must not silently take
-                // the optional marker's exemption away with it.
-                optionalEffects = current.optionalEffects + target.optionalEffects,
+                caughtByAncestor = current.caughtByAncestor + target.caughtByAncestor
             )
         }
         return current

@@ -551,22 +551,7 @@ sealed interface MezzeType {
         // (`callbackEffects − outerReturnEffects`). When the enclosing row
         // names the same effect the set is empty, no marker existed, and the
         // lower bound went unenforced — a pure callback satisfied `<Boom, ...>`.
-        val declaredOnCallback: Boolean = false,
-        /**
-         * Effects this row says MAY be performed — written `Name?`.
-         *
-         * `...` is zero or more and a named effect before it is mandatory, so
-         * neither says "optional, and if present then THIS instance". A callback
-         * slot whose enclosing function DISCHARGES the effect needs exactly
-         * that: `http_router`'s verbs catch Exception for their handler, so a
-         * pure handler is fine and a throwing one must throw what the verb can
-         * turn into a response. A bare `<...>` absorbs the thrown type
-         * unchecked; `<Exception, ...>` would force every handler to throw.
-         *
-         * Only the LOWER bound is lifted. The instance is still unified when the
-         * effect is present, which is the whole point of naming it.
-         */
-        val optionalEffects: Set<String> = emptySet()
+        val declaredOnCallback: Boolean = false
     ) : MezzeType {
         /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
         @kotlinx.serialization.Transient internal var groundMemo: Byte = 0

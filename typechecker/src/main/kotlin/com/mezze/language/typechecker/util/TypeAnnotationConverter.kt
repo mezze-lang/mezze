@@ -246,20 +246,17 @@ object TypeAnnotationConverter {
                         val effectInstances = (annotated + synthesized).toSet()
                         if (effectInstances.isEmpty()) {
                             MezzeType.EffectRow.simple(parsedRow.effects.toSet(), rowVar, parsedRow.isPerformed, hashes)
-                                .copy(optionalEffects = parsedRow.optionalEffects)
                         } else {
                             MezzeType.EffectRow(
                                 effects = parsedRow.effects.toSet(),
                                 effectInstances = effectInstances,
                                 rowVar = rowVar,
                                 performed = parsedRow.isPerformed,
-                                effectHashes = hashes,
-                                optionalEffects = parsedRow.optionalEffects,
+                                effectHashes = hashes
                             )
                         }
                     } else {
                         MezzeType.EffectRow.simple(parsedRow.effects.toSet(), rowVar, parsedRow.isPerformed, hashes)
-                            .copy(optionalEffects = parsedRow.optionalEffects)
                     }
                 }
                 val abilityConstraints = annotation.abilityConstraints.map { constraint ->

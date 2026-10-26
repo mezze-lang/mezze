@@ -148,19 +148,6 @@ data class ParsedEffectRow(
     val effectAnnotations: List<ParsedEffectAnnotation> = emptyList(),
     val isPolymorphic: Boolean = false,
     val isPerformed: Boolean = false,
-    /**
-     * Effects written with a `?` — MAY be performed, and if they are, with the
-     * instance this row states.
-     *
-     * `<...>` is zero or more and `<E, ...>` is at least E, so neither can say
-     * "optional, and if present then THIS". A callback slot that CATCHES an
-     * effect needs exactly that: `http_router`'s verbs discharge Exception for
-     * their handler, so a pure handler is fine, and a throwing one must throw
-     * what the verb can turn into a response. Written bare (`<...>`) the thrown
-     * type is absorbed unchecked and the mistake surfaces at run time; written
-     * `<Exception, ...>` every handler would have to throw.
-     */
-    val optionalEffects: Set<String> = emptySet(),
     val loc: Loc,
     /**
      * What each effect name meant WHERE THE ROW WAS WRITTEN, by identity — set
