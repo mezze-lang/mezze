@@ -2061,7 +2061,30 @@ class TypedASTCompiler(
                         // on the thunk hash discards the accumulated partial
                         // args. Fall through to CallIndirect so runtime
                         // dispatch goes through the MezzeFunction.
-                        if (binding.depth > 0) {
+                        // This search is BY NAME, so it must not answer for a
+                        // name this frame CAPTURES. A captured function has no
+                        // local slot — `resolveLocalSlot` reports -1, which is
+                        // how we got here — and the declaration index then
+                        // offered a different declaration that merely shared the
+                        // name. `route` reads its `handler` inside its own
+                        // `run = { req } -> … }`, so a user's top-level
+                        // `let handler` was CALLED in place of the handler the
+                        // route was given: silently, with a fitting type.
+                        //
+                        // `fnIR` on the line below is already right —
+                        // `compileVar` resolves a capture to ReadCaptureIR — so
+                        // the fix is to stop short of the by-name answer and use
+                        // it. The guard is exactly `compileVar`'s capture
+                        // condition, which inside `depth > 0` reduces to this.
+                        //
+                        // Deliberately NOT in `resolveLocalSlot`: returning the
+                        // capture slot from there makes a recursive let's
+                        // self-call indirect through a slot that is still null
+                        // while the closure is being built — the problem the
+                        // recursive-let branch above exists to avoid. Measured:
+                        // 37 tests, every one recursive.
+                        val callsACapture = fn.name in currentCaptureNames
+                        if (binding.depth > 0 && !callsACapture) {
                             val topDecl = declIndex?.values?.find { it.name == fn.name }
                             if (topDecl != null && !isNonLambdaUserLet(topDecl.hash)) {
                                 census.byHashPlain++

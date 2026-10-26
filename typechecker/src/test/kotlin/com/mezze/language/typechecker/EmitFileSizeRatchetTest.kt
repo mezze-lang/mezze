@@ -73,7 +73,14 @@ class EmitFileSizeRatchetTest {
             // `structuralConstraintTypesFor` in the same commit, which shortens
             // `compileCall` but not the file — so the bound moves rather than the
             // code, which is what this test asks for when the code belongs here.
-            C + "TypedASTCompiler.kt" to 4332,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +23 for refusing the by-name declaration-index CALL route when
+            // the frame CAPTURES that name. A captured function has no local
+            // slot, so the search answered for a different declaration sharing
+            // the name and a user's `let handler` was called in place of the
+            // handler a route was given. The guard has to sit at that lookup —
+            // putting it in `resolveLocalSlot` instead broke 37 recursive tests,
+            // which is written down beside it — so the bound moves, not the code.
+            C + "TypedASTCompiler.kt" to 4352,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

@@ -92,52 +92,29 @@ class HttpThrowingFallbackTest {
     }
 
     /**
-     * KNOWN OPEN, and asserted at its WRONG answer so the day it changes is
-     * visible. Nothing here is about throwing or about the `?` row.
+     * A top-level binding does NOT replace a handler a route was given.
      *
-     * A FUNCTION-valued parameter that a NESTED lambda captures, whose name
-     * matches a top-level declaration, is replaced by that declaration. So
-     * `route` — whose `handler` is read inside its own `run = { req } -> … }` —
-     * calls a user's `let handler` instead of the handler it was handed, and
-     * answers the global's 555.
+     * This was open when the verb fold landed, and asserted at its wrong answer
+     * here. `route` reads its `handler` inside its own `run = { req } -> … }`,
+     * so the handler is a CAPTURE — and a captured function called from a
+     * nested lambda resolved to no frame slot, after which `compileCall` fell
+     * into its by-name routes and one of them answered for whatever
+     * declaration shared the name. With `let handler` in scope the route
+     * answered that global's 555 instead of the handler it was handed.
      *
-     * Measured boundaries, each by changing one thing:
-     *  - it needs the reference to be CAPTURED by a nested lambda. The same
-     *    collision with the parameter used directly in the body is correct;
-     *  - it needs the captured value to be a FUNCTION. The same collision on an
-     *    `Int` parameter is correct;
-     *  - the types must fit: a `let fallback: Int` does not capture a
-     *    `{ req: Request } -> Response` slot, and the written value is used;
-     *  - it does NOT depend on inline vs named arguments, free function vs
-     *    chained method, or whether the global is declared before or after;
-     *  - it is NOT about crossing a module boundary. It reproduces inside one
-     *    module in four lines:
+     * `resolveLocalSlot` now consults the captures, which `compileVar` always
+     * did — the two are the READ and the CALL of the same name, and only one of
+     * them knew about captures. CapturedParamNotShadowedTest holds the
+     * four-line reproduction and the boundaries; this is the case that found
+     * it, so it stays here pointed at the stdlib path that bit.
      *
-     *        let f: { n: Int } -> Int = { n } -> 111
-     *        let mk: { f: { n: Int } -> Int } -> { } -> Int = { f } -> { } -> f { n = 1 }
-     *        let g = mk { f = { n } -> 222 }
-     *        g { }        # 111, and it should be 222
-     *
-     *    The stdlib is merely where this bites hardest, because a caller cannot
-     *    see the parameter names they have to avoid;
-     *  - `route` is the raw layer, untouched by the verb fold, and the behaviour
-     *    is identical with the fallback slot's row written bare, so this
-     *    predates both.
-     *
-     * Where: TypedASTCompiler's `BindingRef.Local` fall-through checks scopes,
-     * params and locals, then searches the declaration index BY NAME — and
-     * never consults the captures, which the `BindingRef.Param` branch
-     * immediately below it does consult. A hit there emits a global read, and
-     * `isLambdaHash` is why only function-valued names are taken.
-     *
-     * Consequences worth stating plainly: `handler` and `fallback` are the two
-     * most natural names for exactly these values, so a user meets this by
-     * writing the obvious thing, and gets their own function silently called in
-     * place of the one they passed.
+     * `handler` and `fallback` are the two most natural names for exactly these
+     * values, which is why it mattered: a user met it by writing the obvious
+     * thing.
      */
-    @Test fun `a top-level binding captures a stdlib parameter of the same name`() {
+    @Test fun `a top-level binding does not replace the handler a route was given`() {
         assertEquals(
-            555L,
+            200L,
             run(
                 """
                 let handler: { m: Matched } -> Response = { m } ->
@@ -148,8 +125,23 @@ class HttpThrowingFallbackTest {
                 app { req = get_request { url = "/p" } }.status
                 """
             ),
-            "the global named `handler` is used instead of the written one — when this " +
-                "answers 200, the capture is fixed and this test should assert that",
+            "the handler the route was given must answer, not the global of that name",
+        )
+    }
+
+    /** And the same for `fallback`, the other name a user naturally picks. */
+    @Test fun `a top-level binding does not replace a given fallback`() {
+        assertEquals(
+            499L,
+            run(
+                """
+                let fallback: { req: Request } -> Response = { req } -> not_found { body = "nope" }
+                let app = on_get { path = "/known", handler = { m } -> "here" }
+                  .otherwise { fallback = { req } -> response_status { code = 499, body = "inline" } }
+                app { req = get_request { url = "/elsewhere" } }.status
+                """
+            ),
+            "the fallback written at the call site must answer, not the global of that name",
         )
     }
 }
