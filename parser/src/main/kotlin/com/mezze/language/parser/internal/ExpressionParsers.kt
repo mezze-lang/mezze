@@ -2553,10 +2553,32 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                         }
                     }
                 }
-                TokenType.NEWLINE -> {
-                    // Look past newlines for continuation with DOT (method chaining)
+                TokenType.NEWLINE, TokenType.COMMENT -> {
+                    // Look past newlines AND COMMENTS for a continuation `.`
+                    // (method chaining).
+                    //
+                    // Comments count for the same reason they do in the `|>` chain
+                    // below, which already says it: checking NEWLINE alone stops the
+                    // chain at the comment, so every link after the first commented
+                    // one is orphaned and the enclosing do-block mis-reports its last
+                    // `let` as the result. Both of these failed with
+                    // "Do block must end with a result expression":
+                    //
+                    //     xs
+                    //       # sum them
+                    //       .fold { init = 0, f = { acc, x } -> acc + x }
+                    //
+                    //     xs.map { f = { x } -> x + 1 }   # bump each
+                    //       .fold { init = 0, f = { acc, x } -> acc + x }
+                    //
+                    // The first has COMMENT after the newline, the second has it
+                    // BEFORE — hence this branch accepts either token. Nothing is
+                    // consumed unless a `.` actually follows, so a comment that
+                    // belongs to the next statement is left for it.
                     var ahead = currentStream
-                    while (ahead.current()?.type == TokenType.NEWLINE) {
+                    while (ahead.current()?.type == TokenType.NEWLINE ||
+                        ahead.current()?.type == TokenType.COMMENT
+                    ) {
                         ahead = ahead.advance()
                     }
                     if (ahead.current()?.type == TokenType.DOT) {
@@ -2580,7 +2602,7 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                             is ParseResult.Failure -> break
                         }
                     } else {
-                        break  // Newline not followed by DOT — end of expression
+                        break  // Not followed by DOT — end of expression
                     }
                 }
                 TokenType.LPAREN -> {

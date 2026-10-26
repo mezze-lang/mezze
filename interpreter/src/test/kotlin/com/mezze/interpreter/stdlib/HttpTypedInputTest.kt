@@ -177,15 +177,15 @@ class HttpTypedInputTest {
     /**
      * A query that does not fit answers through the same error and the same 400.
      *
-     * NOTE the asymmetry in the expected string: the PARAMETER case names `id`
-     * and the QUERY case names no field. `param_as` knows the name it was asked
-     * for and puts it in `at`, but a whole-record decode has to learn the field
-     * from the codec, and `decode_record_field` only extracts the sub-input — no
-     * one attaches the failing field's name to the error path on the way out. So
-     * `e.path` arrives empty and the 400 can only say what it expected.
+     * Both cases now name the field. `param_as` always knew the name it was
+     * asked for and put it in `at`; a whole-record decode had to learn it from
+     * the codec, and every field was decoded with the SAME context —
+     * `core::append_path` existed and was called from nowhere — so `e.path`
+     * arrived empty and the 400 could only say what it expected.
      *
-     * When that is fixed, this expects `400 page: expected Int, found xx` and
-     * the fix is to stop dropping the field name, not to change this test.
+     * `CodecGenerator` now decodes each field under its own context with that
+     * field appended to the path, which is where the `page:` in the expected
+     * string below comes from. The asymmetry this note used to describe is gone.
      */
     @Test
     fun `a query that does not fit is a 400 through the same path`() {
@@ -208,6 +208,6 @@ class HttpTypedInputTest {
                 """.trimIndent(),
             )
         )
-        assertEquals("200 2 | 400 expected Int, found xx", r)
+        assertEquals("200 2 | 400 page: expected Int, found xx", r)
     }
 }

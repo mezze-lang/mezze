@@ -295,7 +295,7 @@ class CodecGenerator(
     private fun scalarEncode(hookName: String, valueExpr: ParsedExpr): ParsedExpr =
         call(
             member(id(CONFIG_LOCAL), hookName),
-            record("val" to valueExpr, "ctx" to id("ctx")),
+            record("val" to valueExpr, "ctx" to id(ctxVar)),
         )
 
     /** Nested-value dispatch via Tier 3: `<valueExpr>.encode { config = config }`. */
@@ -317,7 +317,7 @@ class CodecGenerator(
         )
         return call(
             member(id(CONFIG_LOCAL), "encode_record"),
-            record("fields" to encodedFieldsSeq, "ctx" to id("ctx")),
+            record("fields" to encodedFieldsSeq, "ctx" to id(ctxVar)),
         )
     }
 
@@ -331,7 +331,7 @@ class CodecGenerator(
                         record(
                             "tag" to str(ctorName),
                             "payload" to none(),
-                            "ctx" to id("ctx"),
+                            "ctx" to id(ctxVar),
                         ),
                     ),
                 )
@@ -352,7 +352,7 @@ class CodecGenerator(
                         record(
                             "tag" to str(ctorName),
                             "payload" to some(encodedPayload),
-                            "ctx" to id("ctx"),
+                            "ctx" to id(ctxVar),
                         ),
                     ),
                 )
@@ -417,7 +417,7 @@ class CodecGenerator(
             if (bulkScalarSeqAvailable(isEncode = true)) {
                 return call(
                     member(id(CONFIG_LOCAL), Hooks.encodeScalarSeq(tag)),
-                    record("vals" to asSeq, "ctx" to id("ctx")),
+                    record("vals" to asSeq, "ctx" to id(ctxVar)),
                 )
             }
         }
@@ -431,7 +431,7 @@ class CodecGenerator(
         )
         return call(
             member(id(CONFIG_LOCAL), "encode_sequence"),
-            record("elems" to mappedElems, "ctx" to id("ctx")),
+            record("elems" to mappedElems, "ctx" to id(ctxVar)),
         )
     }
 
@@ -472,7 +472,7 @@ class CodecGenerator(
         )
         return call(
             member(id(CONFIG_LOCAL), "encode_mapping"),
-            record("entries" to encodedEntries, "ctx" to id("ctx")),
+            record("entries" to encodedEntries, "ctx" to id(ctxVar)),
         )
     }
 
@@ -528,7 +528,7 @@ class CodecGenerator(
         }
         return call(
             member(id(CONFIG_LOCAL), "encode_option"),
-            record("val" to optionVal, "ctx" to id("ctx")),
+            record("val" to optionVal, "ctx" to id(ctxVar)),
         )
     }
 
@@ -627,7 +627,7 @@ class CodecGenerator(
     private fun scalarDecode(hookName: String, inputExpr: ParsedExpr): ParsedExpr =
         call(
             member(id(CONFIG_LOCAL), hookName),
-            record("val" to inputExpr, "ctx" to id("ctx")),
+            record("val" to inputExpr, "ctx" to id(ctxVar)),
         )
 
     private fun tierThreeDecode(inputExpr: ParsedExpr): ParsedExpr =
@@ -656,10 +656,15 @@ class CodecGenerator(
                 record(
                     "val" to inputExpr,
                     "key" to transformFieldName(fieldName),
-                    "ctx" to id("ctx"),
+                    "ctx" to id(ctxVar),
                 ),
             )
-            val decodeSub = buildDecodeExpr(fieldType, id("${fieldName}_raw"))
+            val outerCtx = ctxVar
+            val fieldCtxVar = "ctx_$fieldName"
+            ctxVar = fieldCtxVar
+            val fieldDecode = buildDecodeExpr(fieldType, id("${fieldName}_raw"))
+            ctxVar = outerCtx
+            val decodeSub = doWithLet(fieldCtxVar, fieldCtx(fieldName, outerCtx), fieldDecode)
             acc = match(
                 fetchRaw,
                 matchCase(
@@ -681,7 +686,7 @@ class CodecGenerator(
         // config.decode_variant { val = it, ctx = ctx } -> Ok { val = { tag, payload } }.
         val decodeCall = call(
             member(id(CONFIG_LOCAL), "decode_variant"),
-            record("val" to inputExpr, "ctx" to id("ctx")),
+            record("val" to inputExpr, "ctx" to id(ctxVar)),
         )
 
         // Build a per-tag dispatch: match info.tag string, decode payload
@@ -689,7 +694,7 @@ class CodecGenerator(
         val tagVar = "__variant"
         val defaultBranch: ParsedExpr = err(
             record(
-                "path" to member(id("ctx"), "path"),
+                "path" to member(id(ctxVar), "path"),
                 "message" to str("Unknown variant tag"),
                 "expected" to str(ctors.joinToString(" | ") { it.key }),
                 "found" to some(member(id(tagVar), "tag")),
@@ -729,7 +734,7 @@ class CodecGenerator(
             payloadOpt,
             matchCase(nonePat(), err(
                 record(
-                    "path" to member(id("ctx"), "path"),
+                    "path" to member(id(ctxVar), "path"),
                     "message" to str("Missing payload for $ctorName"),
                     "expected" to str(ctorName),
                     "found" to none(),
@@ -759,7 +764,7 @@ class CodecGenerator(
             if (bulkScalarSeqAvailable(isEncode = false)) {
                 val bulk = call(
                     member(id(CONFIG_LOCAL), Hooks.decodeScalarSeq(tag)),
-                    record("val" to inputExpr, "ctx" to id("ctx")),
+                    record("val" to inputExpr, "ctx" to id(ctxVar)),
                 )
                 return if (rebuild == null) bulk else match(
                     bulk,
@@ -772,7 +777,7 @@ class CodecGenerator(
         // Then map each element through decodeExpr, gathering into Ok/Err.
         val listCall = call(
             member(id(CONFIG_LOCAL), "decode_sequence"),
-            record("val" to inputExpr, "ctx" to id("ctx")),
+            record("val" to inputExpr, "ctx" to id(ctxVar)),
         )
         // Auto-derived list decode currently threads through a helper native
         // that iterates and decodes element-wise via `elem.decode { config }`.
@@ -818,7 +823,7 @@ class CodecGenerator(
     private fun buildDecodeMapping(keyType: MezzeType, valType: MezzeType, inputExpr: ParsedExpr, sorted: Boolean): ParsedExpr {
         val mapCall = call(
             member(id(CONFIG_LOCAL), "decode_mapping"),
-            record("val" to inputExpr, "ctx" to id("ctx")),
+            record("val" to inputExpr, "ctx" to id(ctxVar)),
         )
         // __native_seq_try_map wraps each element as `{ x = <elem> }` (wrapX), so the
         // callback param is `x` and the `{key,value}` entry is reached via `x.key` /
@@ -910,7 +915,7 @@ class CodecGenerator(
     private fun buildDecodeOption(innerType: MezzeType?, inputExpr: ParsedExpr): ParsedExpr {
         val optCall = call(
             member(id(CONFIG_LOCAL), "decode_option"),
-            record("val" to inputExpr, "ctx" to id("ctx")),
+            record("val" to inputExpr, "ctx" to id(ctxVar)),
         )
         if (innerType == null) {
             return optCall
@@ -1025,6 +1030,46 @@ class CodecGenerator(
                       nativeCase("__native_string_to_screaming_snake_case")),
         )
     }
+
+    /**
+     * The decode context for ONE field of a record, with that field appended to
+     * the path.
+     *
+     * Every decode error carries `ctx.path`, and until now every field of a
+     * record was decoded with the SAME ctx — `core::append_path` existed and was
+     * called from nowhere — so a query like `page=xx` reported
+     * `Expected integer` against the root and never named `page`.
+     *
+     * Appended with the `__native_seq_add` intrinsic rather than `seq::add` or
+     * `core::append_path`, for the reason [transformFieldName] records: a
+     * generated impl lands in an arbitrary user module that need not import
+     * either, and a naked fully-qualified call falls through to a
+     * `BindingRef.Local(0,0)` and crashes at run time. A native symbol always
+     * resolves.
+     */
+    /**
+     * The name the generated body currently binds its decode context to.
+     *
+     * It is `ctx` everywhere except inside one record field's sub-decode, which
+     * gets its own name. Rebinding `ctx` in a nested `do` type-checks — Mezze
+     * only refuses a second `let` for a name bound in the SAME block — but the
+     * generated code then dies with
+     * `FrameSlotTypeException: Frame slot kind Object expected, but got Illegal`,
+     * so the two contexts must not share a slot.
+     */
+    private var ctxVar: String = "ctx"
+
+    private fun fieldCtx(fieldName: String, outerCtx: String): ParsedExpr =
+        record(
+            "path" to call(
+                id("__native_seq_add"),
+                record(
+                    "xs" to member(id(outerCtx), "path"),
+                    "x" to str(fieldName),
+                ),
+            ),
+            "shared" to member(id(outerCtx), "shared"),
+        )
 
     private fun record(vararg fields: Pair<String, ParsedExpr>): ParsedRecordLit =
         ParsedRecordLit(
