@@ -65,18 +65,40 @@ class MethodCallFieldTypeCheckTest {
         }
     }
 
-    // KNOWN BUG (split into a follow-up):
-    //
-    //   `nums.all {p = 5}` currently typechecks even though `p` should be
-    //   a function. Imported inherent impls' method types lose the body's
-    //   inferred constraint (the impl forwards `p` to free `all` whose
-    //   `p: {x: 'a} -> Bool` is fully typed in the home module). The fix
-    //   needs the impl-method-type registered post-solve (after constraint
-    //   resolution narrows `p` from a free TypeVar) — a structural change
-    //   to ContextBuilder's impl-method registration, not a one-line tweak.
-    //
-    //   Tracked separately. Test omitted here so the suite stays green
-    //   while the dispatch fix above ships.
+    /**
+     * This was recorded here as a KNOWN BUG with its test deliberately omitted
+     * "so the suite stays green" — `nums.all { p = 5 }` was said to typecheck
+     * because an imported inherent impl's method type lost the body's inferred
+     * constraint, needing the impl-method type registered post-solve.
+     *
+     * It is fixed. Measured on 2026-10-26: the error is
+     * `Field 'p' type mismatch: expected { x: Int } -> Bool, got Int`, which
+     * names the field, the expected arrow and what arrived. The omitted test is
+     * restored below, because a bug with no test is a bug that can come back.
+     */
+    @Test
+    fun `all with a non-function predicate is rejected`() {
+        val parsed = parser.parseParsedModule(
+            """
+            let f = {} -> do
+              let nums = [1, 2, 3]
+              nums.all { p = 5 }
+            f {}
+            """.trimIndent(),
+            "test.mz",
+        )
+        val message = try {
+            typeChecker.typeCheck(parsed, Paths.get("."), enablePrelude = true)
+            null
+        } catch (e: TypeCheckError) {
+            e.message
+        }
+        assertNotNull(message, "`p = 5` is not a predicate, so this must be refused")
+        assertTrue(
+            message!!.contains("'p'") && message.contains("-> Bool"),
+            "the error must name the field and the arrow it wanted; got: $message",
+        )
+    }
 
     @Test
     fun `Seq add with wrong field name reports a single useful error`() {
