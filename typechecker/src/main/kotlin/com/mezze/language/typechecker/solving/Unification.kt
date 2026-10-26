@@ -1261,8 +1261,11 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     // that's an error regardless of which side of the unification the
     // declared row lands on.
     if (eff1.caughtByAncestor.isNotEmpty() || eff1.declaredOnCallback) {
-        // eff1 is declared, eff2 is actual.
-        val missing = allEffects1 - allEffects2
+        // eff1 is declared, eff2 is actual. An effect written `Name?` is exempt
+        // from the lower bound and from this check ONLY: when the actual body
+        // does perform it, its instance is unified above like any other, which
+        // is why naming it is worth doing at all.
+        val missing = allEffects1 - allEffects2 - eff1.optionalEffects
         if (missing.isNotEmpty()) {
             return UnificationResult.Failure(
                 message = "Effect row mismatch: callback declared row lists <${allEffects1.sorted().joinToString(", ")}> " +
@@ -1275,8 +1278,8 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
         }
     }
     if (eff2.caughtByAncestor.isNotEmpty() || eff2.declaredOnCallback) {
-        // eff2 is declared, eff1 is actual.
-        val missing = allEffects2 - allEffects1
+        // eff2 is declared, eff1 is actual. Same exemption, mirrored.
+        val missing = allEffects2 - allEffects1 - eff2.optionalEffects
         if (missing.isNotEmpty()) {
             return UnificationResult.Failure(
                 message = "Effect row mismatch: callback declared row lists <${allEffects2.sorted().joinToString(", ")}> " +

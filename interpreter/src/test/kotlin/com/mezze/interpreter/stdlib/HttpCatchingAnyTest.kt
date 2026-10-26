@@ -78,9 +78,11 @@ class HttpCatchingAnyTest {
     }
 
     /**
-     * STILL OPEN, and a different family: a RECORD-typed thrown error fails at
-     * run time with `Field not found: into_error_response` — the operation read
-     * as a field off the record instead of dispatched.
+     * STILL OPEN, and a different family: a RECORD-typed thrown error does not
+     * dispatch. It fails at run time, loudly, and the program should not have
+     * compiled at all — the receiver is an ANONYMOUS record, `into_error_response`
+     * resolves against it as a FIELD rather than as an ability op, and a record's
+     * open row lets the missing field through the checker.
      *
      * Not about records as such: the identical shape in ONE module works (see
      * `ThrownErrorTypeRunsTest.a record thrown error is converted in the Err
@@ -92,7 +94,21 @@ class HttpCatchingAnyTest {
      * Giving `Response` an identity impl so this would subsume `catching` was
      * tried and hits the same wall, so the two combinators stay distinct.
      *
-     * When this starts answering 400, invert it.
+     * TWO loud shapes are accepted here, because folding `catching` into the
+     * verbs moved it from one to the other and the move was MEASURED, not
+     * guessed: with the pre-fold router this test saw `Field not found:
+     * into_error_response` (the field read, reached through
+     * `DictFallbackRootNode`); with the fold it sees a wrong impl run instead
+     * (`Expected String for field 's'` — the Str impl handed a record). The
+     * fold does not cause the bug and does not widen it: a crossing of the
+     * verb's `'error = Response` into `catching_any`'s `'e` was the obvious
+     * suspect and does NOT happen — a standalone reproduction with that exact
+     * row shape type-checks with the Str impl DELETED, so `'e` is not Str.
+     * What the fold does cost is the better message, which named the operation.
+     *
+     * When this starts answering 400, invert it. When D-9 is fixed the right
+     * answer is a COMPILE error naming the ability and the record type, and
+     * then this becomes a rejection test.
      */
     @Test fun `a record thrown error does not dispatch yet`() {
         val outcome = runCatching {
@@ -112,9 +128,11 @@ class HttpCatchingAnyTest {
             )
         }
         val err = outcome.exceptionOrNull()
+        val message = err?.message ?: ""
         assertTrue(
-            err != null && err.message!!.contains("into_error_response"),
-            "expected the loud field-not-found; got ${outcome.getOrNull() ?: err?.message}",
+            err != null &&
+                (message.contains("into_error_response") || message.contains("Expected String")),
+            "expected one of the two loud shapes; got ${outcome.getOrNull() ?: message}",
         )
     }
 }

@@ -553,27 +553,71 @@ class HttpIntoResponseTest {
     }
 
     /**
-     * A handler that never throws does NOT satisfy a row carrying Exception,
-     * which is why `try_*` is a separate family instead of `on_get` gaining
-     * the behaviour. Pinned: folding the two together would reject every pure
-     * handler, and this is the measurement that says so.
+     * A pure handler on a route that also accepts throwing ones.
+     *
+     * This used to be REJECTED, and its old note said so: "folding the two
+     * together would reject every pure handler, and this is the measurement
+     * that says so". It was right about the notation available at the time —
+     * `<...>` absorbs a thrown type without checking it, and `<Exception, ...>`
+     * is a lower bound that forces every handler to throw.
+     *
+     * `<Exception? having 'error = Response, ...>` is the upper bound that was
+     * missing: MAY perform Exception, and if so with a Response. The verbs
+     * carry that row and wrap in `catching` themselves, so one `.get` serves
+     * both kinds of handler — and `throwing a non-Response is a compile error`
+     * in HttpTypedInputTest still holds, which is what the fold cost last time.
      */
     @Test
-    fun `a pure handler is rejected by a throwing route`() {
-        val outcome = runCatching {
+    fun `a pure handler is accepted by a route that allows throwing`() {
+        assertEquals(
+            200L,
             run(
                 """
                 let app = group { prefix = "" }
-                  .get { path = "/p", handler = catching { handler = { m } -> "plain" } }
+                  .get { path = "/p", handler = { m } -> "plain" }
                   .otherwise { fallback = fallback }
                 app { req = get_request { url = "/p" } }.status
                 """.trimIndent()
-            )
-        }
-        val error = outcome.exceptionOrNull()
-        assertTrue(
-            error != null && error.toString().contains("Exception"),
-            "expected the row mismatch to be reported; got ${error ?: outcome.getOrNull()}",
+            ),
+        )
+    }
+
+    /** And a THROWING handler on the same verb, with no `catching` in sight. */
+    @Test
+    fun `a throwing handler needs no wrapper`() {
+        assertEquals(
+            404L,
+            run(
+                """
+                let app = group { prefix = "" }
+                  .get { path = "/u/:id", handler = { m } -> do
+                    let id = m.param_or { name = "id", default = "?" }
+                    if id == "7" then "seven" else throw { error = not_found { body = "no" } } }
+                  .otherwise { fallback = fallback }
+                app { req = get_request { url = "/u/9" } }.status
+                """.trimIndent()
+            ),
+        )
+    }
+
+    /** The pure and throwing forms in ONE table, on the same verb. */
+    @Test
+    fun `pure and throwing handlers share a table`() {
+        assertEquals(
+            "200:404",
+            run(
+                """
+                let app = group { prefix = "" }
+                  .get { path = "/p", handler = { m } -> "plain" }
+                  .get { path = "/u/:id", handler = { m } -> do
+                    let id = m.param_or { name = "id", default = "?" }
+                    if id == "7" then "seven" else throw { error = not_found { body = "no" } } }
+                  .otherwise { fallback = fallback }
+                let a = app { req = get_request { url = "/p" } }.status
+                let b = app { req = get_request { url = "/u/9" } }.status
+                "$(int::to_str { n = a }):$(int::to_str { n = b })"
+                """.trimIndent()
+            ).toString(),
         )
     }
 

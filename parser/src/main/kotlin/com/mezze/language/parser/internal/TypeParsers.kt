@@ -10,7 +10,9 @@ private data class EffectRowParseResult(
     val effectAnnotations: List<ParsedEffectAnnotation>,
     val isPolymorphic: Boolean,
     val isPerformed: Boolean,
-    val stream: TokenStream
+    val stream: TokenStream,
+    /** Effects written `Name?` — see ParsedEffectRow.optionalEffects. */
+    val optionalEffects: Set<String> = emptySet(),
 )
 
 /**
@@ -344,6 +346,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                 } else {
                                     val simpleEffectNames = mutableListOf<String>()
                                     val effectAnnotations = mutableListOf<ParsedEffectAnnotation>()
+                                    val optionalEffectNames = mutableSetOf<String>()
                                     var current = skipNewlines(afterLt)
                                     var foundEllipsis = false
                                     var foundPerformed = false
@@ -355,6 +358,15 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                         val effectName = effectNameResult.value
                                         val effectStart = current.current()
                                         current = skipNewlines(effectNameResult.remaining)
+
+                                        // `Name?` — MAY be performed. Read before
+                                        // `having`, so the instance a `?` effect
+                                        // states is parsed exactly as a mandatory
+                                        // one's: `<Exception? having 'error = T, ...>`.
+                                        if (current.current()?.type == TokenType.QUESTION) {
+                                            optionalEffectNames.add(effectName)
+                                            current = skipNewlines(current.advance())
+                                        }
 
                                         if (current.current()?.type == TokenType.HAVING) {
                                             val havingTok = current.current()!!
@@ -455,7 +467,10 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                         result = effectHavingError as ParseResult<ParsedTypeAnnotation>
                                     }
                                     if (current.current()?.type == TokenType.GT) {
-                                        EffectRowParseResult(simpleEffectNames, effectAnnotations, foundEllipsis, foundPerformed, current.advance())
+                                        EffectRowParseResult(
+                                            simpleEffectNames, effectAnnotations, foundEllipsis, foundPerformed,
+                                            current.advance(), optionalEffectNames,
+                                        )
                                     } else {
                                         EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                                     }
@@ -503,6 +518,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                 ParsedEffectRow(
                                     effects = effectRowResult.effects,
                                     effectAnnotations = effectRowResult.effectAnnotations,
+                                    optionalEffects = effectRowResult.optionalEffects,
                                     isPolymorphic = effectRowResult.isPolymorphic,
                                     isPerformed = effectRowResult.isPerformed,
                                     loc = spanLocTo(startToken, streamAfterWith, file)

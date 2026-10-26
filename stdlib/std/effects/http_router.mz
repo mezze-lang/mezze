@@ -208,48 +208,83 @@ pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response 
 # The conversion happens INSIDE the wrapped handler, not at table-build time,
 # because the handler has not run yet — and it runs under the handler's own
 # effect row, which is why the row stays open here.
-## Route one method and path to a handler, converting whatever it answers.
+## Route one method and path to a handler, converting whatever it answers and
+## sending whatever Response it throws.
+##
+## The handler row is `<Exception? having 'error = Response, ...>`: it MAY
+## perform Exception, and if it does the thrown value must be a `Response`. A
+## pure handler passes — that is what the `?` buys — and a handler that throws
+## something else is refused while compiling, naming the row.
+##
+## Written bare (`<...>`) this slot absorbed the thrown type without checking
+## it, so `throw { error = { why = "…" } }` compiled and died at run time with
+## `Field not found: status`. Written `<Exception, ...>` every handler would
+## have had to throw, because a named effect before `...` is a lower bound. The
+## `?` is the upper bound neither could express, and it is what lets the catch
+## live here instead of being written at every call site.
+##
+## `RouteGroup`'s `get`/`post`/… methods are a SECOND family doing the same job
+## for `group { … }.get { … }`, and they carry the same row for the same reason.
+## They are not thin wrappers over this function — each calls `group_add` with
+## the group's prefix — so the row has to be written in both places, and a
+## throwing handler reaching only one of them is the bug this comment exists to
+## stop happening again.
 pub let on_method
-  : { method: Method, path: Str, handler: { m: Matched } -> 'r <...> }
+  : { method: Method, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
   with IntoResponse 'r
   -> Routes
   =
   { method, path, handler } ->
-    route {
-      method = method,
-      path = path,
-      handler = { m } -> do
-        let answer = handler { m = m }
-        answer.into_response {},
-    }
+    route { method = method, path = path, handler = catching { handler = handler } }
 
 ## Route a GET at `path`.
-pub let on_get: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Get, path = path, handler = handler }
+pub let on_get
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Get, path = path, handler = handler }
 
 ## Route a POST at `path`.
-pub let on_post: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Post, path = path, handler = handler }
+pub let on_post
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Post, path = path, handler = handler }
 
 ## Route a PUT at `path`.
-pub let on_put: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Put, path = path, handler = handler }
+pub let on_put
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Put, path = path, handler = handler }
 
 ## Route a PATCH at `path`.
-pub let on_patch: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Patch, path = path, handler = handler }
+pub let on_patch
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Patch, path = path, handler = handler }
 
 ## Route a DELETE at `path`.
-pub let on_delete: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Delete, path = path, handler = handler }
+pub let on_delete
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Delete, path = path, handler = handler }
 
 ## Route a HEAD at `path`.
-pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Head, path = path, handler = handler }
+pub let on_head
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Head, path = path, handler = handler }
 
 ## Route a OPTIONS at `path`.
-pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
-  { path, handler } -> on_method { method = Options, path = path, handler = handler }
+pub let on_options
+  : { path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> Routes
+  = { path, handler } -> on_method { method = Options, path = path, handler = handler }
 
 # ---- handler-side adapters ------------------------------------------------
 #
@@ -269,22 +304,26 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 # — one dictionary slot was filled from a sibling constraint's type. Fixed in
 # the compiler's dict evidence, not worked around.)
 #
-# ONE shape the verbs cannot take, because the reason is the effect system
-# rather than a gap: a handler that THROWS a Response. A handler that never
-# throws does not satisfy a row carrying Exception, and one that throws does
-# not satisfy a pure signature, so `catching` adapts it.
+# The verbs apply this themselves, so a route reads `handler = { m } -> …`
+# whether or not it throws. Writing `catching` is still accepted and still
+# means the same thing; it is no longer needed.
 #
-# The verbs DID apply this themselves for a while, so a route read
-# `handler = { m } -> …` even when it threw. That was reverted: the verb's own
-# handler row has to be a bare `<...>` for a pure handler to pass, and a bare
-# row absorbs the thrown type without checking it — so a handler throwing a
-# NON-Response compiled and died at runtime with `Field not found`, where the
-# explicit form rejects it. The wrapper is verbose; a silent runtime failure is
-# worse. It can come back when a row can say "MAY perform Exception, and if so
-# with `'error = Response`" — an upper bound `<E, ...>` cannot express, since it
-# means AT LEAST.
+# That took two tries. The first fold was REVERTED, and the note left behind
+# said why and what would be needed to bring it back: "it can come back when a
+# row can say MAY perform Exception, and if so with 'error = Response — an
+# upper bound `<E, ...>` cannot express, since it means AT LEAST." The verb's
+# slot had to be a bare `<...>` for a pure handler to pass, and a bare row
+# absorbs the thrown type unchecked, so a handler throwing a NON-Response
+# compiled and died at run time with `Field not found: status`.
 #
-# It is a free function because it carries an ability constraint, and a
+# `<Exception? having 'error = Response, ...>` is that row, and the `?` is new
+# notation added for it: an effect written `Name?` is exempt from the lower
+# bound, while its instance is still unified when the effect IS performed.
+# A pure handler passes, a Response-throwing handler passes, and a handler
+# throwing anything else is refused while compiling — which is the measurement
+# the revert turned on. HttpIntoResponseTest pins all three.
+#
+# It stays a free function because it carries an ability constraint, and a
 # constraint on an inherent impl method only works for an IMPORTED impl (a
 # locally declared one is not re-instantiated per call, so its constrained
 # variable collapses to the first use's type).
@@ -302,9 +341,15 @@ pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with Into
 # `or_throw` do it for a Result.
 ## Adapt a handler that may THROW a Response into one answering a Response.
 ##
+## The verbs do this for you, so this is rarely written by hand:
+##
+##   .get { path = "/u/:id", handler = { m } -> … }       # the usual form
 ##   .get { path = "/u/:id", handler = catching { handler = { m } -> … } }
+##
+## It is still useful where a handler value is built and passed around on its
+## own, away from the route that will carry it.
 pub let catching
-  : { handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  : { handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
   with IntoResponse 'r
   -> { m: Matched } -> Response <...>
   =
@@ -338,8 +383,10 @@ pub let catching
 ## effect row, which used to carry this function's variable rather than what the
 ## handler actually threw.
 ##
-## A RECORD-typed error does not dispatch yet (`Field not found:
-## into_error_response` at run time); throw a `Str`, or a `Response` through
+## A RECORD-typed error does not dispatch yet: against an ANONYMOUS record the
+## operation resolves as a FIELD rather than an ability op, and a record's open
+## row lets the missing field past the checker, so it fails at run time instead
+## of while compiling. Throw a named type, a `Str`, or a `Response` through
 ## `catching`. `HttpCatchingAnyTest` pins each case.
 pub let catching_any
   : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
@@ -359,8 +406,8 @@ pub let catching_any
 # A group is a path prefix plus the routes under it, and groups NEST:
 #
 #   let users = group { prefix = "/users" }
-#     .get  { path = "/:id", handler = catching { handler = show } }
-#     .post { path = "",     handler = respond  { handler = create } }
+#     .get  { path = "/:id", handler = show }
+#     .post { path = "",     handler = create }
 #
 #   let app = group { prefix = "/api" }
 #     .nest { group = users }
@@ -450,74 +497,67 @@ let group_add
 
 impl RouteGroup where {
   ## Append a GET under this group's prefix, answering whatever the handler returns.
-  get: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  get: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Get,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a POST under this group's prefix, answering whatever the handler returns.
-  post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Post,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a PUT under this group's prefix, answering whatever the handler returns.
-  put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Put,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a PATCH under this group's prefix, answering whatever the handler returns.
-  patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Patch,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a DELETE under this group's prefix, answering whatever the handler returns.
-  delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Delete,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append a HEAD under this group's prefix, answering whatever the handler returns.
-  head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Head,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
   ## Append an OPTIONS under this group's prefix, answering whatever the handler returns.
-  options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+  options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <Exception? having 'error = Response, ...> }
+    with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
       g = it,
       method = Options,
       path = path,
-      handler = { m } -> do
-        let answered = handler { m = m }
-        answered.into_response {},
+      handler = catching { handler = handler },
     },
 
   # The child's entries already carry the child's own prefix, so one more
@@ -552,7 +592,7 @@ impl RouteGroup where {
     otherwise { routes = fold_entries { g = it }, fallback = { req } -> not_found { body = "no route matched" } },
 
   ## Close the group with a fallback, producing the handler `serve` takes.
-  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <Exception? having 'error = Response, ...> } ->
     otherwise { routes = fold_entries { g = it }, fallback = fallback },
 }
 
@@ -597,13 +637,21 @@ pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
 ##
 ## The result is a plain function, which is exactly what `HttpServer.serve`
 ## takes — the route table has disappeared by this point.
+## A fallback may THROW its Response too, for the same reason a handler may:
+## written bare, the slot absorbed the thrown type unchecked and the mistake
+## surfaced on the wire. `catching` is not reusable here because its handler
+## takes a `Matched`, and a fallback takes the unmatched `Request`.
 pub let otherwise
-  : { routes: Routes, fallback: { req: Request } -> Response <...> }
+  : { routes: Routes, fallback: { req: Request } -> Response <Exception? having 'error = Response, ...> }
   -> { req: Request } -> Response <...>
   =
   { routes, fallback } -> { req } -> match routes.run { req = req } is
     Some { val } -> val
-    None -> fallback { req = req }
+    None -> do
+      let outcome = perform ExceptionToResult in Ok { val = fallback { req = req } }
+      match outcome is
+        Ok { val } -> val
+        Err { error } -> error
 
 ## ── Query parameters ────────────────────────────────────────────────────────
 
@@ -755,7 +803,7 @@ impl Routes where {
   or_else = { it: 'it, b: Routes } -> or_else { a = it, b = b },
 
   ## Close the table with a fallback, producing the handler `serve` takes.
-  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <Exception? having 'error = Response, ...> } ->
     otherwise { routes = it, fallback = fallback },
 }
 

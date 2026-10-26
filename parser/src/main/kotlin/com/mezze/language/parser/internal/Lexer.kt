@@ -30,7 +30,7 @@ enum class TokenType {
     LPAREN, RPAREN,
     LBRACE, RBRACE,
     LBRACKET, RBRACKET,
-    COMMA, DOT, COLON,
+    COMMA, DOT, COLON, QUESTION,
     ARROW, ASSIGN, ELLIPSIS,
     PLACEHOLDER,  // _ as expression placeholder
     AT,  // @ for pipe operator placeholder
@@ -64,6 +64,7 @@ private object InternedTokens {
     const val RBRACKET = "]"
     const val COMMA = ","
     const val DOT = "."
+    const val QUESTION = "?"
     const val COLON = ":"
     const val ASSIGN = "="
     const val NEWLINE = "\n"
@@ -320,6 +321,10 @@ class Lexer(
             ']' -> TokenType.RBRACKET to InternedTokens.RBRACKET
             ',' -> TokenType.COMMA to InternedTokens.COMMA
             '.' -> TokenType.DOT to InternedTokens.DOT
+            // Marks an effect on a callback row as OPTIONAL — see ParsedEffectRow
+            // .optionalEffects. Free everywhere else in the grammar: the only `?`
+            // in the stdlib today is inside comments and string literals.
+            '?' -> TokenType.QUESTION to InternedTokens.QUESTION
             ':' -> TokenType.COLON to InternedTokens.COLON
             '=' -> TokenType.ASSIGN to InternedTokens.ASSIGN
             '`' -> TokenType.BACKTICK to "`"
