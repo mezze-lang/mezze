@@ -182,6 +182,113 @@ impl HttpClient for MockHttpClient { rules: [MockRule] } where {
   request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
 }
 
+## ── Streamed downloads ──────────────────────────────────────────────────────
+
+## A response whose body is still on the wire.
+##
+## Opaque, like `FileHandle`. It owns a live connection, so it is NOT an
+## ordinary value: it has to be closed, and `with_download` is the form that
+## closes it for you.
+pub newtype Download = __NativeDownload
+
+## What `open` answers: the head of the response, and the body unread.
+##
+## `status` and `headers` have arrived by this point, which is half the reason
+## to stream — a caller can decide on a 404 or a content type before reading a
+## byte of the body.
+pub type OpenDownload = {
+  status: Int,
+  headers: Map Str Str,
+  reader: Download,
+}
+
+## Downloading a response body a chunk at a time.
+##
+## A SEPARATE effect from `HttpClient`, the way `FileStreaming` is separate from
+## `Filesystem`: the capability is different (it holds a connection open across
+## several operations), the performers are different, and a caller that only
+## sends requests should not have to grant this one.
+##
+## `close` is not optional. Nothing here closes itself — unlike the SERVER's
+## inbound reader, where Helidon keeps the request content readable on its own
+## account — so a `read_chunk` after `close` reports the failure by name rather
+## than answering an empty body, which is the `with_lines` discipline.
+effect HttpDownload where {
+  open: { req: Request, config: HttpConfig } -> Result OpenDownload HttpError <HttpDownload>,
+  read_chunk: { reader: Download, max_bytes: Int } -> Result Bytes HttpError <HttpDownload>,
+  close: { reader: Download } -> Result {} HttpError <HttpDownload>,
+}
+
+## Downloads over a real socket, one connection per download.
+impl HttpDownload for SimpleHttpDownload where {
+  open = { req, config } -> __native_http_stream_open { req = req, config = config },
+  read_chunk = { reader, max_bytes } ->
+    __native_http_stream_read { reader = reader, max_bytes = max_bytes },
+  close = { reader } -> __native_http_stream_close { reader = reader },
+}
+
+## A download's chunks, lazily.
+##
+## Takes the READER rather than a request, for the reason `lines_of` does: an
+## `Iter` that owned the connection would leak it, because a consumer may stop
+## early (`take { n = 1 }`) and nothing would then run a close.
+pub let chunks_of
+  : { reader: Download, chunk_bytes: Int } -> Iter Bytes <HttpDownload, ...>
+  = { reader, chunk_bytes } -> iter::unfold {
+    state = {},
+    step = { s } -> match HttpDownload.read_chunk { reader = reader, max_bytes = chunk_bytes } is
+      Err { error = _ } -> Done
+      Ok { val = b } -> if bytes::size { b = b } == 0 then Done
+        else Yield { val = b, next = {} }
+  }
+
+## A response whose body streams, with the connection closed for you.
+##
+##   with_download { req = request { url = u }, config = default_http_config,
+##     f = { resp } -> match resp.chunks is
+##       Some { val = cs } -> iter::fold { it = cs, init = 0,
+##         f = { acc, x } -> acc + bytes::size { b = x } }
+##       None -> 0 }
+##
+## The callback gets an ordinary `Response` whose `chunks` is filled and whose
+## `body` is empty, and may read as much of it as it likes; the connection
+## closes when the callback returns, drained or not.
+##
+## Chunks returned FROM the callback yield NOTHING, and do so quietly. The
+## native does report the closure — `read_chunk` answers a named
+## `ConnectionFailed` saying the download is already closed — but `chunks_of`
+## ends the stream on any error, because an iterator step can only say Yield or
+## Done. `with_lines` claims the stronger property for files and this does not,
+## so: do not return the chunks. Read what you need inside, or collect with a
+## fold inside, and hand out the bytes.
+##
+## A part-way read FAILURE is different and is reported, because `close` runs
+## while the scope is still here to answer — see below.
+pub let with_download
+  : { req: Request, config: HttpConfig, f: { resp: Response } -> 'a <...> }
+  -> Result 'a HttpError <HttpDownload, ...>
+  = { req, config, f } -> match HttpDownload.open { req = req, config = config } is
+    Err { error } -> Err { error = error }
+    Ok { val = d } -> do
+      let resp = {
+        status = d.status,
+        headers = d.headers,
+        # A Response's `body` is Bytes, not an Option, and `chunks` makes it
+        # ignored — see the field's own note. Empty is the honest filler.
+        body = bytes::empty {},
+        url = req.url,
+        chunks = Some { val = chunks_of { reader = d.reader, chunk_bytes = 65536 } },
+      }
+      let out = f { resp = resp }
+      ## `close` is where a part-way read failure surfaces. The chunks iterator
+      ## cannot carry it — a step says Yield or Done, so a connection that died
+      ## at 40 KB of 200 arrives as Done — and a truncated download answering
+      ## `Ok` would be a silent wrong answer of the worst kind: the caller
+      ## believes it has the whole body.
+      match HttpDownload.close { reader = d.reader } is
+        Err { error } -> Err { error = error }
+        Ok { val = _ } -> Ok { val = out }
+
 ## Build a minimal request with method and URL.
 pub let make_request: { method: Method, url: Str } -> Request = { method, url } ->
   {

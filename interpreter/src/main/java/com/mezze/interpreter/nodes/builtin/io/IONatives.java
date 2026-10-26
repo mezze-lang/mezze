@@ -982,28 +982,7 @@ public final class IONatives {
         int timeoutMs
     ) {
         try {
-            HttpClientRequest request = client.method(method).uri(uri);
-
-            // Apply per-request timeout — Helidon exposes this on the
-            // request builder via readTimeout (waiting for the server to
-            // respond / write). Connect-timeout is configured client-wide.
-            request.readTimeout(Duration.ofMillis(timeoutMs));
-
-            // Headers — Helidon's request.header(name, value) is the
-            // simple form. Multi-value headers can be added by calling
-            // it repeatedly; the Map<String,String> here is single-valued.
-            for (Map.Entry<String, String> e : headers.entrySet()) {
-                request.header(io.helidon.http.HeaderNames.create(e.getKey()), e.getValue());
-            }
-
-            // submit() / outputStream() pattern: for small bodies, just
-            // submit the bytes. For empty body, submit empty.
-            HttpClientResponse response;
-            if (body != null) {
-                response = request.submit(body);
-            } else {
-                response = request.request();
-            }
+            HttpClientResponse response = submitOpen(client, method, uri, body, headers, timeoutMs);
 
             try {
                 return createOk(responseToMezze(response, urlString));
@@ -1057,6 +1036,231 @@ public final class IONatives {
             return connectionFailed(urlString, msg);
         }
         return connectionFailed(urlString, msg);
+    }
+
+    /**
+     * Build and send one request, handing back the response still OPEN.
+     *
+     * The caller closes it. `executeRequest` does so in a finally after
+     * reading the whole body; the streaming path hands it to guest code and
+     * closes when that scope ends.
+     */
+    private static HttpClientResponse submitOpen(
+        WebClient client,
+        Method method,
+        URI uri,
+        byte[] body,
+        Map<String, String> headers,
+        int timeoutMs
+    ) {
+        HttpClientRequest request = client.method(method).uri(uri);
+
+        // Apply per-request timeout — Helidon exposes this on the
+        // request builder via readTimeout (waiting for the server to
+        // respond / write). Connect-timeout is configured client-wide.
+        request.readTimeout(Duration.ofMillis(timeoutMs));
+
+        // Headers — Helidon's request.header(name, value) is the
+        // simple form. Multi-value headers can be added by calling
+        // it repeatedly; the Map<String,String> here is single-valued.
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            request.header(io.helidon.http.HeaderNames.create(e.getKey()), e.getValue());
+        }
+
+        // submit() / outputStream() pattern: for small bodies, just
+        // submit the bytes. For empty body, submit empty.
+        return (body != null) ? request.submit(body) : request.request();
+    }
+
+    // ==================== Streamed download ====================
+
+    /**
+     * An OPEN response whose body is still on the wire, behind the guest's
+     * opaque `Download` newtype.
+     *
+     * It owns the connection, and the client too when it created one. Unlike
+     * the server's inbound reader — where Helidon keeps the request content
+     * readable on its own account — nothing here closes itself, so the guest
+     * scope that opened it has to close it. That is why the public shape is
+     * `with_download`, not a bare `open`.
+     */
+    public static final class MezzeDownload {
+        private final HttpClientResponse response;
+        private final java.io.InputStream in;
+        private final HttpClient ownedClient;
+        private final String url;
+        private final java.util.concurrent.atomic.AtomicBoolean closed =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+        /**
+         * Set when a read failed part-way. `close` reports it, which is how a
+         * TRUNCATED download stops looking like a complete one: the iterator
+         * ends either way, so the scope is the only place left to say so.
+         */
+        private volatile String failure = null;
+
+        MezzeDownload(HttpClientResponse response, java.io.InputStream in,
+                      HttpClient ownedClient, String url) {
+            this.response = response;
+            this.in = in;
+            this.ownedClient = ownedClient;
+            this.url = url;
+        }
+    }
+
+    /**
+     * Send, and hand back the response with its body unread.
+     *
+     * `status` and `headers` have arrived by this point — they are what a
+     * caller needs before deciding to read the body at all, which is half the
+     * reason to stream rather than buffer.
+     */
+    @TruffleBoundary
+    public static Object httpStreamOpen(MezzeRecord args) {
+        Object reqObj = getField(args, "req");
+        if (!(reqObj instanceof MezzeRecord req)) {
+            throw new NativeTypeMismatchException("Expected 'req' to be a Request record");
+        }
+        Object configObj = getField(args, "config");
+        MezzeRecord config = (configObj instanceof MezzeRecord c) ? c : MezzeRecord.empty();
+
+        String urlString = getString(req, "url");
+        URI uri;
+        try {
+            uri = URI.create(urlString);
+        } catch (IllegalArgumentException e) {
+            return invalidUrl(urlString, "Malformed URL");
+        }
+        if (uri.getScheme() == null || !(uri.getScheme().equals("http") || uri.getScheme().equals("https"))) {
+            return invalidUrl(urlString, "URL scheme must be http or https");
+        }
+
+        // A client passed in is the caller's to close; one made here is ours,
+        // and the handle closes it alongside the connection.
+        Object clientObj = getField(args, "client");
+        HttpClient passed = (clientObj instanceof HttpClient hc) ? hc : null;
+        HttpClient owned = (passed == null)
+            ? (HttpClient) httpClientCreate(MezzeRecord.fromFields(
+                new String[]{"config"}, new Object[]{config}))
+            : null;
+        HttpClient client = (passed != null) ? passed : owned;
+
+        // Same precedence as the buffered path: the config's timeout, overridden
+        // by the request's own when it carries one.
+        int timeoutMs = getIntOrDefault(config, "timeout_ms", 30000);
+        Object reqTimeoutObj = getField(req, "timeout_ms");
+        if (reqTimeoutObj instanceof Long l) {
+            timeoutMs = l.intValue();
+        } else if (reqTimeoutObj instanceof MezzeVariant v && v.isSome()) {
+            Object val = v.getPayloadFieldByName("val");
+            if (val instanceof Long l) {
+                timeoutMs = l.intValue();
+            }
+        }
+
+        Object body = getOptionalBody(req);
+        try {
+            HttpClientResponse response = submitOpen(
+                client.getWebClient(),
+                parseMethod(getField(req, "method")),
+                uri,
+                (body != null) ? toByteArray(body) : null,
+                parseHeaders(getMap(req, "headers")),
+                timeoutMs);
+
+            Map<Object, Object> headersOut = new HashMap<>();
+            response.headers().forEach(h -> headersOut.put(h.name().toLowerCase(), h.get()));
+
+            MezzeDownload download = new MezzeDownload(
+                response, response.inputStream(), owned, urlString);
+            return createOk(MezzeRecord.fromFields(
+                new String[]{"status", "headers", "reader"},
+                new Object[]{
+                    (long) response.status().code(),
+                    MezzeMap.fromJavaMap(headersOut),
+                    download,
+                }));
+        } catch (RuntimeException e) {
+            if (owned != null) httpClientClose(MezzeRecord.fromFields(
+                new String[]{"client"}, new Object[]{owned}));
+            return classifyFailure(urlString, timeoutMs, e);
+        } catch (Exception e) {
+            if (owned != null) httpClientClose(MezzeRecord.fromFields(
+                new String[]{"client"}, new Object[]{owned}));
+            return classifyFailure(urlString, timeoutMs, e);
+        }
+    }
+
+    /**
+     * The next chunk of a download, or empty Bytes at the end.
+     *
+     * A SHORT read is not the end — the socket hands over what has arrived, so
+     * a chunk smaller than `max_bytes` is ordinary. Only 0 or -1 ends it.
+     *
+     * Reading a CLOSED download is an error that names itself, not an empty
+     * answer. `with_lines` settled this shape for files: "an Iter returned FROM
+     * the callback would be reading a closed handle, which reports
+     * FsClosedHandle rather than silently yielding nothing."
+     */
+    @TruffleBoundary
+    public static Object httpStreamRead(MezzeRecord args) {
+        MezzeDownload d = downloadOf(args);
+        long maxBytes = getIntOrDefault(args, "max_bytes", 0);
+        if (maxBytes <= 0) {
+            throw new NativeTypeMismatchException("'max_bytes' must be positive, got " + maxBytes);
+        }
+        if (d.closed.get()) {
+            return connectionFailed(d.url,
+                "this download was already closed — a response body cannot be read "
+                    + "outside the `with_download` scope that opened it");
+        }
+        int cap = (int) Math.min(maxBytes, 1 << 20);
+        byte[] buf = new byte[cap];
+        try {
+            int n = d.in.read(buf, 0, cap);
+            if (n <= 0) return createOk(new BytesNatives.MezzeBytes(new byte[0]));
+            byte[] out = new byte[n];
+            System.arraycopy(buf, 0, out, 0, n);
+            return createOk(new BytesNatives.MezzeBytes(out));
+        } catch (java.io.IOException e) {
+            String why = "the response body could not be read: "
+                + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            d.failure = why;
+            return connectionFailed(d.url, why);
+        }
+    }
+
+    /** Close the connection, and the client when this handle made one. */
+    @TruffleBoundary
+    public static Object httpStreamClose(MezzeRecord args) {
+        MezzeDownload d = downloadOf(args);
+        if (d.closed.compareAndSet(false, true)) {
+            try {
+                d.response.close();
+            } catch (RuntimeException ignored) {
+                // The peer may already be gone; the handle is spent either way.
+            }
+            if (d.ownedClient != null) {
+                httpClientClose(MezzeRecord.fromFields(
+                    new String[]{"client"}, new Object[]{d.ownedClient}));
+            }
+        }
+        // A read that failed part-way is reported HERE, because the iterator
+        // cannot report it: a stream's step says Yield or Done, and "the
+        // connection died at 40 KB of 200" has to come out as Done. Left at
+        // that, a truncated download would be indistinguishable from a
+        // complete one — the same trap `response_file` still has in the other
+        // direction, where a read error ends the file early and silently.
+        String why = d.failure;
+        if (why != null) return connectionFailed(d.url, why);
+        return createOk(MezzeRecord.empty());
+    }
+
+    private static MezzeDownload downloadOf(MezzeRecord args) {
+        Object r = getField(args, "reader");
+        if (!(r instanceof MezzeDownload d)) {
+            throw new NativeTypeMismatchException("Expected 'reader' to be an open download");
+        }
+        return d;
     }
 
     /**
