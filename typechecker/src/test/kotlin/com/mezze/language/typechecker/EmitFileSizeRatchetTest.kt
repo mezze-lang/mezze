@@ -74,7 +74,13 @@ class EmitFileSizeRatchetTest {
             // `compileCall` but not the file — so the bound moves rather than the
             // code, which is what this test asks for when the code belongs here.
             C + "TypedASTCompiler.kt" to 4332,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
-            E + "TypedAstBuilder.kt" to 2350,    // was 3,107
+            // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
+            // with the row from the pushed CONTEXT, so a callback's associated
+            // type was the CALLEE's variable rather than what the body threw, and
+            // no call site could resolve a constraint on it. Filling it from the
+            // lambda's own recorded row belongs where the lambda is stamped, so
+            // the bound moves rather than the code.
+            E + "TypedAstBuilder.kt" to 2392,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(

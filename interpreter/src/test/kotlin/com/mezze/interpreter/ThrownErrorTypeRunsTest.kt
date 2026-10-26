@@ -49,6 +49,39 @@ class ThrownErrorTypeRunsTest {
         )
     }
 
+    /**
+     * A RECORD-typed thrown error. Worth its own case because the same shape
+     * through the stdlib's `catching_any` fails — see `HttpCatchingAnyTest` —
+     * so this is what localises that failure to the cross-module path with
+     * several competing impls rather than to record errors as such.
+     */
+    @Test fun `a record thrown error is converted in the Err arm`() {
+        assertEquals(
+            "boom",
+            run(
+                """
+                use std::effects::exception::{ ExceptionToResult, throw }
+                type Bad = { why: Str }
+                ability Conv for 'e where { conv: { it: 'e } -> Str }
+                impl Conv for Str where { conv = { it } -> it }
+                impl Conv for Bad where { conv = { it } -> it.why }
+                let adapt
+                  : { f: {} -> 'r <Exception having 'error = 'e, ...> }
+                  with Conv 'e
+                  -> Str <*>
+                  = { f } -> do
+                    let outcome = perform ExceptionToResult in do
+                      let answered = f {}
+                      Ok { val = "ok" }
+                    match outcome is
+                      Ok { val } -> val
+                      Err { error } -> error.conv {}
+                adapt { f = {} -> throw { error = { why = "boom" } } }
+                """
+            ),
+        )
+    }
+
     /** The control: the same shape with the thrown type written out. */
     @Test fun `a concrete thrown error type is converted in the Err arm`() {
         assertEquals(

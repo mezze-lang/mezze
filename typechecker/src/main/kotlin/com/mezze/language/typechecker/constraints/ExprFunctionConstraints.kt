@@ -710,6 +710,11 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         performed = false,
         unusedVariables = bodyResult.unusedVariables + unusedParams,
         lambdaParamTypes = bodyResult.lambdaParamTypes + (expr.loc to paramFields),
+        // What the BODY determined about the effects it performs, kept for emit
+        // even though the arrow discharges them here. See the field's note.
+        lambdaRowInstances = bodyResult.lambdaRowInstances +
+            (if (mergedEffectInstances.isEmpty()) emptyMap()
+             else mapOf(expr.loc to mergedEffectInstances)),
     )
 }
 

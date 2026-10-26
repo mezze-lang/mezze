@@ -332,23 +332,15 @@ pub let catching
 ##     if id == "" then throw { error = NotFound { id = id } } else show { id = id }
 ##   } }
 ##
-## NAME THE HANDLER. An INLINE lambda does not work yet:
+## The thrown type has to reach three places, which is why this did not exist
+## before: the `Err` arm's binding, the call site's dictionary for
+## `IntoErrorResponse`, and — for an INLINE handler — the lambda's own stamped
+## effect row, which used to carry this function's variable rather than what the
+## handler actually threw.
 ##
-##   let h = { m } -> throw { error = NotFound { id = "7" } }
-##   .get { path = "/u/:id", handler = catching_any { handler = h } }      # works
-##   .get { path = "/u/:id", handler = catching_any { handler = { m } -> … } }  # fails
-##
-## The inline form fails LOUDLY, at run time, with "no dictionary was supplied
-## for ability operation `into_error_response`". The cause is measured: an
-## argument lambda's type is stamped with the row from the PUSHED CONTEXT — the
-## callee's declared `<Exception having 'error = 'e, ...>`, carrying the
-## CALLEE's variable — while a named binding gets its own solved row, where the
-## thrown type is `Str`/`NotFound`/whatever the body threw. So the call site has
-## nothing concrete to resolve `IntoErrorResponse` against. See
-## `HttpCatchingAnyTest`, which pins both halves.
-##
-## `catching` has no such restriction: its error type is the concrete
-## `Response`, so it needs no dictionary at all.
+## A RECORD-typed error does not dispatch yet (`Field not found:
+## into_error_response` at run time); throw a `Str`, or a `Response` through
+## `catching`. `HttpCatchingAnyTest` pins each case.
 pub let catching_any
   : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
   with IntoResponse 'r, IntoErrorResponse 'e

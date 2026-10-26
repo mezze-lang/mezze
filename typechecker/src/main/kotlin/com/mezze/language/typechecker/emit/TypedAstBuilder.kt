@@ -96,6 +96,8 @@ class TypedAstBuilder(
     // ownership stays with the separate #378 rider below.
     private val doBindingSolvedTypes: Map<Loc, MezzeType> get() = solved.doBindingSolvedTypes
     private val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> get() = solved.lambdaParamTypes
+    private val lambdaRowInstances: Map<Loc, Set<MezzeType.EffectInstance>>
+        get() = solved.lambdaRowInstances
     private val performFullyDischarged: Map<Loc, Boolean> get() = solved.performFullyDischarged
 
 
@@ -254,6 +256,42 @@ class TypedAstBuilder(
                 ),
             )
         }
+    }
+
+    /**
+     * [contextRow] with each still-open associated type filled from what the
+     * lambda's own BODY determined (`solved.lambdaRowInstances`).
+     *
+     * Only an UNRESOLVED associated type is replaced, and only when the body has
+     * a resolved one for the same effect and name. So a declared concrete row
+     * wins, an effect the body does not perform is untouched, and a lambda with
+     * no record behaves exactly as before.
+     */
+    private fun contextRowWithBodyAssocTypes(
+        contextRow: MezzeType.EffectRow?,
+        loc: Loc,
+    ): MezzeType.EffectRow? {
+        if (contextRow == null || contextRow.effectInstances.isEmpty()) return contextRow
+        val fromBody = lambdaRowInstances[loc] ?: return contextRow
+        if (fromBody.isEmpty()) return contextRow
+        fun sameEffect(a: String, b: String) =
+            a == b || a.endsWith("::$b") || b.endsWith("::$a")
+        var changed = false
+        val filled = contextRow.effectInstances.mapTo(mutableSetOf()) { inst ->
+            val mine = fromBody.firstOrNull { sameEffect(inst.name, it.name) }
+                ?: return@mapTo inst
+            val merged = inst.associatedTypes.mapValues { (assoc, declared) ->
+                if (substitution.apply(declared) !is MezzeType.VarType) return@mapValues declared
+                val own = mine.associatedTypes[assoc]
+                    ?: mine.associatedTypes[assoc.removePrefix("'")]
+                    ?: mine.associatedTypes["'" + assoc.removePrefix("'")]
+                    ?: return@mapValues declared
+                val resolved = substitution.apply(own)
+                if (resolved is MezzeType.VarType) declared else { changed = true; resolved }
+            }
+            if (merged == inst.associatedTypes) inst else inst.copy(associatedTypes = merged)
+        }
+        return if (changed) contextRow.copy(effectInstances = filled) else contextRow
     }
 
     private val typeVarCache = mutableMapOf<String, TypeVar>()
@@ -1257,10 +1295,30 @@ class TypedAstBuilder(
                 // Propagate `with <Ability>` constraints from the enclosing arrow so
                 // the compiler's prescan can see them on the TypedLambda's type when
                 // deciding which method calls need dict-passing (Bug B / #86).
+                // The row comes from the pushed CONTEXT, which for an INLINE
+                // argument is the CALLEE's declared row — so its associated types
+                // are the callee's VARIABLES, not what this body determined.
+                //
+                //     catching_any
+                //       : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
+                //         with IntoResponse 'r, IntoErrorResponse 'e
+                //
+                // Given `handler = { m } -> throw { error = "gone" }`, the stamped
+                // row said `'error = 'e` — the callee's own variable — so the call
+                // site had nothing concrete to resolve `IntoErrorResponse` against
+                // and the dictionary slot reached DictFallbackRootNode. A NAMED
+                // handler worked, because a binding carries its own solved row.
+                //
+                // The body knew: the generator built this lambda's arrow with
+                // `effectInstances = mergedEffectInstances` and recorded them per
+                // Loc. Prefer them PER ASSOCIATED TYPE, and only where the context
+                // left one open: a context that already says `'error = Response`
+                // (plain `catching`) is the more specific answer and keeps it.
+                val stampedRow = contextRowWithBodyAssocTypes(ctxFnType?.effects, loc)
                 val funcType = MezzeType.FunctionType(
                     paramType = paramRecordType,
                     returnType = body.type,
-                    effects = ctxFnType?.effects,
+                    effects = stampedRow,
                     abilityConstraints = ctxFnType?.abilityConstraints ?: emptyList()
                 )
 

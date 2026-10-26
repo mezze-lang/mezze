@@ -23,19 +23,25 @@ import kotlin.test.assertTrue
  *     dict injection fell back to forwarding from a caller with nothing to
  *     forward, and the slot reached `DictFallbackRootNode`.
  *
- * THE HANDLER MUST BE NAMED, which the second test pins. An argument lambda's
- * type is stamped with the row from the pushed CONTEXT — the callee's declared
- * `<Exception having 'error = 'e, ...>`, carrying the CALLEE's variable — while
- * a named binding carries its own solved row with the real thrown type. So an
- * inline handler leaves the call site nothing to resolve against. It fails
- * loudly rather than wrongly.
+ * An INLINE handler needed a third thing, and it is the one that made this
+ * usable. Emit stamps a lambda's type with the row from the pushed CONTEXT,
+ * which for an argument is the CALLEE's declared row — so the associated type
+ * was the callee's VARIABLE, and the call site had nothing concrete to resolve
+ * against. A NAMED handler always worked, because a binding carries its own
+ * solved row. The body knew all along: the generator builds a lambda's arrow
+ * with `effectInstances = mergedEffectInstances`, which for
+ * `{ m } -> throw { error = "gone" }` says `'error = Str`. Those are now
+ * recorded per Loc (`lambdaRowInstances`, beside the older `lambdaParamTypes`
+ * that exists for the same reason) and fill any associated type the context
+ * left open.
  */
 class HttpCatchingAnyTest {
     private val head = """
         use std::effects::http::{ Response, IntoResponse, IntoErrorResponse, response_status, response_ok_text }
         use std::effects::exception::{ throw }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ group, catching_any }
+        use std::effects::http_router::{ group, catching_any, BadInput }
+        use std::collections::map
     """.trimIndent()
 
     private fun run(body: String): Any = MezzeTestHelper.run("$head\n${body.trimIndent()}")
@@ -55,13 +61,10 @@ class HttpCatchingAnyTest {
         )
     }
 
-    /**
-     * The restriction, pinned. When this starts PASSING with an inline lambda,
-     * the stamped-row cause above is fixed — invert it and drop the note from
-     * `catching_any`'s doc.
-     */
-    @Test fun `an inline handler does not resolve its dictionary yet`() {
-        val outcome = runCatching {
+    /** An INLINE handler, which is how anyone would actually write it. */
+    @Test fun `an inline handler's thrown Str becomes its 500`() {
+        assertEquals(
+            500L,
             run(
                 """
                 let api = group { prefix = "" }
@@ -70,12 +73,48 @@ class HttpCatchingAnyTest {
                   .handler {}
                 get_request { url = "/u" }.to { app = api }.status
                 """
+            ),
+        )
+    }
+
+    /**
+     * STILL OPEN, and a different family: a RECORD-typed thrown error fails at
+     * run time with `Field not found: into_error_response` — the operation read
+     * as a field off the record instead of dispatched.
+     *
+     * Not about records as such: the identical shape in ONE module works (see
+     * `ThrownErrorTypeRunsTest.a record thrown error is converted in the Err
+     * arm`). What differs here is the stdlib path with THREE impls of
+     * `into_error_response` competing (Str, HttpError, BadInput) and a receiver
+     * whose record type is anonymous at the dispatch point — the shape recorded
+     * as D-9, whose workaround there was to make the receiver a newtype.
+     *
+     * Giving `Response` an identity impl so this would subsume `catching` was
+     * tried and hits the same wall, so the two combinators stay distinct.
+     *
+     * When this starts answering 400, invert it.
+     */
+    @Test fun `a record thrown error does not dispatch yet`() {
+        val outcome = runCatching {
+            run(
+                """
+                let api = group { prefix = "" }
+                  .get { path = "/u/:id", handler = catching_any { handler = { m } -> do
+                    let id = m.params.get_or { k = "id", def = "" }
+                    if id == "ok"
+                      then response_ok_text { body = "found" }
+                      else throw { error = { at = ["id"], message = "no such id",
+                                             expected = "a known id", found = Some { val = id } } }
+                  } }
+                  .handler {}
+                get_request { url = "/u/nope" }.to { app = api }.status
+                """
             )
         }
         val err = outcome.exceptionOrNull()
         assertTrue(
-            err != null && err.message!!.contains("no dictionary was supplied"),
-            "expected the loud dictionary failure; got ${outcome.getOrNull() ?: err?.message}",
+            err != null && err.message!!.contains("into_error_response"),
+            "expected the loud field-not-found; got ${outcome.getOrNull() ?: err?.message}",
         )
     }
 }

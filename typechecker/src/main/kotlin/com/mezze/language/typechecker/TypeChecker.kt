@@ -859,6 +859,7 @@ class TypeChecker(
                     matchScrutineeTypes = aggregated.matchScrutineeTypes,
                     doBindingSolvedTypes = aggregated.doBindingSolvedTypes,
                     lambdaParamTypes = aggregated.lambdaParamTypes,
+                    lambdaRowInstances = aggregated.lambdaRowInstances,
                     performFullyDischarged = aggregated.performFullyDischarged,
                 )
                 val emitResult = PhaseTiming.phase(currentModulePath, "emit") { emitTypedModuleAndLower(
@@ -956,6 +957,7 @@ class TypeChecker(
         val doBindingSolvedTypes: Map<Loc, MezzeType>,
         val performFullyDischarged: Map<Loc, Boolean>,
         val lambdaParamTypes: Map<Loc, Map<String, MezzeType>>,
+        val lambdaRowInstances: Map<Loc, Set<MezzeType.EffectInstance>>,
     )
 
     /** Every result's entries of [field], later results over earlier — one map, not a copy per result. */
@@ -1004,6 +1006,16 @@ class TypeChecker(
         val lambdaParamTypes = constraintResults.values
             .overlayAll { it.lambdaParamTypes }
             .mapValues { (_, fields) -> fields.mapValues { (_, t) -> substitution.apply(t) } }
+        // Per-lambda row instances, substitution-applied for the same reason: the
+        // body determined the associated type, and only the module solve knows
+        // what the variable it determined it through became.
+        val lambdaRowInstances = constraintResults.values
+            .fold(emptyMap<Loc, Set<MezzeType.EffectInstance>>()) { acc, r -> acc + r.lambdaRowInstances }
+            .mapValues { (_, instances) ->
+                instances.mapTo(mutableSetOf()) { inst ->
+                    inst.copy(associatedTypes = inst.associatedTypes.mapValues { (_, t) -> substitution.apply(t) })
+                }
+            }
         return AggregatedConstraintResults(
             tailCallLocations = tailCallLocations,
             methodCallResolutions = methodCallResolutions,
@@ -1014,6 +1026,7 @@ class TypeChecker(
             doBindingSolvedTypes = doBindingSolvedTypes,
             performFullyDischarged = performFullyDischarged,
             lambdaParamTypes = lambdaParamTypes,
+            lambdaRowInstances = lambdaRowInstances,
         )
     }
 

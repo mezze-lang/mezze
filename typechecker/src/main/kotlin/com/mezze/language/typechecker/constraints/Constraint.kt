@@ -465,6 +465,19 @@ data class ConstraintResult(
     // solver's own answer, which the BODY does determine, had nowhere to be read
     // back from. Merged up like callReturnTypes.
     val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> = emptyMap(),
+    /**
+     * Each lambda's OWN effect-row instances, keyed by its Loc — what its BODY
+     * determined, before the arrow discharged them.
+     *
+     * Emit stamps a lambda's type with the row from the PUSHED CONTEXT, which
+     * for an inline argument is the CALLEE's declared row and so carries the
+     * callee's variables. An `IntoErrorResponse 'e` constrained on the thrown
+     * type then has nothing concrete to resolve against at the call site. The
+     * body knew: `{ m } -> throw { error = "gone" }` determines
+     * `Exception having 'error = Str`. Same reason [lambdaParamTypes] exists,
+     * one field over.
+     */
+    val lambdaRowInstances: Map<Loc, Set<MezzeType.EffectInstance>> = emptyMap(),
 ) {
 
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
@@ -633,6 +646,7 @@ data class ConstraintResult(
             doBindingSolvedTypes = overlay(subs) { it.doBindingSolvedTypes },
             performFullyDischarged = overlay(subs) { it.performFullyDischarged },
             lambdaParamTypes = overlay(subs) { it.lambdaParamTypes },
+            lambdaRowInstances = overlay(subs) { it.lambdaRowInstances },
         )
 
         // Merging is done at every expression, and most fields of most results are

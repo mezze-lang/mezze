@@ -65,4 +65,8 @@ data class SolvedModule(
      *  inline callback passed to an undeclared callee is typed by what its own body
      *  determined rather than by a fresh variable. */
     val lambdaParamTypes: Map<Loc, Map<String, MezzeType>> = emptyMap(),
+    /** Per-lambda effect-row instances its BODY determined, keyed by the lambda's
+     *  Loc. Emit uses them where the pushed context's row left an associated type
+     *  unresolved — see ConstraintResult.lambdaRowInstances. */
+    val lambdaRowInstances: Map<Loc, Set<MezzeType.EffectInstance>> = emptyMap(),
 )
