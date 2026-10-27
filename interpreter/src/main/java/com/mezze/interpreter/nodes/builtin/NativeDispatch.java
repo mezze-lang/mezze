@@ -483,8 +483,11 @@ public final class NativeDispatch extends MezzeNode {
             stringJoin(getSeq(r, "strings"), getString(r, "separator")));
         HANDLERS.put("__native_string_reverse", (r, c) ->
             new StringBuilder(getString(r, "s")).reverse().toString());
+        // Through PrimitiveNatives so the count is CHECKED: `String.repeat`
+        // throws on a negative, and `str::repeat` has always answered "" for
+        // n <= 0 (it was `if n <= 0 then ""` while it was written in Mezze).
         HANDLERS.put("__native_string_repeat", (r, c) ->
-            getString(r, "s").repeat((int) getLong(r, "n")));
+            PrimitiveNatives.stringRepeat(getString(r, "s"), getLong(r, "n")));
         HANDLERS.put("__native_string_trim_start", (r, c) ->
             getString(r, "s").stripLeading());
         HANDLERS.put("__native_string_trim_end", (r, c) ->

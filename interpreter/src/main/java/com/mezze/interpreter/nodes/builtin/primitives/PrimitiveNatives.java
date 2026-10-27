@@ -399,6 +399,23 @@ public final class PrimitiveNatives {
         return s.concat(other);
     }
 
+    /**
+     * `s` repeated `n` times, or empty for n <= 0.
+     *
+     * A native because the Mezze version recursed once per copy and overflowed
+     * the stack at a couple of thousand — well before a string is big enough to
+     * be interesting. String.repeat allocates the result once.
+     */
+    @TruffleBoundary
+    public static String stringRepeat(String s, long n) {
+        if (n <= 0 || s.isEmpty()) return "";
+        if (n > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                "Cannot repeat a string " + n + " times: the count exceeds the maximum string length");
+        }
+        return s.repeat((int) n);
+    }
+
     // ==================== Conversion Operations ====================
 
     public static double intToFloat(long n) {

@@ -96,8 +96,14 @@ pub let ends_with: { s: Str, suffix: Str } -> Bool = { s, suffix } ->
 pub let contains: { s: Str, substring: Str } -> Bool = { s, substring } ->
   __native_string_contains { s = s, substring = substring }
 
-## Repeat the string n times.
-pub let repeat: { s: Str, n: Int } -> Str = { s, n } -> if n <= 0 then "" else if n == 1 then s else concat { l = s, r = repeat { s = s, n = n - 1 } }
+## Repeat the string n times. `n <= 0` gives the empty string.
+#
+# `__native_string_repeat` already existed and this was not using it: the Mezze
+# version called itself once per copy, so it overflowed the stack at a couple of
+# thousand — before the result is big enough to be worth building — and
+# allocated an intermediate per copy on the way.
+pub let repeat: { s: Str, n: Int } -> Str = { s, n } ->
+  __native_string_repeat { s = s, n = n }
 
 ## Split by delimiter into a seq of strings.
 pub let split: { s: Str, delimiter: Str } -> [Str] = { s, delimiter } ->

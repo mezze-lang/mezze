@@ -1,6 +1,9 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-09-22: every bug in this file is CLOSED.** It opened as a hand-off
+**STATUS 2026-10-27: BUGS 26-31 at the end of this file are OPEN.** Everything
+before them is closed.
+
+**STATUS 2026-09-22: every bug 1-25 in this file is CLOSED.** It opened as a hand-off
 list of open bugs surfaced while building the `mezze-showcase` polyglot demo (one
 Mezze seq → numpy stats → JS asciichart, all dot-chained); it is now a record of
 how each one was closed, kept for the root causes and the ruled-out attempts,
@@ -2635,3 +2638,182 @@ one resolution for both spellings, not a second walker.
 
 **Found while** anchoring quotes to `std::syntax` types; quotes avoid it by
 bringing the types into scope under hidden names (`QuoteTypes`).
+
+---
+
+# OPEN — found 2026-10-26/27 while landing the HTTP streaming work
+
+Each was measured, not inferred, and the measurement is written down. Where I
+ruled something OUT that is recorded too, because a wrong suspect costs the next
+person the same hour it cost me.
+
+---
+
+## BUG 26 — OPEN: an ANONYMOUS record satisfies a constraint whose impls are all nominal
+
+```mezze
+ability Shape for 'e where { shape: { it: 'e } -> Str }
+type Bad = { why: Str }
+impl Shape for Str where { shape = { it } -> "STR" }
+impl Shape for Bad where { shape = { it } -> "BAD" }
+let describe: { e: 'e } with Shape 'e -> Str = { e } -> e.shape {}
+
+describe { e = { why = "x" } }      # COMPILES. Should not, or should pick Bad.
+```
+
+The record literal is structurally identical to `Bad` but anonymous, and no impl
+targets it — impl targets are NOMINAL on purpose
+(`project_impl_targets_stay_nominal`). The constraint is satisfied anyway.
+
+In the stdlib this is `catching_any` with a record-typed thrown error:
+`throw { error = { at = …, message = … } }` type-checks and fails on the wire.
+Pinned at its failure by `HttpCatchingAnyTest.a record thrown error does not
+dispatch yet`, which asserts only that it fails LOUDLY — the message has been
+seen two ways (see BUG 31).
+
+RULED OUT as the cause of the symptom moving: the `catching` fold (reverted, and
+`http_router.mz` is byte-identical to before it) and the captured-function fix
+(turning its guard off changes nothing).
+
+NOT the same thing as these, both of which are correctly refused today — do not
+re-measure them:
+  - a plain missing field: `error[T0205]: Field 'nope' not found … Did you mean 'n'?`
+  - a no-matching-impl call on a NAMED record: `error[V0402]: Rec does not
+    implement 'C'. To enable this, implement: impl C for Rec where { … }`
+
+### DECIDED 2026-10-27: the alias wins
+
+User: "if alias is present we use that alias … thus `describe { e = { why = "x" } }`
+should also work." So an anonymous record literal whose shape matches a declared
+alias HAS that alias's type, and dispatch follows.
+
+That is already the intended rule — `adoptRecordAlias` (ast/RecordAliasAdoption.kt,
+landed 2026-08-18) — and it is NOT the broken part. Measured:
+
+  - The minimal shape ALREADY WORKS. `let something = { why = "x" }` and the
+    inline `describe { e = { why = "x" } }` both answer `BAD`, i.e. they dispatch
+    to `impl Shape for Bad`. Do not re-measure this.
+  - For the stdlib case, adoption FIRES. Instrumenting the canonical rule during
+    `HttpCatchingAnyTest`'s record case shows the thrown literal arriving fully
+    determined — `{at=[Str], message=Str, expected=Str, found=Option Str}` — with
+    exactly one candidate in the pool, `BadInput`. The pool does list it twice,
+    but with the SAME hash (`BadInput@c33a2009d2`), so `.distinctBy { hash }`
+    collapses it and `singleOrNull()` succeeds. The literal gets the identity.
+
+So the defect is DOWNSTREAM of adoption: the adopted identity does not reach the
+dictionary lookup for `IntoErrorResponse 'e`, so no impl is found and the call
+falls back. A thrown `Str` works because its impl is reached by another route.
+
+Next step is to instrument where that constraint is resolved and find what type
+it asks about — the expectation is an Anonymous record, i.e. a copy of the type
+made before or beside the labelled one. This is the dictionary family
+(`project_dictionary_not_arriving_family`), not the alias family.
+
+### Acceptance
+
+The program above either prints `BAD` or is refused naming the record type and
+the ability. `HttpCatchingAnyTest`'s record case flips from "fails loudly" to
+asserting the chosen behaviour.
+
+---
+
+## BUG 27 — OPEN: two more name-keyed lowering fallbacks
+
+`TypedASTCompiler` resolves a call it found no frame slot for by searching BY
+NAME, in three places. One is fixed; two are not:
+
+  - `declIndex?.values?.find { it.name == fn.name }` in `compileCall` — FIXED
+    (dd40f2c13). A captured function has no local slot, so the search answered
+    for whatever declaration shared the name, and a user's top-level
+    `let handler` was CALLED in place of the handler a route was given.
+  - `localFnAliases[fn.name]` — OPEN, same function, same shape.
+  - `recursiveLetLambdas[fn.name]` — OPEN, read at both `compileVar` and
+    `compileCall`, and deliberately unscoped per function body.
+
+### How to fix it (learned the expensive way)
+
+Guard the LOOKUP, and fall through to the `emitCallIndirect(fnIR, …)` already
+beneath it — `fnIR` is correct because `compileVar` resolved it. Do NOT teach
+`resolveLocalSlot` to return the capture slot: that breaks 37 tests, every one
+recursive, because a recursive let's self-call then goes indirect through a slot
+still null while its closure is being built. Measured.
+
+### Acceptance
+
+`CapturedParamNotShadowedTest` gains a case per fallback, and
+`a top-level sibling is still reachable from a nested lambda` stays green — that
+is what the by-name search is FOR.
+
+---
+
+## BUG 28 — OPEN: `response_file` turns a read error into a clean end of file
+
+```mezze
+step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = … } is
+  Err { error = _ } -> Done        # a failed read is indistinguishable from EOF
+```
+
+A download that dies at 40 KB of 200 answers `Done`, so the caller gets a short
+file and a success. Both streaming paths landed in 0a6cf65f7 and 014a3f088
+report truncation instead — the inbound reader THROWS, and `with_download`
+reports it from `close`, where the scope is still present to be told. This is
+now the odd one out.
+
+### Acceptance
+
+A `response_file` whose handle fails mid-read does not answer a complete-looking
+response. Test with a handle closed under it.
+
+---
+
+## BUG 29 — OPEN: `iter::to_seq` after a map that changes the element type
+
+```mezze
+iter::to_seq { it = iter::map { it = iter::range { start = 0, end = n },
+                                f = { x } -> "a fixed string" } }
+# UnsupportedSpecializationException … LongSeqBuilderAdd_Node … [long[], String]
+```
+
+The SOURCE is `Int`, so a long-specialised seq builder is chosen; the ELEMENT
+after `map` is `Str`. This is the `source_kind_is_not_element_kind` family —
+the source's kind is not evidence about the element's.
+
+### Acceptance
+
+The program above collects a `[Str]`. Neighbouring shapes (Int→Int, Str→Int) stay
+green.
+
+---
+
+## BUG 30 — OPEN: `str::repeat` recurses once per copy
+
+`stdlib/std/str.mz`: `repeat` calls itself `n` times, so a large `n` overflows
+the stack long before the result is big enough to be interesting (measured: 2000
+copies of a 20-byte block already dies). A test needing a large string has to
+build it in the host language instead.
+
+### Acceptance
+
+`str::repeat { s = "0123456789", n = 100000 }` returns a 1 MB string. Doubling or
+a native, modelled on the neighbouring string natives.
+
+---
+
+## BUG 31 — OPEN: BUG 26's failure message moved, and the cause is unisolated
+
+`HttpCatchingAnyTest`'s record case has failed two ways with the SAME program:
+`Field not found: into_error_response` (the operation read as a field) and
+`Expected String for field 's'` (the Str impl handed a record). It moved
+mid-session.
+
+Ruled out: the `catching` fold, and the captured-function fix (both measured —
+see BUG 26). The remaining suspect is the set of declarations in `http.mz`,
+which grew for streaming, since BUG 26 is about picking among competing impls.
+Isolating it means reverting both streaming commits together, which is why it
+was not chased.
+
+### Acceptance
+
+Either shape is explained, or BUG 26 is fixed and this stops mattering. The test
+currently pins LOUDNESS only, on purpose: a narrow assertion on one message cost
+two re-investigations in one session.
