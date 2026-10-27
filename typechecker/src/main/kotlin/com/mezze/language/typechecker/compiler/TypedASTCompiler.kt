@@ -3477,6 +3477,10 @@ class TypedASTCompiler(
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
                 is TypedStatement.Let -> {
+                    // What this name meant BEFORE the let — null when it was not a
+                    // local here, in which case it resolves onwards (a parameter, a
+                    // capture, a top-level declaration) exactly as it did.
+                    val nameBeforeThisLet = localsByName[stmt.name]
                     val slot = forceAllocLocal(stmt.name)
                     val stmtValue = stmt.value
                     // Recover a concrete type structurally when the solver left
@@ -3520,6 +3524,28 @@ class TypedASTCompiler(
                         }
                     }
 
+                    // `let x = x` reads the OUTER x. The slot above is allocated
+                    // because StmtIR.Let needs it, but the NAME does not mean that
+                    // slot until the let completes — so while a non-recursive RHS
+                    // compiles, the name goes back to whatever it meant, and nothing
+                    // is stored in the new slot yet.
+                    //
+                    // Without this, `let n = n` over a top-level `n` read its own
+                    // slot before anything was written there and died at run time
+                    // with `FrameSlotTypeException … Frame slot kind Object expected,
+                    // but got Illegal`. Measured identically for a value, a plain
+                    // function and a constrained function; a RENAMED alias was always
+                    // fine, which is what said the name was the problem.
+                    //
+                    // A RECURSIVE let is the opposite and must keep the new binding:
+                    // `let f = { n } -> … f { n = n - 1 } …` only works because `f`
+                    // is visible inside its own RHS. `stmt.isRecursive` is the
+                    // distinction, and the same flag already gates the recursive-let
+                    // registration above.
+                    if (!stmt.isRecursive) {
+                        if (nameBeforeThisLet != null) localsByName[stmt.name] = nameBeforeThisLet
+                        else localsByName.remove(stmt.name)
+                    }
                     val valueIR = if (stmtValue is TypedLambda) {
                         // Let-bound lambda: check if it matches a top-level function.
                         // If so, reference the top-level function's hash (not a re-hashed copy).
@@ -3548,6 +3574,8 @@ class TypedASTCompiler(
                     } else {
                         compileExpr(stmtValue)
                     }
+                    // The let has completed: from here the name is its own slot.
+                    if (!stmt.isRecursive) localsByName[stmt.name] = slot
                     StmtIR.Let(slot, typeToSlotKind(stmt.type), stmt.name, stmt.contentHash, valueIR, locToSourceInfo(stmt.loc))
                 }
                 is TypedStatement.Expr -> StmtIR.Expr(compileExpr(stmt.expr), locToSourceInfo(stmt.loc))

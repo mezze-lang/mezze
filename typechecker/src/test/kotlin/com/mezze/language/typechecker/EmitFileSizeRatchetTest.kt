@@ -80,7 +80,15 @@ class EmitFileSizeRatchetTest {
             // handler a route was given. The guard has to sit at that lookup —
             // putting it in `resolveLocalSlot` instead broke 37 recursive tests,
             // which is written down beside it — so the bound moves, not the code.
-            C + "TypedASTCompiler.kt" to 4352,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +26 for a non-recursive `let`'s RHS seeing the OUTER binding. Three
+            // small edits — remember what the name meant, hide the new slot while
+            // the RHS compiles, restore it after — and a comment that is most of
+            // the diff, because the RECURSIVE case needs the opposite and the next
+            // reader has to know which way round it goes. `let n = n` over a
+            // top-level `n` used to die with `FrameSlotTypeException … got
+            // Illegal`. The edit belongs where the slot is allocated, so the bound
+            // moves rather than the code.
+            C + "TypedASTCompiler.kt" to 4380,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

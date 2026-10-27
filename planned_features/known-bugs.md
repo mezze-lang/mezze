@@ -1,7 +1,9 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-27: BUGS 26-31 at the end of this file are OPEN.** Everything
-before them is closed.
+**STATUS 2026-10-27: BUGS 26, 28, 29*, 31 and 32 at the end of this file are
+OPEN.** BUG 27 closed as a class and BUG 30 fixed, both the same day; 29 is
+marked * because its FIX landed and only its acceptance note is worth re-reading.
+Everything before BUG 26 is closed.
 
 **STATUS 2026-09-22: every bug 1-25 in this file is CLOSED.** It opened as a hand-off
 list of open bugs surfaced while building the `mezze-showcase` polyglot demo (one
@@ -2730,19 +2732,34 @@ NAME, in three places. One is fixed; two are not:
   - `recursiveLetLambdas[fn.name]` — OPEN, read at both `compileVar` and
     `compileCall`, and deliberately unscoped per function body.
 
-### How to fix it (learned the expensive way)
+### CLOSED 2026-10-27 as a class: one was real, the other two do not reproduce
+
+Measured, each in the shape its own condition requires:
+
+  - `localFnAliases` only answers when the aliased target carries DICTIONARY
+    methods, so the alias has to name a CONSTRAINED function. With that set up
+    and a captured parameter of the same name, the CAPTURE wins (222).
+  - `recursiveLetLambdas` takes the direct path only for a TAIL call. Same
+    arrangement, the capture wins (222), and the recursive let still recurses.
+  - The control matters: `the alias answers when it is the one called` returns 2,
+    so the alias path is live and the two results above are not vacuous.
+
+Why the fixed one differed: the `declIndex` scan is the LAST fall-through, reached
+only after everything else failed, so a capture — which has no frame slot — landed
+on it. These two sit EARLIER, behind conditions a capture does not satisfy.
+
+Kept as coverage in `CapturedVsSameNamedLocalTest` rather than deleted: the
+name-keyed lookups are still name-keyed, so if one starts answering with the
+local's value the class is back. The real cure is keying them by the binding's
+identity — `project_name_to_identity_sweep`.
+
+### How the fixed one was fixed (learned the expensive way)
 
 Guard the LOOKUP, and fall through to the `emitCallIndirect(fnIR, …)` already
 beneath it — `fnIR` is correct because `compileVar` resolved it. Do NOT teach
 `resolveLocalSlot` to return the capture slot: that breaks 37 tests, every one
 recursive, because a recursive let's self-call then goes indirect through a slot
 still null while its closure is being built. Measured.
-
-### Acceptance
-
-`CapturedParamNotShadowedTest` gains a case per fallback, and
-`a top-level sibling is still reachable from a nested lambda` stays green — that
-is what the by-name search is FOR.
 
 ---
 
@@ -2817,3 +2834,38 @@ was not chased.
 Either shape is explained, or BUG 26 is fixed and this stops mattering. The test
 currently pins LOUDNESS only, on purpose: a narrow assertion on one message cost
 two re-investigations in one session.
+
+---
+
+## BUG 32 — OPEN: `let x = x` in a do-block crashes, shadowing a top-level `x`
+
+```mezze
+let n: Int = 7
+let go: {} -> Int = {} -> do
+  let n = n       # FrameSlotTypeException: Frame slot kind Object expected,
+  n               #   but got Illegal at frame slot index 2
+go {}
+```
+
+The RHS `n` should be the OUTER binding — the new `n` is not in scope until the
+`let` completes — and instead it reads its own slot before anything is stored
+there.
+
+Measured: it crashes identically for a plain VALUE, a plain FUNCTION, and a
+CONSTRAINED function. A renamed alias (`let chooser = pick`) is fine, which is
+what says this is about the name being the same rather than about aliasing.
+
+Found while probing BUG 27; unrelated to it.
+
+### Why it is not simply "resolve the RHS in the outer scope"
+
+A RECURSIVE let needs the opposite: `let f = { n } -> … f { n = n - 1 } …` only
+works because `f` IS visible inside its own RHS. The distinction already exists
+in the typed AST — `stmt.isRecursive` — so the rule is to bind the name before
+the RHS only when the let is recursive, and after otherwise.
+
+### Acceptance
+
+The program above answers 7. `the recursive local let still recurses` in
+`CapturedVsSameNamedLocalTest` stays green, as does
+`DoBlockRecursiveLetInterpreterTest`.
