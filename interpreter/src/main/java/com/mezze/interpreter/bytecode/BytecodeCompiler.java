@@ -6271,7 +6271,23 @@ public final class BytecodeCompiler {
         // ── Init builder for materializing sinks ──
         // RangeSeq sources produce longs — use a long[] builder to avoid
         // boxing. RawSeq sources use the generic ArrayList<Object> builder.
+        //
+        // The source's kind is NOT the element's kind. A `MapCall` stage returns
+        // whatever its callee returns, so `range.map { f = { x } -> "s" }`
+        // collected into a long[] builder threw
+        // `UnsupportedSpecializationException … LongSeqBuilderAdd … [long[], String]`
+        // at the first element. A `MapInline` is safe and stays on the fast path:
+        // the classifier above REJECTS any map op that is not ADD/SUB/MUL/DIV/MOD,
+        // so an inline map is arithmetic on longs by construction.
+        //
+        // A MapCall that happens to return a long loses the long[] builder here.
+        // That is a missed optimisation, not a wrong answer, and recovering it
+        // needs the callee's return type at this point — which this phase does
+        // not carry.
+        boolean mapsToUnknownKind = stages.stream()
+                .anyMatch(st -> st instanceof ClassifiedStage.MapCall);
         boolean useLongBuilder = isRange
+                && !mapsToUnknownKind
                 && (mode instanceof FusedSinkMode.Materialize || mode instanceof FusedSinkMode.ScanAccum);
         boolean hasFilter = stages.stream().anyMatch(s -> s instanceof ClassifiedStage.FilterStep);
         if (mode instanceof FusedSinkMode.Materialize) {
@@ -6301,6 +6317,29 @@ public final class BytecodeCompiler {
                 // Use a reasonable default — the builder grows if needed.
                 b.beginNewSeqBuilder();
                   b.emitLoadLongConstant(64L);
+                b.endNewSeqBuilder();
+            } else if (isRange) {
+                // A RANGE source with a GENERIC builder. New combination: before
+                // the element kind was consulted, a range always took the long
+                // builder, so this fell through to the branch below and loaded
+                // `sizeSlot` — which belongs to a SEQ source and is not
+                // initialised on the range path. The emit then crashed
+                // (`reason=entry-emit-crash`) the moment a MapCall made the long
+                // builder unusable. The size hint is the same `end - start` the
+                // long branch uses; only the builder differs.
+                b.beginNewSeqBuilder();
+                if (hasFilter) {
+                    b.beginDirectDivide();
+                      b.beginDirectSubtract();
+                        b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                      b.endDirectSubtract();
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.beginDirectSubtract();
+                      b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                    b.endDirectSubtract();
+                }
                 b.endNewSeqBuilder();
             } else {
                 b.beginNewSeqBuilder();
@@ -6339,6 +6378,29 @@ public final class BytecodeCompiler {
             } else if (isList) {
                 b.beginNewSeqBuilder();
                   b.emitLoadLongConstant(64L);
+                b.endNewSeqBuilder();
+            } else if (isRange) {
+                // A RANGE source with a GENERIC builder. New combination: before
+                // the element kind was consulted, a range always took the long
+                // builder, so this fell through to the branch below and loaded
+                // `sizeSlot` — which belongs to a SEQ source and is not
+                // initialised on the range path. The emit then crashed
+                // (`reason=entry-emit-crash`) the moment a MapCall made the long
+                // builder unusable. The size hint is the same `end - start` the
+                // long branch uses; only the builder differs.
+                b.beginNewSeqBuilder();
+                if (hasFilter) {
+                    b.beginDirectDivide();
+                      b.beginDirectSubtract();
+                        b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                      b.endDirectSubtract();
+                      b.emitLoadLongConstant(2L);
+                    b.endDirectDivide();
+                } else {
+                    b.beginDirectSubtract();
+                      b.emitLoadLocal(endSlot); b.emitLoadLocal(iSlot);
+                    b.endDirectSubtract();
+                }
                 b.endNewSeqBuilder();
             } else {
                 b.beginNewSeqBuilder();
