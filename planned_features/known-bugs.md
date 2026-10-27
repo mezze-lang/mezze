@@ -2702,14 +2702,61 @@ landed 2026-08-18) — and it is NOT the broken part. Measured:
     but with the SAME hash (`BadInput@c33a2009d2`), so `.distinctBy { hash }`
     collapses it and `singleOrNull()` succeeds. The literal gets the identity.
 
-So the defect is DOWNSTREAM of adoption: the adopted identity does not reach the
-dictionary lookup for `IntoErrorResponse 'e`, so no impl is found and the call
-falls back. A thrown `Str` works because its impl is reached by another route.
+### ROOT CAUSE, traced 2026-10-27: adoption needs solved types, dispatch needs them sooner
 
-Next step is to instrument where that constraint is resolved and find what type
-it asks about — the expectation is an Anonymous record, i.e. a copy of the type
-made before or beside the labelled one. This is the dictionary family
-(`project_dictionary_not_arriving_family`), not the alias family.
+The chain, each step measured:
+
+1. Dispatch reads the SUBSTITUTION. `obligationDispatchTypes` calls
+   `harvestVarBindings(declared.returnType, substitution.apply(callType), …)`,
+   and `resolveOpFromObligation` matches those args against each impl's
+   `targetTypes` with `typeMatchesTarget`.
+2. At that point the record is ANONYMOUS. Instrumenting `typeMatchesTarget`:
+   `concrete=RecordType/{ at: [Str], … } id=Anonymous hash=null ||
+   target=TypeApplication/BadInput hash=c33a2009d2`. The target's hash is right;
+   the concrete side has none, so the identity early-return cannot fire and the
+   `when` below has no arm for (RecordType, TypeApplication).
+3. Adoption DOES fire — but only at EMIT. Printing the call site:
+   `ExprRecordConstraints.generateRecordLiteral` → `matched=[]`, while
+   `TypedAstBuilder.buildExpr` → `matched=[BadInput]`.
+4. WHY constraint-gen cannot adopt: at that point the literal's field types are
+   still VARIABLES — `{at=['a], message=Str, expected=Str, found='a}` — and the
+   canonical rule compares field types EXACTLY. `'a` is not `Option Str`. The
+   types only become determined by the solve, which is after the substitution
+   dispatch reads.
+
+That is the deadlock: adoption is OUTWARD recovery and needs solved types, so it
+can only run at emit; dispatch needs the identity during the solve.
+
+### Tried and REVERTED (so it is not tried again)
+
+Adding IMPORTED aliases to constraint generation's pool. The pool is built from
+`context.typeDeclarations` (registry only) while emit merges registry + import
+context, which looked like the gap. It is not: measured `imported=0` for the
+module in question, and the pool already contained `BadInput` from the registry
+— the field TYPES are what fail to match, not the alias's presence. The change
+had no demonstrable benefit (it did move the error message, which is a reason
+against keeping it, not for) and was reverted.
+
+### The cure that exists for the analogous case
+
+The RECEIVER position had this same problem and was fixed on 2026-10-23: it
+"takes its expectation from the called ability's impl target and UNIFIES (pinning
+the open field); adoption then fires by itself". The same move applies here, one
+position over — a `throw`'s payload, whose type flows into the effect row's
+`'error` and from there into the ability constraint. Pin the literal's open
+fields from the candidate impl targets before solving, and adoption fires on its
+own.
+
+That is inference work in the same place as the receiver fix
+(`ExprMethodConstraints`' receiver-expectation logic), not a patch at the
+dispatch boundary. Matching structurally inside `typeMatchesTarget` instead
+would duplicate the adoption rule in a second place and is the wrong shape.
+
+### Works today, for the record
+
+An ANNOTATED thrown record dispatches correctly: `let bad: BadInput = { … }` then
+`throw { error = bad }` answers 400 through `impl IntoErrorResponse for BadInput`.
+So does a thrown `Str` (500). Only the BARE literal fails.
 
 ### Acceptance
 
