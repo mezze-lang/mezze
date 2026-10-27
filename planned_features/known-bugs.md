@@ -2737,6 +2737,26 @@ module in question, and the pool already contained `BadInput` from the registry
 had no demonstrable benefit (it did move the error message, which is a reason
 against keeping it, not for) and was reverted.
 
+### Tried and REVERTED, second attempt: adopting at the dispatch boundary
+
+The obligation's args arrive with SOLVED fields and no identity, so adopting
+THERE looked like it would work, and cheaply: `printTypeDefs` is already on the
+compiler (built by #394 so a nominal receiver could be printed) and
+`PrintTypeDefs.resolve` already hands back a closed record as
+`RecordType(fields, rowVar = null, identity = declared(name, hash))` — the exact
+pool the adoption rule wants, local shadowing imported. Wired it into
+`obligationDispatchTypes`; the bare literal still failed, identically.
+
+WHY it cannot work from there: the failure is `Field not found:
+into_error_response` at RUN TIME, i.e. the call was lowered as a FIELD READ. That
+decision is taken during CONSTRAINT GENERATION, when the method-call ladder finds
+no impl for the receiver and bails to a structural field access — long before any
+dictionary resolution the compiler does. Adopting at the dispatch boundary fixes
+a lookup that is never reached.
+
+So the layer matters: the record must carry its identity by the time the
+method-call ladder runs, which is while its fields are still variables.
+
 ### The cure that exists for the analogous case
 
 The RECEIVER position had this same problem and was fixed on 2026-10-23: it
