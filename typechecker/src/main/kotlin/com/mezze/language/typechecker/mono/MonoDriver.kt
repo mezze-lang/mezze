@@ -879,22 +879,61 @@ object MonoDriver {
 
     /** True if `typeParamName` appears anywhere in `type`. Used to
      *  distinguish "phantom" type params (declared but unreferenced)
-     *  from real ones that must be bound by unification. */
+     *  from real ones that must be bound by unification.
+     *
+     *  This descends into an effect row's ASSOCIATED TYPES, and it must: a
+     *  thrown error type lives nowhere else. `catching_any`'s signature is
+     *
+     *      { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
+     *      with IntoResponse 'r, IntoErrorResponse 'e -> …
+     *
+     *  and `'e` appears in no parameter, no return and no record — only in
+     *  `having 'error = 'e`. Stopping at the row made `'e` read as PHANTOM, so
+     *  [deriveTypeArgs] filled it with its stable `Int` placeholder on the
+     *  stated grounds that "substitution over an absent name is a no-op, so any
+     *  placeholder yields the same specialized body". That is false for a name
+     *  a `with` constraint mentions: `resolveAbilityConstraints` substitutes it
+     *  and then picks the impl, `IntoErrorResponse Int` has none, the evidence
+     *  was dropped, and the specialization was emitted anyway — with
+     *  `error.into_error_response {}` left as a raw FIELD READ. The call site
+     *  took the mono rewrite and returned before injecting any dictionary, so
+     *  the program died at run time with `Field not found: into_error_response`.
+     *
+     *  Found by println: the probe printed the constraint as `args=[Int]` with
+     *  targets `[Str], [HttpError], [BadInput]`, which named the substitution
+     *  rather than the dispatch. It had hidden behind `MezzeTestHelper`'s SHARED
+     *  static `TypeChecker` — a program run after one that already compiled this
+     *  route worked, so the same source passed in one test class and failed in
+     *  another.
+     *
+     *  [collectVarTypes] stops at the row the same way. That one PAIRS vars for
+     *  unification, so widening it changes what unifies, and it is left alone:
+     *  this fix only reclassifies a param as real, after which the ordinary
+     *  generic path (dictionary injection at the call site) handles the call.
+     */
     private fun typeParamAppearsIn(typeParamName: String, type: MezzeType): Boolean {
         return when (type) {
             is MezzeType.VarType -> type.variable.name == typeParamName
             is MezzeType.FunctionType -> typeParamAppearsIn(typeParamName, type.paramType) ||
-                typeParamAppearsIn(typeParamName, type.returnType)
+                typeParamAppearsIn(typeParamName, type.returnType) ||
+                type.abilityConstraints.any { c ->
+                    c.typeArgs.any { typeParamAppearsIn(typeParamName, it) } ||
+                        c.associatedTypeBindings.values.any { typeParamAppearsIn(typeParamName, it) }
+                } ||
+                (type.effects?.let { typeParamAppearsIn(typeParamName, it) } ?: false)
             is MezzeType.RecordType -> type.fields.values.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.VariantType -> type.constructors.values.any {
                 it != null && typeParamAppearsIn(typeParamName, it)
             }
             is MezzeType.NewtypeType -> typeParamAppearsIn(typeParamName, type.wrappedType)
             is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
+            is MezzeType.EffectRow -> type.effectInstances.any { instance ->
+                instance.associatedTypes.values.any { typeParamAppearsIn(typeParamName, it) }
+            }
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.FracType,
             is MezzeType.BytesType,
-            is MezzeType.CharType, is MezzeType.EffectRow -> false
+            is MezzeType.CharType -> false
         }
     }
 

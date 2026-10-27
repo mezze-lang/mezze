@@ -78,38 +78,44 @@ class HttpCatchingAnyTest {
     }
 
     /**
-     * STILL OPEN, and a different family: a RECORD-typed thrown error does not
-     * dispatch, and fails at run time.
+     * A RECORD-typed thrown error dispatches — no annotation (BUG 26, fixed).
      *
-     * The MESSAGE is not the property. It has been seen two ways —
-     * `Field not found: into_error_response`, the operation read as a field off
-     * the record, and `Expected String for field 's'`, the Str impl handed a
-     * record — and it moved between them without this test's program changing.
-     * Measured NOT to be the cause: folding `catching` into the verbs (that
-     * work is reverted and `http_router.mz` is byte-identical to before it), and
-     * the captured-function fix in `compileCall` (turning its guard off leaves
-     * the message unchanged). What did move it is unisolated; the remaining
-     * suspect is the set of declarations in `http.mz`, which grew, since D-9 is
-     * about picking the wrong impl among competing ones.
+     * This was open all through the streaming work and pinned at "fails loudly",
+     * because the thrown literal reached `into_error_response` as a FIELD and
+     * died at run time. It took TWO fixes, and it hid behind a third thing.
      *
-     * So this asserts only that it fails LOUDLY, which is the property worth
-     * keeping while the bug is open. A narrow assertion on one message has
-     * already cost two re-investigations.
+     *  1. Monomorphization's phantom check stopped at the EFFECT ROW, and `'e`
+     *     lives only in `having 'error = 'e` — so it read as a phantom type
+     *     param and was filled with the stable `Int` placeholder. The
+     *     constraint then resolved as `IntoErrorResponse Int`, no impl claimed
+     *     it, the evidence was dropped, and the specialization was emitted
+     *     ANYWAY with the op still a field read. The call site took that mono
+     *     rewrite and returned before injecting any dictionary. Same blind spot
+     *     as item 2 in this class's header, in a second walker.
+     *  2. With a dictionary now being injected, it resolved to the WRONG impl:
+     *     resolution descends into record FIELD types, and `message: Str` found
+     *     `impl IntoErrorResponse for Str` — `Expected String for field 's'`.
+     *     A bare literal has to earn its alias's identity by ADOPTION, and
+     *     adoption compares field types exactly so it cannot run while they are
+     *     still variables; it now runs where they are first known, in
+     *     `resolveOpHashFromConcreteTypes`.
      *
-     * Not about records as such: the identical shape in ONE module works (see
-     * `ThrownErrorTypeRunsTest.a record thrown error is converted in the Err
-     * arm`). What differs here is the stdlib path with THREE impls of
-     * `into_error_response` competing (Str, HttpError, BadInput) and a receiver
-     * whose record type is anonymous at the dispatch point — the shape recorded
-     * as D-9, whose workaround there was to make the receiver a newtype.
+     * Removing either half brings this test back. BUG 26 records both, and two
+     * earlier attempts at (2) alone that could not have worked.
      *
-     * Giving `Response` an identity impl so this would subsume `catching` was
-     * tried and hits the same wall, so the two combinators stay distinct.
+     * What hid it: `MezzeTestHelper` holds a SHARED static `TypeChecker`, so a
+     * program run after one that already compiled this route passed. The same
+     * source failed alone and passed in a class whose earlier test warmed it —
+     * which is why the first four probe shapes all answered 400 and none of them
+     * was evidence.
      *
-     * When this starts answering 400, invert it.
+     * 400 is `impl IntoErrorResponse for BadInput`'s own status, and the body
+     * names the field, so this also shows the right impl ran rather than some
+     * other one that happens to answer.
      */
-    @Test fun `a record thrown error does not dispatch yet`() {
-        val outcome = runCatching {
+    @Test fun `a record thrown error dispatches to its alias's impl`() {
+        assertEquals(
+            400L,
             run(
                 """
                 let api = group { prefix = "" }
@@ -123,15 +129,7 @@ class HttpCatchingAnyTest {
                   .handler {}
                 get_request { url = "/u/nope" }.to { app = api }.status
                 """
-            )
-        }
-        val err = outcome.exceptionOrNull()
-        val message = err?.message ?: ""
-        assertTrue(
-            err != null &&
-                (message.contains("into_error_response") || message.contains("Expected String")),
-            "a record thrown error must still fail loudly, in one of the two shapes seen so " +
-                "far; got ${outcome.getOrNull() ?: message}",
+            ),
         )
     }
 }

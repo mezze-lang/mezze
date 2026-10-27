@@ -1381,3 +1381,44 @@ internal fun TypedASTCompiler.ownDictMethodsOf(value: TypedExpr): Set<String> {
     return scanExprForVarTypeMethodCalls(value.body, arrowIsConstrained = true) +
         scanExprForCallsToDictFunctions(value.body)
 }
+
+/**
+ * A bare record literal's type, carrying its alias's identity.
+ *
+ * Called from `resolveOpHashFromConcreteTypes` before a type is matched against
+ * an impl. A literal gets its alias's identity by ADOPTION, and adoption
+ * compares field types exactly — so it cannot run during the solve, while the
+ * fields are still variables. By the time a type reaches op resolution they are
+ * solved and the identity is still missing: `{ at: [Str], message: Str,
+ * expected: Str, found: Option Str }` as Anonymous. A nominal
+ * `impl … for BadInput` cannot match that, while the same value written
+ * `let bad: BadInput = …` dispatched fine — the annotation supplied the
+ * identity the literal had to earn (BUG 26).
+ *
+ * Adopting at that call is the right place because it is the first point at
+ * which the fields are known. It also stops a WRONG impl being found:
+ * `resolveOpHashFromConcreteTypes`' later pass descends into record FIELD
+ * types, so a record with a `message: Str` field reached
+ * `impl IntoErrorResponse for Str` and failed at run time with
+ * `Expected String for field 's'`.
+ *
+ * `printTypeDefs` is the pool, and it is already here: #394 built it so a
+ * nominal receiver could be PRINTED, and `PrintTypeDefs.resolve` yields a
+ * closed record as `RecordType(fields, rowVar = null,
+ * identity = declared(name, hash))` with local declarations shadowing
+ * imported ones — the same scoping adoption needs. No second source.
+ */
+internal fun TypedASTCompiler.adoptBareRecord(type: MezzeType): MezzeType {
+    val record = type as? RecordType ?: return type
+    if (record.identity != com.mezze.language.ast.TypeIdentity.Anonymous) return type
+    if (record.rowVar != null || record.fields.isEmpty()) return type
+    if (printTypeDefs.isEmpty()) return type
+    val aliases = printTypeDefs.mapNotNull { (name, declared) ->
+        val rec = declared as? RecordType ?: return@mapNotNull null
+        if (rec.rowVar != null) return@mapNotNull null
+        val hash = (rec.identity as? com.mezze.language.ast.TypeIdentity.Declared)?.hash
+            ?: return@mapNotNull null
+        Triple(name, hash, rec.fields)
+    }.distinctBy { (_, hash, _) -> hash }
+    return com.mezze.language.ast.adoptRecordAlias(record, aliases)
+}

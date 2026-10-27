@@ -2536,7 +2536,7 @@ class TypedASTCompiler(
         // First pass: direct match.
         for (concreteType in concreteTypes) {
             if (concreteType is VarType) continue
-            val opHash = tryResolveAbilityOp(methodName, concreteType, abilityHash = abilityHash)
+            val opHash = tryResolveAbilityOp(methodName, adoptBareRecord(concreteType), abilityHash = abilityHash)
             if (opHash != null) return opHash
         }
         // Second pass (#195 B3): descend into container types. When the caller
@@ -3821,7 +3821,8 @@ class TypedASTCompiler(
      *  underlying, record body, variant body, alias target). Lets the
      *  PrintType builder resolve a nominal `TypeApplication(name)` receiver
      *  (all a use site carries) to a printable shape. */
-    private var printTypeDefs: Map<String, MezzeType> = emptyMap()
+    internal var printTypeDefs: Map<String, MezzeType> = emptyMap()
+        private set
     /** Declared type name → its type-parameter names, positional (`Box 'a` → [`'a`]). */
     private var typeDeclParams: Map<String, List<String>> = emptyMap()
     fun setPrintTypeDefs(defs: Map<String, MezzeType>, params: Map<String, List<String>> = emptyMap()) {

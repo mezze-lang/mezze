@@ -2651,7 +2651,7 @@ person the same hour it cost me.
 
 ---
 
-## BUG 26 — OPEN: an ANONYMOUS record satisfies a constraint whose impls are all nominal
+## BUG 26 — FIXED: a constraint variable living only in the effect row got a placeholder
 
 ```mezze
 ability Shape for 'e where { shape: { it: 'e } -> Str }
@@ -2778,11 +2778,107 @@ An ANNOTATED thrown record dispatches correctly: `let bad: BadInput = { … }` t
 `throw { error = bad }` answers 400 through `impl IntoErrorResponse for BadInput`.
 So does a thrown `Str` (500). Only the BARE literal fails.
 
-### Acceptance
+### THE ACTUAL CAUSE, found 2026-10-27 by println: a PHANTOM type param
 
-The program above either prints `BAD` or is refused naming the record type and
-the ability. `HttpCatchingAnyTest`'s record case flips from "fails loudly" to
-asserting the chosen behaviour.
+Everything above is real and none of it was the cause. Two fixes closed it, and
+a third thing hid it.
+
+**Fix 1 — `MonoDriver.typeParamAppearsIn` stopped at the effect row.**
+`catching_any` is
+
+```mezze
+pub let catching_any
+  : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
+  with IntoResponse 'r, IntoErrorResponse 'e
+  -> { m: Matched } -> Response <...>
+```
+
+`'e` appears in no parameter, no return, no record, no application — only in
+`having 'error = 'e`. The walk's last arm read `is EffectRow -> false`, so `'e`
+came back absent and `deriveTypeArgs` classified it PHANTOM: "declared in the
+scheme but never referenced … substitution over an absent name is a no-op, so
+any placeholder yields the same specialized body. Pick a stable value so the
+spec-hash is deterministic" — `MezzeType.IntType`.
+
+That reasoning holds only for a name nothing else reads. A `with` clause reads
+it: `resolveAbilityConstraints` substituted the placeholder and asked for
+`IntoErrorResponse Int`. The probe printed it exactly —
+
+```
+P5 constraint ability=fc83f3 args=[Int] implsForHash=3
+   targets=[[Str], [HttpError], [BadInput]]
+P5   -> NO EVIDENCE, dropped
+```
+
+— and that line is the whole bug: the question was asked at `Int`. No impl
+claims it, the evidence was dropped, **and the specialization was emitted
+anyway**, with `error.into_error_response {}` still a raw FIELD READ. The call
+site then took the mono rewrite and returned before injecting anything:
+
+```
+P3 MONO-TAKEN catching_any specializedNeeds=null
+   originalNeeds=[into_response, into_error_response]
+```
+
+The generic `catching_any` needs two dictionaries; its specialized twin was
+registered as needing none. Hence `Field not found: into_error_response`.
+
+The walk now descends into the row's `effectInstances[].associatedTypes` and
+into `abilityConstraints`, matching `MezzeType.anyChild`, which already did
+both. `'e` is then a real param, nothing binds it, no specialization is
+produced, and the ordinary generic path injects the dictionaries.
+
+This is the SAME blind spot as item 2 in `HttpCatchingAnyTest`'s class header
+("the binder walked parameters, results, records and applications but never the
+EFFECT ROW"), in a second walker. `collectVarTypes` in the same file still stops
+at the row; it PAIRS vars for unification, so widening it changes what unifies,
+and it was left alone deliberately.
+
+**Fix 2 — with a dictionary now injected, it resolved to the WRONG impl.**
+`Expected String for field 's'`: resolution's later pass descends into record
+FIELD types, so `message: Str` found `impl IntoErrorResponse for Str`. A bare
+literal has to earn its alias's identity, and the adoption rule compares field
+types exactly, so it cannot run while they are variables. It now runs where they
+are first known — `adoptBareRecord`, called from
+`resolveOpHashFromConcreteTypes` and living in `DictEvidence.kt` beside the rest
+of the evidence code. The pool is `printTypeDefs` (#394 built it so a nominal
+receiver could be printed; `PrintTypeDefs.resolve` already yields a closed record
+with a `Declared` identity, local shadowing imported — exactly what adoption
+wants, so there is no second source of truth).
+
+Removing either half brings the failure back, each with its own message —
+measured both ways round.
+
+**What hid it: `MezzeTestHelper` holds a SHARED static `TypeChecker`.** The
+engine is fresh per run, the checker is not. A program run after one that already
+compiled this route PASSED, so the same source failed alone and passed in a class
+whose earlier test warmed it. Four probe shapes answering 400 were all artifacts
+of the first one. This is a live test-isolation hazard well beyond this bug: a
+genuinely broken program can go green in the suite purely by position.
+
+### What this says about the earlier root-cause chain
+
+Steps 1–4 above describe a real layer — the record IS anonymous at the
+substitution dispatch reads, and adoption genuinely cannot run during the solve.
+That is Fix 2. What the chain never reached is that the call site was not
+consulting dispatch at all: it had taken a monomorphized specialization built on
+a placeholder. "The cure that exists for the analogous case" (pinning open fields
+from candidate impl targets in `ExprMethodConstraints`) was therefore aimed at
+the wrong layer and was not needed.
+
+Also corrected: "So does a thrown `Str` (500). Only the BARE literal fails" was
+true of the ROUTER only. At user level a thrown `Str` fails too, and harder — a
+record is rescued by mono's own #333 structural recovery
+(`anonymousRecordMatchesDeclaredRecord`) while a primitive has no such fallback.
+`ThrownTypeInConstraintTest` is that case, minimal and off the stdlib.
+
+### Acceptance — met
+
+`describe { e = { why = "x" } }` answers `BAD`. `HttpCatchingAnyTest`'s record
+case asserts 400 through `impl IntoErrorResponse for BadInput`.
+`ThrownTypeInConstraintTest` pins the compiler rule on a user-defined ability.
+`BareRecordDispatchTest` keeps the plain shape honest — its four cases pass
+WITHOUT the fix, which is now stated in its header rather than implied away.
 
 ---
 
@@ -2883,7 +2979,7 @@ a native, modelled on the neighbouring string natives.
 
 ---
 
-## BUG 31 — OPEN: BUG 26's failure message moved, and the cause is unisolated
+## BUG 31 — CLOSED: the two messages were two different halves of BUG 26
 
 `HttpCatchingAnyTest`'s record case has failed two ways with the SAME program:
 `Field not found: into_error_response` (the operation read as a field) and
@@ -2896,11 +2992,26 @@ which grew for streaming, since BUG 26 is about picking among competing impls.
 Isolating it means reverting both streaming commits together, which is why it
 was not chased.
 
-### Acceptance
+### Explained 2026-10-27
 
-Either shape is explained, or BUG 26 is fixed and this stops mattering. The test
-currently pins LOUDNESS only, on purpose: a narrow assertion on one message cost
-two re-investigations in one session.
+Both messages were real, and they are the two halves of BUG 26 failing one at a
+time:
+
+  - `Field not found: into_error_response` — no dictionary injected at all,
+    because the call site took a monomorphized specialization built on the `Int`
+    placeholder (Fix 1).
+  - `Expected String for field 's'` — a dictionary injected but resolved to
+    `impl IntoErrorResponse for Str`, because the bare literal had no identity
+    and resolution descended into its FIELD types (Fix 2).
+
+Which one appeared depended on which half was in place. It "moved mid-session"
+because the SHARED static `TypeChecker` in `MezzeTestHelper` let an earlier
+program in the same JVM warm the route — so test position, not the program,
+decided the outcome. Nothing about `http.mz`'s declarations was involved; that
+suspect is cleared.
+
+The remaining item is not this bug: a shared static checker means a broken
+program can pass by position. Worth its own ticket.
 
 ---
 
