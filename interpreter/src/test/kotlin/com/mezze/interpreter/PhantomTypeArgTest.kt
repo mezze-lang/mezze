@@ -4,122 +4,239 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
 /**
- * A type argument no field or payload mentions is ERASED (BUG 33, OPEN).
+ * A phantom type argument is enforced on the NOMINAL forms (BUG 33).
  *
- * `type Tag 'a = | Tagged { n: Int }, |` declares `'a` and uses it nowhere, so
- * the only thing carrying it is the applied type's `typeArgs`. Unification never
- * reads those: `Unification.kt` mentions `typeArgs` once, to CARRY them —
- * "#194: carry the application's args so the printer can render `Tree Int`".
- * They were added for printing and were never wired into type identity. Where a
- * param IS used, the payloads carry the distinction and this never shows; a
- * phantom param is the only case where `typeArgs` are the sole carrier.
+ * `type Tag 'a = | Tagged { n: Int }, |` declares `'a` and no payload mentions
+ * it, so the only thing carrying it is the applied type's `typeArgs`.
+ * `unifyVariants` never read those — `typeArgs` was added so the PRINTER could
+ * render `Tree Int` (#194) and was never wired into identity, which rested on
+ * the declaration's content hash alone, and `Tag Str` and `Tag Int` share that.
+ * So the two were mutually assignable: across an annotation, a function boundary
+ * and a return. Where a param IS used the payloads differ and body unification
+ * catches it, which is why this never showed.
  *
- * So `Tag Str` and `Tag Int` are mutually assignable — through a `let`
- * annotation, across a function boundary and out of a return. That defeats what
- * a phantom parameter is for: `Id User` vs `Id Order`, units, tagged handles.
+ * `newtype` always got it right, because a newtype reaches unification as a
+ * `TypeApplication` whose `args` ARE compared. The stdlib depends on that:
+ * `newtype IterCursor 'a = __NativeIterCursor` is an opaque native handle tagged
+ * by its element type — exactly what Rust needs `PhantomData` for — and
+ * retagging an `IterCursor Int` as `IterCursor Str` has always been rejected.
+ * So Mezze already HAD working phantom parameters; the variant form dropped them.
  *
- * THIS TEST PINS THE CURRENT BEHAVIOUR ON PURPOSE, the way
- * `HttpCatchingAnyTest`'s record case pinned BUG 26 at "fails loudly" before it
- * was fixed. Deciding that a phantom arg is identity-bearing is a language
- * semantics call, not a bug fix, and it is not mine to make — so these assert
- * what Mezze does today and will fail loudly the moment it changes, which is
- * what makes the change deliberate. The two `used` cases below are the control
- * and must keep refusing whichever way the decision goes.
+ * Fixed by unifying a variant's `typeArgs` pairwise, the way
+ * `unifyTypeApplications` already does for the same reason.
  *
- * Related, and NOT the same thing: `MonoDriver.typeParamAppearsIn` and
- * `MonoTypeOps.unify` also skip `typeArgs`, so such a param reads as a PHANTOM
- * type param and `deriveTypeArgs` fills it with its stable `Int` placeholder —
- * the machinery that caused BUG 26 one layer over. A sweep probe confirmed that
- * path IS reached (`'a in Declared(Tag) typeArgs=['a] ctors=[Tagged]`), and that
- * nothing in the stdlib or either suite reaches it: zero hits compiling the whole
- * stdlib, zero across `:typechecker:test` and `:interpreter:test`. Aligning those
- * two walkers with `MezzeType.anyChild` changes NOTHING observable — measured,
- * with the walkers fixed and these six cases unchanged — because the erasure is
- * in the solver. That patch is therefore held until the decision, rather than
- * landed without a test that fails without it.
+ * Rust's OTHER answer was tried and is wrong here. E0392 ("parameter `T` is
+ * never used", with "consider … using a marker such as `PhantomData`") refuses
+ * the declaration; implemented as a validator, it rejected `IterCursor 'a` —
+ * sound, intended, load-bearing code — and the stdlib gate caught it as a false
+ * positive. Mezze has no `PhantomData` to opt back in with, so refusing the
+ * declaration would remove the capability rather than fix it.
  */
 class PhantomTypeArgTest {
     private fun run(src: String): Any = MezzeTestHelper.run(src.trimIndent())
 
     private fun refused(src: String): String {
         val outcome = runCatching { run(src) }
-        assert(outcome.isFailure) {
-            "expected a type error, got ${outcome.getOrNull()}"
-        }
+        assert(outcome.isFailure) { "expected a type error, got ${outcome.getOrNull()}" }
         return outcome.exceptionOrNull()?.message ?: ""
     }
 
-    /** A phantom arg does not survive a `let` annotation. */
-    @Test fun `a variant's phantom arg is erased across an annotation`() {
-        assertEquals(
-            1L,
-            run(
-                """
-                type Tag 'a = | Tagged { n: Int }, |
-                let s: Tag Str = Tagged { n = 1 }
-                let t: Tag Int = s
-                match t is
-                  Tagged { n } -> n
-                """
-            ),
+    /** A variant's phantom arg survives a `let` annotation. */
+    @Test fun `a variant's phantom arg is enforced across an annotation`() {
+        val message = refused(
+            """
+            type Tag 'a = | Tagged { n: Int }, |
+            let s: Tag Str = Tagged { n = 1 }
+            let t: Tag Int = s
+            match t is
+              Tagged { n } -> n
+            """
+        )
+        assert(message.contains("Type annotation mismatch")) {
+            "expected an annotation mismatch; got: $message"
+        }
+    }
+
+    /** And a function boundary. */
+    @Test fun `a variant's phantom arg is enforced across a function boundary`() {
+        val message = refused(
+            """
+            type Tag 'a = | Tagged { n: Int }, |
+            let want_int: { t: Tag Int } -> Int = { t } -> match t is
+              Tagged { n } -> n
+            let s: Tag Str = Tagged { n = 1 }
+            want_int { t = s }
+            """
+        )
+        assert(message.contains("Tag Int")) {
+            "expected the mismatch to name `Tag Int`; got: $message"
+        }
+    }
+
+    /** And a return type. */
+    @Test fun `a variant's phantom arg is enforced out of a return`() {
+        refused(
+            """
+            type Tag 'a = | Tagged { n: Int }, |
+            let mk: {} -> Tag Str = {} -> Tagged { n = 1 }
+            let t: Tag Int = mk {}
+            match t is
+              Tagged { n } -> n
+            """
         )
     }
 
-    /** Same for a record alias — records are compared by field, so a phantom
-     *  param there is invisible the same way. */
-    @Test fun `a record's phantom arg is erased across an annotation`() {
-        assertEquals(
-            1L,
-            run(
-                """
-                type Tag 'a = { n: Int }
-                let s: Tag Str = { n = 1 }
-                let t: Tag Int = s
-                t.n
-                """
-            ),
+    /**
+     * A `newtype`'s phantom arg is enforced — it always was, and this is the
+     * form the stdlib's `IterCursor 'a` relies on. Kept so the variant fix
+     * cannot be mistaken for having introduced the capability.
+     */
+    @Test fun `a newtype's phantom arg is enforced`() {
+        refused(
+            """
+            newtype UTag 'a = Int
+            let s: UTag Str = UTag.(1)
+            let t: UTag Int = s
+            0
+            """
         )
     }
 
-    /** A function asking for `Tag Int` accepts a `Tag Str`. */
-    @Test fun `a phantom arg is erased across a function boundary`() {
-        assertEquals(
-            1L,
-            run(
-                """
-                type Tag 'a = | Tagged { n: Int }, |
-                let want_int: { t: Tag Int } -> Int = { t } -> match t is
-                  Tagged { n } -> n
-                let s: Tag Str = Tagged { n = 1 }
-                want_int { t = s }
-                """
-            ),
+    /** The stdlib case itself: an `IterCursor Int` is not an `IterCursor Str`. */
+    @Test fun `an IterCursor cannot be retagged`() {
+        val message = refused(
+            """
+            use std::collections::iter
+            use std::collections::iter::{ IterCursor }
+            let it = iter::range { start = 1, end = 4 }
+            let c = iter::cursor { it = it }
+            let s: IterCursor Str = c
+            match iter::cursor_next { c = s } is
+              Some { val } -> val
+              None -> "none"
+            """
         )
+        assert(message.contains("IterCursor")) {
+            "expected the mismatch to name IterCursor; got: $message"
+        }
     }
 
-    /** And out of a return type. */
-    @Test fun `a phantom arg is erased out of a return`() {
+    /** A correctly tagged cursor still works — the fix must not cost the feature. */
+    @Test fun `a correctly tagged IterCursor still pulls`() {
         assertEquals(
             1L,
             run(
                 """
-                type Tag 'a = | Tagged { n: Int }, |
-                let mk: {} -> Tag Str = {} -> Tagged { n = 1 }
-                let t: Tag Int = mk {}
-                match t is
-                  Tagged { n } -> n
+                use std::collections::iter
+                use std::collections::iter::{ IterCursor }
+                let it = iter::range { start = 1, end = 4 }
+                let c: IterCursor Int = iter::cursor { it = it }
+                match iter::cursor_next { c = c } is
+                  Some { val } -> val
+                  None -> 0
                 """
             ),
         )
     }
 
     /**
-     * CONTROL: a param the payload uses makes the two provably different, and
-     * the assignment is refused. This must hold whichever way BUG 33 is decided
-     * — it is what says the erasure is specific to the phantom case and not a
-     * general hole in variant identity.
+     * A tag cannot be LAUNDERED — this is what makes the enforcement real
+     * rather than cosmetic.
+     *
+     * `{ x: UTag 'a } -> UTag 'b` would retag anything as anything, and it is
+     * refused because `'b` appears in no parameter. Without this, every other
+     * case here could be walked around in one function.
      */
-    @Test fun `a used variant arg is not erased`() {
+    @Test fun `a phantom tag cannot be laundered by a retagging function`() {
+        refused(
+            """
+            newtype UTag 'a = Int
+            let retag: { x: UTag 'a } -> UTag 'b = { x } -> x
+            let s: UTag Str = UTag.(1)
+            let i: UTag Int = retag { x = s }
+            0
+            """
+        )
+    }
+
+    /**
+     * The intended use: two brands over one payload do not mix.
+     *
+     * This is what `newtype Tag 'a = …` is FOR — `Id User` against `Id Order`,
+     * units, a handle tagged by its element type — and it is why refusing the
+     * declaration (Rust's E0392) was the wrong fix: it would remove this.
+     *
+     * Building a FRESH tagged value through a tag-polymorphic constructor
+     * (`{ n: Int } -> Id 'a`) is allowed and is not laundering: it mints a new
+     * tag rather than moving an existing one, exactly as `Id::new()` does.
+     */
+    @Test fun `two brands over the same payload do not mix`() {
+        val message = refused(
+            """
+            newtype Id 'a = Int
+            type User = { name: Str }
+            type Order = { total: Int }
+            let user_id: Id User = Id.(7)
+            let want_order: { id: Id Order } -> Int = { id } -> 0
+            want_order { id = user_id }
+            """
+        )
+        assert(message.contains("Id Order")) {
+            "expected the mismatch to name `Id Order`; got: $message"
+        }
+    }
+
+    /**
+     * A FORGOTTEN type param is caught at the first use, by the payload.
+     *
+     * `newtype Box 'a = Int` where `= 'a` was meant is the accident Rust's
+     * E0392 exists to catch at the declaration. Mezze catches it the moment a
+     * value is put in — `expected Int, but got Str` — which is why the
+     * declaration does not need refusing, and refusing it would have cost the
+     * branding above.
+     */
+    @Test fun `a forgotten type param is caught at the first use`() {
+        val message = refused(
+            """
+            newtype Box 'a = Int
+            let b: Box Str = Box.("hello")
+            0
+            """
+        )
+        assert(message.contains("expected Int")) {
+            "expected the payload mismatch to name Int; got: $message"
+        }
+    }
+
+    /**
+     * A RECORD's phantom arg is still erased, and that is the structural rule
+     * working rather than a leftover.
+     *
+     * A record alias NAMES A SHAPE, and Mezze compares records structurally, so
+     * `type RTag 'a = { n: Int }` really does make both instantiations
+     * `{ n: Int }` — there is no nominal wall to enforce. A variant is nominal
+     * (`unifyVariants` is built out of identity vetoes and alias walls), which
+     * is why dropping ITS args was the inconsistency. Tagged data over one shape
+     * is what `newtype` is for, as `IterCursor` shows.
+     *
+     * Pinned so that if records ever become nominal here, it is deliberate.
+     */
+    @Test fun `a record's phantom arg is erased, structurally`() {
+        assertEquals(
+            1L,
+            run(
+                """
+                type RTag 'a = { n: Int }
+                let s: RTag Str = { n = 1 }
+                let t: RTag Int = s
+                t.n
+                """
+            ),
+        )
+    }
+
+    /** CONTROL: a param the payload uses was always enforced, by the payloads. */
+    @Test fun `a used variant arg is enforced`() {
         val message = refused(
             """
             type Box 'a = | Boxed { val: 'a }, |
@@ -130,12 +247,12 @@ class PhantomTypeArgTest {
             """
         )
         assert(message.contains("Type annotation mismatch")) {
-            "expected an annotation mismatch naming the two types; got: $message"
+            "expected an annotation mismatch; got: $message"
         }
     }
 
-    /** CONTROL: the same for a record field. */
-    @Test fun `a used record arg is not erased`() {
+    /** CONTROL: and a used record field, structurally. */
+    @Test fun `a used record arg is enforced`() {
         val message = refused(
             """
             type Box 'a = { val: 'a }
@@ -145,7 +262,25 @@ class PhantomTypeArgTest {
             """
         )
         assert(message.contains("Type annotation mismatch")) {
-            "expected an annotation mismatch naming the two types; got: $message"
+            "expected an annotation mismatch; got: $message"
         }
+    }
+
+    /**
+     * A variant that is generic and USED generically still works — the arg
+     * unification must bind `'a`, not merely compare it.
+     */
+    @Test fun `a generic variant still binds its arg`() {
+        assertEquals(
+            "x",
+            run(
+                """
+                type Box 'a = | Boxed { val: 'a }, |
+                let unwrap: { b: Box 'a } -> 'a = { b } -> match b is
+                  Boxed { val } -> val
+                unwrap { b = Boxed { val = "x" } }
+                """
+            ).toString(),
+        )
     }
 }

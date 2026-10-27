@@ -922,9 +922,14 @@ object MonoDriver {
                 } ||
                 (type.effects?.let { typeParamAppearsIn(typeParamName, it) } ?: false)
             is MezzeType.RecordType -> type.fields.values.any { typeParamAppearsIn(typeParamName, it) }
+            // #194: an applied variant carries the args that complete its nominal
+            // identity in `typeArgs`, and a param NO payload mentions lives only
+            // there. `MezzeType.anyChild` and `transformChildren` both walk them;
+            // this walk did not, so such a param read as absent and
+            // [deriveTypeArgs] filled it with its stable `Int` placeholder.
             is MezzeType.VariantType -> type.constructors.values.any {
                 it != null && typeParamAppearsIn(typeParamName, it)
-            }
+            } || type.typeArgs.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.NewtypeType -> typeParamAppearsIn(typeParamName, type.wrappedType)
             is MezzeType.TypeApplication -> type.args.any { typeParamAppearsIn(typeParamName, it) }
             is MezzeType.EffectRow -> type.effectInstances.any { instance ->

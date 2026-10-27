@@ -387,7 +387,17 @@ internal fun unify(pattern: MezzeType, value: MezzeType, bindings: MutableMap<St
                     pT != null && vT != null -> unify(pT, vT, bindings)
                     else -> false
                 }
-            }
+            } &&
+            // #194: `typeArgs` carries the args completing the nominal identity,
+            // and the TypeApplication arm below already unifies its `args` this
+            // way. A param NO payload mentions lives only here, so without this
+            // the payload walk binds nothing and `deriveTypeArgs` calls it
+            // phantom. Only compared when BOTH sides carry args: one side with
+            // none is an unapplied/legacy shape, and refusing those would cut
+            // seeding rather than correct it.
+            (pattern.typeArgs.isEmpty() || v.typeArgs.isEmpty() ||
+                (pattern.typeArgs.size == v.typeArgs.size &&
+                    pattern.typeArgs.zip(v.typeArgs).all { (p2, v2) -> unify(p2, v2, bindings) }))
         is MezzeType.NewtypeType -> v is MezzeType.NewtypeType &&
             // Move-5: newtype is a nominal wall — two DISTINCT declared newtypes
             // (same name, different hash: the newtype-two-faces hazard) must not

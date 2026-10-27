@@ -44,6 +44,15 @@ class UnifierDifferentialGateTest {
     private fun h(c: Char) = Hash(c.toString().repeat(64))
     private fun dv(n: String, c: Char, ctors: List<String>) =
         VariantType(ctors.associateWith { null }, identity = TypeIdentity.Declared(h(c), n))
+    /** An APPLIED variant whose payload does NOT mention the arg — a phantom
+     *  parameter, where `typeArgs` is the only thing carrying the difference
+     *  (BUG 33). */
+    private fun dvApplied(n: String, c: Char, args: List<MezzeType>) =
+        VariantType(
+            constructors = mapOf("Tg" to RecordType(fields = mapOf("n" to IntType))),
+            typeArgs = args,
+            identity = TypeIdentity.Declared(h(c), n),
+        )
     private fun dr(n: String, c: Char, f: Map<String, MezzeType>) =
         RecordType(fields = f, identity = TypeIdentity.Declared(h(c), n))
     private fun v(n: String) = VarType(TypeVar.freshWithName(n))
@@ -68,6 +77,13 @@ class UnifierDifferentialGateTest {
         "var V{X}" to dv("V", '5', listOf("X")),
         "fn Int->Str" to FunctionType(IntType, StringType),
         "fn 'a->'a" to FunctionType(v("a"), v("a")),
+        // BUG 33: an applied variant whose parameter is PHANTOM — no payload
+        // mentions it, so `typeArgs` is the only carrier of the difference. The
+        // matrix had no applied variant at all, which is why the solver gaining
+        // a typeArgs check registered here as nothing.
+        "var T[Int]" to dvApplied("T", '6', listOf(IntType)),
+        "var T[Str]" to dvApplied("T", '6', listOf(StringType)),
+        "var T['a]" to dvApplied("T", '6', listOf(v("a"))),
     )
 
     /**
@@ -116,6 +132,42 @@ class UnifierDifferentialGateTest {
         // untouched by any of this — it is a primitive boolean either way.
         "Bool vs var V{X,Y}", "var V{X,Y} vs Bool",
         "Bool vs var V{X}", "var V{X} vs Bool",
+
+        // ── Added with the three APPLIED phantom-param variants (BUG 33) ──
+        //
+        // The matrix had no applied variant, so the solver gaining a typeArgs
+        // check registered here as nothing. Adding `var T[Int]`, `var T[Str]`
+        // and `var T['a]` exposed it: before the mono fix the FIRST assertion
+        // failed with `[var T[Int] vs var T[Str], var T[Str] vs var T[Int]]` —
+        // mono accepting a pair the solver rejects, the one direction this gate
+        // calls a soundness failure. Mono now compares typeArgs too, so that
+        // pair AGREES (both refuse) and is absent from this set.
+        //
+        // These eleven are the two families already justified above, now with a
+        // third declared variant in the matrix. Nothing new in kind:
+        //
+        // (a) Bool-and-List-are-variants, nine pairs. Exactly the eight
+        //     `Bool vs var V{…}` / `List Int vs var V{…}` entries above: the
+        //     SOLVER relates a builtin-variant to another declared variant,
+        //     mono refuses because a variant row is not a concrete binding it
+        //     can seed with. `List Int` pairs with `T[Int]` but NOT with
+        //     `T[Str]` — where the args disagree both sides refuse, which is
+        //     the typeArgs check working through this family too.
+        "Bool vs var T[Int]", "var T[Int] vs Bool",
+        "Bool vs var T[Str]", "var T[Str] vs Bool",
+        "Bool vs var T['a]", "var T['a] vs Bool",
+        "List Int vs var T[Int]", "var T[Int] vs List Int",
+        "List Int vs var T['a]", "var T['a] vs List Int",
+
+        // (b) mono-will-not-bind-a-variable, one pair. The same stance as
+        //     `['a] vs ['a]` and `App(P,['a]) vs App(P,['a])` directly above,
+        //     and it is PATCH-CAUSED: mono now unifies a variant's typeArgs, so
+        //     `T['a]` against `T['a]` asks it to relate `'a` to `'a`, which it
+        //     refuses on purpose — specialization needs concrete arguments.
+        //     Before the patch mono ignored the args and vacuously accepted.
+        //     That this moved INTO the mono-refuses column is the fix working:
+        //     stricter than the type system is the allowed direction.
+        "var T['a] vs var T['a]",
     )
 
     @Test

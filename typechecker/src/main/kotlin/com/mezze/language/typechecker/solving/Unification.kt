@@ -867,7 +867,89 @@ fun <T> withInScopeAliasNames(names: Set<String>, block: () -> T): T {
 
 fun inScopeAliasNamesForSolverOrNull(): Set<String>? = inScopeAliasNamesOverride.get()
 
+/**
+ * Two applied variants unify when their ARGS and their bodies both do (BUG 33).
+ *
+ * `typeArgs` carries the args that complete an applied variant's nominal
+ * identity (#194). It was added so the PRINTER could render `Tree Int` and was
+ * never read here, so identity rested on the declaration's content hash alone —
+ * which `Tag Str` and `Tag Int` share. Where a param IS used, the constructor
+ * payloads differ and the body unification below catches the mismatch, which is
+ * why this never showed. A param NO payload mentions is the only case where the
+ * args are the sole carrier of the difference, and there `Tag Str` and
+ * `Tag Int` were mutually assignable — across an annotation, a function
+ * boundary and a return.
+ *
+ * `newtype` already gets this right: `newtype UTag 'a = Int` refuses
+ * `UTag Str` where `UTag Int` is wanted, in both positions, because a newtype
+ * reaches unification as a `TypeApplication` whose `args` ARE compared. The
+ * stdlib depends on that — `newtype IterCursor 'a = __NativeIterCursor` is an
+ * opaque native handle tagged by its element type, exactly what Rust needs
+ * `PhantomData` for, and retagging an `IterCursor Int` as `IterCursor Str` is
+ * correctly rejected today. So Mezze already HAS working phantom parameters;
+ * variants were the form that silently dropped them.
+ *
+ * Rust's other answer — refusing the declaration outright, E0392 "parameter `T`
+ * is never used" — was tried here and is WRONG for Mezze: it rejects
+ * `IterCursor 'a`, which is sound, intended and load-bearing. The stdlib gate
+ * caught it as a false positive on correct code.
+ *
+ * RECORDS are deliberately left alone. A record alias NAMES A SHAPE and Mezze
+ * compares records structurally, so `type RTag 'a = { n: Int }` really does make
+ * both instantiations `{ n: Int }`; erasure there is the structural rule working,
+ * and `newtype` is what tagged data is for. A variant is nominal — this function
+ * is built out of identity vetoes and alias walls — so dropping its args was the
+ * inconsistency.
+ *
+ * Args are compared only when BOTH sides carry them: an unapplied or legacy
+ * shape has none, and refusing those would cut unification that has nothing to
+ * do with this.
+ */
 internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantType, registry: DeclarationRegistry): UnificationResult {
+    val argSubstitution = when (val args = unifyVariantTypeArgs(var1, var2, registry)) {
+        is UnificationResult.Failure -> return args
+        is UnificationResult.Success -> args.substitution
+    }
+    return when (val body = unifyVariantBodies(var1, var2, registry)) {
+        is UnificationResult.Failure -> body
+        is UnificationResult.Success ->
+            UnificationResult.Success(body.substitution.compose(argSubstitution))
+    }
+}
+
+/** The args completing each side's nominal identity, pairwise. Mirrors
+ *  [unifyTypeApplications]' arg loop, which is the same question for the same
+ *  reason. */
+private fun unifyVariantTypeArgs(
+    var1: MezzeType.VariantType,
+    var2: MezzeType.VariantType,
+    registry: DeclarationRegistry,
+): UnificationResult {
+    if (var1.typeArgs.isEmpty() || var2.typeArgs.isEmpty()) return UnificationResult.Success(Substitution.empty)
+    if (var1.typeArgs.size != var2.typeArgs.size) {
+        return UnificationResult.Failure(
+            message = "Type argument count mismatch: ${var1.typeArgs.size} vs ${var2.typeArgs.size}",
+            type1 = var1,
+            type2 = var2,
+        )
+    }
+    var substitution = Substitution.empty
+    for (i in var1.typeArgs.indices) {
+        val arg1 = substitution.apply(var1.typeArgs[i])
+        val arg2 = substitution.apply(var2.typeArgs[i])
+        when (val argResult = unify(arg1, arg2, registry)) {
+            is UnificationResult.Success -> substitution = argResult.substitution.compose(substitution)
+            is UnificationResult.Failure -> return UnificationResult.Failure(
+                message = "Type argument $i mismatch: ${argResult.message}",
+                type1 = var1,
+                type2 = var2,
+            )
+        }
+    }
+    return UnificationResult.Success(substitution)
+}
+
+private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.VariantType, registry: DeclarationRegistry): UnificationResult {
     val constructors1 = var1.constructors.keys
     val constructors2 = var2.constructors.keys
 

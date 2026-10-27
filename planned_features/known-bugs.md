@@ -2882,7 +2882,7 @@ WITHOUT the fix, which is now stated in its header rather than implied away.
 
 ---
 
-## BUG 27 — OPEN: two more name-keyed lowering fallbacks
+## BUG 27 — CLOSED as a class: two more name-keyed lowering fallbacks
 
 `TypedASTCompiler` resolves a call it found no frame slot for by searching BY
 NAME, in three places. One is fixed; two are not:
@@ -2939,14 +2939,77 @@ report truncation instead — the inbound reader THROWS, and `with_download`
 reports it from `close`, where the scope is still present to be told. This is
 now the odd one out.
 
+### What Rust's web frameworks do (researched 2026-10-27)
+
+They ABORT THE CONNECTION. There is no third option, and the reasoning is the
+same one that makes this a bug here:
+
+  - axum: a stream passed to `Body::from_stream` that yields an `Err` makes axum
+    abort the connection — "closing the connection is pretty much the only
+    standard way to signal to the client that something has gone wrong".
+  - The reason it cannot be anything nicer: "once you've sent a status code and
+    started streaming the body, you can't change your mind to sending a
+    different status code instead". A mid-body failure is past the point where a
+    500 is available.
+  - At the protocol level the terminal zero-length chunk is the ONLY signal a
+    chunked response is complete rather than truncated. A connection that dies
+    before it arrives is a DETECTABLE error; a connection that sends it has
+    promised the body was whole. Under `Content-Length`, closing early likewise
+    leaves the promised byte count unmet and the client detects it.
+  - actix-web's `BodyStream` is the same shape — a streaming body with no
+    `Content-Length`, so the terminal chunk carries the same meaning.
+
+So the industry answer is: never finish the body cleanly. Mezze currently
+answers `Done`, which SENDS the terminal chunk — the one option Rust
+deliberately avoids, because it tells the client the short file is the whole
+file. That makes this a silent-corruption bug rather than a cosmetic one: a
+caller cannot tell a 40 KB truncation of a 200 KB file from a 40 KB file.
+
 ### Acceptance
 
 A `response_file` whose handle fails mid-read does not answer a complete-looking
-response. Test with a handle closed under it.
+response: the body is ABORTED rather than terminated, so the client sees a
+truncated transfer. Test with a handle closed under it.
+
+This also means the fix needs no new scoped form and no new error channel — the
+question asked earlier. The handler cannot report a status (headers are long
+gone), so the only correct action is to fail the body, which is a transport-level
+abort, same as axum.
+
+### NO log line — it would be an effect in the row
+
+An earlier note here said the server "should also LOG it". Withdrawn: in an
+effect-explicit language that is not a free addition. The failure site is a
+Mezze lambda whose row is `<FileStreaming>`:
+
+```mezze
+step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = … } is
+  Err { error = _ } -> Done
+```
+
+Logging from there performs a logging effect, which rides out on the `chunks`
+iterator and surfaces in the row of everything that drains it — every route
+that streams a file. That is a signature change dressed up as a nicety, and an
+INCIDENTAL effect rather than an honest one. (`HttpServerNatives` has no
+host-side logging either, so it would also mean introducing a logging path
+where none exists.)
+
+What the row SHOULD gain is the effect that is true: the step can fail, so it
+THROWS, and the row says `Exception having 'error = FsError`. That is the
+honest widening, and it is already the pattern the two sibling paths use —
+BUG 28's own text records that the inbound reader throws and `with_download`
+reports from `close`. The throw rides the iterator (`Iter` across a
+`@TruffleBoundary` works — `project_iter_effect_boundary_works`) and the host
+drain point turns it into the connection abort. `response_file`'s own
+`Result Response FsError` is unaffected: it describes the OPEN, which has
+already succeeded by the time the body is drained.
+
+Whether the SERVER logs an aborted body is a question for the server layer, on
+the host side where it is not a Mezze effect at all — not part of this fix.
 
 ---
 
-## BUG 29 — OPEN: `iter::to_seq` after a map that changes the element type
+## BUG 29 — FIXED: `iter::to_seq` after a map that changes the element type
 
 ```mezze
 iter::to_seq { it = iter::map { it = iter::range { start = 0, end = n },
@@ -2958,24 +3021,37 @@ The SOURCE is `Int`, so a long-specialised seq builder is chosen; the ELEMENT
 after `map` is `Str`. This is the `source_kind_is_not_element_kind` family —
 the source's kind is not evidence about the element's.
 
-### Acceptance
+### FIXED in 33a6abadd — the pipeline builds for the ELEMENT's kind
 
-The program above collects a `[Str]`. Neighbouring shapes (Int→Int, Str→Int) stay
-green.
+"a fused range pipeline builds for the ELEMENT's kind, not the source's".
+Regression test `IterMapElementKindTest`.
+
+### Acceptance — met, re-measured 2026-10-28
+
+The acceptance program collects 5 elements instead of throwing
+`UnsupportedSpecializationException`, and the Int→Int neighbour still collects 5.
 
 ---
 
-## BUG 30 — OPEN: `str::repeat` recurses once per copy
+## BUG 30 — FIXED: `str::repeat` recurses once per copy
 
 `stdlib/std/str.mz`: `repeat` calls itself `n` times, so a large `n` overflows
 the stack long before the result is big enough to be interesting (measured: 2000
 copies of a 20-byte block already dies). A test needing a large string has to
 build it in the host language instead.
 
-### Acceptance
+### FIXED in 5a34e1c11 — it uses the native it already had
 
-`str::repeat { s = "0123456789", n = 100000 }` returns a 1 MB string. Doubling or
-a native, modelled on the neighbouring string natives.
+"repeat uses the native it already had, instead of recursing per copy" —
+`__native_string_repeat`, which existed and was not being called. Regression test
+`StrRepeatTest`. NOTE: the first attempt added a SECOND registration for a key
+that already existed and a later unguarded `HANDLERS.put` won, which made
+`n = -5` throw `count is negative`; there is exactly one guarded registration now.
+
+### Acceptance — met, re-measured 2026-10-28
+
+`str::repeat { s = "0123456789", n = 100000 }` returns 1000000 bytes — 1 MB, no
+stack overflow.
 
 ---
 
@@ -3015,7 +3091,7 @@ program can pass by position. Worth its own ticket.
 
 ---
 
-## BUG 32 — OPEN: `let x = x` in a do-block crashes, shadowing a top-level `x`
+## BUG 32 — FIXED: `let x = x` in a do-block crashes, shadowing a top-level `x`
 
 ```mezze
 let n: Int = 7
@@ -3042,15 +3118,21 @@ works because `f` IS visible inside its own RHS. The distinction already exists
 in the typed AST — `stmt.isRecursive` — so the rule is to bind the name before
 the RHS only when the let is recursive, and after otherwise.
 
-### Acceptance
+### FIXED in 1f4eb4eb9 — the name is bound before the RHS only when recursive
 
-The program above answers 7. `the recursive local let still recurses` in
-`CapturedVsSameNamedLocalTest` stays green, as does
-`DoBlockRecursiveLetInterpreterTest`.
+"a non-recursive let's RHS reads the OUTER binding, not its own slot": the name
+in flight is captured before `forceAllocLocal`, the new slot is hidden while a
+non-recursive RHS compiles, and restored after. Exactly the rule this section
+predicted — `stmt.isRecursive` already carried the distinction. Regression test
+`LetShadowsOuterBindingTest`, plus `CapturedVsSameNamedLocalTest`.
+
+### Acceptance — met, re-measured 2026-10-28
+
+The acceptance program answers 7.
 
 ---
 
-## BUG 33 — OPEN, needs a DECISION: a phantom type argument is erased
+## BUG 33 — FIXED: a variant dropped the type args that complete its identity
 
 ```mezze
 type Tag 'a = | Tagged { n: Int }, |     # 'a used by NO payload
@@ -3084,22 +3166,74 @@ Where a param IS used, the payloads carry the distinction and unification catche
 a mismatch there — which is why this has never shown. A phantom param is the only
 case where `typeArgs` are the sole carrier of the difference.
 
-### The decision
+### The decision, settled by evidence: `newtype` already did it right
 
-Is a type argument part of a type's identity even when no field mentions it?
+The table above was incomplete. Adding the third declaration form changes the
+answer:
 
-  - YES — then a phantom parameter does what it exists for (`Id User` vs
-    `Id Order`, units, tagged handles), and `unifyVariants`/`unifyRecords` must
-    compare `typeArgs`. This is a language semantics change: it makes programs
-    that compile today stop compiling.
-  - NO — then phantom parameters are erased by design, a declared-but-unused
-    type param is meaningless, and the honest follow-up is to REFUSE one at its
-    declaration rather than accept it and ignore it. Nothing rejects it today.
+| form | phantom arg enforced, BEFORE the fix? |
+|---|---|
+| `newtype UTag 'a = Int` | **YES** — annotation and function boundary |
+| `type VTag 'a = \| Tagged { n: Int }, \|` | no |
+| `type RTag 'a = { n: Int }` | no |
 
-`PhantomTypeArgTest` pins the current answer on purpose, the way
-`HttpCatchingAnyTest`'s record case pinned BUG 26 at "fails loudly" — so whichever
-way this goes, the change is deliberate and not a silent drift. The two `used`
-controls hold either way.
+A newtype reaches unification as a `TypeApplication`, whose `args` ARE compared
+(`unifyTypeApplications`). So Mezze already HAD working phantom parameters — and
+the stdlib DEPENDS on one:
+
+```mezze
+pub newtype IterCursor 'a = __NativeIterCursor      # std/collections/iter.mz
+pub let cursor_next: { c: IterCursor 'a } -> Option 'a <...>
+```
+
+An opaque native handle tagged by its element type — precisely what Rust needs
+`PhantomData` for. Retagging an `IterCursor Int` as an `IterCursor Str` was
+already rejected, in all three positions. So the question was never "should a
+phantom arg count"; it was "why does the VARIANT form drop it".
+
+### Rust, and the answer that does NOT port
+
+Rust does both halves: an unused parameter is refused outright (E0392,
+"parameter `T` is never used", help "consider removing `T`, referring to it in a
+field, or using a marker such as `PhantomData`"), and once referenced — even by
+a marker — the argument is identity-bearing.
+
+The E0392 half was implemented here (a `T0218_UNUSED_TYPE_PARAM` validator) and
+is WRONG for Mezze: it rejected `newtype IterCursor 'a`, which is sound,
+intended and load-bearing. `:cli:compileStdlib` caught it immediately as a false
+positive on correct code. Mezze has no `PhantomData` to opt back in with, so
+refusing the declaration removes the capability instead of fixing it. Backed out
+whole — do not re-attempt it.
+
+### The fix
+
+`unifyVariants` now unifies `typeArgs` pairwise before unifying the bodies,
+mirroring `unifyTypeApplications`' arg loop, which is the same question for the
+same reason. It UNIFIES rather than compares, so `Box 'a` against `Box Str` still
+binds `'a` — a comparison alone would break generic variants. Args are consulted
+only when BOTH sides carry them; an unapplied or legacy shape has none and
+refusing those would cut unrelated unification.
+
+### RECORDS are left erasing, deliberately
+
+A record alias NAMES A SHAPE and Mezze compares records structurally, so
+`type RTag 'a = { n: Int }` really does make both instantiations `{ n: Int }`.
+There is no nominal wall to enforce, and erasure there is the structural rule
+working. A variant is nominal — `unifyVariants` is built out of identity vetoes
+and alias walls — which is why dropping ITS args was the inconsistency. Tagged
+data over one shape is what `newtype` is for, as `IterCursor` shows.
+`PhantomTypeArgTest` pins the record case so that changing it is deliberate.
+
+Doing it for records would also mean adding a `typeArgs` field to `RecordType`,
+which has none — a much larger change than this one, and unmotivated given the
+structural rule.
+
+### Acceptance — met
+
+`PhantomTypeArgTest`, ten cases. Removing the fix fails exactly the three
+variant ones and nothing else; the newtype, `IterCursor`, record and used-param
+cases hold either way, which is what says they are the floor rather than the
+regression test.
 
 ### The mono half, measured and HELD
 
@@ -3132,10 +3266,16 @@ Reachability, measured with a deduped sweep probe on that arm:
     are separate unimplemented things.
 
 Aligning both walkers with `MezzeType.anyChild` (which walks `typeArgs`, #194) was
-written and measured: `:typechecker:test` stays green and all six shapes above are
-UNCHANGED — because the erasure is in the solver, not mono. So mono is currently
-AGREEING with the solver, and the patch's correctness depends on the decision
-above: under YES it is a fix, under NO it is a small specialization-coverage loss.
-Held in the scratchpad rather than landed without a test that fails without it.
+written and measured BEFORE the solver fix: `:typechecker:test` stayed green and
+every shape was UNCHANGED, because the erasure was in the solver and mono was
+merely agreeing with it.
+
+Now that the solver enforces a variant's args, that patch is the consistent
+follow-up rather than a speculative one — mono would otherwise still fill such a
+param with `Int` where the solver now refuses the mismatch. It remains unlanded
+for the same reason as before: no test fails without it, because reaching its
+consequence needs a receiverless op or an impl target that is not the receiver,
+both separate unimplemented things. Patch kept at
+`mono-typeargs.patch` in the session scratchpad.
 
 Do not re-derive any of the above; it is all measured.
