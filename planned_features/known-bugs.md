@@ -3047,3 +3047,95 @@ the RHS only when the let is recursive, and after otherwise.
 The program above answers 7. `the recursive local let still recurses` in
 `CapturedVsSameNamedLocalTest` stays green, as does
 `DoBlockRecursiveLetInterpreterTest`.
+
+---
+
+## BUG 33 — OPEN, needs a DECISION: a phantom type argument is erased
+
+```mezze
+type Tag 'a = | Tagged { n: Int }, |     # 'a used by NO payload
+let s: Tag Str = Tagged { n = 1 }
+let t: Tag Int = s                        # ACCEPTED. Should it be?
+```
+
+`Tag Str` and `Tag Int` are mutually assignable — across a `let` annotation,
+across a function boundary, and out of a return type. Measured, six shapes,
+`PhantomTypeArgTest`:
+
+| shape | phantom param? | `Tag Str` -> `Tag Int` |
+|---|---|---|
+| variant, let annotation | yes | ACCEPTED |
+| record alias, let annotation | yes | ACCEPTED |
+| variant, through a function param | yes | ACCEPTED |
+| variant, out of a return | yes | ACCEPTED |
+| variant, param used in payload | no | correctly refused |
+| record, param used in field | no | correctly refused |
+
+### Why
+
+`typeArgs` was added for PRINTING and never wired into type identity.
+`solving/Unification.kt` mentions it exactly once, and only to carry it:
+
+```kotlin
+typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
+```
+
+Where a param IS used, the payloads carry the distinction and unification catches
+a mismatch there — which is why this has never shown. A phantom param is the only
+case where `typeArgs` are the sole carrier of the difference.
+
+### The decision
+
+Is a type argument part of a type's identity even when no field mentions it?
+
+  - YES — then a phantom parameter does what it exists for (`Id User` vs
+    `Id Order`, units, tagged handles), and `unifyVariants`/`unifyRecords` must
+    compare `typeArgs`. This is a language semantics change: it makes programs
+    that compile today stop compiling.
+  - NO — then phantom parameters are erased by design, a declared-but-unused
+    type param is meaningless, and the honest follow-up is to REFUSE one at its
+    declaration rather than accept it and ignore it. Nothing rejects it today.
+
+`PhantomTypeArgTest` pins the current answer on purpose, the way
+`HttpCatchingAnyTest`'s record case pinned BUG 26 at "fails loudly" — so whichever
+way this goes, the change is deliberate and not a silent drift. The two `used`
+controls hold either way.
+
+### The mono half, measured and HELD
+
+`MonoDriver.typeParamAppearsIn` and `MonoTypeOps.unify` also skip `typeArgs`, so
+a phantom param reads as a PHANTOM TYPE PARAM and `deriveTypeArgs` fills it with
+the stable `Int` placeholder — the exact machinery behind BUG 26. What that would
+do if it were reachable in an observable way:
+
+  - an `Int` impl EXISTS for the ability -> it silently resolves to `impl C for
+    Int`. If that op ignores its receiver, a WRONG ANSWER with no crash; worse
+    than BUG 26, which at least died loudly.
+  - no `Int` impl -> evidence dropped, specialization emitted anyway, op left as
+    a field read -> `Field not found`, i.e. BUG 26 exactly.
+  - and because `Int` is chosen SPECIFICALLY to be stable for spec-hashing,
+    `Tag Str` and `Tag Bool` hash to the SAME specialization: two instantiations
+    sharing one body.
+
+Reachability, measured with a deduped sweep probe on that arm:
+
+  - ZERO hits compiling the whole stdlib, zero across `:typechecker:test`
+    (4697 tests), zero across `:interpreter:test`. Every polymorphic variant in
+    the stdlib uses its param in at least one payload.
+  - The arm IS reached by user code: `SWEEP194 'a in Declared(Tag)
+    typeArgs=['a] ctors=[Tagged]`.
+  - But no program making its CONSEQUENCE observable gets past the checker. It
+    needs the body to use the `C 'a` dictionary while `'a` appears only in
+    `typeArgs`, which needs either a receiverless op (`'Default.make' takes no
+    receiver, so the type it produces is …`) or an op whose receiver is `Tag 'a`
+    while the impl target is `'a` (`Tag Str does not implement 'Unwrap'`). Both
+    are separate unimplemented things.
+
+Aligning both walkers with `MezzeType.anyChild` (which walks `typeArgs`, #194) was
+written and measured: `:typechecker:test` stays green and all six shapes above are
+UNCHANGED — because the erasure is in the solver, not mono. So mono is currently
+AGREEING with the solver, and the patch's correctness depends on the decision
+above: under YES it is a fix, under NO it is a small specialization-coverage loss.
+Held in the scratchpad rather than landed without a test that fails without it.
+
+Do not re-derive any of the above; it is all measured.
