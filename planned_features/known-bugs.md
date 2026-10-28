@@ -1,8 +1,9 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-28: BUG 28 at the end is the only open bug in this file.** The
-module-qualified type annotation below is fixed, as are numbered bugs 26, 29, 30,
-31, 32 and 33; 27 closed as a class. Each fix has a regression test named
+**STATUS 2026-10-28: NO open bugs in this file.** BUG 28 is fixed, as is the
+module-qualified type annotation below and numbered bugs 26, 29, 30, 31, 32 and
+33; 27 closed as a class. Everything claimed open outside this file was re-run
+and was stale — see the sweep below. Each fix has a regression test named
 in its section, and 29/30/32's acceptance programs were re-measured on 2026-10-28
 because their entries had been left saying OPEN after the fixes landed — a stale
 header is how a fixed bug gets investigated twice.
@@ -3037,7 +3038,7 @@ still null while its closure is being built. Measured.
 
 ---
 
-## BUG 28 — OPEN: `response_file` turns a read error into a clean end of file
+## BUG 28 — FIXED: `response_file` turned a read error into a clean end of file
 
 ```mezze
 step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = … } is
@@ -3117,6 +3118,77 @@ already succeeded by the time the body is drained.
 
 Whether the SERVER logs an aborted body is a question for the server layer, on
 the host side where it is not a Mezze effect at all — not part of this fix.
+(It already does, in `sendChunks`' IOException arm, for the peer-went-away case.
+An earlier note here said `HttpServerNatives` had no logging at all; that was a
+grep of the wrong directory — the file is under `io/`, not `effects/`.)
+
+### FIXED 2026-10-28 — three pieces, because probing found two more
+
+1. **The guest step THROWS** instead of answering `Done`.
+2. **The host drain does not COMPLETE a failed body.** `sendChunks` used
+   try-with-resources, so the stream closed on every path — and a clean close is
+   the PROMISE that the body is whole: for chunked HTTP/1.1 the terminal
+   zero-length chunk is the only signal the client has. It now closes only on
+   success, and lets a body failure reach Helidon, which drops the connection.
+3. **The CLIENT names a truncated transfer.** Helidon's chunked decoder DOES
+   raise on a premature close — `DataReader$InsufficientDataAvailableException` —
+   but it extends `RuntimeException` (checked with javap), so it sailed past
+   `httpStreamRead`'s `IOException` arm and out of the guest program as a raw
+   Java exception. It now returns a named failure through the same `d.failure`
+   channel `close` already reports from.
+
+Only (1) was in the plan. (2) and (3) came out of running it over a real socket,
+and without either the bug is still there — the body would complete cleanly, or
+the truncation would escape as a Java exception instead of an `Err`.
+
+### What the measurement says
+
+`HttpStreamedBodyFailureTest`, three cases over a real socket. With the host
+abort disabled, the headline case reports
+
+    a failed body must not answer Ok; got: ok status=200 bytes=200000
+
+— a 200, terminal chunk sent, complete-looking body, for a body that died. That
+is BUG 28 exactly. With the fix:
+
+    ERR: … the response body ended early — the connection closed before the
+    body was complete
+
+A failure BEFORE anything flushes is a 500 instead, because Helidon can still
+choose a status then; what matters is that it is not a 200. A healthy 200 KB
+stream still adds up to 200000, so the failure case costs the ordinary one
+nothing. Three consecutive runs, no flake.
+
+### Two limits, stated because neither is an oversight
+
+**The throw does not unwind — it SUSPENDS.** `sendChunks` enters the Truffle
+context but does not install the handler chain `runHandler` does, so a `perform`
+at drain time finds no handler and the cursor is handed a `MezzeSuspend` where a
+`Step` was due. The failure is still caught and aborted, and the log now says
+that rather than reporting the bare `ClassCastException` that falls out of the
+cast. The mechanism is "unhandled effect at drain", not "exception propagated".
+
+**The type is imprecise, and cannot be otherwise today.** `iter::unfold`
+attributes a step's effects to the CONSTRUCTION site, so `response_file` declares
+`Exception having 'error = FsError` even though the throw happens later, at
+drain, on a server thread — measured: a builder annotated `<>` over a throwing
+step is REJECTED. So a caller cannot usefully HANDLE it; the handler that
+returned the response is long gone by then. The row says the operation can fail,
+which is true and worth knowing, and does not promise you can catch it. Past the
+headers, recovery is not available to anyone — the same position axum is in.
+
+A `Result`-element body (`Iter (Result Bytes FsError)`, Rust's `TryStream`) would
+put the failure in the TYPE at the drain point, where the host could not forget
+it. It was rejected deliberately: every chunk on the healthy path would pay a
+`Result` allocation and every producer would write
+`Yield { val = Ok { val = b }, next = … }`, to express something Mezze has
+effects for. Rust needs it because it has no effect system.
+
+### Acceptance — met
+
+A `response_file` whose handle fails mid-read does not answer a
+complete-looking response: the body is aborted and the client reports a
+truncated transfer by name.
 
 ---
 

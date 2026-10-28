@@ -1360,7 +1360,8 @@ pub let response_stream
 ## guaranteed should use `with_lines`-style scoping and buffer, or accept that
 ## the handle is released when the context goes (see `OpenResources`).
 pub let response_file
-  : { path: Str, chunk_bytes: Int } -> Result Response FsError <FileStreaming>
+  : { path: Str, chunk_bytes: Int }
+  -> Result Response FsError <FileStreaming, Exception having 'error = FsError>
   = { path, chunk_bytes } -> match FileStreaming.open { path = path, mode = Read } is
     Err { error } -> Err { error = error }
     Ok { val = h } -> Ok {
@@ -1369,8 +1370,22 @@ pub let response_file
         headers = map::empty {},
         chunks = iter::unfold {
           state = {},
+          # A FAILED read is not the end of the file. Answering `Done` for both
+          # sent the terminal chunk, which tells the client the body is COMPLETE
+          # — so a download dying at 40 KB of 200 looked exactly like a 40 KB
+          # file, with a 200 on it. Silent truncation, and the caller had no way
+          # to tell.
+          #
+          # `Step` has no failure arm — Yield, Skip, Done — and it is not getting
+          # one: it is the core lazy protocol every `iter` user shares. The
+          # failure travels as the effect it IS, which is also what the two
+          # sibling streaming paths do (the inbound reader throws; `with_download`
+          # reports from `close`). The host drain turns it into a connection
+          # abort, which is the only thing left to say once the status and
+          # headers are long gone — the same conclusion axum reaches, for the
+          # same reason.
           step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = chunk_bytes } is
-            Err { error = _ } -> Done
+            Err { error } -> throw { error = error }
             Ok { val = b } -> if bytes::size { b = b } == 0 then Done
               else Yield { val = b, next = {} }
         },

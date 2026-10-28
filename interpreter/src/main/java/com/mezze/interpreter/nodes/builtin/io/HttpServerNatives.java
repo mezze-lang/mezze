@@ -531,7 +531,13 @@ public final class HttpServerNatives {
     @TruffleBoundary
     private static void sendChunks(TruffleContext truffleCtx, ServerResponse res, Object chunks) {
         Object prev = truffleCtx.enter(null);
-        try (java.io.OutputStream out = res.outputStream()) {
+        java.io.OutputStream out = null;
+        // Non-null once the BODY itself has failed — as opposed to the peer
+        // having gone away, which is the IOException below and is not our
+        // failure to report.
+        String bodyFailure = null;
+        try {
+            out = res.outputStream();
             com.mezze.interpreter.nodes.builtin.collections.IterCursor cursor =
                 com.mezze.interpreter.nodes.builtin.collections.IterCursor.of(
                     (com.mezze.datastructures.iter.MezzeIter) chunks,
@@ -554,9 +560,57 @@ public final class HttpServerNatives {
             // — the status and headers are long gone — so this is dropped
             // rather than turned into a 500 that cannot be delivered.
             System.err.println("[mezze] streamed response aborted: " + e.getMessage());
+        } catch (Throwable t) {
+            // The BODY failed while being produced: a guest step threw, which is
+            // what `response_file` now does when a read fails instead of
+            // answering `Done` (BUG 28). Only the MESSAGE is kept — a guest
+            // value must not travel out onto a Helidon thread.
+            // A `perform` inside a chunk step arrives here as a SUSPENSION, not
+            // as an unwinding exception: the drain enters the context but does
+            // not install the handler chain `runHandler` does, so there is no
+            // handler for the effect at this point and the cursor is handed a
+            // MezzeSuspend where a Step was due. Name it, rather than reporting
+            // the ClassCastException that falls out of the cast.
+            String raw = t.getClass().getSimpleName()
+                + (t.getMessage() == null ? "" : ": " + t.getMessage());
+            bodyFailure = raw.contains("MezzeSuspend")
+                ? "a chunk step performed an effect with no handler at the point the "
+                    + "body is written — a streamed body cannot perform one that is "
+                    + "handled inside the handler that returned it (" + raw + ")"
+                : raw;
         } finally {
             truffleCtx.leave(null, prev);
         }
+
+        if (bodyFailure == null) {
+            // Completing the response is a PROMISE that the body is whole: for
+            // chunked HTTP/1.1 the terminal zero-length chunk is the only signal
+            // the client has, and under Content-Length it is the promised count
+            // being met. Only say it when it is true.
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (java.io.IOException e) {
+                    System.err.println("[mezze] streamed response aborted: " + e.getMessage());
+                }
+            }
+            return;
+        }
+
+        // DELIBERATELY NOT CLOSED. A clean close here is what made a 40 KB
+        // truncation of a 200 KB file indistinguishable from a 40 KB file with a
+        // 200 on it. The status and headers left long ago, so no error response
+        // is available — the only honest thing left is to fail the body and let
+        // the connection drop, so the client sees a truncated transfer. That is
+        // what axum does with an errored stream, and for the same reason.
+        //
+        // Logged HOST-side, where it costs no guest effect. A log call in the
+        // guest step would have put a logging effect in the row of every caller
+        // that streams a file.
+        System.err.println("[mezze] streamed response body FAILED mid-stream, connection aborted: "
+            + bodyFailure);
+        throw new IllegalStateException(
+            "streamed response body failed mid-stream: " + bodyFailure);
     }
 
     /** Read a guest `Response` back out into plain Java. */

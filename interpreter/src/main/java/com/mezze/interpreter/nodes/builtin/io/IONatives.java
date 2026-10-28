@@ -1226,6 +1226,24 @@ public final class IONatives {
                 + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
             d.failure = why;
             return connectionFailed(d.url, why);
+        } catch (RuntimeException e) {
+            // A TRUNCATED transfer, and the reason this arm exists: the peer
+            // closing mid-body leaves a chunked response without its terminal
+            // zero-length chunk, and Helidon's decoder says so by raising —
+            // `DataReader$InsufficientDataAvailableException`, which is a
+            // RuntimeException and so sailed straight past the IOException arm
+            // above and out of the guest program as a raw Java exception.
+            //
+            // It must come back as a named failure instead, through the same
+            // `d.failure` channel `close` already reports from: a download that
+            // died at 40 KB of 200 is EXACTLY what the caller needs told, and
+            // the alternative is the shape BUG 28 was about — a short body that
+            // looks whole.
+            String why = "the response body ended early — the connection closed "
+                + "before the body was complete (" + e.getClass().getSimpleName()
+                + (e.getMessage() != null ? ": " + e.getMessage() : "") + ")";
+            d.failure = why;
+            return connectionFailed(d.url, why);
         }
     }
 
