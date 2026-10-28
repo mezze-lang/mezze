@@ -1,9 +1,17 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-27: BUGS 26, 28, 29*, 31 and 32 at the end of this file are
-OPEN.** BUG 27 closed as a class and BUG 30 fixed, both the same day; 29 is
-marked * because its FIX landed and only its acceptance note is worth re-reading.
-Everything before BUG 26 is closed.
+**STATUS 2026-10-28: TWO open bugs in this file** — BUG 28 at the end, and the
+module-qualified type annotation below (found 2026-10-22, came in from main).
+Numbered bugs 26, 29, 30, 31, 32 and 33 are fixed, 27 closed as a class. Each fix has a regression test named
+in its section, and 29/30/32's acceptance programs were re-measured on 2026-10-28
+because their entries had been left saying OPEN after the fixes landed — a stale
+header is how a fixed bug gets investigated twice.
+
+Note for anyone reading the memory index alongside this file: that index lags.
+Two of its "OPEN" typechecker entries were checked on 2026-10-28 and are stale —
+`DictPlumbingTest` no longer exists, and `CallbackTailEscapesClosedRowTest` now
+asserts the laundering is REJECTED. Trust a green test or a measurement here,
+not a note.
 
 **STATUS 2026-09-22: every bug 1-25 in this file is CLOSED.** It opened as a hand-off
 list of open bugs surfaced while building the `mezze-showcase` polyglot demo (one
@@ -2643,7 +2651,7 @@ bringing the types into scope under hidden names (`QuoteTypes`).
 
 ---
 
-# OPEN — found 2026-10-26/27 while landing the HTTP streaming work
+# Found 2026-10-26/28 while landing the HTTP streaming work (only 28 still open)
 
 Each was measured, not inferred, and the measurement is written down. Where I
 ruled something OUT that is recorded too, because a wrong suspect costs the next
