@@ -282,6 +282,28 @@ private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
     return startPath.toAbsolutePath()
 }
 
+/**
+ * The prefetch parse pool, in its own leaf holder.
+ *
+ * A shared, warm, bounded pool is the performant shape — the LSP runs many
+ * checks and reuses these threads rather than paying for a cold pool each time.
+ * But it must be created at RUN TIME, not at native-image build time: the wasm
+ * image build passes `--initialize-at-build-time=com.mezze`, so an eagerly
+ * initialised `val` here would run its initializer during image generation and
+ * capture the live threads in the image heap ("Detected a started Thread…"),
+ * which native-image refuses. `by lazy` builds the pool on first use (runtime);
+ * the matching `--initialize-at-run-time` for THIS leaf (see wasm-build) defers
+ * even its class init, so the guarantee doesn't rest on "nothing touched it".
+ * Daemon threads with deep stacks: the recursive-descent parser needs the room.
+ */
+internal object ModuleParsePool {
+    val executor: java.util.concurrent.ExecutorService by lazy {
+        java.util.concurrent.Executors.newFixedThreadPool(
+            maxOf(1, Runtime.getRuntime().availableProcessors()),
+        ) { r -> Thread(null, r, "module-parser", 1L shl 28).apply { isDaemon = true } }
+    }
+}
+
 class ModuleResolver(
     currentPath: Path = Paths.get("."),
     /**
@@ -349,11 +371,6 @@ class ModuleResolver(
         private val worlds = java.util.concurrent.ConcurrentHashMap<World, Caches>()
 
         private fun caches(world: World): Caches = worlds.computeIfAbsent(world) { Caches() }
-
-        /** Parses a stamping pass's modules ahead of it (see prefetch). Daemon threads, deep stacks. */
-        private val PARSERS = java.util.concurrent.Executors.newFixedThreadPool(
-            maxOf(1, Runtime.getRuntime().availableProcessors()),
-        ) { r -> Thread(null, r, "module-parser", 1L shl 28).apply { isDaemon = true } }
 
                 @Volatile
         private var store: MezzeStore? = null
@@ -895,7 +912,7 @@ class ModuleResolver(
             }
             if (wanted.isEmpty()) return
             val parsed = wanted.map { (dep, via) ->
-                PARSERS.submit<Raw?> {
+                ModuleParsePool.executor.submit<Raw?> {
                     val src = via.readSource(dep) ?: return@submit null
                     // A module that does not parse is reported where the pass meets it.
                     val module = try { PhaseTiming.phase(dep, "parse") { via.parse(src) } } catch (_: ModuleError.ParseError) { return@submit null }

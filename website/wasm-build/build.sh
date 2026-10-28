@@ -189,6 +189,7 @@ docker run --rm \
       -H:+EnableFallbackCompilation \
       -H:IncludeResources='.*\.mz\$' \
       --initialize-at-build-time=com.mezze,kotlin,kotlinx \
+      --initialize-at-run-time=com.mezze.language.typechecker.ModuleParsePool \
       -cp \"\$(cat '$IMAGE_CP_FILE'):/tmp/classes\" \
       -H:WasmAsPath=$BINARYEN/bin/wasm-as \
       MezzeWeb -o /out/mezze
