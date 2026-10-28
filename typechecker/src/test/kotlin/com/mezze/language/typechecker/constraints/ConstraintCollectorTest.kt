@@ -47,6 +47,7 @@ class ConstraintCollectorTest {
         doBindingSolvedTypes = mapOf(loc to MezzeType.IntType),
         performFullyDischarged = mapOf(loc to true),
         lambdaParamTypes = mapOf(other to mapOf("p" to MezzeType.IntType)),
+        lambdaRowInstances = mapOf(other to setOf(MezzeType.EffectInstance("Exception", emptyMap()))),
     )
 
     private val fields = ConstraintResult::class.java.declaredFields.filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) }

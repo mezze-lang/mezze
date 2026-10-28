@@ -177,6 +177,7 @@ class ExpressionConstraintGenerator {
         // Per-lambda solved param types, merged up like callReturnTypes so a
         // lambda nested anywhere reaches the top-level decl's ConstraintResult.
         val lambdaParamTypes = mutableMapOf<Loc, Map<String, MezzeType>>()
+        val lambdaRowInstances = mutableMapOf<Loc, Set<MezzeType.EffectInstance>>()
 
         val patternWarnings = mutableListOf<String>()
         val expectedTypeAt = mutableMapOf<Loc, MezzeType>()
@@ -213,6 +214,7 @@ class ExpressionConstraintGenerator {
             doBindingSolvedTypes.putAll(result.doBindingSolvedTypes)
             performFullyDischarged.putAll(result.performFullyDischarged)
             lambdaParamTypes.putAll(result.lambdaParamTypes)
+            lambdaRowInstances.putAll(result.lambdaRowInstances)
             patternWarnings.addAll(result.patternWarnings)
             expectedTypeAt.putAll(result.expectedTypeAt)
             matchCaseBindings.putAll(result.matchCaseBindings)
@@ -235,6 +237,7 @@ class ExpressionConstraintGenerator {
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
             lambdaParamTypes = lambdaParamTypes,
+            lambdaRowInstances = lambdaRowInstances,
             matchScrutineeTypes = matchScrutineeTypes,
             pendingClosureArgEffects = pendingClosureArgEffects,
             duplicateBindings = duplicateBindings,

@@ -95,7 +95,9 @@ class EmitFileSizeRatchetTest {
             // no call site could resolve a constraint on it. Filling it from the
             // lambda's own recorded row belongs where the lambda is stamped, so
             // the bound moves rather than the code.
-            E + "TypedAstBuilder.kt" to 2392,    // was 3,107
+            // +2 on the rebase onto main: main grew this file too, and our +42
+            // landed on top of it. The bound tracks the file, not either change.
+            E + "TypedAstBuilder.kt" to 2394,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(
