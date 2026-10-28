@@ -7,11 +7,40 @@ in its section, and 29/30/32's acceptance programs were re-measured on 2026-10-2
 because their entries had been left saying OPEN after the fixes landed — a stale
 header is how a fixed bug gets investigated twice.
 
-Note for anyone reading the memory index alongside this file: that index lags.
-Two of its "OPEN" typechecker entries were checked on 2026-10-28 and are stale —
-`DictPlumbingTest` no longer exists, and `CallbackTailEscapesClosedRowTest` now
-asserts the laundering is REJECTED. Trust a green test or a measurement here,
-not a note.
+### The 2026-10-28 sweep: twelve "open" claims, twelve stale
+
+Everything claimed open OUTSIDE this file was re-run. All twelve were stale:
+
+| claim | what the re-run found |
+|---|---|
+| callback row var launders past a closed row | `CallbackTailEscapesClosedRowTest` asserts it is REJECTED, green |
+| nested-spread record override = silent corruption (HIGH) | `ExprRecordConstraints` opens the field type on a fresh row var and unifies the override in (H1, b922e4981) |
+| 4 confirmed soundness holes | that file's own body has said ALL FOUR FIXED since 2026-08-30 |
+| receiverless op: #159 L-3, #160 S-3 open | its own table marks both fixed |
+| dict family S-17 "blocks container Arbitrary" | `ArbitraryContainerTest`, `ArbitraryBuiltinContainerTest` green |
+| dict plumbing: `catching_any` needs a NAMED handler | fixed 2026-10-28 — `lambdaRowInstances`; the inline-handler test passes |
+| dict plumbing: perform-region Result out of a handler | `HttpIntoResponseTest` pins it WORKING (`500no such id`) |
+| `AsyncNatives.CURRENT_SCOPE` ThreadLocal leak | `resetPerThreadScope()` runs on both dispose hooks, per thread, complete |
+| `FunctionType.effects` traversal gap | `anyChild` and `transformChildren` both walk the row |
+| impl TARGET is a spelling, `use … as` unfindable | does not reproduce; three-module repro accepted → `ImplTargetThroughRenamedImportTest` |
+| #195 gap 3: dict-passing needs multi-candidate | the gate reads `arrowIsConstrained` FIRST → `SingleCandidateAbilityDispatchTest` |
+| #22 polyglot lift-and-launder hole | fixed in e02d7a570; only the index said otherwise |
+| cross-context static leaks (4 remaining) | no demonstrated leak: the remaining statics hold scalars/resources and self-clear; two are deliberate keeps |
+
+`DictPlumbingTest`, cited by one of those notes, no longer exists.
+
+TWO LESSONS, because they are why the list was wrong for weeks:
+
+  1. A note's one-line summary is the LEAST reliable part of it. Several said
+     OPEN while their own body said FIXED — bodies were updated when fixes
+     landed, summaries were not. Read the body, and prefer a green test or a
+     measurement to either.
+  2. EVERY stale claim had NO TEST. That is what let it outlive its fix. The two
+     whose absence of a test cost a fresh investigation now have one.
+
+Nothing was "fixed" speculatively in this sweep. Where a claim could not be
+demonstrated — the seeded-RNG cross-context case — it stays documented and
+untouched, which is what its own note already said to do.
 
 **STATUS 2026-09-22: every bug 1-25 in this file is CLOSED.** It opened as a hand-off
 list of open bugs surfaced while building the `mezze-showcase` polyglot demo (one
