@@ -155,6 +155,22 @@ class DeclarationRegistry(
             // cross-module type resolve by hash without making that type's name
             // resolvable (keeps import-scoping + avoids name collisions).
             hashOnlyTypeDecls: Collection<ParsedTypeDecl> = emptyList(),
+            // A type's hash under its MODULE-QUALIFIED spelling, `std::syntax::Expr`.
+            // `let s: std::syntax::Expr = …` converted to a TypeApplication whose
+            // constructor was that whole string and whose hash was null, because no
+            // resolver knew a qualified name — so it unified only with itself and
+            // every value of the type was rejected against it, while the same line
+            // under `use std::syntax::{ Expr }` passed.
+            //
+            // Keyed by spelling rather than resolved to the bare name on purpose:
+            // the bare name would discard the qualifier, which is the one thing the
+            // author wrote to disambiguate, and `allTypeHashesByName` holds one
+            // entry per bare name across every loaded module. With the hash
+            // stamped, `lookupType` finds the declaration BY HASH and
+            // `unifyTypeApplications` relates the two spellings through
+            // `sameDeclaredIdentity` — the same mechanism that already makes a
+            // renamed import unify with its declaration.
+            qualifiedTypeHashes: Map<String, Hash> = emptyMap(),
         ): DeclarationRegistry {
             // Every type decl arrives stamped (DeclIdentity), so every MezzeType
             // built from a registry decl carries a real nominal identity (Declared).
@@ -166,6 +182,9 @@ class DeclarationRegistry(
             // collision (same hash = same type, so order is immaterial, but keep
             // it deterministic).
             for (d in typeDeclsStamped.values) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }
+            // A qualified key contains "::" and so can never collide with a bare
+            // name; added last, and only ever ADDING resolvable spellings.
+            hashByName.putAll(qualifiedTypeHashes)
             return DeclarationRegistry(
                 typesByName = typeDeclsStamped,
                 typesByHash = byHash,

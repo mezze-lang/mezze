@@ -1060,9 +1060,15 @@ class TypeChecker(
         // shared getAllCachedModules() set), so unrelated modules can't leak in
         // and shadow a same-named type/ability across independent typechecks.
         val transitiveTypesByHash = mutableMapOf<String, ParsedTypeDecl>()
-        for ((_, mod) in loadedModules) {
+        // …and the same declarations under their qualified spelling, so
+        // `std::syntax::Expr` in an annotation resolves to the same declaration
+        // `use std::syntax::{ Expr }` would reach. The module path was being
+        // discarded here, which is why no resolver knew a qualified name.
+        val qualifiedTypeHashes = mutableMapOf<String, Hash>()
+        for ((modulePath, mod) in loadedModules) {
             mod.declarationHeaders.filterIsInstance<ParsedTypeDecl>().forEach {
                 transitiveTypesByHash[it.name] = it
+                it.contentHash?.let { h -> qualifiedTypeHashes["${modulePath.fullPath}::${it.name}"] = h }
             }
         }
         val allTypeDeclarations = buildResult.registry.typeDeclarations +
@@ -1087,6 +1093,7 @@ class TypeChecker(
         return DeclarationRegistry.from(
             allTypeDeclarations, allAbilityDeclarations, allEffectDeclarations,
             hashOnlyTypeDecls = transitiveTypesByHash.values,
+            qualifiedTypeHashes = qualifiedTypeHashes,
         )
     }
 
