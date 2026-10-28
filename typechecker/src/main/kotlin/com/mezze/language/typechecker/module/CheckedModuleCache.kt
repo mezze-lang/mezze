@@ -81,10 +81,11 @@ object CheckedModuleCache {
 
     private val pending = java.util.concurrent.ConcurrentLinkedQueue<java.util.concurrent.Future<*>>()
 
-    /** Daemon threads: a run that ends without [flush] keeps what it finished. */
-    private val writers = java.util.concurrent.Executors.newFixedThreadPool(
-        maxOf(1, Runtime.getRuntime().availableProcessors() / 2),
-    ) { r -> Thread(r, "checked-module-writer").apply { isDaemon = true } }
+    /** Daemon threads: a run that ends without [flush] keeps what it finished.
+     *  Via [com.mezze.language.typechecker.MezzeExecutors] so the single-threaded
+     *  WASM web image writes inline instead of crashing on Thread.start(). */
+    private val writers = com.mezze.language.typechecker.MezzeExecutors.newPool(
+        "checked-module-writer", Runtime.getRuntime().availableProcessors() / 2, 0L)
 
     private fun <T> read(bytes: ByteArray, serializer: KSerializer<T>): T? = try {
         TypeSharing.read { cbor.decodeFromByteArray(serializer, bytes) }

@@ -295,12 +295,13 @@ private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
  * the matching `--initialize-at-run-time` for THIS leaf (see wasm-build) defers
  * even its class init, so the guarantee doesn't rest on "nothing touched it".
  * Daemon threads with deep stacks: the recursive-descent parser needs the room.
+ * The pool comes from [MezzeExecutors], so in the single-threaded WASM web image
+ * (where a platform thread cannot be started) it is a same-thread executor and
+ * every submitted parse runs inline.
  */
 internal object ModuleParsePool {
     val executor: java.util.concurrent.ExecutorService by lazy {
-        java.util.concurrent.Executors.newFixedThreadPool(
-            maxOf(1, Runtime.getRuntime().availableProcessors()),
-        ) { r -> Thread(null, r, "module-parser", 1L shl 28).apply { isDaemon = true } }
+        MezzeExecutors.newPool("module-parser", Runtime.getRuntime().availableProcessors(), 1L shl 28)
     }
 }
 
@@ -911,14 +912,14 @@ class ModuleResolver(
                     .map { dep -> dep to resolver }
             }
             if (wanted.isEmpty()) return
-            val parsed = wanted.map { (dep, via) ->
-                ModuleParsePool.executor.submit<Raw?> {
-                    val src = via.readSource(dep) ?: return@submit null
-                    // A module that does not parse is reported where the pass meets it.
-                    val module = try { PhaseTiming.phase(dep, "parse") { via.parse(src) } } catch (_: ModuleError.ParseError) { return@submit null }
-                    Raw(src, module, via.resolverFor(src.filePath))
-                }
-            }.mapNotNull { it.get() }
+            // A module that does not parse is reported where the pass meets it.
+            fun parseOne(dep: String, via: ModuleResolver): Raw? {
+                val src = via.readSource(dep) ?: return null
+                val module = try { PhaseTiming.phase(dep, "parse") { via.parse(src) } } catch (_: ModuleError.ParseError) { return null }
+                return Raw(src, module, via.resolverFor(src.filePath))
+            }
+            val parsed = wanted.map { (dep, via) -> ModuleParsePool.executor.submit<Raw?> { parseOne(dep, via) } }
+                .mapNotNull { it.get() }
             for (raw in parsed) raws.putIfAbsent(raw.source.modulePath, raw)
             frontier = parsed.map { Triple(it.parsed, it.source.modulePath, it.resolver) }
         }

@@ -166,8 +166,12 @@ public final class MezzeWeb {
                         ParseErrorFormatter.INSTANCE.format(pe)
                             .replace("/tmp/playground.mz", "playground.mz")));
             }
+            // Never surface a bare "null": an exception with no message (e.g.
+            // IllegalThreadStateException) left the playground showing "error at ? null",
+            // which is impossible to diagnose from the page. Fall back to the class name.
+            String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
             return "{\"status\":\"ERRORS\",\"diagnostics\":[{\"severity\":\"ERROR\",\"message\":"
-                 + jsonStr(String.valueOf(t.getMessage())) + "}]}";
+                 + jsonStr(msg) + "}]}";
         }
     }
 
@@ -623,6 +627,12 @@ public final class MezzeWeb {
     }
 
     public static void main(String[] args) {
+        // This is the single-threaded GraalVM web image: a platform thread cannot
+        // be started (even one small probe thread can start, but the real parse/
+        // check pools with their large stacks throw IllegalThreadStateException).
+        // Tell MezzeExecutors to run everything inline here. Set before any
+        // typecheck so the pools never attempt a thread.
+        System.setProperty("mezze.wasm.singleThreaded", "true");
         System.setProperty("polyglot.engine.allowUnsupportedPlatform", "true");
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false");
         System.setProperty("polyglot.engine.userResourceCache", "/tmp/tcache");

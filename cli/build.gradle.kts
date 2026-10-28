@@ -54,6 +54,19 @@ kotlin {
 val precompileOnly: Configuration by configurations.creating {
     isCanBeConsumed = false
     isCanBeResolved = true
+    // Resolve shared libraries at the SAME versions as :cli's own runtime
+    // classpath. Without this, precompileOnly (which only declares :interpreter)
+    // misses the kotlinx-serialization 1.9.0 constraint that runtimeClasspath
+    // picks up transitively, and resolves kotlinx-serialization to 1.6.2. Both
+    // versions then coexist wherever precompileOnly is concatenated with
+    // runtimeClasspath (printRuntimeClasspath → the WASM classpath, and the
+    // native-classpath.zip embedded in `mez`). native-image orders that
+    // classpath alphabetically, so 1.6.2 sorts first and DECODES the
+    // stdlib snapshot that 1.9.0 ENCODED — the two CBOR formats disagree on
+    // structures, so every decode dies with "Field 'hex' is required for
+    // Hash, but it was missing", and in the browser (snapshot-only, no source
+    // fallback) that surfaces as every `use std::` program failing.
+    shouldResolveConsistentlyWith(configurations["runtimeClasspath"])
 }
 
 dependencies {
@@ -296,6 +309,14 @@ val compileStdlib by tasks.registering(JavaExec::class) {
 
     // Needs access to stdlib source files for parsing
     systemProperty("mezze.project.root", stdlibDir.absolutePath)
+
+    // The WASM build passes -PslimSnapshot=true to omit stdlib TypedModules from
+    // the snapshot (~22 MB the browser image bakes into its heap but never needs —
+    // they only drive a mono fast-path). A task input, so the snapshot is
+    // regenerated whenever the flag flips between a WASM and a JVM/native build.
+    val slimSnapshot = (project.findProperty("slimSnapshot") as String?) == "true"
+    inputs.property("slimSnapshot", slimSnapshot)
+    systemProperty("mezze.snapshot.slim", slimSnapshot.toString())
 }
 
 // Include pre-compiled stdlib.sqlite as a JAR resource via the

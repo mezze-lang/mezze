@@ -55,7 +55,10 @@ fi
 MODULES="ast parser typechecker langservice stdlib store interpreter datastructures formatter cli"
 
 say "Building JVM artifacts"
-(cd "$REPO" && ./gradlew --quiet $(for m in $MODULES; do printf ':%s:jar ' "$m"; done))
+# -PslimSnapshot=true omits stdlib TypedModules from the embedded snapshot: ~22 MB
+# the browser image bakes into its heap but never needs (a mono fast-path only).
+# Keeps the WASM runtime loadable; JVM/native builds omit the flag and keep them.
+(cd "$REPO" && ./gradlew --quiet -PslimSnapshot=true $(for m in $MODULES; do printf ':%s:jar ' "$m"; done))
 
 # The classpath is staged by hand. Gradle's is wrong here for two reasons:
 #
@@ -150,6 +153,24 @@ done
 [[ -n "$snapshot_jar" ]] ||
   { echo "no stdlib-snapshot.cbor on the classpath — the image would have no stdlib" >&2; exit 1; }
 
+# A library staged at two different versions is a silent correctness bug: the
+# stdlib snapshot is CBOR-encoded by whichever version the gradle build resolved,
+# but native-image builds its classpath alphabetically (the `paste` below), so a
+# lower version sorting first DECODES what the higher one ENCODED. The two CBOR
+# formats need not agree — kotlinx-serialization 1.6.2 reading 1.9.0's bytes threw
+# "Field 'hex' is required for Hash, but it was missing" and, with no source
+# fallback in the browser, broke every `use std::` program in the playground.
+# Catch it here rather than ship another broken runtime.
+dupes=$(for j in "$STAGE"/*.jar; do
+          b=$(basename "$j")
+          printf '%s\t%s\n' "$(printf '%s' "$b" | sed -E 's/-[0-9][0-9A-Za-z.]*\.jar$//')" "$b"
+        done | sort -u | awk -F'\t' '{ n[$1]++; seen[$1]=seen[$1] " " $2 } END { for (k in n) if (n[k] > 1) print k ":" seen[k] }')
+if [[ -n "$dupes" ]]; then
+  echo "staged classpath carries a library at two versions — the snapshot would not round-trip:" >&2
+  printf '  %s\n' "$dupes" >&2
+  exit 1
+fi
+
 printf '%s\n' "$STAGE"/*.jar | paste -sd: - > "$CP_FILE"
 [[ -s "$CP_FILE" ]] || { echo "staging produced an empty classpath" >&2; exit 1; }
 IMAGE_CP_FILE="$CP_FILE"
@@ -190,6 +211,7 @@ docker run --rm \
       -H:IncludeResources='.*\.mz\$' \
       --initialize-at-build-time=com.mezze,kotlin,kotlinx \
       --initialize-at-run-time=com.mezze.language.typechecker.ModuleParsePool \
+      --initialize-at-run-time=com.mezze.language.typechecker.MezzeExecutors \
       -cp \"\$(cat '$IMAGE_CP_FILE'):/tmp/classes\" \
       -H:WasmAsPath=$BINARYEN/bin/wasm-as \
       MezzeWeb -o /out/mezze

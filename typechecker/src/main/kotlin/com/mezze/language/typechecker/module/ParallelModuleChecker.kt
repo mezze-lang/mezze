@@ -5,7 +5,6 @@ import com.mezze.language.parsedast.ParsedModule
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.World
-import java.util.concurrent.Executors
 
 /**
  * Checks a program's project modules before its entry does, many at a time.
@@ -63,7 +62,11 @@ object ParallelModuleChecker {
         if (imports.size < 2) return
         // Every module looks itself up in the cache store first: open it now,
         // beside the work, rather than with every worker waiting on it.
-        ModuleResolver.cacheStore?.let { store -> Thread { store.value }.apply { isDaemon = true }.start() }
+        ModuleResolver.cacheStore?.let { store ->
+            if (com.mezze.language.typechecker.MezzeExecutors.platformThreadsAvailable)
+                Thread { store.value }.apply { isDaemon = true }.start()
+            else store.value
+        }
 
         val waitingOn = HashMap<String, Int>()
         val importers = HashMap<String, MutableList<String>>()
@@ -72,9 +75,7 @@ object ParallelModuleChecker {
             for (d in deps) importers.getOrPut(d) { ArrayList() } += path
         }
 
-        val pool = Executors.newFixedThreadPool(n) { r ->
-            Thread(null, r, "module-checker", STACK_BYTES).apply { isDaemon = true }
-        }
+        val pool = com.mezze.language.typechecker.MezzeExecutors.newPool("module-checker", n, STACK_BYTES)
         val lock = Object()
         var inFlight = 0
         fun start(path: String) {

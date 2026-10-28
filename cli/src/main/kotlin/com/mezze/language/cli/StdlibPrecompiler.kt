@@ -341,6 +341,13 @@ fun main(args: Array<String>) {
         println("Not preloaded (typed form over ${MAX_SHIPPED_MODULE_BYTES / 1_000_000} MB): ${tooLarge.map { it.modulePath }.sorted()}")
     }
     val shippedTyped = precompiled.stdlibTypedModules + checked.associate { it.typedModule!!.hash to it.typedModule!! }
+    // The WASM image bakes the whole snapshot into the heap, and the typed
+    // modules are ~22 MB of that — a mono fast-path the browser does not need
+    // (it type-checks user code against the stamped + lowered stdlib either way).
+    // `-Dmezze.snapshot.slim=true` (set only by the WASM build) omits them so the
+    // browser image stays loadable; JVM/native builds keep them.
+    val slimSnapshot = System.getProperty("mezze.snapshot.slim") == "true"
+    if (slimSnapshot) println("Slim snapshot: omitting ${shippedTyped.size} typedModules (WASM build)")
     val snapshot = com.mezze.language.typechecker.StdlibSnapshot(
         importContext = precompiled.preludeImportContext,
         functions = functions,
@@ -350,8 +357,9 @@ fun main(args: Array<String>) {
         declHashes = precompiled.stdlibDeclHashes,
         moduleHashes = precompiled.stdlibModuleHashes,
         // #415: ship TypedModules so mono can specialize any callsite
-        // that flows through a polymorphic stdlib decl.
-        typedModules = shippedTyped,
+        // that flows through a polymorphic stdlib decl. Omitted for the WASM
+        // image (slim), which trades that fast-path for ~22 MB off the heap.
+        typedModules = if (slimSnapshot) emptyMap() else shippedTyped,
         identities = com.mezze.language.typechecker.StdlibIdentities.table(),
         modules = checked.mapNotNull { com.mezze.language.typechecker.module.CachedModule.of(it) },
         dictMethods = precompiled.preloweredDictMethods,
