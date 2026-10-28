@@ -21,9 +21,14 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
  *  - effect names in `<...>` rows and effect-op effect lists (separate namespace),
  *  - ability names in `with`/`having` constraint position (separate namespace),
  *  - type variables (`'a`, lowercase-initial — `isTypeVarName`),
- *  - qualified names (`mod::Type`) — carry an explicit module path resolved by the
- *    import machinery, a different namespace; skipped to avoid false positives
- *    (their args ARE walked).
+ *  - qualified names (`mod::Type`) are now CHECKED. They were skipped, justified
+ *    as "resolved by the import machinery" — which was written when no resolver
+ *    knew a qualified name at all, so `std::syntax::NoSuchTypeHere` and even
+ *    `no::such::module::Thing` type-checked: the annotation became a type
+ *    application with no identity that unified only with itself, and the program
+ *    was accepted until some concrete value had to match it. Now that a
+ *    qualified spelling resolves to its declaration, a spelling that resolves to
+ *    NOTHING is a dangling reference like any other.
  * Associated-type binding VALUES (`having 'x = T`) and constraint type-args ARE
  * type positions and are walked; the ability/effect NAME itself is not.
  */
@@ -80,8 +85,7 @@ internal class UnknownTypeValidator(
                 for (arg in annotation.args) walk(arg, errors)
             }
             is ParsedQualifiedType -> {
-                // Qualified name: explicit module path, resolved by import machinery
-                // (separate namespace). Skip the constructor name; still walk args.
+                checkQualified(annotation, errors)
                 for (arg in annotation.args) walk(arg, errors)
             }
             is ParsedSeqType -> walk(annotation.elementType, errors)
@@ -94,6 +98,38 @@ internal class UnknownTypeValidator(
                 for (c in annotation.abilityConstraints) walkConstraint(c, errors)
             }
         }
+    }
+
+    /**
+     * A qualified spelling must name something.
+     *
+     * A BUILTIN is matched on its last segment, because a builtin belongs to no
+     * module and `std::collections::map::Map` is the same type as `Map`.
+     *
+     * Otherwise the whole spelling is looked up: the registry indexes every
+     * LOADED type under its qualified name. A module nothing imports is not
+     * loaded, so a qualified reference does not itself pull one in — that would
+     * be module-resolution work, and until it exists, refusing is the honest
+     * answer rather than accepting a type that unifies with nothing.
+     */
+    private fun checkQualified(annotation: ParsedQualifiedType, errors: MutableList<ValidationError>) {
+        if (annotation.typeName.isTypeVarName()) return
+        // Globally nameable — a builtin belongs to no module, and a well-known
+        // stdlib type resolves bare without an import, so a qualified spelling of
+        // either names the same type. Matched on the LAST SEGMENT for exactly
+        // that reason; see the converter's qualified arm for why the qualifier
+        // goes unchecked here.
+        if (BuiltinTypes.isBuiltinTypeName(annotation.typeName)) return
+        if (WellKnownHashConstants.resolveTypeHash(annotation.typeName) != null) return
+        val qualified = (annotation.modulePath + annotation.typeName).joinToString("::")
+        if (registry.lookupType(qualified) != null) return
+        if (registry.typeHashFor(qualified) != null) return
+        if (WellKnownHashConstants.resolveTypeHash(qualified) != null) return
+        errors.add(ValidationError.UnknownType(
+            typeName = qualified,
+            availableTypes = registry.typeNames.sorted(),
+            loc = annotation.loc,
+        ))
     }
 
     private fun checkName(name: String, loc: Loc, errors: MutableList<ValidationError>) {

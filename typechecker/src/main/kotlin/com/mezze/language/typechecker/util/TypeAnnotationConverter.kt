@@ -79,6 +79,14 @@ object TypeAnnotationConverter {
      * `typeHashFor`'s table also carries types known only by hash. A name that is
      * neither is a builtin or a primitive, which legitimately has no decl hash.
      */
+    /** True when a type needs no import to be named: a builtin, or a well-known
+     *  stdlib type. Both are global, so a module-qualified spelling of one must
+     *  denote the same type as the bare spelling. */
+    internal fun isGloballyNameable(typeName: String, config: ConversionConfig): Boolean =
+        com.mezze.language.ast.BuiltinTypes.isBuiltinTypeName(typeName) ||
+            config.resolveTypeHash(typeName) != null &&
+            com.mezze.language.typechecker.WellKnownHashConstants.resolveTypeHash(typeName) != null
+
     fun registryConfig(
         registry: DeclarationRegistry,
         typeParamSubst: Map<String, MezzeType>? = null,
@@ -354,12 +362,45 @@ object TypeAnnotationConverter {
             is ParsedSeqType -> com.mezze.language.ast.BuiltinTypes.seqApp(recurse(annotation.elementType))
 
             is ParsedQualifiedType -> {
+                // A BUILTIN belongs to no module — `Map` is global, not a member of
+                // `std::collections::map` — so `std::collections::map::Map Str Int`
+                // and `Map Str Int` have to be ONE type. Resolve those on the last
+                // segment, producing exactly what the bare spelling produces.
+                //
+                // The qualifier is then not checked, because nothing records which
+                // module a builtin would belong to: `std::str::Map` resolves too.
+                // Accepted deliberately — the alternative is a builtin-to-module
+                // table invented for this one check, and a wrong qualifier on a
+                // builtin is a spelling slip, not a type error waiting to happen.
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                WellKnownTypeApp.of(
-                    constructor = qualifiedName,
-                    args = annotation.args.map { recurse(it) },
-                    typeHash = config.resolveTypeHash(qualifiedName)
-                )
+                val qualifiedHash = config.resolveTypeHash(qualifiedName)
+                // A GLOBALLY NAMEABLE type is one no import is needed for: a
+                // builtin (`Map` belongs to no module at all) or a well-known
+                // stdlib type (`Expr` resolves bare through
+                // `WellKnownHashConstants`, measured). For those, the qualified
+                // and bare spellings have to mean ONE type, so resolve on the
+                // last segment and produce exactly what the bare spelling does.
+                //
+                // The qualifier then goes unchecked for these — `std::str::Map`
+                // resolves as readily as `std::collections::map::Map` — because
+                // nothing records which module such a type would belong to, and
+                // for a builtin the answer is "none". Accepted deliberately: the
+                // alternative is inventing a type-to-home-module table for this
+                // one check, and a wrong qualifier on a global type is a spelling
+                // slip, not a type error waiting to happen.
+                if (qualifiedHash == null && isGloballyNameable(annotation.typeName, config)) {
+                    WellKnownTypeApp.of(
+                        constructor = annotation.typeName,
+                        args = annotation.args.map { recurse(it) },
+                        typeHash = config.resolveTypeHash(annotation.typeName),
+                    )
+                } else {
+                    WellKnownTypeApp.of(
+                        constructor = qualifiedName,
+                        args = annotation.args.map { recurse(it) },
+                        typeHash = qualifiedHash,
+                    )
+                }
             }
         }
     }

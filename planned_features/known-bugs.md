@@ -1,8 +1,8 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-28: TWO open bugs in this file** — BUG 28 at the end, and the
-module-qualified type annotation below (found 2026-10-22, came in from main).
-Numbered bugs 26, 29, 30, 31, 32 and 33 are fixed, 27 closed as a class. Each fix has a regression test named
+**STATUS 2026-10-28: BUG 28 at the end is the only open bug in this file.** The
+module-qualified type annotation below is fixed, as are numbered bugs 26, 29, 30,
+31, 32 and 33; 27 closed as a class. Each fix has a regression test named
 in its section, and 29/30/32's acceptance programs were re-measured on 2026-10-28
 because their entries had been left saying OPEN after the fixes landed — a stale
 header is how a fixed bug gets investigated twice.
@@ -2627,7 +2627,7 @@ Gates for every change: `:typechecker:test` and `:interpreter:test` SEPARATELY,
 
 ---
 
-## OPEN (2026-10-22) — a module-qualified type annotation never resolves to its declaration
+## FIXED (2026-10-28) — a module-qualified type annotation never resolved to its declaration
 
 **Symptom.** `let s: std::syntax::Expr = IntExpr { … }` fails with *declared as
 std::syntax::Expr but expression has type Expr*, while the same line with
@@ -2648,6 +2648,80 @@ one resolution for both spellings, not a second walker.
 
 **Found while** anchoring quotes to `std::syntax` types; quotes avoid it by
 bringing the types into scope under hidden names (`QuoteTypes`).
+
+### FIXED 2026-10-28 — the module path was being discarded
+
+The fix direction above was right about WHERE, and the cause was narrower than
+"no resolver knows a qualified name": `TypeChecker` walks
+`loadedModules: Map<ModulePath, …>` to index every loaded type and wrote
+
+```kotlin
+for ((_, mod) in loadedModules) {            // key discarded
+    transitiveTypesByHash[it.name] = it      // bare name only
+}
+```
+
+The path was available one line before it was needed. Indexing each loaded type
+under its qualified spelling as well is the whole of part 1; everything
+downstream was already hash-driven and needed no change —
+`DeclarationRegistry.resolve` prefers the hash over the name, so
+`declarationFor` finds the declaration and variant expansion works, and
+`unifyTypeApplications` relates the two spellings through `sameDeclaredIdentity`,
+the same mechanism that already lets a renamed import unify with its
+declaration. No second walker, as the fix direction asked.
+
+Keyed by SPELLING, never reduced to the bare name: `allTypeHashesByName` holds
+one entry per bare name across every loaded module, so resolving `a::b::T` by
+looking up `T` would answer with whichever module won that slot.
+
+Two more parts came out of probing it:
+
+  2. A GLOBALLY NAMEABLE type resolves on its LAST SEGMENT. A builtin belongs to
+     no module — `Map` is not a member of `std::collections::map` — and a
+     well-known stdlib type resolves bare with no import at all (measured:
+     `WellKnownHashConstants.resolveTypeHash("Expr")` answers). For those the
+     qualified and bare spellings must denote ONE type. USER DECISION: both
+     spellings resolve to the same type, rather than the module not exposing the
+     name.
+  3. A qualified spelling resolving to NOTHING is now refused.
+     `std::syntax::NoSuchTypeHere` and `no::such::module::Thing` type-checked
+     before — `UnknownTypeValidator` skipped qualified names, justified as
+     "resolved by the import machinery", which was written when none of them
+     resolved.
+
+### KNOWN COST of part 2, pinned as a test
+
+The qualifier goes UNCHECKED for a global type: `std::str::Map Str Int` resolves
+as readily as `std::collections::map::Map Str Int`. Nothing records which module
+such a type would belong to, and for a builtin the answer is "none", so checking
+it means inventing a type-to-home-module table for this one case. Accepted
+deliberately; `a builtin under a wrong module path still resolves` pins it so a
+change is a decision.
+
+### Two things I got wrong on the way, so they are not re-derived
+
+  - I called bare `Expr`-without-import a TRANSITIVE SCOPE LEAK. It is not.
+    Instrumenting `UnknownTypeValidator.checkName` printed
+    `wellKnown=true` — it is a well-known stdlib type, globally nameable by
+    design. The asymmetry was that the QUALIFIED form alone was refused, i.e.
+    the explicit spelling losing to the implicit one, which part 2 fixes.
+  - I added a targeted "module is not imported here" diagnostic
+    (`QualifiedTypeModuleNotImported`) with a confident comment. A probe printed
+    `bareResolves=false` on the very case it was written for: it could never
+    fire. Deleted rather than shipped.
+
+Also corrected: a first attempt at a test used
+`std::collections::map::Map Str Int` as the "declared type with arguments" case.
+`Map` is a BUILTIN, so that spelling named nothing and the test failed for a
+reason unrelated to what it claimed to check. It is now the builtin case, which
+is what it always was.
+
+### Acceptance — met
+
+`QualifiedTypeAnnotationTest`, nine cases. Each of the three parts is
+independently break-verified: removing part 1 fails the two resolution cases,
+part 2's converter half fails the two builtin cases, its validator half fails the
+no-import case, and part 3 fails the two refusal cases.
 
 ---
 
