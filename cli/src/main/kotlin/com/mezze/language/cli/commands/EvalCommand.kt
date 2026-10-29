@@ -259,7 +259,7 @@ class EvalCommand {
         println("  mez eval 'big_value' --depth=2         stop at depth 2")
         println("  mez eval 'config' --json               the value as a tree")
         println()
-        println("  --session=FILE     evaluate on a running `mez dev` (its .mezze/session.json),")
+        println("  --session=FILE     evaluate on a running `mez dev` (its .mez/session.json),")
         println("                     not a freshly spawned runtime — no JDK of its own needed")
         println("  --session-id=ID    run on a persistent, isolated session so successive evals")
         println("                     share runtime state (used by the editor's inline eval)")

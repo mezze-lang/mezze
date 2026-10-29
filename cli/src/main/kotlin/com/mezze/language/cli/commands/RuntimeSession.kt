@@ -27,7 +27,7 @@ import java.net.Socket
  *
  * Unlike [WireSession], this does NOT spawn or own a JVM — it connects to the
  * warm runtime `mez dev` already runs in the project's devenv shell (published
- * as `.mezze/session.json`). Compilation stays on THIS side (native `mez`, no JDK needed); only
+ * as `.mez/session.json`). Compilation stays on THIS side (native `mez`, no JDK needed); only
  * EXECUTION happens in the runtime. The EVAL closure is self-contained ("all
  * modules are already in the FunctionIR list"), so nothing has to be loaded
  * into that runtime's world first and a sample cannot perturb a running

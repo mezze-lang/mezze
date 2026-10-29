@@ -41,7 +41,7 @@ const SAMPLE_INITIAL_COUNT = 6, SAMPLE_STEP = 6, SAMPLE_MAX_COUNT = 60;
 // the editor knows there is a warm runtime (on the devenv shell's toolchain) to
 // attach to; absent, there is nothing to sample against.
 function sessionFileFor(root: string): string | undefined {
-    const f = path.join(root, '.mezze', 'session.json');
+    const f = path.join(root, '.mez', 'session.json');
     return fs.existsSync(f) ? f : undefined;
 }
 
@@ -273,7 +273,7 @@ function sampleNeedsDevHtml(fn: string): string {
       <p>Sampling runs on a warm runtime that <code>mez dev</code> hosts, so it uses your
          project's own toolchain.</p>
       <p>Start it in a terminal in this project — <code>mez dev</code> — then click the lens
-         again. It publishes <code>.mezze/session.json</code> and the sampler attaches to it.</p>
+         again. It publishes <code>.mez/session.json</code> and the sampler attaches to it.</p>
     </body></html>`;
 }
 

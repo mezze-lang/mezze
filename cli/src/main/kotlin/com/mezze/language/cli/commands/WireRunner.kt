@@ -163,17 +163,17 @@ object WireRunner {
         // over the socket, sharing one eval worker.
         //
         // EXACTLY ONE dev hosts the session per project, decided by a non-blocking
-        // lock on `.mezze/session.lock`. Without it, two `mez dev` in one project
-        // would both write `.mezze/session.json` (last-writer-wins, orphaning the
+        // lock on `.mez/session.lock`. Without it, two `mez dev` in one project
+        // would both write `.mez/session.json` (last-writer-wins, orphaning the
         // other's live port) and each delete it on exit — so one quitting would
         // wipe the survivor's session. With the lock, a second dev runs its watch
         // loop but does not publish; the OS drops the lock if the holder dies, so
         // a dev started after that can become the host. The host cleans the file
         // on exit so it never points at a dead port.
-        val sessionFile = File(currentDir, ".mezze/session.json")
+        val sessionFile = File(currentDir, ".mez/session.json")
         sessionFile.parentFile?.mkdirs()
         val sessionLockChannel = try {
-            java.io.RandomAccessFile(File(currentDir, ".mezze/session.lock"), "rw").channel
+            java.io.RandomAccessFile(File(currentDir, ".mez/session.lock"), "rw").channel
         } catch (_: Exception) { null }
         val sessionLock = try { sessionLockChannel?.tryLock() } catch (_: Exception) { null }
         val hostsSession = sessionLock != null

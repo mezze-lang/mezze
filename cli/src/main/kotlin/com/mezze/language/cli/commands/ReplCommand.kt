@@ -34,7 +34,7 @@ import java.io.InputStreamReader
  *
  * ## Warm or cold
  *
- * If `mez dev` is running it publishes `.mezze/session.json`; the REPL attaches to
+ * If `mez dev` is running it publishes `.mez/session.json`; the REPL attaches to
  * that warm runtime (the project's own devenv toolchain, no JDK of its own needed).
  * Otherwise it cold-spawns a one-shot runtime for the session (which needs a JDK).
  */
@@ -279,11 +279,11 @@ class ReplCommand {
     private var warm = false
 
     private fun connect(currentDir: File): Conn? {
-        val sessionFile = File(currentDir, ".mezze/session.json")
+        val sessionFile = File(currentDir, ".mez/session.json")
         WireListener.readSessionFile(sessionFile)?.let { session ->
             RuntimeSession.connect(session, client = "mez-repl")?.let { warm = true; return Warm(it) }
             // A stale session file (dev gone) is not fatal — fall through to cold.
-            System.err.println("${Glyphs.WARN} a `.mezze/session.json` is present but unreachable — starting a private runtime instead")
+            System.err.println("${Glyphs.WARN} a `.mez/session.json` is present but unreachable — starting a private runtime instead")
         }
         val ws = WireSession.start(currentDir, timing = false, t0 = System.nanoTime()) ?: return null
         return Cold(ws)

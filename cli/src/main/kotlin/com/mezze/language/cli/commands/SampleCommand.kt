@@ -38,7 +38,7 @@ class SampleCommand {
 
     /**
      * When `--session=<file>` is given, a connection to an already-running
-     * `mez dev` runtime (which publishes `.mezze/session.json`). Every eval goes there — warm,
+     * `mez dev` runtime (which publishes `.mez/session.json`). Every eval goes there — warm,
      * on the project's own (devenv) toolchain — instead of this process
      * cold-spawning its own JVM, which also means `mez sample` needs no JDK of
      * its own. Null = the classic spawn-per-run path.
