@@ -2526,11 +2526,25 @@ class MezzeTextDocumentService(
             val imported = result?.loadedModules?.values.orEmpty()
                 .flatMap { it.decls }.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
             for (decl in lets) {
-                val rows = com.mezze.language.langservice.sample.SampleBranches.forFunction(decl, lets, imported)
-                    ?.filter { it.display.isNotEmpty() }.orEmpty()
-                if (rows.isEmpty()) continue
+                // A function is sampleable the moment it TAKES ARGUMENTS — the
+                // sampler generates them, runs it, and shows input→output. So the
+                // lens is NOT gated on branches. It is gated on there being an
+                // argument to generate: a value, a non-record parameter, and a
+                // zero-arg `{ } -> …` function (an empty parameter record) all have
+                // nothing to sample, so they are skipped.
+                val params = com.mezze.language.langservice.sample.SampleBranches.paramFields(decl)
+                if (params.isNullOrEmpty()) continue
+                // Branch rows, when present, just name how many branches the drawn
+                // inputs reach; absent, the lens is still offered as a plain "sample".
+                val branchRows = com.mezze.language.langservice.sample.SampleBranches
+                    .forFunction(decl, lets, imported)?.filter { it.display.isNotEmpty() }
+                    .orEmpty()
                 val at = Position(decl.loc.startLine - 1, (decl.loc.startCol - 1).coerceAtLeast(0))
-                val title = if (rows.size == 1) "1 branch input · sample" else "${rows.size} branch inputs · sample"
+                val title = when {
+                    branchRows.isEmpty() -> "sample"
+                    branchRows.size == 1 -> "1 branch input · sample"
+                    else -> "${branchRows.size} branch inputs · sample"
+                }
                 lenses.add(CodeLens(Range(at, at), Command(title, "mezze.sample", listOf(uri, decl.name)), null))
             }
 

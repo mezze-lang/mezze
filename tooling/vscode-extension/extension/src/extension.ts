@@ -25,6 +25,149 @@ function resolveMezPath(): string {
     return mezPath;
 }
 
+// --- `mez sample` as a table ------------------------------------------------
+// The "N branch inputs · sample" CodeLens fires `mezze.sample`; instead of a raw
+// terminal dump we run `mez sample --json` and render the input→output rows in a
+// webview table (with a resample button). The JSON is produced by the CLI's
+// SampleCommand.sampleJson.
+let samplePanel: vscode.WebviewPanel | undefined;
+let sampleTarget: { root: string; fn: string; seed: number; count: number } | undefined;
+const SAMPLE_INITIAL_COUNT = 6, SAMPLE_STEP = 6, SAMPLE_MAX_COUNT = 60;
+
+function runSampleJson(root: string, fn: string, seed: number, count: number): Promise<{ data: any | null; err: string }> {
+    // row i is always seed+i, so the same seed reproduces rows (retain) and a
+    // larger count only appends more — "more rows" keeps what's already shown.
+    const args = ['sample', '--json', `--seed=${seed}`, `--count=${count}`, fn];
+    return new Promise((resolve) => {
+        cp.execFile(resolveMezPath(), args, { cwd: root, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+            let data: any = null;
+            try { data = JSON.parse(stdout); } catch { /* not json — surface stderr below */ }
+            resolve({ data, err: data ? '' : (stderr || stdout || String(error || 'mez sample failed')) });
+        });
+    });
+}
+
+function escHtml(s: string): string {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+}
+
+// Readable text for a sampled value node (scalar/record/list/variant).
+function valueText(node: any): string {
+    if (node == null) { return ''; }
+    if (node.node === 'scalar' && typeof node.text === 'string') { return node.text; }
+    switch (node.node) {
+        case 'record':
+            return '{ ' + (node.fields || []).map((f: any) => `${f.name} = ${valueText(f.value)}`).join(', ') + ' }';
+        case 'list':
+            return '[' + (node.items || node.elements || []).map(valueText).join(', ') + ']';
+        case 'variant':
+            return String(node.name || '') +
+                (node.fields && node.fields.length ? ` { ${node.fields.map((f: any) => `${f.name} = ${valueText(f.value)}`).join(', ')} }` : '');
+        default:
+            return typeof node.text === 'string' ? node.text : JSON.stringify(node);
+    }
+}
+
+function sampleTableHtml(d: any, fn: string): string {
+    const rows: any[] = Array.isArray(d.rows) ? d.rows : [];
+    // Per-field input columns when every row's input is a record with fields.
+    const firstRec = rows.find((r) => r.args?.value?.node === 'record')?.args?.value;
+    const fieldNames: string[] = firstRec ? (firstRec.fields || []).map((f: any) => f.name) : [];
+    const perField = fieldNames.length > 0 && rows.every((r) => !r.args || r.args.value?.node === 'record');
+
+    const head = (perField
+        ? fieldNames.map((n) => `<th>${escHtml(n)}</th>`).join('')
+        : '<th>input</th>') + '<th class="arrow">→</th><th>output</th><th>branch</th>';
+
+    const body = rows.map((r) => {
+        const crashed = typeof r.crashed === 'string';
+        const out = crashed ? r.crashed : (r.result?.text ?? '');
+        const why = r.why ?? '';
+        let cells: string;
+        if (perField) {
+            const byName: Record<string, any> = {};
+            for (const f of (r.args?.value?.fields || [])) { byName[f.name] = f.value; }
+            cells = fieldNames.map((n) => `<td><code>${escHtml(valueText(byName[n]))}</code></td>`).join('');
+        } else {
+            cells = `<td><code>${escHtml(r.args?.text ?? '')}</code></td>`;
+        }
+        return `<tr class="${crashed ? 'crashed' : ''}">${cells}<td class="arrow">→</td>` +
+               `<td><code>${escHtml(out)}</code>${crashed ? ' <span class="tag">crash</span>' : ''}</td>` +
+               `<td class="why">${escHtml(why)}</td></tr>`;
+    }).join('');
+
+    const unreached: any[] = Array.isArray(d.unreached) ? d.unreached : [];
+    const cov = unreached.length
+        ? `<p class="note warn">${unreached.length} branch(es) not covered: ${unreached.map((u) => escHtml(`${u.branch} (${u.file}:${u.line})`)).join(', ')}</p>`
+        : (rows.length ? `<p class="note ok">all branches covered</p>` : '');
+    const newtypes: string[] = Array.isArray(d.unchecked_newtypes) ? d.unchecked_newtypes : [];
+    const nt = newtypes.length ? `<p class="note">newtypes drawn from their representation: ${newtypes.map(escHtml).join(', ')}</p>` : '';
+
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+      body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 10px 14px; }
+      h2 { font-size: 1.1em; margin: 0 0 2px; } h2 code { font-size: 1em; }
+      .meta { opacity: .7; font-size: .85em; margin-bottom: 10px; display: flex; gap: 10px; align-items: center; }
+      button { font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background);
+               border: 0; padding: 3px 10px; border-radius: 3px; cursor: pointer; }
+      button:hover { background: var(--vscode-button-hoverBackground); }
+      table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+      th, td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--vscode-panel-border, #8884); vertical-align: top; }
+      th { font-weight: 600; opacity: .85; border-bottom: 2px solid var(--vscode-panel-border, #8886); }
+      td code { font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; }
+      .arrow { opacity: .5; text-align: center; width: 1.5em; }
+      .why { opacity: .7; font-size: .85em; }
+      tr.crashed td { color: var(--vscode-errorForeground); }
+      .tag { font-size: .75em; background: var(--vscode-errorForeground); color: var(--vscode-editor-background); padding: 0 5px; border-radius: 3px; }
+      .note { font-size: .85em; opacity: .85; margin: 10px 0 0; }
+      .note.ok { color: var(--vscode-testing-iconPassed, #3a3); }
+      .note.warn { color: var(--vscode-testing-iconQueued, #c80); }
+    </style></head><body>
+      <h2>sample · <code>${escHtml(fn)}</code></h2>
+      <div class="meta"><span>${rows.length} row(s) · seed ${escHtml(String(d.seed ?? ''))}</span>
+        <button onclick="post('more')" title="draw more inputs, keeping these">+ more rows</button>
+        <button onclick="post('resample')" title="new seed — a fresh set of inputs">↻ resample</button></div>
+      <table><thead><tr>${head}</tr></thead><tbody>${body || '<tr><td colspan="9">no sampleable rows</td></tr>'}</tbody></table>
+      ${cov}${nt}
+      <p class="note">deterministic — <code>mez sample --seed ${escHtml(String(d.seed ?? ''))} ${escHtml(fn)}</code> reproduces these exact rows.</p>
+      <script>const vs = acquireVsCodeApi(); function post(cmd){ vs.postMessage({ cmd }); }</script>
+    </body></html>`;
+}
+
+function sampleErrHtml(fn: string, msg: string): string {
+    return `<!doctype html><html><body style="font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px;">
+      <h2 style="font-size:1.1em;">sample · ${escHtml(fn)}</h2>
+      <p style="color: var(--vscode-errorForeground);">Could not sample this function.</p>
+      <pre style="white-space: pre-wrap; opacity:.85;">${escHtml(msg)}</pre></body></html>`;
+}
+
+async function showSample(root: string, fn: string, seed: number, count: number): Promise<void> {
+    sampleTarget = { root, fn, seed, count };
+    if (!samplePanel) {
+        samplePanel = vscode.window.createWebviewPanel(
+            'mezzeSample', `sample · ${fn}`,
+            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+            { enableScripts: true },
+        );
+        samplePanel.onDidDispose(() => { samplePanel = undefined; });
+        samplePanel.webview.onDidReceiveMessage((m) => {
+            if (!sampleTarget) { return; }
+            if (m?.cmd === 'resample') {
+                // new seed → a fresh set of inputs, back to the initial count
+                void showSample(sampleTarget.root, sampleTarget.fn, Math.floor(Math.random() * 1e9), SAMPLE_INITIAL_COUNT);
+            } else if (m?.cmd === 'more') {
+                // same seed, larger count → keeps the rows shown and appends more
+                void showSample(sampleTarget.root, sampleTarget.fn, sampleTarget.seed, Math.min(sampleTarget.count + SAMPLE_STEP, SAMPLE_MAX_COUNT));
+            }
+        });
+    }
+    samplePanel.title = `sample · ${fn}`;
+    samplePanel.webview.html = `<!doctype html><body style="font-family: var(--vscode-font-family); padding: 14px; opacity:.7;">sampling <code>${escHtml(fn)}</code>…</body>`;
+    samplePanel.reveal(vscode.ViewColumn.Beside, true);
+    const { data, err } = await runSampleJson(root, fn, seed, count);
+    if (!samplePanel) { return; }
+    samplePanel.webview.html = data ? sampleTableHtml(data, fn) : sampleErrHtml(fn, err);
+}
+
 export function activate(context: vscode.ExtensionContext) {
     // Get the path to the mez executable
     const mezPath = resolveMezPath();
@@ -157,9 +300,9 @@ export function activate(context: vscode.ExtensionContext) {
             peek(uri, pos, 'vscode.executeImplementationProvider', 'implementations')),
         vscode.commands.registerCommand('mezze.showPerformers', (uri, pos) =>
             peek(uri, pos, 'vscode.executeImplementationProvider', 'performers')),
-        // The "N branch inputs · sample" lens: run `mez sample <fn>` in a terminal,
-        // from the project the file belongs to. Only on a click — the lens itself
-        // runs nothing; its count comes from reading the function's code.
+        // The "N branch inputs · sample" lens: run `mez sample --json <fn>` from
+        // the project the file belongs to and show the input→output rows as a
+        // table in a webview. Only on a click — the lens itself runs nothing.
         vscode.commands.registerCommand('mezze.sample', async (uriArg: any, fn: string) => {
             const file = vscode.Uri.parse(String(uriArg)).fsPath;
             let dir = path.dirname(file);
@@ -167,11 +310,9 @@ export function activate(context: vscode.ExtensionContext) {
                 dir = path.dirname(dir);
             }
             const root = fs.existsSync(path.join(dir, 'Mezze.toml')) ? dir : path.dirname(file);
-            const name = 'mez sample';
-            const terminal = vscode.window.terminals.find(t => t.name === name)
-                ?? vscode.window.createTerminal({ name, cwd: root });
-            terminal.show(true);
-            terminal.sendText(`cd ${JSON.stringify(root)} && ${JSON.stringify(resolveMezPath())} sample ${fn}`);
+            // Stable seed on open → reopening a function shows the same table
+            // (retained/reproducible); "resample" draws a fresh set.
+            await showSample(root, fn, 0, SAMPLE_INITIAL_COUNT);
         })
     );
 

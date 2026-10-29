@@ -1554,16 +1554,21 @@ class LspFeaturesTest {
     }
 
     /**
-     * The branch analysis `mez sample` uses, in the editor: a lens counting the
-     * inputs that reach each branch, read from the function's code. Clicking runs
-     * the client's `mezze.sample` with the function's name; nothing runs otherwise.
+     * The sample lens, in the editor: offered over every function that TAKES
+     * ARGUMENTS, because that is exactly what `mez sample` generates. Branches are
+     * not required — a branchless function (`flat`) still gets the plain "sample";
+     * a function with branches names how many its drawn inputs reach. A value
+     * (`max_value`) and a zero-argument `{ } -> …` function (`answer`) have no
+     * arguments to generate, so neither is offered. Clicking runs the client's
+     * `mezze.sample` with the function's name; nothing runs otherwise.
      */
     @Test
-    fun `code lens counts branch inputs and offers sample`() {
+    fun `code lens offers sample on every argument-taking function`() {
         val (uri, _) = openSingleFile("""
             let max_value = 100
             let clamp = { n: Int } -> if n > max_value then max_value else n
             let flat = { n: Int } -> n
+            let answer = { } -> 42
         """.trimIndent())
 
         val lenses = server.textDocumentService.codeLens(CodeLensParams().apply {
@@ -1571,10 +1576,18 @@ class LspFeaturesTest {
         }).get(5, TimeUnit.SECONDS) ?: emptyList()
 
         val sample = lenses.filter { it.command?.command == "mezze.sample" }
-        assertEquals(1, sample.size, "one sample lens — over `clamp` only, `flat` has no branch: ${lenses.map { it.command?.title }}")
-        assertEquals("2 branch inputs · sample", sample.single().command.title)
-        assertEquals("clamp", sample.single().command.arguments[1].toString().trim('"'))
-        assertEquals(1, sample.single().range.start.line, "on `clamp`'s line")
+        val byFn = sample.associate { it.command.arguments[1].toString().trim('"') to it.command.title }
+        assertEquals(
+            setOf("clamp", "flat"), byFn.keys,
+            "sample lens over the argument-taking functions only — not `max_value` (a value) or `answer` " +
+                "(zero-arg): ${lenses.map { it.command?.title }}",
+        )
+        assertEquals("2 branch inputs · sample", byFn["clamp"], "branchy function names its branches")
+        assertEquals("sample", byFn["flat"], "branchless function still offers a plain sample")
+        assertEquals(
+            1, sample.first { it.command.arguments[1].toString().trim('"') == "clamp" }.range.start.line,
+            "on `clamp`'s line",
+        )
     }
 
     @Test
