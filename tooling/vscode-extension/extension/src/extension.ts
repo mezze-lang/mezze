@@ -37,12 +37,24 @@ let sampleTarget: { root: string; file: string; fn: string; seed: number; count:
 let sampleShownFn: string | undefined;
 const SAMPLE_INITIAL_COUNT = 6, SAMPLE_STEP = 6, SAMPLE_MAX_COUNT = 60;
 
+// The per-project session file a running `mez dev` publishes. Its presence is how
+// the editor knows there is a warm runtime (on the devenv shell's toolchain) to
+// attach to; absent, there is nothing to sample against.
+function sessionFileFor(root: string): string | undefined {
+    const f = path.join(root, '.mezze', 'session.json');
+    return fs.existsSync(f) ? f : undefined;
+}
+
 function runSampleJson(root: string, file: string, fn: string, seed: number, count: number): Promise<{ data: any | null; err: string }> {
     // row i is always seed+i, so the same seed reproduces rows (retain) and a
     // larger count only appends more — "more rows" keeps what's already shown.
-    // `--file` points the CLI at the module the lens came from, so a function in
-    // any open file is sampleable, not only the project's app module.
-    const args = ['sample', '--json', `--file=${file}`, `--seed=${seed}`, `--count=${count}`, fn];
+    // `--file` points the CLI at the module the lens came from (compilation is
+    // local, native, no JDK); `--session` points it at the warm `mez dev` runtime
+    // that actually evaluates, on the project's devenv toolchain.
+    const session = sessionFileFor(root);
+    const args = ['sample', '--json', `--file=${file}`, `--seed=${seed}`, `--count=${count}`];
+    if (session) { args.splice(2, 0, `--session=${session}`); }
+    args.push(fn);
     return new Promise((resolve) => {
         cp.execFile(resolveMezPath(), args, { cwd: root, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
             let data: any = null;
@@ -188,6 +200,22 @@ function sampleErrHtml(fn: string, msg: string): string {
       <pre style="white-space: pre-wrap; opacity:.85;">${escHtml(msg)}</pre></body></html>`;
 }
 
+function sampleNeedsDevHtml(fn: string): string {
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+      body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 16px 18px; }
+      h2 { font-size: 1.05em; margin: 0 0 8px; }
+      p { opacity: .85; line-height: 1.5; }
+      code { font-family: var(--vscode-editor-font-family, monospace);
+             background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); padding: 1px 6px; border-radius: 4px; }
+    </style></head><body>
+      <h2>sample · <code>${escHtml(fn)}</code></h2>
+      <p>Sampling runs on a warm runtime that <code>mez dev</code> hosts, so it uses your
+         project's own toolchain.</p>
+      <p>Start it in a terminal in this project — <code>mez dev</code> — then click the lens
+         again. It publishes <code>.mezze/session.json</code> and the sampler attaches to it.</p>
+    </body></html>`;
+}
+
 async function showSample(root: string, file: string, fn: string, seed: number, count: number): Promise<void> {
     sampleTarget = { root, file, fn, seed, count };
     if (!samplePanel) {
@@ -209,6 +237,16 @@ async function showSample(root: string, file: string, fn: string, seed: number, 
         });
     }
     samplePanel.title = `sample · ${fn}`;
+    samplePanel.reveal(vscode.ViewColumn.Beside, true);
+    // Sampling runs on the warm runtime a `mez dev` publishes (on the devenv
+    // shell's toolchain). No session → nothing to attach to; say so rather than
+    // fail obscurely. (The editor never spawns its own runtime — that would need
+    // a JDK it may not have, and wouldn't be the devenv toolchain.)
+    if (!sessionFileFor(root)) {
+        sampleShownFn = undefined;
+        samplePanel.webview.html = sampleNeedsDevHtml(fn);
+        return;
+    }
     // Only show the "sampling…" placeholder when there is nothing useful to keep
     // on screen — a first open, or a different function. For "+ more rows" and
     // "resample" (same function) we leave the current table visible while the new
@@ -216,7 +254,6 @@ async function showSample(root: string, file: string, fn: string, seed: number, 
     if (sampleShownFn !== fn) {
         samplePanel.webview.html = `<!doctype html><body style="font-family: var(--vscode-font-family); padding: 14px; opacity:.7;">sampling <code>${escHtml(fn)}</code>…</body>`;
     }
-    samplePanel.reveal(vscode.ViewColumn.Beside, true);
     const { data, err } = await runSampleJson(root, file, fn, seed, count);
     if (!samplePanel) { return; }
     sampleShownFn = fn;
