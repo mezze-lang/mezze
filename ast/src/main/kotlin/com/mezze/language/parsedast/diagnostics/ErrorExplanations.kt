@@ -254,6 +254,20 @@ fun ErrorCode.explain(): String = when (this) {
         "An uppercase name in a type position resolves to no declaration, import, or builtin. " +
         "Declare it (`type X = ...` / `newtype X = ...`), import it (`use mod::{X}`), or fix the spelling."
 
+    ErrorCode.T0219_EFFECT_ROW_IN_TYPE_ALIAS ->
+        "A `type` or `newtype` that names a function type may carry no effect row: " +
+        "`type Gen 'a = {} -> 'a` is fine, `{} -> 'a <Sample>` and `{} -> 'a <...>` are " +
+        "not. The alias names a SHAPE, and what a particular function of that shape " +
+        "performs belongs on the signature that uses it, where a reader can see it. " +
+        "A NAMED effect in the alias is invisible at the use site — `{} -> Gen Str " +
+        "<Other>` shows one row where there are two — and it cannot be moved to the use " +
+        "site instead, because a row needs an arrow to own it and `Gen Str` is not one. An " +
+        "OPEN row hides no particular effect but widens every use of the name to accept " +
+        "any effectful function, which is a permissive default better written out than " +
+        "left behind a name. Neither is unsound; both are unreadable. A record FIELD " +
+        "holding an effectful callback is unaffected: the arrow is the field's, not the " +
+        "alias's, and that is how routing and `select` are written."
+
     ErrorCode.T0214_TYPECHECK_LIMIT_EXCEEDED ->
         "The typechecker recursed further than any real program requires and stopped " +
         "rather than risk overflowing the stack or running away. This almost always " +

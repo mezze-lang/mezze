@@ -34,6 +34,7 @@ class TypeValidator(
     private val matchValidator = MatchValidator(typeDeclarations, registry)
     private val performValidator = PerformValidator(typeDeclarations, implDeclarations)
     private val unknownTypeValidator = UnknownTypeValidator(registry)
+    private val aliasEffectRowValidator = AliasEffectRowValidator()
     private val codecGenerator = CodecGenerator()
 
     private val typeNameCache = mutableMapOf<MezzeType, String>()
@@ -56,6 +57,7 @@ class TypeValidator(
             typedModule?.let { buildDecidedScrutineeTypes(it) } ?: emptyMap()
 
         errors.addAll(unknownTypeValidator.validate(module))
+        errors.addAll(aliasEffectRowValidator.validate(module))
 
         // Where each binding was written, so an error about one can be squiggled
         // rather than reported against the file at large.

@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test
 class ArbitraryCoverageTest {
 
     private val head = """
-        use std::effects::sample::{ Sampler, SeededSampleWith }
+        use std::effects::sample::{ SeededSampleWith }
         use std::abilities::arbitrary::{ Arbitrary }
         use std::collections::seq
         use std::collections::bytes
@@ -31,7 +31,7 @@ class ArbitraryCoverageTest {
     @Test
     fun `Bytes has an instance, sized by the budget`() {
         val longest = run("""
-            let g: Sampler Bytes = {} -> Arbitrary.arbitrary {}
+            let g: {} -> Bytes <Sample> = {} -> Arbitrary.arbitrary {}
             let go = {} -> do
               let bs = ${at(5)} seq::map { xs = seq::range { start = 0, end = 200 }, f = { x } -> g {} }
               seq::fold { xs = bs, init = 0, f = { acc, x } -> if bytes::size { b = x } > acc then bytes::size { b = x } else acc }
@@ -43,7 +43,7 @@ class ArbitraryCoverageTest {
     @Test
     fun `a Str at a stress size can be long`() {
         val longest = run("""
-            let g: Sampler Str = {} -> Arbitrary.arbitrary {}
+            let g: {} -> Str <Sample> = {} -> Arbitrary.arbitrary {}
             let go = {} -> do
               let xs = ${at(100)} seq::map { xs = seq::range { start = 0, end = 300 }, f = { x } -> g {} }
               seq::fold { xs = xs, init = 0, f = { acc, x } -> if str::size { s = x } > acc then str::size { s = x } else acc }
@@ -55,7 +55,7 @@ class ArbitraryCoverageTest {
     @Test
     fun `a Str at the default size stays short and readable`() {
         val longest = run("""
-            let g: Sampler Str = {} -> Arbitrary.arbitrary {}
+            let g: {} -> Str <Sample> = {} -> Arbitrary.arbitrary {}
             let go = {} -> do
               let xs = ${at(5)} seq::map { xs = seq::range { start = 0, end = 300 }, f = { x } -> g {} }
               seq::fold { xs = xs, init = 0, f = { acc, x } -> if str::size { s = x } > acc then str::size { s = x } else acc }
@@ -68,7 +68,7 @@ class ArbitraryCoverageTest {
     @Test
     fun `nested containers stay bounded at a large size`() {
         val total = run("""
-            let g: Sampler [[[Int]]] = {} -> Arbitrary.arbitrary {}
+            let g: {} -> [[[Int]]] <Sample> = {} -> Arbitrary.arbitrary {}
             let inner: { ys: [[Int]] } -> Int = { ys } -> seq::fold { xs = ys, init = 0, f = { acc, x } -> acc + seq::size { xs = x } }
             let go = {} -> do
               let v = ${at(100)} g {}
@@ -81,8 +81,8 @@ class ArbitraryCoverageTest {
     @Test
     fun `Option and Result generate through the ability`() {
         val out = run("""
-            let o: Sampler (Option Int) = {} -> Arbitrary.arbitrary {}
-            let r: Sampler (Result Int Str) = {} -> Arbitrary.arbitrary {}
+            let o: {} -> Option Int <Sample> = {} -> Arbitrary.arbitrary {}
+            let r: {} -> Result Int Str <Sample> = {} -> Arbitrary.arbitrary {}
             let go = {} -> do
               let os = ${at(5)} seq::map { xs = seq::range { start = 0, end = 60 }, f = { x } -> o {} }
               let rs = ${at(5, seed = 2)} seq::map { xs = seq::range { start = 0, end = 60 }, f = { x } -> r {} }
