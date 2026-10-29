@@ -2,7 +2,7 @@
   "name": "mezze-language",
   "displayName": "Mezze Language Support",
   "description": "Full language support for Mezze: syntax highlighting, type information, diagnostics, go to definition, and more",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {
@@ -142,8 +142,29 @@
       {
         "command": "mezze.resetServerState",
         "title": "Mezze: Reset Server State"
+      },
+      {
+        "command": "mezze.evalSelection",
+        "title": "Mezze: Evaluate Selection"
       }
     ],
+    "keybindings": [
+      {
+        "command": "mezze.evalSelection",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == mezze"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "mezze.evalSelection",
+          "when": "editorLangId == mezze",
+          "group": "1_run@1"
+        }
+      ]
+    },
     "breakpoints": [
       {
         "language": "mezze"

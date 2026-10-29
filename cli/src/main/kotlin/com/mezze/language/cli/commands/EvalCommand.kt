@@ -57,6 +57,14 @@ class EvalCommand {
         val items = intFlag(flags, "--items") ?: WireProtocol.DEFAULT_EVAL_MAX_ITEMS
         val timeoutMs = intFlag(flags, "--timeout")?.toLong()?.times(1_000) ?: 0L
 
+        // `--session=<file>` attaches to a warm runtime a running `mez dev` publishes
+        // (compilation still happens here; only EXECUTION is remote), so an editor
+        // with no JDK can still evaluate. `--session-id=<id>` runs on a PERSISTENT,
+        // isolated session so successive evals share runtime state and stay apart
+        // from the sampler's stateless evals — see [com.mezze.wire.Eval.session].
+        val sessionFileArg = stringFlag(flags, "--session")
+        val sessionId = stringFlag(flags, "--session-id")
+
         val moduleFile = resolveAppFile(currentDir) ?: kotlin.system.exitProcess(1)
 
         when (val compiled = EvalClosure.compile(currentDir, moduleFile, expression)) {
@@ -72,26 +80,11 @@ class EvalCommand {
                 val runDir = com.mezze.language.store.ProjectLayout.runDir(currentDir)
                 val (fnsFile, metaFile) = EvalClosure.writeTo(runDir, compiled)
 
-                val session = WireSession.start(currentDir, timing = false, t0 = System.nanoTime())
-                    ?: kotlin.system.exitProcess(1)
-                val result = try {
-                    session.evalOnce(
-                        fnsFile = fnsFile,
-                        metaFile = metaFile,
-                        requestId = 1,
-                        maxDepth = depth,
-                        maxItems = items,
-                        timeoutMs = timeoutMs,
-                    )
-                } finally {
-                    session.close()
-                }
-
-                if (result == null) {
-                    // The runtime died; it already said why on stderr. Saying
-                    // nothing more beats inventing a second explanation.
-                    kotlin.system.exitProcess(1)
-                }
+                // Null means the runtime died or could not be reached; it (or
+                // runEval) already said why on stderr, so just exit.
+                val result = runEval(
+                    currentDir, sessionFileArg, sessionId, fnsFile, metaFile, depth, items, timeoutMs,
+                ) ?: kotlin.system.exitProcess(1)
 
                 val error = result.error
                 if (error != null) {
@@ -125,10 +118,57 @@ class EvalCommand {
         }
     }
 
+    /**
+     * Evaluate one compiled closure, warm or cold.
+     *
+     * With `--session=<file>` it attaches to the running `mez dev` that published
+     * that file — the project's warm devenv runtime, no JDK of this process's own
+     * needed, which is what lets an editor evaluate. Without it, a one-shot runtime
+     * is spawned for this expression (which does need a JDK). Either way [sessionId]
+     * selects the runtime session: null is stateless, a value is persistent and
+     * isolated (see [com.mezze.wire.Eval.session]).
+     */
+    private fun runEval(
+        currentDir: File,
+        sessionFileArg: String?,
+        sessionId: String?,
+        fnsFile: File,
+        metaFile: File,
+        depth: Int,
+        items: Int,
+        timeoutMs: Long,
+    ): com.mezze.wire.EvalResult? {
+        if (sessionFileArg != null) {
+            val sessionFile = File(sessionFileArg).let { if (it.isAbsolute) it else File(currentDir, sessionFileArg) }
+            val session = com.mezze.wire.WireListener.readSessionFile(sessionFile) ?: run {
+                System.err.println(
+                    "${Glyphs.CROSS} no runtime session at ${sessionFile.absolutePath}. " +
+                        "Run `mez dev` in this project — the editor attaches to it to evaluate.",
+                )
+                return null
+            }
+            val rt = RuntimeSession.connect(session, client = "mez-eval") ?: return null
+            return try {
+                rt.evalOnce(fnsFile, metaFile, 1, depth, items, timeoutMs, session = sessionId)
+            } finally {
+                rt.close()
+            }
+        }
+        val session = WireSession.start(currentDir, timing = false, t0 = System.nanoTime()) ?: return null
+        return try {
+            session.evalOnce(fnsFile, metaFile, 1, depth, items, timeoutMs, session = sessionId)
+        } finally {
+            session.close()
+        }
+    }
+
     private fun intFlag(flags: List<String>, name: String): Int? =
         flags.firstOrNull { it.startsWith("$name=") }
             ?.substringAfter("=")
             ?.toIntOrNull()
+
+    private fun stringFlag(flags: List<String>, name: String): String? =
+        flags.firstOrNull { it.startsWith("$name=") }?.substringAfter("=")
 
     /** The app module `mez dev` would run — the scope a user means by "my code". */
     private fun resolveAppFile(currentDir: File): File? {
@@ -218,6 +258,11 @@ class EvalCommand {
         println("  mez eval '[1, 2, 3]' --type            show the type too")
         println("  mez eval 'big_value' --depth=2         stop at depth 2")
         println("  mez eval 'config' --json               the value as a tree")
+        println()
+        println("  --session=FILE     evaluate on a running `mez dev` (its .mezze/session.json),")
+        println("                     not a freshly spawned runtime — no JDK of its own needed")
+        println("  --session-id=ID    run on a persistent, isolated session so successive evals")
+        println("                     share runtime state (used by the editor's inline eval)")
         println()
         println("Evaluates the code as SAVED on disk. Definitions do not accumulate between runs.")
     }

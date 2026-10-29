@@ -64,6 +64,67 @@ function runSampleJson(root: string, file: string, fn: string, seed: number, cou
     });
 }
 
+// --- inline eval ------------------------------------------------------------
+// "Mezze: Evaluate Selection" runs `mez eval --json` on the selected expression
+// (or the current line) and shows its value inline at the end of that line. It
+// rides the same warm `mez dev` runtime the sampler uses — but on its OWN session
+// id, so the editor's evals share runtime state with each other and stay isolated
+// from the sampler's stateless draws. Compilation is local/native (no JDK); only
+// execution is remote, which is what lets this work in a JDK-less editor.
+
+// One session for the editor's evals in a project. Distinct from the sampler's
+// (null) session, so neither perturbs the other — see Eval.session, CLI-side.
+const EDITOR_SESSION_ID = 'mez-editor';
+
+/** Walk up from a file to the nearest Mezze.toml; the file's own dir otherwise. */
+function projectRootFor(file: string): string {
+    let dir = path.dirname(file);
+    while (!fs.existsSync(path.join(dir, 'Mezze.toml')) && path.dirname(dir) !== dir) {
+        dir = path.dirname(dir);
+    }
+    return fs.existsSync(path.join(dir, 'Mezze.toml')) ? dir : path.dirname(file);
+}
+
+function runEvalJson(root: string, expr: string): Promise<{ data: any | null; err: string }> {
+    const session = sessionFileFor(root);
+    const args = ['eval', '--json', `--session-id=${EDITOR_SESSION_ID}`];
+    if (session) { args.push(`--session=${session}`); }
+    args.push(expr);
+    return new Promise((resolve) => {
+        cp.execFile(resolveMezPath(), args, { cwd: root, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+            let data: any = null;
+            try { data = JSON.parse(stdout); } catch { /* a compile error is plain text on stderr */ }
+            resolve({ data, err: data ? '' : (stderr || stdout || String(error || 'mez eval failed')) });
+        });
+    });
+}
+
+// End-of-line "⟹ value : type" (or "⟹ error") for the last evaluated line. One
+// shared decoration type, cleared and re-set per eval and wiped on edit, so a
+// stale result never lingers over code that changed under it.
+let evalDecoration: vscode.TextEditorDecorationType | undefined;
+function evalDecorationType(): vscode.TextEditorDecorationType {
+    if (!evalDecoration) {
+        evalDecoration = vscode.window.createTextEditorDecorationType({
+            after: { margin: '0 0 0 1.5rem', color: new vscode.ThemeColor('editorCodeLens.foreground') },
+            rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+        });
+    }
+    return evalDecoration;
+}
+
+function clearEvalDecorations(editor?: vscode.TextEditor) {
+    if (evalDecoration && editor) { editor.setDecorations(evalDecoration, []); }
+}
+
+function showEvalResult(editor: vscode.TextEditor, line: number, label: string) {
+    const end = editor.document.lineAt(line).range.end;
+    editor.setDecorations(evalDecorationType(), [{
+        range: new vscode.Range(end, end),
+        renderOptions: { after: { contentText: `⟹ ${label}` } },
+    }]);
+}
+
 function escHtml(s: string): string {
     return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 }
@@ -407,6 +468,59 @@ export function activate(context: vscode.ExtensionContext) {
             // module the lens sits in, passed to `mez sample --file` so any open
             // file's functions are sampleable, not only the app module.
             await showSample(root, file, fn, 0, SAMPLE_INITIAL_COUNT);
+        })
+    );
+
+    // "Mezze: Evaluate Selection" — evaluate the selected expression (or, with no
+    // selection, the current line) and show its value inline. One warm runtime,
+    // the editor's own session, so repeated evals build on each other.
+    const evalOutput = vscode.window.createOutputChannel('Mezze Eval');
+    context.subscriptions.push(
+        evalOutput,
+        vscode.commands.registerCommand('mezze.evalSelection', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'mezze') {
+                vscode.window.showWarningMessage('Mezze: open a .mz file and select an expression to evaluate.');
+                return;
+            }
+            const sel = editor.selection;
+            const line = sel.active.line;
+            const expr = (sel.isEmpty ? editor.document.lineAt(line).text : editor.document.getText(sel)).trim();
+            if (!expr) {
+                vscode.window.showWarningMessage('Mezze: nothing to evaluate — select an expression or put the cursor on one.');
+                return;
+            }
+            const file = editor.document.uri.fsPath;
+            const root = projectRootFor(file);
+            // The editor never spawns its own runtime (that needs a JDK it may not
+            // have); evaluation rides the warm one a `mez dev` publishes. Say so
+            // plainly when there is none, rather than failing obscurely.
+            if (!sessionFileFor(root)) {
+                vscode.window.showWarningMessage('Mezze: start `mez dev` in this project to evaluate — the editor attaches to its runtime.');
+                return;
+            }
+            showEvalResult(editor, line, '…');
+            const { data, err } = await runEvalJson(root, expr);
+            if (data && data.ok) {
+                const label = `${data.text}${data.type ? `  : ${data.type}` : ''}`;
+                showEvalResult(editor, line, label);
+                evalOutput.appendLine(`${expr}\n  ⟹ ${label}`);
+            } else if (data && data.ok === false) {
+                const msg = `${data.kind}${data.message ? `: ${data.message}` : ''}`;
+                showEvalResult(editor, line, `✗ ${msg}`);
+                evalOutput.appendLine(`${expr}\n  ✗ ${msg}`);
+            } else {
+                clearEvalDecorations(editor);
+                evalOutput.appendLine(`${expr}\n  ✗ ${err}`);
+                evalOutput.show(true);
+                vscode.window.showErrorMessage('Mezze eval failed — see the "Mezze Eval" output for details.');
+            }
+        }),
+        // A stale result over edited code is worse than none, so wipe it as soon as
+        // the document changes.
+        vscode.workspace.onDidChangeTextDocument((e) => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && e.document === editor.document) { clearEvalDecorations(editor); }
         })
     );
 
