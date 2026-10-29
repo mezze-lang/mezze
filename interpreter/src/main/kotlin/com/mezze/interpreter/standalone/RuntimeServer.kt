@@ -1028,6 +1028,42 @@ object RuntimeServer {
     @Volatile
     private var activeEvalRequest: Long? = null
 
+    /**
+     * A DEDICATED engine for serving EVALs, separate from the one `mez dev` runs
+     * the program in. Built once, reused across samples so its content-code cache
+     * (compiled CallTargets by hash) stays warm — but it NEVER loads the user's
+     * program, so the one thing that can corrupt a self-contained eval's code
+     * resolution (program functions sharing the engine's hash→code cache) can't
+     * happen. It only ever holds the immutable stdlib and content-addressed eval
+     * closures, so reuse is safe: same code, same hash, same result. This is the
+     * shape a remote node would use — a long-lived worker that evaluates hashes,
+     * never a user program.
+     */
+    private val samplingEngine =
+        java.util.concurrent.atomic.AtomicReference<org.graalvm.polyglot.Engine?>(null)
+
+    /**
+     * The fresh CONTEXT the MOST RECENT [handleEval] ran in (on [samplingEngine]),
+     * kept alive so EXPAND (most-recent-only) can still walk its value, and closed
+     * when the next eval supersedes it. Fresh per eval so per-context state
+     * (globals, evaluated effectful thunk values, handler chains) never carries
+     * between samples.
+     */
+    private val lastEvalContext =
+        java.util.concurrent.atomic.AtomicReference<org.graalvm.polyglot.Context?>(null)
+
+    private fun samplingEngine(): org.graalvm.polyglot.Engine {
+        samplingEngine.get()?.let { return it }
+        val built = org.graalvm.polyglot.Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.Compilation", "false")
+            .build()
+        // CAS so a racing caller doesn't leak a second engine.
+        return if (samplingEngine.compareAndSet(null, built)) built
+        else { try { built.close(true) } catch (_: Exception) {}; samplingEngine.get()!! }
+    }
+
     private fun evalFailed(requestId: Long, kind: String, message: String): WireFrame =
         WireFrame.of(MessageType.EVAL_RESULT, EvalResult(
             requestId = requestId,
@@ -1136,16 +1172,31 @@ object RuntimeServer {
         }
         val (functions, meta, printType) = prep as EvalPrep.Ready
 
-        try {
-            MezzeLanguage.setFunctionsForDirectExecution(
-                functions, meta.performerRecords, state.projectRoot(), meta.entryHash,
-            )
+        // Each EVAL runs in a FRESH context on the DEDICATED sampling engine —
+        // never `mez dev`'s engine. The sampling engine is warm (its compiled
+        // stdlib/sample code is reused across samples) but holds no user program,
+        // so a self-contained eval's hash→code resolution can't be corrupted by
+        // whatever `mez dev` loaded. The fresh context clears per-context state
+        // between samples. Result: a pure function of the closure's hashes —
+        // same code, same hash, same evaluation — which is the guarantee
+        // hash-addressed distribution needs. Interpreter-only (a sample is tiny;
+        // JIT would only add latency) and no guest languages (none must pin it).
+        // The context is held until the NEXT eval so EXPAND (most-recent-only)
+        // still has a live value.
+        val evalContext = try {
+            org.graalvm.polyglot.Context.newBuilder(MezzeLanguage.ID)
+                .engine(samplingEngine())
+                .allowAllAccess(true)
+                .allowCreateThread(true)
+                .allowExperimentalOptions(true)
+                .build()
         } catch (e: Exception) {
-            send(evalFailed(
-                eval.requestId, EvalError.Kind.DECODE_FAILED,
-                "register failed: ${e.javaClass.simpleName}: ${e.message ?: "no message"}",
-            ))
+            send(evalFailed(eval.requestId, EvalError.Kind.FAILED, "could not create eval context: ${e.message}"))
             return
+        }
+        // Close the previous eval's context now that a newer one supersedes it.
+        lastEvalContext.getAndSet(evalContext)?.let { prev ->
+            try { prev.close(true) } catch (_: Exception) {}
         }
 
         try {
@@ -1170,9 +1221,9 @@ object RuntimeServer {
         // indistinguishable from this expression returning that same value.
         MezzeLanguage.clearLastResult()
         activeEvalRequest = eval.requestId
-        val timeoutWatchdog = armEvalTimeout(eval, state)
+        val timeoutWatchdog = armEvalTimeout(eval, evalContext)
         try {
-            state.context.eval(source)
+            evalContext.eval(source)
             val result = MezzeLanguage.getLastExecutionResult()
             val frame = evalResultFrame(
                 requestId = eval.requestId,
@@ -1235,7 +1286,7 @@ object RuntimeServer {
      * also why the worker runs one expression at a time. Serving several
      * concurrently needs a context per request, i.e. the world/context refactor.
      */
-    private fun armEvalTimeout(eval: Eval, state: ServerState): EvalTimeout {
+    private fun armEvalTimeout(eval: Eval, context: org.graalvm.polyglot.Context): EvalTimeout {
         if (eval.timeoutMs <= 0) return EvalTimeout(null)
         val timer = java.util.Timer("mez-eval-timeout-${eval.requestId}", true)
         val handle = EvalTimeout(timer)
@@ -1243,7 +1294,7 @@ object RuntimeServer {
             override fun run() {
                 handle.markFired()
                 try {
-                    state.context.interrupt(java.time.Duration.ofSeconds(5))
+                    context.interrupt(java.time.Duration.ofSeconds(5))
                 } catch (_: Exception) {
                     // The expression finished between the deadline and here.
                 }
