@@ -15,11 +15,11 @@ class PropertyCheckTest {
 
     private val head = """
         use std::property::{ check, check_from, Passed, Failed }
-        use std::effects::sample::{ Sampler }
+        use std::effects::sample::{  }
         use std::abilities::arbitrary::{ Arbitrary }
 
-        let ints: Sampler Int = {} -> Arbitrary.arbitrary {}
-        let lists: Sampler [Int] = {} -> Arbitrary.arbitrary {}
+        let ints: {} -> Int <Sample> = {} -> Arbitrary.arbitrary {}
+        let lists: {} -> [Int] <Sample> = {} -> Arbitrary.arbitrary {}
     """.trimIndent()
 
     private fun run(body: String): String = MezzeTestHelper.run("$head\n\n${body.trimIndent()}").toString()
@@ -77,7 +77,7 @@ class PropertyCheckTest {
     @Test
     fun `a string counterexample shrinks to the empty string when that fails`() {
         val out = run("""
-            let strs: Sampler Str = {} -> Arbitrary.arbitrary {}
+            let strs: {} -> Str <Sample> = {} -> Arbitrary.arbitrary {}
             let main = {} -> match check { gen = strs, holds = { x } -> x.size {} > 100, runs = 20, seed = 4 } is
                 Passed { runs } -> "passed"
                 Failed { input, original, shrinks } -> input.to_dbg {}

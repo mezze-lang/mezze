@@ -255,15 +255,26 @@ class DeclIdentityTest {
 
     @Test
     fun `an imported alias means what its names meant where it was declared`() {
-        // `Ticker` mentions `Tick`, which the importer never imports. The alias's
-        // row must resolve `Tick` in `lib`, where it was written — it used to be
-        // looked up here and fail ("Effect `Tick` is not defined or not imported").
+        // `Ticker` mentions `Tick`, which the importer never imports. The row
+        // inside the declaration must resolve `Tick` in `lib`, where it was
+        // written — it used to be looked up here and fail ("Effect `Tick` is not
+        // defined or not imported").
+        //
+        // The row is on a record FIELD rather than being the declaration's whole
+        // target. It was written `pub type Ticker = {} -> Int <Tick>` until
+        // T0219 made that form illegal — an alias naming a function type with a
+        // named effect hides it at every use site. The cross-module question is
+        // identical either way: a row written inside a type declaration, used
+        // from a module that cannot name the effect. A record holding an
+        // effectful callback is also the shape the stdlib actually uses for this
+        // (`Routes`, `RouteEntry`, `SelectBranch`), so this now pins the fix on
+        // the spelling that survives.
         writeModule("lib", """
             effect Tick where {
               tick: {} -> Int <Tick>
             }
 
-            pub type Ticker = {} -> Int <Tick>
+            pub type Ticker = { run: {} -> Int <Tick> }
         """)
         val result = check("""
             use lib::{ Ticker }

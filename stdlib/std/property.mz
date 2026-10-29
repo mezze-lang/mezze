@@ -25,7 +25,7 @@
 use std::int
 use std::nat::{ Nat }
 use std::nat
-use std::effects::sample::{ Sample, Sampler, default_size }
+use std::effects::sample::{ Sample, default_size }
 
 ## What a check found.
 pub type Verdict 'a = | Passed { runs: Int }, Failed { input: 'a, original: 'a, shrinks: Int } |
@@ -91,17 +91,17 @@ impl Sample for ReplayAt { draws: [Int], key: Int, size: Nat } where {
 
 ## Check that `holds` is true of `runs` inputs drawn by `gen`, the i-th from
 ## `seed + i`. On the first that fails, shrink it.
-pub let check: { gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
+pub let check: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
   { gen, holds, runs, seed } -> run_from { gen = gen, holds = holds, runs = runs, seed = seed, i = 0 }
 
 ## [check], but first on each of `first`, in order: the values already known to
 ## matter — one per branch of the code under test, say, as `mez sample` pins its
 ## leading rows. A failure among them is reported as given, unshrunk: it was
 ## chosen, not drawn, so there are no draws to simplify. A pass counts them.
-pub let check_from: { first: ['a], gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
+pub let check_from: { first: ['a], gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
   { first, gen, holds, runs, seed } -> first_then_draw { first = first, gen = gen, holds = holds, runs = runs, seed = seed, i = 0 }
 
-let first_then_draw: { first: ['a], gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
+let first_then_draw: { first: ['a], gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
   { first, gen, holds, runs, seed, i } ->
     match __native_seq_get { xs = first, i = i } is
       Some { val } ->
@@ -111,7 +111,7 @@ let first_then_draw: { first: ['a], gen: Sampler 'a, holds: { x: 'a } -> Bool, r
         Passed { runs = drawn } -> Passed { runs = drawn + i }
         Failed { input, original, shrinks } -> Failed { input = input, original = original, shrinks = shrinks }
 
-let run_from: { gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
+let run_from: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
   { gen, holds, runs, seed, i } ->
     if i >= runs then Passed { runs = runs }
     else do
@@ -124,7 +124,7 @@ let run_from: { gen: Sampler 'a, holds: { x: 'a } -> Bool, runs: Int, seed: Int,
       else shrink { gen = gen, holds = holds, size = size, draws = __native_draw_log { key = 0 }, best = x, original = x, steps = 0 }
 
 ## Keep taking the first simpler sequence that still fails, until none does.
-let shrink: { gen: Sampler 'a, holds: { x: 'a } -> Bool, size: Nat, draws: [Int], best: 'a, original: 'a, steps: Int } -> Verdict 'a <*> =
+let shrink: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, size: Nat, draws: [Int], best: 'a, original: 'a, steps: Int } -> Verdict 'a <*> =
   { gen, holds, size, draws, best, original, steps } ->
     if steps >= max_shrinks then Failed { input = best, original = original, shrinks = steps }
     else match simpler_failure { gen = gen, holds = holds, size = size, current = draws, candidates = __native_shrink_candidates { draws = draws }, i = 0 } is
@@ -133,7 +133,7 @@ let shrink: { gen: Sampler 'a, holds: { x: 'a } -> Bool, size: Nat, draws: [Int]
 
 ## The first candidate whose replay still fails AND is strictly simpler than
 ## `current` — the second condition is what makes shrinking terminate.
-let simpler_failure: { gen: Sampler 'a, holds: { x: 'a } -> Bool, size: Nat, current: [Int], candidates: [[Int]], i: Int } -> Option { draws: [Int], x: 'a } <*> =
+let simpler_failure: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, size: Nat, current: [Int], candidates: [[Int]], i: Int } -> Option { draws: [Int], x: 'a } <*> =
   { gen, holds, size, current, candidates, i } ->
     match __native_seq_get { xs = candidates, i = i } is
       None -> None

@@ -87,6 +87,7 @@ enum class ErrorCode {
     T0214_TYPECHECK_LIMIT_EXCEEDED,
     T0215_AMBIGUOUS_ABILITY_TYPE, // an ability method whose type is decided by neither the parameters nor the result — no call site can pin it, so it could never dispatch // the typechecker hit an internal recursion/work limit on this program (pathological or malformed) — a clean bail-out instead of ever crashing/hanging
     T0216_AMBIGUOUS_DISPATCH, // two same-priority impls apply to this call and the receiver's type does not choose between them
+    T0219_EFFECT_ROW_IN_TYPE_ALIAS, // `type Gen 'a = {} -> 'a <Sample>` or `<...>` — a type/newtype naming a function type may carry NO effect row. An alias names a SHAPE; what a given function performs belongs on the signature that uses it. Sound either way, but a NAMED effect is invisible at the use site (`{} -> Gen Str <Other>` shows one row where there are two) and an OPEN row silently widens every use to accept any effectful function. A record FIELD holding an effectful callback is unaffected
     T0217_FOREIGN_HANDLE_NOT_STRUCTURAL, // a polyglot foreign handle bound to a structural type (`Result`, a record, a variant, a function, a primitive) — the #22 laundering gate. A KIND violation, so it is settled the moment it is raised: no later pinning of the surrounding type vars can make it legal, which is why the impl-body suppression must not treat it as provisional (S-18)
 
     // ─── Typechecker: inference & binding (T03xx) ────────────────────────

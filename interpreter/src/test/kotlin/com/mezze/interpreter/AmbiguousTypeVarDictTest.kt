@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test
  *
  * A dictionary reaches a function from its caller, by instantiating the
  * function's type. `let xs: ['a] = Arbitrary.arbitrary {}` inside a function
- * typed `Sampler Int` puts `'a` where no caller can name it, so nothing can ever
- * supply `Arbitrary 'a`. It checked clean and then:
+ * typed `{} -> Int <Sample>` puts `'a` where no caller can name it, so nothing
+ * can ever supply `Arbitrary 'a`. It checked clean and then:
  *  - the scalar shape died at RUN time with "no dictionary was supplied …
  *    This is a compiler defect";
  *  - the `['a]` shape ran fine for as long as every draw was empty, and died
@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test
  */
 class AmbiguousTypeVarDictTest {
     private val head = """
-        use std::effects::sample::{ Sampler, SeededSample }
+        use std::effects::sample::{ SeededSample }
         use std::abilities::arbitrary::{ Arbitrary }
     """.trimIndent()
 
@@ -44,7 +44,7 @@ class AmbiguousTypeVarDictTest {
     fun `a bare type variable nothing determines is rejected`() = assertRejectedAtCheck(
         "scalar",
         """
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let x: 'a = Arbitrary.arbitrary {}
               7
             perform SeededSample { seed = 7 } in draw {}
@@ -56,7 +56,7 @@ class AmbiguousTypeVarDictTest {
     fun `a type variable inside a container is rejected too`() = assertRejectedAtCheck(
         "list",
         """
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let xs: ['a] = Arbitrary.arbitrary {}
               xs.size {}
             perform SeededSample { seed = 7 } in draw {}
@@ -69,7 +69,7 @@ class AmbiguousTypeVarDictTest {
         "via function",
         """
             let draw_any: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let x: 'a = draw_any {}
               7
             perform SeededSample { seed = 7 } in draw {}
@@ -85,7 +85,7 @@ class AmbiguousTypeVarDictTest {
         "derived",
         """
             type Box 'a = { v: 'a }
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let b: Box 'a = Arbitrary.arbitrary {}
               7
             perform SeededSample { seed = 7 } in draw {}
@@ -100,7 +100,7 @@ class AmbiguousTypeVarDictTest {
     fun `a local generalized helper keeps its own variable`() = assertEquals(
         7L,
         run("""
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let mk: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}
               let n: Int = mk {}
               7
@@ -160,7 +160,7 @@ class AmbiguousTypeVarDictTest {
         7L,
         run("""
             let draw_any: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let x: Int = draw_any {}
               7
             perform SeededSample { seed = 7 } in draw {}
@@ -171,7 +171,7 @@ class AmbiguousTypeVarDictTest {
     fun `a concrete type is untouched`() = assertEquals(
         7L,
         run("""
-            let draw: Sampler Int = {} -> do
+            let draw: {} -> Int <Sample> = {} -> do
               let xs: [Int] = Arbitrary.arbitrary {}
               7
             perform SeededSample { seed = 7 } in draw {}

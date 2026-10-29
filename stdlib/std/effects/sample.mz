@@ -43,9 +43,15 @@ effect Sample where {
 ## ambient, this needs no generator data type and no threaded seed — it is just a
 ## thunk, and every combinator below is an ordinary function.
 ##
-## `Arbitrary.arbitrary` is the canonical `Sampler 'a` for a type. Anything you
+## `Arbitrary.arbitrary` is the canonical generator for a type. Anything you
 ## write by hand is another one, and you pass it explicitly where you want it.
-pub type Sampler 'a = {} -> 'a <Sample>
+##
+## Written out as `{} -> 'a <Sample>` at every use rather than hidden behind a
+## `Sampler 'a` alias. An alias whose target is a function type with a NAMED
+## effect reads as if it had none — `{} -> Sampler Str <Other>` shows one row
+## where there are two — and the row cannot be moved to the use site either,
+## because a row needs an arrow to own it and `Sampler Str` is not one. So the
+## alias is gone and T0219 refuses the form.
 
 ## The default budget.
 ##
@@ -116,7 +122,7 @@ impl Sample for RandomSampleWith { config: SampleConfig } where {
 ## And it was redundant. The function's whole content was two nested `perform`s,
 ## which the caller can write — so it bought no late binding, only an extra calling
 ## convention to learn. Its own comment said as much, having already replaced an
-## earlier `Sampler` effect on that reasoning; the simplification went one step too
+## earlier generator effect on that reasoning; the simplification went one step too
 ## far and took composition with it.
 ##
 ## ## Why this one OWNS the stream instead of raising `Random`
@@ -270,7 +276,7 @@ pub let scripted: { values: ['a], key: Int, op: Int } -> 'a = { values, key, op 
   __native_scripted_next { values = values, key = key, op = op }
 
 # ---------------------------------------------------------------------------
-# Combinators — ordinary functions over `Sampler`, not operations.
+# Combinators — ordinary functions over a `{} -> 'a <Sample>` thunk, not operations.
 #
 # This is the vocabulary you write a generator in. They are functions because
 # nothing about combining recipes needs to be swappable; only the draw does.
@@ -304,7 +310,7 @@ pub let one_of: { xs: ['a], def: 'a } -> 'a <Sample> = { xs, def } ->
 ## `[[[Int]]]` at size 100 held 127 746 ints. It costs an element's own reach
 ## nothing that matters: a property check's sizes run high enough that elements
 ## still get their extremes (`std::property.max_check_size`).
-pub let list_of: { g: Sampler 'a } -> ['a] <Sample> = { g } -> do
+pub let list_of: { g: {} -> 'a <Sample> } -> ['a] <Sample> = { g } -> do
   let budget = Sample.size {}
   let n = Sample.choose { bound = int::from_nat { n = budget } + 1 }
   Sample.resize { n = budget / 2n, call = {} -> seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> g {} } }
@@ -318,7 +324,7 @@ pub let list_of: { g: Sampler 'a } -> ['a] <Sample> = { g } -> do
 ##
 ## `def` covers an empty or all-zero-weight `choices`: a generator with nothing to
 ## choose from, the caller's mistake, and not worth an Option at every call site.
-pub let frequency: { choices: [{ weight: Int, gen: Sampler 'a }], def: 'a } -> 'a <Sample> =
+pub let frequency: { choices: [{ weight: Int, gen: {} -> 'a <Sample> }], def: 'a } -> 'a <Sample> =
   { choices, def } -> do
     let total = seq::fold { xs = choices, init = 0, f = { acc, x } -> acc + int::max { l = x.weight, r = 0 } }
     let target = Sample.choose { bound = int::max { l = total, r = 1 } }

@@ -17,17 +17,17 @@ import org.junit.jupiter.api.Test
 class ArbitrarySizeTest {
 
     private val head = """
-        use std::effects::sample::{ Sampler, SeededSampleWith }
+        use std::effects::sample::{ SeededSampleWith }
         use std::abilities::arbitrary::{ Arbitrary, int_max, int_min }
         use std::collections::seq
         use std::nat::{ Nat }
         use std::nat
         use std::property::{ check }
 
-        let one_int: Sampler Int = {} -> Arbitrary.arbitrary {}
-        let one_nat: Sampler Nat = {} -> Arbitrary.arbitrary {}
-        let one_float: Sampler Float = {} -> Arbitrary.arbitrary {}
-        let one_str: Sampler Str = {} -> Arbitrary.arbitrary {}
+        let one_int: {} -> Int <Sample> = {} -> Arbitrary.arbitrary {}
+        let one_nat: {} -> Nat <Sample> = {} -> Arbitrary.arbitrary {}
+        let one_float: {} -> Float <Sample> = {} -> Arbitrary.arbitrary {}
+        let one_str: {} -> Str <Sample> = {} -> Arbitrary.arbitrary {}
 
         let ints: { size: Nat } -> [Int] <*> = { size } ->
           perform SeededSampleWith { seed = 11, config = { size = size, enumerate = 12n } } in

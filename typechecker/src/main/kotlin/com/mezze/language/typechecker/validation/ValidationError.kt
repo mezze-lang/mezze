@@ -238,6 +238,34 @@ sealed interface ValidationError {
      * registry is complete before this check runs, so a name that fails to resolve
      * is genuinely undeclared, not transiently-unresolved.
      */
+    /**
+     * A type/newtype naming a function type, with an effect row on it.
+     *
+     * Sound behind the name, but the alias names a SHAPE — what a given function
+     * of that shape performs belongs on the signature that uses it, where a
+     * reader can see it. See [AliasEffectRowValidator] for the scope and for why
+     * an OPEN row is refused too.
+     */
+    data class EffectRowInTypeAlias(
+        val typeName: String,
+        val row: String,
+        val loc: Loc? = null
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.T0219_EFFECT_ROW_IN_TYPE_ALIAS
+
+        // Context + direction, and no more: an alias names a shape, so say which
+        // alias and which row, then what to do. The reasoning and the
+        // record-field exception live in `mez explain T0219`, which is where a
+        // reader goes for them — an inline diagnostic that recites them is one
+        // nobody finishes reading.
+        override fun message(): String =
+            "'$typeName' names a function type carrying $row. An alias names a shape — " +
+                "put the effects on the signature that uses '$typeName', or write the " +
+                "function type out there"
+
+        override fun location() = loc
+    }
+
     data class UnknownType(
         val typeName: String,
         val availableTypes: List<String> = emptyList(),
