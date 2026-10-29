@@ -156,7 +156,18 @@ object WireRunner {
         }
         initStore(currentDir)
 
-        var session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
+        // Publish a runtime session so editor tools (the sample lens, a REPL)
+        // can attach to THIS warm `mez dev` runtime and EVAL against it — on the
+        // project's own (devenv) toolchain, no second JVM, no duplicate GraalVM.
+        // The runtime serves dev's own driver over stdio and these eval clients
+        // over the socket, sharing one eval worker. Cleaned up on exit so a stale
+        // file never points at a dead port.
+        val sessionFile = File(currentDir, ".mezze/session.json")
+        sessionFile.parentFile?.mkdirs()
+        val devFlagsWithListen = devFlags + "--listen=${sessionFile.absolutePath}"
+        Runtime.getRuntime().addShutdownHook(Thread { try { sessionFile.delete() } catch (_: Exception) {} })
+
+        var session = WireSession.start(currentDir, timing, t0, devFlagsWithListen) ?: return 1
         var prevHashes: Set<Hash> = emptySet()
 
         // Ctrl-C in watch mode quits the whole session. We disable
@@ -176,7 +187,7 @@ object WireRunner {
          *  fails (subprocess won't start, etc); caller should bail. */
         fun restartSession(): Boolean {
             try { session.close() } catch (_: Exception) {}
-            val fresh = WireSession.start(currentDir, timing, System.nanoTime(), devFlags)
+            val fresh = WireSession.start(currentDir, timing, System.nanoTime(), devFlagsWithListen)
                 ?: return false
             session = fresh
             prevHashes = emptySet()  // child has no cached state anymore
@@ -1007,50 +1018,31 @@ internal class WireSession private constructor(
     }
 
     companion object {
-        fun start(
-            currentDir: File,
-            timing: Boolean,
-            t0: Long,
-            devFlags: List<String> = emptyList(),
-        ): WireSession? {
-            fun ms() = (System.nanoTime() - t0) / 1_000_000
-
-            // Use the JDK the resolver classified (same precedence + GraalVM
-            // detection the dev/build entry warned about), falling back to the
-            // legacy finder only if resolution somehow came back empty. The
-            // caller (DevCommand) has already hard-stopped on an unrunnable JDK
-            // and warned on a degraded one, so here we just need the executable.
+        /**
+         * The `java … com.mezze.interpreter.standalone.RuntimeServer` command,
+         * built exactly as [start] does, with [extraArgs] appended as the
+         * RuntimeServer's own args (dev-instrumentation flags, or `--listen=…`
+         * for a socket host). Shared by the pipe-spawning [start] and the
+         * socket-listening `mez serve`. Null (with a message) when no JDK is
+         * found.
+         */
+        fun buildRuntimeCommand(currentDir: File, extraArgs: List<String> = emptyList()): List<String>? {
             val java = com.mezze.language.cli.GraalvmResolver.resolve().javaExe
                 ?: JvmLauncher.findJava()
                 ?: run {
                     System.err.println("${Glyphs.CROSS} no JDK 21+ found — see `mez doctor`")
                     return null
                 }
-            // Base classpath = mezze-runtime.jar. When dev flags are
-            // present, also append ~/.mezze/lib/tools/*.jar so the
-            // chromeinspector / profiler / coverage / dap / insight
-            // tool jars are visible to Truffle's option parser.
-            // installDevTools laid these down at install time.
             val baseClasspath = JvmLauncher.buildClasspath()
-            val withTools = if (devFlags.isNotEmpty()) {
+            val withTools = if (extraArgs.isNotEmpty()) {
                 val toolsDir = com.mezze.language.cli.MezzeHome.toolsDir
                 val toolJars = toolsDir.listFiles { f -> f.name.endsWith(".jar") }
                     ?.joinToString(File.pathSeparator) { it.absolutePath }
                     ?: ""
                 if (toolJars.isNotEmpty()) "$baseClasspath${File.pathSeparator}$toolJars" else baseClasspath
             } else baseClasspath
-            // Mezze.toml [polyglot.jvm] classpath entries — user-supplied
-            // Java classes callable via `java::type(...)`. Resolved once
-            // here (parent side) so the child's -cp is fully built before
-            // spawn.
             val polyglotJvmCp = com.mezze.language.cli.`package`.PolyglotResolver
                 .resolveJvmClasspath(currentDir)
-            // Commit 5 — walk Mezze.lock's resolved packages, read each
-            // package's `[jars]` table, verify each jar's sha256 against
-            // `~/.mezze/store/jars/<sha>/`, and append the verified jars
-            // to the classpath. Missing store entries log a warning and
-            // are skipped so a partially-synced project still boots; a
-            // sha256 mismatch is a hard skip with a clean-sync hint.
             val resolvedJarsReport = com.mezze.language.cli.`package`.ResolvedJarsClasspath.collect(currentDir)
             for (w in resolvedJarsReport.warnings) System.err.println("[mez] $w")
             val resolvedJarsCp = resolvedJarsReport.asClasspath()
@@ -1065,16 +1057,26 @@ internal class WireSession private constructor(
                     append(resolvedJarsCp)
                 }
             }
-
             val command = mutableListOf(java.absolutePath)
             command.addAll(jvmArgs())
             command.add("-Dmezze.project.root=${currentDir.absolutePath}")
             command.add("-cp"); command.add(classpath)
             command.add("com.mezze.interpreter.standalone.RuntimeServer")
-            // Dev instrumentation flags get appended as RuntimeServer's
-            // args[] — DevFlags.parse picks them up before building the
-            // Truffle Engine. Order doesn't matter; they're flag-named.
-            command.addAll(devFlags)
+            command.addAll(extraArgs)
+            return command
+        }
+
+        fun start(
+            currentDir: File,
+            timing: Boolean,
+            t0: Long,
+            devFlags: List<String> = emptyList(),
+        ): WireSession? {
+            fun ms() = (System.nanoTime() - t0) / 1_000_000
+
+            // Build the child command the same way a socket host does, so the
+            // one classpath/JDK-resolution path serves both transports.
+            val command = buildRuntimeCommand(currentDir, devFlags) ?: return null
 
             // PIPE (not INHERIT) the child's stderr: the child's normal user
             // output rides the wire as STDERR_DATA frames, so fd 2 only ever

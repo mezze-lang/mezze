@@ -143,20 +143,19 @@ object RuntimeServer {
                 System.err.println("[mezze] token: ${listener.token}")
             }
         }
-        val accepted = listener?.accept()
-
-        val controlOut: OutputStream = if (accepted != null) {
-            BufferedOutputStream(accepted.getOutputStream())
-        } else {
+        // The stdio pipe is ALWAYS the primary control transport: the process
+        // that spawned us — `mez dev`/`eval`/`run` — drives it. A `--listen`
+        // socket, when present, is served ADDITIONALLY by the acceptor thread
+        // below, so an editor can attach to this same warm runtime and EVAL
+        // without disturbing the primary driver. Both transports feed ONE
+        // shared eval worker, so all execution stays serialized on one thread.
+        val controlOut: OutputStream =
             BufferedOutputStream(java.io.FileOutputStream(java.io.FileDescriptor.out))
-        }
-        val controlIn = if (accepted != null) {
-            BufferedInputStream(accepted.getInputStream())
-        } else {
-            BufferedInputStream(System.`in`)
-        }
-        // Null on stdio, where there is nothing to prove.
-        val requiredToken = listener?.token
+        val controlIn = BufferedInputStream(System.`in`)
+        // Null on stdio — the pipe was inherited from the process that forked
+        // us, so the OS already decided who may write to it. The socket path
+        // (acceptor) demands the session token instead.
+        val requiredToken: String? = null
 
         // Run all I/O on this lock — single writer to controlOut, no
         // interleaving between (e.g.) a STDOUT_DATA frame from user code
@@ -494,6 +493,43 @@ object RuntimeServer {
             }
         }
 
+        // ONE eval worker for ALL execution — the stdio driver AND any socket
+        // eval clients. A single-threaded Truffle context cannot be entered from
+        // two threads at once, so every LOAD/EVAL queues here and runs serialized.
+        val evalWorker = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "mez-runtime-eval").apply { isDaemon = true }
+        }
+
+        // Socket eval clients (editor sampler / REPL / agent) attaching to this
+        // warm runtime. Served on daemon threads so the stdio driver below stays
+        // the runtime's lifecycle: when it disconnects, main falls through and
+        // shuts everything down. Each client gets its OWN frame writer (so its
+        // EVAL_RESULT goes back to it); they share `state` and `evalWorker`.
+        if (listener != null) {
+            val token = listener.token
+            Thread({
+                while (true) {
+                    val sock = try { listener.accept() } catch (_: Exception) { break }
+                    Thread({
+                        try {
+                            val cOut = BufferedOutputStream(sock.getOutputStream())
+                            val cIn = BufferedInputStream(sock.getInputStream())
+                            val cLock = ReentrantLock()
+                            val cSend: (WireFrame) -> Unit = { f -> cLock.withLock { WireFrameCodec.writeFlush(cOut, f) } }
+                            handshake(cIn, cSend, diag, token)
+                            dispatchLoop(cIn, cSend, state, diag, evalWorker)
+                        } catch (e: Exception) {
+                            if (System.getenv("MEZZE_DEBUG") != null) {
+                                originalStderr.println("[RuntimeServer] socket eval client ended: ${e.message}")
+                            }
+                        } finally {
+                            try { sock.close() } catch (_: Exception) {}
+                        }
+                    }, "mez-runtime-socket-client").apply { isDaemon = true }.start()
+                }
+            }, "mez-runtime-acceptor").apply { isDaemon = true }.start()
+        }
+
         try {
             handshake(controlIn, ::send, diag, requiredToken)
             // Redirect System.out / System.err to the wire so all user
@@ -509,7 +545,7 @@ object RuntimeServer {
             // panics/exceptions land on stderr.
             System.setOut(wireOut)
             System.setErr(wireErr)
-            dispatchLoop(controlIn, ::send, state, diag)
+            dispatchLoop(controlIn, ::send, state, diag, evalWorker)
         } catch (e: WireProtocolException) {
             // Framing-level failure — best-effort report then exit. Always
             // log this to the real stderr; wire failures are bugs, not
@@ -520,6 +556,9 @@ object RuntimeServer {
             originalStderr.println("[RuntimeServer] fatal: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace(originalStderr)
         } finally {
+            // Primary driver gone → tear the runtime down. Stop the shared
+            // worker first so no queued eval touches a closing context.
+            evalWorker.shutdownNow()
             // Close the CURRENT context (state.context may have been swapped by a
             // dev reload; the local `context` is only the startup one).
             try { state.context.close(true) } catch (_: Exception) {}
@@ -602,16 +641,16 @@ object RuntimeServer {
         send: (WireFrame) -> Unit,
         state: ServerState,
         diag: PrintStream,
+        /**
+         * The SHARED single-thread executor that runs every LOAD/EVAL. Shared
+         * across transports (the stdio driver and any attached socket eval
+         * clients) so that all guest execution is serialized onto ONE thread —
+         * a single-threaded Truffle context cannot be touched from two threads
+         * at once. Owned by [main], which shuts it down; this loop must not.
+         */
+        evalWorker: java.util.concurrent.ExecutorService,
     ) {
-        // Dedicated worker for LOAD-triggered evals. The dispatch loop
-        // MUST stay free to read frames concurrently with eval — otherwise
-        // STDIN_DATA / INTERRUPT / EVICT frames would buffer on the wire
-        // until eval returned, which means stdin reads would deadlock.
-        // Single-thread executor enforces "one active run at a time" (v1).
-        val evalWorker = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-            Thread(r, "mez-runtime-eval").apply { isDaemon = true }
-        }
-        try {
+        run {
             while (true) {
                 val frame = try {
                     WireFrameCodec.read(input) ?: return  // EOF — parent closed, leave quietly
@@ -693,11 +732,6 @@ object RuntimeServer {
                     }
                 }
             }
-        } finally {
-            // Best-effort shutdown of the eval worker. If a run is in
-            // progress when we exit (e.g. parent closed mid-run), it's
-            // already going to die with the process anyway.
-            evalWorker.shutdownNow()
         }
     }
 
@@ -994,6 +1028,42 @@ object RuntimeServer {
     @Volatile
     private var activeEvalRequest: Long? = null
 
+    /**
+     * A DEDICATED engine for serving EVALs, separate from the one `mez dev` runs
+     * the program in. Built once, reused across samples so its content-code cache
+     * (compiled CallTargets by hash) stays warm — but it NEVER loads the user's
+     * program, so the one thing that can corrupt a self-contained eval's code
+     * resolution (program functions sharing the engine's hash→code cache) can't
+     * happen. It only ever holds the immutable stdlib and content-addressed eval
+     * closures, so reuse is safe: same code, same hash, same result. This is the
+     * shape a remote node would use — a long-lived worker that evaluates hashes,
+     * never a user program.
+     */
+    private val samplingEngine =
+        java.util.concurrent.atomic.AtomicReference<org.graalvm.polyglot.Engine?>(null)
+
+    /**
+     * The fresh CONTEXT the MOST RECENT [handleEval] ran in (on [samplingEngine]),
+     * kept alive so EXPAND (most-recent-only) can still walk its value, and closed
+     * when the next eval supersedes it. Fresh per eval so per-context state
+     * (globals, evaluated effectful thunk values, handler chains) never carries
+     * between samples.
+     */
+    private val lastEvalContext =
+        java.util.concurrent.atomic.AtomicReference<org.graalvm.polyglot.Context?>(null)
+
+    private fun samplingEngine(): org.graalvm.polyglot.Engine {
+        samplingEngine.get()?.let { return it }
+        val built = org.graalvm.polyglot.Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.Compilation", "false")
+            .build()
+        // CAS so a racing caller doesn't leak a second engine.
+        return if (samplingEngine.compareAndSet(null, built)) built
+        else { try { built.close(true) } catch (_: Exception) {}; samplingEngine.get()!! }
+    }
+
     private fun evalFailed(requestId: Long, kind: String, message: String): WireFrame =
         WireFrame.of(MessageType.EVAL_RESULT, EvalResult(
             requestId = requestId,
@@ -1102,16 +1172,31 @@ object RuntimeServer {
         }
         val (functions, meta, printType) = prep as EvalPrep.Ready
 
-        try {
-            MezzeLanguage.setFunctionsForDirectExecution(
-                functions, meta.performerRecords, state.projectRoot(), meta.entryHash,
-            )
+        // Each EVAL runs in a FRESH context on the DEDICATED sampling engine —
+        // never `mez dev`'s engine. The sampling engine is warm (its compiled
+        // stdlib/sample code is reused across samples) but holds no user program,
+        // so a self-contained eval's hash→code resolution can't be corrupted by
+        // whatever `mez dev` loaded. The fresh context clears per-context state
+        // between samples. Result: a pure function of the closure's hashes —
+        // same code, same hash, same evaluation — which is the guarantee
+        // hash-addressed distribution needs. Interpreter-only (a sample is tiny;
+        // JIT would only add latency) and no guest languages (none must pin it).
+        // The context is held until the NEXT eval so EXPAND (most-recent-only)
+        // still has a live value.
+        val evalContext = try {
+            org.graalvm.polyglot.Context.newBuilder(MezzeLanguage.ID)
+                .engine(samplingEngine())
+                .allowAllAccess(true)
+                .allowCreateThread(true)
+                .allowExperimentalOptions(true)
+                .build()
         } catch (e: Exception) {
-            send(evalFailed(
-                eval.requestId, EvalError.Kind.DECODE_FAILED,
-                "register failed: ${e.javaClass.simpleName}: ${e.message ?: "no message"}",
-            ))
+            send(evalFailed(eval.requestId, EvalError.Kind.FAILED, "could not create eval context: ${e.message}"))
             return
+        }
+        // Close the previous eval's context now that a newer one supersedes it.
+        lastEvalContext.getAndSet(evalContext)?.let { prev ->
+            try { prev.close(true) } catch (_: Exception) {}
         }
 
         try {
@@ -1136,9 +1221,9 @@ object RuntimeServer {
         // indistinguishable from this expression returning that same value.
         MezzeLanguage.clearLastResult()
         activeEvalRequest = eval.requestId
-        val timeoutWatchdog = armEvalTimeout(eval, state)
+        val timeoutWatchdog = armEvalTimeout(eval, evalContext)
         try {
-            state.context.eval(source)
+            evalContext.eval(source)
             val result = MezzeLanguage.getLastExecutionResult()
             val frame = evalResultFrame(
                 requestId = eval.requestId,
@@ -1201,7 +1286,7 @@ object RuntimeServer {
      * also why the worker runs one expression at a time. Serving several
      * concurrently needs a context per request, i.e. the world/context refactor.
      */
-    private fun armEvalTimeout(eval: Eval, state: ServerState): EvalTimeout {
+    private fun armEvalTimeout(eval: Eval, context: org.graalvm.polyglot.Context): EvalTimeout {
         if (eval.timeoutMs <= 0) return EvalTimeout(null)
         val timer = java.util.Timer("mez-eval-timeout-${eval.requestId}", true)
         val handle = EvalTimeout(timer)
@@ -1209,7 +1294,7 @@ object RuntimeServer {
             override fun run() {
                 handle.markFired()
                 try {
-                    state.context.interrupt(java.time.Duration.ofSeconds(5))
+                    context.interrupt(java.time.Duration.ofSeconds(5))
                 } catch (_: Exception) {
                     // The expression finished between the deadline and here.
                 }

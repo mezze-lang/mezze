@@ -36,6 +36,15 @@ import java.io.File
  */
 class SampleCommand {
 
+    /**
+     * When `--session=<file>` is given, a connection to an already-running
+     * `mez dev` runtime (which publishes `.mezze/session.json`). Every eval goes there — warm,
+     * on the project's own (devenv) toolchain — instead of this process
+     * cold-spawning its own JVM, which also means `mez sample` needs no JDK of
+     * its own. Null = the classic spawn-per-run path.
+     */
+    private var runtime: RuntimeSession? = null
+
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
         val flags = args.filter { it.startsWith("--") }
         val positional = args.filter { !it.startsWith("--") }
@@ -78,6 +87,20 @@ class SampleCommand {
         val timeoutMs = intFlag(flags, "--timeout")?.toLong()?.times(1_000) ?: 0L
 
         val moduleFile = resolveModuleFile(flags, currentDir) ?: kotlin.system.exitProcess(1)
+
+        // `--session=<file>`: attach to a warm runtime instead of spawning one.
+        val sessionArg = flags.firstOrNull { it.startsWith("--session=") }?.substringAfter("=")
+        if (sessionArg != null) {
+            val sessionFile = File(sessionArg).let { if (it.isAbsolute) it else File(currentDir, sessionArg) }
+            val session = com.mezze.wire.WireListener.readSessionFile(sessionFile) ?: run {
+                System.err.println(
+                    "${Glyphs.CROSS} no runtime session at ${sessionFile.absolutePath}. " +
+                        "Run `mez dev` in this project — the editor attaches to it to sample.",
+                )
+                kotlin.system.exitProcess(1)
+            }
+            runtime = RuntimeSession.connect(session) ?: kotlin.system.exitProcess(1)
+        }
 
         val target = when (val t = SampleTarget.resolve(currentDir, moduleFile, name)) {
             is SampleTarget.Result.Refused -> {
@@ -167,6 +190,7 @@ class SampleCommand {
                 if (rows.any { it is RowOutcome.Crashed }) kotlin.system.exitProcess(1)
             }
         }
+        runtime?.close()
     }
 
     /**
@@ -264,6 +288,19 @@ class SampleCommand {
     ): com.mezze.wire.EvalResult? {
         val runDir = com.mezze.language.store.ProjectLayout.runDir(currentDir)
         val (fnsFile, metaFile) = EvalClosure.writeTo(runDir, compiled)
+        // Attached to a warm runtime: reuse the one connection for every row.
+        runtime?.let { rt ->
+            return rt.evalOnce(
+                fnsFile = fnsFile,
+                metaFile = metaFile,
+                requestId = 1,
+                maxDepth = depth,
+                maxItems = items,
+                timeoutMs = timeoutMs,
+                stdout = stdout,
+            )
+        }
+        // No session: spawn a one-shot runtime for this expression (needs a JDK).
         val session = WireSession.start(currentDir, timing = false, t0 = System.nanoTime())
             ?: return null
         return try {

@@ -143,7 +143,15 @@ public final class LazyStubRootNode extends RootNode {
             MezzeContext ctx = lang.getCurrentContext();
             if (ctx != null) {
                 Object global = ctx.lookupGlobal(hash);
-                if (global instanceof MezzeFunction f && f.getCallTarget() != selfCT) {
+                // #374 + dev-session fix: skip a global whose CallTarget is ANY
+                // lazy stub for this hash, not just THIS stub instance. When a
+                // context is reused across evals (an editor sampling against a
+                // running `mez dev`), an earlier eval can leave a global wrapping
+                // an older stub generation for the same hash. Forwarding to it
+                // (its `!= selfCT`) chains stub → stub → … → stack overflow.
+                // Falling through to the real IR (steps 2–3) is correct and keeps
+                // the content-hash invariant: same hash compiles the same code.
+                if (global instanceof MezzeFunction f && !isLazyStubTarget(f.getCallTarget())) {
                     return f;
                 }
             }
@@ -160,6 +168,11 @@ public final class LazyStubRootNode extends RootNode {
             return MezzeFunction.create(real.getCallTarget(), hash.getHex());
         }
         return null;
+    }
+
+    /** True if {@code ct} is the CallTarget of some lazy stub (any instance). */
+    private static boolean isLazyStubTarget(CallTarget ct) {
+        return ct instanceof RootCallTarget rct && rct.getRootNode() instanceof LazyStubRootNode;
     }
 
     @Override
