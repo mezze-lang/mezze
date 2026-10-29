@@ -13,8 +13,7 @@ use std::effects::http::{
     request, format_error, body_str, with_query, ToQuery
 }
 use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-use std::effects::http_router::{ route, otherwise, Matched, FromQuery }
-use std::codec::core::{ DecodeError }
+use std::effects::http_router::{ route, otherwise, Matched, FromQuery, BadInput }
 use std::collections::map
 use std::collections::bytes
 use std::int
@@ -33,7 +32,7 @@ let not_found: { req: Request } -> Response = { req } ->
 let app = otherwise {
     routes = route { method = Get, path = "/hello/:name", handler = { m } -> do
         let who = m.param_or { name = "name", default = "?" }
-        let q: Result { times: Int } DecodeError = m.query_as {}
+        let q: Result { times: Int } BadInput = m.query_as {}
         match q is
             Ok { val } -> reply {
                 code = 200,
