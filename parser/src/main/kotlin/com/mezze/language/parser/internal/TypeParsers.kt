@@ -331,6 +331,21 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                     val afterEllipsis = skipNewlines(afterLt.advance())
                                     if (afterEllipsis.current()?.type == TokenType.GT) {
                                         EffectRowParseResult(emptyList(), emptyList(), true, false, afterEllipsis.advance())
+                                    } else if (afterEllipsis.current()?.type == TokenType.COMMA) {
+                                        // `<..., *>` — an open tail AND the handled-here marker,
+                                        // with no named effect between them. This is what the
+                                        // printer emits for a fully-handled body that still
+                                        // carries a row variable, so refusing it made an
+                                        // inferred type unwritable (BUG 34).
+                                        val afterComma = skipNewlines(afterEllipsis.advance())
+                                        val afterStar2 = skipNewlines(afterComma.advance())
+                                        if (afterComma.current()?.type == TokenType.STAR &&
+                                            afterStar2.current()?.type == TokenType.GT
+                                        ) {
+                                            EffectRowParseResult(emptyList(), emptyList(), true, true, afterStar2.advance())
+                                        } else {
+                                            EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
+                                        }
                                     } else {
                                         EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                                     }
@@ -338,6 +353,20 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                     val afterStar = skipNewlines(afterLt.advance())
                                     if (afterStar.current()?.type == TokenType.GT) {
                                         EffectRowParseResult(emptyList(), emptyList(), false, true, afterStar.advance())
+                                    } else if (afterStar.current()?.type == TokenType.COMMA) {
+                                        // `<*, ...>` — the same row written backwards. `*` is
+                                        // always LAST, which is the order the printer uses.
+                                        val starTok = skipNewlines(afterLt).current()
+                                        result = ParseResult.Failure(
+                                            message = "The `*` marker comes last in an effect row, after the " +
+                                                "names and after `...`. Write `<..., *>`.",
+                                            position = starTok?.position ?: 0,
+                                            line = starTok?.line ?: 0,
+                                            column = starTok?.column ?: 0,
+                                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0137_EFFECT_ROW_MARKER_ORDER,
+                                            isFatal = true,
+                                        )
+                                        EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                                     } else {
                                         EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                                     }
@@ -439,11 +468,35 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                                             if (current.current()?.type == TokenType.ELLIPSIS) {
                                                 foundEllipsis = true
                                                 current = skipNewlines(current.advance())
+                                                // `<Tick, ..., *>`: the tail may be followed by
+                                                // the handled-here marker. Same order as the
+                                                // nameless `<..., *>` above.
+                                                if (current.current()?.type == TokenType.COMMA) {
+                                                    val afterComma = skipNewlines(current.advance())
+                                                    if (afterComma.current()?.type == TokenType.STAR) {
+                                                        foundPerformed = true
+                                                        current = skipNewlines(afterComma.advance())
+                                                    }
+                                                }
                                                 break
                                             }
                                             if (current.current()?.type == TokenType.STAR) {
                                                 foundPerformed = true
+                                                val starTok = current.current()
                                                 current = skipNewlines(current.advance())
+                                                // `<Tick, *, ...>` — backwards, same as the
+                                                // nameless case. `*` is always last.
+                                                if (current.current()?.type == TokenType.COMMA) {
+                                                    effectHavingError = ParseResult.Failure(
+                                                        message = "The `*` marker comes last in an effect row, after " +
+                                                            "the names and after `...`. Write `<…, ..., *>`.",
+                                                        position = starTok?.position ?: 0,
+                                                        line = starTok?.line ?: 0,
+                                                        column = starTok?.column ?: 0,
+                                                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0137_EFFECT_ROW_MARKER_ORDER,
+                                                        isFatal = true,
+                                                    )
+                                                }
                                                 break
                                             }
                                         } else {

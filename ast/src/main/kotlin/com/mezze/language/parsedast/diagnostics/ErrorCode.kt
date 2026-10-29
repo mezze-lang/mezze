@@ -68,6 +68,7 @@ enum class ErrorCode {
     P0133_TWO_EFFECT_ROWS, // `-> A -> B <E> <F>` — a second trailing row with no arrow of its own; parenthesise the returned function
     P0134_LET_NAME_UPPERCASE, // `let Max = 1` — an uppercase name is a constructor, so a use site would read it as a variant
     P0135_DO_BLOCK_INCONSISTENT_INDENT, // statements in a `do` block must all start at the same column; this one is indented differently
+    P0137_EFFECT_ROW_MARKER_ORDER, // `<*, ...>` — the `*` marker comes LAST in a row, after the names and after `...`, so the canonical spelling is `<..., *>`. Both markers may co-occur; only the order is fixed, and it is the order the printer emits
     P0136_MALFORMED_QUOTE, // a quote `( … ) or a splice ~x / ~( … ) that is not well formed, or `~` outside a quote
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
