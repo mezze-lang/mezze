@@ -106,6 +106,14 @@ fun ErrorCode.explain(): String = when (this) {
         "The `with` clause for ability constraints must come before the `->` arrow. " +
         "Use `{x} with Show 'a -> body` not `{x} -> body with Show 'a`."
 
+    ErrorCode.P0137_EFFECT_ROW_MARKER_ORDER ->
+        "An effect row reads in one order: the effect NAMES first, then `...` for the open " +
+        "tail, then `*` for \"performed and handled here\". So `<..., *>`, `<Tick, ...>`, " +
+        "`<Tick, ..., *>` and `<Tick, *>` are all spellings; `<*, ...>` is the same row " +
+        "written backwards. The order is fixed so that a row has ONE spelling, and it is " +
+        "the order the compiler prints — which matters because a type you are shown has to " +
+        "be a type you can write back."
+
     ErrorCode.P0133_TWO_EFFECT_ROWS ->
         "A function type has ONE effect row, written after its return type. In " +
         "`{} -> {} -> Int <A> <B>` the second row has no arrow of its own to belong to. " +

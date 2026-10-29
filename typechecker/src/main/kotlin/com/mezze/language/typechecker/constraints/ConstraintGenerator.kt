@@ -12,6 +12,7 @@ import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.ast.solving.closeGeneratedRowVars
+import com.mezze.language.ast.solving.pruneVacuousResultRow
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -1092,7 +1093,17 @@ class ConstraintGenerator(
         // generated tail is dropped, so genuine row-polymorphism is preserved.
         val closeOpenRowVars = solver.getMustBeOpenRowVars()
         val solvedBindings = rawSolvedBindings.mapValues { (_, type) ->
-            closeGeneratedRowVars(type, closeOpenRowVars)
+            // …and drop a RESULT row variable that carries no effects and occurs
+            // nowhere else in this binding's type. `run_async` inferred
+            // `{} -> {} <..., *>` from a leftover variable nothing could
+            // instantiate, and the printer rendered it as a `...` — a type the
+            // parser then rejected (BUG 34). This is the binding's COMPLETE
+            // type, which is the only place the "occurs once" question can be
+            // asked honestly; asked of a fragment it closes live variables.
+            pruneVacuousResultRow(
+                closeGeneratedRowVars(type, closeOpenRowVars),
+                closeOpenRowVars,
+            )
         }
 
         // (d) carry ability constraints into function-typed bindings.

@@ -1,6 +1,9 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-28: NO open bugs in this file.** BUG 28 is fixed, as is the
+**STATUS 2026-10-30: NO open bugs.** BUG 34 is fixed in both halves — the
+printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
+PRECISE (a vacuous row variable no longer survives inference). Everything else in
+this file is closed. BUG 28 is fixed, as is the
 module-qualified type annotation below and numbered bugs 26, 29, 30, 31, 32 and
 33; 27 closed as a class. Everything claimed open outside this file was re-run
 and was stale — see the sweep below. Each fix has a regression test named
@@ -3462,3 +3465,201 @@ both separate unimplemented things. Patch kept at
 `mono-typeargs.patch` in the session scratchpad.
 
 Do not re-derive any of the above; it is all measured.
+
+---
+
+## BUG 34 — FIXED 2026-10-30: an inferred row printed `<..., *>`, a form the parser rejected
+
+```mezze
+pub let run_async = {} -> perform Console, SystemTime, LoomAsync in do
+  let p = Async.spawn { f = {} -> 6 * 7 }
+  let answer = result::get_or { result = await { p = p }, def = 0 - 1 }
+  let fast = Async.spawn { f = {} -> 1 }
+  let slow = Async.spawn { f = {} -> do sleep { ms = 100 }; 2 }
+  match race { ps = [fast, slow] } is …
+```
+
+`mez check` reports its type as `{} -> {} <..., *>`. That spelling is a PARSE
+ERROR, in both orders:
+
+| asked | answer |
+|---|---|
+| inferred and printed | `{} -> {} <..., *>` |
+| annotation `<..., *>` | refused — `Parse error: Expected '=' but got '<'` |
+| annotation `<*, ...>` | refused — same |
+| annotation `<*>` | **ACCEPTED** |
+
+So the type the compiler shows cannot be written back, and the one that works is
+narrower than the one it printed.
+
+### Cause: a vacuous row variable, faithfully printed
+
+The inferred row is
+
+    effects=[]  instances=[]  rowVar=RowVar(userOpen_row923)  performed=true
+
+An open tail carrying NO effects, on a body that handles everything. `<*>` is
+accepted, so the tail is unnecessary. It leaks out of the async signatures' own
+open tails — `park: { predicate: {} -> Bool <...> } -> {} <Async, ...>` and
+`race: … -> Result 'a AsyncError <Async, ...>` — and is never closed, even though
+every effect reaching the top is discharged by the `perform`.
+
+The printer then renders the leftover variable as `...` beside the `*`, which is
+how an unwritable type reaches the user.
+
+RULED OUT: the promises are not the source. `spawn`, `await`, `sleep` and
+`cancel` all carry CLOSED rows (`<Async>`, `<Time>`). A `...` in a callee's row
+does NOT force one on the caller — it is a row VARIABLE that resolves at the call
+site, which is why `<*>` is accepted here at all.
+
+Also measured: `race`'s own `<Async, ...>` is MEANINGLESS — it takes promises,
+not callbacks, so there is no caller-supplied function whose effects a tail could
+carry. It compiles as plain `<Async>` with no effect on callers. Not changed on
+its own: there are 42 `<Async, ...>` signatures in `async.mz` and tightening one
+arbitrarily is not a fix. Whether the leak survives tightening them is the first
+thing to measure.
+
+### The chain, traced 2026-10-29
+
+1. `TypeAnnotationConverter`: a written `...` mints a PRESERVED row variable —
+
+       val rowVar = if (parsedRow.isPolymorphic) sharedRowVar.getOrCreate() else null
+
+   and the shared var is a `RowVar.userOpen()`, which is the kind the closing
+   policy keeps on purpose. The stdlib's own tails are the source:
+   `park: { predicate: {} -> Bool <...> } -> {} <Async, ...>`.
+2. Call sites propagate it into the caller's inferred row.
+3. `Substitution.closeGeneratedRowVars` closes AUTO-GENERATED vars
+   (`RowVar.fresh()`) and keeps `userOpen()` ones. Its own comment says effects
+   are out of scope: "effects do NOT participate here — their rows ride on
+   `type.effects` and are closed by their own set-row machinery, not
+   drop-and-close."
+4. Nothing else closes it here. The variable survives generalization with
+   `effects=[]`, on a body whose `perform` handles everything and where no caller
+   can instantiate it — `run_async` takes no arguments and no callbacks.
+5. The printer renders the surviving variable as `...` beside the `*`.
+6. The PARSER cannot read that back, because leading `...` and leading `*` are
+   each special-cased as the SOLE content of a row:
+
+       if (firstToken == ELLIPSIS) { if (next == GT) … else BAIL }
+       else if (firstToken == STAR) { if (next == GT) … else BAIL }
+       else { /* general loop: NAME first, then handles ellipsis AND star */ }
+
+   `<Tick, ...>` works because a name sends it to the general loop. `<..., *>`
+   has no name, so no path handles it. That is a structural artifact, NOT a
+   semantic rule — nothing says the two markers may not co-occur.
+
+### Two fixes, independent
+
+  1. The PARSER should accept `...` and `*` together with no named effect. The
+     combination has a reading — "handles what it performs, and the row is still
+     open" — and the general loop already supports it when a name is present.
+     Cheapest, and it restores round-trip on its own. USER DECISION: this form
+     should be allowed.
+  2. INFERENCE should not keep a row variable that carries no effects and that no
+     caller can instantiate. That is the cause of the `...` being there at all,
+     and fixing it makes the printed type `<*>` — which is what a reader expects
+     and what the annotation already accepts.
+
+A round-trip property test — print every inferred type, parse it back — is what
+would have caught this years ago, and is worth having whichever fix lands first.
+
+### FIX 1 LANDED 2026-10-29 — the parser
+
+`<..., *>` parses, and so does `<Tick, ..., *>`; the general loop used to `break`
+after the first marker. The ORDER is fixed — names, then `...`, then `*` — which
+is the order the printer already emits, so a row has one spelling and it is the
+one you are shown. The wrong order gets P0137 naming it ("The `*` marker comes
+last in an effect row, after the names and after `...`. Write `<..., *>`.")
+instead of the old `Expected '=' but got '<'`, which was the parser backtracking
+and failing somewhere else entirely. `EffectRowMarkerOrderTest`.
+
+So the printed type is WRITABLE now. It is still not PRECISE — that is fix 2.
+
+### FIX 2 — FIRST ATTEMPT, REVERTED. Do not repeat this shape
+
+Closing the vacuous variable at `Substitution.closeGeneratedRowVars`, guarded on
+the variable occurring nowhere else in the signature. It broke
+`:cli:compileStdlib` immediately:
+
+    ImportError(modulePath=std::effects::sample, …
+      reason=Field `xs` expects ['a] but got [Int] in call to `map`)
+
+WHY IT CANNOT WORK THERE: the converter mints ONE SHARED row variable per
+signature —
+
+    val rowVar = if (parsedRow.isPolymorphic) sharedRowVar.getOrCreate() else null
+
+— and `closeGeneratedRowVars` runs at many finalization boundaries, often on a
+FRAGMENT of a signature rather than a whole one. So "this variable appears
+nowhere else in this type" does NOT mean "nothing can instantiate it": it can be
+live in a sibling row that shares the same variable. Closing it locally changed
+generalization in `sample.mz` and made a generic element type concrete.
+
+A correct fix has to know the variable is dead GLOBALLY — a generalize-and-prune
+step over the finished module, not a local rewrite at the display seam. The same
+objection applies to doing it in the PRINTER: the printer sees one signature, and
+one signature is not enough to know a shared variable is dead.
+
+DO NOT fix by suppressing `...` at print time alone: that would HIDE a genuinely
+open row wherever one is legitimate. The printer is the only honest component in
+this chain.
+
+### FIX 2 LANDED 2026-10-30 — `pruneVacuousResultRow`
+
+Same idea, asked at a place where the question is answerable:
+`rawSolvedBindings.mapValues` in `ConstraintGenerator`, where a BINDING's
+finished type is formed. A row variable is dropped when it is the outermost
+row's, carries no effects or instances, is not in `closeOpenRowVars`, and
+`countEffectRowVar(type, v) == 1` over the WHOLE type.
+
+The two narrowings are the fix; the drop is one line. Both are break-verified by
+`PruneVacuousRowNarrowingTest`, a class with NO fixture:
+
+  - narrowing 1, OCCURS EXACTLY ONCE. Counting over the complete type is the
+    global question the first attempt asked of a fragment. Remove it and
+    `std::effects::sample` fails to compile with `expected { n: Nat, call: {} ->
+    'a <Sample, ...> } -> 'a but got { n: 'c, call: {} -> ['b] } -> 'd`.
+  - narrowing 2, THE OUTERMOST ROW ONLY. A nested arrow's row has call-site
+    meaning; pruning it makes `{ f: {} -> Int <...> } -> Int` stop accepting an
+    effectful callback — stricter, not tidier.
+
+WHY THE NARROWING TESTS ARE THEIR OWN CLASS, no `@BeforeEach`: anything that
+builds a `TypeChecker` reaches `PrecompiledStdlib` whether or not the prelude is
+enabled, so when a narrowing is removed the stdlib stops precompiling and EVERY
+test in such a class dies with `NoClassDefFoundError: PrecompiledStdlib` before
+a single assertion runs — measured, 11 of 11, none of them the actual claim. A
+suite that reports everything broken does not say WHAT broke. The narrowing
+tests call the pure function on hand-built types so the one that fails names
+itself.
+
+`VacuousResultRowTest` keeps the whole-program half, including the round-trip
+the bug is really about: whatever is inferred must be writable back as an
+annotation.
+
+MEASURED END TO END on the program at the top of this entry, `mez check
+src/app.mz` against the dev runtime, by swapping the prune for an identity
+function and rebuilding:
+
+| | printed type |
+|---|---|
+| before | `pub run_async : {} -> {} <..., *>` |
+| after  | `pub run_async : {} -> {} <*>` |
+
+`<*>` is the spelling the table above records as ACCEPTED, and it is also what
+the entry-point contract asks for verbatim — `App must define a 'main' function
+with type {} -> {} <*>`. So a fully handled top-level function now prints the
+type the compiler itself demands of it.
+
+ONE THING THE TESTS DELIBERATELY DO NOT ASSERT: that `...` appears in the
+printed type of `{ f: {} -> Int <...> } -> Int <...>`. It does not, with or
+without this fix — measured with the prune disabled. A row that resolved to
+empty is correctly OMITTED by the printer, so a test looking for `...` there
+would pass for the wrong reason and miss the pruning bug it was written to
+catch. Those two guards assert BEHAVIOUR instead: the parameter still accepts an
+effectful callback.
+
+### Acceptance
+
+`mez check` on the program above reports a type that parses back unchanged.
+A round-trip property test covers inferred types generally.

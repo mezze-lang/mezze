@@ -638,6 +638,82 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
     is MezzeType.CharType, is MezzeType.EffectRow -> type
 }
 
+/**
+ * Drop a RESULT row variable that carries no effects and occurs nowhere else in
+ * the signature (BUG 34).
+ *
+ * `run_async = {} -> perform Console, SystemTime, LoomAsync in do …` inferred
+ * `{} -> {} <..., *>`: `effects=[]`, `instances=[]`, `performed=true`, and a
+ * surviving row variable. A written `...` mints one —
+ * `TypeAnnotationConverter` does `if (parsedRow.isPolymorphic)
+ * sharedRowVar.getOrCreate()` — and the stdlib's tails are full of them
+ * (`park: { predicate: {} -> Bool <...> } -> {} <Async, ...>`). It reached the
+ * caller and nothing closed it: [closeGeneratedRowVars] is the labeled-row pass
+ * for records and variants and says effects do not participate.
+ *
+ * TWO DELIBERATE NARROWINGS, both from a failed first attempt that broke
+ * `:cli:compileStdlib` with `Field 'xs' expects ['a] but got [Int] in call to
+ * 'map'` in `std::effects::sample`:
+ *
+ *  1. OCCURS EXACTLY ONCE IN THE WHOLE TYPE. The converter mints ONE SHARED row
+ *     variable per signature, so a variable absent from the fragment you are
+ *     looking at can still be live in a sibling row. The first attempt checked
+ *     "absent from this function's param and return", which is a fragment
+ *     question, and closed variables that were still load-bearing — changing
+ *     generalization. Counting over the ENTIRE type is the global question, and
+ *     one occurrence means nothing can relate the variable to anything, so
+ *     nothing can instantiate it.
+ *  2. THE OUTERMOST ROW ONLY. A row variable on a nested arrow has call-site
+ *     meaning: `{ g: {} -> Int <v> } -> Int` says "g may perform anything", and
+ *     pruning `v` there would make the parameter PURE and start rejecting
+ *     effectful callbacks — a stricter language, not a tidier type. Whether that
+ *     absorption should be an error is its own question (#215); it is not this
+ *     one.
+ *
+ * Applied where a BINDING's finished type is formed, never on a fragment.
+ */
+fun pruneVacuousResultRow(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = emptySet()): MezzeType {
+    val fn = type as? MezzeType.FunctionType ?: return type
+    val row = fn.effects ?: return type
+    val v = row.rowVar ?: return type
+    if (v in mustBeOpenRowVars) return type
+    // A named effect makes the tail a lower bound on a real row, not a leftover.
+    if (row.effects.isNotEmpty() || row.effectInstances.isNotEmpty()) return type
+    if (countEffectRowVar(type, v) != 1) return type
+    return MezzeType.FunctionType(
+        paramType = fn.paramType,
+        returnType = fn.returnType,
+        effects = row.copy(rowVar = null),
+        abilityConstraints = fn.abilityConstraints,
+    )
+}
+
+/** How many effect rows in [type] carry [v] as their row variable. */
+private fun countEffectRowVar(type: MezzeType, v: RowVar): Int = when (type) {
+    is MezzeType.EffectRow ->
+        (if (type.rowVar == v) 1 else 0) +
+            type.effectInstances.sumOf { inst ->
+                inst.associatedTypes.values.sumOf { countEffectRowVar(it, v) }
+            }
+    is MezzeType.FunctionType ->
+        (type.effects?.let { countEffectRowVar(it, v) } ?: 0) +
+            countEffectRowVar(type.paramType, v) +
+            countEffectRowVar(type.returnType, v) +
+            type.abilityConstraints.sumOf { c ->
+                c.typeArgs.sumOf { countEffectRowVar(it, v) } +
+                    c.associatedTypeBindings.values.sumOf { countEffectRowVar(it, v) }
+            }
+    is MezzeType.RecordType -> type.fields.values.sumOf { countEffectRowVar(it, v) }
+    is MezzeType.VariantType ->
+        type.constructors.values.sumOf { if (it == null) 0 else countEffectRowVar(it, v) } +
+            type.typeArgs.sumOf { countEffectRowVar(it, v) }
+    is MezzeType.TypeApplication -> type.args.sumOf { countEffectRowVar(it, v) }
+    is MezzeType.NewtypeType -> countEffectRowVar(type.wrappedType, v)
+    is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+    is MezzeType.StringType, is MezzeType.FracType, is MezzeType.BytesType,
+    is MezzeType.CharType -> 0
+}
+
 fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
     return when (type) {
         is MezzeType.VarType -> typeVar == type.variable
