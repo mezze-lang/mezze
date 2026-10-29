@@ -160,12 +160,34 @@ object WireRunner {
         // can attach to THIS warm `mez dev` runtime and EVAL against it — on the
         // project's own (devenv) toolchain, no second JVM, no duplicate GraalVM.
         // The runtime serves dev's own driver over stdio and these eval clients
-        // over the socket, sharing one eval worker. Cleaned up on exit so a stale
-        // file never points at a dead port.
+        // over the socket, sharing one eval worker.
+        //
+        // EXACTLY ONE dev hosts the session per project, decided by a non-blocking
+        // lock on `.mezze/session.lock`. Without it, two `mez dev` in one project
+        // would both write `.mezze/session.json` (last-writer-wins, orphaning the
+        // other's live port) and each delete it on exit — so one quitting would
+        // wipe the survivor's session. With the lock, a second dev runs its watch
+        // loop but does not publish; the OS drops the lock if the holder dies, so
+        // a dev started after that can become the host. The host cleans the file
+        // on exit so it never points at a dead port.
         val sessionFile = File(currentDir, ".mezze/session.json")
         sessionFile.parentFile?.mkdirs()
-        val devFlagsWithListen = devFlags + "--listen=${sessionFile.absolutePath}"
-        Runtime.getRuntime().addShutdownHook(Thread { try { sessionFile.delete() } catch (_: Exception) {} })
+        val sessionLockChannel = try {
+            java.io.RandomAccessFile(File(currentDir, ".mezze/session.lock"), "rw").channel
+        } catch (_: Exception) { null }
+        val sessionLock = try { sessionLockChannel?.tryLock() } catch (_: Exception) { null }
+        val hostsSession = sessionLock != null
+        if (!hostsSession) try { sessionLockChannel?.close() } catch (_: Exception) {}
+        val devFlagsWithListen =
+            if (hostsSession) devFlags + "--listen=${sessionFile.absolutePath}" else devFlags
+        if (hostsSession) {
+            Runtime.getRuntime().addShutdownHook(Thread { try { sessionFile.delete() } catch (_: Exception) {} })
+        } else {
+            System.err.println(
+                "[mez] another `mez dev` is already hosting this project's sampler session; " +
+                    "this one runs but won't host it.",
+            )
+        }
 
         var session = WireSession.start(currentDir, timing, t0, devFlagsWithListen) ?: return 1
         var prevHashes: Set<Hash> = emptySet()
