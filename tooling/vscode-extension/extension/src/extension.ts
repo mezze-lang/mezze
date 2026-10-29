@@ -31,13 +31,15 @@ function resolveMezPath(): string {
 // webview table (with a resample button). The JSON is produced by the CLI's
 // SampleCommand.sampleJson.
 let samplePanel: vscode.WebviewPanel | undefined;
-let sampleTarget: { root: string; fn: string; seed: number; count: number } | undefined;
+let sampleTarget: { root: string; file: string; fn: string; seed: number; count: number } | undefined;
 const SAMPLE_INITIAL_COUNT = 6, SAMPLE_STEP = 6, SAMPLE_MAX_COUNT = 60;
 
-function runSampleJson(root: string, fn: string, seed: number, count: number): Promise<{ data: any | null; err: string }> {
+function runSampleJson(root: string, file: string, fn: string, seed: number, count: number): Promise<{ data: any | null; err: string }> {
     // row i is always seed+i, so the same seed reproduces rows (retain) and a
     // larger count only appends more — "more rows" keeps what's already shown.
-    const args = ['sample', '--json', `--seed=${seed}`, `--count=${count}`, fn];
+    // `--file` points the CLI at the module the lens came from, so a function in
+    // any open file is sampleable, not only the project's app module.
+    const args = ['sample', '--json', `--file=${file}`, `--seed=${seed}`, `--count=${count}`, fn];
     return new Promise((resolve) => {
         cp.execFile(resolveMezPath(), args, { cwd: root, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
             let data: any = null;
@@ -140,8 +142,8 @@ function sampleErrHtml(fn: string, msg: string): string {
       <pre style="white-space: pre-wrap; opacity:.85;">${escHtml(msg)}</pre></body></html>`;
 }
 
-async function showSample(root: string, fn: string, seed: number, count: number): Promise<void> {
-    sampleTarget = { root, fn, seed, count };
+async function showSample(root: string, file: string, fn: string, seed: number, count: number): Promise<void> {
+    sampleTarget = { root, file, fn, seed, count };
     if (!samplePanel) {
         samplePanel = vscode.window.createWebviewPanel(
             'mezzeSample', `sample · ${fn}`,
@@ -153,17 +155,17 @@ async function showSample(root: string, fn: string, seed: number, count: number)
             if (!sampleTarget) { return; }
             if (m?.cmd === 'resample') {
                 // new seed → a fresh set of inputs, back to the initial count
-                void showSample(sampleTarget.root, sampleTarget.fn, Math.floor(Math.random() * 1e9), SAMPLE_INITIAL_COUNT);
+                void showSample(sampleTarget.root, sampleTarget.file, sampleTarget.fn, Math.floor(Math.random() * 1e9), SAMPLE_INITIAL_COUNT);
             } else if (m?.cmd === 'more') {
                 // same seed, larger count → keeps the rows shown and appends more
-                void showSample(sampleTarget.root, sampleTarget.fn, sampleTarget.seed, Math.min(sampleTarget.count + SAMPLE_STEP, SAMPLE_MAX_COUNT));
+                void showSample(sampleTarget.root, sampleTarget.file, sampleTarget.fn, sampleTarget.seed, Math.min(sampleTarget.count + SAMPLE_STEP, SAMPLE_MAX_COUNT));
             }
         });
     }
     samplePanel.title = `sample · ${fn}`;
     samplePanel.webview.html = `<!doctype html><body style="font-family: var(--vscode-font-family); padding: 14px; opacity:.7;">sampling <code>${escHtml(fn)}</code>…</body>`;
     samplePanel.reveal(vscode.ViewColumn.Beside, true);
-    const { data, err } = await runSampleJson(root, fn, seed, count);
+    const { data, err } = await runSampleJson(root, file, fn, seed, count);
     if (!samplePanel) { return; }
     samplePanel.webview.html = data ? sampleTableHtml(data, fn) : sampleErrHtml(fn, err);
 }
@@ -311,8 +313,10 @@ export function activate(context: vscode.ExtensionContext) {
             }
             const root = fs.existsSync(path.join(dir, 'Mezze.toml')) ? dir : path.dirname(file);
             // Stable seed on open → reopening a function shows the same table
-            // (retained/reproducible); "resample" draws a fresh set.
-            await showSample(root, fn, 0, SAMPLE_INITIAL_COUNT);
+            // (retained/reproducible); "resample" draws a fresh set. `file` is the
+            // module the lens sits in, passed to `mez sample --file` so any open
+            // file's functions are sampleable, not only the app module.
+            await showSample(root, file, fn, 0, SAMPLE_INITIAL_COUNT);
         })
     );
 

@@ -77,7 +77,7 @@ class SampleCommand {
         )
         val timeoutMs = intFlag(flags, "--timeout")?.toLong()?.times(1_000) ?: 0L
 
-        val moduleFile = resolveAppFile(currentDir) ?: kotlin.system.exitProcess(1)
+        val moduleFile = resolveModuleFile(flags, currentDir) ?: kotlin.system.exitProcess(1)
 
         val target = when (val t = SampleTarget.resolve(currentDir, moduleFile, name)) {
             is SampleTarget.Result.Refused -> {
@@ -678,6 +678,27 @@ class SampleCommand {
             ?.substringAfter("=")
             ?.toIntOrNull()
 
+    private fun stringFlag(flags: List<String>, name: String): String? =
+        flags.firstOrNull { it.startsWith("$name=") }?.substringAfter("=")
+
+    /**
+     * The module to look in for the function. `--file=<path>` names it directly
+     * — the editor's sample lens appears over functions in ANY open file and
+     * passes that file here, so sampling is not confined to the app entry. The
+     * path is resolved against [currentDir] when relative. Without the flag (a
+     * bare `mez sample <fn>` at the shell) it falls back to the project's app
+     * module, the scope a user means by "my code".
+     */
+    internal fun resolveModuleFile(flags: List<String>, currentDir: File): File? {
+        val named = stringFlag(flags, "--file") ?: return resolveAppFile(currentDir)
+        val file = File(named).let { if (it.isAbsolute) it else File(currentDir, named) }
+        if (!file.exists()) {
+            System.err.println("${Glyphs.CROSS} file not found: ${file.absolutePath}")
+            return null
+        }
+        return file
+    }
+
     /** The app module `mez dev` would run — the scope a user means by "my code". */
     private fun resolveAppFile(currentDir: File): File? {
         val toml = File(currentDir, "Mezze.toml")
@@ -708,10 +729,11 @@ class SampleCommand {
     }
 
     private fun printUsage() {
-        System.err.println("Usage: mez sample <function> [--count=N] [--seed=N] [--json]")
+        System.err.println("Usage: mez sample <function> [--file=PATH] [--count=N] [--seed=N] [--json]")
         System.err.println()
         System.err.println("Generate arguments for a function, run it, and show both.")
         System.err.println()
+        System.err.println("  --file=PATH  the module declaring the function (default: the project's app module)")
         System.err.println("  --count=N    how many rows to draw (default $DEFAULT_COUNT, max $MAX_COUNT)")
         System.err.println("  --seed=N     reproduce an earlier run (the seed is printed every time)")
         System.err.println("  --json       the sample as data")
