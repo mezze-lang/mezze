@@ -4,6 +4,7 @@ import com.mezze.interpreter.runtime.MezzeExitException
 import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.wire.Bye
 import com.mezze.wire.Cancel
+import com.mezze.wire.CloseSession
 import com.mezze.wire.Config
 import com.mezze.wire.ConfigAck
 import com.mezze.wire.Eval
@@ -562,6 +563,13 @@ object RuntimeServer {
             // Close the CURRENT context (state.context may have been swapped by a
             // dev reload; the local `context` is only the startup one).
             try { state.context.close(true) } catch (_: Exception) {}
+            // Tear down the dedicated sampling/session world: every live session
+            // context, the last ephemeral eval context, then the engine they all
+            // share (closed last — the contexts are built on it).
+            sessionContexts.values.forEach { ctx -> try { ctx.close(true) } catch (_: Exception) {} }
+            sessionContexts.clear()
+            lastEvalContext.getAndSet(null)?.let { ctx -> try { ctx.close(true) } catch (_: Exception) {} }
+            samplingEngine.getAndSet(null)?.let { eng -> try { eng.close(true) } catch (_: Exception) {} }
             try { send(WireFrame.of(MessageType.BYE, Bye())) } catch (_: Exception) {}
         }
     }
@@ -692,6 +700,13 @@ object RuntimeServer {
                     // behind a running expression.
                     MessageType.EXPAND -> handleExpand(frame.decode(), send)
                     MessageType.CANCEL -> handleCancel(frame.decode(), state, diag)
+                    MessageType.CLOSE_SESSION -> {
+                        // Onto the eval worker, where session contexts are created
+                        // and used — so the close runs AFTER any eval already queued
+                        // for this session and never races a live evaluation on it.
+                        val close = frame.decode<CloseSession>()
+                        evalWorker.submit { handleCloseSession(close, diag) }
+                    }
                     MessageType.PING -> send(WireFrame.of(MessageType.PONG, Pong()))
                     MessageType.STATUS -> send(WireFrame.of(MessageType.STATUS_REPLY, state.snapshotStatus()))
                     MessageType.INTERRUPT -> handleInterrupt(frame.decode(), state, diag)
@@ -1052,6 +1067,15 @@ object RuntimeServer {
     private val lastEvalContext =
         java.util.concurrent.atomic.AtomicReference<org.graalvm.polyglot.Context?>(null)
 
+    /**
+     * Persistent per-session contexts (nREPL-style sessions), on [samplingEngine].
+     * Each holds one session's accumulated top-level defs, isolated from the
+     * running program and from other sessions. Kept until the session is closed
+     * (CLOSE_SESSION) or the runtime shuts down.
+     */
+    private val sessionContexts =
+        java.util.concurrent.ConcurrentHashMap<String, org.graalvm.polyglot.Context>()
+
     private fun samplingEngine(): org.graalvm.polyglot.Engine {
         samplingEngine.get()?.let { return it }
         val built = org.graalvm.polyglot.Engine.newBuilder()
@@ -1183,20 +1207,39 @@ object RuntimeServer {
         // JIT would only add latency) and no guest languages (none must pin it).
         // The context is held until the NEXT eval so EXPAND (most-recent-only)
         // still has a live value.
-        val evalContext = try {
-            org.graalvm.polyglot.Context.newBuilder(MezzeLanguage.ID)
-                .engine(samplingEngine())
-                .allowAllAccess(true)
-                .allowCreateThread(true)
-                .allowExperimentalOptions(true)
-                .build()
+        //
+        // A SESSION eval (`eval.session != null`, à la nREPL's `session`) instead
+        // runs in a PERSISTENT context kept for that session, so top-level defs an
+        // earlier eval registered are visible to a later one — the REPL model. It
+        // is still on the sampling engine (never `mez dev`'s), so it is isolated
+        // from the running program; and a fresh context per session isolates one
+        // session's state from another's. The ephemeral path is unchanged.
+        val sessionId = eval.session
+        val evalContext: org.graalvm.polyglot.Context = try {
+            if (sessionId != null) {
+                sessionContexts.computeIfAbsent(sessionId) {
+                    org.graalvm.polyglot.Context.newBuilder(MezzeLanguage.ID)
+                        .engine(samplingEngine())
+                        .allowAllAccess(true).allowCreateThread(true).allowExperimentalOptions(true)
+                        .build()
+                }
+            } else {
+                org.graalvm.polyglot.Context.newBuilder(MezzeLanguage.ID)
+                    .engine(samplingEngine())
+                    .allowAllAccess(true).allowCreateThread(true).allowExperimentalOptions(true)
+                    .build()
+            }
         } catch (e: Exception) {
             send(evalFailed(eval.requestId, EvalError.Kind.FAILED, "could not create eval context: ${e.message}"))
             return
         }
-        // Close the previous eval's context now that a newer one supersedes it.
-        lastEvalContext.getAndSet(evalContext)?.let { prev ->
-            try { prev.close(true) } catch (_: Exception) {}
+        // An ephemeral context is superseded (and closed) by the next ephemeral
+        // eval; a session context is held in [sessionContexts] until the session
+        // closes, so it is not touched here.
+        if (sessionId == null) {
+            lastEvalContext.getAndSet(evalContext)?.let { prev ->
+                try { prev.close(true) } catch (_: Exception) {}
+            }
         }
 
         try {
@@ -1353,6 +1396,20 @@ object RuntimeServer {
                 state.context.interrupt(java.time.Duration.ofSeconds(5))
             } catch (e: Exception) {
                 diag.println("[RuntimeServer] cancel interrupt failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Drop a session's persistent context (see [handleEval]'s session path).
+     * Idempotent: an unknown id is a no-op. Runs on the eval worker, so a
+     * close can never land while an eval is mid-flight on the same context.
+     */
+    private fun handleCloseSession(close: CloseSession, diag: PrintStream) {
+        sessionContexts.remove(close.session)?.let { ctx ->
+            diag.println("[RuntimeServer] CLOSE_SESSION ${close.session}")
+            try { ctx.close(true) } catch (e: Exception) {
+                diag.println("[RuntimeServer] session close failed: ${e.message}")
             }
         }
     }

@@ -280,6 +280,25 @@ class WireProtocolTest {
         assertEquals(r, WireFrame.of(MessageType.REJECT, r).decode<Reject>())
     }
 
+    @Test
+    fun `Eval round-trips with and without a session`() {
+        // Null (the stateless sampler default) and a set id (the REPL/session
+        // path) must both survive — a session that decoded back as null would
+        // silently route a session eval onto the ephemeral path.
+        val stateless = Eval(requestId = 3, fnsCborPath = "/t/fns.cbor", metaCborPath = "/t/meta.cbor")
+        val insession = stateless.copy(session = "repl-7")
+        assertNull(stateless.session, "the default must be null, not an empty string")
+        assertEquals(stateless, WireFrame.of(MessageType.EVAL, stateless).decode<Eval>())
+        assertEquals(insession, WireFrame.of(MessageType.EVAL, insession).decode<Eval>())
+        assertEquals("repl-7", WireFrame.of(MessageType.EVAL, insession).decode<Eval>().session)
+    }
+
+    @Test
+    fun `CloseSession round-trips`() {
+        val c = CloseSession(session = "repl-7")
+        assertEquals(c, WireFrame.of(MessageType.CLOSE_SESSION, c).decode<CloseSession>())
+    }
+
     // ─── Forward-compatibility: ignore unknown fields ────────────────
 
     @Test

@@ -172,6 +172,7 @@ enum class MessageType(val tag: Byte) {
     EXPAND(0x72),
     EXPAND_RESULT(0x73),
     CANCEL(0x74),
+    CLOSE_SESSION(0x75),
     ;
 
     constructor(tag: Int) : this(tag.toByte())
@@ -559,6 +560,17 @@ data class Eval(
     @SerialName("max_items") val maxItems: Int = WireProtocol.DEFAULT_EVAL_MAX_ITEMS,
     /** Wall-clock budget for the expression. 0 = no limit. */
     @SerialName("timeout_ms") val timeoutMs: Long = 0,
+    /**
+     * Optional session the expression runs in, à la nREPL's `session`. Null (the
+     * default) is a STATELESS eval — a fresh, isolated world per request, which is
+     * what the sampler wants and what every client got before sessions existed. A
+     * non-null id names a PERSISTENT, isolated world the runtime keeps between
+     * requests: top-level defs an earlier eval registered are visible to a later
+     * one in the same session, and nothing leaks between sessions or in from the
+     * program `mez dev` is running. The client mints the id (any opaque string)
+     * and tracks the accumulated scope itself, since compilation is client-side.
+     */
+    @SerialName("session") val session: String? = null,
 )
 
 /**
@@ -671,6 +683,18 @@ data class ExpandResult(
  */
 @Serializable
 data class Cancel(@SerialName("request_id") val requestId: Long)
+
+/**
+ * Client → runtime: drop a session's persistent world, à la nREPL's `close`.
+ *
+ * Frees the context the runtime kept for [session] (see [Eval.session]) along
+ * with its accumulated top-level defs. Closing an unknown or already-closed
+ * session is not an error — like [Cancel], it is idempotent, so a client that
+ * disconnected and reconnected need not remember whether it already closed.
+ * There is no reply: the next [Eval] on the same id simply starts a new world.
+ */
+@Serializable
+data class CloseSession(val session: String)
 
 // ─── Frame: type + payload pair ───────────────────────────────────────
 
