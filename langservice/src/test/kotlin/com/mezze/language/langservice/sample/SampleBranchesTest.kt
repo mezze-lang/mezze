@@ -42,6 +42,7 @@ class SampleBranchesTest {
         assertEquals(
             mapOf("n" to listOf(
                 "99 | if n > max_value (= 100) — else",
+                "100 | if n > max_value (= 100) — else",
                 "101 | if n > max_value (= 100) — then",
             )),
             pins("""
@@ -51,11 +52,11 @@ class SampleBranchesTest {
         )
     }
 
-    /** `>=` flips between 39 and 40, not 40 and 41 — and a chain of constants is followed. */
+    /** `>=` includes the boundary: 39 (else), 40 and 41 (then). A chain of constants is followed. */
     @Test
     fun `a chain of constants is followed and ge puts the boundary below`() {
         assertEquals(
-            listOf("39 | if n >= limit (= 40) — else", "40 | if n >= limit (= 40) — then"),
+            listOf("39 | if n >= limit (= 40) — else", "40 | if n >= limit (= 40) — then", "41 | if n >= limit (= 40) — then"),
             pins("""
                 let base = 40
                 let limit = base
@@ -68,7 +69,7 @@ class SampleBranchesTest {
     @Test
     fun `a parameter on the right mirrors the operator`() {
         assertEquals(
-            listOf("9 | if n > 10 — else", "11 | if n > 10 — then"),
+            listOf("9 | if n > 10 — else", "10 | if n > 10 — else", "11 | if n > 10 — then"),
             pins("pub let f = { n } -> 10 < n", "f")["n"],
         )
     }
@@ -89,7 +90,7 @@ class SampleBranchesTest {
     @Test
     fun `constant arithmetic is folded with the runtime's division`() {
         assertEquals(
-            listOf("-4 | if n > neg (= -3) — else", "-2 | if n > neg (= -3) — then"),
+            listOf("-4 | if n > neg (= -3) — else", "-3 | if n > neg (= -3) — else", "-2 | if n > neg (= -3) — then"),
             pins("""
                 let neg = (0 - 7) / 2
                 pub let f = { n } -> n > neg
@@ -110,12 +111,12 @@ class SampleBranchesTest {
         )
     }
 
-    /** `n > Int.MAX` can never hold: one pin, no wrapped-around `then` value. */
+    /** `n > Int.MAX` can never hold: the `k+1` pin does not wrap, so every pin is `else`. */
     @Test
     fun `a boundary at Int's maximum does not wrap`() {
         val p = pins("pub let f = { n } -> n > 9223372036854775807", "f")["n"]!!
-        assertEquals(1, p.size, "got $p")
-        assertTrue(p.single().endsWith("— else"), "got $p")
+        assertTrue(p.isNotEmpty() && p.all { it.endsWith("— else") }, "got $p")
+        assertTrue(p.none { it.contains("9223372036854775808") }, "no wrapped value: got $p")
     }
 
     /** The match-arm pins from S-21 still come out, now with their reasons. */
@@ -208,9 +209,10 @@ class SampleBranchesTest {
             let limit = 10
             pub let f = { p: { x: Int, y: Int } } -> p.x > limit
         """, "f")["p"]!!
-        assertEquals(2, p.size, "got $p")
+        assertEquals(3, p.size, "got $p")
         assertTrue(p[0].startsWith("{ x = 9, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — else"), "got ${p[0]}")
-        assertTrue(p[1].startsWith("{ x = 11, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — then"), "got ${p[1]}")
+        assertTrue(p[1].startsWith("{ x = 10, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — else"), "got ${p[1]}")
+        assertTrue(p[2].startsWith("{ x = 11, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — then"), "got ${p[2]}")
     }
 
     /** A path through two records rebuilds both levels around the pinned leaf. */
@@ -377,14 +379,14 @@ class SampleBranchesTest {
               let y = a < b
               y
         """, "f")
-        assertEquals(5, r.size, "got $r")
-        assertTrue(r.count { it.contains("a > 10") } == 2, "got $r")
+        assertEquals(6, r.size, "got $r")
+        assertTrue(r.count { it.contains("a > 10") } == 3, "got $r")
         assertTrue(r.count { it.contains("a < b") } == 3, "got $r")
     }
 
     // ── sizes ─────────────────────────────────────────────────────────────────
 
-    /** `seq::size { xs } > min_chunk` pins sequences of length 3 and 4. */
+    /** `seq::size { xs } > min_chunk` pins sequences of length 2, 3 (both else) and 4 (then). */
     @Test
     fun `a size comparison pins sequences either side of the length`() {
         val p = pins("""
@@ -392,17 +394,17 @@ class SampleBranchesTest {
             let min_chunk = 3
             pub let f = { xs: [Int] } -> seq::size { xs = xs } > min_chunk
         """, "f")["xs"]!!
-        assertEquals(2, p.size, "got $p")
-        assertEquals(3, p[0].substringBefore(" |").count { it == ',' } + 1, "got ${p[0]}")
+        assertEquals(3, p.size, "got $p")
+        assertEquals(listOf(2, 3, 4), p.map { it.substringBefore(" |").count { c -> c == ',' } + 1 }, "got $p")
         assertTrue(p[0].endsWith("if size(xs) > min_chunk (= 3) — else"), "got ${p[0]}")
-        assertEquals(4, p[1].substringBefore(" |").count { it == ',' } + 1, "got ${p[1]}")
+        assertTrue(p[2].endsWith("if size(xs) > min_chunk (= 3) — then"), "got ${p[2]}")
     }
 
     /** The inherent `xs.size {}` reaches the same native and gets the same treatment. */
     @Test
     fun `the dot spelling of size is read too`() {
         val p = pins("pub let f = { xs: [Int] } -> xs.size {} <= 2", "f")["xs"]!!
-        assertEquals(listOf("then", "else"), p.map { it.substringAfterLast("— ") }, "got $p")
+        assertEquals(listOf("then", "then", "else"), p.map { it.substringAfterLast("— ") }, "got $p")
     }
 
     @Test
@@ -462,7 +464,7 @@ class SampleBranchesTest {
     @Test
     fun `a guard on a bare variable pattern pins the scrutinee`() {
         assertEquals(
-            listOf("-1 | match n guard — if x < 0 — then", "1 | match n guard — if x < 0 — else"),
+            listOf("-1 | match n guard — if x < 0 — then", "0 | match n guard — if x < 0 — else", "1 | match n guard — if x < 0 — else"),
             pins("""
                 pub let f = { n: Int } -> match n is
                   x if x < 0 -> "neg"
@@ -512,7 +514,7 @@ class SampleBranchesTest {
         val fields = ((f.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
         val rows = SampleBranches.inventory(f, fields, decls, evaluated = mapOf(limit.hash to SampleBranches.Evaluated.IntValue(42L)))
         assertEquals(
-            listOf("41 | if n > limit (= 42) — else", "43 | if n > limit (= 42) — then"),
+            listOf("41 | if n > limit (= 42) — else", "42 | if n > limit (= 42) — else", "43 | if n > limit (= 42) — then"),
             rows.map { r -> r.pins.getValue("n").let { "${it.source} | ${it.why}" } },
         )
     }
@@ -640,7 +642,7 @@ class SampleBranchesTest {
               let l = str::size { s = s }
               if l > 3 then "long" else "short"
         """, "f")
-        assertEquals(2, p["s"]?.size, "got $p")
+        assertEquals(3, p["s"]?.size, "got $p")
         assertTrue(p.getValue("s").any { it.endsWith("if size(s) > 3 — then") }, "got $p")
     }
 

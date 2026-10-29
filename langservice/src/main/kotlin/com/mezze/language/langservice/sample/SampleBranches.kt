@@ -792,30 +792,27 @@ object SampleBranches {
      * rather than wrapped — a wrapped value is on the wrong side.
      */
     /**
-     * Two values either side of where a comparison against [k] flips: one that
-     * clearly satisfies it and one that clearly does not.
+     * The values to pin around a comparison against [k].
      *
-     * [straddle] (the default, for a plain scalar comparison): for STRICT `>`/`<`
-     * the excluded side is the boundary itself, and pinning it (`x = 100` for
-     * `x > 100`) reads as a puzzle — 100 is not greater than 100, but it LOOKS
-     * like the edge. So straddle it — `99` and `101`, each obviously on its side.
-     * For `>=`/`<=`/`==` the boundary IS the included value (`100` satisfies
-     * `>= 100`), the clear and meaningful pick, so it is kept.
+     * For a RELATIONAL op (`>`/`>=`/`<`/`<=`) all three of `k-1`, `k`, `k+1` are
+     * shown, so a reader sees the full picture: one value clearly below, the
+     * boundary itself, and one clearly above — each row labelled with the side it
+     * lands on. (`x > 100` → `99` else, `100` else, `101` then; `x >= 100` → `99`
+     * else, `100` then, `101` then.) The boundary alone read as a puzzle — `100`
+     * is not greater than `100` — and only-the-straddle hid the exact edge; both
+     * together are clearest.
      *
-     * Not straddling (a `size(...)` comparison): a length's boundary is already a
-     * clean, meaningful value — length 0 is "empty", length 3 is "three" — and
-     * `k-1` can fall below zero (`size > 0` → -1) where there is no sequence to
-     * pin, so the boundary is kept and the straddle is off.
+     * For `==`/`!=` the boundary is the whole point: `k` (then) and one that
+     * differs (else). A length comparison runs through here too; its caller drops
+     * any value below zero, so `size > 0` simply loses the `-1` row.
      */
-    private fun intBoundary(k: Long, op: String, straddle: Boolean = true): List<Pair<Long, Boolean>> {
-        val (lo, hi) = when (op) {
-            "gt", "lt" -> if (straddle) k.safeDec() to k.safeInc()
-                          else if (op == "gt") k to k.safeInc() else k.safeDec() to k
-            "le", "eq", "neq" -> k to k.safeInc()
-            "ge" -> k.safeDec() to k
+    private fun intBoundary(k: Long, op: String): List<Pair<Long, Boolean>> {
+        val values = when (op) {
+            "gt", "ge", "lt", "le" -> listOfNotNull(k.safeDec(), k, k.safeInc())
+            "eq", "neq" -> listOfNotNull(k, k.safeInc())
             else -> return emptyList()
         }
-        return listOfNotNull(lo, hi).map { it to holds(it.compareTo(k), op) }
+        return values.map { it to holds(it.compareTo(k), op) }
     }
 
     /**
@@ -926,7 +923,7 @@ object SampleBranches {
         val k = knownValue(other, byHash) as? Known.IntValue ?: return emptyList()
         val sized = typeAt(path, params) ?: return emptyList()
         val where = "size(${path.label}) ${SYMBOL.getValue(effectiveOp)} ${k.describe()}"
-        return intBoundary(k.value, effectiveOp, straddle = false)
+        return intBoundary(k.value, effectiveOp)
             // A length is never negative, and one past MAX_PINNED_LENGTH is a value
             // nobody reads in a table — that branch is left to the draws.
             .filter { (n, _) -> n in 0..MAX_PINNED_LENGTH }
