@@ -32,6 +32,9 @@ function resolveMezPath(): string {
 // SampleCommand.sampleJson.
 let samplePanel: vscode.WebviewPanel | undefined;
 let sampleTarget: { root: string; file: string; fn: string; seed: number; count: number } | undefined;
+// The function whose table is currently rendered — so a re-sample of the SAME
+// function keeps its rows on screen instead of flashing a loading placeholder.
+let sampleShownFn: string | undefined;
 const SAMPLE_INITIAL_COUNT = 6, SAMPLE_STEP = 6, SAMPLE_MAX_COUNT = 60;
 
 function runSampleJson(root: string, file: string, fn: string, seed: number, count: number): Promise<{ data: any | null; err: string }> {
@@ -76,10 +79,25 @@ function sampleTableHtml(d: any, fn: string): string {
     const firstRec = rows.find((r) => r.args?.value?.node === 'record')?.args?.value;
     const fieldNames: string[] = firstRec ? (firstRec.fields || []).map((f: any) => f.name) : [];
     const perField = fieldNames.length > 0 && rows.every((r) => !r.args || r.args.value?.node === 'record');
+    const nIn = perField ? fieldNames.length : 1;
+    const hasBranch = rows.some((r) => (r.why ?? '') !== '');
 
-    const head = (perField
-        ? fieldNames.map((n) => `<th>${escHtml(n)}</th>`).join('')
-        : '<th>input</th>') + '<th class="arrow">→</th><th>output</th><th>branch</th>';
+    // Two-row header: a group band (INPUT over the argument columns, OUTPUT,
+    // BRANCH) above the actual column names — so "input" and "output" are always
+    // labelled even when the inputs are broken out per field.
+    const groupRow =
+        `<tr class="grp">` +
+        `<th class="in" colspan="${nIn}">input</th>` +
+        `<th class="sep"></th>` +
+        `<th class="out">output</th>` +
+        (hasBranch ? `<th class="br">branch</th>` : '') +
+        `</tr>`;
+    const colRow =
+        `<tr class="cols">` +
+        (perField ? fieldNames.map((n) => `<th class="in">${escHtml(n)}</th>`).join('') : `<th class="in">args</th>`) +
+        `<th class="sep"></th><th class="out">value</th>` +
+        (hasBranch ? `<th class="br">why chosen</th>` : '') +
+        `</tr>`;
 
     const body = rows.map((r) => {
         const crashed = typeof r.crashed === 'string';
@@ -89,48 +107,76 @@ function sampleTableHtml(d: any, fn: string): string {
         if (perField) {
             const byName: Record<string, any> = {};
             for (const f of (r.args?.value?.fields || [])) { byName[f.name] = f.value; }
-            cells = fieldNames.map((n) => `<td><code>${escHtml(valueText(byName[n]))}</code></td>`).join('');
+            cells = fieldNames.map((n) => `<td class="in"><code>${escHtml(valueText(byName[n]))}</code></td>`).join('');
         } else {
-            cells = `<td><code>${escHtml(r.args?.text ?? '')}</code></td>`;
+            cells = `<td class="in"><code>${escHtml(r.args?.text ?? '')}</code></td>`;
         }
-        return `<tr class="${crashed ? 'crashed' : ''}">${cells}<td class="arrow">→</td>` +
-               `<td><code>${escHtml(out)}</code>${crashed ? ' <span class="tag">crash</span>' : ''}</td>` +
-               `<td class="why">${escHtml(why)}</td></tr>`;
+        return `<tr class="${crashed ? 'crashed' : ''}">${cells}<td class="sep">→</td>` +
+               `<td class="out"><code>${escHtml(out)}</code>${crashed ? ' <span class="tag">crash</span>' : ''}</td>` +
+               (hasBranch ? `<td class="br">${escHtml(why)}</td>` : '') + `</tr>`;
     }).join('');
 
+    const span = nIn + 2 + (hasBranch ? 1 : 0);
     const unreached: any[] = Array.isArray(d.unreached) ? d.unreached : [];
     const cov = unreached.length
         ? `<p class="note warn">${unreached.length} branch(es) not covered: ${unreached.map((u) => escHtml(`${u.branch} (${u.file}:${u.line})`)).join(', ')}</p>`
-        : (rows.length ? `<p class="note ok">all branches covered</p>` : '');
+        : (rows.length && hasBranch ? `<p class="note ok">all branches covered</p>` : '');
     const newtypes: string[] = Array.isArray(d.unchecked_newtypes) ? d.unchecked_newtypes : [];
     const nt = newtypes.length ? `<p class="note">newtypes drawn from their representation: ${newtypes.map(escHtml).join(', ')}</p>` : '';
 
     return `<!doctype html><html><head><meta charset="utf-8"><style>
-      body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 10px 14px; }
-      h2 { font-size: 1.1em; margin: 0 0 2px; } h2 code { font-size: 1em; }
-      .meta { opacity: .7; font-size: .85em; margin-bottom: 10px; display: flex; gap: 10px; align-items: center; }
-      button { font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background);
-               border: 0; padding: 3px 10px; border-radius: 3px; cursor: pointer; }
-      button:hover { background: var(--vscode-button-hoverBackground); }
-      table { border-collapse: collapse; width: 100%; margin-top: 6px; }
-      th, td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--vscode-panel-border, #8884); vertical-align: top; }
-      th { font-weight: 600; opacity: .85; border-bottom: 2px solid var(--vscode-panel-border, #8886); }
-      td code { font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; }
-      .arrow { opacity: .5; text-align: center; width: 1.5em; }
-      .why { opacity: .7; font-size: .85em; }
-      tr.crashed td { color: var(--vscode-errorForeground); }
-      .tag { font-size: .75em; background: var(--vscode-errorForeground); color: var(--vscode-editor-background); padding: 0 5px; border-radius: 3px; }
-      .note { font-size: .85em; opacity: .85; margin: 10px 0 0; }
+      :root { --line: var(--vscode-panel-border, #8883); --accent: var(--vscode-textLink-foreground, #4ea1ff); }
+      body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px 16px; }
+      h2 { font-size: 1.05em; font-weight: 600; margin: 0 0 1px; }
+      h2 code { font-family: var(--vscode-editor-font-family, monospace); }
+      .meta { opacity: .75; font-size: .82em; margin: 2px 0 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .meta .count { font-variant-numeric: tabular-nums; }
+      .spacer { flex: 1; }
+      button { font: inherit; font-size: .85em; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+               background: var(--vscode-button-secondaryBackground, transparent); border: 1px solid var(--line);
+               padding: 2px 10px; border-radius: 4px; cursor: pointer; }
+      button:hover { background: var(--vscode-button-hoverBackground); border-color: var(--accent); }
+      .card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { text-align: left; padding: 5px 12px; vertical-align: top; }
+      /* group band */
+      thead tr.grp th { font-size: .68em; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+                        opacity: .6; padding-bottom: 1px; padding-top: 7px; }
+      thead tr.grp th.in  { color: var(--accent); }
+      /* column names */
+      thead tr.cols th { font-size: .82em; font-weight: 600; opacity: .8; border-bottom: 1px solid var(--line); padding-top: 0; padding-bottom: 6px; }
+      tbody td { border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+      tbody tr:last-child td { border-bottom: 0; }
+      tbody tr:nth-child(even) { background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent); }
+      tbody tr:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+      code { font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; }
+      td.in code { font-variant-numeric: tabular-nums; }
+      td.out { font-weight: 600; }
+      .in + .sep, td.in:last-of-type { } /* no-op anchor */
+      .sep { color: var(--accent); opacity: .55; text-align: center; width: 1.6em; font-weight: 700; }
+      th.out, td.out { border-left: 1px solid var(--line); }
+      .br { opacity: .65; font-size: .82em; }
+      tr.crashed td.out { color: var(--vscode-errorForeground); }
+      .tag { font-size: .7em; vertical-align: middle; background: var(--vscode-errorForeground); color: var(--vscode-editor-background);
+             padding: 1px 6px; border-radius: 4px; margin-left: 4px; }
+      .note { font-size: .82em; opacity: .85; margin: 12px 0 0; }
       .note.ok { color: var(--vscode-testing-iconPassed, #3a3); }
       .note.warn { color: var(--vscode-testing-iconQueued, #c80); }
+      .repro { opacity: .55; }
     </style></head><body>
       <h2>sample · <code>${escHtml(fn)}</code></h2>
-      <div class="meta"><span>${rows.length} row(s) · seed ${escHtml(String(d.seed ?? ''))}</span>
-        <button onclick="post('more')" title="draw more inputs, keeping these">+ more rows</button>
-        <button onclick="post('resample')" title="new seed — a fresh set of inputs">↻ resample</button></div>
-      <table><thead><tr>${head}</tr></thead><tbody>${body || '<tr><td colspan="9">no sampleable rows</td></tr>'}</tbody></table>
+      <div class="meta">
+        <span class="count">${rows.length} row(s)</span><span>·</span><span>seed ${escHtml(String(d.seed ?? ''))}</span>
+        <span class="spacer"></span>
+        <button onclick="post('more')" title="draw more inputs, keeping these">+ more</button>
+        <button onclick="post('resample')" title="new seed — a fresh set of inputs">↻ resample</button>
+      </div>
+      <div class="card"><table>
+        <thead>${groupRow}${colRow}</thead>
+        <tbody>${body || `<tr><td colspan="${span}" style="opacity:.6;padding:14px">no sampleable rows</td></tr>`}</tbody>
+      </table></div>
       ${cov}${nt}
-      <p class="note">deterministic — <code>mez sample --seed ${escHtml(String(d.seed ?? ''))} ${escHtml(fn)}</code> reproduces these exact rows.</p>
+      <p class="note repro">deterministic — <code>mez sample --seed=${escHtml(String(d.seed ?? ''))} ${escHtml(fn)}</code> reproduces these exact rows.</p>
       <script>const vs = acquireVsCodeApi(); function post(cmd){ vs.postMessage({ cmd }); }</script>
     </body></html>`;
 }
@@ -150,7 +196,7 @@ async function showSample(root: string, file: string, fn: string, seed: number, 
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
             { enableScripts: true },
         );
-        samplePanel.onDidDispose(() => { samplePanel = undefined; });
+        samplePanel.onDidDispose(() => { samplePanel = undefined; sampleShownFn = undefined; });
         samplePanel.webview.onDidReceiveMessage((m) => {
             if (!sampleTarget) { return; }
             if (m?.cmd === 'resample') {
@@ -163,10 +209,17 @@ async function showSample(root: string, file: string, fn: string, seed: number, 
         });
     }
     samplePanel.title = `sample · ${fn}`;
-    samplePanel.webview.html = `<!doctype html><body style="font-family: var(--vscode-font-family); padding: 14px; opacity:.7;">sampling <code>${escHtml(fn)}</code>…</body>`;
+    // Only show the "sampling…" placeholder when there is nothing useful to keep
+    // on screen — a first open, or a different function. For "+ more rows" and
+    // "resample" (same function) we leave the current table visible while the new
+    // data loads, so the rows never blink away before the fuller set arrives.
+    if (sampleShownFn !== fn) {
+        samplePanel.webview.html = `<!doctype html><body style="font-family: var(--vscode-font-family); padding: 14px; opacity:.7;">sampling <code>${escHtml(fn)}</code>…</body>`;
+    }
     samplePanel.reveal(vscode.ViewColumn.Beside, true);
     const { data, err } = await runSampleJson(root, file, fn, seed, count);
     if (!samplePanel) { return; }
+    sampleShownFn = fn;
     samplePanel.webview.html = data ? sampleTableHtml(data, fn) : sampleErrHtml(fn, err);
 }
 

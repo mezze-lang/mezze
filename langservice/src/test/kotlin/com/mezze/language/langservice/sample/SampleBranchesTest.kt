@@ -41,7 +41,7 @@ class SampleBranchesTest {
     fun `a top-level constant is resolved and both sides of the comparison pinned`() {
         assertEquals(
             mapOf("n" to listOf(
-                "100 | if n > max_value (= 100) — else",
+                "99 | if n > max_value (= 100) — else",
                 "101 | if n > max_value (= 100) — then",
             )),
             pins("""
@@ -68,7 +68,7 @@ class SampleBranchesTest {
     @Test
     fun `a parameter on the right mirrors the operator`() {
         assertEquals(
-            listOf("10 | if n > 10 — else", "11 | if n > 10 — then"),
+            listOf("9 | if n > 10 — else", "11 | if n > 10 — then"),
             pins("pub let f = { n } -> 10 < n", "f")["n"],
         )
     }
@@ -89,7 +89,7 @@ class SampleBranchesTest {
     @Test
     fun `constant arithmetic is folded with the runtime's division`() {
         assertEquals(
-            listOf("-3 | if n > neg (= -3) — else", "-2 | if n > neg (= -3) — then"),
+            listOf("-4 | if n > neg (= -3) — else", "-2 | if n > neg (= -3) — then"),
             pins("""
                 let neg = (0 - 7) / 2
                 pub let f = { n } -> n > neg
@@ -209,7 +209,7 @@ class SampleBranchesTest {
             pub let f = { p: { x: Int, y: Int } } -> p.x > limit
         """, "f")["p"]!!
         assertEquals(2, p.size, "got $p")
-        assertTrue(p[0].startsWith("{ x = 10, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — else"), "got ${p[0]}")
+        assertTrue(p[0].startsWith("{ x = 9, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — else"), "got ${p[0]}")
         assertTrue(p[1].startsWith("{ x = 11, y = Arbitrary.arbitrary {} } | if p.x > limit (= 10) — then"), "got ${p[1]}")
     }
 
@@ -447,7 +447,7 @@ class SampleBranchesTest {
     @Test
     fun `a guard on a payload field pins both sides of the guard`() {
         val p = pins(classify, "f")["s"]!!
-        assertTrue("Circle { r = 10 } | match s — `Circle` guard: if r > big_r (= 10) — else" in p, "got $p")
+        assertTrue("Circle { r = 9 } | match s — `Circle` guard: if r > big_r (= 10) — else" in p, "got $p")
         assertTrue("Circle { r = 11 } | match s — `Circle` guard: if r > big_r (= 10) — then" in p, "got $p")
     }
 
@@ -462,7 +462,7 @@ class SampleBranchesTest {
     @Test
     fun `a guard on a bare variable pattern pins the scrutinee`() {
         assertEquals(
-            listOf("-1 | match n guard — if x < 0 — then", "0 | match n guard — if x < 0 — else"),
+            listOf("-1 | match n guard — if x < 0 — then", "1 | match n guard — if x < 0 — else"),
             pins("""
                 pub let f = { n: Int } -> match n is
                   x if x < 0 -> "neg"
@@ -512,7 +512,7 @@ class SampleBranchesTest {
         val fields = ((f.scheme.type as MezzeType.FunctionType).paramType as MezzeType.RecordType).fields
         val rows = SampleBranches.inventory(f, fields, decls, evaluated = mapOf(limit.hash to SampleBranches.Evaluated.IntValue(42L)))
         assertEquals(
-            listOf("42 | if n > limit (= 42) — else", "43 | if n > limit (= 42) — then"),
+            listOf("41 | if n > limit (= 42) — else", "43 | if n > limit (= 42) — then"),
             rows.map { r -> r.pins.getValue("n").let { "${it.source} | ${it.why}" } },
         )
     }
@@ -581,7 +581,7 @@ class SampleBranchesTest {
             pub let f = { n: Int, strict: Bool } -> if strict then n > limit else n >= 0
         """, "f")
         assertTrue("strict = True, n = 101 | if strict — then; if n > limit (= 100) — then" in r, "got $r")
-        assertTrue("strict = True, n = 100 | if strict — then; if n > limit (= 100) — else" in r, "got $r")
+        assertTrue("strict = True, n = 99 | if strict — then; if n > limit (= 100) — else" in r, "got $r")
         assertTrue("strict = False, n = 0 | if strict — else; if n >= 0 — then" in r, "got $r")
         assertTrue("strict = False, n = -1 | if strict — else; if n >= 0 — else" in r, "got $r")
         // and no inner pin appears WITHOUT its path
@@ -622,7 +622,7 @@ class SampleBranchesTest {
     @Test
     fun `a value satisfying both conditions keeps the inner row`() {
         val r = rows("pub let f = { n: Int } -> if n > 10 then (if n < 15 then 1 else 2) else 3", "f")
-        assertTrue("n = 15 | if n > 10 — then; if n < 15 — else" in r, "got $r")
+        assertTrue("n = 16 | if n > 10 — then; if n < 15 — else" in r, "got $r")
         assertTrue("n = 14 | if n > 10 — then; if n < 15 — then" in r, "got $r")
         val s = rows("pub let f = { n: Int } -> if n > 10 then (if n < 5 then 1 else 2) else 3", "f")
         assertTrue("n = 11 | if n > 10 — then; if n < 5 — else" in s, "got $s")

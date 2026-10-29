@@ -791,10 +791,28 @@ object SampleBranches {
      * the comparison HOLDS for it. An edge that would overflow `Int` is dropped
      * rather than wrapped — a wrapped value is on the wrong side.
      */
-    private fun intBoundary(k: Long, op: String): List<Pair<Long, Boolean>> {
+    /**
+     * Two values either side of where a comparison against [k] flips: one that
+     * clearly satisfies it and one that clearly does not.
+     *
+     * [straddle] (the default, for a plain scalar comparison): for STRICT `>`/`<`
+     * the excluded side is the boundary itself, and pinning it (`x = 100` for
+     * `x > 100`) reads as a puzzle — 100 is not greater than 100, but it LOOKS
+     * like the edge. So straddle it — `99` and `101`, each obviously on its side.
+     * For `>=`/`<=`/`==` the boundary IS the included value (`100` satisfies
+     * `>= 100`), the clear and meaningful pick, so it is kept.
+     *
+     * Not straddling (a `size(...)` comparison): a length's boundary is already a
+     * clean, meaningful value — length 0 is "empty", length 3 is "three" — and
+     * `k-1` can fall below zero (`size > 0` → -1) where there is no sequence to
+     * pin, so the boundary is kept and the straddle is off.
+     */
+    private fun intBoundary(k: Long, op: String, straddle: Boolean = true): List<Pair<Long, Boolean>> {
         val (lo, hi) = when (op) {
-            "gt", "le", "eq", "neq" -> k to k.safeInc()
-            "ge", "lt" -> k.safeDec() to k
+            "gt", "lt" -> if (straddle) k.safeDec() to k.safeInc()
+                          else if (op == "gt") k to k.safeInc() else k.safeDec() to k
+            "le", "eq", "neq" -> k to k.safeInc()
+            "ge" -> k.safeDec() to k
             else -> return emptyList()
         }
         return listOfNotNull(lo, hi).map { it to holds(it.compareTo(k), op) }
@@ -908,7 +926,7 @@ object SampleBranches {
         val k = knownValue(other, byHash) as? Known.IntValue ?: return emptyList()
         val sized = typeAt(path, params) ?: return emptyList()
         val where = "size(${path.label}) ${SYMBOL.getValue(effectiveOp)} ${k.describe()}"
-        return intBoundary(k.value, effectiveOp)
+        return intBoundary(k.value, effectiveOp, straddle = false)
             // A length is never negative, and one past MAX_PINNED_LENGTH is a value
             // nobody reads in a table — that branch is left to the draws.
             .filter { (n, _) -> n in 0..MAX_PINNED_LENGTH }

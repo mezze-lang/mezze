@@ -1556,11 +1556,11 @@ class LspFeaturesTest {
     /**
      * The sample lens, in the editor: offered over every function that TAKES
      * ARGUMENTS, because that is exactly what `mez sample` generates. Branches are
-     * not required — a branchless function (`flat`) still gets the plain "sample";
-     * a function with branches names how many its drawn inputs reach. A value
+     * not required — a branchless function (`flat`) gets it too. A value
      * (`max_value`) and a zero-argument `{ } -> …` function (`answer`) have no
-     * arguments to generate, so neither is offered. Clicking runs the client's
-     * `mezze.sample` with the function's name; nothing runs otherwise.
+     * arguments to generate, so neither is offered. The lens reads simply
+     * "sample" (the branch count lives in the table it opens, not the gutter).
+     * Clicking runs the client's `mezze.sample` with the function's name.
      */
     @Test
     fun `code lens offers sample on every argument-taking function`() {
@@ -1582,8 +1582,8 @@ class LspFeaturesTest {
             "sample lens over the argument-taking functions only — not `max_value` (a value) or `answer` " +
                 "(zero-arg): ${lenses.map { it.command?.title }}",
         )
-        assertEquals("2 branch inputs · sample", byFn["clamp"], "branchy function names its branches")
-        assertEquals("sample", byFn["flat"], "branchless function still offers a plain sample")
+        assertEquals("sample", byFn["clamp"], "the lens reads plainly 'sample'")
+        assertEquals("sample", byFn["flat"], "the lens reads plainly 'sample'")
         assertEquals(
             1, sample.first { it.command.arguments[1].toString().trim('"') == "clamp" }.range.start.line,
             "on `clamp`'s line",
