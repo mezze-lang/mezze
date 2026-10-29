@@ -191,6 +191,7 @@ private fun runMain(rawArgs: Array<String>) {
             "search" -> handleSearchCommand(remainingArgs)
             "doc" -> handleDocCommand(remainingArgs)
             "eval" -> handleEvalCommand(remainingArgs)
+            "repl" -> handleReplCommand(remainingArgs)
             "sample" -> handleSampleCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
@@ -244,6 +245,7 @@ private fun showHelp() {
     println("  build     Build app to a standalone JAR")
     println("  check     Type check the project")
     println("  eval      Evaluate one expression in the app module's scope")
+    println("  repl      Interactive session where definitions accumulate")
     println()
     println("EDITOR / FORMATTING:")
     println("  fmt       Format Mezze source code")
@@ -300,7 +302,7 @@ private fun showUsage() {
     println()
     println("COMMANDS:")
     println("  Project:  init, dev, exec, build, check")
-    println("  Tools:    fmt, lsp, index, search, doc, eval, sample")
+    println("  Tools:    fmt, lsp, index, search, doc, eval, repl, sample")
     println("  Env:      doctor, toolchain")
     println()
     println("For command-specific help: mez <command> --help")
@@ -355,6 +357,24 @@ private fun showCommandHelp(command: String) {
             println("  mez eval 'config' --json               the value as a structured tree")
             println()
             println("Evaluates the code as SAVED on disk. Definitions do not accumulate between runs.")
+        }
+        "repl" -> {
+            println("USAGE: mez repl [--depth=N] [--items=N] [--timeout=SECONDS]")
+            println()
+            println("An interactive session in your app module's scope. Unlike `mez eval`,")
+            println("definitions ACCUMULATE: a `let`/`type`/`effect`/`ability`/`impl` you enter")
+            println("stays in scope for later lines, and redefining a name shadows the earlier")
+            println("one. An expression is evaluated and its value and type are printed.")
+            println()
+            println("It attaches to a running `mez dev` when there is one — the project's own")
+            println("warm runtime, no JDK of its own needed — and otherwise starts a private")
+            println("runtime for the session.")
+            println()
+            println("COMMANDS (inside the REPL):")
+            println("  :type <expr>   the expression's type, without evaluating it")
+            println("  :scope         the imports and definitions in scope")
+            println("  :reset         forget every definition")
+            println("  :quit          leave (same as Ctrl-D)")
         }
         "doc" -> {
             println("USAGE: mez doc <name> [--json]")
@@ -617,6 +637,10 @@ private fun handleSearchCommand(args: List<String>) {
 
 private fun handleEvalCommand(args: List<String>) {
     com.mezze.language.cli.commands.EvalCommand().execute(args)
+}
+
+private fun handleReplCommand(args: List<String>) {
+    com.mezze.language.cli.commands.ReplCommand().execute(args)
 }
 
 private fun handleSampleCommand(args: List<String>) {

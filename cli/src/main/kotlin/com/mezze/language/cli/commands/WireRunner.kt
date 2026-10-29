@@ -732,6 +732,11 @@ internal class WireSession private constructor(
         /** Where the expression's own stdout goes. A caller that may run the same
          *  code again (sample's row recovery) holds it back so nothing prints twice. */
         stdout: java.io.OutputStream = System.out,
+        /** The runtime session this eval runs in, or null for a stateless one — see
+         *  [com.mezze.wire.Eval.session]. A REPL on a cold-spawned runtime still
+         *  needs it: null is fresh-per-eval, so without it each line's state would
+         *  be discarded before the next. */
+        session: String? = null,
     ): com.mezze.wire.EvalResult? {
         stdoutSink = stdout
         send(WireFrame.of(MessageType.EVAL, com.mezze.wire.Eval(
@@ -741,6 +746,7 @@ internal class WireSession private constructor(
             maxDepth = maxDepth,
             maxItems = maxItems,
             timeoutMs = timeoutMs,
+            session = session,
         )))
         val drained = try { drain() } finally { stdoutSink = System.out }
         return when (drained) {

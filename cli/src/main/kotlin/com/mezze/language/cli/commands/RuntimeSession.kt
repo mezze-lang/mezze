@@ -1,5 +1,6 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.wire.CloseSession
 import com.mezze.wire.Eval
 import com.mezze.wire.EvalResult
 import com.mezze.wire.Hello
@@ -58,6 +59,14 @@ internal class RuntimeSession private constructor(
         maxItems: Int,
         timeoutMs: Long,
         stdout: OutputStream = System.out,
+        /**
+         * The runtime session this eval runs in, or null for a stateless one.
+         * The sampler leaves it null (a fresh, isolated world per request); a REPL
+         * passes a stable id so each line sees the runtime state the last one left
+         * — and so its world stays isolated from the sampler's and from the running
+         * program. See [com.mezze.wire.Eval.session].
+         */
+        session: String? = null,
     ): EvalResult? {
         WireFrameCodec.writeFlush(
             out,
@@ -70,6 +79,7 @@ internal class RuntimeSession private constructor(
                     maxDepth = maxDepth,
                     maxItems = maxItems,
                     timeoutMs = timeoutMs,
+                    session = session,
                 ),
             ),
         )
@@ -97,6 +107,18 @@ internal class RuntimeSession private constructor(
                 else -> {}
             }
         }
+    }
+
+    /**
+     * Drop the runtime's persistent world for [session], freeing its context on
+     * the shared `mez dev` runtime. Fire-and-forget (CLOSE_SESSION has no reply)
+     * and idempotent, so a REPL calls it on the way out without waiting. Does not
+     * close the connection — [close] does that.
+     */
+    fun closeSession(session: String) {
+        try {
+            WireFrameCodec.writeFlush(out, WireFrame.of(MessageType.CLOSE_SESSION, CloseSession(session)))
+        } catch (_: Exception) {}
     }
 
     override fun close() {
