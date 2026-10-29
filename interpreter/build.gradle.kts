@@ -343,6 +343,23 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
     // still runs because Truffle tools (profiler, coverage, …) also
     // contribute service files and their entries must round-trip.
     mergeServiceFiles()
+
+    // Helidon's service registry enumerates its modules through
+    // `META-INF/helidon/manifest` — a line list ("#HELIDON MANIFEST#" header
+    // then each module's service-registry.json / service.loader paths). Every
+    // Helidon jar ships its own; in a fat jar they collapse to ONE readable
+    // entry under that fixed path, so the registry sees a single module and
+    // everything else — e.g. MapperManager from io.helidon.common.mapper —
+    // goes missing, and a request fails mid-route with a ServiceRegistryException.
+    // Append them so the merged manifest lists every module's descriptors. The
+    // repeated header lines are harmless: they are not resource paths, so the
+    // loader skips them. Without this, a real Helidon server binds but cannot
+    // answer a request under `mez dev` / any jar boot.
+    transform(com.github.jengelman.gradle.plugins.shadow.transformers.AppendingTransformer::class.java) {
+        resource.set("META-INF/helidon/manifest")
+        separator.set("\n")
+    }
+
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 
     // Exclude module-info.class so the merged fat-jar doesn't claim to be
