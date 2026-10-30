@@ -166,10 +166,16 @@ public final class PolyglotNatives {
         String lang = getString(args, "lang");
         String source = getString(args, "source");
         try {
+            // A4: eval in THIS thread's own inner Context (not the shared ambient
+            // one), so mezze's async virtual threads each run guest code without
+            // tripping the single-threaded-access guard. The result is tagged with
+            // that context's id, so every follow-on value op re-enters it.
+            long cid = threadContextId(lang, currentNode);
+            com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.get(cid);
             MezzePolyglotSupport support =
                 MezzeContext.get(currentNode).getPolyglotSupport();
-            Object result = support.eval(lang, source);
-            return new MezzeForeign(result, lang);
+            Object result = support.evalRawIn(ctx, lang, source, currentNode);
+            return new MezzeForeign(result, lang, null, cid);
         } catch (Throwable t) {
             return MezzeForeign.errored(translateException(t), lang);
         }
@@ -305,9 +311,46 @@ public final class PolyglotNatives {
         final java.util.concurrent.atomic.AtomicLong nextId =
             new java.util.concurrent.atomic.AtomicLong(1);
 
+        // A4 (async+polyglot): a single-threaded guest (js/python) can't be shared
+        // across threads, and mezze async runs on many virtual threads. So each
+        // thread gets its OWN inner Context per language — true parallelism, no
+        // "multi-threaded access" guard, isolated per-thread guest state (the
+        // Node/worker model). Lazily opened on first guest use; the result foreign
+        // is tagged with the context id so every follow-on value op re-enters it
+        // via inInnerContext. Keyed `lang → context-id` per thread.
+        final ThreadLocal<java.util.Map<String, Long>> perThreadByLang =
+            ThreadLocal.withInitial(java.util.HashMap::new);
+
+        // Ids of per-thread contexts whose owning thread has finished (disposeThread
+        // ran). They are NOT closed there: disposeThread fires inside Truffle's
+        // thread unmount callback, and closing a TruffleContext from inside that
+        // callback corrupts the mount/unmount machinery (ForkJoinPool carriers
+        // crash with "Exception in unmount_callback"). So the dead thread only
+        // ENQUEUES its ids here — a pure data op, safe in the callback — and the
+        // next guest op (or context dispose) closes them from a live thread, which
+        // is where every other inner-context close already happens.
+        final java.util.concurrent.ConcurrentLinkedQueue<Long> pendingClose =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+        /** Close the contexts of threads that have finished since the last drain. */
+        void drainPendingCloses() {
+            Long id;
+            while ((id = pendingClose.poll()) != null) {
+                com.oracle.truffle.api.TruffleContext ctx = byId.remove(id);
+                if (ctx == null) continue;
+                try {
+                    ctx.close();
+                } catch (Throwable t) {
+                    System.err.println("[mezze] per-thread polyglot context did not close: "
+                        + (t.getMessage() != null ? t.getMessage() : t.getClass().getName()));
+                }
+            }
+        }
+
         /** Close every inner context the guest left open. */
         @Override
         public void close() {
+            drainPendingCloses();
             for (java.util.Iterator<com.oracle.truffle.api.TruffleContext> it = byId.values().iterator();
                     it.hasNext();) {
                 com.oracle.truffle.api.TruffleContext ctx = it.next();
@@ -326,6 +369,67 @@ public final class PolyglotNatives {
     @TruffleBoundary
     private static InnerContexts innerContexts() {
         return MezzeContext.get(null).nativeState(InnerContexts.class, InnerContexts::new);
+    }
+
+    /**
+     * The id of the CURRENT thread's inner Context for {@code lang}, opening one
+     * lazily on first guest use (A4: async + polyglot).
+     *
+     * GraalJS/GraalPython are single-threaded per Context — the first thread to
+     * enter owns it, and mezze runs its async handlers on many virtual threads.
+     * So rather than share one guest Context (which trips "multi-threaded access
+     * not allowed for language(s) js" the moment a second thread evals), each
+     * thread gets its OWN inner Context per language on a SHARED Engine — the
+     * server pattern GraalVM itself recommends. Threads run guest code in true
+     * parallel, each with isolated guest state (the Node worker-threads model),
+     * and guest-internal threads/multiprocessing are handled by the context's own
+     * {@code allowCreateThread}.
+     *
+     * The result foreign is tagged with the returned id, so every follow-on value
+     * op re-enters this same thread-owned context via {@link #inInnerContext}.
+     */
+    @TruffleBoundary
+    private static long threadContextId(String lang, Node node) {
+        InnerContexts ic = innerContexts();
+        // Close contexts left behind by threads that finished since the last guest
+        // op (disposeThread only enqueues them — see InnerContexts.pendingClose).
+        ic.drainPendingCloses();
+        java.util.Map<String, Long> byLang = ic.perThreadByLang.get();
+        Long existing = byLang.get(lang);
+        if (existing != null && ic.byId.containsKey(existing)) return existing;
+        MezzePolyglotSupport support = MezzeContext.get(node).getPolyglotSupport();
+        com.oracle.truffle.api.TruffleContext ctx =
+            support.openContext(lang, MezzePolyglotSupport.ExecConfig.permissive());
+        long id = ic.nextId.getAndIncrement();
+        ic.byId.put(id, ctx);
+        byLang.put(lang, id);
+        return id;
+    }
+
+    /**
+     * Hand off the CURRENT thread's per-thread guest Context ids for deferred
+     * close. Called from {@code MezzeLanguage.disposeThread}, which Truffle runs
+     * on each thread as it leaves the Context (incl. a virtual thread unmounting
+     * from its carrier). It must NOT close the contexts itself: disposeThread
+     * fires inside Truffle's thread unmount callback, and a {@code TruffleContext
+     * .close()} there corrupts the carrier's mount/unmount machinery. So this
+     * only moves the ids to {@code pendingClose} (a pure data op) and clears the
+     * thread-local; the next guest op, or context dispose, closes them from a
+     * live thread (InnerContexts.drainPendingCloses).
+     *
+     * The sandbox contexts that {@code openContext} put in {@code byId} are
+     * scope-owned (not in any {@code perThreadByLang}), so they are untouched here.
+     */
+    @TruffleBoundary
+    public static void disposeThreadContexts(MezzeContext context) {
+        if (context == null) return;
+        InnerContexts ic = context.nativeStatePeek(InnerContexts.class);
+        if (ic == null) return;
+        java.util.Map<String, Long> byLang = ic.perThreadByLang.get();
+        if (!byLang.isEmpty()) {
+            ic.pendingClose.addAll(byLang.values());
+        }
+        ic.perThreadByLang.remove();
     }
 
     private static MezzePolyglotSupport.ExecConfig execConfigOf(MezzeRecord args) {

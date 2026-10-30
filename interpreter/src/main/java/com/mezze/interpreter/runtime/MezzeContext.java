@@ -106,6 +106,22 @@ public final class MezzeContext {
     }
 
     /**
+     * Read per-context state WITHOUT creating it — returns null if absent.
+     *
+     * For the dispose path: disposeThread runs on every thread that entered the
+     * context, and the common case is a thread that never touched this state, so
+     * {@link #nativeState} (which would allocate an empty holder per thread just
+     * to tear it down) is the wrong tool there. Same {@code @TruffleBoundary}
+     * constraint as {@link #nativeState} — the {@code ConcurrentHashMap.get} is
+     * on SVM's runtime-compilation blocklist.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public <T> T nativeStatePeek(Class<T> key) {
+        return (T) nativeState.get(key);
+    }
+
+    /**
      * Close everything registered, newest first, then drop the per-context
      * state itself. A failure to close one does not stop the rest — a
      * half-torn-down context is worse than a noisy one — but it is reported,

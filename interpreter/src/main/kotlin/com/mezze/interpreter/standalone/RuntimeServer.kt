@@ -890,15 +890,12 @@ object RuntimeServer {
             }
         }
 
-        // Auto-warm each declared guest language on THIS thread (the
-        // eval worker) before user code runs. GraalJS is single-
-        // threaded per Context — first thread in "owns" it, and later
-        // access from a different thread trips the multi-threaded-
-        // access guard ("not allowed for language(s) js"). NumPy's
-        // native workers touching the Context first is the usual
-        // trigger. A no-op eval per language stakes the claim on the
-        // right thread. Once per Context — flip a flag so subsequent
-        // LOADs don't repeat the work.
+        // A4 (async + polyglot): guest languages are NOT warmed in the ambient
+        // Context (warmupPolyglotLanguages is now a no-op — see its doc). Warming
+        // js/python here would initialize a single-threaded language in the
+        // ambient Context, making the whole Context single-threaded so async
+        // virtual threads could no longer enter it. Each thread instead runs
+        // guest code in its own per-thread inner Context, created lazily.
         // Per-run context isolation: on every run AFTER the first (a `mez dev`
         // reload), swap in a fresh Context so guest state (Python modules, JS
         // require globals, native modules) doesn't accumulate across reloads.
@@ -1430,23 +1427,18 @@ object RuntimeServer {
      * eval surface, and it isn't affected by the same thread-ownership
      * rule.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun warmupPolyglotLanguages(context: Context, languages: List<String>) {
-        val debug = System.getenv("MEZZE_DEBUG") != null
-        for (lang in languages) {
-            val snippet = when (lang) {
-                "js" -> "1"
-                "python" -> "1"
-                else -> continue
-            }
-            try {
-                context.eval(lang, snippet)
-                if (debug) System.err.println("[mezze] polyglot: warmed $lang")
-            } catch (_: Throwable) {
-                // Best-effort — a bad snippet or provider hiccup here
-                // should surface at the user's first real eval with a
-                // clearer message from GraalVM.
-            }
-        }
+        // No-op under the A4 per-thread-inner-Context model (kept as a seam).
+        //
+        // This used to eval `1` in each single-threaded guest (js/python) in the
+        // ambient Context on the eval worker, to pin that thread as owner. But a
+        // Context that has initialized a single-threaded language is itself
+        // single-threaded, so that one no-op eval made every async virtual thread
+        // that later entered the Context crash with "not allowed for language(s)
+        // js". Guest languages are now initialized lazily, each in its own
+        // per-thread inner Context (PolyglotNatives.threadContextId), so the
+        // ambient Context stays multi-threaded and there is nothing to warm here.
     }
 
     /**

@@ -503,19 +503,17 @@ object EmbeddedExec {
         val context = contextBuilder.build()
         mark("Context built")
 
-        // Auto-warm each declared guest language on this thread BEFORE
-        // handing the Context to user code. GraalJS in particular is
-        // single-threaded per Context — the first thread to enter it
-        // "owns" it forever. When a language (e.g. NumPy) later spins
-        // up worker threads that touch the Context first, subsequent
-        // access from the main thread trips the multi-threaded-access
-        // guard with the cryptic "not allowed for language(s) js"
-        // error. A no-op eval on this thread stakes the claim so the
-        // real evals below run without bouncing.
-        //
-        // WASM is skipped: its "eval" isn't source-string driven the
-        // same way (module instantiation, not expression evaluation),
-        // and it isn't affected by the same thread-ownership rule.
+        // A4 (async + polyglot): deliberately do NOT warm js/python in this
+        // ambient Context. GraalJS/GraalPython are single-threaded, and a
+        // Context that has initialized a single-threaded language becomes
+        // single-threaded AS A WHOLE — so a single no-op js eval here would
+        // pin the ambient Context to this thread and mezze's own async
+        // virtual threads could no longer enter it (the "not allowed for
+        // language(s) js" crash). Instead each thread runs guest code in its
+        // OWN inner Context, created lazily on first use (PolyglotNatives
+        // .threadContextId), so the ambient Context stays multi-threaded for
+        // mezze and every guest access is single-threaded within its own
+        // context. See warmupPolyglotLanguages for why it is now a no-op.
         warmupPolyglotLanguages(context, extraLanguages)
 
         try {
@@ -585,31 +583,19 @@ object EmbeddedExec {
     }
 
     /**
-     * Evaluate a minimal no-op snippet in each declared guest language on
-     * the current thread so the Context's single-threaded languages pin
-     * this thread as their owner BEFORE user code runs. Silently ignores
-     * failures — a bad snippet must not crash Context boot. INFO-level
-     * announce only when [MEZZE_DEBUG] is set to keep normal runs quiet.
+     * No-op under the A4 per-thread-inner-Context model (kept as a seam).
+     *
+     * This used to eval a no-op snippet (`1`) in each single-threaded guest
+     * (js/python) in the AMBIENT Context, to pin this thread as the owner so
+     * later evals didn't bounce. That is exactly the wrong thing now: once a
+     * single-threaded language is initialized in the ambient Context, the whole
+     * Context is single-threaded, so mezze's async virtual threads can't enter
+     * it. Guest languages are instead initialized lazily, each in its own
+     * per-thread inner Context (PolyglotNatives.threadContextId), so there is
+     * nothing to pin here and warming the ambient Context must be avoided.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun warmupPolyglotLanguages(context: Context, languages: List<String>) {
-        val debug = System.getenv("MEZZE_DEBUG") != null
-        for (lang in languages) {
-            val snippet = when (lang) {
-                "js" -> "1"
-                "python" -> "1"
-                // WASM has no eval-a-string surface — instantiation is
-                // module-driven, and the thread-ownership pin doesn't
-                // apply the same way. Skip.
-                else -> continue
-            }
-            try {
-                context.eval(lang, snippet)
-                if (debug) System.err.println("[mezze] polyglot: warmed $lang")
-            } catch (_: Throwable) {
-                // Silent by design — warmup is best-effort. Any error
-                // here would resurface at the user's first real eval
-                // with a much clearer message from GraalVM.
-            }
-        }
+        // Intentionally empty — see the doc comment.
     }
 }

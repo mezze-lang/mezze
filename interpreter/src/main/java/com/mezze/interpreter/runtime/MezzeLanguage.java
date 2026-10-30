@@ -1099,6 +1099,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // the context, so every slot gets cleared, not just the closing thread's.
         com.mezze.interpreter.nodes.builtin.effects.AsyncNatives
                 .resetPerThreadScope();
+        // A4: close any per-thread guest (js/python) inner Contexts this thread
+        // opened, so an async virtual thread releases them when it finishes
+        // rather than leaking one guest Context per task until the outer Context
+        // closes. Same hook, same completeness argument as the scope reset above.
+        com.mezze.interpreter.nodes.builtin.polyglot.PolyglotNatives
+                .disposeThreadContexts(context);
     }
 
     /**
