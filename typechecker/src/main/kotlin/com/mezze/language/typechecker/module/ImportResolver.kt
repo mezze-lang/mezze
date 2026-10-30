@@ -379,14 +379,17 @@ class ImportResolver(
                             errors.add(ModuleError.PrivateExport(
                                 modulePath = modulePath,
                                 exportName = item.name,
-                                loc = sourceLoc
+                                // The SPECIFIC symbol's span, not the whole `use`
+                                // line — the caret should sit under the one name
+                                // that failed to import, not the entire statement.
+                                loc = item.loc ?: sourceLoc
                             ))
                         } else {
                             val availableExports = module.exports.keys.toList().sorted()
                             errors.add(ModuleError.ExportNotFound(
                                 modulePath = modulePath,
                                 exportName = item.name,
-                                loc = sourceLoc,
+                                loc = item.loc ?: sourceLoc,
                                 availableExports = availableExports
                             ))
                         }
@@ -638,6 +641,10 @@ class ImportResolver(
             }
 
             abilityImpls.putAll(module.index.abilityImplsByHash)
+            // Coherent impls reachable transitively (see transitiveAbilityImpls):
+            // a constraint on an imported fn may be discharged by an impl a hop
+            // past the module it was imported from.
+            abilityImpls.putAll(transitiveAbilityImpls(module, mutableSetOf()))
         }
 
         return ModuleImportContext(
@@ -806,6 +813,10 @@ class ImportResolver(
             // …and the impls of whatever this module re-exports. See
             // reexportedAbilityImpls for why a `pub use` has to carry them.
             module?.let { abilityImpls.putAll(reexportedAbilityImpls(it, mutableSetOf())) }
+            // …and the coherent impls reachable through its transitive imports,
+            // so a constraint on an imported fn whose discharging impl lives a
+            // hop past the imported module still resolves. See transitiveAbilityImpls.
+            module?.let { abilityImpls.putAll(transitiveAbilityImpls(it, mutableSetOf())) }
 
             // #183 follow-up: also collect from inherent impl op annotations
             // (param + return + impl target) so chain expressions like
@@ -948,6 +959,42 @@ class ImportResolver(
             }
             out.putAll(srcModule.index.abilityImplsByHash)
             out.putAll(reexportedAbilityImpls(srcModule, visited))
+        }
+        return out
+    }
+
+    /**
+     * Every ability impl reachable through [module]'s TRANSITIVE import closure.
+     *
+     * A plain `use http_router::{ on_get }` already carries http_router's OWN
+     * impls (above) — the model is that a constraint is discharged at the CALL
+     * site, so the caller needs the instances. But a constraint can be satisfied
+     * by an impl that lives one hop PAST the imported module: `on_get`'s
+     * `with IntoResponse 'r` is discharged by `impl IntoResponse for Str`, which
+     * is declared in `std::effects::http` — a module `http_router` merely `use`s.
+     * Without this closure that impl is invisible to the caller and the
+     * constraint fails with a spurious "Str does not implement IntoResponse",
+     * even though `http_router` itself type-checked fine against it.
+     *
+     * Collecting the whole closure is SOUND: ability impls are COHERENT (the
+     * orphan rule admits at most one impl per ability/type across the program),
+     * so a wider view can only COMPLETE a discharge, never change WHICH impl is
+     * chosen or create ambiguity. Only DEFINING an impl is scope-gated;
+     * discharging one is global. [visited] breaks import cycles.
+     */
+    private fun transitiveAbilityImpls(
+        module: LoadedModule,
+        visited: MutableSet<String>,
+    ): Map<Hash, ParsedImplAbilityDecl> {
+        if (!visited.add("timpls:${module.modulePath}")) return emptyMap()
+        val out = mutableMapOf<Hash, ParsedImplAbilityDecl>()
+        for (dep in module.dependencies) {
+            val depModule = when (val r = loader.loadModule(dep)) {
+                is ModuleLoadResult.Success -> r.module
+                is ModuleLoadResult.Failure -> continue
+            }
+            out.putAll(depModule.index.abilityImplsByHash)
+            out.putAll(transitiveAbilityImpls(depModule, visited))
         }
         return out
     }

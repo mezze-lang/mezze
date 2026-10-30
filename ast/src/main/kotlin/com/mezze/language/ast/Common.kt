@@ -317,7 +317,10 @@ data class ImportItem(
     val name: String,
     val alias: String? = null,
     val contentHash: String? = null,
-    val kind: ImportItemKind = ImportItemKind.VALUE  // Default to VALUE for backward compatibility
+    val kind: ImportItemKind = ImportItemKind.VALUE,  // Default to VALUE for backward compatibility
+    // Source span of THIS symbol within the `use` statement, so an import error
+    // (M0803) points its caret at the one name that failed, not the whole line.
+    val loc: com.mezze.language.parsedast.Loc? = null
 ) {
     val needsRuntimeBinding: Boolean get() = kind == ImportItemKind.VALUE
 }

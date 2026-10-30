@@ -15,6 +15,6 @@ fun parsedUsePathToCore(path: ParsedUsePath): UsePath = when (path) {
     is ParsedUsePath.Module -> ModulePath(path.path.segments)
     is ParsedUsePath.Selective -> SelectivePath(
         module = path.modulePath.segments,
-        items = path.items.map { ImportItem(name = it.name, alias = it.alias) }
+        items = path.items.map { ImportItem(name = it.name, alias = it.alias, loc = it.loc) }
     )
 }
