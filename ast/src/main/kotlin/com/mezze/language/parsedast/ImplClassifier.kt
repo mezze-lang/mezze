@@ -47,6 +47,39 @@ object ImplClassifier {
      *   two historic call sites used different locs (`effect.loc` vs the decl loc); it
      *   feeds the content hash, so it stays a parameter to keep extraction exact. #303.
      */
+    /**
+     * Reclassify a whole module's imported-ability-impl performers to
+     * [ParsedImplAbilityDecl], the way [com.mezze.language.typechecker.context.ContextBuilder]
+     * does once imports are known — but driven by the caller's name sets so it can
+     * run where ContextBuilder cannot, chiefly on a stdlib module loaded from the
+     * snapshot (which is re-parsed from source, so its imports' ability impls are
+     * still performers → missing from the ability-impl index → `Encode QueryC`
+     * can't derive through `with_query`, #3b). Each converted impl KEEPS the
+     * performer's `contentHash`, so the module's identity/fingerprint is unchanged
+     * (fingerprint hashes decl content-hashes, not decl kinds). Mirrors
+     * ContextBuilder's call exactly (forallVars=[], stripEmptyRecordParams=true,
+     * targetLoc=the decl's loc). A no-op when nothing reclassifies.
+     */
+    fun reclassifyImportedAbilityImpls(
+        module: ParsedModule,
+        abilityNames: Set<String>,
+        effectNames: Set<String>,
+    ): ParsedModule {
+        var changed = false
+        val decls = module.decls.map { d ->
+            if (d is ParsedPerformerDecl && isAbilityImpl(d.effect.localName, abilityNames, effectNames)) {
+                changed = true
+                performerToAbilityImpl(
+                    perfDecl = d,
+                    forallVars = emptyList(),
+                    stripEmptyRecordParams = true,
+                    targetLoc = d.loc,
+                ).copy(contentHash = d.identity)
+            } else d
+        }
+        return if (changed) module.copy(decls = decls) else module
+    }
+
     fun performerToAbilityImpl(
         perfDecl: ParsedPerformerDecl,
         forallVars: List<String>,

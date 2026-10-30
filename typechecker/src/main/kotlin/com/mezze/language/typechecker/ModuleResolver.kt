@@ -31,6 +31,22 @@ import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 
+// Every ability / effect name declared ANYWHERE in the stdlib. The stdlib is a
+// closed set, so an impl in one module of an ability imported from another is
+// recognised against this union — which is what lets `fromSnapshot` reclassify
+// imported-ability-impl performers it can't otherwise see (#3b). Computed once
+// from the snapshot; thread-safe via lazy.
+private val allStdlibAbilityNames: Set<String> by lazy {
+    StdlibSnapshotData.stamped.values.flatMap { sm ->
+        sm.module.decls.filterIsInstance<ParsedAbilityDecl>().map { it.name }
+    }.toSet()
+}
+private val allStdlibEffectNames: Set<String> by lazy {
+    StdlibSnapshotData.stamped.values.flatMap { sm ->
+        sm.module.decls.filterIsInstance<ParsedEffectDecl>().map { it.name }
+    }.toSet()
+}
+
 data class ProgramIndex(
     val typeDeclarations: Map<String, ParsedTypeDecl>,
     val abilityDeclarations: Map<String, ParsedAbilityDecl>,
@@ -714,7 +730,17 @@ class ModuleResolver(
         if (System.getProperty("mezze.stdlib.force-recompile") == "1") return null
         getFromCache(world, modulePath)?.let { return it }
         val s = StdlibSnapshotData.stamped[modulePath] ?: return null
-        val module = s.module
+        // #3b: the snapshot stores each stdlib module as RE-PARSED FROM SOURCE, so
+        // an impl of an IMPORTED ability is still a performer (the parser post-pass
+        // reclassifies only LOCAL abilities). Reclassify them here — exactly as
+        // ContextBuilder does once imports are known — using the whole stdlib's
+        // ability/effect names, so `std::codec::query`'s `impl EncodeRecord for
+        // QueryC` (and its 12 siblings) land in the ability-impl index and
+        // `Encode QueryC` derives through `with_query`. contentHash is preserved,
+        // so the module's identity/fingerprint is unchanged.
+        val module = ImplClassifier.reclassifyImportedAbilityImpls(
+            s.module, allStdlibAbilityNames, allStdlibEffectNames,
+        )
         StdlibIdentities.register(module)
         return Module(
             path = ModulePath.parse(modulePath),
