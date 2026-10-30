@@ -2951,6 +2951,7 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== Stdin ====================
 
     private static void registerStdinHandlers() {
+        HANDLERS.put("__native_signal_await_interrupt", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.SignalNatives.awaitInterrupt(r));
         HANDLERS.put("__native_stdin_read_line", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.readLine(r));
         HANDLERS.put("__native_stdin_read_char", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.readChar(r));
         HANDLERS.put("__native_stdin_read_bytes", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.readBytes(r));

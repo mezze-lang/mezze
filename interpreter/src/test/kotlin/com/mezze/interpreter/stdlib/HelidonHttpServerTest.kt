@@ -320,6 +320,40 @@ class HelidonHttpServerTest {
     }
 
     @Test
+    fun `with_graceful_shutdown serves until the trigger fires, then stops`() {
+        // The axum shape: a server runs while a trigger thunk parks, then the
+        // socket is stopped. The trigger is an EFFECT, so `ImmediateSignal` makes
+        // it return at once — a test never has to deliver a real SIGINT. Before
+        // the trigger a request is answered; after it the socket is closed, so
+        // the same request no longer comes back "ok".
+        val r = MezzeTestHelper.run(
+            """
+            $head
+            $fetch
+            use std::effects::signal::{ ImmediateSignal, ctrl_c }
+            use std::effects::http_server::{ with_graceful_shutdown }
+            let app = otherwise {
+              routes = route { method = Get, path = "/", handler = { m } -> reply { code = 200, text = "ok", url = m.req.url } },
+              fallback = not_found,
+            }
+            let go: {} -> Str <*> = {} ->
+              perform ImmediateSignal in
+                perform HelidonHttpServerWith { config = listen_on_any_port } in
+                  perform SimpleHttpClient in do
+                    let h = HttpServer.serve { handler = app }
+                    let before = fetch { url = ${url("/")} }
+                    h.with_graceful_shutdown { on = { } -> ctrl_c {} }
+                    let after = fetch { url = ${url("/")} }
+                    "$(before)|$(after)"
+            go {}
+            """.trimIndent(),
+        )
+        val s = r as String
+        assertTrue(s.startsWith("ok|"), "the server answered before shutdown, got: $s")
+        assertTrue(s.substringAfter("|") != "ok", "after graceful shutdown the socket is closed, got: $s")
+    }
+
+    @Test
     fun `two requests in a row both get answered`() {
         // One request proves the path works once. A second proves the worker
         // went back for more rather than retiring after its first job.

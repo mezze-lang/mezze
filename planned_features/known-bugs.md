@@ -39,6 +39,30 @@ standalone layer to `openContext`, which applies them to the inner-context build
 js-only eval test would pass without the fix and mislead (the T4 lesson). No test
 yet; fix not landed.
 
+### F-1 — graceful server shutdown (`with_graceful_shutdown`) + a `Signal` effect (DONE)
+
+A long-lived HTTP server had no first-class "run until shutdown" — `serve` returns
+a handle (`stop`/`port`) and nothing keeps it up, so the only way to park was a
+stdin hack. Added the axum shape:
+
+- `std::effects::signal`: `effect Signal { interrupt }` with `SystemSignal`
+  (parks until SIGINT via `__native_signal_await_interrupt`, `SignalNatives`) and
+  `ImmediateSignal` (returns at once — tour/test). `ctrl_c`/`await_shutdown` wrap it.
+- `std::effects::http_server`: `with_graceful_shutdown { server, on }` runs `on {}`
+  (any trigger thunk — `{ } -> ctrl_c {}`, a timer, a flag) then `server.stop {}`.
+  Mirrors `serve(...).with_graceful_shutdown(signal).await`.
+
+NOTE on method chaining: a free `pub let f { recv: T, … }` does NOT auto-chain as
+`recv.f {}` — that needs an inherent `impl T where { f = { it, … } -> f { … } }`
+block (how `.otherwise`/`.with_method` chain). Shipped `impl ServerHandle where {
+with_graceful_shutdown }` so `h.with_graceful_shutdown { on = … }` dispatches
+(else member-access falls to field access → "Record type does not have field").
+Under `mez dev` the CLI owns SIGINT (forwards an INTERRUPT frame → Truffle cancel),
+so `SystemSignal`'s in-guest graceful path runs to completion only in a
+standalone/native run; a `mez dev` Ctrl-C still stops it, just not gracefully.
+Test: `HelidonHttpServerTest` "with_graceful_shutdown serves until the trigger
+fires, then stops" (method form, ImmediateSignal).
+
 ### B-11 — a dependency-package codec impl is missing from an INCREMENTAL re-check's context (DO LAST)
 
 With the checked-module cache active (`ModuleResolver.cacheStore`), editing a

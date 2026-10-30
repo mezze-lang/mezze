@@ -237,3 +237,28 @@ impl HttpServer for HelidonHttpServer where {
 impl HttpServer for HelidonHttpServerWith { config: ServerConfig } where {
   serve = { handler } -> start_socket { handler = handler, config = config },
 }
+
+## Serve until a shutdown trigger fires, then stop the socket.
+##
+## `on` is any thunk that RETURNS when it is time to shut down: `{ } -> ctrl_c {}`
+## for SIGINT (see std::effects::signal), a timer, or a flag a route flips. The
+## server runs on its own threads while `on` parks, so this is the mezze shape of
+## axum's `serve(...).with_graceful_shutdown(signal).await` — the trigger is a
+## value you choose, not a built-in, and swapping `SystemSignal` for
+## `ImmediateSignal` is all it takes to make a tour or a test not block.
+##
+##   let h = HttpServer.serve { handler = app }
+##   h.with_graceful_shutdown { on = { } -> ctrl_c {} }
+pub let with_graceful_shutdown
+  : { server: ServerHandle, on: {} -> {} <...> } -> {} <...>
+  = { server, on } -> do
+    on {}
+    server.stop {}
+
+## Method form, so a handle chains like the client and router do:
+##
+##   HttpServer.serve { handler = app }.with_graceful_shutdown { on = { } -> ctrl_c {} }
+impl ServerHandle where {
+  with_graceful_shutdown = { it: 'it, on: {} -> {} <...> } ->
+    with_graceful_shutdown { server = it, on = on },
+}

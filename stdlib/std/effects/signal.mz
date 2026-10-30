@@ -1,0 +1,33 @@
+# A shutdown signal, as an effect so the TRIGGER can be swapped — wait for Ctrl-C
+# in production, return at once in a test or a quick tour. This is the thunk you
+# hand to a server's `with_graceful_shutdown` (std::effects::http_server): the
+# mezze shape of awaiting `tokio::signal::ctrl_c()`.
+
+## A one-shot shutdown trigger.
+effect Signal where {
+  ## Park until a shutdown is requested, then return.
+  interrupt: {} -> {} <Signal>
+}
+
+## Wait for an OS interrupt (SIGINT / Ctrl-C). Parks until the signal arrives.
+##
+## In a standalone run the process owns SIGINT and this returns when the user
+## hits Ctrl-C. Under `mez dev` the CLI owns SIGINT and cancels the program
+## instead, which also releases this — either way Ctrl-C stops the server.
+impl Signal for SystemSignal where {
+  interrupt = {} -> __native_signal_await_interrupt {},
+}
+
+## Return immediately. A server guarded by this stops as soon as it is asked to,
+## which is what a test or a non-blocking tour wants — no socket is left parked.
+impl Signal for ImmediateSignal where {
+  interrupt = {} -> {},
+}
+
+## Park until a shutdown signal (Ctrl-C under `SystemSignal`). Hand
+## `{ } -> ctrl_c {}` to `with_graceful_shutdown`.
+pub let ctrl_c: {} -> {} <Signal> = {} -> Signal.interrupt {}
+
+## The same thing under a name that does not assume a keystroke, for a trigger
+## installed by something other than a terminal.
+pub let await_shutdown: {} -> {} <Signal> = {} -> Signal.interrupt {}
