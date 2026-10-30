@@ -23,6 +23,15 @@ import com.mezze.language.parser.ParseException
  */
 object ParseErrorFormatter {
 
+    // Red headline when stderr is a terminal and NO_COLOR is unset — matches
+    // ErrorFormatter so a parse error reads the same as a type error. Plain when
+    // piped or under tests (no console), so asserted wording is unchanged.
+    private val useColor: Boolean =
+        System.getenv("NO_COLOR") == null &&
+            System.getenv("TERM") != "dumb" &&
+            System.console() != null
+    private fun errorHead(s: String): String = if (useColor) "\u001b[1;31m$s\u001b[0m" else s
+
     fun format(error: ParseException): String = buildString {
         val message = trimToFirstSentence(error.errorMessage)
         val header = if (error.code != ErrorCode.UNCATEGORIZED) {
@@ -30,7 +39,7 @@ object ParseErrorFormatter {
         } else {
             "error: $message"
         }
-        appendLine(header)
+        appendLine(errorHead(header))
 
         if (error.line > 0) {
             val fileInfo = error.file ?: "<input>"

@@ -8,13 +8,26 @@ import com.mezze.language.typechecker.module.ModuleError
 import com.mezze.language.typechecker.solving.ConstraintSolver
 
 object ErrorFormatter {
+    // Colour the diagnostic HEADLINE (error red, warning yellow), the way rustc
+    // and clang do, so a failure reads at a glance in check/dev/build. On only
+    // when stderr is a real terminal and NO_COLOR is unset — so piped output,
+    // CI logs, and the unit tests (no console under gradle) stay plain text and
+    // assert on the wording unchanged.
+    private val useColor: Boolean =
+        System.getenv("NO_COLOR") == null &&
+            System.getenv("TERM") != "dumb" &&
+            System.console() != null
+    private const val ESC = "\u001b"
+    private fun errorHead(s: String): String = if (useColor) "$ESC[1;31m$s$ESC[0m" else s
+    private fun warnHead(s: String): String = if (useColor) "$ESC[1;33m$s$ESC[0m" else s
+
     /**
      * A warning, in the same shape as an error: `warning[W0501]: …`, where it
      * is, and the line. Without this the CLI only ever counted warnings.
      */
     fun formatWarning(warning: TypeChecker.TypeCheckWarning, sourceCode: String? = null): String = buildString {
         val code = warning.code?.let { "[${it.display()}]" } ?: ""
-        appendLine("warning$code: ${warning.message}")
+        appendLine(warnHead("warning$code: ${warning.message}"))
         val loc = warning.loc
         if (loc != null) {
             appendLine("  --> ${loc.file.ifEmpty { "<input>" }}:${loc.startLine}:${loc.startCol}")
@@ -36,7 +49,7 @@ object ErrorFormatter {
             } else {
                 "[${error.phase}]"
             }
-            appendLine("error$bracket: ${error.message}")
+            appendLine(errorHead("error$bracket: ${error.message}"))
 
             // Bind to a local: `loc` is a nullable public property on a type in
             // another module (:typechecker), so Kotlin won't smart-cast it after
@@ -76,7 +89,7 @@ object ErrorFormatter {
                     "[$human]"
                 }
             }
-            appendLine("error$codeSlot: ${error.message}")
+            appendLine(errorHead("error$codeSlot: ${error.message}"))
 
             val location = error.loc
             if (location != null) {
@@ -99,7 +112,7 @@ object ErrorFormatter {
         sourceCode: String? = null,
     ): String = buildString {
         val codeStr = diag.code.display()
-        appendLine("error[$codeStr]: ${diag.message}")
+        appendLine(errorHead("error[$codeStr]: ${diag.message}"))
 
         val loc = diag.loc
         val fileInfo = loc.file.ifEmpty { "<input>" }
@@ -140,7 +153,7 @@ object ErrorFormatter {
         error: ModuleError,
         loc: Loc? = null,
     ): String = buildString {
-        appendLine("error[${error.code.display()}]: ${error.message}")
+        appendLine(errorHead("error[${error.code.display()}]: ${error.message}"))
 
         if (loc != null) {
             val fileInfo = loc.file.ifEmpty { "<input>" }
