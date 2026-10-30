@@ -924,7 +924,17 @@ class AbilityChecker internal constructor(
         val prefix = if (isEncode) "Encode" else "Decode"
 
         fun require(abilityName: String): MissingTier2? {
-            val hash = registry.resolveAbilityHash(abilityName)
+            // Tier-2 codec abilities (EncodeScalar, EncodeRecord, …) are stdlib
+            // (std::codec::core). Resolve them by IDENTITY, not by the name in the
+            // consumer's scope: a project using `x.to_js {}` need not import
+            // std::codec::core, so resolveAbilityHash(name) can be null — and a
+            // null hash drops abilityImpls' by-hash channel, so a dependency
+            // package's `impl EncodeScalar for JsC` (tagged by that very hash) is
+            // never found and the derivation wrongly reports "format lacks
+            // EncodeScalar" (B-10). The identity is available whether or not the
+            // name is in scope.
+            val hash = com.mezze.language.typechecker.StdlibIdentities.ability(abilityName)
+                ?: registry.resolveAbilityHash(abilityName)
             val impls = abilityImpls(abilityName, hash)
             val hit = impls.any { impl ->
                 val ann = impl.targetTypeAnnotations?.firstOrNull() ?: return@any false
