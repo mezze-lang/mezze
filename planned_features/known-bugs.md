@@ -7,7 +7,7 @@ installed/playground skew): B-3 (stale installed mez writes `.mezze/`), B-8
 (`MockHttpClient` works on main; the wasm playground is stale). STILL OPEN:
 B-A4 (per-thread guest Contexts drop language options — deferred, designed),
 B-9 IMPLEMENTED store-backed (import hint for an unimported ability's method;
-works in the LSP, CLI pending the store wiring below). The website em-dash/
+works in the LSP, `mez dev`, and `mez check`). The website em-dash/
 semicolon cleanup + concepts `Medium` arm shipped in 1461b6b1f. Verify any
 playground-reported item against current `main` before fixing.
 
@@ -59,12 +59,17 @@ share an op name but is not imported for a method call); the current project's
 own parsed ability decls are unioned in from `getAllParsedModules`. Store query
 tested on both backends (`DefinitionIndexTest`).
 
-WORKS IN THE LSP, where `PrecompiledStdlib.setStore(openProject(...))` makes the
-stdlib+deps store available. KNOWN LIMITATION: `mez dev`/`mez check` run in
-SQLite-free snapshot mode where `PrecompiledStdlib.getStore()` is null, so the
-CLI shows no hint (it degrades to the plain error, same as the pre-existing
-effect-import hint). A follow-up could expose a complete ability-op index from
-the cbor snapshot so the CLI matches the editor.
+The hint is attached in `ConstraintErrorClassifier` — the single choke point
+every constraint error passes through — NOT at the solver's field-failure site,
+because a let-bound `.method {}` failure surfaces via a solve path that drops
+the solver's hints. WORKS in all three contexts: the LSP
+(`PrecompiledStdlib.setStore(openProject(...))`), `mez dev`
+(`WireRunner` sets the store), and `mez check` (falls back to
+`ModuleResolver.cacheStore` — the lazily-opened SQLite cache, forced only on
+this error path). All three attach stdlib + deps, so the op index is complete.
+Verified end-to-end: `6.to_jvm {}` → `= hint: … use std::codec::jvm::{ ToJvm }`
+in both dev and check, plus the `FixHint.Import` the LSP renders as a one-click
+"Import" action.
 
 ### B-1 — unused-import warning faints the whole `use` line when only some names are unused
 

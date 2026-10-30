@@ -9,6 +9,10 @@ import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ErrorContext
 import com.mezze.language.typechecker.solving.ConstraintSolver
+import com.mezze.language.typechecker.PrecompiledStdlib
+import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.parsedast.ParsedAbilityDecl
+import com.mezze.language.store.DeclKind
 
 internal fun classifyConstraintError(
     error: ConstraintSolver.ConstraintError
@@ -90,6 +94,13 @@ internal fun classifyConstraintError(
         }
     }
 
+    // B-9: a `.method {}` that failed because its receiver is not a record may
+    // really be an ability op whose ability is not imported (`6.to_jvm {}`
+    // without `use std::codec::jvm::{ ToJvm }`). This is the single choke point
+    // every constraint error passes through, so the hint is attached here rather
+    // than at one of the solver's several field-failure sites.
+    val (abilityHintLines, abilityFixHints) = abilityImportHints(error, code)
+
     // The failing SITE's own advice leads: it knew a fact this classifier
     // cannot re-derive — which module holds the impl, say — so its hint is
     // more specific than anything keyed off the error's shape.
@@ -98,9 +109,70 @@ internal fun classifyConstraintError(
         message = error.message,
         loc = error.constraint.loc,
         code = code,
-        hints = error.hints + hints,
-        fixHints = error.fixHints + solverFixHints,
+        hints = error.hints + hints + abilityHintLines,
+        fixHints = error.fixHints + solverFixHints + abilityFixHints,
     )
+}
+
+/**
+ * When a `.method {}` fails because its receiver is not a record (T0205 on a
+ * `HasField`), the method name may be an op of an ability that is simply not
+ * imported. Returns one `= hint:` line and one `FixHint.Import` per candidate
+ * ability so an editor can offer "Import `X` from `Y`" (B-9). Empty unless the
+ * name actually names an ability op somewhere.
+ */
+private fun abilityImportHints(
+    error: ConstraintSolver.ConstraintError,
+    code: ErrorCode,
+): Pair<List<String>, List<FixHint>> {
+    if (code != ErrorCode.T0205_FIELD_NOT_FOUND) return emptyList<String>() to emptyList()
+    // Only the non-record case (a method on a scalar/opaque value); a real
+    // record-field typo is not an unimported-ability situation.
+    if (!error.message.contains("non-record type")) return emptyList<String>() to emptyList()
+    val hasField = error.constraint as? Constraint.HasField ?: return emptyList<String>() to emptyList()
+    val loc = error.constraint.loc ?: return emptyList<String>() to emptyList()
+    val providers = abilitiesProvidingOp(hasField.fieldName)
+    if (providers.isEmpty()) return emptyList<String>() to emptyList()
+    val hints = providers.map { (ability, modulePath) ->
+        "`${hasField.fieldName}` is a method of ability `$ability`; " +
+            "import it with `use $modulePath::{ $ability }`"
+    }
+    val fixes = providers.map { (ability, modulePath) -> FixHint.Import(loc, ability, listOf(modulePath)) }
+    return hints to fixes
+}
+
+/**
+ * Abilities that declare an op named [opName], as `(abilityName, modulePath)`,
+ * deduplicated. Unions two sources: the store's op index
+ * ([com.mezze.language.store.MezzeStore.findDefinitionOwnersByOp], covering
+ * stdlib + deps + a populated project, restricted to ability owners since an
+ * effect may share an op name but is not imported for a method call), and the
+ * current project's own parsed ability decls (not necessarily populated into the
+ * store during `mez check`). The store is PrecompiledStdlib's (set by `mez dev`
+ * and the LSP) or `mez check`'s lazily-opened SQLite cache; both attach stdlib +
+ * deps. Only reached on a field-access failure, so the scan is off the hot path.
+ */
+private fun abilitiesProvidingOp(opName: String): List<Pair<String, String>> {
+    if (opName.isEmpty()) return emptyList()
+    val out = LinkedHashSet<Pair<String, String>>()
+    (PrecompiledStdlib.getStore() ?: ModuleResolver.cacheStore?.value)?.let { store ->
+        val owners = store.findDefinitionOwnersByOp(opName)
+        if (owners.isNotEmpty()) {
+            val abilityHashes = store.getDeclsByKind(DeclKind.ABILITY).mapTo(HashSet()) { it.hash }
+            for (ownerHash in owners) {
+                if (ownerHash !in abilityHashes) continue
+                for (nameRow in store.getNamesForHash(ownerHash)) out.add(nameRow.name to nameRow.module)
+            }
+        }
+    }
+    for ((modulePath, module) in ModuleResolver.getAllParsedModules()) {
+        for (decl in module.decls) {
+            if (decl is ParsedAbilityDecl && decl.operations.any { it.name == opName }) {
+                out.add(decl.name to modulePath)
+            }
+        }
+    }
+    return out.toList()
 }
 
 /**
