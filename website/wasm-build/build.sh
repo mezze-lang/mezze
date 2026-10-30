@@ -58,6 +58,16 @@ say "Building JVM artifacts"
 # -PslimSnapshot=true omits stdlib TypedModules from the embedded snapshot: ~22 MB
 # the browser image bakes into its heap but never needs (a mono fast-path only).
 # Keeps the WASM runtime loadable; JVM/native builds omit the flag and keep them.
+#
+# compileStdlib is run FIRST, in its own invocation: the jar tasks package
+# generated/resources but do NOT depend on compileStdlib (circular — see
+# cli/build.gradle.kts), so the slimSnapshot flag only takes effect if
+# compileStdlib actually runs. Without this a prior NON-slim build (mez install /
+# check / dev / build, which all regenerate the snapshot full) leaves the FULL
+# snapshot in generated/resources and the WASM image bakes in ~13 MB of
+# TypedModules it never uses. Regenerating here makes the WASM build own its
+# snapshot regardless of what ran before it.
+(cd "$REPO" && ./gradlew --quiet -PslimSnapshot=true :cli:compileStdlib)
 (cd "$REPO" && ./gradlew --quiet -PslimSnapshot=true $(for m in $MODULES; do printf ':%s:jar ' "$m"; done))
 
 # The classpath is staged by hand. Gradle's is wrong here for two reasons:
