@@ -458,47 +458,45 @@ object EmbeddedExec {
         val enablePython = "python" in extraLanguages
         val enableJs = "js" in extraLanguages
         val enableWasm = "wasm" in extraLanguages
+        // Build the guest-language options ONCE, then apply them to the ambient
+        // Context AND hand them to MezzePolyglotSupport so the per-thread inner
+        // Contexts get the same options (A4 — newInnerContextBuilder does not
+        // inherit them). Keyed `languageId → {fullOptionKey → value}`.
+        val guestOptions = HashMap<String, MutableMap<String, String>>()
         if (enablePython) {
-            contextBuilder
-                .allowExperimentalOptions(true)
-                // Java posix backend keeps the embedded GraalPy off host
-                // libc — required when running inside the same JVM as
-                // Mezze without a POSIX resource lib set up. The manifest
-                // may override this via [polyglot.python.options].
-                .option("python.PosixModuleBackend", "java")
-                .option("python.WarnExperimentalFeatures", "false")
-            if (!polyglot.pythonPath.isNullOrBlank()) {
-                contextBuilder.option("python.PythonPath", polyglot.pythonPath)
-            }
-            for ((k, v) in polyglot.pythonOptions) {
-                contextBuilder.option("python.$k", v)
-            }
+            val py = guestOptions.getOrPut("python") { linkedMapOf() }
+            // Java posix backend keeps the embedded GraalPy off host libc —
+            // required when running inside the same JVM as Mezze without a POSIX
+            // resource lib. The manifest may override via [polyglot.python.options].
+            py["python.PosixModuleBackend"] = "java"
+            py["python.WarnExperimentalFeatures"] = "false"
+            polyglot.pythonPath?.takeIf { it.isNotBlank() }?.let { py["python.PythonPath"] = it }
+            for ((k, v) in polyglot.pythonOptions) py["python.$k"] = v
         }
         if (enableJs) {
-            contextBuilder.allowExperimentalOptions(true)
-            // js.ecmascript-version = 2024 pins behaviour predictably
-            // across GraalJS bumps. `latest` (the GraalJS default)
-            // silently changes when users update the provider.
-            contextBuilder.option("js.ecmascript-version", "2024")
-            // CommonJS require: the user's explicit `node_modules` override,
-            // else the JS provider's `runtime_dir` — and only when that
-            // directory EXISTS. See PolyglotManifest.commonJsRoot.
+            val js = guestOptions.getOrPut("js") { linkedMapOf() }
+            // js.ecmascript-version = 2024 pins behaviour predictably across GraalJS
+            // bumps. `latest` (the default) silently changes when users update.
+            js["js.ecmascript-version"] = "2024"
+            // CommonJS require: the user's node_modules override, else the JS
+            // provider's runtime_dir — only when that directory EXISTS.
             val jsCwd = com.mezze.interpreter.polyglot.PolyglotManifest
                 .commonJsRoot(File("."), polyglot.jsNodeModules)
             if (jsCwd != null) {
-                contextBuilder.option("js.commonjs-require", "true")
-                contextBuilder.option("js.commonjs-require-cwd", jsCwd)
+                js["js.commonjs-require"] = "true"
+                js["js.commonjs-require-cwd"] = jsCwd
             }
-            for ((k, v) in polyglot.jsOptions) {
-                contextBuilder.option("js.$k", v)
-            }
+            for ((k, v) in polyglot.jsOptions) js["js.$k"] = v
         }
         if (enableWasm) {
-            // GraalWasm forwards any user-supplied `wasm.<KEY>` options
-            // (e.g. wasi enablement in future GraalWasm releases).
-            for ((k, v) in polyglot.wasmOptions) {
-                contextBuilder.option("wasm.$k", v)
-            }
+            val wasm = guestOptions.getOrPut("wasm") { linkedMapOf() }
+            for ((k, v) in polyglot.wasmOptions) wasm["wasm.$k"] = v
+        }
+        if (guestOptions.isNotEmpty()) {
+            contextBuilder.allowExperimentalOptions(true)
+            for ((_, opts) in guestOptions) for ((k, v) in opts) contextBuilder.option(k, v)
+            com.mezze.interpreter.runtime.MezzePolyglotSupport
+                .setGuestLanguageOptions(guestOptions.mapValues { it.value.toMap() })
         }
         val context = contextBuilder.build()
         mark("Context built")

@@ -351,37 +351,37 @@ object RuntimeServer {
         val enablePython = "python" in extraLanguages
         val enableJs = "js" in extraLanguages
         val enableWasm = "wasm" in extraLanguages
+        // Build guest-language options ONCE, apply to the ambient Context AND hand
+        // to MezzePolyglotSupport so per-thread inner Contexts get the same options
+        // (A4 — newInnerContextBuilder does not inherit them).
+        val guestOptions = HashMap<String, MutableMap<String, String>>()
         if (enablePython) {
-            contextBuilder
-                .option("python.PosixModuleBackend", "java")
-                .option("python.WarnExperimentalFeatures", "false")
-            if (!polyglot.pythonPath.isNullOrBlank()) {
-                contextBuilder.option("python.PythonPath", polyglot.pythonPath)
-            }
-            for ((k, v) in polyglot.pythonOptions) {
-                contextBuilder.option("python.$k", v)
-            }
+            val py = guestOptions.getOrPut("python") { linkedMapOf() }
+            py["python.PosixModuleBackend"] = "java"
+            py["python.WarnExperimentalFeatures"] = "false"
+            polyglot.pythonPath?.takeIf { it.isNotBlank() }?.let { py["python.PythonPath"] = it }
+            for ((k, v) in polyglot.pythonOptions) py["python.$k"] = v
         }
         if (enableJs) {
-            contextBuilder.option("js.ecmascript-version", "2024")
-            // CommonJS require: the user's explicit `node_modules` override,
-            // else the JS provider's `runtime_dir` — and only when that
-            // directory EXISTS. See PolyglotManifest.commonJsRoot.
+            val js = guestOptions.getOrPut("js") { linkedMapOf() }
+            js["js.ecmascript-version"] = "2024"
+            // CommonJS require: the user's node_modules override, else the JS
+            // provider's runtime_dir — only when that directory EXISTS.
             val jsCwd = com.mezze.interpreter.polyglot.PolyglotManifest
                 .commonJsRoot(projectRoot, polyglot.jsNodeModules)
             if (jsCwd != null) {
-                contextBuilder.option("js.commonjs-require", "true")
-                contextBuilder.option("js.commonjs-require-cwd", jsCwd)
+                js["js.commonjs-require"] = "true"
+                js["js.commonjs-require-cwd"] = jsCwd
             }
-            for ((k, v) in polyglot.jsOptions) {
-                contextBuilder.option("js.$k", v)
-            }
+            for ((k, v) in polyglot.jsOptions) js["js.$k"] = v
         }
         if (enableWasm) {
-            for ((k, v) in polyglot.wasmOptions) {
-                contextBuilder.option("wasm.$k", v)
-            }
+            val wasm = guestOptions.getOrPut("wasm") { linkedMapOf() }
+            for ((k, v) in polyglot.wasmOptions) wasm["wasm.$k"] = v
         }
+        for ((_, opts) in guestOptions) for ((k, v) in opts) contextBuilder.option(k, v)
+        com.mezze.interpreter.runtime.MezzePolyglotSupport
+            .setGuestLanguageOptions(guestOptions.mapValues { it.value.toMap() })
         // Build the FIRST context, but keep the fully-configured builder as a
         // factory so each subsequent run (`mez dev` reload) gets a FRESH context.
         // A long-lived server that reused one context accumulated guest state
