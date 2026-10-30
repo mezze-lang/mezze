@@ -494,6 +494,14 @@ object WireRunner {
         } catch (e: com.mezze.language.typechecker.TypeCheckError) {
             System.err.println(com.mezze.language.langservice.printing.ErrorFormatter.format(e, source))
             return null
+        } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+            // An error in an IMPORTED module (e.g. a parse error in a `use`d file)
+            // surfaces as a ModuleError. Render it with the SAME structured
+            // diagnostic `mez check` uses (error[M08xx] + caret + hint) instead of
+            // letting it escape to the top-level `✗ … re-run with --verbose`
+            // boundary, which reads as a raw one-liner in the dev console.
+            System.err.println(com.mezze.language.langservice.printing.ErrorFormatter.formatModuleError(e))
+            return null
         }
         if (rawResult is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure) {
             System.err.println(TypeCheckRunner.formatErrors(rawResult, source))
