@@ -1,12 +1,14 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-30: five open items reported while wiring the showcase to real
-polyglot + HTTP (B-A4, B-1, B-3, B-6, B-8).** None fixed yet — logged for the
-task list. The companion enhancements (showcase `.to_jvm` chaining, showcase
-HTTP server, website em-dash/semicolon cleanup, a `Medium` arm in the concepts
-open-variant example) are tracked in `project_showcase_polyglot_backlog`, not
-here. Verify each below against current `main` before fixing — 6 and 8 were seen
-in the website's wasm playground, which may lag the compiler.
+**STATUS 2026-10-30: showcase polyglot/HTTP wiring surfaced several items.**
+FIXED + committed: B-6 (c6c37ecb4, unknown-constructor arm points at the arm),
+B-1 (7f7f06221, W0102 per-name range). NOT compiler bugs on `main` (main-vs-
+installed/playground skew): B-3 (stale installed mez writes `.mezze/`), B-8
+(`MockHttpClient` works on main; the wasm playground is stale). STILL OPEN:
+B-A4 (per-thread guest Contexts drop language options — deferred, designed),
+B-9 (no import hint for an unimported ability's method). The website em-dash/
+semicolon cleanup + concepts `Medium` arm shipped in 1461b6b1f. Verify any
+playground-reported item against current `main` before fixing.
 
 ### B-A4 — per-thread guest Contexts don't inherit the ambient's language options
 
@@ -35,6 +37,28 @@ standalone layer to `openContext`, which applies them to the inner-context build
 (a `node_modules/` + a `require('x')` eval) to prove the option takes effect — a
 js-only eval test would pass without the fix and mislead (the T4 lesson). No test
 yet; fix not landed.
+
+### B-9 — a method call whose ability is unimported gives no import, so the LSP can't offer one
+
+Writing `6.to_jvm {}` without `use std::codec::jvm::{ ToJvm }` reports a bare
+`T0205: Cannot access field 'to_jvm' on non-record type: Int`
+(`ConstraintSolver.kt:1416`) with NO import FixHint, so the editor offers no
+"Import" quick-fix. `to_jvm` is an op of the `ToJvm` ability (`codec/jvm.mz:369`),
+and the compiler should recognize that a failed `.method {}` matches a known
+ability op and point at the ability to import.
+
+The editor half already works: the compiler emits
+`FixHint.Import(loc, name, candidateModules)` and the LSP renders it as an
+"Import `name` from `module`" code action (`MezzeTextDocumentService.kt:3334`;
+abilities are import-hinted in one path at `AbilityChecker.kt:1234`). GAP is
+compiler-side: on a `.method {}` field-access failure, look the method name up
+among ALL ability ops (including UNIMPORTED stdlib abilities) and, if it is an
+op of some ability, attach a `FixHint.Import` for that ability's home module.
+Needs an op-name → ability → module index: the store has abilities by name
+(`getDeclsByKind(DeclKind.ABILITY)` + modulePath) but not by op name, so build
+the op index from each stored ability's parsed ops; list all candidates when
+several abilities share an op name. Tests-first: a `.method {}` on a type whose
+ability is unimported must produce the import hint. No fix yet.
 
 ### B-1 — unused-import warning faints the whole `use` line when only some names are unused
 
