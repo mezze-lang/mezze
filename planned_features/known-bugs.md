@@ -17,9 +17,24 @@ loses `js.ecmascript-version`, `js.commonjs-require[-cwd]`, and python
 `PosixModuleBackend` / `PythonPath`. Plain `eval` works (that is all the showcase
 demo exercises); `require`/module import, a pinned ECMAScript version, and GraalPy
 with the java posix backend will not, from any thread that goes through the new
-path (now ALL guest eval, async or not). FIX: thread the same options
-`EmbeddedExec`/`RuntimeServer` set on the ambient builder into `openContext`'s
-inner-context builder. No test yet.
+path (now ALL guest eval, async or not — so this is also a mild regression of
+pre-T4 MAIN-THREAD js, which used the ambient Context with its options).
+
+IMPACT is bounded: the ambient only enabled `js.commonjs-require` when a
+`node_modules`/runtime_dir EXISTS (none in the showcase), and `ecmascript-version`
+defaults to a workable "latest" — so plain `eval` (the showcase, the typical case)
+is unaffected. It bites a project that configured guest options or used
+`require`/module import.
+
+FIX (deliberate, not yet done — DEFERRED so it is designed, not rushed): the
+guest options live only in the standalone layer (`EmbeddedExec`/`RuntimeServer`,
+from `PolyglotManifest`); `MezzePolyglotSupport(env)` cannot see them. Thread them
+per-CONTEXT (NOT a cross-context static — see [[static_ctx_leaks]]) from the
+standalone layer to `openContext`, which applies them to the inner-context builder
+(`TruffleContext.Builder.option(k, v)`). TEST needs a commonjs `require` fixture
+(a `node_modules/` + a `require('x')` eval) to prove the option takes effect — a
+js-only eval test would pass without the fix and mislead (the T4 lesson). No test
+yet; fix not landed.
 
 ### B-1 — unused-import warning faints the whole `use` line when only some names are unused
 
