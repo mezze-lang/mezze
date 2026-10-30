@@ -1,5 +1,7 @@
-# Should fail: closed record function called with extra fields
-let processUser = { user } -> "$(user.name) is $(user.age)"
+# Should fail: an AUTHOR-WRITTEN closed record rejects extra fields.
+# (An inferred param is now OPEN and would accept the extras — see
+# InferredParamOpenTest; the closed rejection needs an explicit annotation.)
+let processUser: { user: { name: Str, age: Int } } -> Str = { user } -> user.name
 
 let user1 = { name = "Alice", age = 30, city = "NYC" }
 

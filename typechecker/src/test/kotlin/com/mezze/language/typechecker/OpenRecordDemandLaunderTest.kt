@@ -111,22 +111,28 @@ class OpenRecordDemandLaunderTest {
         // They are unequal as DATA and identical as TYPES, so the walk that looks
         // for "the first field where actual != expected" used to stop at `c` and
         // report "Field `c` expects Bool but got Bool" — a sentence nobody can act
-        // on — while never mentioning b's unexpected `y`, which is the real
-        // problem. The same call with `c: Int` always reported it correctly.
+        // on — while never mentioning the field that actually failed. The same call
+        // with `c: Int` always reported it correctly.
+        //
+        // The trigger is a genuine field TYPE mismatch (`b.x` is used as Int via
+        // `else 0`, but passed a Str), NOT an extra field: an inferred param is now
+        // open and admits extra fields it never reads (InferredParamOpenTest), so a
+        // stray `y` is no longer an error — but a wrong-typed `x` still is, and the
+        // diagnostic must name `x`, not the Bool `c`.
         val msg = check(
             """
             let f = { c: Bool, b } -> if c then b.x else 0
-            let main = {} -> f { c = True, b = { x = 2, y = 3 } }
+            let main = {} -> f { c = True, b = { x = "hi" } }
         """
         )
-        assertTrue(msg != null, "expected a rejection for b's extra field")
+        assertTrue(msg != null, "expected a rejection for b.x's type mismatch")
         assertFalse(
             msg!!.contains("expects Bool but got Bool"),
             "the diagnostic blames a Bool field and prints the same type twice: $msg"
         )
         assertTrue(
-            msg.contains("y"),
-            "the diagnostic never mentions `y`, which is the field that actually failed: $msg"
+            msg.contains("x"),
+            "the diagnostic never mentions `x`, which is the field that actually failed: $msg"
         )
     }
 
@@ -136,9 +142,9 @@ class OpenRecordDemandLaunderTest {
         val msg = check(
             """
             let f = { c: Int, b } -> if c > 0 then b.x else 0
-            let main = {} -> f { c = 1, b = { x = 2, y = 3 } }
+            let main = {} -> f { c = 1, b = { x = "hi" } }
         """
         )
-        assertTrue(msg != null && msg.contains("y"), "expected the `y` mismatch: $msg")
+        assertTrue(msg != null && msg.contains("x"), "expected the `x` mismatch: $msg")
     }
 }

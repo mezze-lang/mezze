@@ -19,11 +19,14 @@ import java.nio.file.Paths
  * a field off a value that doesn't have it — a soundness hole. These tests pin
  * that the refinement fires and is sound.
  *
- * #403: a row INFERRED PURELY FROM FIELD ACCESS is CLOSED — it rejects extra
- * fields, exactly like a declared closed record. The `...` escape hatch (an
- * explicit `{ r, ... }` pattern or a written `{ a: T, ... }` annotation) is the
- * ONLY way to admit extra fields. So `getA { r = { a, b, c } }` is now correctly
- * rejected: the field-access refinement carries no promise of row-polymorphism.
+ * A row INFERRED PURELY FROM FIELD ACCESS is OPEN: it is a LOWER BOUND ("the arg
+ * needs at least the fields it reads"), so a caller may pass a WIDER record and
+ * the unread extra fields are harmless. This is an inference decision keyed on
+ * PROVENANCE (inferred ⇒ open, author-written ⇒ closed), not subtyping, and it is
+ * sound because a field actually READ is a concrete requirement here, so a value
+ * missing it is still rejected — openness only absorbs fields the function never
+ * uses. See InferredParamOpenTest. (Display stays closed via the emit-time close,
+ * so printed signatures read `{ a: T }`, not `{ a: T, ... }`.)
  */
 class FieldAccessRowRefinementTest {
     private lateinit var parser: MezzeParser
@@ -91,18 +94,16 @@ class FieldAccessRowRefinementTest {
     }
 
     @Test
-    fun `an extra field beyond the accessed one is REJECTED (closed refinement, #403)`() {
-        // #403: a field-access-inferred param row is CLOSED. `getA` only accesses
-        // `r.a`, so its param is `{ r: { a: 'b } }` — a caller passing extra `b, c`
-        // is rejected, exactly like a declared closed record. Openness requires the
-        // explicit `{ r, ... }` / `{ a: T, ... }` escape hatch.
-        val e = err("""
+    fun `an extra field beyond the accessed one is ACCEPTED (inferred rows are open)`() {
+        // A field-access-inferred param row is a LOWER BOUND, hence OPEN: `getA`
+        // reads only `r.a`, so a caller may pass extra `b, c` that `getA` never
+        // touches. (Rejected under the old closed-inference policy; now accepted —
+        // see InferredParamOpenTest. A field actually READ that is MISSING is still
+        // rejected: see the `LACKS the field` test above.)
+        assertNull(err("""
             let getA = { r } -> r.a
             let n = getA { r = { a = 1, b = 2, c = 3 } }
-        """)
-        assertNotNull(e, "field-access-inferred row is closed: extra fields must be rejected")
-        assertTrue(e!!.contains("b") || e.contains("c") || e.contains("unexpected"),
-            "error should flag the extra fields: $e")
+        """), "an inferred param reads only r.a, so extra fields are harmless")
     }
 
     @Test

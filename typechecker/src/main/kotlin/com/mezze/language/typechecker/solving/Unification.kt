@@ -491,14 +491,21 @@ private fun directionalParamFieldCheck(value: MezzeType, demand: MezzeType): Uni
     for ((fieldName, demandFieldType) in demand.fields) {
         val valueFieldType = value.fields[fieldName]
         if (valueFieldType == null) {
-            // The demand requires `fieldName`; the value's concrete field set lacks
-            // it.  Sound to accept ONLY if the value's row var could still supply it
-            // — but a launder is exactly "the value is open yet genuinely has no
-            // such field", which is indistinguishable from a not-yet-inferred open
-            // value.  We reject when the value is a record with a rowVar that is NOT
-            // a fresh inference placeholder for this field, i.e. always for a
-            // concrete open record: an explicit `{ x, ... }` value declares its
-            // fields and `...` admits only EXTRAS, it does not conjure `y`.
+            // An INFERRED-open value (a fresh, non-user row tail grown by field
+            // access) is a LOWER BOUND — "the arg needs at least these fields" — so a
+            // demand field it does not read is genuinely harmless: the open tail
+            // ABSORBS it, the function never touches it. This is the contravariant
+            // param direction that lets a usage-inferred helper be passed where a
+            // WIDER record is demanded. A field the value itself NEEDS that the
+            // demand cannot supply is still rejected — at the param-unify above, when
+            // the demand is closed and lacks the value's concrete field.
+            //
+            // A CLOSED value, or a USER-written `{ x, ... }` (whose `...` admits only
+            // EXTRAS and does not conjure a specific demanded field), is unchanged:
+            // the launder "the value is open yet genuinely has no such field" stays
+            // rejected.
+            val valueRow = value.rowVar
+            if (valueRow != null && !valueRow.isUserSpecified()) continue
             return UnificationResult.Failure(
                 message = "record fields don't match: missing '$fieldName' (required by the expected type)",
                 type1 = value,

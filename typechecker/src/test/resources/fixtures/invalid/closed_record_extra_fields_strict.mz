@@ -1,7 +1,7 @@
-# Test that closed records reject extra fields (strict type safety)
-let processUser = { user } -> user.name  # infers closed: { user: { name: Str } }
+# An author-written closed record rejects extra fields (strict type safety).
+let processUser: { user: { name: Str } } -> Str = { user } -> user.name
 
-# This should FAIL - passing extra fields to closed record
+# This should FAIL - passing extra fields to a closed record annotation
 let result = processUser { user = { name = "Alice", age = 30, city = "NYC" } }
 
 result

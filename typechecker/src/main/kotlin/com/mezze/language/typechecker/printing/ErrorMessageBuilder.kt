@@ -5,6 +5,7 @@ import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.ast.prettyPrintTypePair
+import com.mezze.language.ast.solving.closeGeneratedRowVars
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ErrorContext
 import com.mezze.language.typechecker.solving.UnificationResult
@@ -15,8 +16,14 @@ object ErrorMessageBuilder {
         constraint: Constraint.Equality,
         failure: UnificationResult.Failure
     ): String {
-        val type1 = constraint.left
-        val type2 = constraint.right
+        // Close inferred (non-user) generated row tails for DISPLAY only: an
+        // inferred param now stays OPEN through the solve (so a wider record is
+        // accepted), but its printed form must read closed `{ a: T }`, not
+        // `{ a: T, … }` — a user-written `{ a, ... }` keeps its `…`. This matches
+        // the close emit already applies to signatures/hover; the error path builds
+        // its message mid-solve, before that, so it closes here.
+        val type1 = closeGeneratedRowVars(constraint.left)
+        val type2 = closeGeneratedRowVars(constraint.right)
         val errorContext = constraint.errorContext
         val stringContext = constraint.context ?: ""
 

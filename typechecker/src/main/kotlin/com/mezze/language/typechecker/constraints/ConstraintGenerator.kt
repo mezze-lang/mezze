@@ -389,7 +389,13 @@ class ConstraintGenerator(
                             //     receiver into `{ to_str: {} -> 'a }`; the runtime
                             //     dispatches on the value. That shape is the call's,
                             //     not a record the program has.
-                            val closeOpen = solver.getMustBeOpenRowVars()
+                            // Keep this binding's inferred OUTERMOST-param rows open
+                            // in the cross-binding substitution too (see
+                            // usageInferredParamRowVars); otherwise the composed
+                            // global solve re-closes what bindLet kept open and a
+                            // helper passed into a function-typed slot loses it.
+                            val closeOpen = solver.getMustBeOpenRowVars() +
+                                usageInferredParamRowVars(substitution.apply(result.type))
                             perBindingSubstitution = Substitution(
                                 mappings = substitution.mappings
                                     .filterKeys {
@@ -1090,7 +1096,16 @@ class ConstraintGenerator(
         // genuinely open/forwarded param — e.g. `g = { r } -> openf { rec = r }`
         // where openf's param is `{ x, ... }`). Only a purely field-access-derived
         // generated tail is dropped, so genuine row-polymorphism is preserved.
-        val closeOpenRowVars = solver.getMustBeOpenRowVars()
+        // Inferred OUTERMOST-param rows stay OPEN in the scheme later bindings
+        // consult: a usage-inferred param is a lower bound on the arg's shape, so a
+        // caller may pass a wider record (the unread extra fields are harmless).
+        // This is the inferred-vs-written split — an author's closed type is
+        // untouched, and a field actually READ is a concrete entry here, not the
+        // open tail, so it is still required. Emit's own close shuts these for
+        // display, so printed signatures stay closed. (NOT the covariant RETURN
+        // direction — that remains the launder direction the close owns.)
+        val paramRowVars = rawSolvedBindings.values.flatMap { usageInferredParamRowVars(it) }.toSet()
+        val closeOpenRowVars = solver.getMustBeOpenRowVars() + paramRowVars
         val solvedBindings = rawSolvedBindings.mapValues { (_, type) ->
             closeGeneratedRowVars(type, closeOpenRowVars)
         }
@@ -2065,4 +2080,31 @@ private fun collectNativeDeclaredTypes(
             existing != nativeType -> { out.remove(nativeName); conflicting.add(nativeName) }
         }
     }
+}
+
+/**
+ * Row vars grown by FIELD ACCESS on a binding's OUTERMOST parameter — the
+ * usage-inferred "the arg needs at least these fields" tails. The parameter is
+ * RECEIVED (contravariant), so keeping these open in the generalized scheme is
+ * the honest type: we only ever learned a LOWER BOUND on the arg's shape. A
+ * field that is actually READ is a concrete entry in this record (not the tail),
+ * so a value missing it is still rejected; the open tail only ever absorbs
+ * fields the function provably never uses. Deliberately does NOT cross an inner
+ * `->` (variance flips) and never inspects the RETURN (the covariant
+ * codec/launder direction the close owns).
+ */
+private fun usageInferredParamRowVars(type: MezzeType): Set<RowVar> =
+    if (type is MezzeType.FunctionType) rowVarsInNonFunction(type.paramType) else emptySet()
+
+private fun rowVarsInNonFunction(type: MezzeType): Set<RowVar> = when (type) {
+    is MezzeType.RecordType ->
+        (listOfNotNull(type.rowVar) + type.fields.values.flatMap { rowVarsInNonFunction(it) }).toSet()
+    is MezzeType.VariantType ->
+        (listOfNotNull(type.rowVar) +
+            type.constructors.values.filterNotNull().flatMap { rowVarsInNonFunction(it) } +
+            type.typeArgs.flatMap { rowVarsInNonFunction(it) }).toSet()
+    is MezzeType.TypeApplication -> type.args.flatMap { rowVarsInNonFunction(it) }.toSet()
+    is MezzeType.NewtypeType -> rowVarsInNonFunction(type.wrappedType)
+    is MezzeType.FunctionType -> emptySet()
+    else -> emptySet()
 }
