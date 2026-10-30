@@ -1,5 +1,73 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
+**STATUS 2026-10-30: five open items reported while wiring the showcase to real
+polyglot + HTTP (B-A4, B-1, B-3, B-6, B-8).** None fixed yet — logged for the
+task list. The companion enhancements (showcase `.to_jvm` chaining, showcase
+HTTP server, website em-dash/semicolon cleanup, a `Medium` arm in the concepts
+open-variant example) are tracked in `project_showcase_polyglot_backlog`, not
+here. Verify each below against current `main` before fixing — 6 and 8 were seen
+in the website's wasm playground, which may lag the compiler.
+
+### B-A4 — per-thread guest Contexts don't inherit the ambient's language options
+
+The T4 fix (commit 4e954f467) opens a per-thread inner Context for js/python via
+`MezzePolyglotSupport.openContext` → `env.newInnerContextBuilder(lang)`, which
+does NOT carry the ambient Context's language OPTIONS. So the per-thread guest
+loses `js.ecmascript-version`, `js.commonjs-require[-cwd]`, and python
+`PosixModuleBackend` / `PythonPath`. Plain `eval` works (that is all the showcase
+demo exercises); `require`/module import, a pinned ECMAScript version, and GraalPy
+with the java posix backend will not, from any thread that goes through the new
+path (now ALL guest eval, async or not). FIX: thread the same options
+`EmbeddedExec`/`RuntimeServer` set on the ambient builder into `openContext`'s
+inner-context builder. No test yet.
+
+### B-1 — unused-import warning faints the whole `use` line when only some names are unused
+
+`use std::polyglot::jvm::{ Jvm, JvmHost, JvmForeign, from_int }` with `Jvm` and
+`from_int` USED but `JvmHost`/`JvmForeign` unused: the editor greys/warns the
+WHOLE import statement, not just the two unused names. A fully-unused line (e.g.
+`use std::polyglot::core::{ InteropError }` with `InteropError` unused) is
+correctly flagged whole. So W0102's diagnostic RANGE is the import clause; it
+should be each unused identifier. LSP/diagnostic range bug. Repro = the
+showcase `run_java` module. No test yet.
+
+### B-3 — `mez dev` leaves a session lock under `.mezze/` instead of `.mez/`
+
+`WireRunner` correctly writes `session.json` / `session.lock` under `.mez/`
+(`WireRunner.kt:173-176`), yet a project picks up a stray `.mezze/session.lock`
+(seen in `mezze-showcase/.mezze/session.lock`, 0 bytes). The writer is NOT
+WireRunner — it is some other path that resolves a project-local `.mezze/`
+(candidate: a MEZZE_HOME/toolchain default landing in the cwd). PIN THE WRITER
+before fixing; the dir should be `.mez/`. No test yet.
+
+### B-6 — a non-existent variant arm highlights the wrong span
+
+```
+type Status = | Queued, Shipped { days: Int } |
+let describe = { s : Status } -> match s is
+  Queued -> "waiting"
+  Shipped { days } -> "soon"
+  Refunded -> "money back"   # Refunded is not a Status constructor
+```
+The error is raised (good) but points at the wrong location; it should underline
+`Refunded`. Diagnostic-range bug. Seen in the website concepts playground —
+verify on current `main` (may be wasm-build lag). No test yet.
+
+### B-8 — `MockHttpClient` appears not to intercept `send`
+
+```
+use std::effects::http::{ MockHttpClient, mock_get, request }
+let fetch = { url } -> request { url }.send {}.text_or { def = "offline" }
+let handled = {} ->
+  perform MockHttpClient { rules = [mock_get { body = "sunny", url = "*" }] } in fetch { url = "https://wttr.in/Amsterdam?format=3" }
+```
+Reported to reach the real network and return the live body rather than the
+mocked `"sunny"`. Either the `impl HttpClient for MockHttpClient` handler
+(`stdlib/std/effects/http.mz:181`) does not match `request{}.send{}`, or the
+website wasm playground has no HTTP backend and the op falls through. REPRO
+first: does it reproduce under `mez dev` on current `main`, or only in the
+playground? No test yet.
+
 **STATUS 2026-10-28: NO open bugs in this file.** BUG 28 is fixed, as is the
 module-qualified type annotation below and numbered bugs 26, 29, 30, 31, 32 and
 33; 27 closed as a class. Everything claimed open outside this file was re-run
