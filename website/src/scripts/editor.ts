@@ -14,7 +14,6 @@ import {
 } from './completion-popup'
 import type { Completion } from './mezze-runtime'
 import { loadMezze } from './mezze-runtime'
-import { liveWeather } from './weather'
 
 /** How long typing must pause before diagnostics re-run. */
 const LIVE_CHECK_MS = 600
@@ -544,28 +543,16 @@ export function mountEditor(root: HTMLElement): EditorHandle {
   }
 
   const ACTIONS: Record<string, () => void> = {
-    run: async () => {
+    run: () => {
       if (!report(window.checkMezze!(srcEl.value))) return
-      const src = srcEl.value
-      // Effects sample: the browser wasm has no network, so the real-client
-      // (PooledHttpClient) call falls back to "offline". Fetch the live weather
-      // in JS first (through the dev proxy, to dodge CORS) and inject it as the
-      // real-client output line — the rest of the program's output is unchanged.
-      // Cached per URL on the client (scripts/weather.ts) so a repeat Run
-      // reuses the value; null → unavailable, keep the program's own output.
-      const m = src.match(/https:\/\/wttr\.in\/[^\s"']+/)
-      const live = m ? await liveWeather(m[0]) : null
-      let out = String(window.runMezze!(src))
-      if (live) {
-        // Replace the first non-empty line — the real-client println — with the
-        // freshly fetched weather, keeping every other line as the program made it.
-        const lines = out.split('\n')
-        const i = lines.findIndex((l) => l.trim().length > 0)
-        if (i >= 0) {
-          lines[i] = live
-          out = lines.join('\n')
-        }
-      }
+      // Run the program and show exactly what it produced. A sample that uses
+      // MockHttpClient answers from its own rules (no socket, no network), and a
+      // sample that uses the real client gets the browser's "offline" fallback —
+      // either way the playground shows the program's actual output, nothing
+      // injected. (The landing-page Effects tab is a recorded replay and does its
+      // own live-weather injection in index.astro; that is deliberately the only
+      // place it happens.)
+      const out = String(window.runMezze!(srcEl.value))
       const denied = out.includes('Not supported in the browser')
       show(out, denied ? 'warn' : /^(TYPE ERROR|ERROR)/.test(out) ? 'err' : '')
     },

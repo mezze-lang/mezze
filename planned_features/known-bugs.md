@@ -136,11 +136,15 @@ let handled = {} ->
   perform MockHttpClient { rules = [mock_get { body = "sunny", url = "*" }] } in fetch { url = "https://wttr.in/Amsterdam?format=3" }
 ```
 Reported to reach the real network and return the live body rather than the
-mocked `"sunny"`. Either the `impl HttpClient for MockHttpClient` handler
-(`stdlib/std/effects/http.mz:181`) does not match `request{}.send{}`, or the
-website wasm playground has no HTTP backend and the op falls through. REPRO
-first: does it reproduce under `mez dev` on current `main`, or only in the
-playground? No test yet.
+mocked `"sunny"`. ROOT CAUSE (not the compiler): the `MockHttpClient` handler is
+fine on `main`; it was the website PLAYGROUND wrapper. `editor.ts`'s `run` action
+unconditionally matched any `https://wttr.in/...` URL in the source and overwrote
+the program's first output line with a live `fetch` (`scripts/weather.ts`) — so a
+mock sample showed the real network. FIXED (website): the playground now shows the
+program's actual output verbatim; live-weather injection is scoped to the
+landing-page Effects tab alone (`index.astro`, a recorded replay). `weather.ts`
+stays, used only by `index.astro`. Needs the playground wasm rebuilt to ship, but
+the behavior bug is in the editor wrapper, now removed.
 
 **STATUS 2026-10-28: NO open bugs in this file.** BUG 28 is fixed, as is the
 module-qualified type annotation below and numbered bugs 26, 29, 30, 31, 32 and
