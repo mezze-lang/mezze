@@ -63,7 +63,26 @@ standalone/native run; a `mez dev` Ctrl-C still stops it, just not gracefully.
 Test: `HelidonHttpServerTest` "with_graceful_shutdown serves until the trigger
 fires, then stops" (method form, ImmediateSignal).
 
-### B-11 — a dependency-package codec impl is missing from an INCREMENTAL re-check's context (DO LAST)
+### B-11 — checked-module cache in dev/build; dep impls dropped on re-check (FIXED)
+
+RESOLVED. The checked-module cache (`CheckedModuleCache`, keyed by
+`identity:sourceHash`) is now wired into `dev` and `build` (it already was in
+`check`): `ModuleResolver.cacheStore = lazyOf(store)` + a flush before close, the
+same lines reverted in d189addf6. Miss-or-stale ⇒ recompute (the key changes when
+source or any resolved dependency changes), hit ⇒ reuse; `invalidateOnVersionShift`
+wipes it when a different `mez` wrote it. CLI-only: only CLI commands set
+`cacheStore`, so the WASM runtime never opens SQLite (and the WASM build stages no
+sqlite-jdbc — it boots from the CBOR snapshot).
+
+The impl-drop that caused the revert is gone: the cross-module coherence fix
+(cebf22e81, transitiveAbilityImpls) re-collects a dependency's ability impls at
+IMPORT RESOLUTION on every re-check, independent of whether the dep's typecheck is
+served from the cache. Validated with a path-dependency package providing
+`impl Greet for Int` used generically by the main: cold run, app-edited re-check
+(dep from cache), and both-from-cache all succeed; changing the dep recomputes
+(stale detection). No V0408/V0402.
+
+### B-11 (historical) — a dependency-package codec impl is missing from an INCREMENTAL re-check's context
 
 With the checked-module cache active (`ModuleResolver.cacheStore`), editing a
 module and reloading fails for a dependency-package codec:
