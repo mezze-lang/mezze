@@ -454,15 +454,6 @@ object WireRunner {
         val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
-        // Incremental typecheck reuse: a project module unchanged since the last
-        // run is read back from the store, not re-checked (same CheckedModuleCache
-        // `mez check` uses — it is off until a command sets cacheStore). Flush its
-        // async writers + close the store at exit, mirroring CheckCommand.
-        com.mezze.language.typechecker.ModuleResolver.cacheStore = lazyOf(store)
-        Runtime.getRuntime().addShutdownHook(Thread {
-            com.mezze.language.typechecker.module.CheckedModuleCache.flush()
-            try { store.close() } catch (_: Exception) {}
-        })
         projectStore = store
     }
 

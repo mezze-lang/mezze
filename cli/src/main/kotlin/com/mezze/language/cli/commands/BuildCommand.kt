@@ -154,10 +154,6 @@ class BuildCommand {
         val store = ProjectStore.open(currentDir)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
-        // Incremental typecheck reuse: a project module unchanged since the last
-        // run is read back, not re-checked (the CheckedModuleCache `mez check`
-        // uses — off until a command sets cacheStore). Flushed before close below.
-        com.mezze.language.typechecker.ModuleResolver.cacheStore = lazyOf(store)
         // What `comptime` blocks see when they ask `std::codebase` about this
         // project: the same store this build indexes into.
         val codebase = com.mezze.language.codebase.CodebaseHostAdapter(
@@ -477,9 +473,6 @@ class BuildCommand {
             if (com.mezze.language.cli.CliContext.verbose) e.printStackTrace()
             kotlin.system.exitProcess(1)
         } finally {
-            // Wait for the incremental checked-module cache's async writers before
-            // the store closes, so the next build reuses what this one checked.
-            com.mezze.language.typechecker.module.CheckedModuleCache.flush()
             store.close()
         }
     }
