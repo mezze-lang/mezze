@@ -48,15 +48,21 @@ object UnusedImportLinter {
         val out = mutableListOf<Finding>()
         for (decl in module.decls) {
             if (decl !is ParsedUseDecl) continue // ParsedPubUseDecl is a deliberate re-export
-            val unused = unusedItems(decl, referenced)
-            if (unused.isEmpty()) continue
-            val label = if (unused.size == 1) "'${unused.single()}'" else unused.joinToString(", ") { "'$it'" }
-            out.add(Finding(
-                message = "Unused import: $label is never referenced in this module. " +
-                    "Remove it from the `use` clause.",
-                loc = decl.loc,
-                code = WarningCode.W0102_UNUSED_IMPORT,
-            ))
+            // Only selective imports are checked (see unusedItems); a whole-module
+            // `use` is left alone. One finding PER unused item, pointed at that
+            // item's own loc — so an editor faints ONLY the unused name, not the
+            // whole `use a::{ used, unused }` line (B-1).
+            val path = decl.path
+            if (path !is ParsedUsePath.Selective) continue
+            for (item in unusedItemNodes(path, referenced)) {
+                val local = item.alias ?: item.name
+                out.add(Finding(
+                    message = "Unused import: '$local' is never referenced in this module. " +
+                        "Remove it from the `use` clause.",
+                    loc = item.loc,
+                    code = WarningCode.W0102_UNUSED_IMPORT,
+                ))
+            }
         }
         return out
     }
@@ -102,13 +108,25 @@ object UnusedImportLinter {
     private fun unusedItems(decl: ParsedUseDecl, referenced: Set<String>): List<String> =
         when (val path = decl.path) {
             is ParsedUsePath.Module -> emptyList()
-            is ParsedUsePath.Selective -> path.items.mapNotNull { item ->
-                val local = item.alias ?: item.name
-                // A `~` name is the compiler's own import — for a quote, or for a
-                // name a macro's expansion uses — never written, so never the
-                // author's to remove.
-                if (local in referenced || local.startsWith("~")) null else local
-            }
+            is ParsedUsePath.Selective -> unusedItemNodes(path, referenced).map { it.alias ?: it.name }
+        }
+
+    /**
+     * The import ITEMS of a selective `use` that are never referenced — the item
+     * nodes themselves, so a caller can point a diagnostic at each one's own loc.
+     * `unusedItems` is the local-name projection of this; both must agree, so they
+     * share this one filter.
+     */
+    private fun unusedItemNodes(
+        path: ParsedUsePath.Selective,
+        referenced: Set<String>,
+    ): List<ParsedImportItem> =
+        path.items.filter { item ->
+            val local = item.alias ?: item.name
+            // A `~` name is the compiler's own import — for a quote, or for a
+            // name a macro's expansion uses — never written, so never the
+            // author's to remove.
+            local !in referenced && !local.startsWith("~")
         }
 
     // ── reference collection ─────────────────────────────────────────────

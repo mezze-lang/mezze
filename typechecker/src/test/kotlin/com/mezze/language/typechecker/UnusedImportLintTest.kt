@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import kotlin.test.assertEquals
 
 /**
  * #84 linter — W0102 unused imports. The linter is a pure function of the parsed
@@ -125,6 +126,44 @@ class UnusedImportLintTest {
     // breaks the build. Each case below is a position where `ParsedExpr.children()`
     // / `ParsedTypeAnnotation.children()` see a reference and the linter's own
     // recursion did not.
+
+    @Test
+    fun `each unused item is flagged at its own location, not the whole use line (B-1)`() {
+        // B-1: `{ map, filter }` both unused → one finding PER item, each pointed
+        // at that item's own column, so an editor faints only the unused name
+        // rather than greying the entire `use` statement.
+        val module = parser.parseParsedModule("""
+            use std::collections::seq::{ map, filter }
+
+            let f = {} -> 42
+        """.trimIndent(), "test.mz")
+        val findings = UnusedImportLinter.lint(module)
+            .filter { it.code == WarningCode.W0102_UNUSED_IMPORT }
+
+        assertEquals(2, findings.size, "one finding per unused item, not one for the clause. Got: ${findings.map { it.message }}")
+        val mapF = findings.single { it.message.contains("'map'") }
+        val filterF = findings.single { it.message.contains("'filter'") }
+        assertEquals(1, mapF.loc.startLine, "map is on the use line")
+        assertEquals(1, filterF.loc.startLine, "filter is on the use line")
+        // Distinct, item-specific columns — not col 1 (the `use` keyword), which is
+        // what a single whole-clause finding at decl.loc would give.
+        assertTrue(mapF.loc.startCol > 1, "map points at the item, not the `use` keyword; got col ${mapF.loc.startCol}")
+        assertTrue(filterF.loc.startCol > mapF.loc.startCol, "filter is flagged after map; got ${mapF.loc.startCol} vs ${filterF.loc.startCol}")
+    }
+
+    @Test
+    fun `a partly-used import flags only the unused item, at its own column (B-1)`() {
+        val module = parser.parseParsedModule("""
+            use std::collections::seq::{ map, filter }
+
+            let f = {xs: [Int]} -> map { xs = xs, f = {x} -> x + 1 }
+        """.trimIndent(), "test.mz")
+        val findings = UnusedImportLinter.lint(module)
+            .filter { it.code == WarningCode.W0102_UNUSED_IMPORT }
+        assertEquals(1, findings.size, "only `filter` is unused. Got: ${findings.map { it.message }}")
+        assertTrue(findings.single().message.contains("'filter'"), "the one finding names filter")
+        assertTrue(findings.single().loc.startCol > 1, "flagged at `filter`'s column, not the `use` keyword")
+    }
 
     @Test
     fun `an import used only inside a string interpolation is not flagged`() {
