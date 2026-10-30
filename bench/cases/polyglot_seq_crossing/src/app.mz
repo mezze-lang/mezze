@@ -18,7 +18,7 @@
 # validated, unlanded in the provider repos).
 #
 # AS OF 2026-09-22 THE FIRST-PARTY SIDE IS DONE, and this bench is now measuring
-# a workaround that only the THIRD-PARTY providers still need. `std::codec::jvm`
+# a workaround that only the THIRD-PARTY providers still need. `std::polyglot::jvm`
 # has the full container half — EncodeList / EncodeMap / EncodeRecord /
 # EncodeVariant over `jvm_list` / `jvm_dict`, plus the decode mirrors and the
 # four hash-read natives that `make_dict` had been shipped without. So

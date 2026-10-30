@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
 /**
  * Container shapes through the first-party JVM polyglot codec.
  *
- * `std::codec::jvm` shipped only the SCALAR half — `EncodeScalar` /
+ * `std::polyglot::jvm` shipped only the SCALAR half — `EncodeScalar` /
  * `EncodeOption` and their decode mirrors — so `[1, 2, 3].to_jvm {}` had no
  * `EncodeSequence` to auto-derive through and failed to compile. That is the same
  * gap the third-party `mezze-python` / `mezze-js` providers have, and it is the
@@ -48,7 +48,7 @@ class JvmCodecContainerTest {
     fun `seq of Int encodes to a JvmForeign with array elements`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [1, 2, 3].to_jvm {}
             f.len {}
@@ -62,7 +62,7 @@ class JvmCodecContainerTest {
     fun `an encoded seq reads back element by element`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [10, 20, 30].to_jvm {}
             f.at { index = 1 }.int {}
@@ -78,7 +78,7 @@ class JvmCodecContainerTest {
     fun `a seq of Int round-trips through the JVM codec`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ ToJvm, FromJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::seq
             let f = [7, 8, 9].to_jvm {}
@@ -95,7 +95,7 @@ class JvmCodecContainerTest {
     fun `a nested seq encodes as a view of views`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = [[1, 2], [3, 4, 5]].to_jvm {}
             f.at { index = 1 }.len {}
@@ -111,7 +111,7 @@ class JvmCodecContainerTest {
     fun `a record encodes to a hash-shaped Foreign keyed by field name`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             let f = { count = 42, label = "hi" }.to_jvm {}
             f.key { of = "count" }.int {}
@@ -125,7 +125,7 @@ class JvmCodecContainerTest {
     fun `a record round-trips through the JVM codec`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ ToJvm, FromJvm }
             use std::polyglot::jvm::{ JvmForeign }
             pub type Point = { x: Int, y: Int }
             let f = { x = 3, y = 4 }.to_jvm {}
@@ -145,7 +145,7 @@ class JvmCodecContainerTest {
     fun `a map encodes to a hash-shaped Foreign with one entry per key`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::map
             let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
@@ -161,7 +161,7 @@ class JvmCodecContainerTest {
     fun `an encoded map reads an entry back by key`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm }
+            use std::polyglot::jvm::{ ToJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::map
             let m = map::insert { m = map::empty {}, k = "a", v = 7 }
@@ -225,7 +225,7 @@ class JvmCodecContainerTest {
     fun `a map round-trips through the JVM codec`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ ToJvm, FromJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::map
             let m = map::insert { m = map::insert { m = map::empty {}, k = "a", v = 1 }, k = "b", v = 2 }
@@ -306,7 +306,7 @@ class JvmCodecContainerTest {
         val result = eval(
             """
             use std::effects::log::{ Log, Console, info }
-            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ ToJvm, FromJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::seq
 
@@ -334,7 +334,7 @@ class JvmCodecContainerTest {
     fun `a let-bound seq of Option encodes the same as an inline one`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ ToJvm, FromJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::seq
             let opts = [Some { val = 10 }, None, Some { val = 20 }]
@@ -389,7 +389,7 @@ class JvmCodecContainerTest {
     fun `a seq of Option round-trips, preserving None`() {
         val result = eval(
             """
-            use std::codec::jvm::{ ToJvm, FromJvm }
+            use std::polyglot::jvm::{ ToJvm, FromJvm }
             use std::polyglot::jvm::{ JvmForeign }
             use std::collections::seq
             let or_else: { o: Option Int, d: Int } -> Int = { o, d } -> match o is

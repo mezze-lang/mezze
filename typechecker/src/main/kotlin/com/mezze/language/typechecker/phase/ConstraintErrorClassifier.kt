@@ -96,7 +96,7 @@ internal fun classifyConstraintError(
 
     // B-9: a `.method {}` that failed because its receiver is not a record may
     // really be an ability op whose ability is not imported (`6.to_jvm {}`
-    // without `use std::codec::jvm::{ ToJvm }`). This is the single choke point
+    // without `use std::polyglot::jvm::{ ToJvm }`). This is the single choke point
     // every constraint error passes through, so the hint is attached here rather
     // than at one of the solver's several field-failure sites.
     val (abilityHintLines, abilityFixHints) = abilityImportHints(error, code)
