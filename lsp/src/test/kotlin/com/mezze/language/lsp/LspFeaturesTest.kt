@@ -1590,39 +1590,43 @@ class LspFeaturesTest {
         )
     }
 
+    // Hover is signature-only now: the branch-input samples it used to carry moved
+    // to the `mezze.sample` code lens (see the sample-lens test above). These pin
+    // that hover shows the signature and no longer carries the sample text.
     @Test
-    fun `hover on a function lists the inputs that reach each branch`() {
+    fun `hover on a function shows its signature, not branch-input samples`() {
         val (uri, _) = openSingleFile("""
             let max_value = 100
             let clamp = { n: Int } -> if n > max_value then max_value else n
         """.trimIndent())
         val content = hoverText(hoverAt(uri, line = 1, character = 4)!!)
-        assertTrue("Branch inputs" in content, content)
-        assertTrue("`n = 100` — if n > max_value (= 100) — else" in content, content)
-        assertTrue("`n = 101` — if n > max_value (= 100) — then" in content, content)
+        assertTrue("clamp : { n: Int } -> Int" in content, content)
+        assertFalse("Branch inputs" in content, "hover must not carry branch-input samples: $content")
     }
 
-    /** A constant computed by a call is evaluated only by the command, and the hover says so. */
     @Test
-    fun `hover names a constant the editor cannot pin`() {
+    fun `hover on a function referencing a call-computed constant shows its signature`() {
         val (uri, _) = openSingleFile("""
             let compute = { x: Int } -> x * 2
             let limit = compute { x = 21 }
             let big = { n: Int } -> if n > limit then 1 else 0
         """.trimIndent())
         val content = hoverText(hoverAt(uri, line = 2, character = 4)!!)
-        assertTrue("_Not pinned here:_ `limit` is computed by a function call" in content, content)
+        assertTrue("big : { n: Int } -> Int" in content, content)
+        // The "not pinned here" note was part of the branch-input samples, now gone.
+        assertFalse("Not pinned here" in content, "hover must not carry the not-pinned sample note: $content")
     }
 
     @Test
-    fun `hover on a call site lists the callee's branch inputs too`() {
+    fun `hover on a call site shows the callee's signature`() {
         val (uri, _) = openSingleFile("""
             let max_value = 100
             let clamp = { n: Int } -> if n > max_value then max_value else n
             let use_it = {} -> clamp { n = 5 }
         """.trimIndent())
         val content = hoverText(hoverAt(uri, line = 2, character = 20)!!)
-        assertTrue("`n = 101` — if n > max_value (= 100) — then" in content, content)
+        assertTrue("clamp : { n: Int } -> Int" in content, content)
+        assertFalse("Branch inputs" in content, "hover must not carry branch-input samples: $content")
     }
 
     @Test
