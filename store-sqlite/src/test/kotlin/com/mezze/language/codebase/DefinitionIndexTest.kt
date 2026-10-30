@@ -107,6 +107,30 @@ abstract class DefinitionIndexContract {
     }
 
     @Test
+    fun `findDefinitionOwnersByOp maps an op name to its declaring ability or effect`() {
+        // B-9: `x.total {}` with `Total` unimported looks the op up here, then
+        // getNamesForHash turns the owner hash into `(module, Total)` for the
+        // "import the ability" hint. Covers both store backends.
+        val totalHash = store.getDeclsForModule("app")
+            .single { it.declKind == DeclKind.ABILITY && it.declName == "Total" }.hash
+        val owners = store.findDefinitionOwnersByOp("total")
+        assertTrue(totalHash in owners, "op 'total' should resolve to Total's owner hash. Got: $owners")
+        assertTrue(
+            store.getNamesForHash(totalHash).any { it.name == "Total" && it.module == "app" },
+            "owner hash should resolve back to Total in module app",
+        )
+
+        // An effect op is indexed the same way (the typechecker filters effects
+        // out of the ability-import hint, but the store answers for both).
+        val pingHash = store.getDeclsForModule("app")
+            .single { it.declKind == DeclKind.EFFECT && it.declName == "Ping" }.hash
+        assertTrue(pingHash in store.findDefinitionOwnersByOp("ping"), "op 'ping' should resolve to Ping")
+
+        // A name that is no operation finds nothing.
+        assertTrue(store.findDefinitionOwnersByOp("no_such_op").isEmpty(), "unknown op resolves to nothing")
+    }
+
+    @Test
     fun `a definition is never read as a signature`() {
         // Separate tables: the signature of a type declaration is empty, and
         // definition rows handed to the type reader fail loudly.

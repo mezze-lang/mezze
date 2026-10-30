@@ -3277,6 +3277,22 @@ class SQLiteMezzeStore private constructor(
             }
             return SignatureRows(nodes, effects, constraints)
         }
+
+        private val ownersByOpLabelStmt: PreparedStatement by lazy {
+            conn.prepareStatement(unionAll("""
+                SELECT DISTINCT owner_hash FROM <DB>.$nodesTable
+                WHERE slot = '${TypeSlot.OP.dbValue}' AND slot_label = ?
+            """.trimIndent()))
+        }
+
+        /** Owner hashes of definitions (across main + stdlib + deps) with an op
+         *  named [opName]. Uses the `(slot, slot_label)` index. */
+        fun ownersByOpLabel(opName: String): List<Hash> {
+            for (db in 0..2) ownersByOpLabelStmt.setString(db + 1, opName)
+            return ownersByOpLabelStmt.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(Hash(rs.getString("owner_hash"))) }
+            }
+        }
     }
 
     private val signatureTables = TreeTables("type_nodes", "type_node_effects", "type_node_constraints")
@@ -3293,6 +3309,10 @@ class SQLiteMezzeStore private constructor(
 
     @Synchronized
     override fun getDefinition(declHash: Hash): SignatureRows = definitionTables.get(declHash)
+
+    @Synchronized
+    override fun findDefinitionOwnersByOp(opName: String): List<Hash> =
+        definitionTables.ownersByOpLabel(opName)
 
     /**
      * One query for many hashes, chunked so a large call-graph closure cannot exceed

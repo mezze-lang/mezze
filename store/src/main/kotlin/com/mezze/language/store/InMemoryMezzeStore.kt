@@ -414,6 +414,12 @@ class InMemoryMezzeStore : MezzeStore {
     override fun getDefinition(declHash: Hash): SignatureRows =
         definitions[declHash] ?: SignatureRows.EMPTY
 
+    override fun findDefinitionOwnersByOp(opName: String): List<Hash> =
+        definitions.values
+            .filter { rows -> rows.nodes.any { it.slot == TypeSlot.OP && it.slotLabel == opName } }
+            .mapNotNull { it.nodes.firstOrNull()?.ownerHash }
+            .distinct()
+
     /** The node ids of [ownerHash]'s residual arrow — see [TypeNodeRow.isResidual]. */
     private fun residualNodeIds(ownerHash: Hash): Set<Int> =
         signatures[ownerHash]?.nodes?.filter { it.isResidual }?.map { it.nodeId }?.toSet().orEmpty()

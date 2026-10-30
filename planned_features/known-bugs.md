@@ -6,7 +6,8 @@ B-1 (7f7f06221, W0102 per-name range). NOT compiler bugs on `main` (main-vs-
 installed/playground skew): B-3 (stale installed mez writes `.mezze/`), B-8
 (`MockHttpClient` works on main; the wasm playground is stale). STILL OPEN:
 B-A4 (per-thread guest Contexts drop language options — deferred, designed),
-B-9 (no import hint for an unimported ability's method). The website em-dash/
+B-9 IMPLEMENTED store-backed (import hint for an unimported ability's method;
+works in the LSP, CLI pending the store wiring below). The website em-dash/
 semicolon cleanup + concepts `Medium` arm shipped in 1461b6b1f. Verify any
 playground-reported item against current `main` before fixing.
 
@@ -38,27 +39,32 @@ standalone layer to `openContext`, which applies them to the inner-context build
 js-only eval test would pass without the fix and mislead (the T4 lesson). No test
 yet; fix not landed.
 
-### B-9 — a method call whose ability is unimported gives no import, so the LSP can't offer one
+### B-9 — a method call whose ability is unimported now suggests the import (store-backed)
 
-Writing `6.to_jvm {}` without `use std::codec::jvm::{ ToJvm }` reports a bare
-`T0205: Cannot access field 'to_jvm' on non-record type: Int`
-(`ConstraintSolver.kt:1416`) with NO import FixHint, so the editor offers no
-"Import" quick-fix. `to_jvm` is an op of the `ToJvm` ability (`codec/jvm.mz:369`),
-and the compiler should recognize that a failed `.method {}` matches a known
-ability op and point at the ability to import.
+IMPLEMENTED (store-backed). Writing `6.to_jvm {}` without
+`use std::codec::jvm::{ ToJvm }` used to report a bare
+`T0205: Cannot access field 'to_jvm' on non-record type: Int` with no import
+FixHint. Now, on that field-access failure, `ConstraintSolver.solveHasField`
+looks the op name up and, when it is an ability op, attaches a
+`FixHint.Import(loc, ability, [module])` (plus a `= hint:` line) per candidate
+ability — which the LSP already renders as an "Import `X` from `Y`" quick-fix.
 
-The editor half already works: the compiler emits
-`FixHint.Import(loc, name, candidateModules)` and the LSP renders it as an
-"Import `name` from `module`" code action (`MezzeTextDocumentService.kt:3334`;
-abilities are import-hinted in one path at `AbilityChecker.kt:1234`). GAP is
-compiler-side: on a `.method {}` field-access failure, look the method name up
-among ALL ability ops (including UNIMPORTED stdlib abilities) and, if it is an
-op of some ability, attach a `FixHint.Import` for that ability's home module.
-Needs an op-name → ability → module index: the store has abilities by name
-(`getDeclsByKind(DeclKind.ABILITY)` + modulePath) but not by op name, so build
-the op index from each stored ability's parsed ops; list all candidates when
-several abilities share an op name. Tests-first: a `.method {}` on a type whose
-ability is unimported must produce the import hint. No fix yet.
+The op → ability → module index is the store's, via a new
+`MezzeStore.findDefinitionOwnersByOp(opName)`: definition nodes are already
+written with an indexed `(slot, slot_label)` (`idx_def_nodes_slot_label`), so a
+point query over `slot='op'` returns the owner hashes across main + stdlib +
+deps (the `unionAll` DBs `openProject` attaches), and `getNamesForHash` maps
+each to `(module, ability)`. Owners are filtered to abilities (an effect may
+share an op name but is not imported for a method call); the current project's
+own parsed ability decls are unioned in from `getAllParsedModules`. Store query
+tested on both backends (`DefinitionIndexTest`).
+
+WORKS IN THE LSP, where `PrecompiledStdlib.setStore(openProject(...))` makes the
+stdlib+deps store available. KNOWN LIMITATION: `mez dev`/`mez check` run in
+SQLite-free snapshot mode where `PrecompiledStdlib.getStore()` is null, so the
+CLI shows no hint (it degrades to the plain error, same as the pre-existing
+effect-import hint). A follow-up could expose a complete ability-op index from
+the cbor snapshot so the CLI matches the editor.
 
 ### B-1 — unused-import warning faints the whole `use` line when only some names are unused
 

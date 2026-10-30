@@ -312,6 +312,9 @@ class ChainedMezzeStore(
         all.asSequence().map { it.getDefinition(declHash) }.firstOrNull { !it.isEmpty }
             ?: SignatureRows.EMPTY
 
+    override fun findDefinitionOwnersByOp(opName: String): List<Hash> =
+        all.flatMap { it.findDefinitionOwnersByOp(opName) }.distinct()
+
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) =
         primary.putParsedModule(modulePath, sourceHash, parsedBlob)
     override fun getParsedModule(modulePath: String, sourceHash: String): ByteArray? =

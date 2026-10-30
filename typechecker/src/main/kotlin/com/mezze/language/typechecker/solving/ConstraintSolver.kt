@@ -9,6 +9,10 @@ import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
+import com.mezze.language.parsedast.ParsedAbilityDecl
+import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.PrecompiledStdlib
+import com.mezze.language.store.DeclKind
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.printing.ErrorMessageBuilder
 import com.mezze.language.typechecker.util.StringDistance
@@ -1412,10 +1416,68 @@ class ConstraintSolver(
             }
         }
 
+        // B-9: a `.method {}` that fails as a field access may really be an ability
+        // op whose ability is not imported (e.g. `6.to_jvm {}` without
+        // `use std::codec::jvm::{ ToJvm }`). If the name matches a known ability op
+        // anywhere — stdlib, a dep, or this project — point at the ability to
+        // import so an editor offers the one-click fix. Advice only, never dispatch.
+        val opProviders = if (fieldName.isEmpty()) emptyList() else abilitiesProvidingOp(fieldName)
+        if (opProviders.isNotEmpty() && constraint.loc != null) {
+            return ConstraintResult.Failure(
+                "Cannot access field '$fieldName' on non-record type: ${prettyPrintType(recordType)}",
+                code = ErrorCode.T0205_FIELD_NOT_FOUND,
+                hints = opProviders.map { (ability, modulePath) ->
+                    "`$fieldName` is a method of ability `$ability`; " +
+                        "import it with `use $modulePath::{ $ability }`"
+                },
+                fixHints = opProviders.map { (ability, modulePath) ->
+                    FixHint.Import(constraint.loc, ability, listOf(modulePath))
+                },
+            )
+        }
+
         return ConstraintResult.Failure(
             "Cannot access field '$fieldName' on non-record type: ${prettyPrintType(recordType)}",
             code = ErrorCode.T0205_FIELD_NOT_FOUND,
         )
+    }
+
+    /**
+     * Abilities that declare an op named [opName], as `(abilityName, modulePath)`,
+     * deduplicated — the B-9 import-hint source. Two sources, unioned:
+     *
+     *  - the store, via the indexed `(slot, slot_label)` of definition nodes
+     *    ([MezzeStore.findDefinitionOwnersByOp]), then [getNamesForHash] for the
+     *    owner's `(module, name)`; covers stdlib, deps, and a populated project.
+     *    Restricted to ability owners (an effect may share an op name but is not
+     *    imported for a method call).
+     *  - the current project's parsed ability decls, which are not necessarily
+     *    populated into the store during `mez check`.
+     *
+     * Only reached on a genuine field-access failure, and the store op lookup is
+     * an indexed point query that returns nothing for an ordinary typo, so this is
+     * not on a hot path.
+     */
+    private fun abilitiesProvidingOp(opName: String): List<Pair<String, String>> {
+        val out = LinkedHashSet<Pair<String, String>>()
+        PrecompiledStdlib.getStore()?.let { store ->
+            val owners = store.findDefinitionOwnersByOp(opName)
+            if (owners.isNotEmpty()) {
+                val abilityHashes = store.getDeclsByKind(DeclKind.ABILITY).mapTo(HashSet()) { it.hash }
+                for (ownerHash in owners) {
+                    if (ownerHash !in abilityHashes) continue
+                    for (nameRow in store.getNamesForHash(ownerHash)) out.add(nameRow.name to nameRow.module)
+                }
+            }
+        }
+        for ((modulePath, module) in ModuleResolver.getAllParsedModules()) {
+            for (decl in module.decls) {
+                if (decl is ParsedAbilityDecl && decl.operations.any { it.name == opName }) {
+                    out.add(decl.name to modulePath)
+                }
+            }
+        }
+        return out.toList()
     }
 
     private fun applySubstitutionToConstraint(constraint: Constraint, substitution: Substitution): Constraint {

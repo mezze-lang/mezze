@@ -565,6 +565,17 @@ interface MezzeStore : AutoCloseable {
      */
     fun getDefinition(declHash: Hash): SignatureRows
 
+    /**
+     * The owner hashes of every DEFINITION that has an operation named [opName]
+     * — i.e. abilities and effects declaring an op of that name. Backs the
+     * "import the ability that provides this method" hint: a failed `x.foo {}`
+     * looks `foo` up here, then [getNamesForHash] turns each owner into its
+     * `(module, name)`. Covers everything populated into the store (stdlib,
+     * deps, user libs), keyed off the indexed `(slot, slot_label)` of the
+     * definition node table.
+     */
+    fun findDefinitionOwnersByOp(opName: String): List<Hash>
+
     // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
     // ====================================================================
