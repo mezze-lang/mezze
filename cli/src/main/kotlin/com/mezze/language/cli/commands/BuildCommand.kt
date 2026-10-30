@@ -122,9 +122,15 @@ class BuildCommand {
         // need native-image?" decision depends on whether a shell for THIS
         // capability set already exists.
         val polyglot = com.mezze.language.cli.`package`.PolyglotResolver.resolve(currentDir)
-        val polyglotJars = com.mezze.language.cli.`package`.ResolvedJarsClasspath
+        val resolvedJarsReport = com.mezze.language.cli.`package`.ResolvedJarsClasspath
             .collect(currentDir).also { r -> r.warnings.forEach { System.err.println("[mez] $it") } }
-            .jars.map { it.jarPath }
+        // A pinned dependency missing from the cache would build a jar/binary
+        // with a silently incomplete classpath — fail loud and point at sync.
+        resolvedJarsReport.missingSyncMessage()?.let { msg ->
+            throw com.mezze.language.cli.MezzeCliError(msg.substringBefore('\n'),
+                hint = msg.substringAfter('\n', "").trim().ifEmpty { "run `mez sync`" })
+        }
+        val polyglotJars = resolvedJarsReport.jars.map { it.jarPath }
 
         // -O2 always needs native-image; -O1 needs it only when no capability-
         // matching cached shell exists (first build for this language/version set

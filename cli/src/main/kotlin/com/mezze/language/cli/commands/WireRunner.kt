@@ -1081,6 +1081,14 @@ internal class WireSession private constructor(
                 .resolveJvmClasspath(currentDir)
             val resolvedJarsReport = com.mezze.language.cli.`package`.ResolvedJarsClasspath.collect(currentDir)
             for (w in resolvedJarsReport.warnings) System.err.println("[mez] $w")
+            // Pinned dependencies absent from the cache are fatal: booting the
+            // runtime without them produces a classpath that silently drops a
+            // language/library and fails far downstream (e.g. every guest eval
+            // returns an error). Stop with one actionable line instead.
+            resolvedJarsReport.missingSyncMessage()?.let { msg ->
+                System.err.println("${Glyphs.CROSS} $msg")
+                return null
+            }
             val resolvedJarsCp = resolvedJarsReport.asClasspath()
             val classpath = buildString {
                 append(withTools)

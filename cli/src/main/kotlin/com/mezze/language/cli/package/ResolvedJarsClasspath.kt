@@ -33,15 +33,49 @@ object ResolvedJarsClasspath {
         val jarPath: File,
     )
 
+    /**
+     * A locked/declared artifact that is absent from the local cache or store.
+     * Unlike a [Report.warnings] entry this is FATAL for running the project: the
+     * classpath would silently be missing a dependency the project pinned, and the
+     * failure only resurfaces far downstream as a cryptic runtime error (e.g. a
+     * guest language that "just fails to eval"). A `mez sync` fetches it.
+     */
+    data class Missing(
+        /** Maven coordinate or `[jars].<name>` — what the user declared. */
+        val coord: String,
+        /** Absolute path where the resolver expected to find it. */
+        val expectedAt: String,
+    )
+
     /** Result of one lookup pass. */
     data class Report(
         val jars: List<JarEntry>,
-        /** Warnings that DID NOT stop us — missing store entries, unreadable tomls, etc. */
+        /** Soft problems that did NOT stop us — sha256 mismatch, bad #sha256
+         *  shape, unreadable toml/lock. These have their own remedies and leave
+         *  a partially-usable classpath; [missing] is the fatal case. */
         val warnings: List<String>,
+        /** Pinned artifacts absent from the cache/store — a `mez sync` fixes
+         *  every one. The caller must stop rather than boot a degraded runtime. */
+        val missing: List<Missing> = emptyList(),
     ) {
         /** Classpath-ready `File.pathSeparator`-joined string, or empty. */
         fun asClasspath(): String =
             if (jars.isEmpty()) "" else jars.joinToString(File.pathSeparator) { it.jarPath.absolutePath }
+
+        /**
+         * One consolidated, actionable line for [missing] (plus a short sample of
+         * the coordinates), or null when nothing is missing. The caller prefixes
+         * its own glyph and prints this instead of one noisy line per jar.
+         */
+        fun missingSyncMessage(): String? {
+            if (missing.isEmpty()) return null
+            val n = missing.size
+            val noun = if (n == 1) "dependency is" else "dependencies are"
+            val sample = missing.map { it.coord }.take(3).joinToString(", ")
+            val more = if (n > 3) " (+${n - 3} more)" else ""
+            return "$n $noun declared but not fetched — run `mez sync`, then try again.\n" +
+                "    missing: $sample$more"
+        }
     }
 
     /**
@@ -52,12 +86,13 @@ object ResolvedJarsClasspath {
      */
     fun collect(projectRoot: File, storeRoot: File? = null): Report {
         val warnings = mutableListOf<String>()
+        val missing = mutableListOf<Missing>()
         val entries = mutableListOf<JarEntry>()
         val store = storeRoot ?: defaultStoreRoot()
 
         // Root project's own jars — they aren't in Mezze.lock (root isn't
         // "resolved from" anywhere), so we always add them separately.
-        collectFromToml(File(projectRoot, "Mezze.toml"), store, entries, warnings)
+        collectFromToml(File(projectRoot, "Mezze.toml"), store, entries, warnings, missing)
 
         // Every resolved dep's own jars.
         val lock = try {
@@ -70,20 +105,22 @@ object ResolvedJarsClasspath {
             for (node in lock.packages) {
                 if (node.source == "root") continue
                 val tomlFile = tomlForNode(projectRoot, node) ?: continue
-                collectFromToml(tomlFile, store, entries, warnings)
+                collectFromToml(tomlFile, store, entries, warnings, missing)
             }
             // Every locked maven artifact contributes to the wire
             // classpath too — pinned to the exact file the resolver
             // wrote (relative path under `~/.mezze/cache/maven/`), with
             // a sha256 re-verification for the same supply-chain guarantee
             // the `[jars]` handler gives.
-            collectFromLockMaven(lock.maven, entries, warnings)
+            collectFromLockMaven(lock.maven, entries, warnings, missing)
         }
 
         // Dedup on sha256 — the same jar can be declared by both a user
         // project and one of its deps; we want it on the classpath once.
         val distinct = entries.distinctBy { it.sha256 }
-        return Report(distinct, warnings)
+        // Dedup missing on coord too — the same pinned jar can be declared by
+        // more than one node, and the user only needs to be told once.
+        return Report(distinct, warnings, missing.distinctBy { it.coord })
     }
 
     /** Where Aether wrote the maven-layout cache (`~/.mezze/cache/maven/`). */
@@ -94,13 +131,18 @@ object ResolvedJarsClasspath {
         maven: List<LockedMaven>,
         entries: MutableList<JarEntry>,
         warnings: MutableList<String>,
+        missing: MutableList<Missing>,
     ) {
         if (maven.isEmpty()) return
         val cacheDir = defaultMavenCacheDir()
         for (m in maven) {
             val jar = File(cacheDir, m.resolvedFilePath)
             if (!jar.isFile) {
-                warnings += "[maven].${m.coord}: not in cache at ${jar.absolutePath} — run 'mez sync'"
+                // A pinned maven jar absent from the cache is fatal for running:
+                // record it as `missing` (the caller stops and points at `mez
+                // sync`) rather than a warning that would let a degraded runtime
+                // boot and fail cryptically later.
+                missing += Missing(coord = m.coord, expectedAt = jar.absolutePath)
                 continue
             }
             if (System.getenv("MEZZE_SKIP_JAR_VERIFY") != "1") {
@@ -172,6 +214,7 @@ object ResolvedJarsClasspath {
         storeRoot: File,
         entries: MutableList<JarEntry>,
         warnings: MutableList<String>,
+        missing: MutableList<Missing>,
     ) {
         if (!tomlFile.isFile) return
         val toml = try {
@@ -189,8 +232,8 @@ object ResolvedJarsClasspath {
             val jarDir = File(storeRoot, "jars/$sha")
             val jar = firstJarIn(jarDir)
             if (jar == null) {
-                warnings += "${tomlFile.absolutePath}: [jars].$name: not in store " +
-                    "at ${jarDir.absolutePath} — run 'mez sync' to fetch"
+                // Declared but not fetched — fatal, same as a missing maven jar.
+                missing += Missing(coord = "[jars].$name", expectedAt = jarDir.absolutePath)
                 continue
             }
             // Verify. Reading + hashing a jar takes ~a few ms; still under

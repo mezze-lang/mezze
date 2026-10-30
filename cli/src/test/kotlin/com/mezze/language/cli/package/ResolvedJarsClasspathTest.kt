@@ -84,7 +84,7 @@ class ResolvedJarsClasspathTest {
     }
 
     @Test
-    fun `missing store jar produces a warning, does not throw`(@TempDir tmp: Path) {
+    fun `missing store jar is a fatal 'missing' entry, not a warning`(@TempDir tmp: Path) {
         val root = tmp.toFile()
         val storeRoot = File(root, "store").apply { mkdirs() }
         val projectRoot = File(root, "app").apply { mkdirs() }
@@ -95,8 +95,53 @@ class ResolvedJarsClasspathTest {
         ))
         val report = ResolvedJarsClasspath.collect(projectRoot, storeRoot = storeRoot)
         assertTrue(report.jars.isEmpty())
-        assertEquals(1, report.warnings.size)
-        assertTrue(report.warnings[0].contains("not in store"))
+        // A declared-but-unfetched jar is FATAL now, not a soft warning: it goes
+        // to `missing` so the caller can stop and point at `mez sync`.
+        assertTrue(report.warnings.isEmpty(), "unfetched jar is `missing`, not a warning: ${report.warnings}")
+        assertEquals(1, report.missing.size)
+        assertEquals("[jars].ghost", report.missing[0].coord)
+        val msg = report.missingSyncMessage()
+        assertNotNull(msg)
+        assertTrue(msg!!.contains("mez sync"), "message must point at sync: $msg")
+    }
+
+    @Test
+    fun `missing maven jar from the lock is a fatal 'missing' entry`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val storeRoot = File(root, "store").apply { mkdirs() }
+        val projectRoot = File(root, "app").apply { mkdirs() }
+        writeToml(projectRoot, "app", "0.1.0")
+        // A locked maven coord whose jar is not in the maven cache. The relative
+        // path is deliberately bogus so it cannot exist under ~/.mezze/cache/maven.
+        writeLockFile(File(projectRoot, "Mezze.lock"), MezzeLock(
+            version = 2,
+            root = "app",
+            packages = listOf(LockedNode("app", "0.1.0", source = "root")),
+            maven = listOf(LockedMaven(
+                coord = "org.graalvm.js:js-language:25.0.3",
+                resolvedFilePath = "org/mezze-test-nonexistent/does-not-exist/1.0/does-not-exist-1.0.jar",
+                sha256 = "a".repeat(64),
+                transitiveFrom = "org.graalvm.js:js-language:25.0.3",
+                declaredBy = "app",
+            )),
+        ))
+        val report = ResolvedJarsClasspath.collect(projectRoot, storeRoot = storeRoot)
+        assertTrue(report.jars.isEmpty())
+        assertEquals(1, report.missing.size)
+        assertEquals("org.graalvm.js:js-language:25.0.3", report.missing[0].coord)
+    }
+
+    @Test
+    fun `missingSyncMessage collapses many into one actionable line`() {
+        val miss = (1..5).map { ResolvedJarsClasspath.Missing("g:a$it:1.0", "/cache/a$it.jar") }
+        val report = ResolvedJarsClasspath.Report(jars = emptyList(), warnings = emptyList(), missing = miss)
+        val msg = report.missingSyncMessage()
+        assertNotNull(msg)
+        assertTrue(msg!!.contains("5 dependencies are"), "count + plural: $msg")
+        assertTrue(msg.contains("mez sync"), "names the fix: $msg")
+        assertTrue(msg.contains("(+2 more)"), "collapses the tail: $msg")
+        // sanity: no `missing` → no message
+        assertEquals(null, ResolvedJarsClasspath.Report(emptyList(), emptyList()).missingSyncMessage())
     }
 
     @Test

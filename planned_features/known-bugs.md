@@ -63,6 +63,27 @@ there; `StorePopulator` was not found on the dep path) OR register a cache-reuse
 module's ability impls at `ModuleTypeChecker`'s cached-module path. AGREED to do
 this LAST. No fix yet.
 
+### B-12 — missing pinned deps warn-and-run instead of failing loud (FIXED)
+
+`mez dev`/`mez build` on a project whose locked maven/`[jars]` dependencies were
+not in the cache printed one `[mez] [maven].<coord>: not in cache — run 'mez sync'`
+warning PER jar (23+ lines for a js+python project), then built the classpath
+WITHOUT them and launched anyway. The guest languages were silently absent, so
+every `eval`/`call` failed far downstream and the program fell to its own `Err`
+arm ("js eval failed") — a classic silent fallback (violates "resolve or fail
+loudly"). ROOT: `ResolvedJarsClasspath.collect` recorded an absent pinned jar as a
+`warnings` entry and `continue`d.
+
+FIXED (`ResolvedJarsClasspath` + `WireRunner`/`BuildCommand`): a pinned artifact
+absent from the cache/store is now a structured `Report.missing`, distinct from
+soft `warnings` (sha mismatch, bad #sha256, unreadable toml — those still warn and
+degrade). `missingSyncMessage()` collapses them into ONE actionable line
+(`✗ N dependencies are declared but not fetched — run \`mez sync\`, then try
+again.` + a 3-coord sample with `(+K more)`), and both `mez dev` and `mez build`
+STOP (exit 1) instead of booting a broken runtime. `mez check` is untouched
+(typechecking needs no guest jars). Tests: `ResolvedJarsClasspathTest` (missing
+maven-from-lock, missing `[jars]`-from-store, message collapse).
+
 ### B-9 — a method call whose ability is unimported now suggests the import (store-backed)
 
 IMPLEMENTED (store-backed). Writing `6.to_jvm {}` without
