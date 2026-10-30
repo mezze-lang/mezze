@@ -83,7 +83,7 @@ which suits recursion and building a collection one element at a time.
 ## Map and Set
 
 Hashed, so lookup is fast and iteration order is not promised. A `Set` drops
-duplicates on insert; a `Map` replaces the value at a key.
+duplicates on insert. A `Map` replaces the value at a key.
 
 ## SortedMap and SortedSet
 

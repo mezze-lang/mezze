@@ -20,7 +20,7 @@ The first puts `Console` and `println` directly in scope. The second puts
 `map` in scope, and its contents are reached through it as `map::empty {}`.
 
 Prefer the qualified form when a bare name would be ambiguous or uninformative.
-`map::empty` and `set::empty` sit happily in one file; two imported `empty`s do
+`map::empty` and `set::empty` sit happily in one file. Two imported `empty`s do
 not. Prefer the selective form for names that read well alone, which is why
 every example on this site imports `println` rather than writing
 `log::println`.
@@ -88,12 +88,12 @@ user-defined effect left unhandled on the entry's arrow is a compile error
 rather than a failure at run time.
 
 <!--mezze-error
-Entry 'main' performs Audit, but nothing discharges it — the entry has no
+Entry 'main' performs Audit, but nothing discharges it. The entry has no
 enclosing handler, so it leaks at runtime. Wrap the body in a handler:
 `perform <Performer> in …`
 -->
 
 That error is the last link in the chain [Effects](#effects) describes. An
 effect raises from where it is performed, through every arrow that calls it,
-up to the entry — and if nothing has handled it by then, the program does not
+up to the entry, and if nothing has handled it by then, the program does not
 compile.

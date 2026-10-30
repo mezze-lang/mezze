@@ -131,7 +131,7 @@ Each handler above it takes one name away and puts the star there instead.
 `MemoryFileSystem` settles `FileSystem`, `SystemTime` settles `Time`, and only when
 the outermost handler settles `Http` does the row become a bare `<*>`.
 
-So the star is not "handled" — it is "handled, and nothing remains". A row
+So the star is not "handled". It is "handled, and nothing remains". A row
 like `<Http, *>` is the useful middle: some effects are settled, `Http` is
 still the caller's problem, and the type says which. Partially handled code is
 ordinary code, and it stays honest about what is left.
@@ -185,7 +185,7 @@ example writes and reads a real file without touching your disk, and
 ## Your own effects
 
 Nothing above is built in. An effect declares operations and leaves them
-unimplemented; a handler supplies them.
+unimplemented. A handler supplies them.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
@@ -277,7 +277,7 @@ called.
 
 <!--mezze-error
 error[V0502]: Top-level `x` performs an effect at module-load time.
-The top level is for definitions — effectful code must run inside a function.
+The top level is for definitions. Effectful code must run inside a function.
 -->
 
 **The entry point must handle what it uses.** The runtime supplies the ambient
@@ -285,6 +285,6 @@ effects. An effect you declared yourself, left unhandled on the entry's arrow,
 is a compile error rather than a surprise at run time:
 
 <!--mezze-error
-Entry 'main' performs Audit, but nothing discharges it — the entry has no
+Entry 'main' performs Audit, but nothing discharges it. The entry has no
 enclosing handler, so it leaks at runtime.
 -->

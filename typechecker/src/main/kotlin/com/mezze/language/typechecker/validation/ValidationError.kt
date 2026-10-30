@@ -364,7 +364,7 @@ sealed interface ValidationError {
             val effs = effectRow.allEffectNames.sorted().joinToString(", ")
             val what = if (effs.isNotEmpty()) "performs $effs" else "performs an effect"
             append("Top-level `$bindingName` $what at module-load time. ")
-            append("The top level is for definitions — effectful code must run inside a function. ")
+            append("The top level is for definitions. Effectful code must run inside a function. ")
             append("Move it into a function (e.g. your entry): `let $bindingName = {} -> …`")
         }
 

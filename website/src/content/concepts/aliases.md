@@ -4,7 +4,7 @@ blurb: Naming a shape, and making a name mean something.
 ---
 
 Two ways to put a name on a type, and they do opposite things. An alias is a
-shorthand the compiler forgets; a newtype is a distinct type it enforces.
+shorthand the compiler forgets. A newtype is a distinct type it enforces.
 
 ## type is a shorthand
 

@@ -11,7 +11,7 @@ ability works for all of them.
 ability Shape for 'a where { area: { it: 'a } -> Int }
 -->
 
-`'a` is the implementing type, and `it` is the receiver — the value the method
+`'a` is the implementing type, and `it` is the receiver, the value the method
 is called on. Both are ordinary names in an ordinary record: an ability
 declaration is a record of function types, in the same braces as everything
 else in the language.
@@ -161,5 +161,5 @@ An ability is chosen by the **type** of the receiver, decided at the call site
 and fixed once the type is known. An effect is chosen by the **handler** that
 is in scope, decided by whoever runs the computation, and the same code can
 run under a different handler tomorrow. Reach for an ability when behaviour
-belongs to a type; reach for an effect when it belongs to the context the
+belongs to a type. Reach for an effect when it belongs to the context the
 program runs in.

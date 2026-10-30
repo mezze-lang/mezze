@@ -10,7 +10,7 @@ annotate where it helps a reader rather than to satisfy the compiler.
 
 The parts are meant to be few, and to be reused. A function's parameter list
 is a record. An ability is a named set of operations, and so is an effect.
-They are written the same way and read the same way; what differs is who
+They are written the same way and read the same way. What differs is who
 supplies the operations and when. An ability is implemented by a type, and the
 compiler resolves the call at the site. An effect is supplied by a handler
 somewhere up the call stack, and the typechecker tracks which effects a

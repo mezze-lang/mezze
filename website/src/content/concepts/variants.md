@@ -68,10 +68,10 @@ the arm to be taken. The last one binds `days` and catches the rest.
 ## Miss a case and it will not compile
 
 A match has to cover every case the type admits. This one leaves out
-`Cancelled` — press Check and the compiler names exactly what is missing:
+`Cancelled`. Press Check and the compiler names exactly what is missing:
 
 <!--mezze-editor
-# expect-error: the Cancelled arm is missing on purpose; Check reports V0601.
+# expect-error: the Cancelled arm is missing on purpose. Check reports V0601.
 use std::effects::log::{ Console, println }
 
 type Status = | Queued, Shipped { days: Int }, Cancelled { why: Str } |
@@ -100,7 +100,7 @@ An arm after a catch-all can never run, and saying so is more useful than
 letting it sit there looking meaningful:
 
 <!--mezze-editor
-# expect-error: the Queued arm is dead; Check reports V0603.
+# expect-error: the Queued arm is dead. Check reports V0603.
 use std::effects::log::{ Console, println }
 
 type Status = | Queued, Shipped { days: Int } |
@@ -121,7 +121,7 @@ And a case the type does not have is caught where you wrote it, with the ones
 that do exist listed:
 
 <!--mezze-editor
-# expect-error: Refunded is not a Status case; Check reports V0704.
+# expect-error: Refunded is not a Status case. Check reports V0704.
 use std::effects::log::{ Console, println }
 
 type Status = | Queued, Shipped { days: Int } |
@@ -162,12 +162,15 @@ let name = { l : Level } -> match l is
 let main = {} -> perform Console in do
   println { msg = name { l = High } }
   println { msg = name { l = Low } }
+  # Medium was never declared, but an open variant accepts any tag, so it
+  # falls through to the last arm.
+  println { msg = name { l = Medium } }
 -->
 
 An open variant is the mirror of an open record. A closed one is a promise
 about the whole set of cases, which is what makes exhaustiveness checking
-possible; an open one gives that up in exchange for extension. Because the set
-is not known, a match on an open variant needs a catch-all arm — and that
+possible. An open one gives that up in exchange for extension. Because the set
+is not known, a match on an open variant needs a catch-all arm, and that
 catch-all is exactly what stops the compiler telling you about a case you
 forgot.
 

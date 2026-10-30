@@ -4,7 +4,7 @@ blurb: One record in, named arguments, and what falls out of that.
 ---
 
 A function is `{ params } -> body`, and the parameter list is a record. Not
-"like a record" — it is one. So every argument is named at every call site,
+"like a record". It is one. So every argument is named at every call site,
 and Mezze has no positional arguments at all.
 
 <!--mezze-editor
@@ -115,14 +115,14 @@ feeds it into the call on its right, with `@` marking where it lands:
 
 Read top to bottom, each line is one step: split the line on commas, trim each
 piece, join them back, tag the result. The nested-call form of the same thing
-reads inside-out — `concat { l = ..., r = join { strings = map { ... }, ... } }` —
+reads inside-out, `concat { l = ..., r = join { strings = map { ... }, ... } }`,
 and you assemble it from the middle.
 
-Notice where `@` sits. On the first three steps it is the leading field; on the
+Notice where `@` sits. On the first three steps it is the leading field. On the
 last it is the second. That is the whole point of the placeholder.
 
 Languages that have pipes usually have to pick a convention. Some are
-"data first", so the piped value always becomes argument one; others are
+"data first", so the piped value always becomes argument one. Others are
 "data last" and it always becomes the final argument. Both exist because
 neither suits every function, and libraries end up ordering their parameters
 around whichever one their language chose.
@@ -133,9 +133,9 @@ works with any function without that function having been designed for it.
 ## Working for any type
 
 A function does not have to name concrete types. Where a parameter could be
-anything, its type is a *type variable* — an apostrophe and a name, `'a`,
+anything, its type is a *type variable*, an apostrophe and a name, `'a`,
 standing for "some one type, the same everywhere it appears". Write a function
-that only moves values around and it is already polymorphic; you do not ask
+that only moves values around and it is already polymorphic. You do not ask
 for it, and you do not annotate it:
 
 <!--mezze-editor
@@ -149,7 +149,7 @@ let main = {} -> perform Console in do
 -->
 
 Hover `swap` and its type reads `{ pair: { second: 'b, first: 'a } } -> { first: 'b, second: 'a }`.
-Two different variables, because the two fields need not match; `'a` and `'b`
+Two different variables, because the two fields need not match. `'a` and `'b`
 are inferred, not written. The one call above fixes them to `Int` and `Str`,
 and a different call fixes them to something else. One definition, every pair.
 
@@ -168,14 +168,14 @@ let main = {} -> perform Console in do
 -->
 
 Hover `larger`: `{ a: 'a, b: 'a } with Ord 'a -> 'a`. Both fields are the same
-`'a` this time — you compared them, so they must be the same type — and `with
+`'a` this time. You compared them, so they must be the same type, and `with
 Ord 'a` appeared on its own. `>` comes from the `Ord` ability, so the compiler
 records that `larger` works for any type *that has `Ord`*, and nothing else.
-Call it on ordered types and it runs; call it on a type without `Ord` and the
+Call it on ordered types and it runs. Call it on a type without `Ord` and the
 error is about the missing ability, at the call, not deep inside the body.
 
 None of that was annotated. As everywhere else, the annotation is optional and
-the inference is the same either way — a public function usually writes the
+the inference is the same either way. A public function usually writes the
 signature down so its constraints read at a glance:
 
 <!--mezze-code
@@ -184,8 +184,8 @@ let larger : { a: 'a, b: 'a } with Ord 'a -> 'a = { a, b } -> if a > b then a el
 
 `with` states the constraint, and it is the only form that can. This is also
 exactly how the standard library is built: `list::map` is
-`{ xs: List 'a, f: { x: 'a } -> 'b } -> List 'b` — any element type in, any
-element type out — and `math::max` is `{ l: 'a, r: 'a } with Ord 'a -> 'a`, the
+`{ xs: List 'a, f: { x: 'a } -> 'b } -> List 'b`, any element type in, any
+element type out, and `math::max` is `{ l: 'a, r: 'a } with Ord 'a -> 'a`, the
 same shape as `larger`. [Abilities](#abilities) is where `Ord` and constraints
 like it come from.
 
@@ -199,7 +199,7 @@ what calling it *does*:
 -->
 
 The part in angle brackets is the effect row, and it belongs to the arrow
-rather than to either type beside it. Calling this reaches the network; the
+rather than to either type beside it. Calling this reaches the network. The
 `Str` that comes back is an ordinary `Str`.
 
 An effect a function does not handle raises to that function's own arrow, and

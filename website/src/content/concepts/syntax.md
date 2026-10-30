@@ -180,7 +180,7 @@ arithmetic negation is `.neg {}`.
 Reaching for `!x` gets you a parse error saying so. The reason is uniformity:
 a method reads the same as every other operation on a value, participates in
 a chain, and needs no precedence rule of its own. `-` in front of a number
-literal is still ordinary syntax; it is only the prefix *operator* that is
+literal is still ordinary syntax. It is only the prefix *operator* that is
 absent.
 
 ## Modules

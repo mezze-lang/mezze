@@ -114,7 +114,7 @@ object EntryPointCheck {
             val advice = result.effects.mapNotNull { (name, hash) ->
                 hash?.let { metadataByHash[it]?.unhandled }?.let { "$name: $it" }
             }
-            "Entry '$entryName' performs $list, but nothing discharges it — the entry has no " +
+            "Entry '$entryName' performs $list, but nothing discharges it. The entry has no " +
                 "enclosing handler, so it leaks at runtime (you get a raw suspended value, not the result). " +
                 "Wrap the body in a handler: `perform <Performer> in …`." +
                 advice.joinToString("") { " $it" }

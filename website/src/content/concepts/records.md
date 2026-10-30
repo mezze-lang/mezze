@@ -3,7 +3,7 @@ title: Records
 blurb: Structural data, open and closed, with and without a name.
 ---
 
-A record is a set of named fields. Writing one is all it takes; there is no
+A record is a set of named fields. Writing one is all it takes. There is no
 declaration step and no class to define first.
 
 <!--mezze-code
