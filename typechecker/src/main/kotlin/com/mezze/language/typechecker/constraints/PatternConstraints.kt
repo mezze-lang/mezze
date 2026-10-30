@@ -337,7 +337,10 @@ class PatternConstraintGenerator {
                     constructorName = pattern.constructor,
                     payloadType = null,
                     context = "Constructor pattern ${pattern.constructor}",
-                    loc = sourceLoc,
+                    // Prefer the constructor pattern's OWN location over the enclosing
+                    // match's (sourceLoc): an "unknown constructor" error must underline
+                    // the offending `Ctor` arm, not the `match … is` scrutinee (B-6).
+                    loc = pattern.loc ?: sourceLoc,
                     isPatternContext = true
                 )
             )
@@ -356,7 +359,8 @@ class PatternConstraintGenerator {
                     constructorName = pattern.constructor,
                     payloadType = payloadType,
                     context = "Constructor pattern ${pattern.constructor}",
-                    loc = sourceLoc,
+                    // See the payload==null branch: point at the constructor pattern (B-6).
+                    loc = pattern.loc ?: sourceLoc,
                     isPatternContext = true
                 )
             )

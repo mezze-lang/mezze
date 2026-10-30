@@ -126,6 +126,30 @@ let z = x + y
     }
 
     @Test
+    fun `unknown constructor arm points at the pattern, not the match`() {
+        // B-6: a match arm naming a constructor the variant does not have must
+        // underline that arm (`Refunded`, line 5), not the `match … is`
+        // scrutinee (line 2) the enclosing expression's loc would give.
+        val source = """
+type Status = | Queued, Shipped { days: Int } |
+let describe = { s : Status } -> match s is
+  Queued -> "waiting"
+  Shipped { days } -> "soon"
+  Refunded -> "money back"
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+
+        val error = assertThrows(TypeCheckError::class.java) {
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        }
+
+        assertTrue(error.message?.contains("Refunded") == true, "message names the bad constructor")
+        assertNotNull(error.loc, "unknown-constructor error should carry a location")
+        assertEquals(5, error.loc?.startLine, "error should point at the `Refunded` arm (line 5), not the match")
+    }
+
+    @Test
     fun `test valid code does not throw error`() {
         val source = """
 let x = 42
