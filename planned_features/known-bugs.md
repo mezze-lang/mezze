@@ -39,6 +39,30 @@ standalone layer to `openContext`, which applies them to the inner-context build
 js-only eval test would pass without the fix and mislead (the T4 lesson). No test
 yet; fix not landed.
 
+### B-11 — a dependency-package codec impl is missing from an INCREMENTAL re-check's context (DO LAST)
+
+With the checked-module cache active (`ModuleResolver.cacheStore`), editing a
+module and reloading fails for a dependency-package codec:
+`error[V0408]: Cannot auto-derive Encode PythonC for Int: format lacks
+EncodeScalar` (and sometimes `[BDSL] … CallDirectIR:target-not-compiled`). On a
+CLEAN check every module is checked and `ContextBuilder.addAbilityImpl` registers
+the dep's `EncodeScalar JsC`/`PythonC` impl, so `x.to_js {}` / `x.to_py {}` work;
+on an INCREMENTAL re-check the dep's impls are not in the re-checked module's
+context (a cache-reused module returns at `ModuleTypeChecker.kt:325` updating only
+exports, never re-registering its ability impls), so the B-10 hash lookup over
+`context.getAbilityImplsByDeclHash` finds nothing.
+
+Only bites a dependency-PACKAGE ability used in derivation on a cache reuse; the
+stdlib JVM codec is unaffected (always registered). CAUSED the dev-reload crash
+when `cacheStore` was wired into `mez dev`/`mez build` — so that wiring is
+REVERTED for now (dev/build re-check fully each run; `mez check`'s pre-existing
+cacheStore is untouched and carries the same latent gap). FIX DIRECTION: find
+Tier-2 capability impls from a source that survives cache reuse — the store's
+hash-keyed `getAbilityImpls(hash)` (needs confirming dep impls are populated
+there; `StorePopulator` was not found on the dep path) OR register a cache-reused
+module's ability impls at `ModuleTypeChecker`'s cached-module path. AGREED to do
+this LAST. No fix yet.
+
 ### B-9 — a method call whose ability is unimported now suggests the import (store-backed)
 
 IMPLEMENTED (store-backed). Writing `6.to_jvm {}` without
