@@ -958,7 +958,35 @@ class ContextBuilder {
             // alignToTarget's var-remap keeps them consistent with param/return; the
             // constraint's data var already equals the return var (the lambda body IS
             // the return), so pinning the return at the call site pins the codec target.
-            val opConstraintsForOp = opConstraints[op.name].orEmpty()
+            // An inherent method's harvested constraints can include a PHANTOM: a
+            // `with C 'r` the author declared whose `'r` the home-module solve
+            // severed from the parameter it describes (the recurring
+            // one-written-typevar-two-typevars shape). For
+            // `{ make: {x}->'r } with Widen 'r` the post-solve type carries TWO
+            // Widen constraints — `Widen 'e5` (the body's `answered.widen{}`, with
+            // `'e5` = make's return, the obligation that is actually tied to a
+            // parameter) and `Widen 'r` (the declared one, now an orphan: `'r`
+            // occurs nowhere in the method's param or return). The orphan is a
+            // duplicate of the tied one, but at a call inside a lambda it is what
+            // generalizes onto the caller as `with Widen 'a` — a constraint over a
+            // variable absent from the caller's type, which can never discharge or
+            // be a type error (`RouteGroup.otherwise`; run_server / main in the
+            // showcase). A scheme constraint whose variables all occur nowhere in
+            // the signature is not a real quantified obligation, so drop it; ground
+            // constraints (no vars) and any constraint with a variable actually in
+            // the param/return are kept untouched.
+            val opConstraintsForOp = run {
+                val raw = opConstraints[op.name].orEmpty()
+                if (raw.isEmpty()) raw else {
+                    val sigVars = (collectVarTypesInOrder(paramType) +
+                        collectVarTypesInOrder(rawReturnType)).toSet()
+                    raw.filter { c ->
+                        val cVars = (c.typeArgs + c.associatedTypeBindings.values)
+                            .flatMap { collectVarTypesInOrder(it) }
+                        cVars.isEmpty() || cVars.any { it in sigVars }
+                    }
+                }
+            }
             val methodType: MezzeType.FunctionType =
                 if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType) {
                     val alignedWhole = alignToTarget(

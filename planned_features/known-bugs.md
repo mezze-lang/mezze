@@ -106,6 +106,41 @@ there; `StorePopulator` was not found on the dep path) OR register a cache-reuse
 module's ability impls at `ModuleTypeChecker`'s cached-module path. AGREED to do
 this LAST. No fix yet.
 
+### B-14 — an imported inherent method's `with C 'r` constraint leaks a PHANTOM onto a lambda-bound caller (FIXED)
+
+Calling an imported inherent impl method constrained `with C 'r`, where `'r`
+lives in a PARAMETER, inside a function put a phantom `with C 'a` on that
+function's scheme — `'a` occurring nowhere in its type. The showcase showed it as
+`run_server : {} -> {} with IntoResponse 'a` and `main : {} with IntoResponse 'a`:
+a constraint that can neither discharge nor be a type error. A top-level binding
+(value-restricted, solved eagerly) was clean; only a lambda-bound caller
+generalized the phantom. Import-independent and NOT B-13 — reproduced with a
+plain nominal newtype (`CrossModuleInherentMethodConstraintTest`): an imported
+`Builder.close: { make: {x}->'r } with Widen 'r -> {x}->Int` whose body calls
+`make{…}.widen{}`.
+
+ROOT: the one-written-typevar-two-typevars shape. When the home module compiles
+such a method, the op's post-solve FunctionType carries TWO `Widen` constraints:
+the body's `.widen{}` obligation (`Widen 'e5`, with `'e5` = make's return — tied
+to a parameter) AND the DECLARED `with Widen 'r`, whose `'r` the solve severed
+from the parameter — an ORPHAN occurring nowhere in the method's param or return.
+`harvestInherentImplOpConstraints` lifts both verbatim across the module boundary
+(the sibling RETURN harvest re-ties via `remapExportReturnToImplParamVar`;
+constraints had no equivalent), and the orphan re-emitted at the call site is what
+generalizes. Same-module was clean because `addAnonymousImpl` registers param +
+return + constraints through ONE shared typeVarCache.
+
+FIXED (`ContextBuilder.registerImportedInherentImpl`): drop a harvested constraint
+whose type variables are ALL orphan (absent from the method's param + return) — a
+scheme constraint over variables not in the signature is not a real quantified
+obligation, and here it is a severed duplicate of the properly-tied one. Ground
+constraints and any constraint with a variable actually in the param/return are
+kept, so enforcement is intact (a producer whose result has no `Widen` impl is
+still rejected — a test pins this). KNOWN-ADJACENT, NOT fixed here: calling the
+built router propagates the handler signatures' OPEN effect row (`-> Response
+<...>`), so `run_server` / `app.mz` main render `{} -> {} <..., *>` where a pure
+entry point should close to `<*>` — the effect-row analog, tracked separately.
+
 ### B-13 — a bare record won't satisfy an ability via a reachable record-targeting impl unless the impl's module is imported (FIXED)
 
 A bare `{ status = 404, body = "not found" }` satisfied `IntoResponse` (through
