@@ -40,7 +40,7 @@ class HttpCatchingAnyTest {
         use std::effects::http::{ Response, IntoResponse, IntoErrorResponse, response_status, response_ok_text }
         use std::effects::exception::{ throw }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ group, catching_any, BadInput }
+        use std::effects::http_router::{ router, catching_any, BadInput }
         use std::collections::map
     """.trimIndent()
 
@@ -52,7 +52,7 @@ class HttpCatchingAnyTest {
             run(
                 """
                 let h = { m } -> throw { error = "gone" }
-                let api = group { prefix = "" }
+                let api = router { path = "" }
                   .get { path = "/u", handler = catching_any { handler = h } }
                   .handler {}
                 get_request { url = "/u" }.to { app = api }.status
@@ -67,7 +67,7 @@ class HttpCatchingAnyTest {
             500L,
             run(
                 """
-                let api = group { prefix = "" }
+                let api = router { path = "" }
                   .get { path = "/u", handler = catching_any { handler = { m } ->
                     throw { error = "gone" } } }
                   .handler {}
@@ -118,7 +118,7 @@ class HttpCatchingAnyTest {
             400L,
             run(
                 """
-                let api = group { prefix = "" }
+                let api = router { path = "" }
                   .get { path = "/u/:id", handler = catching_any { handler = { m } -> do
                     let id = m.params.get_or { k = "id", def = "" }
                     if id == "ok"

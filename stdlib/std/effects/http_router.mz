@@ -358,11 +358,11 @@ pub let catching_any
 #
 # A group is a path prefix plus the routes under it, and groups NEST:
 #
-#   let users = group { prefix = "/users" }
+#   let users = router { path = "/users" }
 #     .get  { path = "/:id", handler = catching { handler = show } }
 #     .post { path = "",     handler = respond  { handler = create } }
 #
-#   let app = group { prefix = "/api" }
+#   let app = router { path = "/api" }
 #     .nest { group = users }
 #     .get { path = "/health", handler = respond { handler = { m } -> "ok" } }
 #     .otherwise { fallback = fallback }
@@ -396,9 +396,11 @@ pub type RouteEntry = {
 ## the group itself to `serve` is a type error naming this.
 pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry] }
 
-## An empty group rooted at `prefix`. Use `""` for no prefix.
-pub let group: { prefix: Str } -> RouteGroup = { prefix } ->
-  RouteGroup.({ prefix = prefix, entries = [] })
+## An empty router rooted at `path`. Use `""` for no prefix; a non-empty `path`
+## (e.g. `"/api"`) prefixes every route added to it, and nested routers prefix
+## again. Chain `.get` / `.post` / … and close with `.otherwise` (or `.handler`).
+pub let router: { path: Str } -> RouteGroup = { path } ->
+  RouteGroup.({ prefix = path, entries = [] })
 
 let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = { g } ->
   match g is
@@ -551,9 +553,17 @@ impl RouteGroup where {
   handler = { it: 'it } ->
     otherwise { routes = fold_entries { g = it }, fallback = { req } -> not_found { body = "no route matched" } },
 
-  ## Close the group with a fallback, producing the handler `serve` takes.
-  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
-    otherwise { routes = fold_entries { g = it }, fallback = fallback },
+  ## Close the group with a fallback, producing the handler `serve` takes. The
+  ## fallback answers with anything `IntoResponse`: a `Str`, a `{ status, body }`
+  ## record, or a full `Response`.
+  otherwise: { it: 'it, fallback: { req: Request } -> 'r <...> } with IntoResponse 'r
+    -> { req: Request } -> Response <...> =
+    { it, fallback } -> otherwise {
+      routes = fold_entries { g = it },
+      fallback = { req } -> do
+        let answered = fallback { req = req }
+        answered.into_response {},
+    },
 }
 
 # A route table is a LIST, and reads like one:

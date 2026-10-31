@@ -28,7 +28,7 @@ class MockHttpServerSeamTest {
     private val head = """
         use std::effects::http::{ Request, Response, Get, Post, response_ok_text, not_found }
         use std::effects::http_server::{ get_request, post_request, put_request, delete_request, patch_request }
-        use std::effects::http_router::{ group, otherwise }
+        use std::effects::http_router::{ router, otherwise }
         use std::collections::bytes
         use std::str
         use std::int
@@ -40,7 +40,7 @@ class MockHttpServerSeamTest {
           Err { error = _ } -> "err"
 
         ## One app answering every verb, so each test only changes the request.
-        let app = group { prefix = "" }
+        let app = router { path = "" }
           .get { path = "/u", handler = { m } -> "got" }
           .post { path = "/u", handler = { m } -> str::concat {
             l = "made:", r = match m.req.body is
@@ -97,7 +97,7 @@ class MockHttpServerSeamTest {
     fun `a header set by the chain reaches the handler`() {
         val r = run(
             """
-            let echo = group { prefix = "" }
+            let echo = router { path = "" }
               .get { path = "/h", handler = { m } -> match m.req.header { name = "x-trace" } is
                 Some { val } -> val
                 None -> "absent" }
@@ -129,7 +129,7 @@ class MockHttpServerSeamTest {
     fun `a header is found whatever casing it was written in`() {
         val r = run(
             """
-            let echo = group { prefix = "" }
+            let echo = router { path = "" }
               .get { path = "/h", handler = { m } -> str::concat {
                 l = match m.req.header { name = "X-TRACE" } is
                   Some { val } -> val

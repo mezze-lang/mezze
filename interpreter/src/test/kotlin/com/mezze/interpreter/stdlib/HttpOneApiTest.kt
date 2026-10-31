@@ -24,7 +24,7 @@ class HttpOneApiTest {
     private val head = """
         use std::effects::http::{ Request, Response, HttpClient, SimpleHttpClient, MockHttpClient, mock, client, not_found, created, body_str }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, get_request, post_request }
-        use std::effects::http_router::{ group, Matched }
+        use std::effects::http_router::{ router, Matched }
         use std::collections::bytes
         use std::str
         use std::int
@@ -32,13 +32,13 @@ class HttpOneApiTest {
         let fallback: { req: Request } -> Response = { req } -> not_found { body = "no such route" }
 
         ## Everything about users, under its own prefix.
-        let users = group { prefix = "/users" }
+        let users = router { path = "/users" }
           .get { path = "/:id", handler = { m } ->
             str::concat { l = "user ", r = m.param_or { name = "id", default = "?" } } }
           .post { path = "", handler = { m } -> created { body = "made a user" } }
 
         ## The whole service: users mounted under /api, plus a health check.
-        let api = group { prefix = "/api" }
+        let api = router { path = "/api" }
           .nest { group = users }
           .get { path = "/health", handler = { m } -> "ok" }
           .otherwise { fallback = fallback }
@@ -167,7 +167,7 @@ class HttpOneApiTest {
     fun `handler closes a group with a 404 default`() {
         val r = run(
             """
-            let bare = group { prefix = "/api" }
+            let bare = router { path = "/api" }
               .get { path = "/health", handler = { m } -> "ok" }
               .handler {}
             str::concat {
@@ -191,7 +191,7 @@ class HttpOneApiTest {
         val outcome = runCatching {
             run(
                 """
-                let unclosed = group { prefix = "/api" }
+                let unclosed = router { path = "/api" }
                   .get { path = "/health", handler = { m } -> "ok" }
                 get_request { url = "/api/health" }.to { app = unclosed }.status
                 """.trimIndent()

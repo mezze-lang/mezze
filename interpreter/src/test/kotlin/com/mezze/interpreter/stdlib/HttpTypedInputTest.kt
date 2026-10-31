@@ -33,7 +33,7 @@ class HttpTypedInputTest {
         use std::effects::http::{ Request, Response, IntoResponse, IntoErrorResponse, or_throw, not_found, body_str }
         use std::effects::exception::{ throw }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ group, catching, BadInput }
+        use std::effects::http_router::{ router, catching, BadInput }
         use std::str
         use std::int
 
@@ -75,7 +75,7 @@ class HttpTypedInputTest {
      * and died at runtime, where this form rejects it while compiling.
      */
     private val throwingApp = """
-        let api = group { prefix = "" }
+        let api = router { path = "" }
           .get { path = "/users/:id", handler = catching { handler = { m } -> do
             let id = or_throw { result = m.param_as { name = "id" } }
             show { id = id } } }
@@ -103,7 +103,7 @@ class HttpTypedInputTest {
     @Test
     fun `an unbound parameter name is a 400 naming it`() {
         val app = """
-            let api = group { prefix = "" }
+            let api = router { path = "" }
               .get { path = "/users/:id", handler = catching { handler = { m } -> do
                 let other = or_throw { result = m.param_as { name = "nope" } }
                 show { id = other } } }
@@ -120,7 +120,7 @@ class HttpTypedInputTest {
     @Test
     fun `the same decode can be matched instead of thrown`() {
         val app = """
-            let api = group { prefix = "" }
+            let api = router { path = "" }
               .get { path = "/users/:id", handler = { m } -> match m.param_as { name = "id" } is
                 Ok { val } -> show { id = val }
                 Err { error = _ } -> "not a number" }
@@ -159,7 +159,7 @@ class HttpTypedInputTest {
         val outcome = runCatching {
             run(
                 """
-                let api = group { prefix = "" }
+                let api = router { path = "" }
                   .get { path = "/x", handler = catching { handler = { m } ->
                     throw { error = { why = "not a response" } } } }
                   .handler {}
@@ -191,7 +191,7 @@ class HttpTypedInputTest {
     fun `a query that does not fit is a 400 through the same path`() {
         val app = """
             let page_of = { p: { page: Int } } -> int::to_str { n = p.page }
-            let api = group { prefix = "" }
+            let api = router { path = "" }
               .get { path = "/list", handler = catching { handler = { m } -> do
                 let q = or_throw { result = m.query_as {} }
                 page_of { p = q } } }

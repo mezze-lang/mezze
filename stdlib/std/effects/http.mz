@@ -754,6 +754,15 @@ impl IntoResponse for Json where {
   into_response = { it } -> response_json { body = it },
 }
 
+## A minimal reply: a status code and a text body. Lets a handler or a fallback
+## answer `{ status = 404, body = "not found" }` without spelling out the rest of
+## a `Response` (headers, url, chunks). A bare record of this shape adopts to it.
+pub type StatusBody = { status: Int, body: Str }
+
+impl IntoResponse for StatusBody where {
+  into_response = { it } -> response_status { code = it.status, body = it.body },
+}
+
 # A separate ability from IntoResponse, because the two answer different
 # questions about the same type: Str means a 200 with that text when a handler
 # SUCCEEDS with it, and a 500 when a handler FAILS with it. One ability cannot

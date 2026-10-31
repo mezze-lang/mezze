@@ -25,7 +25,7 @@ class HttpIntoResponseTest {
         use std::effects::http::{ HttpError, Timeout, ConnectionFailed, TlsError, RequestFailed, DecodeError, InvalidUrl, EncodeError, Cancelled, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, group, catching, Matched, Routes, routes, otherwise, or_else }
+        use std::effects::http_router::{ on_get, on_post, on_put, on_delete, router, catching, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ JString }
         use std::collections::map
         use std::collections::bytes
@@ -443,7 +443,7 @@ class HttpIntoResponseTest {
     // ---- failure: throwing the response -------------------------------
 
     private val throwingApp = """
-        let app = group { prefix = "" }.get {
+        let app = router { path = "" }.get {
           path = "/u/:id",
           handler = catching { handler = { m } -> do
             let id = m.param_or { name = "id", default = "?" }
@@ -498,7 +498,7 @@ class HttpIntoResponseTest {
     fun `a throw skips the rest of the handler`() {
         val r = run(
             """
-            let app = group { prefix = "" }.get {
+            let app = router { path = "" }.get {
               path = "/x",
               handler = catching { handler = { m } -> do
                 let stopped = throw { error = bad_request { body = "stop" } }
@@ -519,7 +519,7 @@ class HttpIntoResponseTest {
     fun `a domain error converted at the throw site keeps its status`() {
         val r = run(
             """
-            let app = group { prefix = "" }.get {
+            let app = router { path = "" }.get {
               path = "/gw",
               handler = catching { handler = { m } -> do
                 let upstream = Timeout { url = "http://u/x", ms = 50 }
@@ -536,7 +536,7 @@ class HttpIntoResponseTest {
     fun `a throwing route and a plain route live in the same table`() {
         val r = run(
             """
-            let app = group { prefix = "" }
+            let app = router { path = "" }
               .get {
                 path = "/u/:id",
                 handler = catching { handler = { m } -> do
@@ -563,7 +563,7 @@ class HttpIntoResponseTest {
         val outcome = runCatching {
             run(
                 """
-                let app = group { prefix = "" }
+                let app = router { path = "" }
                   .get { path = "/p", handler = catching { handler = { m } -> "plain" } }
                   .otherwise { fallback = fallback }
                 app { req = get_request { url = "/p" } }.status
@@ -584,7 +584,7 @@ class HttpIntoResponseTest {
           if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
         let upstream: { id: Str } -> Result Str HttpError = { id } ->
           Err { error = Timeout { url = "http://u/x", ms = 50 } }
-        let app = group { prefix = "" }.get {
+        let app = router { path = "" }.get {
           path = "/u/:id",
           handler = catching { handler = { m } -> do
             let id = m.param_or { name = "id", default = "?" }
@@ -767,7 +767,7 @@ class HttpIntoResponseTest {
             """
             let load: { id: Str } -> Result Str Str = { id } ->
               if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
-            let app = group { prefix = "" }
+            let app = router { path = "" }
               .get {
                 path = "/u/:id",
                 handler = { m } -> perform ExceptionToResult in do
@@ -804,7 +804,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             $resultRoutes
-            let app = group { prefix = "" }
+            let app = router { path = "" }
               .get { path = "/u/:id",
                      handler = { m } -> load { id = m.param_or { name = "id", default = "?" } } }
               .otherwise { fallback = fallback }
@@ -830,7 +830,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             $resultRoutes
-            let app = group { prefix = "" }
+            let app = router { path = "" }
               .get { path = "/gw", handler = { m } -> upstream { id = "x" } }
               .otherwise { fallback = fallback }
             app { req = get_request { url = "/gw" } }.status
@@ -896,7 +896,7 @@ class HttpIntoResponseTest {
             """
             let load: { id: Str } -> Result Str Str = { id } ->
               if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
-            let app = group { prefix = "/api" }
+            let app = router { path = "/api" }
               .get { path = "/health", handler = { m } -> "ok" }
               .get { path = "/made", handler = { m } -> created { body = "made" } }
               .get { path = "/j", handler = { m } -> JString { val = "jay" } }
@@ -926,7 +926,7 @@ class HttpIntoResponseTest {
             """
             let upstream: { id: Str } -> Result Str HttpError = { id } ->
               Err { error = Timeout { url = "http://u/x", ms = 50 } }
-            let app = group { prefix = "" }
+            let app = router { path = "" }
               .get { path = "/ok", handler = { m } -> "fine" }
               .get { path = "/gw", handler = { m } -> upstream { id = "x" } }
               .otherwise { fallback = fallback }
@@ -942,10 +942,10 @@ class HttpIntoResponseTest {
     // ---- route groups ---------------------------------------------------
 
     private val nestedGroups = """
-        let users = group { prefix = "/users" }
+        let users = router { path = "/users" }
           .get { path = "/:id", handler = { m } -> m.param_or { name = "id", default = "?" } }
           .post { path = "", handler = { m } -> created { body = "made" } }
-        let app = group { prefix = "/api" }
+        let app = router { path = "/api" }
           .nest { group = users }
           .get { path = "/health", handler = { m } -> "ok" }
           .otherwise { fallback = fallback }
@@ -1012,10 +1012,10 @@ class HttpIntoResponseTest {
     fun `groups nest three deep`() {
         val r = run(
             """
-            let inner = group { prefix = "/c" }
+            let inner = router { path = "/c" }
               .get { path = "/leaf", handler = { m } -> "deep" }
-            let mid = group { prefix = "/b" }.nest { group = inner }
-            let app = group { prefix = "/a" }.nest { group = mid }
+            let mid = router { path = "/b" }.nest { group = inner }
+            let app = router { path = "/a" }.nest { group = mid }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/a/b/c/leaf" } } }
             """.trimIndent()
@@ -1028,7 +1028,7 @@ class HttpIntoResponseTest {
     fun `prefix joining does not double or drop slashes`() {
         val r = run(
             """
-            let app = group { prefix = "/a/" }
+            let app = router { path = "/a/" }
               .get { path = "/x", handler = { m } -> "slashy" }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/a/x" } } }
@@ -1042,7 +1042,7 @@ class HttpIntoResponseTest {
     fun `an empty prefix leaves paths alone`() {
         val r = run(
             """
-            let app = group { prefix = "" }
+            let app = router { path = "" }
               .get { path = "/bare", handler = { m } -> "bare" }
               .otherwise { fallback = fallback }
             body_of { resp = app { req = get_request { url = "/bare" } } }
@@ -1056,7 +1056,7 @@ class HttpIntoResponseTest {
     fun `a group converts to a table that composes with or_else`() {
         val r = run(
             """
-            let g = group { prefix = "/g" }
+            let g = router { path = "/g" }
               .get { path = "/x", handler = { m } -> "from-group" }
             let app = g.table {}
               .or_else { b = on_get { path = "/plain", handler = { m } -> "from-route" } }
@@ -1075,7 +1075,7 @@ class HttpIntoResponseTest {
     fun `an earlier group route shadows a later one`() {
         val r = run(
             """
-            let app = group { prefix = "/u" }
+            let app = router { path = "/u" }
               .get { path = "/:id", handler = { m } -> "wildcard" }
               .get { path = "/me", handler = { m } -> "specific" }
               .otherwise { fallback = fallback }
@@ -1090,7 +1090,7 @@ class HttpIntoResponseTest {
     fun `a group mixes answering and throwing handlers`() {
         val r = run(
             """
-            let app = group { prefix = "/m" }
+            let app = router { path = "/m" }
               .get { path = "/plain", handler = { m } -> "plain" }
               .get { path = "/boom", handler = catching { handler = { m } ->
                 throw { error = bad_request { body = "boom" } } } }
@@ -1232,5 +1232,25 @@ class HttpIntoResponseTest {
             """.trimIndent()
         )
         assertEquals("plain", r, "chunks would otherwise win and the new body never ship")
+    }
+
+    @Test
+    fun `a status-body record answers as a Response through a handler`() {
+        // `{ status, body }` is IntoResponse, so a handler answers a custom
+        // status without spelling out the five-field Response. Exercised through
+        // the `router {}.get {}.otherwise {}` builder (`router`, not `group`).
+        val r = run(
+            """
+            use std::effects::http_server::{ incoming }
+            let app = router { path = "" }
+              .get { path = "/made", handler = { m } -> { status = 201, body = "made" } }
+              .get { path = "/hi",   handler = { m } -> "hello" }
+              .otherwise { fallback = fallback }
+            let made = app { req = incoming { method = Get, url = "/made" } }
+            let hi   = app { req = incoming { method = Get, url = "/hi" } }
+            "$(int::to_str { n = made.status }) $(body_of { resp = made }) | $(int::to_str { n = hi.status }) $(body_of { resp = hi })"
+            """.trimIndent()
+        )
+        assertEquals("201 made | 200 hello", r, "a { status, body } record carries its status; a bare Str is a 200")
     }
 }
