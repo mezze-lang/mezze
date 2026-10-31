@@ -441,7 +441,12 @@ pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps }
 
 ## Wait for all promises; return each one's Result in input order. Never
 ## raises; the per-promise Result carries success/failure information.
-pub let all: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
+# The body performs exactly `Async` (await inside seq::map), so the latent row is
+# `<Async>`, not an open `<Async, ...>`. A spurious open tail on a no-callback
+# function's own latent leaks `<..., *>` onto a concrete caller under a `perform`
+# (showcase `run_async_js`) — the callback-sourced `<...>` fix (B-15) does not
+# reach a function that over-declares its OWN latent.
+pub let all: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async> = { ps } ->
   seq::map { xs = ps, f = { x } -> await { p = x } }
 
 ## Run two thunks concurrently, return both Results.

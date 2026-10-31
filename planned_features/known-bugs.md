@@ -140,11 +140,19 @@ fallback closes the built `app` and `run_server` comes out `<*>`. Tests:
 `EffectRowVarResolvesAtConcreteCallTest` (pure closes / effectful propagates /
 concrete control) + full tc + interp green; `#256`/`#215` guards intact.
 
-REMAINING (not this fix): the SAME raise-vs-union happens on other call paths that
-carry `<...>` — notably `Async.spawn` (an ability op), whose `<...>` is the
-documented spawn PERMISSION ([[rowvar_launders_closed]]). So the full showcase
-`main` still shows `<..., *>` via `run_async_js`. Applying the union at the
-ability-op / effect-op raise sites is the follow-up to close that too.
+SECOND ROOT (stdlib hygiene, FIXED for `all`): `Async.spawn` is NOT the problem —
+its OWN latent is CLOSED `<Async>` and its `<...>` is only on the callback param
+(B-15 handles that). The showcase `run_async_js` leak was `std::effects::async`'s
+`all : { ps } -> [Result …] <Async, ...>` over-declaring its OWN latent as OPEN
+when its body (`seq::map { f = {x} -> await … }`) performs exactly `<Async>`. A
+no-callback function's own `<...>` tail is not callback-sourced, so B-15 cannot
+reach it; closing the signature to `<Async>` grounds it and `run_async_js` / the
+full showcase `main` come out `<*>`. A SHARED compiler fix (ground any dangling
+open latent to the body at definition, in `unifyEffectRows`) was tried and REVERTED
+— it over-closes (`scoped` genuinely needs its tail open), so this is correctly
+per-signature stdlib hygiene. Siblings (`race`, `with_timeout`, `try_all`,
+`try_any`, `scope_cancel_all`, …) likely over-declare too but are not in the
+showcase path and must each be checked (a blanket close is unsafe — `scoped`).
 
 ### B-14 — an imported inherent method's `with C 'r` constraint leaks a PHANTOM onto a lambda-bound caller (FIXED)
 
