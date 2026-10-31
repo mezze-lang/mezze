@@ -455,20 +455,15 @@ class CheckCommand {
             println(ErrorFormatter.format(e, source))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.typechecker.module.ModuleError) {
-            if (jsonMode) {
-                jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromModuleError(e), exitCode = 4)
-            }
-            println(ErrorFormatter.formatModuleError(e))
-            kotlin.system.exitProcess(4)
+            // A module failed to resolve its imports, which aborted the whole
+            // app-entry walk. Rather than stop the project on this one error,
+            // fall back to checking every module independently: the broken import
+            // is still reported AND the modules that are fine are still
+            // typechecked, so one pass shows every module's status.
+            checkModulesResiliently(root, appConfig.name, jsonMode)
         } catch (e: com.mezze.language.typechecker.ModuleError) {
-            // Resolver-side module error (e.g. an ambiguous path) — convert and
-            // render it canonically instead of as a raw exception.
-            val converted = com.mezze.language.typechecker.module.ModuleLoader.toModuleError(e)
-            if (jsonMode) {
-                jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromModuleError(converted), exitCode = 4)
-            }
-            println(ErrorFormatter.formatModuleError(converted))
-            kotlin.system.exitProcess(4)
+            // Same, for a resolver-side error (e.g. an ambiguous path).
+            checkModulesResiliently(root, appConfig.name, jsonMode)
         } catch (e: com.mezze.language.parser.ParseException) {
             if (jsonMode) {
                 jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromParseException(e), exitCode = 3)
@@ -476,6 +471,79 @@ class CheckCommand {
             println(ParseErrorFormatter.format(e))
             kotlin.system.exitProcess(3)
         }
+    }
+
+    /**
+     * Resilient project check: typecheck every module under `src/` on its own,
+     * so one module's bad import no longer blanks the whole project. Each module
+     * is parsed and checked independently; its parse / type / import errors are
+     * reported against that module, and the loop carries on to the next. The
+     * result is one pass that lists every module's status — the broken ones with
+     * their errors, the good ones as passing — instead of stopping at the first.
+     *
+     * Only reached from the module-error fallback above; the clean app-entry
+     * path is unchanged.
+     */
+    private fun checkModulesResiliently(root: File, appName: String?, jsonMode: Boolean): Nothing {
+        val srcDir = File(root, "src")
+        val base = if (srcDir.isDirectory) srcDir else root
+        val files = base.walkTopDown()
+            .onEnter { !it.name.startsWith(".") }
+            .filter { it.isFile && it.extension == "mz" }
+            .sortedBy { it.path }
+            .toList()
+
+        val parser = MezzeParser()
+        val jsonDiags = mutableListOf<DiagnosticJson>()
+        val out = StringBuilder()
+        var failed = 0
+
+        for (f in files) {
+            val rel = f.relativeTo(root).path
+            val src = f.readText()
+            val parseResult = parser.parseWithRecovery(src, f.name)
+            val errs = StringBuilder()
+            try {
+                val r = TypeChecker(strictTopLevel = true)
+                    .checkParsedModule(parseResult.module, root.toPath(), enablePrelude = true)
+                if (parseResult.errors.isNotEmpty()) {
+                    errs.append(ParseErrorFormatter.formatAll(parseResult.errors))
+                    if (jsonMode) jsonDiags += parseResult.errors.map { JsonDiagnosticFormatter.fromParseException(it) }
+                }
+                if (r is TypeChecker.TypeCheckResult.Failure) {
+                    errs.append(TypeCheckRunner.formatErrors(r, src))
+                    if (jsonMode) jsonDiags += r.errors.map { JsonDiagnosticFormatter.fromTypeCheckError(it) }
+                }
+            } catch (e: TypeCheckError) {
+                errs.append(ErrorFormatter.format(e, src))
+                if (jsonMode) jsonDiags += JsonDiagnosticFormatter.fromTypeCheckError(e)
+            } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+                errs.append(ErrorFormatter.formatModuleError(e))
+                if (jsonMode) jsonDiags += JsonDiagnosticFormatter.fromModuleError(e)
+            } catch (e: com.mezze.language.typechecker.ModuleError) {
+                val c = com.mezze.language.typechecker.module.ModuleLoader.toModuleError(e)
+                errs.append(ErrorFormatter.formatModuleError(c))
+                if (jsonMode) jsonDiags += JsonDiagnosticFormatter.fromModuleError(c)
+            } catch (e: com.mezze.language.parser.ParseException) {
+                errs.append(ParseErrorFormatter.format(e))
+                if (jsonMode) jsonDiags += JsonDiagnosticFormatter.fromParseException(e)
+            }
+
+            if (errs.isNotEmpty()) {
+                failed++
+                out.append("✗ ").append(rel).append('\n').append(errs).append('\n')
+            } else {
+                out.append("✓ ").append(rel).append('\n')
+            }
+        }
+
+        if (jsonMode) {
+            jsonExitWith(null, appName, jsonDiags, exitCode = if (failed > 0) 4 else 0)
+        }
+        print(out)
+        val passed = files.size - failed
+        println("\n$passed of ${files.size} modules passed" + if (failed > 0) " · $failed with errors" else "")
+        kotlin.system.exitProcess(if (failed > 0) 4 else 0)
     }
 
     private fun printExplainHint(codes: List<com.mezze.language.parsedast.diagnostics.ErrorCode>) {
