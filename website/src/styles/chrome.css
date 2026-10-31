@@ -105,7 +105,9 @@
    should show the same pointer as the text beside it. Standing alone it is
    decorative and inherits whatever the parent has. */
 .mascot.is-static { cursor: inherit; }
-.mascot:not(.is-static):hover { transform: rotate(-6deg) scale(1.06); }
+/* The hero olive is decorative now (no click), but the little hover tilt is a
+   nice touch — keep it on the hero without the clickable pointer cursor. */
+.hero-mascot .mascot:hover { transform: rotate(-6deg) scale(1.06); }
 .mascot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 8px; }
 
 .mascot img {
