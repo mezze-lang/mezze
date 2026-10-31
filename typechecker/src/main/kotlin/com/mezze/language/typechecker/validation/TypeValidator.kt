@@ -14,6 +14,7 @@ import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 import com.mezze.language.typechecker.WellKnownHashConstants
+import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedModule
@@ -319,9 +320,42 @@ class TypeValidator(
         val annotations = implInfo.targetTypeAnnotations ?: return@any false
         if (annotations.size != concreteTypes.size) return@any false
         val bindings = mutableMapOf<String, MezzeType>()
+        // B-13: the impl's target is a type its OWN module declares, which the
+        // consumer need not have imported. `typeDeclarations` is the consumer's,
+        // so a target like `StatusBody` is absent and the annotation cannot
+        // resolve — a bare `{ status, body }` then fails to match
+        // `impl IntoResponse for StatusBody` purely for want of an import. A record
+        // alias is transparent, so the shape is what matters, not whether the
+        // alias is in scope. Resolve any unresolved target name GLOBALLY and hand
+        // that augmented map to the matcher; `typeMatchesAnnotation` /
+        // `typeMatchesDeclaration` still keep a record structural and a
+        // newtype/variant nominal, so a bare record never satisfies a nominal
+        // target. (Sibling fix in AbilityChecker.checkAbilityImplementationUncached.)
+        val matchDecls = augmentTargetDeclarations(annotations)
         concreteTypes.zip(annotations).all { (t, a) ->
-            TypeAnnotationMatcher.typeMatchesAnnotation(t, a, typeDeclarations, implInfo.typeVars, bindings)
+            TypeAnnotationMatcher.typeMatchesAnnotation(t, a, matchDecls, implInfo.typeVars, bindings)
         }
+    }
+
+    /**
+     * B-13. The consumer's `typeDeclarations` plus any impl-target name it lacks,
+     * resolved globally from the module that declares it. An impl target is always
+     * declared SOMEWHERE; whether the consumer imported it must not decide a match.
+     */
+    private fun augmentTargetDeclarations(
+        annotations: List<ParsedTypeAnnotation>
+    ): Map<String, ParsedTypeDecl> {
+        val unresolved = annotations
+            .filterIsInstance<ParsedNamedType>()
+            .map { it.name }
+            .filter { it !in typeDeclarations }
+            .distinct()
+        if (unresolved.isEmpty()) return typeDeclarations
+        val augmented = typeDeclarations.toMutableMap()
+        for (name in unresolved) {
+            ModuleResolver.lookupTypeDeclaration(name)?.let { augmented[name] = it }
+        }
+        return augmented
     }
 
     /**

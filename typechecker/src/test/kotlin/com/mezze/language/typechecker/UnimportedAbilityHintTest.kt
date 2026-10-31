@@ -150,6 +150,139 @@ class UnimportedAbilityHintTest {
     }
 
     @Test
+    fun `a bare record satisfies an impl on a transparent record alias without importing it`() {
+        // B-13. `recdef` declares a transparent `type Card = { … }` and a
+        // NON-blanket `impl Render for Card`; `recwrap` exposes `show` constrained
+        // `with Render 'a`. The consumer imports only `show` and hands it an
+        // ANONYMOUS `{ title, n }` — it never names `Card` or `Render`. A record
+        // alias is transparent, so the bare record is the same shape and must
+        // discharge `Render` structurally, the match reaching the impl even though
+        // `Card` is not in the consumer's scope. (Before B-13 the impl target
+        // `Card` resolved only against the consumer's imports, so an unimported
+        // alias plus a nameless record could not match and this was rejected.)
+        writeModule(
+            "recdef",
+            """
+            ability Render for 'a where {
+              render: { it: 'a } -> Str,
+            }
+
+            pub type Card = { title: Str, n: Int }
+
+            impl Render for Card where {
+              render: { it: Card } -> Str = { it } -> it.title,
+            }
+            """,
+        )
+        writeModule(
+            "recwrap",
+            """
+            use recdef::{ Render }
+
+            pub let show: { c: 'a } with Render 'a -> Str = { c } -> c.render {}
+            """,
+        )
+        val r = report(
+            """
+            use recwrap::{ show }
+
+            let go = {} -> show { c = { title = "hi", n = 1 } }
+
+            go {}
+            """,
+        )
+        assertEquals(
+            "(no error)", r.message,
+            "a bare record must satisfy a transparent-record impl without importing the alias",
+        )
+    }
+
+    @Test
+    fun `a bare record dispatches an ability method against a transparent alias impl`() {
+        // B-13, the direct-call half, and the user's first case: a bare record and a
+        // transparent record alias must behave the same for an ability. The ability
+        // `Render` IS imported — it must be, to name `.render` — but the transparent
+        // alias `Card` the impl targets is NOT. Calling `.render` on a bare
+        // `{ title, n }` still finds `impl Render for Card` by shape. (A guard: the
+        // direct-call path already resolves this through bare-record adoption, so it
+        // held before B-13 too; the constraint-discharge case above is the one that
+        // did not, and is what the AbilityChecker/TypeValidator fix restores.)
+        writeModule(
+            "recdef",
+            """
+            ability Render for 'a where {
+              render: { it: 'a } -> Str,
+            }
+
+            pub type Card = { title: Str, n: Int }
+
+            impl Render for Card where {
+              render: { it: Card } -> Str = { it } -> it.title,
+            }
+            """,
+        )
+        val r = report(
+            """
+            use recdef::{ Render }
+
+            let go = {} -> do
+              let x = { title = "hi", n = 1 }
+              x.render {}
+
+            go {}
+            """,
+        )
+        assertEquals(
+            "(no error)", r.message,
+            "a bare record must dispatch a transparent-alias impl's method without importing the alias",
+        )
+    }
+
+    @Test
+    fun `a bare record does NOT satisfy an impl on a nominal newtype`() {
+        // The guard for B-13: records are transparent, newtypes are OPAQUE. The
+        // augmented global lookup resolves the impl target either way, but
+        // `typeMatchesDeclaration` still matches a newtype only by its nominal
+        // identity — a bare record carries none, so it must be refused. Were this
+        // to pass, the fix would have made every nominal type structural.
+        writeModule(
+            "nomdef",
+            """
+            ability Stamp for 'a where {
+              stamp: { it: 'a } -> Str,
+            }
+
+            pub newtype Seal = { title: Str, n: Int }
+
+            impl Stamp for Seal where {
+              stamp: { it: Seal } -> Str = { it } -> "sealed",
+            }
+            """,
+        )
+        writeModule(
+            "nomwrap",
+            """
+            use nomdef::{ Stamp }
+
+            pub let mark: { c: 'a } with Stamp 'a -> Str = { c } -> c.stamp {}
+            """,
+        )
+        val r = report(
+            """
+            use nomwrap::{ mark }
+
+            let go = {} -> mark { c = { title = "hi", n = 1 } }
+
+            go {}
+            """,
+        )
+        assertTrue(
+            r.message.contains("Stamp"),
+            "a bare record must not satisfy a newtype impl; expected a Stamp error, got: ${r.message}",
+        )
+    }
+
+    @Test
     fun `an ability nothing implements still says to implement it`() {
         // The old message is right in the case it was written for, and stays:
         // `Quiet` has no impl anywhere, so there is no import to suggest.

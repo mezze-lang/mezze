@@ -729,8 +729,38 @@ class AbilityChecker internal constructor(
                 wanted.none { it == null } && wanted == hashes
             }
 
+            // B-13: the impl's TARGET is a type the impl's OWN module declares, but
+            // the consumer may not have imported it. `registry.typeDeclarations` is
+            // the consumer's, so a target like `StatusBody` is absent and the
+            // annotation cannot resolve — an anonymous `{ status, body }` then fails
+            // to match `impl IntoResponse for StatusBody` purely for lack of an
+            // import. Records are transparent: a bare record and a transparent record
+            // alias are the same shape, so the match must not hinge on whether the
+            // alias name is in scope. Resolve any unresolved target name GLOBALLY (it
+            // is declared SOMEWHERE — in the impl's module) and hand that augmented
+            // map to the matcher. `typeMatchesDeclaration` already keeps the
+            // distinction: a record decl matches a record by its fields (structural),
+            // while a newtype/variant decl matches only by hash/name (nominal), so a
+            // bare record still never satisfies a nominal target.
+            val matchDecls = run {
+                val unresolved = annotations
+                    .filterIsInstance<ParsedNamedType>()
+                    .map { it.name }
+                    .filter { it !in registry.typeDeclarations }
+                    .distinct()
+                if (unresolved.isEmpty()) {
+                    registry.typeDeclarations
+                } else {
+                    val augmented = registry.typeDeclarations.toMutableMap()
+                    for (name in unresolved) {
+                        ModuleResolver.lookupTypeDeclaration(name)?.let { augmented[name] = it }
+                    }
+                    augmented
+                }
+            }
+
             val matches = identityMatches || unwrappedTypeArgs.zip(annotations).all { (actualType, annotation) ->
-                TypeAnnotationMatcher.typeMatchesAnnotation(actualType, annotation, registry.typeDeclarations, implInfo.typeVars, typeVarBindings)
+                TypeAnnotationMatcher.typeMatchesAnnotation(actualType, annotation, matchDecls, implInfo.typeVars, typeVarBindings)
             }
 
             if (!matches) return@any false
