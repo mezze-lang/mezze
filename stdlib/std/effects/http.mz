@@ -218,10 +218,8 @@ pub let make_request: { method: Method, url: Str } -> Request = { method, url } 
     chunks = None,
   }
 
-## Build a fully specified request. Used by impl Client's verb shortcuts;
-## the explicit Request return type pins the impl op so cross-module
-## chain dispatch can recover the nominal shape (see #182 notes on the
-## Client impl).
+## Build a fully specified request (used by Client's verb shortcuts); the
+## explicit Request return type keeps cross-module chain dispatch working.
 pub let make_full_request
   : { method: Method, url: Str, headers: Map Str Str, body: Option Bytes, timeout_ms: Option Int }
   -> Request

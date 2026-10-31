@@ -22,7 +22,7 @@
 ##   - decompose gives an atomic {year..nanos} snapshot in a chosen Zone.
 ##   - All errors are Result Instant Str / Result Zone Str at the boundary.
 ##
-## Backed by java.time.Instant / Duration / ZoneId. See #72.
+## Backed by java.time.Instant / Duration / ZoneId.
 use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::default::{ Default }
 use std::abilities::numeric::{ NumAdd, NumSub }

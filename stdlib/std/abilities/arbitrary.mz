@@ -281,10 +281,9 @@ impl Arbitrary for NonEmptyList 'a where {
     }
 }
 
-## No impl for `Option` or `Result` is written here: the compiler derives their
-## instance where it is used, as for any declared variant shape, so both
-## constructors are drawn with the deriver's weighting. `ArbitraryCoverageTest`
-## holds that they keep working.
+## `Option` and `Result` need no impl here — the compiler derives their instance
+## where used, as for any declared variant, so both constructors are drawn with
+## the deriver's weighting.
 
 ## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
 ## exactly as it does for `Embeddable`.

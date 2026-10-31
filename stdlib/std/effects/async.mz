@@ -804,9 +804,9 @@ pub let scope_is_cancelled: { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
   __native_async_scope_is_cancelled { sc = sc }
 
 ## Wait for every Promise in `ps` to settle, or `ms` milliseconds to elapse —
-## whichever comes first. Returns True if all settled in time; False if the
-## deadline fired (and the scope is cancelled so remaining children unwind).
-## #253: single-call deadline join over a Scope's spawned children.
+## Single-call deadline join over a Scope's spawned children: wait for all, or
+## the deadline. Returns True if all settled in time; False if the deadline
+## fired (and the scope is cancelled so remaining children unwind).
 pub let scope_join_until
   : { sc: Scope 'a, ps: [Promise 'b], ms: Int }
   -> Bool <Async, ...>

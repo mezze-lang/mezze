@@ -296,10 +296,10 @@ pub let both3
 ## the pool's parallelism level, sums each chunk on one FJP worker via
 ## SIMD, and combines. One flat join level instead of log₂(N) — much
 ## faster than delegating to `reduce`. Falls back to a scalar loop
-## when the seq isn't a native LongSeqStorage. #69.
+## when the seq isn't a native LongSeqStorage.
 pub let sum: { xs: [Int] } -> Int <Parallel> = { xs } -> __native_parallel_sum_long { xs = xs }
 
-## Parallel product of a Seq of Ints. Same shape as `sum`. #69.
+## Parallel product of a Seq of Ints. Same shape as `sum`.
 pub let product: { xs: [Int] } -> Int <Parallel> = { xs } ->
   __native_parallel_product_long { xs = xs }
 

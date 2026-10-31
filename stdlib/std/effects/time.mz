@@ -1,6 +1,6 @@
 ## Time effect — clock reads and sleep. Three ops, two impls.
 ##
-## Design (#72, #75):
+## Design:
 ##
 ##   effect Time { now, monotonic, sleep }
 ##

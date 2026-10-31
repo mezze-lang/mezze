@@ -164,8 +164,7 @@ pub let default_server_config: ServerConfig = {
 ##
 ## It outlives the handler. Helidon keeps the connection's content readable
 ## while the response is written, so a handler may hand its request's `chunks`
-## straight on as the response's and get a pass-through that buffers nothing —
-## measured at 20 B, 40 KB and 400 KB. `HttpStreamedUploadTest` pins it.
+## straight on as the response's and get a pass-through that buffers nothing.
 pub newtype BodyReader = __NativeBodyReader
 
 ## How much is asked for per read. One chunk is the peak cost of streaming, so

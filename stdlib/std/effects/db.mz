@@ -76,12 +76,9 @@ pub type Rows = {
 ## the shape asked for.
 pub type DbError = | Unavailable { msg: Str }, Rejected { sql: Str, msg: Str }, Conflict { msg: Str }, Timeout { ms: Int }, Decode { msg: Str } |
 
-## Run queries.
-##
-## `tx`'s body row is `<...>`, and that is load-bearing for the same reason the
-## server handler's is: a body may perform whatever the surrounding program
-## installed — `Log`, `Time`, another `Db` — and those effects escape through
-## `tx` to whoever installed them rather than being swallowed here.
+## Run queries. `tx`'s body row is `<...>`, so a transaction body may perform
+## whatever the surrounding program installed (`Log`, `Time`, another `Db`) and
+## those effects escape through `tx` rather than being swallowed.
 effect Db where {
   run:   { q: Query } -> Result Rows DbError <Db>,
   apply: { q: Query } -> Result { changed: Int } DbError <Db>,

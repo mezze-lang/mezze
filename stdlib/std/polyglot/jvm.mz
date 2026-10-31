@@ -225,19 +225,9 @@ impl EncodeOption for JvmC having 'out = JvmForeign where {
 
 ## Tier 2: encode, container shapes
 ##
-## These used to be absent, on the reasoning that a Foreign "doesn't naturally
-## carry those shapes without a specific Java container choice (ArrayList vs
-## LinkedList vs int[], HashMap vs LinkedHashMap, …)". That dilemma is gone:
-## `jvm_list` / `jvm_dict` do not pick a Java class at all. They build an
-## interop VIEW over the already-encoded elements, which the guest reads on
-## demand — so there is no container to choose, and no copy to pay for.
-##
-## The cost of not having them was not just an unsupported shape, it was a slow
-## one: with no `EncodeSequence`, `[1, 2, 3].to_jvm {}` failed to auto-derive, and
-## the only way to hand a guest a sequence was to PRINT IT INTO GUEST SOURCE and
-## have the guest parse it back — O(n) string building plus an O(n) parse, about
-## 19 us fixed and 0.085 us per element (bench/cases/polyglot_seq_crossing).
-## Through the view it is O(1): nothing is converted until the guest asks.
+## `jvm_list` / `jvm_dict` build an interop VIEW over the already-encoded
+## elements, which the guest reads on demand — no Java container class is chosen
+## and nothing is copied until the guest asks (an O(1) crossing).
 
 impl EncodeSequence for JvmC having 'out = JvmForeign where {
   encode_sequence = { it, elems, ctx } -> jvm_list { elems = elems },
