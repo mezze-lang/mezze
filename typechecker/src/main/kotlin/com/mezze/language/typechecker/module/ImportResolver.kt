@@ -44,7 +44,9 @@ class ImportResolver(
         return if (errors.isEmpty()) {
             ImportResolutionResult.Success(importContext, loadedModules)
         } else {
-            ImportResolutionResult.Failure(errors)
+            // Carry the partial context + loaded modules so the caller can still
+            // typecheck the body from the imports that resolved.
+            ImportResolutionResult.Failure(errors, importContext, loadedModules)
         }
     }
 

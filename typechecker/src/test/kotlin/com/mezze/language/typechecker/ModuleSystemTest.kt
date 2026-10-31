@@ -4,6 +4,8 @@ import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.module.ModuleError
+import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -89,11 +91,14 @@ class ModuleSystemTest {
         
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        val exception = assertThrows(ModuleError.ModuleNotFound::class.java) {
+        // An import failure is now a collected diagnostic (M0801), surfaced as a
+        // TypeCheckError, rather than a thrown ModuleError — so the rest of the
+        // module is still checked. Same error, reported not aborted.
+        val exception = assertThrows(TypeCheckError::class.java) {
             typeChecker.typeCheck(parsedModule, tempDir)
         }
-
-        assertTrue(exception.message!!.contains("non_existent::module"))
+        assertEquals(ErrorCode.M0801_MODULE_NOT_FOUND, exception.code)
+        assertTrue(exception.message.contains("non_existent::module"))
     }
 
     @Test
@@ -145,14 +150,13 @@ class ModuleSystemTest {
 
         val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
-        val exception = assertThrows(ModuleError.PrivateExport::class.java) {
+        val exception = assertThrows(TypeCheckError::class.java) {
             typeChecker.typeCheck(parsedModule, srcDir)
         }
-
-        // Verify the error contains useful info
-        assertEquals("subtract", exception.exportName)
-        assertEquals("math", exception.modulePath)
-        assertTrue(exception.message!!.contains("not public"))
+        // Verify the error contains useful info (M0803 covers private/not-exported)
+        assertEquals(ErrorCode.M0803_NOT_EXPORTED, exception.code)
+        assertTrue(exception.message.contains("subtract"))
+        assertTrue(exception.message.contains("not public"))
     }
 
     @Test
@@ -177,13 +181,12 @@ class ModuleSystemTest {
 
         val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
-        val exception = assertThrows(ModuleError.ExportNotFound::class.java) {
+        val exception = assertThrows(TypeCheckError::class.java) {
             typeChecker.typeCheck(parsedModule, srcDir)
         }
-
         // Verify the error contains useful info
-        assertEquals("multiply", exception.exportName)
-        assertEquals("math", exception.modulePath)
+        assertEquals(ErrorCode.M0803_NOT_EXPORTED, exception.code)
+        assertTrue(exception.message.contains("multiply"))
     }
     
     @Test
@@ -210,13 +213,46 @@ class ModuleSystemTest {
         
         val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
-        val exception = assertThrows(ModuleError.InternalModuleAccess::class.java) {
+        val exception = assertThrows(TypeCheckError::class.java) {
             typeChecker.typeCheck(parsedModule, srcDir)
         }
-        
-        assertTrue(exception.message!!.contains("internal"))
+        assertEquals(ErrorCode.M0803_NOT_EXPORTED, exception.code)
+        assertTrue(exception.message.contains("internal"))
     }
-    
+
+    @Test
+    fun `a bad import does not stop the rest of the module being checked`() {
+        // Resilience guard: a `use … { missing }` is REPORTED, and the module's
+        // other declarations are still typechecked — a sibling's own type error
+        // shows up too, rather than the bad import aborting the whole module.
+        // Without the fix the import error threw and the body was never reached,
+        // so the `1 + "x"` error below went unreported.
+        val srcDir = tempDir.resolve("src")
+        Files.createDirectories(srcDir)
+        Files.writeString(srcDir.resolve("math.mz"), "pub let add = { x, y } -> x + y")
+
+        val main = """
+            use math::{ add, multiply }
+
+            let bad: {} -> Int = {} -> 1 + "x"
+        """.trimIndent()
+        Files.writeString(srcDir.resolve("main.mz"), main)
+        val parsed = parser.parseParsedModule(main, "main.mz")
+
+        val result = typeChecker.checkParsedModule(parsed, srcDir, enablePrelude = true)
+        val failure = result as TypeChecker.TypeCheckResult.Failure
+        val codes = failure.errors.map { it.code }
+        assertTrue(
+            codes.contains(ErrorCode.M0803_NOT_EXPORTED),
+            "the missing import `multiply` is reported: $codes",
+        )
+        assertTrue(
+            failure.errors.any { it.message.contains("+") || it.message.contains("NumAdd") },
+            "the body's own type error is ALSO reported (module still checked): " +
+                failure.errors.map { it.message },
+        )
+    }
+
     @Test
     fun testTypeConstructorImport() {
         // Create a module with variant type
@@ -351,10 +387,11 @@ class ModuleSystemTest {
 
         val parsedModule = parser.parseParsedModule(moduleA, "test.mz")
 
-        // Should throw ModuleNotFound since module B doesn't exist
-        assertThrows(ModuleError.ModuleNotFound::class.java) {
+        // Module B doesn't exist — reported as M0801, collected not thrown.
+        val exception = assertThrows(TypeCheckError::class.java) {
             typeChecker.typeCheck(parsedModule, tempDir)
         }
+        assertEquals(ErrorCode.M0801_MODULE_NOT_FOUND, exception.code)
     }
     
     @Test
@@ -982,9 +1019,11 @@ class ModuleSystemTest {
         writeModule("main", main)
 
         val parsed = parser.parseParsedModule(main.trimIndent(), "test.mz")
-        // The missing import surfaces as M0803 ExportNotFound (a ModuleError), the
-        // same as any absent export — the re-export path must not swallow it.
-        val err = assertThrows(ModuleError.ExportNotFound::class.java) { typeChecker.typeCheck(parsed, tempDir) }
+        // The missing import surfaces as an M0803 diagnostic (collected, not
+        // thrown), the same as any absent export — the re-export path must not
+        // swallow it.
+        val err = assertThrows(TypeCheckError::class.java) { typeChecker.typeCheck(parsed, tempDir) }
+        assertEquals(ErrorCode.M0803_NOT_EXPORTED, err.code)
         assertTrue(err.message.contains("nope"), "a name neither declared nor re-exported must still error")
     }
 }

@@ -257,7 +257,14 @@ sealed class ImportResolutionResult {
     ) : ImportResolutionResult()
 
     data class Failure(
-        val errors: List<ModuleError>
+        val errors: List<ModuleError>,
+        // The imports that DID resolve, and the modules loaded so far. Carried so
+        // the typechecker can still build the body from what resolved — a bad
+        // import no longer blanks the whole module (see TypeChecker's import
+        // Failure branch); the declarations that don't need the missing symbol
+        // still check, like a plain type error elsewhere in the module.
+        val partialContext: ModuleImportContext = ModuleImportContext.empty(),
+        val loadedModules: Map<ModulePath, TypedModuleResult> = emptyMap(),
     ) : ImportResolutionResult()
 }
 

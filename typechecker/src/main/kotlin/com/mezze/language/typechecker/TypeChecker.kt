@@ -308,6 +308,12 @@ class TypeChecker(
 
         var importContext: ModuleImportContext? = null
         var loadedModules: Map<ModulePath, TypedModuleResult> = emptyMap()
+        // Import-resolution errors from a module whose imports only partially
+        // resolved. Folded into `collectedErrors` once it exists, so they are
+        // reported alongside any body errors and force a Failure result — the
+        // module is still checked for everything else (see the import Failure
+        // branch below).
+        val importFailureErrors = mutableListOf<TypeCheckError>()
         val shouldInjectPrelude = !ModulePathConventions.isStdlib(currentModulePath)
         val hasUserImports = hasImportsParsed(module)
         // Not wrapped in `try { … } catch (_: Exception) { null }`. Touching the
@@ -359,45 +365,61 @@ class TypeChecker(
                 ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
             }
 
+            // Apply a resolved import context: fold in the prelude + codec impls
+            // and merge into the parent scope. Shared by both branches so the body
+            // is built the same way whether every import resolved or only some did.
+            fun applyResolvedImports(resolved: ModuleImportContext): TypingContext {
+                importContext = resolved
+                val localTypeNames = module.decls
+                    .filterIsInstance<ParsedTypeDecl>()
+                    .map { it.name }
+                    .toSet()
+                val builtinNames = BuiltinTypes.allBuiltinTypeNames
+                if (shouldInjectPrelude) {
+                    val preludeContext = PhaseTiming.phase(currentModulePath, "prelude") { loadPreludeModulesInternal(importResolver, importContext!!) }
+                    importContext = importContext!!.merge(preludeContext)
+                }
+                // Cross-module `from_json`/`to_json` wrapper hole: a wrapper such
+                // as `decw : … with FromJson 'a Str -> …` compiles in its own
+                // module, but a module that only imports the WRAPPER (not the
+                // codec module) can't discharge the wrapper's `FromJson`/`Decode`
+                // constraint — the impls never travel with the import, so the
+                // ability check reports "does not implement FromJson". Make the
+                // codec blanket IMPLS visible for constraint solving here (never
+                // the ability decls — see loadCodecImplContext), but ONLY when
+                // this module does NOT
+                // already have codec in scope (an explicit `use std::codec::*`
+                // already brings them, and re-injecting a second copy perturbs
+                // the codec-derivation path). Scoped to a user-module typecheck —
+                // never the precompiled prelude/stdlib — so derivation ordering
+                // for codec-importing code is untouched.
+                if (shouldInjectPrelude && !hasCodecInScope(importContext!!)) {
+                    PhaseTiming.phase(currentModulePath, "codec-context") { loadCodecImplContext(importResolver) }?.let {
+                        importContext = importContext!!.merge(it)
+                    }
+                }
+                val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames + builtinNames
+                return mergeImportContext(parentContext, importContext!!, inScopeNames)
+            }
+
             when (importResult) {
                 is ImportResolutionResult.Success -> {
-                    importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
-
-                    val localTypeNames = module.decls
-                        .filterIsInstance<ParsedTypeDecl>()
-                        .map { it.name }
-                        .toSet()
-                    val builtinNames = BuiltinTypes.allBuiltinTypeNames
-                    if (shouldInjectPrelude) {
-                        val preludeContext = PhaseTiming.phase(currentModulePath, "prelude") { loadPreludeModulesInternal(importResolver, importContext!!) }
-                        importContext = importContext!!.merge(preludeContext)
-                    }
-                    // Cross-module `from_json`/`to_json` wrapper hole: a wrapper such
-                    // as `decw : … with FromJson 'a Str -> …` compiles in its own
-                    // module, but a module that only imports the WRAPPER (not the
-                    // codec module) can't discharge the wrapper's `FromJson`/`Decode`
-                    // constraint — the impls never travel with the import, so the
-                    // ability check reports "does not implement FromJson". Make the
-                    // codec blanket IMPLS visible for constraint solving here (never
-                    // the ability decls — see loadCodecImplContext), but ONLY when
-                    // this module does NOT
-                    // already have codec in scope (an explicit `use std::codec::*`
-                    // already brings them, and re-injecting a second copy perturbs
-                    // the codec-derivation path). Scoped to a user-module typecheck —
-                    // never the precompiled prelude/stdlib — so derivation ordering
-                    // for codec-importing code is untouched.
-                    if (shouldInjectPrelude && !hasCodecInScope(importContext!!)) {
-                        PhaseTiming.phase(currentModulePath, "codec-context") { loadCodecImplContext(importResolver) }?.let {
-                            importContext = importContext!!.merge(it)
-                        }
-                    }
-                    val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames + builtinNames
-                    mergeImportContext(parentContext, importContext!!, inScopeNames)
+                    applyResolvedImports(importResult.importContext)
                 }
                 is ImportResolutionResult.Failure -> {
-                    throw importResult.errors.firstOrNull()
-                        ?: TypeCheckError("Import failed with unknown error")
+                    // A module's imports did not fully resolve. Record the import
+                    // errors — they flow into `collectedErrors` below, so they are
+                    // reported and force a Failure result — but keep going: build
+                    // the body from the imports that DID resolve, so declarations
+                    // that don't reference the missing symbol still typecheck. A
+                    // bad `use` now behaves like any other error in the module (the
+                    // rest is still checked) rather than aborting it whole, which
+                    // is what makes `mez check`/`dev`/the LSP report per-declaration
+                    // diagnostics instead of going dark on one bad import.
+                    loadedModules = importResult.loadedModules
+                    importFailureErrors.addAll(importResult.errors.map { it.toImportTypeCheckError() })
+                    applyResolvedImports(importResult.partialContext)
                 }
             }
         } else {
@@ -532,6 +554,9 @@ class TypeChecker(
         val collectedTypeCheckErrors = programConstraintResult.collectedTypeCheckErrors
 
         val collectedErrors = mutableListOf<TypeCheckError>()
+        // Import failures reported first: they are the root of whatever else the
+        // body check turns up, and they force this module to a Failure result.
+        collectedErrors.addAll(importFailureErrors)
 
         if (collectedTypeCheckErrors.isNotEmpty()) {
             collectedErrors.addAll(collectedTypeCheckErrors.map { e ->
@@ -1319,6 +1344,29 @@ class TypeChecker(
 
     private fun hasCodecInScope(ctx: ModuleImportContext): Boolean =
         ctx.importedAbilities.keys.any { it in codecAbilityNames }
+
+    /**
+     * An import-resolution [ModuleError] as a [TypeCheckError], so a failed import
+     * joins the module's own diagnostics (with its code, hints and span intact)
+     * instead of aborting the check. Only the subtypes that carry a [Loc] anchor
+     * the caret; the rest point at the module as a whole.
+     */
+    private fun com.mezze.language.typechecker.module.ModuleError.toImportTypeCheckError(): TypeCheckError {
+        val loc = when (this) {
+            is com.mezze.language.typechecker.module.ModuleError.ExportNotFound -> this.loc
+            is com.mezze.language.typechecker.module.ModuleError.PrivateExport -> this.loc
+            is com.mezze.language.typechecker.module.ModuleError.InternalModuleAccess -> this.loc
+            else -> null
+        }
+        return TypeCheckError(
+            phase = "ImportResolution",
+            message = message ?: "import failed",
+            loc = loc,
+            code = code,
+            hints = hints,
+            fixHints = fixHints,
+        )
+    }
 
     private var cachedCodecImplContext: ModuleImportContext? = null
 

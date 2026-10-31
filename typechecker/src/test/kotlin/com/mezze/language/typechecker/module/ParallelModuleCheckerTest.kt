@@ -98,7 +98,15 @@ class ParallelModuleCheckerTest {
         } catch (e: ModuleError) {
             return emptyMap<String, String>() to "${e::class.simpleName}: ${e.message}"
         }
-        if (result !is TypeChecker.TypeCheckResult.Success) return emptyMap<String, String>() to result.toString()
+        if (result !is TypeChecker.TypeCheckResult.Success) {
+            // Compare the error MESSAGES (sorted), not the whole result: a Failure's
+            // typedModule embeds fresh TypeVar ids that differ run to run, so
+            // result.toString() is non-deterministic. The messages are stable, and
+            // a broken module now reports its errors (collected) rather than throwing.
+            val failure = result as TypeChecker.TypeCheckResult.Failure
+            val msgs = failure.errors.map { it.message }.sorted().joinToString("\n")
+            return emptyMap<String, String>() to msgs
+        }
         val types = HashMap<String, String>()
         val modules = ModuleTypeChecker.getAllCachedModules().filterKeys { !it.startsWith("std::") }
         for ((path, m) in modules) {
