@@ -75,11 +75,7 @@ pub let insert: { m: Map 'k 'v, k: 'k, v: 'v } with Eq 'k, Hash 'k -> Map 'k 'v 
 ##
 ##   map::of { of = [{ k = "a", v = 1 }, { k = "b", v = 2 }] }
 #
-# A map had NO literal form: building one meant nesting `insert` inside
-# `insert` inside `empty`, once per entry. The native was already here, added
-# so a codec could decode INTO a map, and simply was not exposed.
-# A later entry wins over an earlier one with the same key, as repeated
-# `insert` would.
+# a later entry wins over an earlier one with the same key, as repeated `insert` would
 pub let of: { of: [{ k: 'k, v: 'v }] } with Eq 'k, Hash 'k -> Map 'k 'v = { of } ->
   __native_map_from_seq { xs = of }
 

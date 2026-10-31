@@ -98,10 +98,6 @@ pub let contains: { s: Str, substring: Str } -> Bool = { s, substring } ->
 
 ## Repeat the string n times. `n <= 0` gives the empty string.
 #
-# `__native_string_repeat` already existed and this was not using it: the Mezze
-# version called itself once per copy, so it overflowed the stack at a couple of
-# thousand — before the result is big enough to be worth building — and
-# allocated an intermediate per copy on the way.
 pub let repeat: { s: Str, n: Int } -> Str = { s, n } ->
   __native_string_repeat { s = s, n = n }
 

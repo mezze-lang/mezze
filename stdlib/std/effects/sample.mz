@@ -2,9 +2,6 @@
 
 use std::effects::random::{ Random, random_int }
 use std::nat::{ Nat }
-# The arithmetic below needs Int's numeric impls in scope. Importing `std::nat`
-# alone brings only Nat's, and `bound - 1` then reports no `NumSub` for Int —
-# the same trap `std::abilities::arbitrary` documents.
 use std::int
 use std::collections::seq
 
@@ -270,9 +267,6 @@ pub let scripted: { values: ['a], key: Int, op: Int } -> 'a = { values, key, op 
   __native_scripted_next { values = values, key = key, op = op }
 
 # Combinators — ordinary functions over `Sampler`, not operations.
-#
-# This is the vocabulary you write a generator in. They are functions because
-# nothing about combining recipes needs to be swappable; only the draw does.
 
 ## An Int in [min, max], inclusive.
 pub let int_between: { min: Int, max: Int } -> Int <Sample> = { min, max } ->
