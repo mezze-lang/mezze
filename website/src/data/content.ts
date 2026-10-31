@@ -77,7 +77,7 @@ export const playground = {
       label: "Effects",
       blurb: "Mock it or mean it",
       code: `use std::effects::log::{ Console, println }
-use std::effects::http::{ PooledHttpClient, MockHttpClient, mock_get, request }
+use std::effects::http::{ SimpleHttpClient, MockHttpClient, mock_get, request }
 
 # weather says <HttpClient> in its type. It never says which client answers,
 # so the caller below picks that, not weather.
@@ -87,7 +87,7 @@ let main = {} -> perform Console in do
   let url = "https://wttr.in/Amsterdam?format=3"
 
   # The real client. This one goes over the network.
-  perform PooledHttpClient in println { msg = weather { url } }
+  perform SimpleHttpClient in println { msg = weather { url } }
 
   # Same function, same url, no network at all.
   let rules = [mock_get { body = "Amsterdam: Always raining", url = "*" }]
