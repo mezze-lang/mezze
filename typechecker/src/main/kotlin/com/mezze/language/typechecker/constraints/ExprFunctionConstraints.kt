@@ -1227,10 +1227,27 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             }
             collector.effects.addAll(effectRow.effects + rowVarEffects)
             collector.effectInstances.addAll(effectRow.effectInstances)
-            // #256: the callee's own effect row var flows out to the enclosing
-            // scope. Carrying it lets an un-annotated wrapper fn (`launder`) infer
-            // an OPEN return row instead of silently dropping the callback's tail.
-            effectRow.rowVar?.let { collector.effectRowVars.add(it) }
+            // #256 + row union: the callee's latent row var is the open tail of its
+            // `<...>`. Where that tail is SOURCED from a callback PARAMETER — e.g.
+            // `apply1 : { f: {} -> Int <ρ> } -> Int <ρ>`, whose latent effect IS
+            // whatever `f` performs — raise the open tails the ACTUAL callback
+            // arguments carry, not the callee's declared var: a pure/closed callback
+            // contributes none, so nothing is raised and the caller closes to `<*>`
+            // (concrete effects still flow via `rowVarEffects` above, so no
+            // laundering). This is what stops `apply1 { f = {} -> 1 }` leaking
+            // `<..., *>` under a `perform`. But when the callee has NO callback
+            // parameter — its `ρ` is its OWN genuine polymorphism (a callback
+            // parameter `f` called as `f { x = 1 }`, whose effects must flow to the
+            // enclosing wrapper, #256) — raise the callee's own var as before.
+            if (effectRow.rowVar != null) {
+                val calleeHasCallbackParam = (functionType.paramType as? MezzeType.RecordType)
+                    ?.fields?.values?.any { it is MezzeType.FunctionType } == true
+                if (calleeHasCallbackParam) {
+                    collectClosureArgRowVars(argumentResult.type).forEach { collector.effectRowVars.add(it) }
+                } else {
+                    collector.effectRowVars.add(effectRow.rowVar!!)
+                }
+            }
             collector.performed = collector.performed || effectRow.performed
 
             if (tailCallLocation != null) {

@@ -631,6 +631,24 @@ class ExpressionConstraintGenerator {
     }
 
     /**
+     * The OPEN row-var tails carried by callback arguments. Sibling of
+     * [collectClosureArgEffects]: that one harvests a callback's concrete effect
+     * NAMES, this one its open tail VARIABLE. Used to propagate what the ACTUAL
+     * callbacks leave open, rather than the callee's own declared `<...>` row var
+     * — a pure/closed callback contributes no tail, so nothing is raised and the
+     * caller closes.
+     */
+    internal fun collectClosureArgRowVars(argType: MezzeType): Set<RowVar> {
+        if (argType !is MezzeType.RecordType) return emptySet()
+        val rowVars = mutableSetOf<RowVar>()
+        for ((_, fieldType) in argType.fields) {
+            val fnType = fieldType as? MezzeType.FunctionType ?: continue
+            fnType.effects?.rowVar?.let { rowVars.add(it) }
+        }
+        return rowVars
+    }
+
+    /**
      * Walk a MezzeType and collect the union of `caughtByAncestor` effect
      * names on every reachable EffectRow. Used to know which effects an
      * enclosing function catches, so they can be filtered from what flows

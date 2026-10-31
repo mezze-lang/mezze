@@ -106,6 +106,46 @@ there; `StorePopulator` was not found on the dep path) OR register a cache-reuse
 module's ability impls at `ModuleTypeChecker`'s cached-module path. AGREED to do
 this LAST. No fix yet.
 
+### B-15 — a callee's open effect row `<...>` is raised to the caller instead of unioned with the actual argument's effects (FIXED, partial)
+
+Calling an effect-polymorphic `{ f: {} -> Int <...> } -> Int <...>` with a PURE
+callback left the shared `<...>` row variable open on the caller: it surfaced as
+`<..., *>` under a `perform` (e.g. `apply1 { f = { } -> 1 }`; the showcase
+`server_live_demo` main, `run_server`). The open tail is the pass-through for
+"whatever the callback performs," so a pure callback (performs nothing) must
+ground it to `<>` — the caller should close to `<*>`. The inferred type was wrong,
+not merely cosmetic (a concrete function carrying a vacuous open effect row). Note
+it was SOUND — an effectful callback still propagated its effect (#215/#256), so
+no runtime launder; the defect was the un-grounded tail.
+
+ROOT: at a call, `ExprFunctionConstraints` raised the callee's DECLARED latent row
+var (`effectRow.rowVar`) to the caller unconditionally (the #256 anti-launder
+carry), rather than unioning it with the ACTUAL arguments' effects. A pure
+callback contributes no open tail, yet the declared var was still raised.
+`apply1`/`map` are MONO within their module (shared row var), so binding the var
+at `unifyFunctions` is NOT an option (corrupts other uses — regressed
+`std::effects::sample`'s `map`); the fix is at the RAISE site.
+
+FIXED (`ExprFunctionConstraints` call path + `collectClosureArgRowVars` in
+`ExpressionConstraints`): when the callee's latent row is SOURCED from a callback
+parameter, raise the ACTUAL callback arguments' open tails instead of the declared
+var — a pure callback raises nothing (caller closes), an effect-polymorphic
+callback's own tail flows out, and concrete effects still propagate via
+`rowVarEffects` (no #215 regression). When the callee has NO callback param — its
+latent var is its OWN polymorphism (a callback parameter `f` called as `f {x=1}`,
+whose effects must reach the wrapper, #256) — raise it as before.
+`ExprMethodConstraints` grounds the same way for an inherent method that RETURNS a
+function with a callback-sourced latent row (`RouteGroup.otherwise`), so a pure
+fallback closes the built `app` and `run_server` comes out `<*>`. Tests:
+`EffectRowVarResolvesAtConcreteCallTest` (pure closes / effectful propagates /
+concrete control) + full tc + interp green; `#256`/`#215` guards intact.
+
+REMAINING (not this fix): the SAME raise-vs-union happens on other call paths that
+carry `<...>` — notably `Async.spawn` (an ability op), whose `<...>` is the
+documented spawn PERMISSION ([[rowvar_launders_closed]]). So the full showcase
+`main` still shows `<..., *>` via `run_async_js`. Applying the union at the
+ability-op / effect-op raise sites is the follow-up to close that too.
+
 ### B-14 — an imported inherent method's `with C 'r` constraint leaks a PHANTOM onto a lambda-bound caller (FIXED)
 
 Calling an imported inherent impl method constrained `with C 'r`, where `'r`

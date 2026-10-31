@@ -1316,14 +1316,34 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // instead of falling through to a structural field access ("Cannot access
             // field … on variant type …"). Other return shapes keep the fresh var —
             // there is no name to preserve.
-            val methodReturn = freshMethodType.returnType
-            val namedReturn = methodReturn
+            // Row union on the RETURNED function's latent row. When a method takes
+            // a callback and RETURNS a function whose latent row is the shared
+            // `<...>` tail (e.g. `RouteGroup.otherwise :
+            // { fallback: {req}->'r <ρ> } -> ({req}->Response <ρ>)`), that tail
+            // stands for "whatever the fallback performs." A pure fallback performs
+            // nothing, yet the arg unification leaves ρ open, so the BUILT value
+            // (`app`) carries `{req}->Response <...>` and a later `app { req }` leaks
+            // it. Ground the returned function's latent row from the ACTUAL callback
+            // arguments' open tails (none → closed), exactly as the plain-call path
+            // does for a callee whose latent is callback-sourced. Safe here: an
+            // imported method is freshly instantiated, so ρ is this call's own var.
+            val rawReturn = freshMethodType.returnType
+            val methodHasCallbackParam = fullParams.values.any { it is MezzeType.FunctionType }
+            val groundedReturn = if (
+                methodHasCallbackParam &&
+                rawReturn is MezzeType.FunctionType &&
+                rawReturn.effects?.rowVar != null
+            ) {
+                val argTails = collectClosureArgRowVars(argumentResult.type)
+                rawReturn.copy(effects = rawReturn.effects!!.copy(rowVar = argTails.firstOrNull()))
+            } else rawReturn
+            val namedReturn = groundedReturn
             if (namedReturn is MezzeType.TypeApplication) {
-                resultType = instantiateTypeWithFreshVars(methodReturn)
+                resultType = instantiateTypeWithFreshVars(groundedReturn)
             }
             constraints.add(Constraint.Equality(
                 left = resultType,
-                right = freshMethodType.returnType,
+                right = groundedReturn,
                 context = "Inherent method call return type",
                 loc = expr.loc
             ))
