@@ -159,6 +159,7 @@ enum class ErrorCode {
     M0802_CIRCULAR_DEPENDENCY,
     M0803_NOT_EXPORTED,
     M0804_MODULE_HAS_ERRORS,
+    M0805_AMBIGUOUS_MODULE,
 
     // ─── Validator: comptime (V08xx) ──────────────────────────────────────
     // Grouped by what the author has to DO about it, not one per rule.

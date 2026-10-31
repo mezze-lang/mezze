@@ -91,6 +91,16 @@ sealed class ModuleError(override val message: String) : Exception(message) {
         )
     }
 
+    data class AmbiguousModule(
+        val modulePath: String,
+        val locations: List<String>
+    ) : ModuleError("Module '$modulePath' is ambiguous — it resolves to ${locations.size} sources: ${locations.joinToString("; ")}") {
+        override val code = ErrorCode.M0805_AMBIGUOUS_MODULE
+        override val hints: List<String> = listOf(
+            "a module path must name exactly one module — rename one of them, or disambiguate with `use … as`"
+        )
+    }
+
     data class ImportError(
         val modulePath: String,
         val itemName: String,

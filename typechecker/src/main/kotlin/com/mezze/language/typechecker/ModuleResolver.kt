@@ -192,6 +192,11 @@ sealed class ModuleError(message: String) : Exception(message) {
         override val code = ErrorCode.M0804_MODULE_HAS_ERRORS
     }
 
+    data class AmbiguousModule(val modulePath: String, val locations: List<String>) :
+        ModuleError("Module '$modulePath' is ambiguous — it resolves to ${locations.size} sources: ${locations.joinToString("; ")}") {
+        override val code = ErrorCode.M0805_AMBIGUOUS_MODULE
+    }
+
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,
@@ -774,7 +779,11 @@ class ModuleResolver(
         // The overlay is consulted BEFORE the file is resolved, not after it is
         // read: a changeset that ADDS a module has no file to find.
         val overlaid = overlayFor(world, modulePath)
-        val resolvedFile = resolveModuleFile(modulePath)
+        // Real resolution is STRICT: a path that resolves to more than one source
+        // is an ambiguity error, never a silent first-match (probing elsewhere
+        // stays lenient). An overlaid module is an in-memory changeset edit, not a
+        // filesystem lookup, so it is exempt.
+        val resolvedFile = resolveModuleFile(modulePath, strict = overlaid == null)
         if (resolvedFile == null && overlaid == null) return null
         // An overlaid module with no file still needs a path: it names where the
         // module WOULD live, so diagnostics and FunctionIR.sourceFile point
@@ -945,7 +954,18 @@ class ModuleResolver(
                 return Raw(src, module, via.resolverFor(src.filePath))
             }
             val parsed = wanted.map { (dep, via) -> ModuleParsePool.executor.submit<Raw?> { parseOne(dep, via) } }
-                .mapNotNull { it.get() }
+                .mapNotNull {
+                    // `Future.get` wraps anything parseOne throws in an
+                    // ExecutionException, whose message is the cause's `toString`.
+                    // Unwrap it so a real ModuleError (e.g. an ambiguous module
+                    // path from strict resolution) reaches the CLI/LSP catch and
+                    // renders as `error[M08xx]`, not a raw `ExecutionException`.
+                    try {
+                        it.get()
+                    } catch (e: java.util.concurrent.ExecutionException) {
+                        throw (e.cause ?: e)
+                    }
+                }
             for (raw in parsed) raws.putIfAbsent(raw.source.modulePath, raw)
             frontier = parsed.map { Triple(it.parsed, it.source.modulePath, it.resolver) }
         }
@@ -1105,8 +1125,8 @@ class ModuleResolver(
         return target
     }
 
-        private fun resolveModuleFile(modulePath: String): Path? {
-        return resolveModuleFile(ModulePath.parse(modulePath))
+        private fun resolveModuleFile(modulePath: String, strict: Boolean = false): Path? {
+        return resolveModuleFile(ModulePath.parse(modulePath), strict)
     }
 
     /** The stdlib grouping directories a leaf module may live under. Probed when a
@@ -1133,9 +1153,12 @@ class ModuleResolver(
         return null
     }
 
-        private fun resolveModuleFile(path: ModulePath): Path? {
+        private fun resolveModuleFile(path: ModulePath, strict: Boolean = false): Path? {
         val segments = path.segments
 
+        // `std::…` is a RESERVED namespace — always the compiler-provided stdlib,
+        // never a local file or a dependency. Resolved alone, so it can neither be
+        // shadowed by nor collide with user/dep modules.
         if (segments.isNotEmpty() && segments[0] == "std") {
             val stdSegments = segments.drop(1)
             val relativeFilePath = "stdlib/std/" + stdSegments.joinToString("/") + ".mz"
@@ -1162,33 +1185,39 @@ class ModuleResolver(
             return null
         }
 
+        // Gleam's rule for every non-`std::` path: collect EVERY candidate across
+        // the search roots and require exactly one. More than one distinct source
+        // is an AMBIGUITY error (`strict`), not a silent first-match — so a local
+        // file can't quietly shadow a dependency, a bare name can't quietly shadow
+        // a flat stdlib module, and two deps/roots can't nondeterministically win.
+        // Deduped by real path (the same file reached via overlapping roots is not
+        // a false tie); each dependency contributes at most one candidate (its own
+        // src/-vs-root layout fallbacks are the same module). The insertion order
+        // is the historical precedence (flat-stdlib, local, deps), so a NON-strict
+        // probe (`suggestModulePath`) still gets the first match.
+        val candidates = LinkedHashMap<Path, Path>()   // realpath -> path
+        val sources = LinkedHashMap<Path, String>()     // realpath -> human label
+        fun offer(p: Path, label: String) {
+            if (!Files.exists(p) || !Files.isRegularFile(p)) return
+            val key = try { p.toRealPath() } catch (_: Exception) { p.toAbsolutePath().normalize() }
+            if (!candidates.containsKey(key)) {
+                candidates[key] = p
+                sources[key] = label
+            }
+        }
+
         if (segments.size == 1) {
             val relativeFilePath = "stdlib/std/${segments[0]}.mz"
             val resourceContent = loadStdlibFromResource(relativeFilePath)
-            if (resourceContent != null) {
-                return materializeStdlibTempFile(relativeFilePath, resourceContent)
-            }
-
-            val flatStdlibPath = projectRoot.resolve(relativeFilePath)
-            DebugLogger.debug(Category.ModuleResolver) { "Checking flat stdlib path: $flatStdlibPath (exists: ${Files.exists(flatStdlibPath)})" }
-            if (Files.exists(flatStdlibPath) && Files.isRegularFile(flatStdlibPath)) {
-                return flatStdlibPath
-            }
+            if (resourceContent != null) offer(materializeStdlibTempFile(relativeFilePath, resourceContent), "stdlib $relativeFilePath")
+            else offer(projectRoot.resolve(relativeFilePath), "stdlib $relativeFilePath")
         }
-        
-        val localSearchRoots = listOf(
-            projectRoot.resolve("src"),
-            projectRoot.resolve("lib"),
-            projectRoot
-        )
 
-        for (root in localSearchRoots) {
+        for (root in listOf(projectRoot.resolve("src"), projectRoot.resolve("lib"), projectRoot)) {
             // `.mz`, then each suffix a frontend reads (`*.sql.mz`).
             for (suffix in listOf(".mz") + frontends.suffixes) {
                 val filePath = root.resolve(segments.joinToString("/") + suffix)
-                if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
-                    return filePath
-                }
+                offer(filePath, "local $filePath")
             }
         }
 
@@ -1227,19 +1256,22 @@ class ModuleResolver(
                             add(depDir.resolve("src").resolve(restOfPath))
                             add(depDir.resolve(restOfPath))
                         }
-
-                        for (path in searchPaths) {
-                            if (Files.exists(path) && Files.isRegularFile(path)) {
-                                return path
-                            }
-                        }
+                        // The first layout that exists IS this package's module;
+                        // one candidate per dep dir (so src/-vs-root is not a tie,
+                        // but two dep dirs — e.g. two versions — are).
+                        searchPaths.firstOrNull { Files.exists(it) && Files.isRegularFile(it) }
+                            ?.let { offer(it, "dependency ${depDir.fileName}") }
                     }
                 }
               }
             }
         }
 
-        return null
+        if (candidates.isEmpty()) return null
+        if (strict && candidates.size > 1) {
+            throw ModuleError.AmbiguousModule(path.fullPath, sources.values.toList())
+        }
+        return candidates.values.first()
     }
 
     /**

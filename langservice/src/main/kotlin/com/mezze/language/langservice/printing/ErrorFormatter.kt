@@ -143,6 +143,7 @@ object ErrorFormatter {
             is ModuleError.ModuleNotFound -> formatModuleNotFoundError(error)
             is ModuleError.CircularDependency -> formatModuleCircularDependencyError(error)
             is ModuleError.ParseError -> formatModuleParseError(error)
+            is ModuleError.AmbiguousModule -> renderModuleError(error)
             is ModuleError.ImportError -> formatModuleImportError(error)
             is ModuleError.ExportNotFound -> formatModuleExportNotFoundError(error)
             is ModuleError.PrivateExport -> formatModulePrivateExportError(error)

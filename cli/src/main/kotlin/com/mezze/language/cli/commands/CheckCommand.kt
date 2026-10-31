@@ -185,6 +185,17 @@ class CheckCommand {
             println(ErrorFormatter.formatModuleError(e))
             printExplainHint(listOf(e.code))
             kotlin.system.exitProcess(4)
+        } catch (e: com.mezze.language.typechecker.ModuleError) {
+            // A resolver-side module error that escaped the loader's conversion
+            // (e.g. an ambiguous module path thrown straight from resolution) —
+            // convert and render it the canonical way, not as a raw exception.
+            val converted = com.mezze.language.typechecker.module.ModuleLoader.toModuleError(e)
+            if (jsonMode) {
+                jsonExitWith(absPath, null, JsonDiagnosticFormatter.fromModuleError(converted), exitCode = 4)
+            }
+            println(ErrorFormatter.formatModuleError(converted))
+            printExplainHint(listOf(converted.code))
+            kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.parser.ParseException) {
             if (jsonMode) {
                 jsonExitWith(absPath, null, JsonDiagnosticFormatter.fromParseException(e), exitCode = 3)
@@ -448,6 +459,15 @@ class CheckCommand {
                 jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromModuleError(e), exitCode = 4)
             }
             println(ErrorFormatter.formatModuleError(e))
+            kotlin.system.exitProcess(4)
+        } catch (e: com.mezze.language.typechecker.ModuleError) {
+            // Resolver-side module error (e.g. an ambiguous path) — convert and
+            // render it canonically instead of as a raw exception.
+            val converted = com.mezze.language.typechecker.module.ModuleLoader.toModuleError(e)
+            if (jsonMode) {
+                jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromModuleError(converted), exitCode = 4)
+            }
+            println(ErrorFormatter.formatModuleError(converted))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.parser.ParseException) {
             if (jsonMode) {

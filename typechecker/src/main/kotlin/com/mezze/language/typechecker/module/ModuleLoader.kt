@@ -108,15 +108,26 @@ class ModuleLoader(
         ResolverItemType.EFFECT -> ExportedItemType.EFFECT
     }
 
-    private fun convertResolverError(error: ResolverModuleError): ModuleError = when (error) {
-        is ResolverModuleError.ModuleNotFound -> ModuleError.ModuleNotFound(error.modulePath, error.searchPaths, error.suggestion)
-        is ResolverModuleError.CircularDependency -> ModuleError.CircularDependency(error.cycle)
-        is ResolverModuleError.ParseError -> ModuleError.ParseError(error.modulePath, error.error)
-        is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(error.modulePath, error.exportName, error.loc)
-        else -> ModuleError.ParseError("unknown", error.message ?: "Unknown error")
-    }
+    private fun convertResolverError(error: ResolverModuleError): ModuleError = toModuleError(error)
 
     companion object {
+        /**
+         * Convert a resolver-side [ResolverModuleError] to the typechecker's
+         * [ModuleError] for rendering. Used by the loader, and by CLI/LSP entry
+         * points that catch a raw resolver error (e.g. an ambiguous module path
+         * thrown straight from resolution) and want the canonical `error[M08xx]`
+         * layout rather than the exception's `toString`.
+         */
+        @JvmStatic
+        fun toModuleError(error: ResolverModuleError): ModuleError = when (error) {
+            is ResolverModuleError.ModuleNotFound -> ModuleError.ModuleNotFound(error.modulePath, error.searchPaths, error.suggestion)
+            is ResolverModuleError.CircularDependency -> ModuleError.CircularDependency(error.cycle)
+            is ResolverModuleError.ParseError -> ModuleError.ParseError(error.modulePath, error.error)
+            is ResolverModuleError.AmbiguousModule -> ModuleError.AmbiguousModule(error.modulePath, error.locations)
+            is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(error.modulePath, error.exportName, error.loc)
+            else -> ModuleError.ParseError("unknown", error.message ?: "Unknown error")
+        }
+
         @JvmOverloads
         fun create(world: World = World.DEFAULT) =
             ModuleLoader(ModuleResolver(Paths.get("."), world))

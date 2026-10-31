@@ -498,6 +498,11 @@ fun ErrorCode.explain(): String = when (this) {
         "The imported module has type errors and cannot be used. " +
         "Fix the errors in the imported module first."
 
+    ErrorCode.M0805_AMBIGUOUS_MODULE ->
+        "A module path resolved to more than one source — e.g. a local file and a " +
+        "dependency, or a name that matches both. A path must name exactly one " +
+        "module. Rename one of them, or disambiguate with `use … as`."
+
     ErrorCode.V0801_COMPTIME_MISUSE ->
         "`comptime` must be applied directly at a call site — it is not a value. " +
         "Its whole mechanism is that the call site is replaced by the result it " +
