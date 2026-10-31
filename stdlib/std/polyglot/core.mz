@@ -1,29 +1,16 @@
 # Polyglot interop — shared kernel.
 #
-# The polyglot layer bridges Mezze values to guest-language objects via the
-# Truffle InteropLibrary. It is split into two layers:
+# Bridges Mezze values to guest-language objects via the Truffle InteropLibrary,
+# in two layers:
+#   1. `Polyglot` (this module) — the raw, language-agnostic capability whose
+#      sole handler `Runtime` is the only thing that calls a `__native_*`. It is
+#      gated: an op is reachable only where `Runtime` is performed. First-party.
+#   2. A per-language effect (`Jvm`, out-of-tree `Py`/`Js`/…) — the typed surface
+#      a user calls; its handler delegates down via
+#      `perform Runtime in Polyglot.<op>`, so a language layer writes no natives.
 #
-#   1. `Polyglot` (this module) — the raw, language-agnostic capability. Its
-#      ops are the interop primitives (member read/write, call/invoke/construct,
-#      array/hash access, the coercions, guest `eval`, value boxing), and its
-#      SOLE handler `Runtime` is the ONLY thing in the whole system that calls a
-#      `__native_*`. `Polyglot` is a *gated* capability: an op is reachable only
-#      where `Runtime` is performed, so raw interop is never ambient authority.
-#      This layer is first-party (stdlib) only.
-#
-#   2. A per-language effect (`Jvm`, and out-of-tree `Py`/`Js`/… providers) —
-#      the idiomatic, typed surface a user actually calls. Each language handler
-#      delegates DOWN to `Polyglot` via `perform Runtime in Polyglot.<op> …`, so
-#      the language layer writes NO natives and the user performs only the
-#      language handler (`Runtime` stays buried inside it).
-#
-# This is what lets a third party add any GraalVM language (Ruby, R, …) in pure
-# Mezze, in their own repo, with no Java: they define a `<Lang>Foreign` newtype
-# (type-safe against mixing foreigns) and a small effect whose handler performs
-# `Polyglot` ops. Only this repo ever writes `__native_*`.
-#
-# The polyglot Context is managed inside the runtime by the effect handler
-# machinery — user code never sees the underlying Truffle Context.
+# This lets a third party add any GraalVM language in pure Mezze (a
+# `<Lang>Foreign` newtype + a small effect); only this repo writes `__native_*`.
 use std::result
 use std::collections::bytes
 
@@ -69,7 +56,7 @@ pub type InteropError = |
 ##     carried error finally becomes a Mezze `Result`.
 ## Producers (`eval_raw`, `eval_bytes`, `box_*`) also yield a foreign → `'f`.
 effect Polyglot having 'f where {
-  ## ---- value ops: yield a foreign (error-carrying, no Result) ----
+  ## Value ops: yield a foreign (error-carrying, no Result).
   read_member:   { on: 'f, name: Str }              -> 'f <Polyglot>,
   write_member:  { on: 'f, name: Str, val: 'f }     -> 'f <Polyglot>,
   invoke_member: { on: 'f, name: Str, args: ['f] }  -> 'f <Polyglot>,
@@ -84,7 +71,7 @@ effect Polyglot having 'f where {
   write_hash:    { on: 'f, key: 'k, val: 'f }       -> 'f <Polyglot>,
   hash_entries:  { on: 'f }                         -> 'f <Polyglot>,
 
-  ## ---- crossings: yield a Mezze value → Result (error surfaces HERE) ----
+  ## Crossings: yield a Mezze value as a Result (error surfaces here).
   has_member:    { on: 'f, name: Str }              -> Result Bool InteropError <Polyglot>,
   size:          { on: 'f }                         -> Result Int InteropError <Polyglot>,
   to_seq:        { on: 'f }                         -> Result ['f] InteropError <Polyglot>,
@@ -108,7 +95,7 @@ effect Polyglot having 'f where {
   ## presence probe (missing field / absent payload vs a real one).
   check:         { on: 'f }                         -> Result {} InteropError <Polyglot>,
 
-  ## ---- producers: mint a foreign in language `lang` (error-carrying) ----
+  ## Producers: mint a foreign in language `lang` (error-carrying).
   ## ENTRY ONLY. `eval_raw` gets your FIRST foreign — import a module or fetch a
   ## function, ONCE. It is NOT the working API and must never sit in a hot loop: it
   ## re-runs (and rebuilds) the whole source every call. Once you hold a foreign, use
@@ -137,7 +124,7 @@ effect Polyglot having 'f where {
   box_str_seq:   { vals: [Str], lang: Str }         -> 'f <Polyglot>,
   box_bool_seq:  { vals: [Bool], lang: Str }        -> 'f <Polyglot>,
 
-  ## ---- sandboxed inner contexts ----
+  ## Sandboxed inner contexts.
   # Open a configured INNER context (isolated globals + access restricted BELOW the
   # permissive parent). Yields a foreign HANDLE (error-carrying). `config` is a
   # structural record of the Context.Builder sandbox knobs — a `GraalXWith` handler

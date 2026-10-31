@@ -4,13 +4,9 @@ use std::effects::sample::{ Sample, choose, one_of, list_of, frequency }
 use std::math::core
 use std::nat::{ Nat }
 use std::nat
-# The arithmetic below needs the Int and Float numeric impls in scope; without
-# these, `0 - 100` reports no `NumSub` for Int because only Nat's were imported.
 use std::int
 use std::float
 use std::frac
-# The container impls below build each container from a generated sequence, so
-# every one of these is a constructor, not a convenience.
 use std::collections::seq
 use std::collections::set
 use std::collections::list
@@ -22,94 +18,21 @@ use std::collections::nonemptylist
 use std::collections::bytes
 use std::str
 
-## A type that can be generated.
+## A type that can be generated. Says HOW a value is assembled — structure — so
+## the compiler derives it for records and non-recursive variants like `Eq`; a
+## derived impl performs only `<Sample>`, leaving the sampler to decide seeded
+## vs live entropy. Containers are written (below) and newtypes must opt in,
+## since generation has a domain question the representation cannot answer
+## (`newtype Email = Str` does not want arbitrary strings).
 ##
-## The ability says HOW a value is assembled, which is structure — so the
-## compiler derives it for records and non-recursive variants the same way it
-## derives `Eq`. Where the numbers come from is not part of any type, so that
-## lives in the `Sample` effect instead, and a derived impl performs only
-## `<Sample>`: it never mentions `Random`, and the sampler decides whether
-## entropy is seeded or live.
-##
-## Containers are WRITTEN rather than derived, because a container's identity is a
-## reserved name rather than a declaration, so there is no structure to walk. They
-## are written below for all of them: sequences, `List`, `Set`, `SortedSet`,
-## `Deque`, `NonEmptyList`, `Map` and `SortedMap`.
-##
-## ## What this makes possible
-##
-## A Mezze function takes a single RECORD. So "generate arguments for `f`" is not
-## a special mechanism — it is `arbitrary` at `f`'s parameter type, which is an
-## ordinary record and derives like any other. That is why `mez sample` needs no
-## type-directed code of its own, and why a field whose type has no impl produces
-## an ordinary missing-impl diagnostic naming that type rather than a hand-written
-## list of what the tool cannot handle.
-##
-## Property testing is the other consumer, and wants the same generators.
-##
-## ## Dispatch is on the RETURN type
-##
-## `arbitrary` takes no arguments, so there is nothing to dispatch on but the type
-## being produced. Like a `decode`-style operation, the call site's expected type
-## is what selects the impl — which means `arbitrary {}` needs its target pinned,
-## and an unannotated `let x = arbitrary {}` is ambiguous rather than wrong.
-##
-## ## Newtypes must opt in
-##
-## As with `Embeddable`, and for the same reason plus a stronger one. A newtype is
-## opaque, so deriving would pierce that wall — but generation also has a domain
-## question the representation cannot answer: `newtype Email = Str` does not want
-## arbitrary strings and `newtype Age = Int` does not want negative ones. The
-## author opting in is where they say what a valid value IS.
+## Dispatch is on the RETURN type: `arbitrary {}` takes no arguments, so the
+## call site's expected type selects the impl and must be pinned.
 ability Arbitrary for 'a where {
   arbitrary: {} -> 'a <Sample>
 }
 
 ## The ability operation under a plain name, so callers write `arbitrary {}`.
-##
-## This was rejected before S-1 with "Annotation declares effects Sample which are
-## not used in the implementation" — the op's declared `<Sample>` never reached the
-## call site, so the body looked pure and contradicted the annotation. The
-## constraint is what carries `'a` out to the caller, whose expected type pins it.
 pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitrary {}
-
-## ## Why these are not uniform draws, and where the numbers come from
-##
-## A uniform draw over a wide range is close to the worst generator there is: every
-## value it produces is unremarkable, and the ones that break code are the ones it
-## will almost never pick. Drawing uniformly over the whole Int range hits `0` with
-## probability 2^-64.
-##
-## The weights and the special values below are ScalaCheck's, read off
-## `Gen.chooseNum`:
-##
-##     val basics = List(minT, maxT, zero, one, -one)
-##     val basicsAndSpecials = ... yield (1, const(t))
-##     val other = (basicsAndSpecials.length, c.choose(minT, maxT))
-##     frequency(allGens*)
-##
-## So: FIVE specials — min, max, 0, 1, -1 — one weight each, and the uniform draw
-## weighted equal to their count. A 50/50 split, 10% per special, and the random
-## half spans the FULL range.
-##
-## ## …but only when the SIZE asks for it
-##
-## That table is right for a property test hunting overflows and wrong for a person
-## reading a sample: `int_max` one draw in ten, and the rest uniform over 63 bits —
-## so effectively never a number below a million — turned every `mez sample` row
-## into `n = 4776357352858102767`, and crashed any function that multiplies.
-##
-## One generator serves both, and the `Sample` SIZE budget is the dial, as in
-## QuickCheck. Below [stress_size] a draw is human-sized: the readable specials
-## only, at [everyday_percent], and magnitudes capped by [magnitude_bits]. From
-## [stress_size] up it is the table above, extremes included. `mez sample` runs at
-## `default_size`; `std::property.check` grows the size across its runs, so a
-## property test still reaches every extreme — in its later runs.
-##
-## The random half draws its WIDTH first and then a magnitude within it, so small
-## numbers stay as common as large widths: uniform over the full range is
-## overwhelmingly ~10^18, and a table cannot cover the middle. Draw 0 gives width
-## 0, so a failure shrinks toward small magnitudes on its own.
 
 ## The size from which draws include each type's extremes.
 pub let stress_size: Int = 50
@@ -118,8 +41,8 @@ pub let stress_percent: Int = 50
 ## …and below it, where the table holds only the readable specials.
 pub let everyday_percent: Int = 25
 
-## `0 - max - 1` because the bare literal for the minimum is one past the largest
-## POSITIVE literal the lexer accepts.
+## The Int range bounds (`int_min`'s literal is `0 - max - 1`, since the lexer
+## has no literal one past the largest positive).
 pub let int_max: Int = 9223372036854775807
 pub let int_min: Int = 0 - 9223372036854775807 - 1
 
@@ -190,20 +113,8 @@ let arbitrary_int: {} -> Int <Sample> = {} ->
     ## cannot produce, `int_min` and `int_max`, are in the stress table.
     else negate_sometimes { n = draw_magnitude { max_bits = magnitude_bits {} } }
 
-## ## Float spans EXPONENTS, not a narrow band
-##
-## ScalaCheck builds a Double from its bit pattern — sign, exponent and mantissa
-## drawn separately — so denormals and huge magnitudes arise naturally. Mezze has no
-## float-from-bits native, so the same coverage is composed arithmetically:
-## `mantissa * 2^exponent` with the exponent drawn over [-60, 60].
-##
-## That is the part that matters. The previous `(unit {} * 200.0) - 100.0` could only
-## ever produce a mid-range float — never 1e-18, never 1e18 — so it could not find a
-## precision loss, an underflow, or a comparison that only fails at scale.
-##
-## Scaled by size like `Int`: the mantissa gets two bits and the exponent one step
-## per size step, so the default size gives values like `12.375` or `-301.0`, and
-## [stress_size] gives the full [-60, 60] spread above.
+## A float as `mantissa * 2^exponent` with the exponent over [-60, 60], so the
+## draw spans magnitudes (1e-18 … 1e18), not just a mid-range band. Scaled by size.
 let arbitrary_float: {} -> Float <Sample> = {} ->
   if take_interesting {}
     then one_of { xs = [0.0, 1.0, 0.0 - 1.0, 0.5, 0.0 - 0.5], def = 0.0 }
@@ -228,17 +139,10 @@ let arbitrary_bytes: {} -> Bytes <Sample> = {} -> do
     else choose { bound = 256 }
   bytes::from_seq { arr = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> one {} } }
 
-## ## `Frac` is exact, so its interesting values are the ones exactness is FOR
-##
-## The point of a rational is that `1//3` is not `0.333…`, so the table leans on
-## the fractions a float cannot hold: thirds, sixths, sevenths. The boundaries are
-## still the canonical five from `Gen.chooseNum`, written as fractions.
-##
-## The random half draws numerator and denominator separately, and the denominator
-## is `choose + 1` so it is never zero — `frac::make` auto-reduces, so no further
-## normalisation is wanted here. The magnitudes stay near a million rather than
-## spanning `Int`: reduction multiplies, and a numerator near `int_max` would
-## overflow inside the constructor rather than producing a large fraction.
+## A rational leaning on the fractions a float cannot hold (thirds, sixths,
+## sevenths) plus the canonical bounds; the random half draws numerator and a
+## non-zero denominator separately, magnitudes near a million to avoid overflow
+## in reduction.
 let arbitrary_frac: {} -> Frac <Sample> = {} ->
   if take_interesting {}
     then one_of { xs = [0//1, 1//1, -1//1, 1//2, -1//2, 1//3, 2//3, 1//6, 22//7], def = 0//1 }
@@ -248,41 +152,9 @@ let arbitrary_frac: {} -> Frac <Sample> = {} ->
       denominator = draw_magnitude { max_bits = int::min { l = magnitude_bits {}, r = 10 } } + 1,
     }
 
-## ## `Char`'s alphabet comes from the COMPILER, because Mezze cannot write one
-##
-## This draw takes its characters as arguments where every other one names its
-## values inline, and the asymmetry is forced rather than stylistic: Mezze has no
-## character literal. `'a` is a TYPE VARIABLE, so `'a'` does not parse, and every
-## route to a `Char` from something else is partial —
-##
-##  - `char::from_int`, `char::from_str` — both return `Option Char`.
-##  - `str::chars` then `seq::get` — `Option Char` again.
-##  - `char::to_upper`, `to_lower` — total, and both TAKE a `Char`.
-##  - `MutChar` via `read_char` / `char_to_immut` — total, but the only way to make
-##    a `MutChar` is `char_to_mut { c: Char }`.
-##
-## So discharging the `Option` needs a `Char` for the empty case, which needs
-## another `Option` discharged. The circle closes every way round.
-##
-## What breaks it is that the literal exists EVERYWHERE EXCEPT the parser:
-## `ParsedCharLit` → `TypedCharLit` → `CharLitIR` are all implemented, and only a
-## surface syntax is missing. A generated impl is built as AST, not parsed, so the
-## compiler can supply what no `.mz` file can say — and it does, in
-## `DerivedImplGenerator.CHAR_READABLE` / `CHAR_AWKWARD`.
-##
-## The split with the other primitives is therefore kept, not broken: the compiler
-## owns the INSTANCE and the characters it cannot express otherwise, and the
-## SAMPLING — the 85/15 weighting, and why — still lives here. The weighting is
-## `Arbitrary for Str`'s, for the same reason given there: one instance serves a
-## person reading a single sample and a hundred-case property run, and only the
-## second wants punctuation most of the time.
-##
-## `def` is never reached. `one_of` falls back only on an empty sequence and both
-## alphabets are non-empty by construction; it is required because `one_of` is
-## total, and the compiler passes a plain letter so that a future caller handing in
-## an empty alphabet degrades to something readable instead of crashing.
-##
-## The awkward characters come in at [stress_size], as every type's extremes do.
+## A Char drawn from the given `letters`/`awkward` alphabets, 85/15 at
+## [stress_size]. The alphabets are passed in because Mezze has no character
+## literal, so the compiler supplies them for the derived impl.
 let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char <Sample> =
   { letters, awkward, def } ->
     if at_stress {}
@@ -295,23 +167,9 @@ let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char
       }
       else one_of { xs = letters, def = def }
 
-## ## Readable usually, pathological often enough
-##
-## The awkward values matter — the empty string breaks parsers, a bare quote and a
-## newline break naive escaping, and non-ASCII breaks "it worked on my ASCII" — but
-## they cannot be the TYPICAL draw. One `Arbitrary` instance serves both consumers,
-## and they want opposite things: a sample is read by a person deciding whether a
-## function does what they think, where a lone `"` looks like the tool is broken
-## rather than like information. A property test runs a hundred cases and only needs
-## the awkward ones to appear.
-##
-## Weighting serves both. At 15%, a hundred-case property run sees roughly fifteen
-## pathological inputs — ample — while a single sample reads as an ordinary word
-## about two times in three.
-##
-## Below [stress_size] only the readable part: words, and the empty string — the
-## one boundary a reader also expects to see. The hostile set comes in with every
-## type's extremes.
+## A string: readable words and the empty string most of the time, hostile
+## values (quote, newline, non-ASCII, padding) ~15% of the time. Below
+## [stress_size] only the readable part; the hostile set comes in at stress.
 let arbitrary_str: {} -> Str <Sample> = {} ->
   if at_stress {} then hostile_str {}
   else frequency {
@@ -324,9 +182,7 @@ let arbitrary_str: {} -> Str <Sample> = {} ->
   }
 
 let hostile_str: {} -> Str <Sample> = {} -> frequency {
-  ## The boundaries FIRST, `""` first among them: draw 0 must give the simplest
-  ## value, because shrinking (std::property) pushes draws toward 0. The weights,
-  ## not the order, decide how often each branch is taken.
+  # `""` first: draw 0 must give the simplest value, since shrinking pushes toward 0
   choices = [
     ## The boundaries. Cheap to produce, and the ones most code forgets.
     { weight = 15, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
@@ -345,41 +201,9 @@ let hostile_str: {} -> Str <Sample> = {} -> frequency {
   def = "",
 }
 
-# ---------------------------------------------------------------------------
-# Containers.
-#
-# Every one of these has to be WRITTEN rather than derived, and for a reason that
-# is not about generation: a container's identity is carried by a reserved NAME
-# (see `BuiltinTypes`) rather than a declaration, so there is no structure for the
-# deriver to walk. That same absence is what lets them be written at all — the
-# coherence rule keys on a declaration, finds none, and does not apply. `Option`
-# and `Result` DO have declarations, which is the whole of why they are still
-# stuck (S-4, below).
-#
-# Each impl carries `with Arbitrary 'a`, so the call site must pass a dictionary
-# for the ELEMENT's instance. For a receiver-less operation there is no argument to
-# read that type off, and the dictionary used to be omitted entirely — the call
-# reached a slot nobody filled and died as
-# `DictFallback[arbitrary]: record has no 'it' field`. The instance head now binds
-# against the type the call PRODUCES, which plays exactly the receiver's role, so
-# the element's dictionary arrives. `ArbitraryContainerTest` holds that line.
-#
-# The shape is the same throughout: draw a sequence, then convert. The length comes
-# from the size budget, so nesting terminates rather than multiplying out, and the
-# element draw is an ordinary recursive `Arbitrary.arbitrary {}` — which is why
-# `[[Set Int]]` needs no special case anywhere.
-#
-# These were briefly held out, and the reason is worth keeping because it was a
-# WRONG diagnosis twice over. Adding the two map impls appeared to break
-# `Arbitrary` for the whole program, `Int` included, which read as a two-variable
-# impl head poisoning the operation's dictionary slots. It was neither: the arity
-# was innocent and nothing was poisoned. A parameterised impl of a receiver-less
-# operation simply could not be entered at all (S-10) — the monomorphizer rewrote a
-# constraint-driven call only when the function position was `receiver.method`, and
-# a receiver-less operation has no receiver to be a field access of. The whole
-# module failed, and a failure inside this module takes every consumer with it,
-# which is what made a local bug look global.
-# ---------------------------------------------------------------------------
+# Containers: written, not derived — a container's identity is a reserved name,
+# so there is no structure to walk. Each draws a sequence sized by the budget
+# (so nesting terminates) and converts it, with the element's own Arbitrary.
 
 ## The DRAW for a sequence, named for the same reason the primitive draws above
 ## are: the behaviour gets a name of its own and the impl is a thin forward to it.
@@ -423,23 +247,8 @@ impl Arbitrary for SortedSet 'a where {
     sorted_set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
 }
 
-## ## The maps INSERT rather than converting
-##
-## `map::from_list` would be the obvious constructor and folding `insert` is the
-## one chosen, because it needs no intermediate `List` at all — `map::empty` with
-## `map::insert` is total and the draw is already a sequence.
-##
-## TWO element dictionaries are live at once here, for the key and the value
-## independently — the only impls in this file whose head binds more than one
-## variable — and the pair is drawn inside a LAMBDA, so both have to be CAPTURED
-## rather than read from the operation's own parameters. That combination was S-11:
-## the capture lookup dropped the ability segment from its request, missed the exact
-## per-variable slot, and fell through to a prefix scan answering with whichever
-## variable came first, so one dictionary served both. Fixing it also fixed `List`,
-## whose draw had been coming back as the wrong runtime shape for the same reason.
-##
-## Keys deduplicate on the way in, so a drawn map is usually smaller than the draw,
-## for the same reason a `Set` is.
+# maps fold `insert` over the drawn pairs (no intermediate list); keys
+# deduplicate, so a drawn map is usually smaller than the draw, as with Set
 impl Arbitrary for Map 'k 'v where {
   arbitrary: {} with Arbitrary 'k, Arbitrary 'v, Eq 'k, Hash 'k -> Map 'k 'v <Sample> = {} ->
     seq::fold {

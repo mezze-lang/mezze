@@ -1,25 +1,19 @@
 # JVM host-language access.
 #
-# `JvmForeign` wraps a Java host object (class, instance, array, Iterable,
-# executable, mapping). It is a "try": either a live handle or a carried
-# `InteropError`. Value verbs return a `JvmForeign` and short-circuit an errored
-# one, so a whole chain flows with no `Result` between steps —
+# `JvmForeign` wraps a Java host object and is a "try": a live handle or a
+# carried `InteropError`. Value verbs return a `JvmForeign` and short-circuit an
+# errored one, so a chain flows with no `Result` between steps —
 #
 #     jvm::class { name = "java.util.ArrayList" }
 #       .new { args = [] }
 #       .method { name = "add", args = [from_int { val = 7 }] }
-#       .len {}        # <- a CROSSING: JvmForeign -> Result Int; the error (if any) surfaces HERE
+#       .len {}        # a crossing: JvmForeign -> Result Int, where an error surfaces
 #
-# A `Result` appears only when a value is pulled back into Mezze: the coercions
-# (`int`/`float`/`str`/`bool`), `is_null`, `type_name`, `len` (Int), `to_seq`
-# (seq), `has` (Bool). Everything else yields a `JvmForeign`.
-#
-# This is the in-tree REFERENCE for the two-layer design: verbs delegate DOWN to
-# the raw `Polyglot` effect via `perform Runtime in Polyglot.<op>`, so no verb
-# calls a `__native_polyglot_*`. Only host class lookup and the pure value
-# constructors touch a native directly — legitimate because this module is
-# first-party stdlib. Requires the enclosing polyglot Context to allow host class
-# lookup — `allowAllAccess(true)` in test / dev, or explicit `allowHostClassLookup`.
+# A `Result` appears only when a value is pulled back into Mezze (the coercions,
+# `is_null`, `type_name`, `len`, `to_seq`, `has`). This is the in-tree reference
+# for the two-layer design: verbs delegate down via `perform Runtime in
+# Polyglot.<op>`, so no verb calls a native. Requires the Context to allow host
+# class lookup (`allowAllAccess(true)` in test/dev).
 use std::polyglot::core::{ InteropError, Polyglot, Runtime, Foreign }
 use std::codec::core::{
   Format,
@@ -65,7 +59,7 @@ impl Jvm for JvmHost where {
 ## crossings return a `Result`. An errored receiver short-circuits every value verb
 ## untouched, and a guest throw is caught into an errored `JvmForeign`.
 impl JvmForeign where {
-  ## ---- object protocol (yield a JvmForeign) ----
+  ## object protocol (yield a JvmForeign)
 
   ## Read a member (Java field, static, enum constant, `INSTANCE` singleton).
   get    = { it, name } ->
@@ -83,7 +77,7 @@ impl JvmForeign where {
   new    = { it, args } ->
     perform Runtime in Polyglot.instantiate { on = it, args = args },
 
-  ## ---- containers ----
+  ## containers
 
   ## Read an array element by index (yields a JvmForeign). For BULK numeric data
   ## prefer `to_ints`/`to_floats` (or `to_seq` / `read_bytes`): a per-element `at{}`
@@ -104,7 +98,7 @@ impl JvmForeign where {
   entries = { it } ->
     perform Runtime in Polyglot.hash_entries { on = it },
 
-  ## ---- crossings: pull a value back into Mezze → Result ----
+  ## crossings: pull a value back into Mezze → Result
 
   ## Surface a carried error without extracting a value: `Ok {}` if live, `Err` if
   ## this foreign errored. Use it to check a fire-and-forget call, or to probe
@@ -205,12 +199,12 @@ pub type JvmC = {
 ## Default JVM codec — identity field-name transform.
 pub let jvm_default: JvmC = { shared = default_shared }
 
-## ---- Format link -------------------------------------------------------
+## Format link
 
 impl Format for JvmC having 'out = JvmForeign where {
 }
 
-## ---- Tier 2: encode ----------------------------------------------------
+## Tier 2: encode
 
 impl EncodeScalar for JvmC having 'out = JvmForeign where {
   encode_int   = { it, val, ctx } -> from_int   { val = val },
@@ -229,7 +223,7 @@ impl EncodeOption for JvmC having 'out = JvmForeign where {
     None -> null_val {},
 }
 
-## ---- Tier 2: encode, container shapes ----------------------------------
+## Tier 2: encode, container shapes
 ##
 ## These used to be absent, on the reasoning that a Foreign "doesn't naturally
 ## carry those shapes without a specific Java container choice (ArrayList vs
@@ -291,7 +285,7 @@ impl EncodeVariant for JvmC having 'out = JvmForeign where {
     },
 }
 
-## ---- Tier 2: decode ----------------------------------------------------
+## Tier 2: decode
 
 ## The guest type name for an error message, or "foreign" if the value is itself
 ## an errored foreign. `f` is concretely `JvmForeign`, so `type_name` dispatches
@@ -390,7 +384,7 @@ impl DecodeOption for JvmC having 'in = JvmForeign where {
       Err { error = _ }   -> Ok { val = Some { val = val } },
 }
 
-## ---- Tier 2: decode, container shapes ----------------------------------
+## Tier 2: decode, container shapes
 ##
 ## The mirror of the four encode impls above. Note the asymmetry in what they
 ## read: a list is ARRAY-shaped and a dict is HASH-shaped, and interop models
@@ -521,7 +515,7 @@ impl DecodeVariant for JvmC having 'in = JvmForeign where {
     },
 }
 
-## ---- Tier 4: sugar abilities + blankets --------------------------------
+## Tier 4: sugar abilities + blankets
 
 ## Encode any scalar-shaped value to a `JvmForeign` via `.to_jvm{}`.
 ability ToJvm for 'a where {
