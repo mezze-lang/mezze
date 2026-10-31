@@ -2,11 +2,8 @@ use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
 use std::collections::iter
 use std::effects::filesystem::{ FileStreaming, FsError, Read }
 use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
-## Re-exported, not merely imported: `with_query` is constrained on `ToQuery`,
-## and that constraint is settled at the CALL SITE, so the blanket impl has to be
-## in scope wherever someone adds a query parameter. A `pub use` carries the
-## instance along with the name, so importing anything from this module is
-## enough.
+# pub use, not use: ToQuery's blanket impl must be in scope at every call site
+# that adds a query parameter.
 pub use std::codec::query::{ ToQuery }
 use std::collections::map
 use std::collections::seq
@@ -42,24 +39,8 @@ pub let default_http_config: HttpConfig = {
   keep_alive = True,
 }
 
-## HTTP request record.
-##
-## `chunks` is the inbound mirror of `Response.chunks`, and a FIELD for the same
-## reason: making `body` a variant would change what every reader of `req.body`
-## gets back — the router, the client, user code — while this touches only the
-## few places that CONSTRUCT a Request.
-##
-## The two are exclusive, and the server says which one it filled. A body can be
-## read once: taking the bytes consumes the stream, and walking the stream means
-## the bytes were never collected. So `body = Some …, chunks = None` is a
-## buffered request and `body = None, chunks = Some …` is a streamed one. A
-## server streams only when asked (`ServerConfig.stream_bodies`), which is why
-## every handler written before this still reads `body` and still finds it.
-##
-## `body_bytes` collects a streamed body when a handler wants the whole thing
-## and answers a buffered one unchanged, so a handler that does not care which
-## it was handed has one thing to call. A CLIENT response never streams inbound
-## (see `Response.chunks`), so this is a server-side field in practice.
+## An HTTP request. A body is either buffered (`body`) or streamed (`chunks`),
+## never both; `body_bytes` reads it either way.
 pub type Request = {
   method: Method,
   url: Str,
@@ -69,30 +50,13 @@ pub type Request = {
   chunks: Option (Iter Bytes),
 }
 
-## HTTP response record. `url` is the URL of the request that produced
-## this response — preserved so error promotion (e.g. `ensure_ok`'s
-## `RequestFailed { url, ... }`) can identify the source without an
-## out-of-band thread.
+## An HTTP response. `url` is the URL the request was sent to.
 pub type Response = {
   status: Int,
-  # Both natives lowercase what comes off the wire (IONatives for a client
-  # response, HttpServerNatives for a request), so a builder storing
-  # "Content-Type" makes an entry nothing can read — response_json did exactly
-  # that and its own .content_type {} answered None. Every setter here
-  # lowercases; a hand-written literal must too.
   ## Lowercase-keyed, always: `get_header` lowercases only the needle.
   headers: Map Str Str,
   body: Bytes,
   url: Str,
-  # An extra FIELD rather than making `body` a variant, deliberately: a variant
-  # would change what every reader of resp.body gets back — the client, the
-  # router, user code — while this only touches the few places that construct a
-  # Response.
-  #
-  # The iterator is walked once as the response goes out, and a source with
-  # effects in it performs during that walk, on the connection thread. Only the
-  # server honours this; HttpClient responses always arrive as None with a
-  # whole body.
   ## A streamed body, pulled chunk by chunk as the response is written, which
   ## makes `body` ignored. Single-shot. `None` is the ordinary case.
   chunks: Option (Iter Bytes),
@@ -138,15 +102,7 @@ impl HttpClient for PooledHttpClient where {
     __native_http_request { req = req, config = config, client = scope.client },
 }
 
-## Connection-pooling HTTP client with a fixed config override.
-##
-## The field is `overrides`, not `config`. The operation's own parameter is
-## named `config`, and inside the operation body that parameter SHADOWS a
-## performer field of the same name — so a field called `config` was dead and
-## the override silently did not happen. The name also says what the value
-## does: these WIN over whatever the call site passed, which is the point of
-## fixing a config on the performer. A call site that wants to decide per
-## request uses `PooledHttpClient` and `send_with`.
+## Connection-pooling HTTP client whose `overrides` win over any per-request config.
 impl HttpClient for PooledHttpClientWith { overrides: HttpConfig } where {
   initialize_scope = {} -> do
     let client = __native_http_client_create { config = overrides }
@@ -182,37 +138,20 @@ impl HttpClient for MockHttpClient { rules: [MockRule] } where {
   request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
 }
 
-## ── Streamed downloads ──────────────────────────────────────────────────────
-
-## A response whose body is still on the wire.
-##
-## Opaque, like `FileHandle`. It owns a live connection, so it is NOT an
-## ordinary value: it has to be closed, and `with_download` is the form that
-## closes it for you.
+## A response whose body is still on the wire. Opaque; owns a live connection
+## that must be closed — `with_download` closes it for you.
 pub newtype Download = __NativeDownload
 
-## What `open` answers: the head of the response, and the body unread.
-##
-## `status` and `headers` have arrived by this point, which is half the reason
-## to stream — a caller can decide on a 404 or a content type before reading a
-## byte of the body.
+## What `open` answers: the status and headers, with the body still unread.
 pub type OpenDownload = {
   status: Int,
   headers: Map Str Str,
   reader: Download,
 }
 
-## Downloading a response body a chunk at a time.
-##
-## A SEPARATE effect from `HttpClient`, the way `FileStreaming` is separate from
-## `Filesystem`: the capability is different (it holds a connection open across
-## several operations), the performers are different, and a caller that only
-## sends requests should not have to grant this one.
-##
-## `close` is not optional. Nothing here closes itself — unlike the SERVER's
-## inbound reader, where Helidon keeps the request content readable on its own
-## account — so a `read_chunk` after `close` reports the failure by name rather
-## than answering an empty body, which is the `with_lines` discipline.
+## Downloading a response body a chunk at a time. Separate from `HttpClient`
+## because it holds a connection open across operations. `close` is required;
+## `with_download` closes for you.
 effect HttpDownload where {
   open: { req: Request, config: HttpConfig } -> Result OpenDownload HttpError <HttpDownload>,
   read_chunk: { reader: Download, max_bytes: Int } -> Result Bytes HttpError <HttpDownload>,
@@ -227,11 +166,8 @@ impl HttpDownload for SimpleHttpDownload where {
   close = { reader } -> __native_http_stream_close { reader = reader },
 }
 
-## A download's chunks, lazily.
-##
-## Takes the READER rather than a request, for the reason `lines_of` does: an
-## `Iter` that owned the connection would leak it, because a consumer may stop
-## early (`take { n = 1 }`) and nothing would then run a close.
+## A download's chunks, lazily. Takes the reader, not a request, so stopping
+## early does not leak the connection.
 pub let chunks_of
   : { reader: Download, chunk_bytes: Int } -> Iter Bytes <HttpDownload, ...>
   = { reader, chunk_bytes } -> iter::unfold {
@@ -242,28 +178,15 @@ pub let chunks_of
         else Yield { val = b, next = {} }
   }
 
-## A response whose body streams, with the connection closed for you.
+## A response whose body streams, with the connection closed for you. The
+## callback's `Response` has `chunks` filled and `body` empty; read inside the
+## callback — do not return the chunks, as they yield nothing once closed.
 ##
 ##   with_download { req = request { url = u }, config = default_http_config,
 ##     f = { resp } -> match resp.chunks is
 ##       Some { val = cs } -> iter::fold { it = cs, init = 0,
 ##         f = { acc, x } -> acc + bytes::size { b = x } }
 ##       None -> 0 }
-##
-## The callback gets an ordinary `Response` whose `chunks` is filled and whose
-## `body` is empty, and may read as much of it as it likes; the connection
-## closes when the callback returns, drained or not.
-##
-## Chunks returned FROM the callback yield NOTHING, and do so quietly. The
-## native does report the closure — `read_chunk` answers a named
-## `ConnectionFailed` saying the download is already closed — but `chunks_of`
-## ends the stream on any error, because an iterator step can only say Yield or
-## Done. `with_lines` claims the stronger property for files and this does not,
-## so: do not return the chunks. Read what you need inside, or collect with a
-## fold inside, and hand out the bytes.
-##
-## A part-way read FAILURE is different and is reported, because `close` runs
-## while the scope is still here to answer — see below.
 pub let with_download
   : { req: Request, config: HttpConfig, f: { resp: Response } -> 'a <...> }
   -> Result 'a HttpError <HttpDownload, ...>
@@ -273,18 +196,13 @@ pub let with_download
       let resp = {
         status = d.status,
         headers = d.headers,
-        # A Response's `body` is Bytes, not an Option, and `chunks` makes it
-        # ignored — see the field's own note. Empty is the honest filler.
         body = bytes::empty {},
         url = req.url,
         chunks = Some { val = chunks_of { reader = d.reader, chunk_bytes = 65536 } },
       }
       let out = f { resp = resp }
-      ## `close` is where a part-way read failure surfaces. The chunks iterator
-      ## cannot carry it — a step says Yield or Done, so a connection that died
-      ## at 40 KB of 200 arrives as Done — and a truncated download answering
-      ## `Ok` would be a silent wrong answer of the worst kind: the caller
-      ## believes it has the whole body.
+      # close surfaces a part-way read failure the chunks iterator cannot carry
+      # (a dead connection arrives as Done, not an error).
       match HttpDownload.close { reader = d.reader } is
         Err { error } -> Err { error = error }
         Ok { val = _ } -> Ok { val = out }
@@ -317,21 +235,9 @@ pub let make_full_request
       chunks = None,
     }
 
-## The request's whole body, whichever way the server handed it over.
-##
-## A buffered request answers its bytes; a streamed one is WALKED and collected,
-## which is a single-shot read — the stream is consumed, so a second call sees
-## an exhausted iterator and answers empty. A request with neither answers
-## empty, which is what a GET is.
-##
-## This exists so a handler that wants the whole body does not have to care
-## which shape it was given, and so `stream_bodies = True` does not force every
-## route to be rewritten. A handler that genuinely streams — hashing, or writing
-## straight to disk — should walk `chunks` itself and never call this, because
-## collecting defeats the point: the peak cost is the body's full size again.
-##
-## The row is open because walking the chunks performs whatever the source
-## performs. On a server that is socket reads on the connection thread.
+## The request's whole body: a buffered one as-is, a streamed one walked and
+## collected (single-shot — a second call sees an exhausted stream and answers
+## empty). A handler that genuinely streams should walk `chunks` instead.
 pub let body_bytes: { req: Request } -> Bytes <...> = { req } -> match req.body is
   Some { val } -> val
   None -> match req.chunks is
@@ -342,14 +248,8 @@ pub let body_bytes: { req: Request } -> Bytes <...> = { req } -> match req.body 
       f = { acc, x } -> bytes::concat { b1 = acc, b2 = x },
     }
 
-## Add a single header to a request.
-## Set a header. The name is matched case-insensitively.
-# The map is lowercase-keyed, and this is one of the two places that is made
-# true. The server lowercases every inbound name before a handler sees it, so a
-# handler reads `x-trace` in production; `with_header { k = "X-Trace" }` used to
-# put a second, differently-keyed entry in the same map and the handler found
-# nothing. Lowercasing an outgoing name is also correct: HTTP/1.1 names are
-# case-insensitive and HTTP/2 requires them lowercase.
+## Set a header on a request. The name is matched case-insensitively (stored
+## lowercased, as HTTP header names are).
 pub let with_header: { req: Request, k: Str, v: Str } -> Request = { req, k, v } ->
   {
     method = req.method,
@@ -384,8 +284,7 @@ pub let with_body: { req: Request, body: Bytes } -> Request = { req, body } ->
     headers = req.headers,
     body = Some { val = body },
     timeout_ms = req.timeout_ms,
-    # Setting the body drops a streamed one: the two cannot both be read, and
-    # the explicit bytes are the later word. `Response.with_body` does the same.
+    # explicit bytes replace any streamed body — the two cannot both be read
     chunks = None,
   }
 
@@ -452,23 +351,15 @@ pub let with_api_key: { req: Request, name: Str, val: Str } -> Request =
   { req, name, val } ->
     with_auth { req = req, auth = ApiKey { name = name, val = val } }
 
-## Decode response body as a UTF-8 string.
-##
-## The error is an `HttpError.DecodeError`, not a bare `Str`. Every other
-## failure in this module is an `HttpError`, and this one odd `Result Str Str`
-## forced a `map_err` at each site that wanted to keep the error channel, while
-## `format_error` could not name it at all. The url it carries is the
-## response's own — the only thing that identifies which body failed to decode.
+## Decode the response body as a UTF-8 string. A failure is an
+## `HttpError.DecodeError` carrying the response's url.
 pub let body_str: { resp: Response } -> Result Str HttpError = { resp } ->
   map_err {
     result = bytes::to_str { b = resp.body },
     f = { error } -> DecodeError { url = resp.url, message = error },
   }
 
-## Decode response body as JSON.
-## `body_json` reads the bytes directly rather than through `body_str`: it needs
-## the raw decode message for its own `CodecDecodeError`, and `body_str` now
-## wraps that message in an `HttpError`.
+## Decode the response body as JSON.
 pub let body_json: { resp: Response } -> Result Json CodecDecodeError = { resp } -> do
   match bytes::to_str { b = resp.body } is
     Ok { val } -> match parse_str { s = val } is
@@ -511,7 +402,6 @@ pub let get_header: { resp: Response, name: Str } -> Option Str = { resp, name }
   map::get { m = resp.headers, k = str::to_lower { s = name } }
 
 ## Get a request header by name (case-insensitive).
-# The counterpart to `get_header`: a Request could only be written to, not read.
 pub let request_header: { req: Request, name: Str } -> Option Str = { req, name } ->
   map::get { m = req.headers, k = str::to_lower { s = name } }
 
@@ -525,22 +415,13 @@ pub let get_content_length: { resp: Response } -> Option Int = { resp } -> match
   None -> None
 
 
-# ─── Chainable surface ────────────────────────────────────────────────
-#
-# The chainable API lets you build a request via dot-method composition:
-#
-#   request { url = "https://api.acme.com/users" }
-#     .with_method   { val = Post }
-#     .with_auth     { val = "Bearer xyz" }
-#     .with_json     { val = my_json }
-#     .with_timeout  { ms = 5000 }
-#     .send {}
-#
-# Underneath every impl method delegates to the corresponding free
-# function — they're not duplicate logic, just chain-friendly aliases.
-## Build a fresh GET Request for a URL. All fields zero-initialized
-## (no headers, no body, default timeout). Configure further with
-## `req.with_*` methods, then `req.send {}`.
+## Build a fresh GET request for a URL (no headers, no body, default timeout).
+## Configure with `req.with_*` methods, then `req.send {}`:
+##
+##   request { url = "https://api.acme.com/users" }
+##     .with_method { val = Post }
+##     .with_json   { val = my_json }
+##     .send {}
 pub let request: { url: Str } -> Request = { url } -> make_request { method = Get, url = url }
 
 ## Body setter — wrap raw bytes (already encoded).
@@ -565,26 +446,12 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
     chunks = req.chunks,
   }
 
-## Append `?k1=v1&k2=v2&...` (or `&...` if the URL already has a query) from
-## ANY value the query codec can encode — in practice a record.
+## Append `?k1=v1&…` (or `&…` if the URL already has a query) from any value the
+## query codec can encode — in practice a record. Keys and values are
+## percent-encoded; a value that encodes to nothing is a no-op.
 ##
 ##   req.with_query { params = { page = 2, tags = ["a", "b"] } }
 ##   -- ?page=2&tags=a&tags=b
-##
-## This used to take a `Map Str QueryValue`, where `QueryValue` was a
-## three-constructor variant — `QStr`, `QInt`, `QList` — that existed only
-## because no format could encode a structured query. `std::codec::query` is
-## that format now, so the variant is gone: a record says `{ page = 2 }`
-## instead of `map::insert { m = map::empty {}, k = "page", v = QInt { n = 2 } }`,
-## nests, and decodes back on the server with `from_query`.
-##
-## Keys and values are percent-encoded. A value that encodes to nothing — an
-## empty record, a `None` — is a no-op.
-##
-## A constraint is settled at the CALL SITE, so the `ToQuery` instance has to be
-## in scope there — and it is, through this module's `pub use` below. Importing
-## anything from here brings it, so adding `?page=2` needs no knowledge of which
-## codec module makes it work.
 pub let with_query: { req: Request, params: 'a } with ToQuery 'a -> Request = { req, params } -> do
   let qs = params.query_string {}
   if str::is_empty { s = qs } then req else do
@@ -653,15 +520,10 @@ impl Request where {
   ## Terminal for a handler rather than a client — apply this request to it.
   ##
   ##   post_request { url = "/users" }.with_text { val = "ada" }.to { app = app }
-  # The seam MockHttpServer leaves open: it binds no socket and does not call
-  # the handler, because a handler needs no server to exercise. The row is the
-  # handler's own, so whatever it performs escapes to the caller, as via serve.
   to = { it: 'it, app: { req: Request } -> Response <...> } -> app { req = it },
   ## Terminal with config override.
   send_with = { it: 'it, config: HttpConfig } -> HttpClient.request { req = it, config = config },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
   retry = { it, max_attempts, backoff_ms } -> retry { req = it, max_attempts = max_attempts, backoff_ms = backoff_ms },
 }
 
@@ -691,15 +553,6 @@ impl Response where {
   content_type = { it } -> get_content_type { resp = it },
   content_length = { it } -> get_content_length { resp = it },
 
-  # `with_`-prefixed because a method may not share a name with a FIELD
-  # (V0419), and status/headers/body/url are all fields. The short names live
-  # as free builders (no_content, redirect, …) where nothing collides.
-  #
-  # Each delegates to a Response-ANNOTATED free builder rather than spreading
-  # `it` here: a receiver is `it: 'it`, so `{ ...it, status = code }` answers
-  # the OPEN row `{ status: 'a, ... }` — not a Response — and the next
-  # `.with_header {}` in the chain then has no method to find. Same reason
-  # Request's setters are free functions.
   ## Set the status, keeping every other field.
   with_status = { it: 'it, code: Int } -> resp_with_status { resp = it, code = code },
   ## Set one header, lowercasing its key.
@@ -714,8 +567,6 @@ impl Response where {
   ## Set a JSON body and the json content type.
   with_json = { it: 'it, val: Json } -> resp_with_json { resp = it, val = val },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
   body_str = { it } -> body_str { resp = it },
   body_json = { it } -> body_json { resp = it },
   is_client_error = { it } -> is_client_error { resp = it },
@@ -725,19 +576,8 @@ impl Response where {
   get_content_length = { it } -> get_content_length { resp = it },
 }
 
-# A route handler's job is to answer, and most answers are a string or some
-# JSON — spelling out a five-field Response record for each was the tax this
-# removes:
-#
-#   on_get { path = "/ping",      handler = { m } -> "pong" }
-#   on_get { path = "/users/:id", handler = { m } -> user_json { m = m } }
-#   on_get { path = "/raw",       handler = { m } -> not_found { body = "" } }
-#
-# Declared here beside Response rather than in the router: converting a value
-# to a Response is not a routing idea, and a mock rule or test double wants the
-# same conversion. Response implements it as the identity, so a handler that
-# builds its own response is unchanged and pays nothing.
-## What a route handler may answer with.
+## What a route handler may answer with. A handler can return a `Response`, a
+## `Str` (200 text), `Json`, or a `StatusBody`, and the router converts it.
 ability IntoResponse for 'a where {
   into_response: { it: 'a } -> Response
 }
@@ -754,27 +594,17 @@ impl IntoResponse for Json where {
   into_response = { it } -> response_json { body = it },
 }
 
-## A minimal reply: a status code and a text body. Lets a handler or a fallback
-## answer `{ status = 404, body = "not found" }` without spelling out the rest of
-## a `Response` (headers, url, chunks).
-##
-## NOTE: a bare `{ status, body }` only satisfies IntoResponse where this module
-## (`std::effects::http`) is in scope — the matcher does not yet match a bare
-## record against a record-targeting impl reachable only transitively, the way it
-## does for a builtin like `Str`. Tracked as a bug; a `Str` handler needs no import.
+## A minimal reply: a status code and a text body, so a handler can answer
+## `{ status = 404, body = "not found" }` without the rest of a `Response`.
 pub type StatusBody = { status: Int, body: Str }
 
 impl IntoResponse for StatusBody where {
   into_response = { it } -> response_status { code = it.status, body = it.body },
 }
 
-# A separate ability from IntoResponse, because the two answer different
-# questions about the same type: Str means a 200 with that text when a handler
-# SUCCEEDS with it, and a 500 when a handler FAILS with it. One ability cannot
-# hold both meanings, and picking either would make the other silently wrong.
-# The split is what lets Result be a handler's return type — Ok through
-# IntoResponse, Err through this.
-## How a failure becomes a response.
+## How a failure becomes a response. Separate from `IntoResponse` so a `Result`
+## can be a handler's return type — `Ok` through `IntoResponse`, `Err` through
+## this (e.g. `Str` is a 200 as success but a 500 as failure).
 ability IntoErrorResponse for 'e where {
   into_error_response: { it: 'e } -> Response
 }
@@ -783,18 +613,8 @@ impl IntoErrorResponse for Str where {
   into_error_response = { it } -> response_status { code = 500, body = it },
 }
 
-# An HttpError a handler got from calling something ELSE, so these are gateway
-# statuses: our failure to get an answer, not the upstream's own reply.
-#
-# RequestFailed deliberately does NOT pass its status through. An upstream 404
-# is not this service's 404, and conflating them makes a client retry or cache
-# against the wrong system. A handler wanting passthrough has the error in hand
-# and can match it.
-#
-# The bodies carry no url or upstream text either: these go to a CLIENT, and
-# the url in an HttpError is an internal endpoint. Match the error to log the
-# detail.
-## Gateway statuses for a failed upstream call.
+## Gateway statuses for a failed upstream call. `RequestFailed` is reported as
+## 502, not the upstream's own status — an upstream 404 is not this service's.
 impl IntoErrorResponse for HttpError where {
   into_error_response = { it } -> match it is
     ConnectionFailed { url = _, reason = _ } ->
@@ -816,31 +636,6 @@ impl IntoErrorResponse for HttpError where {
     Cancelled -> response_status { code = 503, body = "request cancelled" },
 }
 
-# This is what carries the Exception sugar into a route. ExceptionToResult
-# turns a region's throws into an Err, so a handler writes straight-line code
-# and each failure picks its own status:
-#
-#   on_get { path = "/users/:id", handler = { m } -> do
-#     let outcome = perform ExceptionToResult in do
-#       let id   = unwrap { result = parse_id { m = m } }
-#       let user = unwrap { result = load { id = id } }
-#       Ok { val = user.name }
-#     outcome.into_response {}
-#   }
-#
-# Each unwrap early-returns the way `?` does. A thrown Str lands as a 500
-# carrying it; a thrown HttpError picks a gateway status. Failure stays a VALUE
-# the whole way — the region answers a Result and this impl reads it.
-#
-# Two things about that shape. The region's body ends in Ok, because the
-# handler only replaces the THROW path. And .into_response {} is called INSIDE
-# the handler rather than letting the route convert a Result return — that part
-# is a workaround, not a preference: returning the Result straight out
-# typechecks and then selects the wrong impl at run time, because the route's
-# `with IntoResponse 'r` hits the known `with C 'a` dictionary-plumbing family
-# (the Result comes back through impl IntoResponse for Str). Converting here
-# dispatches on a concrete Result, which works. Pinned by HttpIntoResponseTest;
-# when that test starts failing, this paragraph and the extra call can go.
 ## Ok answers through IntoResponse, Err through IntoErrorResponse.
 impl IntoResponse for Result 'a 'e where {
   into_response: { it: Result 'a 'e } with IntoResponse 'a, IntoErrorResponse 'e -> Response
@@ -849,27 +644,8 @@ impl IntoResponse for Result 'a 'e where {
         Err { error } -> error.into_error_response {},
 }
 
-# Failure is a VALUE in Mezze, so a fallible call answers a Result. Inside a
-# `catching` handler the thrown channel is a Response, which is why plain
-# `exception::unwrap` does not fit there: it rethrows the RAW error. This is
-# the bridge — unwrap the Ok, or turn the Err into its response and throw that:
-#
-#   .get { path = "/:id", handler = catching { handler = { m } -> do
-#     let id   = m.param_or { name = "id", default = "?" }
-#     let user = or_throw { result = load { id = id } }
-#     user.name
-#   } } }
-#
-# Each or_throw reads like `?`: the happy path continues on one line and the
-# failure leaves as the status its own type chose.
-#
-# Note why this one CAN name `'e` while `http_router::catching` cannot. Here
-# `'e` is bound by a PARAMETER (`result: Result 'a 'e`), so the constraint and
-# the body agree on the variable. In `catching` it would be bound only through
-# the effect row's associated type, and the signature's `'e` then names a
-# different variable than the body's (T0210) — which is why the thrown channel
-# there is a concrete Response.
-## Unwrap a Result, or throw the Err's response.
+## Unwrap a Result, or throw the Err's response — reads like `?` inside a
+## `catching` handler, each failure leaving as the status its own type chose.
 pub let or_throw
   : { result: Result 'a 'e }
   with IntoErrorResponse 'e
@@ -953,12 +729,6 @@ impl Client where {
       default_timeout_ms = it.default_timeout_ms,
     },
   ## Verb shortcuts — return a Request pre-filled with the client's defaults.
-  ## Verb shortcuts — delegate to make_full_request so the impl op's
-  ## return type stays pinned to Request (a nominal TypeApplication)
-  ## instead of an open structural record. Without this, the lambda's
-  ## body type at the home module collapses field types to bare
-  ## TypeVars and the chain `c.get { path }.send {}` can't unify the
-  ## structural result against `Request` in the importer module.
   get = { it: 'it, path: Str } ->
     make_full_request {
       method = Get,
@@ -1072,11 +842,8 @@ pub let retry
       backoff_ms = backoff_ms,
     }
 
-## Fetch multiple URLs concurrently, returning a list of Results.
-##
-## `par_map` returns `[Result Response AsyncError]` per spawn; we collapse
-## each AsyncError into a single HTTP-level ConnectionFailed so callers
-## see a uniform `[Result Response HttpError]`.
+## Fetch multiple URLs concurrently, returning one Result per URL (each spawn's
+## failure collapsed to a `ConnectionFailed`).
 pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <HttpClient, Async> = { urls } ->
   seq::map {
     xs = par_map { xs = urls, f = { x } -> request { url = x }.send {} },
@@ -1185,12 +952,7 @@ pub let is_server_issue: { err: HttpError } -> Bool = { err } -> match err is
   Timeout { url, ms } -> True
   TlsError { url, reason } -> True
   _ -> False
-  # ─── Response builders ────────────────────────────────────────────────
 
-#
-# Build a full Response without hand-writing the
-# `{ status, headers, body, url }` record. Used directly, and by the mock
-# builders below so a canned reply is a one-liner.
 ## A Response with an arbitrary status code and a plain-text body.
 pub let response_status: { code: Int, body: Str } -> Response = { code, body } ->
   {
@@ -1220,14 +982,6 @@ pub let response_json: { body: Json } -> Response = { body } ->
     chunks = None,
   }
 
-# Response setters, each preserving every other field so a chain reads in
-# whatever order you think of it. Module-private: the public surface is the
-# `impl Response` methods, and keeping these unexported leaves the short names
-# free for the status builders below — `with_header` as a free name already
-# belongs to Request.
-#
-# Written field by field rather than with a spread because the annotation is
-# what keeps the result a Response; see the note in `impl Response`.
 let resp_with_status: { resp: Response, code: Int } -> Response = { resp, code } ->
   {
     status = code,
@@ -1246,10 +1000,6 @@ let resp_with_header: { resp: Response, k: Str, v: Str } -> Response = { resp, k
     chunks = resp.chunks,
   }
 
-# Merge, like Request's — `headers` wins on a key both carry. Incoming keys are
-# lowercased first, or a caller passing { "Content-Type": ... } would add a
-# second entry alongside a lowercase one and get_header would read whichever it
-# found.
 let resp_with_headers: { resp: Response, headers: Map Str Str } -> Response = { resp, headers } ->
   {
     status = resp.status,
@@ -1262,9 +1012,6 @@ let resp_with_headers: { resp: Response, headers: Map Str Str } -> Response = { 
     chunks = resp.chunks,
   }
 
-# Setting a body drops a streamed one: chunks would otherwise win and the bytes
-# just set would never reach the socket. Silently keeping both is the bug this
-# avoids.
 let resp_with_body: { resp: Response, body: Bytes } -> Response = { resp, body } ->
   {
     status = resp.status,
@@ -1284,21 +1031,11 @@ let resp_with_json: { resp: Response, val: Json } -> Response = { resp, val } ->
   }
   resp_with_header { resp = bodied, k = "Content-Type", v = "application/json" }
 
-# The statuses a handler reaches for by name. Free functions, not methods:
-# there is no receiver to chain from when you are creating the response, and
-# the short names are free here precisely because they would collide with
-# Response's own fields as methods.
-#
-#   not_found { body = "no such user" }
-#   redirect  { to = "/login" }
-#   no_content {}
-
 ## 201 Created with a plain-text body.
 pub let created: { body: Str } -> Response = { body } ->
   response_status { code = 201, body = body }
 
-## 204 No Content — no body, which is what 204 MEANS, so there is no
-## `body` parameter to get wrong.
+## 204 No Content (no body).
 pub let no_content: {} -> Response = {} ->
   {
     status = 204,
@@ -1336,20 +1073,10 @@ pub let redirect_with: { to: Str, code: Int } -> Response = { to, code } ->
     chunks = None,
   }
 
-## A response whose body is STREAMED from an iterator of chunks.
-##
-## `body` is ignored when `chunks` is `Some`, so it is left empty here. The
-## server pulls one `Bytes` at a time and writes each straight to the socket:
-## peak heap is one chunk, not the whole body. Serving a 2GB file with
-## `response_ok_text` costs 2GB; with this it costs a chunk.
-##
-## The iterator is walked ONCE, as the response goes out, on the connection
-## thread. A source with effects in it performs during that walk — which is
-## how `with_lines` or a `map_concurrent_lazy` pipeline can feed a response
-## directly.
-##
-## Only the server honours `chunks`. A `MockHttpServer` reply and every
-## `HttpClient` response are whole bodies.
+## A response whose body is streamed from an iterator of chunks: the server
+## pulls one `Bytes` at a time and writes it straight to the socket, so peak
+## heap is one chunk. The iterator is walked once, as the response goes out.
+## Only the server honours `chunks`; mock and client responses are whole bodies.
 pub let response_stream
   : { status: Int, headers: Map Str Str, chunks: Iter Bytes } -> Response
   = { status, headers, chunks } ->
@@ -1362,17 +1089,9 @@ pub let response_stream
     }
 
 
-## A 200 whose body streams a file from disk, a chunk at a time.
-##
-## The motivating case for `response_stream`: a download handler that does not
-## read the file into memory first. `chunk_bytes` is the read size, so the peak
-## is one chunk plus the socket buffer regardless of the file's size.
-##
-## Needs `<FileStreaming>` because it holds a handle for the life of the
-## response — which is also why the handle cannot be closed here: the body is
-## written after this function returns. A caller that needs the close
-## guaranteed should use `with_lines`-style scoping and buffer, or accept that
-## the handle is released when the context goes (see `OpenResources`).
+## A 200 whose body streams a file from disk, a chunk at a time, without reading
+## it into memory. `chunk_bytes` is the read size. Holds a `FileStreaming`
+## handle for the life of the response, so it is not closed here.
 pub let response_file
   : { path: Str, chunk_bytes: Int }
   -> Result Response FsError <FileStreaming, Exception having 'error = FsError>
@@ -1384,20 +1103,8 @@ pub let response_file
         headers = map::empty {},
         chunks = iter::unfold {
           state = {},
-          # A FAILED read is not the end of the file. Answering `Done` for both
-          # sent the terminal chunk, which tells the client the body is COMPLETE
-          # — so a download dying at 40 KB of 200 looked exactly like a 40 KB
-          # file, with a 200 on it. Silent truncation, and the caller had no way
-          # to tell.
-          #
-          # `Step` has no failure arm — Yield, Skip, Done — and it is not getting
-          # one: it is the core lazy protocol every `iter` user shares. The
-          # failure travels as the effect it IS, which is also what the two
-          # sibling streaming paths do (the inbound reader throws; `with_download`
-          # reports from `close`). The host drain turns it into a connection
-          # abort, which is the only thing left to say once the status and
-          # headers are long gone — the same conclusion axum reaches, for the
-          # same reason.
+          # a failed read throws rather than ending the stream — Done would
+          # signal a complete body and silently truncate the download
           step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = chunk_bytes } is
             Err { error } -> throw { error = error }
             Ok { val = b } -> if bytes::size { b = b } == 0 then Done
@@ -1464,10 +1171,8 @@ let mock_with_methods: { rule: MockRule, methods: [Method] } -> MockRule = { rul
 
 
 impl MockRule where {
-  ## ---- which requests this rule answers ----
-  ## Restrict to one method. Replaces any previous restriction rather than
-  ## adding to it: `.get {}.post {}` matches POST, which is what reading it
-  ## left to right suggests. Use `.for_methods` for a set.
+  ## Restrict to one method, replacing any previous restriction
+  ## (`.get {}.post {}` matches POST). Use `.for_methods` for a set.
   get = { it: 'it } -> mock_with_methods { rule = it, methods = [Get] },
   post = { it: 'it } -> mock_with_methods { rule = it, methods = [Post] },
   put = { it: 'it } -> mock_with_methods { rule = it, methods = [Put] },
@@ -1481,7 +1186,6 @@ impl MockRule where {
   ## Match every method — the default a bare `mock` starts with.
   any_method = { it: 'it } -> mock_with_methods { rule = it, methods = [] },
 
-  ## ---- what comes back ----
   ## Set the status, keeping the body and headers.
   status = { it: 'it, code: Int } -> do
     let r = mock_response_of { rule = it }
@@ -1519,10 +1223,7 @@ impl MockRule where {
       rule = it,
       resp = { status = r.status, headers = r.headers, body = body, url = r.url, chunks = None },
     },
-  ## Set a response header on the rule.
-  # The name is lowercased, like every other Response header setter: a mocked
-  # response has to answer get_header the way a real one does, or a test passes
-  # against a header the production reader cannot see.
+  ## Set a response header on the rule (lowercased, like every Response setter).
   header = { it: 'it, k: Str, v: Str } -> do
     let r = mock_response_of { rule = it }
     mock_with_response {
@@ -1534,11 +1235,6 @@ impl MockRule where {
       },
     },
 
-  ## ---- failing instead of answering ----
-  ## These were impossible before. `MockRule.response` is a
-  ## `Result Response HttpError`, so a rule could always have carried an
-  ## error — but no builder produced one, which left every error path in
-  ## every caller untestable without hand-writing the literal.
   ## Answer with a transport error rather than a response.
   fails = { it: 'it, error: HttpError } ->
     { methods = it.methods, url = it.url, response = Err { error = error } },
@@ -1553,15 +1249,6 @@ impl MockRule where {
 }
 
 
-# ─── Mock rule builders (shorthands over the chain) ───────────────────
-#
-# One-call forms of the commonest rules:
-#
-#   perform MockHttpClient { rules = [ mock_get { url = "*", body = "pong" } ] } in ...
-#
-# Each is a one-liner over the chain above, so the two surfaces cannot drift.
-# Anything these do not cover — headers, a failure, a non-GET JSON reply — is
-# the chain's job: `mock { url = "*" }.post {}.json { body = payload }`.
 ## A rule: any GET matching `url` returns a 200 text `body`.
 pub let mock_get: { url: Str, body: Str } -> MockRule = { url, body } ->
   mock { url = url }.get {}.text { body = body }
@@ -1591,18 +1278,8 @@ pub let mock_status
   = { url, methods, code, body } ->
     mock { url = url }.for_methods { methods = methods }.status { code = code }.text { body = body }
 
-# ─── Result chain terminals ───────────────────────────────────────────
-#
-# Chain-friendly finishers for the `Result Response HttpError` a `.send {}`
-# returns, so a fetch is one expression instead of a `match`:
-#
-#   request { url }.send {}.text_or { def = "offline" }
-#
-# The impl lives here (not in std::result) because these decoders are
-# Response-specific; the generic `impl Result 'a 'e` stays untouched.
-## Decode the Ok Response body as UTF-8; return `def` on any Err OR a
-## decode failure. The one-call replacement for
-## `match resp is Ok {..} -> body_str{..}.get_or{..}  Err -> def`.
+## Decode the Ok Response body as UTF-8; return `def` on any Err or decode
+## failure.
 pub let text_or: { resp: Result Response HttpError, def: Str } -> Str = { resp, def } ->
   match resp is
     Ok { val } -> match body_str { resp = val } is
@@ -1674,15 +1351,6 @@ pub let json_result: { resp: Result Response HttpError } -> Result Json HttpErro
 ##   let user: Result { name: Str } HttpError =
 ##     request { url }.send {}.from_json {}
 pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
-  # This used to be three nested `flat_map`/`map_err` calls, under a comment
-  # forbidding a hand-written `Ok { val = d } -> Ok { val = d }` re-wrap: a
-  # re-wrap dropped the target-directed decode's dictionary and crashed with
-  # UnsupportedSpecialization, and the generic combinators threaded it because
-  # they are separately compiled. The dictionary-evidence fix settled that —
-  # need is now decided by the operation's unresolved dispatch rather than by
-  # its receiver — so the plain form works, and `HttpChainTest` runs it both
-  # ways round to say so. The combinators also had nowhere to get the url from
-  # and reported the decode failure against `""`.
   match resp is
     Err { error } -> Err { error = error }
     Ok { val } -> match body_str { resp = val } is
@@ -1692,10 +1360,8 @@ pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a S
         Err { error } -> Err { error = DecodeError { url = val.url, message = error.message } }
 
 
-## Chainable finishers on the `Result Response HttpError` from `.send {}`.
-## A specialized inherent impl on the concrete Result — the generic
-## `impl Result 'a 'e` (map/get_or/…) still applies to every other
-## Result. Each method delegates to the free function above.
+## Chainable finishers on the `Result Response HttpError` from `.send {}`. The
+## generic `impl Result 'a 'e` (map/get_or/…) still applies to every other Result.
 impl Result Response HttpError where {
   text_or = { it: 'it, def: Str } -> text_or { resp = it, def = def },
   json_or = { it: 'it, def: Json } -> json_or { resp = it, def = def },
@@ -1709,7 +1375,5 @@ impl Result Response HttpError where {
   json = { it } -> json_result { resp = it },
   from_json = { it } -> from_json_result { resp = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
   ensure_ok = { it } -> ensure_ok { resp = it },
 }

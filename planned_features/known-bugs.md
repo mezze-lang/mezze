@@ -154,6 +154,15 @@ per-signature stdlib hygiene. Siblings (`race`, `with_timeout`, `try_all`,
 `try_any`, `scope_cancel_all`, …) likely over-declare too but are not in the
 showcase path and must each be checked (a blanket close is unsafe — `scoped`).
 
+### #169 — `try_all` fail-fast spawn-of-spawns (OPEN — task, captured from an inline TODO)
+
+`try_all` in `std/effects/async.mz` currently awaits every promise in turn and
+then scans for the first error ("await everything, then check"), so a sibling
+keeps running after another has already failed. #169 tracks switching to a
+fail-fast spawn-of-spawns that cancels the siblings as soon as one errs. Recorded
+here from the inline `## TODO #169` that the stdlib comment cleanup removed — it
+was the only TODO in the stdlib.
+
 ### B-14 — an imported inherent method's `with C 'r` constraint leaks a PHANTOM onto a lambda-bound caller (FIXED)
 
 Calling an imported inherent impl method constrained `with C 'r`, where `'r`
