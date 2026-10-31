@@ -9,8 +9,10 @@ import java.util.concurrent.CountDownLatch;
  * Native for the Signal effect — std/effects/signal.mz.
  *
  * {@code __native_signal_await_interrupt} parks the calling thread until the
- * process receives SIGINT (Ctrl-C), then returns so a server can shut down
- * gracefully — the mezze equivalent of awaiting {@code tokio::signal::ctrl_c()}.
+ * process receives SIGINT (Ctrl-C) OR SIGTERM (the signal `kill`, `docker stop`,
+ * and process managers send to ask for shutdown), then returns so a server can
+ * shut down gracefully — the mezze equivalent of awaiting
+ * {@code tokio::signal::ctrl_c()} (plus the SIGTERM a real service also wants).
  *
  * Only the {@code SystemSignal} impl calls this; {@code ImmediateSignal} returns
  * in pure mezze, so a test or a non-blocking tour never parks here.
@@ -31,15 +33,30 @@ public final class SignalNatives {
     @TruffleBoundary
     public static MezzeRecord awaitInterrupt(MezzeRecord args) {
         final CountDownLatch latch = new CountDownLatch(1);
-        sun.misc.Signal sig;
-        sun.misc.SignalHandler previous;
-        try {
-            sig = new sun.misc.Signal("INT");
-            previous = sun.misc.Signal.handle(sig, s -> latch.countDown());
-        } catch (Throwable t) {
-            // sun.misc.Signal unavailable or refused (e.g. Windows): we cannot
-            // wait for SIGINT, so return at once rather than hang forever — the
-            // caller then shuts the server down immediately.
+        // Install handlers for BOTH SIGINT (Ctrl-C) and SIGTERM (kill / `docker
+        // stop` / a process manager asking to shut down). Either releases the
+        // latch, so the server parks until whichever arrives first. Each is
+        // installed INDEPENDENTLY: a platform may offer one and not the other
+        // (e.g. Windows refuses these), and only if NEITHER installs do we
+        // decline to park and return at once — the caller then shuts down now
+        // rather than hanging forever.
+        final java.util.List<Runnable> restores = new java.util.ArrayList<>();
+        for (String name : new String[] { "INT", "TERM" }) {
+            try {
+                final sun.misc.Signal sig = new sun.misc.Signal(name);
+                final sun.misc.SignalHandler previous = sun.misc.Signal.handle(sig, s -> latch.countDown());
+                restores.add(() -> {
+                    try {
+                        sun.misc.Signal.handle(sig, previous);
+                    } catch (Throwable ignored) {
+                        // best-effort restore of the previous handler
+                    }
+                });
+            } catch (Throwable ignored) {
+                // this signal is unavailable/refused on this platform; try the next.
+            }
+        }
+        if (restores.isEmpty()) {
             return MezzeRecord.empty();
         }
         try {
@@ -49,11 +66,7 @@ public final class SignalNatives {
             // as the shutdown request and return so cleanup can run.
             Thread.currentThread().interrupt();
         } finally {
-            try {
-                sun.misc.Signal.handle(sig, previous);
-            } catch (Throwable ignored) {
-                // best-effort restore of the previous handler
-            }
+            for (Runnable restore : restores) restore.run();
         }
         return MezzeRecord.empty();
     }

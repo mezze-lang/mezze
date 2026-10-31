@@ -9,11 +9,13 @@ effect Signal where {
   interrupt: {} -> {} <Signal>
 }
 
-## Wait for an OS interrupt (SIGINT / Ctrl-C). Parks until the signal arrives.
+## Wait for an OS shutdown signal — SIGINT (Ctrl-C) or SIGTERM (what `kill`,
+## `docker stop`, and process managers send). Parks until one arrives.
 ##
-## In a standalone run the process owns SIGINT and this returns when the user
-## hits Ctrl-C. Under `mez dev` the CLI owns SIGINT and cancels the program
-## instead, which also releases this — either way Ctrl-C stops the server.
+## In a standalone run the process owns these signals and this returns when the
+## user hits Ctrl-C or something sends SIGTERM. Under `mez dev` the CLI owns
+## SIGINT and cancels the program instead, which also releases this — either way
+## a shutdown request stops the server.
 impl Signal for SystemSignal where {
   interrupt = {} -> __native_signal_await_interrupt {},
 }
