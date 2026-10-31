@@ -89,36 +89,23 @@ pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promis
 pub let cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
   __native_promise_cancel { p = p, reason = reason }
 
-## ==================================================================
-## User-space Promise constructors (#77, #80)
-##
-## Three constructors — one primitive + two sugars. `promise_from` is
-## the general form: it invokes `setup` with a
-## { complete, fail, on_cancel } capability record. Whichever
-## resolve-capability setup invokes atomically transitions the promise
-## to that state; subsequent transitions are no-ops (CAS on the state
-## field). If setup raises, the promise is auto-failed so it doesn't
-## leak in Pending forever.
+## Construct a Promise via a `setup` callback that receives a
+## `{ complete, fail, on_cancel }` capability record. Whichever resolve
+## capability `setup` invokes atomically transitions the promise; later
+## transitions are no-ops. If `setup` raises, the promise is auto-failed so it
+## never leaks in Pending.
 ##
 ## `setup` may invoke:
-##   - `complete { val = ... }` — resolve the promise successfully.
+##   - `complete { val = ... }` — resolve successfully.
 ##   - `fail { err = ... }` — resolve with an AsyncError.
-##   - `on_cancel { hook = { reason } -> ... }` — register a cancel
-##     hook. Fires with the CancelReason when the promise is cancelled
-##     (via Async.cancel or scope teardown). Last-writer-wins if called
-##     multiple times. Not required — omit if the backend has no cancel
-##     channel of its own.
+##   - `on_cancel { hook = { reason } -> ... }` — register a cancel hook, fired
+##     with the CancelReason on cancellation. Last-writer-wins; omit if the
+##     backend has no cancel channel.
 ##
-## `setup` may call neither resolve capability — the async case, where
-## a background task fulfills the promise later. That's exactly how a
-## third-party async backend (Kotlin coroutines, CompletableFuture,
-## Vert.x, ...) plugs in: build the promise, launch work on the
-## foreign scheduler, register `complete`/`fail` as the completion
-## callbacks, and route Mezze's cancel back to the foreign scheduler
-## via `on_cancel`.
-## ==================================================================
-## Construct a Promise via a setup callback that receives three
-## write-side capabilities. See module comment above for semantics.
+## `setup` may call neither — the async case, where a background task fulfills
+## the promise later. That is how a third-party backend (Kotlin coroutines,
+## CompletableFuture, Vert.x, …) plugs in: build the promise, launch work on the
+## foreign scheduler, and route cancel back through `on_cancel`.
 pub let promise_from
   : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} <...> } -> {} <...> } -> {} <...> }
   -> Promise 'a
@@ -405,12 +392,10 @@ pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
   let _ = Async.spawn { f = f }
   {}
 
-## ==================================================================
 ## Park-based helpers — derived from spawn + park + await primitives.
 ## These are equivalent to the Async.* ops of the same name and exist
 ## as plain functions so the Async effect can eventually shrink to
 ## just the primitives. For now both paths coexist.
-## ==================================================================
 ## Wait for any of a list of promises to settle, returning the first
 ## non-cancelled outcome as `Result 'a AsyncError`. Losing siblings are
 ## auto-cancelled when the winner commits.
@@ -441,11 +426,6 @@ pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps }
 
 ## Wait for all promises; return each one's Result in input order. Never
 ## raises; the per-promise Result carries success/failure information.
-# The body performs exactly `Async` (await inside seq::map), so the latent row is
-# `<Async>`, not an open `<Async, ...>`. A spurious open tail on a no-callback
-# function's own latent leaks `<..., *>` onto a concrete caller under a `perform`
-# (showcase `run_async_js`) — the callback-sourced `<...>` fix (B-15) does not
-# reach a function that over-declares its OWN latent.
 pub let all: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async> = { ps } ->
   seq::map { xs = ps, f = { x } -> await { p = x } }
 
@@ -485,7 +465,6 @@ pub let par_map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     all { ps = ps }
 
-## ---------- Bounded concurrency over a LAZY source ----------
 ##
 ## `par_map` takes a Seq, so the whole input has to exist before any work
 ## starts. These take an `Iter` and never materialise it: the source is walked
@@ -691,22 +670,10 @@ pub let with_timeout: { ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async,
       Err { error = AsyncTimedOut { ms = ms } }
 
 
-## ==================================================================
-## try_* — fail-fast variants. On first Err, cancel the rest and
-## return that error. On success of every input, return the unwrapped
-## values. Matches Rust `try_join_all` / `try_join!` semantics.
-## ==================================================================
-## Wait for all promises; if any fails, cancel the rest and return
-## the first error. Otherwise return the unwrapped values in input order.
-##
-## Implementation: await each in turn; collect Results into a seq. After
-## all awaits complete (or short-circuit doesn't happen because we already
-## awaited them all sequentially), scan for the first error and either
-## return Ok of unwrapped values or Err with the first error.
-##
-## TODO #169: switch to a fail-fast spawn-of-spawns implementation that
-## cancels siblings as soon as one errs, rather than the current
-## "await everything, then check" approach.
+## try_* — fail-fast variants: on the first Err, cancel the rest and return it;
+## on all-success, return the unwrapped values (Rust `try_join_all` semantics).
+## Wait for all promises; if any fails, return the first error, otherwise the
+## unwrapped values in input order.
 pub let try_all: { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = { ps } ->
   do
     let results = seq::map { xs = ps, f = { x } -> await { p = x } }
@@ -876,23 +843,14 @@ impl Scope 'a where {
   join_on_first = { it, ps } -> join_on_first { sc = it, ps = ps },
 }
 
-# ============================================================================
-# scoped_with — policy-driven structured concurrency over scoped
-#
-# Wraps scoped: the body spawns children into `sc` and returns the
-# [Promise 'a] list of what it spawned. scoped_with parks on those
-# promises according to `policy`, cancels losers, and constructs the
-# appropriate JoinOutcome arm.
-#
-# - OnAllSettled — wait for everyone, return per-item Results.
-# - OnFailure    — wait for everyone; on first failure, cancel rest and
-#                  return OnFailureCaught; if everyone succeeds, return
-#                  OnFailureOutcome with the unwrapped values.
-# - OnSuccess    — first success wins; cancel rest and return
-#                  OnSuccessOutcome; if all fail, return OnSuccessAllFailed.
-# - OnFirst      — first to settle (any way) wins; cancel rest and return
-#                  OnFirstOutcome carrying the result.
-# ============================================================================
+## Structured concurrency over `scoped`: the body spawns children into `sc` and
+## returns their `[Promise 'a]`; `scoped_with` parks on them per `policy`,
+## cancels the losers, and returns the matching `JoinOutcome`.
+##
+##   - OnAllSettled — wait for all, return per-item Results.
+##   - OnFailure    — on first failure cancel the rest; else the unwrapped values.
+##   - OnSuccess    — first success wins, cancel the rest; else all-failed.
+##   - OnFirst      — first to settle (any way) wins, cancel the rest.
 pub let scoped_with
   : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise 'a] <Async, ...> }
   -> JoinOutcome 'a <Async, ...>
@@ -1018,34 +976,14 @@ pub let join_on_first: { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Asy
           settled_at = idx,
           cancelled = cancelled,
         }
-  # ============================================================================
-
-# Cancellation tokens
-#
-# Cooperative cancellation primitive: a flag that tasks can check (via
-# `is_token_cancelled`) at safe points and bail out early. Cancelling the
-# token doesn't kill any running code — it only signals; watchers must
-# respect the signal themselves. Mirrors Go's context.Cancel(), .NET's
-# CancellationTokenSource.Cancel(), Kotlin's Job.cancel().
-#
-# Used to live in std::effects::async::cancellation but moved here
-# because cancel returns CancelOutcome (which talks about token
-# cancellation semantics) and `Scope` exposes `scope_get_token` — the
-# token type belongs with the rest of the async surface, not in a
-# separate module.
-#
-# The `_token` suffix on `cancel_token` and `is_token_cancelled` is to
-# disambiguate from `cancel { p = ... }` / `Promise.is_cancelled
-# { p = ... }`, which operate on Promises (different shape, different
-# return type).
-# ============================================================================
-## Cooperative cancellation token supporting hierarchical cancellation.
+  
+## A cooperative cancellation token (supports hierarchical cancellation): a flag
+## tasks check with `is_token_cancelled` and bail out at safe points. Cancelling
+## only signals — it does not kill running code; watchers must respect it. Like
+## Go's context, .NET's CancellationTokenSource, Kotlin's Job.cancel.
 pub newtype CancellationToken = __NativeCancellationToken
 
 ## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
 impl Hash for CancellationToken where {
   hash: { it: CancellationToken } -> Int = { it } -> structural_hash { it = it }
 }
