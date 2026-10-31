@@ -99,14 +99,6 @@ import { highlight } from '../lib/highlight'
       tab.addEventListener('click', () => select(Number(tab.dataset.idx))),
     )
 
-    // Each dish owns a sample, so clicking the mascot walks the examples with
-    // the colour. Tabs still work on their own — this only follows the mascot.
-    document.addEventListener('mezze-dish', (e) => {
-      const key = (e as CustomEvent).detail?.key
-      const i = playground.tabs.findIndex((t) => t.dish === key)
-      if (i >= 0) select(i)
-    })
-
     // ---- hover types ------------------------------------------------------
     // Types were extracted at build time by wasm-build/hovers.sh, using the
     // same lookup the taste does — so the landing page gets real inferred types

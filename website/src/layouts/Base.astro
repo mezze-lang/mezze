@@ -29,10 +29,6 @@ const {
   description = 'Mezze — a functional language where effects are part of the type.',
   width = 'page',
 } = Astro.props
-
-// The pre-paint script cannot use imports, so the icon paths are baked in
-// here rather than duplicated by hand.
-const iconList = dishes.map((d) => d.icon)
 ---
 <!doctype html>
 <html lang="en">
@@ -43,24 +39,13 @@ const iconList = dishes.map((d) => d.icon)
     <meta name="description" content={description} />
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
     <link rel="icon" type="image/png" href={dishes[0].icon} data-favicon />
-    <script is:inline define:vars={{ iconList }}>
-      // Both of these run before first paint, so the page never shows one
-      // state and then corrects itself.
+    <script is:inline>
+      // Runs before first paint, so the page never shows one state and then
+      // corrects itself. The dish is fixed to olive, so only the theme (the
+      // reader's light/dark choice) is restored here.
       const root = document.documentElement
-
       const t = localStorage.getItem('mezze-theme')
       if (t === 'dark' || t === 'light') root.dataset.theme = t
-
-      // The markup ships dish 0; without this the saved dish only takes effect
-      // after hydration, so the first frame is always olive.
-      const saved = Number(sessionStorage.getItem('mezze-dish'))
-      if (saved > 0) {
-        root.dataset.dish = String(saved)
-        // The tab icon ships as dish 0 too; correct it in the same breath.
-        const icons = iconList
-        const fav = document.querySelector('[data-favicon]')
-        if (fav && icons[saved]) fav.href = icons[saved]
-      }
     </script>
   </head>
   <body>
@@ -144,42 +129,10 @@ const iconList = dishes.map((d) => d.icon)
     </style>
 
     <script>
-      import { dishes } from '../data/dishes'
-
-      const KEY = 'mezze-dish'
+      // The identity is fixed to the olive: colours come straight from the CSS
+      // tokens (--primary defaults to --olive) and the mascot is decorative, so
+      // there is no dish state to set up here.
       const root = document.documentElement
-
-      /** Paint one dish: primary colour everywhere, matching icon shown. */
-      function show(i: number) {
-        const d = dishes[i]
-        root.style.setProperty('--primary', d.primary)
-        root.style.setProperty('--on-primary', d.onPrimary)
-        const imgs = document.querySelectorAll<HTMLImageElement>('[data-mascot] img')
-        imgs.forEach((img) => {
-          img.classList.toggle('on', img.dataset.dish === d.key)
-        })
-        const fav = document.querySelector<HTMLLinkElement>('[data-favicon]')
-        if (fav) fav.href = d.icon
-        sessionStorage.setItem(KEY, String(i))
-        // Let a page follow the dish — the landing page pairs each one with
-        // its own code sample.
-        document.dispatchEvent(new CustomEvent('mezze-dish', { detail: { index: i, key: d.key } }))
-      }
-
-      // Fixed order: a fresh visit starts at the first dish and clicking
-      // advances through the list. The position survives navigation within
-      // a visit, so the site does not flip colour on every page change.
-      const saved = sessionStorage.getItem(KEY)
-      let current = saved === null ? 0 : Number(saved) % dishes.length
-      show(current)
-
-      // Hand off from the pre-paint CSS to the inline styles show() just set,
-      // then allow the cross-fade — so the first frame is correct and only
-      // later clicks animate.
-      root.removeAttribute('data-dish')
-      requestAnimationFrame(() => {
-        document.querySelectorAll('[data-mascot]').forEach((el) => el.classList.add('is-live'))
-      })
 
       // The taste sizes itself to the viewport minus the header. The header is
       // content-driven, so measure it rather than hardcoding a guess.
@@ -190,13 +143,6 @@ const iconList = dishes.map((d) => d.icon)
         publish()
         new ResizeObserver(publish).observe(bar)
       }
-
-      document.querySelectorAll('[data-mascot]:not(.is-static)').forEach((el) =>
-        el.addEventListener('click', () => {
-          current = (current + 1) % dishes.length
-          show(current)
-        }),
-      )
 
       /**
        * Show the page scrollbar only while scrolling.
