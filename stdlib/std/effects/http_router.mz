@@ -1,20 +1,12 @@
-## Routing — PURE code that folds a route table into ONE handler.
+## Routing — pure code that folds a route table into one handler.
 ##
-## Nothing here performs an effect. A `Route` matches a method and a path; `or`
-## joins two routes; `otherwise` supplies the fallback and closes the table into
-## a plain `{ req: Request } -> Response`. That function is what `serve` takes,
-## so routing never appears in the `HttpServer` effect and never grows an
-## operation.
+## Nothing here performs an effect: a route matches a method and a path, `or`
+## joins two routes, and `otherwise` closes the table into the plain
+## `{ req: Request } -> Response` that `serve` takes. Because it is pure, a route
+## table is tested by calling it with a `Request` — no server, mock, or socket.
 ##
-## Because it is pure, a route table is tested by calling it with a `Request`.
-## No server, no mock, no socket.
-##
-## Calls here are QUALIFIED (`seq::size`, `str::starts_with`) rather than
-## method-style. A stdlib inherent method needs its ability in scope at the use
-## site, and this module should not impose that on its consumers.
-##
-## PATH PARAMETERS. A segment written `:name` matches any one segment and binds
-## it. `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
+## Path parameters: a segment written `:name` matches any one segment and binds
+## it, so `/users/:id` matches `/users/7` and binds `id` to `"7"`. The handler
 ## receives the bindings as a `Map Str Str` alongside the request.
 
 use std::effects::http::{ Method, Request, Response, IntoResponse, IntoErrorResponse, not_found, response_status }
@@ -27,8 +19,6 @@ use std::str
 use std::codec::url::{ url_decode_component }
 pub use std::codec::query::{ FromQuery }
 use std::codec::core::{ DecodeError }
-## `path_of` does index arithmetic, and `+` on Int needs int's `NumAdd` impl in
-## scope — an impl arrives with its module, not with the prelude.
 use std::int
 
 ## What a matched route hands its handler: the request, plus the path
@@ -38,13 +28,8 @@ pub type Matched = {
   params: Map Str Str,
 }
 
-## A route table. `run` is the only thing a consumer needs; the variants exist
-## so `or` can build a chain without a mutable list.
-##
-## The row on `run` is open, so the HANDLERS a table carries may perform effects
-## even though the routing around them performs none. A route that reads a
-## database or a clock is the normal case, not an exception, and the row that
-## says so travels with the table rather than being discharged by it.
+## A route table. The row on `run` is open, so the handlers a table carries may
+## perform effects even though the routing around them performs none.
 pub type Routes = {
   run: { req: Request } -> Option Response <...>,
 }
@@ -53,8 +38,6 @@ pub type Routes = {
 ## slash produces, so `/users/7/` and `users/7` agree.
 pub let segments: { path: Str } -> [Str] = { path } ->
   seq::filter { xs = str::split { s = path, delimiter = "/" }, p = { x } -> x != "" }
-
-## ── Request targets ─────────────────────────────────────────────────────────
 
 ## Drop a query string, if there is one.
 let strip_query: { s: Str } -> Str = { s } ->
@@ -102,13 +85,9 @@ pub let query_of: { url: Str } -> Str = { url } ->
 pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } ->
   match_prepared { pat = prepare { pattern = pattern }, url = path }
 
-## A pattern taken apart once, when the route table is built.
-##
-## `segs` serves the binding path. `literal` is the pattern's slash-trimmed form,
-## present ONLY when the pattern binds no `:name` — and then matching is one
-## STRING COMPARISON instead of splitting the request path into a seq, filtering
-## it, zipping it against the pattern and folding a map that comes back empty.
-## For a static route that was 5.3% of throughput.
+## A pattern taken apart once, when the route table is built. `literal` is the
+## slash-trimmed form, present only when the pattern binds no `:name` — then
+## matching is one string comparison rather than a per-segment walk.
 let prepare: { pattern: Str } -> { segs: [Str], literal: Option Str } = { pattern } -> do
   let segs = segments { path = pattern }
   let binds = seq::any { xs = segs, p = { x } -> str::starts_with { s = x, prefix = ":" } }
@@ -134,9 +113,8 @@ let match_prepared
     match pat.literal is
       None -> match_on_path { ps = pat.segs, path = path }
       Some { val = lit } ->
-        ## `//` inside the path makes a comparison disagree with `segments`,
-        ## which drops empty pieces — so that case takes the segment path. It is
-        ## the only shape where the two could differ.
+        # `//` in the path makes a string comparison disagree with `segments`
+        # (which drops empty pieces), so that case takes the segment path
         if str::contains { s = path, substring = "//" } then
           match_on_path { ps = pat.segs, path = path }
         else
@@ -157,10 +135,7 @@ let match_on_path: { ps: [Str], path: Str } -> Option (Map Str Str) = { ps, path
   let xs = segments { path = path }
   if seq::size { xs = ps } != seq::size { xs = xs } then None
   else
-    ## `iter`, not `seq`: this walks the pattern and the path TOGETHER once and
-    ## keeps only the bindings. `seq::zip` would materialise a whole seq of pairs
-    ## for the fold to consume and discard — a lazy pipeline has no business
-    ## allocating one. Zipping lazily, nothing exists but the accumulator.
+    # zip + fold lazily over pattern and path together, keeping only the bindings
     iter::fold {
       it = iter::zip {
         a = iter::from_seq { xs = ps },
@@ -184,7 +159,7 @@ let match_on_path: { ps: [Str], path: Str } -> Option (Map Str Str) = { ps, path
 ## parameters.
 pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response <...> } -> Routes =
   { method, path, handler } -> do
-    ## Taken apart once, here, not on every request.
+    # taken apart once here, not on every request
     let pat = prepare { pattern = path }
     {
       run = { req } ->
@@ -195,20 +170,8 @@ pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response 
             Some { val = handler { m = { req = req, params = params } } },
     }
 
-# A handler may answer with anything convertible to a Response — a Str, a
-# Json, or a Response it built itself:
-#
-#   on_get  { path = "/ping",      handler = { m } -> "pong" }
-#   on_post { path = "/users",     handler = { m } -> created { body = "ok" } }
-#   on_get  { path = "/users/:id", handler = { m } -> m.param_or { name = "id", default = "?" } }
-#
-# `route` remains and still takes a Response-returning handler: these are a
-# layer over it, not a replacement, so nothing written against it changes.
-#
-# The conversion happens INSIDE the wrapped handler, not at table-build time,
-# because the handler has not run yet — and it runs under the handler's own
-# effect row, which is why the row stays open here.
-## Route one method and path to a handler, converting whatever it answers.
+## Route one method and path to a handler, converting whatever it answers (a
+## `Str`, `Json`, `Response`, or `Result`) via `IntoResponse`.
 pub let on_method
   : { method: Method, path: Str, handler: { m: Matched } -> 'r <...> }
   with IntoResponse 'r
@@ -251,55 +214,6 @@ pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoRes
 pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
   { path, handler } -> on_method { method = Options, path = path, handler = handler }
 
-# ---- handler-side adapters ------------------------------------------------
-#
-# A group's verbs take the handler DIRECTLY and convert whatever it answers:
-#
-#   .get { path = "/ping",   handler = { m } -> "pong" }           # Str
-#   .get { path = "/made",   handler = { m } -> created { … } }    # Response
-#   .get { path = "/j",      handler = { m } -> payload }          # Json
-#   .get { path = "/u/:id",  handler = { m } -> load { id = … } }  # Result
-#
-# all in ONE chain, each route answering a different type. Nothing wraps
-# anything, and there is no `try_get` beside `get`.
-#
-# A Result needs no adapter either: `impl IntoResponse for Result` sends the
-# Ok through IntoResponse and the Err through IntoErrorResponse, so an error
-# picks its own status. (A `Result Str HttpError` used to die in a native here
-# — one dictionary slot was filled from a sibling constraint's type. Fixed in
-# the compiler's dict evidence, not worked around.)
-#
-# ONE shape the verbs cannot take, because the reason is the effect system
-# rather than a gap: a handler that THROWS a Response. A handler that never
-# throws does not satisfy a row carrying Exception, and one that throws does
-# not satisfy a pure signature, so `catching` adapts it.
-#
-# The verbs DID apply this themselves for a while, so a route read
-# `handler = { m } -> …` even when it threw. That was reverted: the verb's own
-# handler row has to be a bare `<...>` for a pure handler to pass, and a bare
-# row absorbs the thrown type without checking it — so a handler throwing a
-# NON-Response compiled and died at runtime with `Field not found`, where the
-# explicit form rejects it. The wrapper is verbose; a silent runtime failure is
-# worse. It can come back when a row can say "MAY perform Exception, and if so
-# with `'error = Response`" — an upper bound `<E, ...>` cannot express, since it
-# means AT LEAST.
-#
-# It is a free function because it carries an ability constraint, and a
-# constraint on an inherent impl method only works for an IMPORTED impl (a
-# locally declared one is not re-instantiated per call, so its constrained
-# variable collapses to the first use's type).
-
-# The handler runs inside ExceptionToResult, so a throw short-circuits to the
-# Response it threw. The conversion happens INSIDE the region, where the answer
-# is still typed `'r`: done outside, on the Ok payload, the IntoResponse
-# constraint lands on a different variable and the annotation is rejected.
-#
-# The thrown channel is a concrete Response rather than any error with an
-# IntoErrorResponse impl, because naming that error type here means
-# `having 'error = 'e` plus `with IntoErrorResponse 'e` — and the signature's
-# `'e` does not tie to the one bound in the body's Err arm (T0210). Convert at
-# the throw site instead: `throw { error = e.into_error_response {} }`, or let
-# `or_throw` do it for a Result.
 ## Adapt a handler that may THROW a Response into one answering a Response.
 ##
 ##   .get { path = "/u/:id", handler = catching { handler = { m } -> … } }
@@ -332,15 +246,8 @@ pub let catching
 ##     if id == "" then throw { error = NotFound { id = id } } else show { id = id }
 ##   } }
 ##
-## The thrown type has to reach three places, which is why this did not exist
-## before: the `Err` arm's binding, the call site's dictionary for
-## `IntoErrorResponse`, and — for an INLINE handler — the lambda's own stamped
-## effect row, which used to carry this function's variable rather than what the
-## handler actually threw.
-##
-## A RECORD-typed error does not dispatch yet (`Field not found:
-## into_error_response` at run time); throw a `Str`, or a `Response` through
-## `catching`. `HttpCatchingAnyTest` pins each case.
+## A record-typed error does not dispatch yet; throw a `Str`, or a `Response`
+## through `catching`.
 pub let catching_any
   : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
   with IntoResponse 'r, IntoErrorResponse 'e
@@ -353,34 +260,6 @@ pub let catching_any
     match outcome is
       Ok { val } -> val
       Err { error } -> error.into_error_response {}
-
-# ---- route groups --------------------------------------------------------
-#
-# A group is a path prefix plus the routes under it, and groups NEST:
-#
-#   let users = router { path = "/users" }
-#     .get  { path = "/:id", handler = catching { handler = show } }
-#     .post { path = "",     handler = respond  { handler = create } }
-#
-#   let app = router { path = "/api" }
-#     .nest { group = users }
-#     .get { path = "/health", handler = respond { handler = { m } -> "ok" } }
-#     .otherwise { fallback = fallback }
-#
-# giving /api/users/:id, /api/users and /api/health.
-#
-# Entries are kept as DATA rather than folded into a Routes as they are added,
-# because `nest` has to re-prefix a child's routes and a folded Routes is an
-# opaque function by then.
-#
-# A NEWTYPE, not a record alias, and that is load-bearing. `get` is declared by
-# a dozen inherent impls (Seq, List, Map, Deque, SortedMap, NonEmptyList,
-# Bytes, Client, MockRule, …), so the receiver has to carry a nominal identity
-# for `.get {}` to reach THIS one. As a record alias it does not: the receiver
-# arrives as an anonymous record (a field whose type never solved is enough to
-# stop alias adoption labelling it), no candidate matches, and the call
-# compiles to a field read that fails at RUNTIME with `Field not found: get`.
-# A newtype is nominal by construction.
 
 ## One route in a group: a method, a full path, and a Response-answering handler.
 pub type RouteEntry = {
@@ -406,8 +285,7 @@ let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = {
   match g is
     RouteGroup.(v) -> v
 
-# Every entry folded into one table, first added winning. `table`, `otherwise`
-# and `handler` all want exactly this, and each had its own copy.
+# every entry folded into one table, first added winning
 let fold_entries: { g: RouteGroup } -> Routes = { g } ->
   seq::fold {
     xs = group_inner { g = g }.entries,
@@ -522,9 +400,6 @@ impl RouteGroup where {
         answered.into_response {},
     },
 
-  # The child's entries already carry the child's own prefix, so one more
-  # prepend nests them — and nesting a group that itself nested one works for
-  # the same reason, to any depth.
   ## Mount another group's routes under this group's prefix.
   nest = { it: 'it, group: RouteGroup } -> do
     let outer = group_inner { g = it }
@@ -548,8 +423,6 @@ impl RouteGroup where {
   table = { it: 'it } -> fold_entries { g = it },
 
   ## Close the group, answering anything unmatched with 404.
-  # The only answer a table has for a request it does not match, so requiring
-  # every group to spell out a fallback is ceremony. `otherwise` says otherwise.
   handler = { it: 'it } ->
     otherwise { routes = fold_entries { g = it }, fallback = { req } -> not_found { body = "no route matched" } },
 
@@ -566,26 +439,12 @@ impl RouteGroup where {
     },
 }
 
-# A route table is a LIST, and reads like one:
-#
-#   let app = routes { of = [
-#     on_get    { path = "/ping",      handler = { m } -> "pong" },
-#     on_post   { path = "/users",     handler = { m } -> created { body = "made" } },
-#     on_get    { path = "/users/:id", handler = catching { handler = show } },
-#   ] }.otherwise { fallback = fallback }
-#
-# rather than the first route bare and every later one wrapped in
-# `.or_else { b = … }`. First match still wins, so order is still the priority.
-#
-# This is a free function taking a seq, NOT a chain of `.get {}.post {}`
-# methods on Routes. I built the chain first and it does not work: those
-# methods need `with IntoResponse 'r`, and a constraint on an inherent impl
-# method does not get its dictionary — the call silently selects
-# `impl IntoResponse for Str`, hands it a Response and dies in a native
-# (`Expected String for field 's'`). The known `with C 'a` dict-plumbing
-# family again. Here every constraint stays on the free `on_*`/`try_*`
-# functions, where it already works, and this only folds finished Routes.
-## Fold routes into one table; the first to match wins.
+## Fold a list of routes into one table; the first to match wins.
+##
+##   let app = routes { of = [
+##     on_get  { path = "/ping",      handler = { m } -> "pong" },
+##     on_get  { path = "/users/:id", handler = catching { handler = show } },
+##   ] }.otherwise { fallback = fallback }
 pub let routes: { of: [Routes] } -> Routes = { of } ->
   seq::fold {
     xs = of,
@@ -594,9 +453,6 @@ pub let routes: { of: [Routes] } -> Routes = { of } ->
   }
 
 ## Try `a`, then `b`. First match wins, so declaration order is the priority.
-##
-## Named `or_else`, not `or`: `or` is the infix boolean operator's name and the
-## parser does not take it as a plain identifier here.
 pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
   run = { req } -> match a.run { req = req } is
     Some { val } -> Some { val = val }
@@ -615,20 +471,10 @@ pub let otherwise
     Some { val } -> val
     None -> fallback { req = req }
 
-## ── Query parameters ────────────────────────────────────────────────────────
-
-## Parse a request target's query into its parameters.
-##
-## Repeated keys COLLECT: `?tags=a&tags=b` gives `tags` two values. That is the
-## encoding `with_query`'s `QList` produces and the one the widest range of
-## servers parse, so the two halves of the story agree on it.
-##
-## A fragment with no `=` is a key with one empty value, which is how a flag
-## like `?debug` arrives. Keys and values are percent-decoded.
+## Parse a request target's query into its parameters. Repeated keys collect
+## (`?tags=a&tags=b` gives `tags` two values); a fragment with no `=` is a key
+## with one empty value (`?debug`). Keys and values are percent-decoded.
 pub let query_params: { url: Str } -> Map Str [Str] = { url } ->
-  ## `iter`, not `seq`: the fold is the only consumer, so the filtered fragments
-  ## never need to exist as a collection. Filtering eagerly built one for the
-  ## fold to walk once and drop.
   iter::fold {
     it = iter::filter {
       it = iter::from_seq { xs = str::split { s = query_of { url = url }, delimiter = "&" } },
@@ -666,22 +512,8 @@ pub let query_all: { url: Str, name: Str } -> [Str] = { url, name } ->
 pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
   seq::first { xs = query_all { url = url, name = name } }
 
-## The query, decoded into whatever the use site asks for.
-##
-## The exact mirror of the client's `with_query`: a record goes out as a query,
-## and the same record shape comes back here. Target-directed, so the type
-## comes from the annotation at the use site and no schema is declared.
-##
-##   let page: Result { q: Str, page: Int } DecodeError = query_decoded { url = req.url }
-##
-## `FromQuery` is re-exported from this module, and a `pub use` carries the
-## instance as well as the name — so importing anything from here is enough to
-## call this.
-## What the request carried where something else was wanted.
-##
-## Decoding a path parameter or a query is the one failure a handler meets
-## without asking for it: it reads what the caller sent, and what the caller
-## sent is whatever they liked.
+## What the request carried where something else was wanted — the failure a
+## handler meets when it decodes a path parameter or a query.
 pub type BadInput = {
   at: [Str],
   message: Str,
@@ -689,12 +521,6 @@ pub type BadInput = {
   found: Option Str,
 }
 
-# The codec's DecodeError says the same thing, and an impl for it would be the
-# obvious move — but it reaches this module under a `use … as` alias, and an
-# impl whose target arrived aliased registers under the LOCAL spelling and
-# never matches the declaration. So the router states its own input error,
-# which is better anyway: it knows the parameter's NAME, which a scalar
-# decode's empty path does not.
 let bad_input_of: { e: DecodeError, at: [Str] } -> BadInput = { e, at } -> {
   at = if seq::is_empty { xs = e.path } then at else e.path,
   message = e.message,
@@ -703,8 +529,6 @@ let bad_input_of: { e: DecodeError, at: [Str] } -> BadInput = { e, at } -> {
 }
 
 ## 400, naming where, what was wanted and what arrived.
-# A 400 whose body is only "bad request" sends the caller to read the route's
-# source.
 impl IntoErrorResponse for BadInput where {
   into_error_response = { it } -> do
     let where_ = if seq::is_empty { xs = it.at } then ""
@@ -721,19 +545,15 @@ impl IntoErrorResponse for BadInput where {
     },
 }
 
+## The query, decoded into whatever the use site asks for — the mirror of the
+## client's `with_query`, target-directed from the annotation at the use site.
 pub let query_decoded = { url: Str } ->
   match query_of { url = url }.from_query {} is
     Ok { val } -> Ok { val = val }
     Err { error = e } -> Err { error = bad_input_of { e = e, at = [] } }
 
-## One value, decoded into whatever the use site asks for.
-#
-# A path parameter is a Str, so a handler wanting `/users/:id` as an Int parsed
-# it by hand. No new ability is needed for that: QueryC already decodes a
-# SCALAR, and a scalar is a pair whose key is relative to nothing — `k = ""`.
-# So one value is a one-pair list, and the existing
-# `impl FromQuery 'a for [{ k: Str, v: Str }]` does the rest, which is why this
-# gets Int, Bool, a newtype and anything else with a QueryC decoder for free.
+## One value (e.g. a path parameter), decoded into whatever the use site asks
+## for — Int, Bool, a newtype, anything with a QueryC decoder.
 pub let one_decoded = { v: Str, at: [Str] } ->
   match [{ k = "", v = v }].from_query {} is
     Ok { val } -> Ok { val = val }
@@ -746,19 +566,6 @@ let no_such_param: { name: Str } -> BadInput = { name } -> {
   expected = "a path parameter the pattern declares",
   found = None,
 }
-
-## ── Dot-chaining surface ──────────────────────────────────────────────────
-##
-## Inherent impls on the two types this module declares, so a route table reads
-## as a chain instead of a nest. These are legal here precisely because `Routes`
-## and `Matched` are declared in this module — an inherent impl must live with
-## its type.
-##
-##   route { method = Get, path = "/users/:id", handler = { m } ->
-##     m.ok { text = m.param_or { name = "id", default = "?" } } }
-##     .or_else { b = route { method = Post, path = "/users",
-##                            handler = { m } -> m.reply { status = 201, text = "created" } } }
-##     .otherwise { fallback = not_found }
 
 impl Routes where {
   ## Try this table, then `b`. First match wins.
@@ -793,11 +600,8 @@ impl Matched where {
     Some { val } -> one_decoded { v = val, at = [name] }
     None -> Err { error = no_such_param { name = name } },
 
-  ## A bound path parameter, or `default` when the pattern bound none.
-  ##
-  ## Most handlers want this: a `:name` in the pattern always binds, so the
-  ## `None` arm is unreachable for a parameter the route itself declared, and
-  ## making every handler write the match obscured the interesting line.
+  ## A bound path parameter, or `default` when the pattern bound none. Usually
+  ## what a handler wants, since a `:name` the route declares always binds.
   param_or = { it: 'it, name: Str, default: Str } ->
     match map::get { m = it.params, k = name } is
       Some { val } -> val
