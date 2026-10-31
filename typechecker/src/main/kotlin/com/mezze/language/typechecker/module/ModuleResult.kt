@@ -84,7 +84,7 @@ sealed class ModuleError(override val message: String) : Exception(message) {
     data class ParseError(
         val modulePath: String,
         val error: String
-    ) : ModuleError("Failed to parse module $modulePath: $error") {
+    ) : ModuleError("Failed to parse module $modulePath: ${error.removePrefix("Parse error: ")}") {
         override val code = ErrorCode.M0804_MODULE_HAS_ERRORS
         override val hints: List<String> = listOf(
             "fix the parse errors in $modulePath first"
