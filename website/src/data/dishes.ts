@@ -1,41 +1,37 @@
 /**
- * The dish set.
+ * The dish — the olive.
  *
- * Each entry pairs an icon with a primary colour sampled from that icon, so the
- * mascot and the interface always agree. The order below is the cycle order:
- * a page starts at the first dish and clicking the hero mascot advances through
- * the list, wrapping at the end.
+ * The site's identity is fixed to the olive. This pairs the icon with the
+ * primary colour sampled from it, so the mascot and the interface agree.
  *
- * Order: olive, lemon, onion, tomato, mint, aubergine.
+ * The hero used to cycle through six dishes; that was removed and only the
+ * olive ships now. The other dishes' *colours* still live in styles/tokens.css
+ * as the highlight / squiggle / syntax palette — only their icon art was
+ * dropped. The type stays a list so the single call site (Mascot, the favicon)
+ * needs no change.
  */
 export interface Dish {
   key: string
   label: string
   icon: string
-  /** Palette token. The icons were tinted to match these, so the
-   *  mascot and the interface always agree. */
+  /** Palette token. The icon was tinted to match, so the mascot and the
+   *  interface always agree. */
   primary: string
   /** Text colour that sits on the primary. */
   onPrimary: string
 }
 
 /**
- * Cache-busting stamp on the icon URLs.
+ * Cache-busting stamp on the icon URL.
  *
- * These live in public/, so Astro never fingerprints them: a redesigned icon
- * keeps its old URL, and a CDN goes on serving the cached copy until the entry
- * expires — a week, in our case, during which new artwork simply does not
- * appear. The stamp is a hash of the icon bytes, refreshed by tools/icons.sh,
- * so the URL changes exactly when the artwork does and never otherwise.
+ * The icon lives in public/, so Astro never fingerprints it: a redesigned icon
+ * keeps its old URL until a CDN entry expires. The stamp is a hash of the icon
+ * bytes, refreshed by tools/stamp-icons.mjs, so the URL changes exactly when
+ * the artwork does and never otherwise.
  */
-const ICON_V = '33d865fd'
+const ICON_V = 'da748fd6'
 const icon = (name: string) => `/icons/${name}.png?v=${ICON_V}`
 
 export const dishes: Dish[] = [
-  { key: 'olive',     label: 'Olive',         icon: icon('olive'),     primary: 'var(--olive)', onPrimary: '#FFFEFA' },
-  { key: 'lemon',     label: 'Lemon',         icon: icon('lemon'),     primary: 'var(--lemon)', onPrimary: '#FFFEFA' },
-  { key: 'onion',     label: 'Pickled onion', icon: icon('onion'),     primary: 'var(--onion)', onPrimary: '#FFFEFA' },
-  { key: 'tomato',    label: 'Tomato',        icon: icon('tomato'),    primary: 'var(--tomato)', onPrimary: '#FFFEFA' },
-  { key: 'mint',      label: 'Mint',          icon: icon('mint'),      primary: 'var(--mint)', onPrimary: '#FFFEFA' },
-  { key: 'aubergine', label: 'Aubergine',     icon: icon('aubergine'), primary: 'var(--aubergine)', onPrimary: '#FFFEFA' },
+  { key: 'olive', label: 'Olive', icon: icon('olive'), primary: 'var(--olive)', onPrimary: '#FFFEFA' },
 ]

@@ -2,6 +2,13 @@
 #
 # Rebuild public/icons/*.png from a contact sheet holding all six dishes.
 #
+# NOTE: the site now ships only the olive (the hero no longer cycles dishes),
+# so only public/icons/olive.png is used. This tool still regenerates the whole
+# six-dish sheet — the other five colours remain the highlight/syntax palette
+# in styles/tokens.css, and the crop recipe below is kept intact — but a run
+# will recreate five icons the site does not reference. Delete them again after,
+# or keep only the olive tile.
+#
 # NOTE: the icons currently committed were NOT produced by this script. Five of
 # them are the earlier hand-corrected set (02eadbe84) and only the aubergine
 # comes from a generated sheet, all normalised afterwards by tools/size-icons.sh
