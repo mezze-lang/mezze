@@ -4,7 +4,7 @@ blurb: "Give the type its own verbs, then line them up."
 ---
 `label` was a loose function that only ever applies to one type. `impl Ingredient where { … }` moves it where it belongs: methods of its own, with the receiver named `it`.
 
-They are called with a dot, which means they line up. `chickpeas.for_two {}.label {}` reads left to right, in the order the work actually happens — double the quantity, then describe it — instead of inside-out as `label { i = for_two { i = chickpeas } }` would.
+They are called with a dot, which means they line up. `chickpeas.for_two {}.label {}` reads left to right, in the order the work actually happens (double the quantity, then describe it) instead of inside-out as `label { i = for_two { i = chickpeas } }` would.
 
 And the pantry is a list now. `filter`, `map` and `sum_float` are ordinary stdlib functions, not syntax, called with the same dot on a seq. Note `label` appearing inside that chain: a method you defined two lines up composes with library code without any arrangement between them.
 

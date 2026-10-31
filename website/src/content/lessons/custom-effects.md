@@ -4,11 +4,11 @@ blurb: "Effects are library code, not syntax."
 ---
 `Http` is not built into the language. It is a declaration in a library, and you can write your own the same way.
 
-The shop needs one. A delivery arrives and stock has to be recorded — that is an operation the shop *has*, so `effect Inventory` declares it: a name and the operations it offers, nothing about how they work.
+The shop needs one. A delivery arrives and stock has to be recorded, which is an operation the shop *has*, so `effect Inventory` declares it: a name and the operations it offers, nothing about how they work.
 
-The handlers supply that. `ToFile` appends a line to a CSV; `DryRun` says what it would have done and touches nothing. `delivery` is written against neither — it restocks, and has no idea whether a file exists. Which is what makes the dry run possible at all: not a flag inside the function, but a different answer to the same question.
+The handlers supply that. `ToFile` appends a line to a CSV. `DryRun` says what it would have done and touches nothing. `delivery` is written against neither. It restocks, and has no idea whether a file exists. Which is what makes the dry run possible at all: not a flag inside the function, but a different answer to the same question.
 
-Everything you would reach for syntax to do — exceptions, retries, early return, async — is this shape underneath. There is no keyword to wait for.
+Everything you would reach for syntax to do (exceptions, retries, early return, async) is this shape underneath. There is no keyword to wait for.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }

@@ -5,11 +5,11 @@ import { applyMarkup } from '../lib/markup'
 import Editor from '../components/Editor.astro'
 
 // Rendered at build time and handed to the client script as JSON. Lessons swap
-// without a navigation, so all of them ship with the page — the same as when
+// without a navigation, so all of them ship with the page, the same as when
 // this data lived in a TypeScript array, except the prose is now Markdown.
 const all = (await lessons()).map((l) => ({ ...l, body: applyMarkup(l.body) }))
 ---
-<Base title="Taste — Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
+<Base title="Taste of Mezze" width="full" description="Learn Mezze feature by feature, running every example in your browser.">
   <div class="taste">
     <!-- LEFT: narrow vertical exercise rail + prose -->
     <div class="taste-left">

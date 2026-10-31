@@ -4,9 +4,9 @@ blurb: "One value, one of several situations."
 ---
 Knowing an ingredient is not the same as knowing you can cook with it. Stock is the awkward part: sometimes it is a quantity on the shelf, sometimes a date it comes back, sometimes nothing at all because the line was dropped.
 
-A record cannot say that honestly. You would end up with a `grams` that means nothing when the item is out, a `day` that means nothing when it is in, and a comment explaining which to trust. A **variant** says *or* where a record says *and*, and each case carries only what is actually true in that situation — `OutUntil` has a day and no grams, `Discontinued` has neither.
+A record cannot say that honestly. You would end up with a `grams` that means nothing when the item is out, a `day` that means nothing when it is in, and a comment explaining which to trust. A **variant** says *or* where a record says *and*, and each case carries only what is actually true in that situation: `OutUntil` has a day and no grams, `Discontinued` has neither.
 
-`match` gets you back in, and the payoff is `can_cook` rather than a string: the cases decide something. Because the type is closed, the compiler checks you considered all of them. Delete the `Discontinued` arm and press Check — it names what is missing instead of letting the answer quietly default to something plausible.
+`match` gets you back in, and the payoff is `can_cook` rather than a string: the cases decide something. Because the type is closed, the compiler checks you considered all of them. Delete the `Discontinued` arm and press Check. It names what is missing instead of letting the answer quietly default to something plausible.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }

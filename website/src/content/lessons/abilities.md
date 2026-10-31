@@ -2,9 +2,9 @@
 title: "Abilities"
 blurb: "One question, asked of types that answer differently."
 ---
-The pantry has been pretending every ingredient is priced the same way. It is not. Feta is sold by weight, pita by the piece, and the two have no field in common to read — working out what either costs is a different calculation.
+The pantry has been pretending every ingredient is priced the same way. It is not. Feta is sold by weight, pita by the piece, and the two have no field in common to read. Working out what either costs is a different calculation.
 
-An **ability** is that question, written once. `ability Cost` declares the interface; each `impl` answers it for one type, including types you did not write. The receiver is `it`, exactly as in the inherent impl on the last page — the difference is that many types can implement the same ability.
+An **ability** is that question, written once. `ability Cost` declares the interface. Each `impl` answers it for one type, including types you did not write. The receiver is `it`, exactly as in the inherent impl on the last page. The difference is that many types can implement the same ability.
 
 `line` is the payoff. It never mentions `ByWeight` or `ByUnit`: it asks for a price and formats it. Add a third way of pricing something next month, give it an `impl`, and `line` handles it untouched.
 
@@ -34,4 +34,4 @@ let main = {} -> perform Console in do
   println { msg = { name = "sumac", kilos = 0.02, per_kilo = 90.0 }.to_dbg {} }
 -->
 
-Note what `line` does *not* do: read a field. Adding `x.name` would narrow `x` to a record that has a `name`, and that shape has no `Cost` impl — the constraint is the whole interface, not a starting point to add fields to.
+Note what `line` does *not* do: read a field. Adding `x.name` would narrow `x` to a record that has a `name`, and that shape has no `Cost` impl. The constraint is the whole interface, not a starting point to add fields to.
