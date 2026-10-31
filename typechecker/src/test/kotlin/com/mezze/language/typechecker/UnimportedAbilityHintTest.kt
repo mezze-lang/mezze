@@ -11,25 +11,22 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * "Implement it" is the wrong advice when an impl already exists.
+ * A function's ability constraint is discharged at the CALLER, and the caller
+ * does NOT need the ability in scope.
  *
- * A blanket `impl X for 'a` covers every type, and it is matched where the
- * constraint is settled — the call site. So a caller of a function constrained
- * on `X`, in a file where `X` is not in scope, used to be told
- * "`Int` does not implement 'X'. To enable this, implement: impl X for Int":
- * true, and it sends the reader to write a second impl of something that is
- * already implemented for everything.
+ * `absdef` declares `ability Shout` with a blanket `impl Shout for 'a`; `wrap`
+ * imports `Shout` to write `yell … with Shout 'a`; a consumer imports only
+ * `yell`. Calling `yell { x = 42 }` settles `Shout Int` at the call site, and
+ * the impl is reached transitively through `wrap`'s own import of `absdef`
+ * (ImportResolver.transitiveAbilityImpls) — so the consumer needs no
+ * `use absdef::{ Shout }`. This mirrors how `on_get`'s `with IntoResponse 'r`
+ * is satisfied without importing `std::effects::http`: the ability is named in
+ * the function's signature, the caller chooses nothing, and coherence guarantees
+ * a single impl, so there is nothing to disambiguate.
  *
- * What they need is an import, and the compiler knows which one. The message
- * says what is wrong in one plain line; the hints say what to do; the fix hint
- * lets an editor do it.
- *
- * THE SHAPE THAT STILL REACHES THIS, and why the test is three modules: a
- * direct `use` of a module carries that module's own impls, and a `pub use`
- * carries what it re-exports. What carries nothing is a module that plain-`use`s
- * an ability and exposes a function constrained on it — its consumers get the
- * function and not the instance. That is `wrap` below, and it is the shape of
- * `http.mz`'s `from_json_result`.
+ * Two things still hold, and are covered below: the ability must be in scope to
+ * CALL its method directly (`x.shout {}` — name resolution), and a genuinely
+ * UNIMPLEMENTED ability still says "implement it" (no import can help).
  */
 class UnimportedAbilityHintTest {
 
@@ -98,37 +95,18 @@ class UnimportedAbilityHintTest {
     """
 
     @Test
-    fun `the message is one plain line and says the ability is not imported`() {
+    fun `a constrained function is called without importing the ability`() {
+        // Case 2: the ability is named in `yell`'s signature, not at the call
+        // site. The caller chooses nothing and imports nothing; the blanket impl
+        // is reached transitively (wrap -> absdef), so `Shout Int` discharges and
+        // the program checks clean. (The old behavior demanded `use absdef` here
+        // and offered an import hint; coherence makes that unnecessary — the same
+        // rule that lets `on_get`'s IntoResponse work without importing http.)
         val r = report(callsYellWithoutTheAbility)
         assertEquals(
-            "`Shout` isn't imported here, so `Int` can't use it", r.message,
-            "the one-liner says what is wrong, in the reader's terms, and stops",
+            "(no error)", r.message,
+            "a caller needs no import to satisfy a constraint a function already named",
         )
-        assertTrue(
-            !r.message.contains("impl Shout for"),
-            "do not tell them to write an impl: ${r.message}",
-        )
-    }
-
-    @Test
-    fun `the hints say an impl already exists and give the import line`() {
-        val r = report(callsYellWithoutTheAbility)
-        assertEquals(
-            listOf(
-                "`absdef` implements `Shout` for every type, so `Int` needs no impl of its own",
-                "add `use absdef::{ Shout }` at the top of this file",
-            ),
-            r.hints,
-        )
-    }
-
-    @Test
-    fun `an editor gets the import as a one-click fix`() {
-        val r = report(callsYellWithoutTheAbility)
-        val imports = r.fixHints.filterIsInstance<FixHint.Import>()
-        assertEquals(1, imports.size, "expected one Import fix hint; got ${r.fixHints}")
-        assertEquals("Shout", imports.single().name)
-        assertEquals(listOf("absdef"), imports.single().candidateModules)
     }
 
     @Test

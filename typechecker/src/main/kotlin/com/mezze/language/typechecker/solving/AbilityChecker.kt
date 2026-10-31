@@ -1406,6 +1406,10 @@ class AbilityChecker internal constructor(
                 else -> null
             }
         }.distinct()
+            // Sort before taking: the impl set's iteration order is not stable
+            // (it now includes transitively-carried impls), so a fixed order
+            // keeps the "Available impls" list — and its snapshots — deterministic.
+            .sorted()
         if (rendered.isEmpty()) return ""
         val shown = rendered.take(5)
         val suffix = if (rendered.size > shown.size) ", … (${rendered.size - shown.size} more)" else ""

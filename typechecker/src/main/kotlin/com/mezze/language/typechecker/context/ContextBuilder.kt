@@ -833,19 +833,36 @@ class ContextBuilder {
 
         var result = ctx
         for (op in implDecl.operations) {
-            val paramType = op.paramType?.let { convertParsedTypeAnnotation(it) }
+            // Clear ONCE per op and convert param + return + constraints through
+            // the shared typeVarCache (convertParsedTypeAnnotationInternal does
+            // NOT clear). This keeps a var named `'r` the SAME across the
+            // signature AND the `with C 'r` constraints below — without it a
+            // locally-declared inherent method dropped its constraint, its body's
+            // obligation (`x.into_response {}`) resolved eagerly, and the var
+            // collapsed to the first concrete type (the limitation documented in
+            // http_router.mz). The imported path already carries these.
+            typeVarCache.clear()
+            val paramType = op.paramType?.let { convertParsedTypeAnnotationInternal(it) }
                 ?: inferParamTypeFromLambda(op.implementation) { parsedType, name ->
                     val isSynthetic = (parsedType as? ParsedNamedType)
                         ?.let { it.name.removePrefix("'") == name } ?: false
                     if (isSynthetic) MezzeType.VarType(TypeVar.fresh())
-                    else convertParsedTypeAnnotation(parsedType)
+                    else convertParsedTypeAnnotationInternal(parsedType)
                 }
-            val returnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
+            val returnType = op.returnType?.let { convertParsedTypeAnnotationInternal(it) }
                 ?: MezzeType.VarType(TypeVar.fresh())
+            val opConstraints = op.abilityConstraints.map { c ->
+                MezzeType.FunctionAbilityConstraint(
+                    abilityName = c.abilityName,
+                    typeArgs = c.typeArgs.map { convertParsedTypeAnnotationInternal(it) },
+                    abilityHash = currentAbilityDecls[c.abilityName]?.contentHash
+                        ?: com.mezze.language.typechecker.StdlibIdentities.ability(c.abilityName),
+                )
+            }
 
             result = result.extendWithAnonymousMethod(TypingContext.InherentMethodInfo(
                 targetTypeName = targetTypeName, methodName = op.name,
-                methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType),
+                methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType, abilityConstraints = opConstraints),
                 implContentHash = implKey,
                 // Content hash of the TARGET type. Populates the hash index so member
                 // dispatch can disambiguate two same-named types from different modules
