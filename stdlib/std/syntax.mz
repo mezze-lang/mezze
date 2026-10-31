@@ -220,7 +220,7 @@ pub type EffectOpSyntax = { name: Str, param: TypeExpr, result: TypeExpr, effect
 pub type OpSyntax = { name: Str, param: Option TypeExpr, result: Option TypeExpr, body: Expr, effects: Option EffectRowExpr, requires: [Constraint], doc: Option Str, span: Span }
 pub type ImportItem = { name: Str, alias: Option Str, span: Span }
 
-## ---- Walking -------------------------------------------------------------
+## Walking
 
 ## Every expression in a declaration — each, and everything inside it, outermost
 ## first: what a linter looks through. A `let`'s value, and the operations of an

@@ -42,7 +42,7 @@ use std::char
 use std::str
 use std::bool
 
-## ---- Config ------------------------------------------------------------
+## Config
 
 ## Query config. Output and input are both `[{ k: Str, v: Str }]`.
 pub type QueryC = {
@@ -56,7 +56,7 @@ pub let query_default: QueryC = {
 impl Format for QueryC having 'out = [{ k: Str, v: Str }] where {
 }
 
-## ---- Pair helpers ------------------------------------------------------
+## Pair helpers
 
 ## One nameless pair — what a scalar encodes to.
 let bare: { v: Str } -> [{ k: Str, v: Str }] = { v } -> [{ k = "", v = v }]
@@ -140,7 +140,7 @@ pub let parse_pairs: { s: Str } -> [{ k: Str, v: Str }] = { s } ->
     },
   }
 
-## ---- Tier 2: encode ----------------------------------------------------
+## Tier 2: encode
 
 impl EncodeScalar for QueryC having 'out = [{ k: Str, v: Str }] where {
   encode_int   = { it, val, ctx } -> bare { v = int::to_str { n = val } },
@@ -191,7 +191,7 @@ impl EncodeOption for QueryC having 'out = [{ k: Str, v: Str }] where {
     None -> [],
 }
 
-## ---- Tier 2: decode ----------------------------------------------------
+## Tier 2: decode
 
 impl DecodeScalar for QueryC having 'in = [{ k: Str, v: Str }] where {
   decode_int = { it, val, ctx } -> match one { pairs = val, ctx = ctx, expected = "Int" } is
@@ -292,7 +292,7 @@ impl DecodeOption for QueryC having 'in = [{ k: Str, v: Str }] where {
     if seq::is_empty { xs = val } then Ok { val = None } else Ok { val = Some { val = val } },
 }
 
-## ---- Tier 4: sugar -----------------------------------------------------
+## Tier 4: sugar
 
 ## Allow a target taken straight off the wire, `?` and all.
 let strip_leading_question: { s: Str } -> Str = { s } ->

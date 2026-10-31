@@ -52,7 +52,7 @@ pub type DecodeError = {
 ## Default shared config — no field-name transform.
 pub let default_shared: SharedConfig = { field_transform = Identity }
 
-## ---- Tier 1 — Format identity ------------------------------------------
+## Tier 1 — Format identity
 ##
 ## Associates a config type with the output type its encoders produce.
 ## One tiny impl per (config, output) pair — the sole point where format
@@ -60,7 +60,7 @@ pub let default_shared: SharedConfig = { field_transform = Identity }
 ability Format for 'config having 'out where {
 }
 
-## ---- Tier 2 — Per-shape encode (6 abilities) ---------------------------
+## Tier 2 — Per-shape encode (6 abilities)
 
 ## Encode primitive scalars. Every format must implement these to encode
 ## anything; missing means "format can't produce output at all".
@@ -103,7 +103,7 @@ ability EncodeOption for 'config having 'out where {
   encode_option: { it: 'config, val: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
-## ---- Tier 2 — Per-shape decode (6 abilities) ---------------------------
+## Tier 2 — Per-shape decode (6 abilities)
 
 ## Decode primitive scalars from the format's input representation.
 ability DecodeScalar for 'config having 'in where {
@@ -143,7 +143,7 @@ ability DecodeOption for 'config having 'in where {
   decode_option: { it: 'config, val: 'in, ctx: CodecCtx } -> Result (Option 'in) DecodeError,
 }
 
-## ---- Tier 2 — OPTIONAL bulk scalar-sequence fast path -------------------
+## Tier 2 — OPTIONAL bulk scalar-sequence fast path
 ##
 ## A `[Int]`/`[Float]`/`[Str]`/`[Bool]` is a Sequence of Scalars. The generic
 ## `Sequence` + per-element `Scalar` walk is correct for every format, but for a
@@ -170,7 +170,7 @@ ability DecodeScalarSequence for 'config having 'in where {
   decode_bool_seq:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Bool]  DecodeError,
 }
 
-## ---- Tier 3 — Encode / Decode primitives -------------------------------
+## Tier 3 — Encode / Decode primitives
 ##
 ## The compiler auto-derives `impl Encode 'config for 'a having 'out`
 ## per (config, value-type) pair by walking the shape and composing Tier
@@ -193,7 +193,7 @@ ability Decode 'config 'a for 'in where {
   decode: { it: 'in, config: 'config } -> Result 'a DecodeError,
 }
 
-## ---- Path helpers ------------------------------------------------------
+## Path helpers
 
 ## Empty path for top-level encoding/decoding.
 pub let empty_path: [Str] = []
@@ -220,7 +220,7 @@ pub let decode_error
       found = found,
     } }
 
-## ---- Field-name transforms ---------------------------------------------
+## Field-name transforms
 
 ## Encode-side transform: source name → wire name.
 pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is

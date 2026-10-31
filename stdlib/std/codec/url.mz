@@ -23,7 +23,7 @@ use std::nat
 use std::char
 use std::str
 
-## ---- Structured URL (native-backed) ------------------------------------
+## Structured URL (native-backed)
 
 ## Structured URL. Produced by `parse`, consumed by `render`. Absent
 ## components (no scheme, no userinfo, no port, etc.) are `None`. `path`
@@ -63,7 +63,7 @@ pub let parse
 ## host, port, path, query, and fragment identity.
 pub let render: { url: Url } -> Str = { url } -> __native_url_render { url = url }
 
-## ---- Config type -------------------------------------------------------
+## Config type
 
 ## URL query-parameter config. The output type is `Str` — a single URL
 ## parameter value. Values are NOT percent-encoded here; encoding happens
@@ -78,12 +78,12 @@ pub let url_default: UrlC = {
   shared = { field_transform = Identity },
 }
 
-## ---- Format link -------------------------------------------------------
+## Format link
 
 impl Format for UrlC having 'out = Str where {
 }
 
-## ---- Tier 2: encode ----------------------------------------------------
+## Tier 2: encode
 
 impl EncodeScalar for UrlC having 'out = Str where {
   encode_int   = { it, val, ctx } -> int::to_str { n = val },
@@ -112,7 +112,7 @@ impl EncodeOption for UrlC having 'out = Str where {
 ## parameter value can't carry structure. Types containing those shapes
 ## will fail auto-derivation at the offending field path.
 
-## ---- Tier 2: decode ----------------------------------------------------
+## Tier 2: decode
 
 impl DecodeScalar for UrlC having 'in = Str where {
   decode_int = { it, val, ctx } -> match int::from_str { s = val } is
@@ -185,7 +185,7 @@ impl DecodeOption for UrlC having 'in = Str where {
     else Ok { val = Some { val = val } },
 }
 
-## ---- Tier 4: sugar abilities + blankets --------------------------------
+## Tier 4: sugar abilities + blankets
 
 ## Encode any scalar-shaped value to a URL query-parameter string.
 ability ToUrl for 'a where {

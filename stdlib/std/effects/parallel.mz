@@ -52,9 +52,7 @@ effect Parallel where {
   join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel>
 }
 
-## ==================================================================
 ## LoomParallel — one Loom virtual thread per fork. Default.
-## ==================================================================
 ## Every Parallel.join spawns a fresh Loom virtual thread for the
 ## right side (left runs inline on caller). Virtual threads are cheap
 ## (~14µs spawn on Loom), scheduled M:N onto the JDK's default
@@ -85,7 +83,6 @@ impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where
   join = { l, r } -> __native_loom_parallel_join { l = l, r = r },
 }
 
-## ==================================================================
 ## OSThreadParallel — one platform Truffle thread per fork.
 ##
 ## Every Parallel.join spawns a fresh polyglot-attached platform OS
@@ -96,7 +93,6 @@ impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where
 ## long-lived.
 ##
 ## Mirrors OSThreadAsync from std::effects::async.
-## ==================================================================
 ## Mirrors OSThreadAsync from std::effects::async.
 impl Parallel for OSThreadParallel where {
   initialize_scope = {} -> __native_osthread_parallel_init { pool_size = 0, min_chunk = 1024 },
@@ -115,13 +111,11 @@ impl Parallel for OSThreadParallelWith { pool_size: Int, min_chunk: Int } where 
   join = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
 }
 
-## ==================================================================
 ## DeterministicSequential — no concurrency at all. Runs l then r
 ## inline on the current thread. Same effect signature as the
 ## concurrent impls so caller code is portable, but zero scheduling
 ## and zero nondeterminism. Useful in tests to opt out of race-flake
 ## sources without changing production code.
-## ==================================================================
 ## Sequential-only impl of Parallel. Runs {l} then {r} inline.
 ## Result values are identical to the concurrent impls; only wall-clock
 ## and observed interleavings differ. Useful for tests that want to
@@ -134,7 +128,6 @@ impl Parallel for DeterministicSequential where {
     { l = lv, r = rv }
 }
 
-## ==================================================================
 ## Derived combinators.
 ##
 ## All follow the same recursive binary split. Base cases:
@@ -153,7 +146,6 @@ impl Parallel for DeterministicSequential where {
 ## overhead from dominating on small sub-batches. The default for
 ## the no-arg LoomParallel / OSThreadParallel handlers is
 ## min_chunk = 1024, matching Rayon's work-splitting floor.
-## ==================================================================
 ## Read the current scope's min_chunk hint. Returns 1 when no hint
 ## is set (matches pre-#65 default behavior).
 let min_chunk: {} -> Int = {} -> __native_parallel_min_chunk_hint {}
@@ -288,9 +280,7 @@ pub let all: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = 
       all { xs = right, f = f } }
     both.l && both.r
 
-## ==================================================================
 ## Derived both/both3 — direct wrappers on join.
-## ==================================================================
 pub let both: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...> = { l, r } ->
   Parallel.join { l = l, r = r }
 
@@ -301,9 +291,7 @@ pub let both3
     let ab_and_c = Parallel.join { l = {} -> Parallel.join { l = a, r = b }, r = c }
     { a = ab_and_c.l.l, b = ab_and_c.l.r, c = ab_and_c.r }
 
-## ==================================================================
 ## Numeric / convenience helpers.
-## ==================================================================
 ## Parallel sum of a Seq of Ints. Chunks the underlying long[] across
 ## the pool's parallelism level, sums each chunk on one FJP worker via
 ## SIMD, and combines. One flat join level instead of log₂(N) — much
@@ -336,7 +324,6 @@ pub let flat_map
   -> ['b] <Parallel, ...>
   = { xs, f } -> flatten { xs = map { xs = xs, f = f } }
 
-## ==================================================================
 ## Fused chunk-parallel combinators.
 ##
 ## The element-wise combinators above (map, filter, reduce, fold) each
@@ -361,7 +348,6 @@ pub let flat_map
 ##
 ## The splitting uses the same binary-split + min_chunk strategy as
 ## the element-wise combinators above.
-## ==================================================================
 
 ## Parallel chunk fold: split into parallel sub-batches, apply `f` to
 ## each batch, combine results with an associative `combine`.

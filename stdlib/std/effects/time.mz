@@ -73,11 +73,9 @@ impl Time for FrozenTime { fixed: Instant } where {
   sleep = { d } -> {},
 }
 
-## ==================================================================
 ## Sugar — thin wrappers over Time.now + std::datetime helpers.
 ## Kept in this module (not std::datetime) because they carry the
 ## <Time> effect row.
-## ==================================================================
 ## Wall-clock instant right now — same as Time.now.
 pub let now: {} -> Instant <Time> = {} -> Time.now {}
 

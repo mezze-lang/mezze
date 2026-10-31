@@ -104,9 +104,7 @@ pub type WriteMode = | CreateOrTruncate, CreateNew, CreateOrAppend |
 ## with_read / with_write scope helpers below.
 pub newtype FileHandle = __NativeFileHandle
 
-## ==================================================================
 ## Effect — 9 primitive ops in 4 groups.
-## ==================================================================
 effect FileSystem where {
   ## Whole-file — each maps to an optimized native call
   read_bytes: { path: Str } -> Result Bytes FsError <FileSystem>,
@@ -176,7 +174,6 @@ impl FileSystem for MemoryFileSystem where {
   move_file = { src, dest, replace_existing, require_atomic } -> __native_memfs_move_file { src = src, dest = dest, replace_existing = replace_existing, require_atomic = require_atomic },
 }
 
-## ==================================================================
 ## FileStreaming — random access over an open handle.
 ##
 ## Split out of FileSystem, and this split is the one that makes an
@@ -187,7 +184,6 @@ impl FileSystem for MemoryFileSystem where {
 ##
 ## `read_at`/`write_at`/`seek`/`truncate` are what a database or a
 ## binary-format tool needs and what Mezze had no way to express.
-## ==================================================================
 effect FileStreaming where {
   open: { path: Str, mode: OpenMode } -> Result FileHandle FsError <FileStreaming>,
   read_chunk: { handle: FileHandle, max_bytes: Int }
@@ -239,7 +235,6 @@ impl FileStreaming for MemoryFileStreaming where {
   close = { handle } -> __native_memfs_close { handle = handle },
 }
 
-## ==================================================================
 ## FileDurability — fsync, as its own effect.
 ##
 ## Separate from `FileSystem` because of what a backend can honestly
@@ -256,7 +251,6 @@ impl FileStreaming for MemoryFileStreaming where {
 ## store would implement this trivially, since every PUT is already
 ## durable; one that could not would simply not implement the effect, and
 ## the typechecker would reject it at the `perform` site.
-## ==================================================================
 effect FileDurability where {
   ## Force this handle's content AND metadata to the device. A write whose
   ## length change never reached the inode is still a lost write.
@@ -283,7 +277,6 @@ impl FileDurability for MemoryFileDurability where {
   fsync_dir = { path } -> __native_memfs_fsync_dir { path = path },
 }
 
-## ==================================================================
 ## FileLock — coordinated access to a path.
 ##
 ## Whole-file, advisory, process-wide. Byte-range locks are deliberately
@@ -295,7 +288,6 @@ impl FileDurability for MemoryFileDurability where {
 ## a no-op that reports success — that is the backend lying, and it is
 ## precisely why this is a separate effect a backend may decline to
 ## implement rather than an op on FileSystem that S3 would have to stub.
-## ==================================================================
 pub type LockKind = | Shared, Exclusive |
 
 ## Opaque handle for a held lock. Pass it back to `unlock`; holding the
@@ -330,7 +322,6 @@ impl FileLock for MemoryFileLock where {
   unlock = { handle } -> __native_memfs_unlock { handle = handle },
 }
 
-## ==================================================================
 ## FileSymlinks — links, created and inspected.
 ##
 ## POSIX-only and admitted as such rather than faked. Matters for package
@@ -338,7 +329,6 @@ impl FileLock for MemoryFileLock where {
 ## Windows needs administrator or developer mode for symlinks, which
 ## surfaces as FsPermissionDenied; an object store declines the whole
 ## effect.
-## ==================================================================
 effect FileSymlinks where {
   ## Create a symbolic link at `link` pointing at `target`. `target` is
   ## not resolved or required to exist — a dangling symlink is legal and
@@ -373,14 +363,12 @@ impl FileSymlinks for MemoryFileSymlinks where {
   is_symlink = { path } -> __native_memfs_is_symlink { path = path },
 }
 
-## ==================================================================
 ## FilePermissions — POSIX metadata.
 ##
 ## `real_path` lives here because symlink resolution touches the same
 ## metadata layer. Windows implements what it can and returns
 ## FsNotSupported for owner/group off an NTFS ACL volume, which is honest
 ## rather than aspirational.
-## ==================================================================
 ## Nine permission bits as a record rather than an octal Int: `0o755` is
 ## write-only knowledge, while `owner_exec = True` reads at the call site
 ## and cannot be transposed by accident.
@@ -432,13 +420,11 @@ impl FilePermissions for MemoryFilePermissions where {
     __native_memfs_real_path { path = path, follow_symlinks = follow_symlinks },
 }
 
-## ==================================================================
 ## FileWatch — change notification.
 ##
 ## The one capability whose backends differ most: inotify/kqueue locally,
 ## synthesised from writes in MemoryFileSystem, and nothing at all for an object
 ## store or an HTTP-backed tree, which decline the effect.
-## ==================================================================
 ## `Overflow` carries no path on purpose: it means the queue dropped
 ## events, so there is no single path it is about. The honest recovery is
 ## to rescan the tree — which a caller can only do if it is told, which is
@@ -487,10 +473,8 @@ impl FileWatch for MemoryFileWatch where {
   unwatch = { handle } -> __native_memfs_unwatch { handle = handle },
 }
 
-## ==================================================================
 ## Derived helpers — pure Mezze, built on the 13 primitives.
-## ==================================================================
-## ---------- Text convenience ----------
+## Text convenience
 ## Read a file's contents as UTF-8. Errors on invalid UTF-8.
 pub let read_text: { path: Str } -> Result Str FsError <FileSystem> = { path } ->
   match FileSystem.read_bytes { path = path } is
@@ -511,7 +495,7 @@ pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def 
     Err { error } -> def
 
 
-## ---------- Metadata queries derived from stat ----------
+## Metadata queries derived from stat
 pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path, follow_symlinks = True } is
   Ok { val = s } -> match s.kind is
     NotFound -> Ok { val = False }
@@ -541,7 +525,7 @@ pub let file_size: { path: Str } -> Result Int FsError <FileSystem> = { path } -
     Err { error } -> Err { error = error }
 
 
-## ---------- Append ----------
+## Append
 ## Append bytes to a file, creating it if missing.
 ##
 ## This used to open a handle, write a chunk and close it, which meant a
@@ -559,7 +543,7 @@ pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> 
   append_bytes { path = path, bytes = bytes::from_str { s = text } }
 
 
-## ---------- The atomic lockfile primitive ----------
+## The atomic lockfile primitive
 ## Create a file ONLY if it does not exist, and say which happened.
 ##
 ## `Ok { val = True }` means this caller created it; `Ok { val = False }`
@@ -577,7 +561,7 @@ pub let create_exclusive: { path: Str, bytes: Bytes } -> Result Bool FsError <Fi
     Err { error = FsAlreadyExists { path = _ } } -> Ok { val = False }
     Err { error } -> Err { error = error }
 
-## ---------- Directory + write conveniences ----------
+## Directory + write conveniences
 ## Create directory + all missing ancestors.
 pub let create_directories: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
   match is_directory { path = path } is
@@ -605,7 +589,7 @@ pub let write_text_mkdirs: { path: Str, text: Str } -> Result {} FsError <FileSy
     let _ = create_directories { path = fs::parent { path = path } }
     write_text { path = path, text = text }
 
-## ---------- Recursive delete ----------
+## Recursive delete
 ## Delete a file or directory tree.
 ##
 ## For directories, deletes children first (recursively), then the
@@ -638,7 +622,7 @@ pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { pa
           Ok { val } -> FileSystem.delete { path = path }
 
 
-## ---------- Streaming safety ----------
+## Streaming safety
 ## Auto-closing read wrapper. `f` receives the handle; on return or
 ## error, the handle is closed.
 pub let with_read
@@ -652,7 +636,7 @@ pub let with_read
     Err { error } -> Err { error = error }
 
 
-## ---------- Lazy sources: the filesystem as an `Iter` ----------
+## Lazy sources: the filesystem as an `Iter`
 
 ## A file's lines, lazily, over an already-open handle.
 ##

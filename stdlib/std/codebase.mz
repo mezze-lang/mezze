@@ -240,7 +240,7 @@ impl Codebase for ComptimeEvalCodebase where {
   occurrences = { kind, symbol } -> perform ComptimeEval in perform EvalCodebase in Codebase.occurrences { kind = kind, symbol = symbol },
 }
 
-## ---- Testing without a compiler ----------------------------------------
+## Testing without a compiler
 
 ## What `FixtureCodebase` answers from. Start from `empty_fixture` and fill in
 ## what a test needs: `{ ...empty_fixture, decls = [...] }`.
