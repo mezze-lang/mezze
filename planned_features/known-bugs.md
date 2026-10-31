@@ -106,6 +106,35 @@ there; `StorePopulator` was not found on the dep path) OR register a cache-reuse
 module's ability impls at `ModuleTypeChecker`'s cached-module path. AGREED to do
 this LAST. No fix yet.
 
+### B-13 — a bare record won't satisfy an ability via a reachable record-targeting impl unless the impl's module is imported (OPEN)
+
+A bare `{ status = 404, body = "not found" }` satisfies `IntoResponse` (through
+`impl IntoResponse for StatusBody`, `StatusBody = { status: Int, body: Str }`)
+ONLY when `std::effects::http` is in scope. A module that imports `router`/`serve`
+but not `http` gets `V0408/V0402` on the obligation `IntoResponse <{status,body}>`
+— even though the impl is reachable transitively (the coherence fix carries it)
+and a `Str` handler in the SAME spot discharges import-free. Identical whether the
+impl targets the nominal alias `StatusBody` or the structural `{ status: Int,
+body: Str }` — they behave the same (both need the import), which is the user's
+point: they SHOULD behave the same, and both should work import-free.
+
+ROOT: the ability matcher (`AbilityChecker.checkAbilityImplementationUncached`,
+unify-based — NOT the narrow `typeMatchesMezzeType`) matches a concrete builtin
+receiver (`Str`) against a reachable impl, but a bare anonymous RECORD against a
+record-targeting impl needs the target alias/shape in scope (adoption via
+`printTypeDefs` needs the alias imported). Records are TRANSPARENT, so a bare
+record should match a reachable record-targeting impl structurally, import-free,
+exactly like `Str`. The COMPILER's matcher already has the record-structural arm
+(`mono.typeMatchesTarget` MonoTypeOps.kt:251 — `identityVerdict != DISTINCT &&
+fields ==`); the TYPECHECKER's ability matcher lacks the equivalent.
+
+FIX DIRECTION: give AbilityChecker's impl matching a record-structural arm
+(anonymous record vs Declared/anonymous record target, `identityVerdict !=
+DISTINCT && fields match`), and ensure record-targeting impls are in the
+candidate set transitively like builtin-targeting ones. Deep, test-first, full
+gates — deserves a focused start. WORKAROUND: import `std::effects::http` (a real
+HTTP module does anyway for Request/Response), or return `response_status {…}`.
+
 ### B-12 — missing pinned deps warn-and-run instead of failing loud (FIXED)
 
 `mez dev`/`mez build` on a project whose locked maven/`[jars]` dependencies were

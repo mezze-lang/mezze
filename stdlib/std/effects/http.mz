@@ -756,7 +756,12 @@ impl IntoResponse for Json where {
 
 ## A minimal reply: a status code and a text body. Lets a handler or a fallback
 ## answer `{ status = 404, body = "not found" }` without spelling out the rest of
-## a `Response` (headers, url, chunks). A bare record of this shape adopts to it.
+## a `Response` (headers, url, chunks).
+##
+## NOTE: a bare `{ status, body }` only satisfies IntoResponse where this module
+## (`std::effects::http`) is in scope — the matcher does not yet match a bare
+## record against a record-targeting impl reachable only transitively, the way it
+## does for a builtin like `Str`. Tracked as a bug; a `Str` handler needs no import.
 pub type StatusBody = { status: Int, body: Str }
 
 impl IntoResponse for StatusBody where {
