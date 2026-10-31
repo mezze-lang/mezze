@@ -24,7 +24,7 @@ class HttpOneApiTest {
     private val head = """
         use std::effects::http::{ Request, Response, HttpClient, SimpleHttpClient, MockHttpClient, mock, client, not_found, created, body_str }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, get_request, post_request }
-        use std::effects::http_router::{ router, Matched }
+        use std::effects::http_server::{ router, Matched }
         use std::collections::bytes
         use std::str
         use std::int

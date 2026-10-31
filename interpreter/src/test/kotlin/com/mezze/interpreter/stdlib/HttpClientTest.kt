@@ -129,7 +129,7 @@ class HttpClientTest {
     private val redirectServer = """
         use std::effects::http::{ HttpClient, PooledHttpClientWith, Request, Response, default_http_config, request, format_error, Get, Method }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_router::{ route, or_else, otherwise, path_of }
+        use std::effects::http_server::{ route, or_else, otherwise, path_of }
         use std::collections::map
         use std::collections::bytes
         use std::int

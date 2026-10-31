@@ -17,7 +17,7 @@ class HttpServerIntegrationTest {
     private val head = """
         use std::effects::http::{ Request, Response, Method, Get, Post }
         use std::effects::http_server::{ HttpServer, MockHttpServer, incoming, get_request }
-        use std::effects::http_router::{ route, or_else, otherwise, Matched }
+        use std::effects::http_server::{ route, or_else, otherwise, Matched }
         use std::collections::map
         use std::collections::bytes
         use std::int

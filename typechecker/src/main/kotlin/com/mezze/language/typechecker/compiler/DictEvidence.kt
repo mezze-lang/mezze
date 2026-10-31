@@ -1248,7 +1248,7 @@ internal fun TypedASTCompiler.structuralConstraintTypesFor(calleeHash: Hash, exp
  * Bind a pattern row's associated types from the actual row's, for
  * [TypedASTCompiler.harvestVarBindings].
  *
- * A constraint variable can live ONLY in an effect row. `http_router`'s
+ * A constraint variable can live ONLY in an effect row. `http_server`'s
  * `catching_any` takes a handler typed
  * `{ m: Matched } -> 'r <Exception having 'error = 'e, ...>` and declares
  * `with IntoErrorResponse 'e` — about the THROWN type, which the row names and

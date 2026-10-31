@@ -2,9 +2,9 @@
 ##
 ## ONE operation, `serve`, which receives a HANDLER and runs it. The handler is
 ## a function from `Request` to `Response`; routing is not part of the effect.
-## A route table is pure code that FOLDS into one handler (see
-## `std::effects::http_router`), so the effect never grows an operation per
-## routing feature.
+## The routing surface — pure code (`router`, `route`, `on_get`, `otherwise`, …)
+## — lives in this module too, below the effect, and FOLDS a route table into
+## one handler, so the effect never grows an operation per routing feature.
 ##
 ## Two performers answer it. `MockHttpServer` binds no socket and does not call
 ## the handler — a test calls the handler itself, because a handler is a plain
@@ -31,11 +31,17 @@
 ## Effects other than async always escape through `serve` to whoever installed
 ## the server.
 
-use std::effects::http::{ Method, Get, Post, Put, Delete, Patch, Head, Options, Request, Response }
+use std::effects::http::{ Method, Get, Post, Put, Delete, Patch, Head, Options, Request, Response, IntoResponse, IntoErrorResponse, not_found, response_status }
+use std::effects::exception::{ ExceptionToResult }
 use std::collections::map
 use std::collections::iter
+use std::collections::seq
 use std::collections::bytes
 use std::str
+use std::codec::url::{ url_decode_component }
+pub use std::codec::query::{ FromQuery }
+use std::codec::core::{ DecodeError }
+use std::int
 
 ## A running server. `stop` shuts it down; `port` is the bound port, which
 ## matters when a test binds port 0 and the OS chooses.
@@ -257,4 +263,617 @@ pub let with_graceful_shutdown
 impl ServerHandle where {
   with_graceful_shutdown = { it: 'it, on: {} -> {} <...> } ->
     with_graceful_shutdown { server = it, on = on },
+}
+
+## Routing — pure code that folds a route table into one handler for `serve`.
+##
+## Nothing below performs an effect: a route matches a method and a path, `or`
+## joins two routes, and `otherwise` closes the table into the plain
+## `{ req: Request } -> Response` that `serve` takes. Because it is pure, a route
+## table is tested by calling it with a `Request` — no server, mock, or socket.
+##
+## Path parameters: a segment written `:name` matches any one segment and binds
+## it, so `/users/:id` matches `/users/7` and binds `id` to `"7"`.
+
+## What a matched route hands its handler: the request, plus the path
+## parameters the pattern bound.
+pub type Matched = {
+  req: Request,
+  params: Map Str Str,
+}
+
+## A route table. The row on `run` is open, so the handlers a table carries may
+## perform effects even though the routing around them performs none.
+pub type Routes = {
+  run: { req: Request } -> Option Response <...>,
+}
+
+## Split a path into segments, dropping the empty pieces a leading or trailing
+## slash produces, so `/users/7/` and `users/7` agree.
+pub let segments: { path: Str } -> [Str] = { path } ->
+  seq::filter { xs = str::split { s = path, delimiter = "/" }, p = { x } -> x != "" }
+
+## Drop a query string, if there is one.
+let strip_query: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "?" } is
+    None -> s
+    Some { val = q } -> str::substring { s = s, start = 0, end = q }
+
+## The path of an authority-relative remainder: everything from its first
+## slash. A URL with no path at all (`https://host`) means the root.
+let slash_onward: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "/" } is
+    None -> "/"
+    Some { val = j } -> str::substring { s = s, start = j, end = str::size { s = s } }
+
+## Drop a `scheme://authority` prefix, if there is one.
+let strip_authority: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "://" } is
+    None -> s
+    Some { val = i } ->
+      slash_onward { s = str::substring { s = s, start = i + 3, end = str::size { s = s } } }
+
+## The path part of a request target: no scheme, no authority, no query.
+##
+## The two sides of the web story spell a target differently. A server hands the
+## handler what arrived on the wire — `/users/7?page=2`. A client's `Request.url`
+## is absolute — `https://api.example.com/users/7`. Routing cares about neither
+## the authority nor the query, so both reduce to `/users/7` here and ONE route
+## table matches requests from either side.
+pub let path_of: { url: Str } -> Str = { url } ->
+  strip_query { s = strip_authority { s = url } }
+
+## The raw query string of a request target, or `""` when it carries none.
+##
+## Raw: still percent-encoded, still `&`-joined. Turning it into typed values is
+## the query codec's job, not the router's.
+pub let query_of: { url: Str } -> Str = { url } ->
+  match str::index_of { s = url, sub = "?" } is
+    None -> ""
+    Some { val = q } -> str::substring { s = url, start = q + 1, end = str::size { s = url } }
+
+## Match one pattern against one path, returning the bound parameters.
+##
+## Returns `None` when the lengths differ or a literal segment disagrees. A
+## `:name` segment always matches and binds.
+pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } ->
+  match_prepared { pat = prepare { pattern = pattern }, url = path }
+
+## A pattern taken apart once, when the route table is built. `literal` is the
+## slash-trimmed form, present only when the pattern binds no `:name` — then
+## matching is one string comparison rather than a per-segment walk.
+let prepare: { pattern: Str } -> { segs: [Str], literal: Option Str } = { pattern } -> do
+  let segs = segments { path = pattern }
+  let binds = seq::any { xs = segs, p = { x } -> str::starts_with { s = x, prefix = ":" } }
+  {
+    segs = segs,
+    literal = if binds then None else Some { val = trim_slashes { s = pattern } },
+  }
+
+## Drop one leading and one trailing `/`, so `/users` and `users/` agree the way
+## `segments` makes them agree. `"/"` trims to `""`, which is the root's zero
+## segments.
+let trim_slashes: { s: Str } -> Str = { s } -> do
+  let n = str::size { s = s }
+  let start = if str::starts_with { s = s, prefix = "/" } then 1 else 0
+  let end = if n > start then (if str::ends_with { s = s, suffix = "/" } then n - 1 else n) else n
+  str::substring { s = s, start = start, end = end }
+
+let match_prepared
+  : { pat: { segs: [Str], literal: Option Str }, url: Str }
+  -> Option (Map Str Str)
+  = { pat, url } -> do
+    let path = path_of { url = url }
+    match pat.literal is
+      None -> match_on_path { ps = pat.segs, path = path }
+      Some { val = lit } ->
+        # `//` in the path makes a string comparison disagree with `segments`
+        # (which drops empty pieces), so that case takes the segment path
+        if str::contains { s = path, substring = "//" } then
+          match_on_path { ps = pat.segs, path = path }
+        else
+          if trim_slashes { s = path } == lit then Some { val = map::empty {} } else None
+
+## Bind a prepared pattern's segments against an already-extracted path.
+##
+## A pattern cannot change between requests, so splitting it again on every one
+## is work that can only produce the same answer. `route` splits its pattern
+## when the table is BUILT and calls this; doing it per request cost 7% of
+## throughput on a two-segment route.
+##
+## Measured and NOT worth it on its own: skipping just the zip and the parameter
+## map for a static route, while still SPLITTING the path (457.5k -> 457.3k). The
+## split is the expensive half, which is why `prepare`'s `literal` avoids it
+## entirely rather than only the fold.
+let match_on_path: { ps: [Str], path: Str } -> Option (Map Str Str) = { ps, path } -> do
+  let xs = segments { path = path }
+  if seq::size { xs = ps } != seq::size { xs = xs } then None
+  else
+    # zip + fold lazily over pattern and path together, keeping only the bindings
+    iter::fold {
+      it = iter::zip {
+        a = iter::from_seq { xs = ps },
+        b = iter::from_seq { xs = xs },
+      },
+      init = Some { val = map::empty {} },
+      f = { acc, x } -> match acc is
+        None -> None
+        Some { val = bound } ->
+          if str::starts_with { s = x.fst, prefix = ":" } then
+            Some { val = map::insert {
+              m = bound,
+              k = str::substring { s = x.fst, start = 1, end = str::size { s = x.fst } },
+              v = x.snd,
+            } }
+          else
+            if x.fst == x.snd then Some { val = bound } else None
+    }
+
+## One route: a method, a path pattern, and a handler that receives the bound
+## parameters.
+pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response <...> } -> Routes =
+  { method, path, handler } -> do
+    # taken apart once here, not on every request
+    let pat = prepare { pattern = path }
+    {
+      run = { req } ->
+        if req.method != method then None
+        else match match_prepared { pat = pat, url = req.url } is
+          None -> None
+          Some { val = params } ->
+            Some { val = handler { m = { req = req, params = params } } },
+    }
+
+## Route one method and path to a handler, converting whatever it answers (a
+## `Str`, `Json`, `Response`, or `Result`) via `IntoResponse`.
+pub let on_method
+  : { method: Method, path: Str, handler: { m: Matched } -> 'r <...> }
+  with IntoResponse 'r
+  -> Routes
+  =
+  { method, path, handler } ->
+    route {
+      method = method,
+      path = path,
+      handler = { m } -> do
+        let answer = handler { m = m }
+        answer.into_response {},
+    }
+
+## Route a GET at `path`.
+pub let on_get: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Get, path = path, handler = handler }
+
+## Route a POST at `path`.
+pub let on_post: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Post, path = path, handler = handler }
+
+## Route a PUT at `path`.
+pub let on_put: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Put, path = path, handler = handler }
+
+## Route a PATCH at `path`.
+pub let on_patch: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Patch, path = path, handler = handler }
+
+## Route a DELETE at `path`.
+pub let on_delete: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Delete, path = path, handler = handler }
+
+## Route a HEAD at `path`.
+pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Head, path = path, handler = handler }
+
+## Route a OPTIONS at `path`.
+pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Options, path = path, handler = handler }
+
+## Adapt a handler that may THROW a Response into one answering a Response.
+##
+##   .get { path = "/u/:id", handler = catching { handler = { m } -> … } }
+pub let catching
+  : { handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> do
+    let outcome = perform ExceptionToResult in do
+      let answered = handler { m = m }
+      Ok { val = answered.into_response {} }
+    match outcome is
+      Ok { val } -> val
+      Err { error } -> error
+
+## Like `catching`, for a handler that throws its OWN error type.
+##
+## `catching` takes a handler that throws a `Response` — it has already decided
+## the status and the body. This one takes a handler that throws whatever its
+## domain uses and converts it on the way out, so a route can speak in
+## `NotFound { id }` and let `IntoErrorResponse` decide what that is on the wire:
+##
+##   impl IntoErrorResponse for NotFound where {
+##     into_error_response = { it } -> response_status { code = 404, body = it.id },
+##   }
+##
+##   .get { path = "/u/:id", handler = catching_any { handler = { m } -> do
+##     let id = m.params.get_or { k = "id", default = "" }
+##     if id == "" then throw { error = NotFound { id = id } } else show { id = id }
+##   } }
+##
+## A record-typed error does not dispatch yet; throw a `Str`, or a `Response`
+## through `catching`.
+pub let catching_any
+  : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
+  with IntoResponse 'r, IntoErrorResponse 'e
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> do
+    let outcome = perform ExceptionToResult in do
+      let answered = handler { m = m }
+      Ok { val = answered.into_response {} }
+    match outcome is
+      Ok { val } -> val
+      Err { error } -> error.into_error_response {}
+
+## One route in a group: a method, a full path, and a Response-answering handler.
+pub type RouteEntry = {
+  method: Method,
+  path: Str,
+  handler: { m: Matched } -> Response <...>,
+}
+
+## A path prefix and the routes under it. Build with `group`, nest with `nest`.
+##
+## A group is a route TABLE, not yet a handler. Close it with `handler` for a
+## 404 on anything unmatched, or `otherwise` to answer that yourself. Passing
+## the group itself to `serve` is a type error naming this.
+pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry] }
+
+## An empty router rooted at `path`. Use `""` for no prefix; a non-empty `path`
+## (e.g. `"/api"`) prefixes every route added to it, and nested routers prefix
+## again. Chain `.get` / `.post` / … and close with `.otherwise` (or `.handler`).
+pub let router: { path: Str } -> RouteGroup = { path } ->
+  RouteGroup.({ prefix = path, entries = [] })
+
+let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = { g } ->
+  match g is
+    RouteGroup.(v) -> v
+
+# every entry folded into one table, first added winning
+let fold_entries: { g: RouteGroup } -> Routes = { g } ->
+  seq::fold {
+    xs = group_inner { g = g }.entries,
+    init = { run = { req } -> None },
+    f = { acc, x } -> or_else {
+      a = acc,
+      b = route { method = x.method, path = x.path, handler = x.handler },
+    },
+  }
+
+# Join a prefix and a path with exactly one slash between them, so "/users" and
+# "/:id" give "/users/:id" and "/users" with "" stays "/users".
+let join_prefix: { prefix: Str, path: Str } -> Str = { prefix, path } ->
+  if str::is_empty { s = prefix } then path
+  else if str::is_empty { s = path } then prefix
+  else if str::ends_with { s = prefix, suffix = "/" } && str::starts_with { s = path, prefix = "/" }
+  then str::concat {
+    l = prefix,
+    r = str::substring { s = path, start = 1, end = str::size { s = path } },
+  }
+  else if str::ends_with { s = prefix, suffix = "/" } || str::starts_with { s = path, prefix = "/" }
+  then str::concat { l = prefix, r = path }
+  else str::concat { l = str::concat { l = prefix, r = "/" }, r = path }
+
+let group_add
+  : { g: RouteGroup, method: Method, path: Str, handler: { m: Matched } -> Response <...> }
+  -> RouteGroup
+  =
+  { g, method, path, handler } -> do
+    let inner = group_inner { g = g }
+    RouteGroup.({
+      prefix = inner.prefix,
+      entries = seq::push {
+        xs = inner.entries,
+        x = {
+          method = method,
+          path = join_prefix { prefix = inner.prefix, path = path },
+          handler = handler,
+        },
+      },
+    })
+
+impl RouteGroup where {
+  ## Append a GET under this group's prefix, answering whatever the handler returns.
+  get: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Get,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a POST under this group's prefix, answering whatever the handler returns.
+  post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Post,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a PUT under this group's prefix, answering whatever the handler returns.
+  put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Put,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a PATCH under this group's prefix, answering whatever the handler returns.
+  patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Patch,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a DELETE under this group's prefix, answering whatever the handler returns.
+  delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Delete,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a HEAD under this group's prefix, answering whatever the handler returns.
+  head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Head,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append an OPTIONS under this group's prefix, answering whatever the handler returns.
+  options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Options,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+
+  ## Mount another group's routes under this group's prefix.
+  nest = { it: 'it, group: RouteGroup } -> do
+    let outer = group_inner { g = it }
+    let child = group_inner { g = group }
+    RouteGroup.({
+      prefix = outer.prefix,
+      entries = seq::concat {
+        xs = outer.entries,
+        ys = seq::map {
+          xs = child.entries,
+          f = { x } -> {
+            method = x.method,
+            path = join_prefix { prefix = outer.prefix, path = x.path },
+            handler = x.handler,
+          },
+        },
+      },
+    }),
+
+  ## Fold this group into a route table. First added wins.
+  table = { it: 'it } -> fold_entries { g = it },
+
+  ## Close the group, answering anything unmatched with 404.
+  handler = { it: 'it } ->
+    otherwise { routes = fold_entries { g = it }, fallback = { req } -> not_found { body = "no route matched" } },
+
+  ## Close the group with a fallback, producing the handler `serve` takes. The
+  ## fallback answers with anything `IntoResponse`: a `Str`, a `{ status, body }`
+  ## record, or a full `Response`.
+  otherwise: { it: 'it, fallback: { req: Request } -> 'r <...> } with IntoResponse 'r
+    -> { req: Request } -> Response <...> =
+    { it, fallback } -> otherwise {
+      routes = fold_entries { g = it },
+      fallback = { req } -> do
+        let answered = fallback { req = req }
+        answered.into_response {},
+    },
+}
+
+## Fold a list of routes into one table; the first to match wins.
+##
+##   let app = routes { of = [
+##     on_get  { path = "/ping",      handler = { m } -> "pong" },
+##     on_get  { path = "/users/:id", handler = catching { handler = show } },
+##   ] }.otherwise { fallback = fallback }
+pub let routes: { of: [Routes] } -> Routes = { of } ->
+  seq::fold {
+    xs = of,
+    init = { run = { req } -> None },
+    f = { acc, x } -> or_else { a = acc, b = x },
+  }
+
+## Try `a`, then `b`. First match wins, so declaration order is the priority.
+pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
+  run = { req } -> match a.run { req = req } is
+    Some { val } -> Some { val = val }
+    None -> b.run { req = req },
+}
+
+## Close the table: everything unmatched goes to `fallback`.
+##
+## The result is a plain function, which is exactly what `HttpServer.serve`
+## takes — the route table has disappeared by this point.
+pub let otherwise
+  : { routes: Routes, fallback: { req: Request } -> Response <...> }
+  -> { req: Request } -> Response <...>
+  =
+  { routes, fallback } -> { req } -> match routes.run { req = req } is
+    Some { val } -> val
+    None -> fallback { req = req }
+
+## Parse a request target's query into its parameters. Repeated keys collect
+## (`?tags=a&tags=b` gives `tags` two values); a fragment with no `=` is a key
+## with one empty value (`?debug`). Keys and values are percent-decoded.
+pub let query_params: { url: Str } -> Map Str [Str] = { url } ->
+  iter::fold {
+    it = iter::filter {
+      it = iter::from_seq { xs = str::split { s = query_of { url = url }, delimiter = "&" } },
+      p = { x } -> x != "",
+    },
+    init = map::empty {},
+    f = { acc, x } -> do
+      let cut = str::index_of { s = x, sub = "=" }
+      let k = match cut is
+        None -> url_decode_component { s = x }
+        Some { val = i } -> url_decode_component { s = str::substring { s = x, start = 0, end = i } }
+      let v = match cut is
+        None -> ""
+        Some { val = i } ->
+          url_decode_component { s = str::substring { s = x, start = i + 1, end = str::size { s = x } } }
+      let prior = match map::get { m = acc, k = k } is
+        Some { val } -> val
+        None -> []
+      map::insert { m = acc, k = k, v = seq::push { xs = prior, x = v } },
+  }
+
+## Every value a query gave for `name`, in the order they appeared. No such key
+## is the empty sequence, not an error — a parameter nobody sent and a
+## parameter sent zero times are the same thing to a handler.
+pub let query_all: { url: Str, name: Str } -> [Str] = { url, name } ->
+  match map::get { m = query_params { url = url }, k = name } is
+    Some { val } -> val
+    None -> []
+
+## The FIRST value a query gave for `name`.
+##
+## First, not last, and not an error on a repeat: a handler that wants one
+## value should not have to care that a client sent two, and the first is what
+## a reader of the URL would say it is.
+pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
+  seq::first { xs = query_all { url = url, name = name } }
+
+## What the request carried where something else was wanted — the failure a
+## handler meets when it decodes a path parameter or a query.
+pub type BadInput = {
+  at: [Str],
+  message: Str,
+  expected: Str,
+  found: Option Str,
+}
+
+let bad_input_of: { e: DecodeError, at: [Str] } -> BadInput = { e, at } -> {
+  at = if seq::is_empty { xs = e.path } then at else e.path,
+  message = e.message,
+  expected = e.expected,
+  found = e.found,
+}
+
+## 400, naming where, what was wanted and what arrived.
+impl IntoErrorResponse for BadInput where {
+  into_error_response = { it } -> do
+    let where_ = if seq::is_empty { xs = it.at } then ""
+      else str::concat { l = str::join { strings = it.at, separator = "." }, r = ": " }
+    let got = match it.found is
+      Some { val } -> str::concat { l = ", found ", r = val }
+      None -> ""
+    response_status {
+      code = 400,
+      body = str::concat {
+        l = where_,
+        r = str::concat { l = str::concat { l = "expected ", r = it.expected }, r = got },
+      },
+    },
+}
+
+## The query, decoded into whatever the use site asks for — the mirror of the
+## client's `with_query`, target-directed from the annotation at the use site.
+pub let query_decoded = { url: Str } ->
+  match query_of { url = url }.from_query {} is
+    Ok { val } -> Ok { val = val }
+    Err { error = e } -> Err { error = bad_input_of { e = e, at = [] } }
+
+## One value (e.g. a path parameter), decoded into whatever the use site asks
+## for — Int, Bool, a newtype, anything with a QueryC decoder.
+pub let one_decoded = { v: Str, at: [Str] } ->
+  match [{ k = "", v = v }].from_query {} is
+    Ok { val } -> Ok { val = val }
+    Err { error = e } -> Err { error = bad_input_of { e = e, at = at } }
+
+## The error for a name the route never bound.
+let no_such_param: { name: Str } -> BadInput = { name } -> {
+  at = [name],
+  message = "the route bound no parameter by this name",
+  expected = "a path parameter the pattern declares",
+  found = None,
+}
+
+impl Routes where {
+  ## Try this table, then `b`. First match wins.
+  or_else = { it: 'it, b: Routes } -> or_else { a = it, b = b },
+
+  ## Close the table with a fallback, producing the handler `serve` takes.
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
+    otherwise { routes = it, fallback = fallback },
+}
+
+impl Matched where {
+  ## A bound path parameter, if the pattern bound one by that name.
+  param = { it: 'it, name: Str } -> map::get { m = it.params, k = name },
+  ## The first value the query gave for `name`.
+  query = { it: 'it, name: Str } -> query_param { url = it.req.url, name = name },
+  ## The first value the query gave for `name`, or `default`.
+  query_or = { it: 'it, name: Str, default: Str } ->
+    match query_param { url = it.req.url, name = name } is
+      Some { val } -> val
+      None -> default,
+  ## Every value the query gave for `name`.
+  query_all = { it: 'it, name: Str } -> query_all { url = it.req.url, name = name },
+  ## The query, decoded into whatever the use site asks for.
+  query_as = { it } -> query_decoded { url = it.req.url },
+  ## A bound path parameter, decoded into whatever the use site asks for.
+  ##
+  ##   let show = { id: Int } -> …
+  ##   .get { path = "/users/:id", handler = { m } -> match m.param_as { name = "id" } is
+  ##     Ok { val } -> show { id = val }
+  ##     Err { error = _ } -> bad_request { body = "id must be a number" } }
+  param_as = { it: 'it, name: Str } -> match map::get { m = it.params, k = name } is
+    Some { val } -> one_decoded { v = val, at = [name] }
+    None -> Err { error = no_such_param { name = name } },
+
+  ## A bound path parameter, or `default` when the pattern bound none. Usually
+  ## what a handler wants, since a `:name` the route declares always binds.
+  param_or = { it: 'it, name: Str, default: Str } ->
+    match map::get { m = it.params, k = name } is
+      Some { val } -> val
+      None -> default,
+  ## A 200 carrying `text`, with the request's own url echoed back.
+  ok = { it: 'it, text: Str } -> {
+    status = 200,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = it.req.url,
+    chunks = None,
+  },
+  ## Any status carrying `text`.
+  reply = { it: 'it, status: Int, text: Str } -> {
+    status = status,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = it.req.url,
+    chunks = None,
+  },
 }

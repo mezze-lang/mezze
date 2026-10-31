@@ -40,7 +40,7 @@ class HttpCatchingAnyTest {
         use std::effects::http::{ Response, IntoResponse, IntoErrorResponse, response_status, response_ok_text }
         use std::effects::exception::{ throw }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ router, catching_any, BadInput }
+        use std::effects::http_server::{ router, catching_any, BadInput }
         use std::collections::map
     """.trimIndent()
 

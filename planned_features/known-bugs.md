@@ -3126,7 +3126,7 @@ dispatch yet`, which asserts only that it fails LOUDLY — the message has been
 seen two ways (see BUG 31).
 
 RULED OUT as the cause of the symptom moving: the `catching` fold (reverted, and
-`http_router.mz` is byte-identical to before it) and the captured-function fix
+`http_server.mz` is byte-identical to before it) and the captured-function fix
 (turning its guard off changes nothing).
 
 NOT the same thing as these, both of which are correctly refused today — do not

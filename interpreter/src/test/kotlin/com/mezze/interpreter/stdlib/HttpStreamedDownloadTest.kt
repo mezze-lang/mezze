@@ -40,7 +40,7 @@ class HttpStreamedDownloadTest {
     private val head = """
         use std::effects::http::{ Request, Response, Method, Get, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, request, format_error, body_str, response_stream, with_download, default_http_config }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_router::{ route, otherwise, Matched }
+        use std::effects::http_server::{ route, otherwise, Matched }
         use std::collections::{ bytes, iter, map, seq }
         use std::int
 

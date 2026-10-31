@@ -840,7 +840,7 @@ class ContextBuilder {
             // locally-declared inherent method dropped its constraint, its body's
             // obligation (`x.into_response {}`) resolved eagerly, and the var
             // collapsed to the first concrete type (the limitation documented in
-            // http_router.mz). The imported path already carries these.
+            // http_server.mz routing section). The imported path already carries these.
             typeVarCache.clear()
             val paramType = op.paramType?.let { convertParsedTypeAnnotationInternal(it) }
                 ?: inferParamTypeFromLambda(op.implementation) { parsedType, name ->

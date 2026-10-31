@@ -968,15 +968,15 @@ class ImportResolver(
     /**
      * Every ability impl reachable through [module]'s TRANSITIVE import closure.
      *
-     * A plain `use http_router::{ on_get }` already carries http_router's OWN
+     * A plain `use http_server::{ on_get }` already carries http_server's OWN
      * impls (above) — the model is that a constraint is discharged at the CALL
      * site, so the caller needs the instances. But a constraint can be satisfied
      * by an impl that lives one hop PAST the imported module: `on_get`'s
      * `with IntoResponse 'r` is discharged by `impl IntoResponse for Str`, which
-     * is declared in `std::effects::http` — a module `http_router` merely `use`s.
+     * is declared in `std::effects::http` — a module `http_server` merely `use`s.
      * Without this closure that impl is invisible to the caller and the
      * constraint fails with a spurious "Str does not implement IntoResponse",
-     * even though `http_router` itself type-checked fine against it.
+     * even though `http_server` itself type-checked fine against it.
      *
      * Collecting the whole closure is SOUND: ability impls are COHERENT (the
      * orphan rule admits at most one impl per ability/type across the program),

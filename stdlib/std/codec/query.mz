@@ -19,7 +19,7 @@
 ## A sequence just concatenates its elements' pairs. Each element kept `k = ""`,
 ## so the enclosing record stamps the same name on all of them — a repeated key,
 ## which is the encoding the widest range of servers parse and the one
-## `std::effects::http_router`'s `query_all` collects.
+## `std::effects::http_server`'s `query_all` collects.
 ##
 ## Values are NOT percent-encoded here, exactly as in `UrlC`: escaping belongs
 ## to whoever places the pairs, because a value bound for a query is escaped

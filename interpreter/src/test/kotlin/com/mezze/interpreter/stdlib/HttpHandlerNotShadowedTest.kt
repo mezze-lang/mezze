@@ -29,7 +29,7 @@ class HttpHandlerNotShadowedTest {
     private val head = """
         use std::effects::http::{ Request, Response, Get, not_found, response_status, response_ok_text }
         use std::effects::http_server::{ get_request }
-        use std::effects::http_router::{ on_get, otherwise, route, Matched }
+        use std::effects::http_server::{ on_get, otherwise, route, Matched }
         use std::collections::bytes
         use std::int
     """.trimIndent()

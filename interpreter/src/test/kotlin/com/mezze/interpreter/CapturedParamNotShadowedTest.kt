@@ -18,7 +18,7 @@ import kotlin.test.assertEquals
  * an `Int`, a named argument instead of an inline lambda, a free function
  * instead of a method, the global declared after the call. It needed the
  * nesting AND a function-valued name. In the stdlib it bit hardest —
- * `http_router`'s `route` reads its `handler` inside `run = { req } -> … }` and
+ * `http_server`'s `route` reads its `handler` inside `run = { req } -> … }` and
  * `otherwise` reads its `fallback` inside `{ req } -> … }`, so a user writing
  * the obvious `let handler` or `let fallback` had their own function called in
  * place of the one they passed. Those two are covered where they live, in

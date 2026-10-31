@@ -22,7 +22,7 @@ class HelidonHttpServerTest {
     private val head = """
         use std::effects::http::{ Request, Response, Method, Get, Post, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_router::{ route, or_else, otherwise, Matched }
+        use std::effects::http_server::{ route, or_else, otherwise, Matched }
         use std::collections::map
         use std::collections::bytes
         use std::int
@@ -291,7 +291,7 @@ class HelidonHttpServerTest {
             """
             $head
             use std::effects::http::{ with_query, ToQuery }
-            use std::effects::http_router::{ BadInput }
+            use std::effects::http_server::{ BadInput }
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
                 let q: Result { q: Str, page: Int } BadInput = m.query_as {}

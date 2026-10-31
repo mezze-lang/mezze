@@ -36,7 +36,7 @@ import java.nio.file.Paths
  * the first test, because five of its six layers were dead ends and the next
  * person should not pay for them again.
  *
- * This was the gap behind three separate things in std::effects::http_router:
+ * This was the gap behind three separate things in std::effects::http_server:
  * `catching` could only accept a thrown `Response` rather than any convertible
  * error; a route could not therefore let a handler throw its own domain error;
  * and the verbs could not apply `catching` themselves, because naming the error
