@@ -41,7 +41,7 @@ class HelidonHttpServerTest {
             Ok { val = s } -> s
             Err { error = _ } -> "could not decode"
           None -> "<empty>"
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
         # serve expecting success (these tests bind port 0, which never clashes):
         # unwrap the Result, or hand back a port=-1 handle so a stray failure
         # fails the test loudly rather than silently.
@@ -156,7 +156,7 @@ class HelidonHttpServerTest {
             """
             $head
             $fetch
-            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1, stream_bodies = False }
+            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1, stream_bodies = False, helidon_logs = False }
             let app = otherwise {
               routes = route { method = Get, path = "/users/:id",
                 handler = { m } -> reply { code = 200, text = m.param_or { name = "id", default = "?" }, url = m.req.url } },

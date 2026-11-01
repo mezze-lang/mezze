@@ -482,7 +482,7 @@ class SqliteDbTest {
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
-                    perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
+                    perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False } } in
                       perform SimpleHttpClient in do
                         let _ = Db.apply { q = sql { text = "create table t (a int)" } }
                         let _ = Db.apply { q = sql { text = "insert into t values (1), (2)" } }
@@ -516,7 +516,7 @@ class SqliteDbTest {
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
-                    perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
+                    perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False } } in
                       perform SimpleHttpClient in do
                         let _ = Db.apply { q = sql { text = "create table t (a int)" } }
                         let h = match HttpServer.serve { handler = handler } is
@@ -552,7 +552,7 @@ class SqliteDbTest {
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
-                    perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
+                    perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False } } in
                       perform SimpleHttpClient in do
                         let _ = Db.apply { q = sql { text = "create table t (a int)" } }
                         let h = match HttpServer.serve { handler = handler } is
@@ -596,7 +596,7 @@ class SqliteDbTest {
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
                     perform LoomParallel in
-                      perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 8, stream_bodies = False } } in
+                      perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 8, stream_bodies = False, helidon_logs = False } } in
                         perform SimpleHttpClient in do
                           let _ = Db.apply { q = sql { text = "create table t (a int)" } }
                           let h = match HttpServer.serve { handler = handler } is
@@ -643,7 +643,7 @@ class SqliteDbTest {
                     ## not something the typechecker folds into the inner one.
                     let _ = Db.apply { q = sql { text = "create table t (a int)" } }
                     perform SqliteDb { path = ":memory:" } in
-                      perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
+                      perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False } } in
                         perform SimpleHttpClient in do
                           let h = match HttpServer.serve { handler = handler } is
                             Ok { val = hh } -> hh

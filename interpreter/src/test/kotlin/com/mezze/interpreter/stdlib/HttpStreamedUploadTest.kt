@@ -67,8 +67,8 @@ class HttpStreamedUploadTest {
         let chunks_of: { parts: [Str] } -> Iter Bytes = { parts } ->
           iter::map { it = iter::from_seq { xs = parts }, f = { x } -> bytes::from_str { s = x } }
 
-        let streaming: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = True }
-        let buffering: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
+        let streaming: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = True, helidon_logs = False }
+        let buffering: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
     """.trimIndent()
 
     /** A handler walks the chunks it was given, boundaries intact. */

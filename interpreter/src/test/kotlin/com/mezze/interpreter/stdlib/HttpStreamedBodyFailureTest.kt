@@ -68,7 +68,7 @@ class HttpStreamedBodyFailureTest {
           status = 404, headers = map::empty {}, body = bytes::from_str { s = "nope" },
           url = req.url, chunks = None,
         }
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
     """.trimIndent()
 
     /**

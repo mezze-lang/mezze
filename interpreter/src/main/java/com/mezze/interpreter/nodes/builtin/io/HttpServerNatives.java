@@ -83,32 +83,39 @@ public final class HttpServerNatives {
     private HttpServerNatives() {
     }
 
-    static {
-        // Helidon logs via JUL straight to stderr — a start failure dumps a full
-        // Java stack trace there. A language runtime must not leak its embedded
-        // server's internals to the user's terminal; the guest gets a typed
-        // `ServerError` instead (see `startError`). Silence the whole `io.helidon`
-        // tree, unless MEZZE_HELIDON_LOG is set as an escape hatch for debugging.
-        if (System.getenv("MEZZE_HELIDON_LOG") == null) {
-            java.util.logging.Logger.getLogger("io.helidon").setLevel(java.util.logging.Level.OFF);
-        }
-    }
-
     private static final java.util.concurrent.atomic.AtomicBoolean HELIDON_BOOTSTRAP_MUTED =
         new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
+     * Apply the `helidon_logs` config switch to the embedded server's logging.
+     *
+     * Helidon logs via JUL straight to stderr — a start failure dumps a full Java
+     * trace, and startup prints a banner and the bound socket. A Mezze program
+     * speaks in its own output and typed `ServerError`s, so the default is to
+     * show NONE of it; `helidon_logs = True` (or the `MEZZE_HELIDON_LOG` env
+     * escape hatch) shows EVERYTHING. The switch is honored per server start.
+     */
+    @TruffleBoundary
+    private static void configureHelidonLogging(boolean showLogs) {
+        java.util.logging.Logger helidon = java.util.logging.Logger.getLogger("io.helidon");
+        if (showLogs) {
+            helidon.setLevel(null);  // inherit the default level → records flow
+        } else {
+            helidon.setLevel(java.util.logging.Level.OFF);
+            muteHelidonBootstrapLine();
+        }
+    }
+
+    /**
      * Helidon's {@code LogConfig.configureRuntime()} prints "There is no Helidon
      * logging implementation on classpath…" to {@code System.err} DIRECTLY (not
-     * through a logger, so the JUL silencing above cannot reach it), once,
-     * guarded by its own flag. Run it here with stderr muted BEFORE the server
-     * starts — the later {@code start()} finds it already configured and stays
-     * silent, so that line never reaches the terminal. Lazy (server-only) and
-     * once per process; no-op under MEZZE_HELIDON_LOG.
+     * through a logger, so the JUL level above cannot reach it), once, guarded by
+     * its own flag. Run it here with stderr muted BEFORE the server starts — the
+     * later {@code start()} finds it already configured and stays silent, so that
+     * line never reaches the terminal. Once per process.
      */
     @TruffleBoundary
     private static void muteHelidonBootstrapLine() {
-        if (System.getenv("MEZZE_HELIDON_LOG") != null) return;
         if (!HELIDON_BOOTSTRAP_MUTED.compareAndSet(false, true)) return;
         java.io.PrintStream realErr = System.err;
         try {
@@ -228,7 +235,9 @@ public final class HttpServerNatives {
      */
     @TruffleBoundary
     public static Object httpServerStart(MezzeRecord args) {
-        muteHelidonBootstrapLine();
+        boolean showLogs = getBoolOrDefault(args, "helidon_logs", false)
+            || System.getenv("MEZZE_HELIDON_LOG") != null;
+        configureHelidonLogging(showLogs);
         Object handlerObj = getField(args, "handler");
         if (!(handlerObj instanceof MezzeFunction handler)) {
             throw new NativeTypeMismatchException("Expected 'handler' to be a function");
@@ -821,6 +830,11 @@ public final class HttpServerNatives {
         throw new NativeTypeMismatchException(
             "Expected Bool for field '" + fieldName + "'"
                 + (value == null ? " but it was absent" : ", got " + value.getClass().getSimpleName()));
+    }
+
+    private static boolean getBoolOrDefault(MezzeRecord args, String fieldName, boolean defaultValue) {
+        Object value = getField(args, fieldName);
+        return value instanceof Boolean b ? b : defaultValue;
     }
 
     private static String getString(MezzeRecord args, String fieldName) {

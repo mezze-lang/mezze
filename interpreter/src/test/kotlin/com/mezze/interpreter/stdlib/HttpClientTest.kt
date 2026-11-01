@@ -51,7 +51,7 @@ class HttpClientTest {
  chunks = None,
 }
 
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_logs = False }
         let impatient = { ...default_http_config, timeout_ms = 60 }
     """.trimIndent()
 
@@ -136,7 +136,7 @@ class HttpClientTest {
         use std::collections::bytes
         use std::int
 
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_logs = False }
 
         let text_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val

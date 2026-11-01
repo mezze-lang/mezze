@@ -48,7 +48,7 @@ class HttpStreamedDownloadTest {
           status = 404, headers = map::empty {}, body = bytes::from_str { s = "nope" },
           url = req.url, chunks = None,
         }
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
 
         ## A 200 KB body as ten 20 KB chunks, from a seq so the element type is
         ## Bytes throughout — `iter::map` from a range of Int into Bytes hits a

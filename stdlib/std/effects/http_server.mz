@@ -153,11 +153,16 @@ pub let options_request: { url: Str } -> Request = { url } ->
 ## exactly for the large uploads it was meant to handle. One switch means a
 ## handler knows which shape it gets, and `body_bytes` covers the handler that
 ## wants the whole thing anyway.
+## `helidon_logs` shows the underlying server's own logs (startup banner, bound
+## socket, and any failures it prints) — `True` shows everything, `False` shows
+## nothing. Off by default: a Mezze program speaks in its own output and typed
+## `ServerError`s, not the embedded Java server's logging.
 pub type ServerConfig = {
   port: Int,
   host: Str,
   workers: Int,
   stream_bodies: Bool,
+  helidon_logs: Bool,
 }
 
 ## Port 8080 on the loopback address, with the default worker count.
@@ -169,6 +174,7 @@ pub let default_server_config: ServerConfig = {
   host = "127.0.0.1",
   workers = 0,
   stream_bodies = False,
+  helidon_logs = False,
 }
 
 ## ── Streamed request bodies ─────────────────────────────────────────────────
@@ -231,6 +237,7 @@ let start_socket
       host = config.host,
       workers = config.workers,
       stream_bodies = config.stream_bodies,
+      helidon_logs = config.helidon_logs,
     } is
       Ok { val = s } -> Ok { val = {
         stop = {} -> __native_http_server_stop { server = s },
