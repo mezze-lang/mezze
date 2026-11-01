@@ -43,7 +43,9 @@ class HttpServerEffectTest {
               chunks = None,
             }
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
-              let h = HttpServer.serve { handler = handler }
+              let h = match HttpServer.serve { handler = handler } is
+                Ok { val = hh } -> hh
+                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())

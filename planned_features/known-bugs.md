@@ -163,6 +163,97 @@ fail-fast spawn-of-spawns that cancels the siblings as soon as one errs. Recorde
 here from the inline `## TODO #169` that the stdlib comment cleanup removed — it
 was the only TODO in the stdlib.
 
+### B-16 — a bare record did not adopt to a record-ALIAS impl target in the compiler's op dispatch (FIXED)
+
+A router whose `.otherwise` fallback (or any route handler) returns a bare
+`{ status, body }` record — adopted to the `StatusBody` alias and answered
+through `impl IntoResponse for StatusBody` — served a **500 "The handler raised:
+Field not found: into_response"** under `mez dev` / `mez build`. The `.get`
+handler returning a plain `Str` worked; only the bare-record→alias adoption
+failed.
+
+ROOT: `type StatusBody = { status: Int, body: Str }` is a record ALIAS, so
+`impl IntoResponse for StatusBody` registers its target as the nominal
+`TypeApplication(StatusBody)`. At a call site the SOLVER adopts a bare `{ … }`
+literal to `StatusBody` fine (typechecking passed), but the COMPILER's own
+dispatch — `tryResolveAbilityOp` → `typeMatchesTarget` — had no arm matching a
+nameless `RecordType` receiver against a `TypeApplication` target: the only
+RecordType↔TypeApplication arm keys on the receiver carrying the alias NAME,
+which an anonymous literal lacks. So `rec.into_response {}` resolved to no op
+and lowered to a structural field read that threw at runtime.
+
+Why it looked CLI-only: on the interpreter/`context.eval` path the solver
+happened to leave the receiver nominal (`StatusBody`), which `typeMatchesTarget`
+matched; the CLI path's mono specialization re-lowered the fallback wrapper with
+a STRUCTURAL `{status,body}` receiver, which did not. Both paths share the same
+dispatch code — the bug was latent on eval, triggered whenever the receiver
+reached dispatch structurally. The regression test forces the structural shape
+(a parameter annotated `{ status: Int, body: Str }`, not `StatusBody`) so it
+fails on BOTH paths without the fix.
+
+FIX (one line): `tryResolveAbilityOp` now computes its receiver as
+`adoptBareRecord(receiverType)` instead of the raw `receiverType`.
+`adoptBareRecord` (already in `DictEvidence`) runs the canonical, ambiguity-safe
+`adoptRecordAlias` rule — a closed, anonymous record adopts a UNIQUE in-scope
+record-alias's nominal identity, keyed on the alias's content HASH + field shape
+(never its name), and stays Anonymous when two rival aliases match. So a bare
+`{ status, body }` receiver becomes `StatusBody` and `typeMatchesTarget` resolves
+it exactly as an annotated receiver would; a genuinely ambiguous literal still
+declines. (The first attempt — a bespoke first-match helper + a hash→record map
+on `PrintTypeDefs` — was discarded: it broke `ImportedAliasAdoptionTest`'s
+ambiguity guard by picking a candidate where adoption must decline. Reusing the
+canonical rule is both smaller and correct.) Pinned by
+`HelidonHttpServerTest."a bare record adopts to a record-alias impl target at op
+dispatch"` — a parameter annotated `{ status: Int, body: Str }` (NOT `StatusBody`)
+forces the structural receiver, and the test fails with "Field not found:
+into_response" without the fix.
+
+### B-17 — `serve` hid a failed bind: it leaked Helidon's Java trace and still printed "serving on" (FIXED)
+
+A server whose socket failed to bind (port in use, privileged, unassignable)
+dumped Helidon's full JUL stack trace to the terminal AND then ran the guest's
+"serving on …" print anyway — because the native handed back a handle for a
+server that was not listening, and Helidon's own logging went straight to
+stderr. The program then parked on a dead socket.
+
+FIX, three parts:
+ 1. `serve` now answers `Result ServerHandle ServerError` (consistent with
+    `HttpClient.request`'s `Result … HttpError`), so a bind failure is a value
+    the caller handles — "serving on" can only print on the `Ok` path. The
+    `ServerError` variant is `AddressInUse` / `PermissionDenied` /
+    `AddressNotAvailable` (precise, `{host, port}`) + `StartFailed {host, port,
+    reason}` (catch-all, nothing swallowed).
+ 2. `HttpServerNatives.httpServerStart` detects the failure precisely: it probes
+    the bind with a plain `ServerSocket` first (for a specific port), then wraps
+    `server.start()` and checks `isRunning()`, mapping the cause to the right
+    `ServerError` constructor and returning `Err` — never a dead handle.
+ 3. A static block silences the `io.helidon` JUL tree (`Level.OFF`, escape hatch
+    `MEZZE_HELIDON_LOG`), so a successful start is quiet and a failure surfaces
+    as the typed error, not a Java trace. (One benign line — "There is no Helidon
+    logging implementation on classpath" — comes from Helidon's logging
+    bootstrap on a different path and still shows; harmless.)
+
+Every `serve` caller now unwraps the Result (stdlib, ~14 interpreter test files,
+fixtures/native-server-smoke, bench/http-work-route, showcase server_live_demo,
+which matches each `ServerError` case as a worked example). MockHttpServer.serve
+returns `Ok`.
+
+### B-18 — `mez dev --app server` did not hot-reload on edit (FIXED)
+
+Editing worked for the tour but not a running server. `WireRunner.watch` ran the
+app inline with `session.runOnce(...)`, which blocks until the run finishes; a
+server parks until Ctrl-C, so the watch loop never reached the file-watch event
+loop and saves were never processed.
+
+FIX: each run goes on a background daemon thread so the loop stays free to notice
+saves. On a save, if the previous run is still alive (a parked server holding its
+socket), the child is force-killed and replaced (`WireSession.kill()` —
+`destroy()` then `destroyForcibly()`, since a parked child never answers the
+graceful QUIT `close()` waits on) and the recompiled code runs on the fresh
+child; a run that already returned (the tour) keeps its child and hot-reloads
+with EVICT as before. Verified live: editing a parked server's fallback body
+reloads it (`prev still running · reloaded`).
+
 ### B-14 — an imported inherent method's `with C 'r` constraint leaks a PHANTOM onto a lambda-bound caller (FIXED)
 
 Calling an imported inherent impl method constrained `with C 'r`, where `'r`

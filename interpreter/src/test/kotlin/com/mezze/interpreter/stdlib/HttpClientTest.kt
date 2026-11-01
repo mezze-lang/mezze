@@ -103,7 +103,9 @@ class HttpClientTest {
               perform SystemTime in
                 perform HelidonHttpServerWith { config = any_port } in
                   perform PooledHttpClientWith { overrides = impatient } in do
-                    let h = HttpServer.serve { handler = slow }
+                    let h = match HttpServer.serve { handler = slow } is
+                      Ok { val = hh } -> hh
+                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/slow" }.send {} is
                       Ok { val } -> "the override did not reach the request"
                       Err { error = e } -> format_error { err = e }
@@ -183,7 +185,9 @@ class HttpClientTest {
             let go: {} -> Int <*> = {} ->
               perform HelidonHttpServerWith { config = any_port } in
                 perform PooledHttpClientWith { overrides = { ...default_http_config, follow_redirects = False } } in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = match HttpServer.serve { handler = app } is
+                    Ok { val = hh } -> hh
+                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/redir" }.send {} is
                     Ok { val } -> val.status
                     Err { error = _ } -> -1
@@ -201,7 +205,9 @@ class HttpClientTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = any_port } in
                 perform PooledHttpClientWith { overrides = default_http_config } in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = match HttpServer.serve { handler = app } is
+                    Ok { val = hh } -> hh
+                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/redir" }.send {} is
                     Ok { val } -> text_of { resp = val }
                     Err { error = e } -> format_error { err = e }
@@ -300,7 +306,9 @@ class HttpClientTest {
               perform SystemTime in
                 perform HelidonHttpServerWith { config = any_port } in
                   perform SimpleHttpClientWith { overrides = impatient } in do
-                    let h = HttpServer.serve { handler = slow }
+                    let h = match HttpServer.serve { handler = slow } is
+                      Ok { val = hh } -> hh
+                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/slow" }.send {} is
                       Ok { val } -> "the override did not reach the request"
                       Err { error = e } -> format_error { err = e }

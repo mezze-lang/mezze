@@ -78,7 +78,9 @@ class HttpStreamedResponseTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = match HttpServer.serve { handler = app } is
+                    Ok { val = hh } -> hh
+                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = fetch { url = ${url("/stream")} }
                   h.stop {}
                   out
@@ -129,7 +131,9 @@ class HttpStreamedResponseTest {
                 perform HelidonHttpServerWith { config = listen_on_any_port } in
                   perform SimpleHttpClient in do
                     let _ = FileSystem.create_directory { path = "/pulled" }
-                    let h = HttpServer.serve { handler = app }
+                    let h = match HttpServer.serve { handler = app } is
+                      Ok { val = hh } -> hh
+                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                     let body = fetch { url = ${url("/stream")} }
                     h.stop {}
                     match FileSystem.list { path = "/pulled" } is
@@ -162,7 +166,9 @@ class HttpStreamedResponseTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = match HttpServer.serve { handler = app } is
+                    Ok { val = hh } -> hh
+                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = fetch { url = ${url("/empty")} }
                   h.stop {}
                   "[$(out)]"
@@ -192,7 +198,9 @@ class HttpStreamedResponseTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = match HttpServer.serve { handler = app } is
+                    Ok { val = hh } -> hh
+                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = fetch { url = ${url("/whole")} }
                   h.stop {}
                   out
@@ -230,7 +238,9 @@ class HttpStreamedResponseTest {
                   perform HelidonHttpServerWith { config = listen_on_any_port } in
                     perform SimpleHttpClient in do
                       let _ = write_text { path = "/big.txt", text = "abcdefghijklmno" }
-                      let h = HttpServer.serve { handler = app }
+                      let h = match HttpServer.serve { handler = app } is
+                        Ok { val = hh } -> hh
+                        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                       let out = fetch { url = ${url("/file")} }
                       h.stop {}
                       out

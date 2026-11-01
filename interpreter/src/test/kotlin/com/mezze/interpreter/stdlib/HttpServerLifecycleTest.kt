@@ -40,7 +40,9 @@ class HttpServerLifecycleTest {
                 $head
                 let go: {} -> Int <*> = {} ->
                   perform HelidonHttpServerWith { config = any_port } in do
-                    let h = HttpServer.serve { handler = handler }
+                    let h = match HttpServer.serve { handler = handler } is
+                      Ok { val = hh } -> hh
+                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                     h.port
                 go {}
                 """.trimIndent(),

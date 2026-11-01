@@ -94,7 +94,9 @@ class HttpStreamedBodyFailureTest {
         let go: {} -> Str <*> = {} ->
           perform HelidonHttpServerWith { config = listen_on_any_port } in
             perform SimpleHttpClient in perform SimpleHttpDownload in do
-              let h = HttpServer.serve { handler = app }
+              let h = match HttpServer.serve { handler = app } is
+                Ok { val = hh } -> hh
+                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
               let out = match with_download {
                 req = request { url = str::concat { l = "http://127.0.0.1:", r = str::concat {
                   l = int::to_str { n = h.port }, r = "/big" } } },
@@ -168,7 +170,9 @@ class HttpStreamedBodyFailureTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in perform SimpleHttpDownload in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = match HttpServer.serve { handler = app } is
+                    Ok { val = hh } -> hh
+                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match with_download {
                     req = request { url = str::concat { l = "http://127.0.0.1:", r = str::concat {
                       l = int::to_str { n = h.port }, r = "/big" } } },

@@ -144,7 +144,9 @@ class HttpOneApiTest {
             """
             perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
               perform SimpleHttpClient in do
-                let h = HttpServer.serve { handler = api }
+                let h = match HttpServer.serve { handler = api } is
+                  Ok { val = hh } -> hh
+                  Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                 let c = client { base_url = "http://127.0.0.1:${'$'}(int::to_str { n = h.port })" }
                 let one = sent { r = c.get { path = "/api/users/7" }.send {} }
                 let two = sent { r = c.post { path = "/api/users" }.send {} }

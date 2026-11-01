@@ -50,9 +50,21 @@ pub type ServerHandle = {
   port: Int,
 }
 
-## Run a handler as a server.
+## Why a server could not start. The first three are the precise, common cases
+## a caller may want to match on; `StartFailed` carries the raw reason for any
+## other failure, so nothing is swallowed.
+pub type ServerError = |
+  AddressInUse { host: Str, port: Int },
+  PermissionDenied { host: Str, port: Int },
+  AddressNotAvailable { host: Str, port: Int },
+  StartFailed { host: Str, port: Int, reason: Str },
+|
+
+## Run a handler as a server. Binding a socket can fail — the port may be in
+## use, privileged, or name an address this host can't assign — so `serve`
+## answers a `Result`: `Ok` with the handle, or `Err` with a `ServerError`.
 effect HttpServer where {
-  serve: { handler: { req: Request } -> Response <...> } -> ServerHandle <HttpServer>
+  serve: { handler: { req: Request } -> Response <...> } -> Result ServerHandle ServerError <HttpServer>
 }
 
 ## A server that never binds a socket.
@@ -63,7 +75,7 @@ effect HttpServer where {
 ##
 ## It installs NO async performer, so a handler's `<Async>` escapes to the test.
 impl HttpServer for MockHttpServer where {
-  serve = { handler } -> { stop = {} -> {}, port = 0 }
+  serve = { handler } -> Ok { val = { stop = {} -> {}, port = 0 } }
 }
 
 ## Build a `Request` for a handler, without a server.
@@ -210,20 +222,21 @@ let attach_reader: { req: Request, reader: Option BodyReader } -> Request = { re
 ## Bind the socket, start the workers, hand back the handle.
 let start_socket
   : { handler: { req: Request } -> Response <...>, config: ServerConfig }
-  -> ServerHandle
+  -> Result ServerHandle ServerError
   = { handler, config } -> do
     let wrapped = { req, reader } -> handler { req = attach_reader { req = req, reader = reader } }
-    let s = __native_http_server_start {
+    match __native_http_server_start {
       handler = wrapped,
       port = config.port,
       host = config.host,
       workers = config.workers,
       stream_bodies = config.stream_bodies,
-    }
-    {
-      stop = {} -> __native_http_server_stop { server = s },
-      port = __native_http_server_port { server = s },
-    }
+    } is
+      Ok { val = s } -> Ok { val = {
+        stop = {} -> __native_http_server_stop { server = s },
+        port = __native_http_server_port { server = s },
+      } }
+      Err { error } -> Err { error = error }
 
 ## A server on a real socket, backed by Helidon.
 ##

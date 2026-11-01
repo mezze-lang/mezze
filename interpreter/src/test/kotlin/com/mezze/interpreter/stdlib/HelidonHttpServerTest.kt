@@ -42,6 +42,12 @@ class HelidonHttpServerTest {
             Err { error = _ } -> "could not decode"
           None -> "<empty>"
         let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False }
+        # serve expecting success (these tests bind port 0, which never clashes):
+        # unwrap the Result, or hand back a port=-1 handle so a stray failure
+        # fails the test loudly rather than silently.
+        let serve_ok = { app } -> match HttpServer.serve { handler = app } is
+          Ok { val = h } -> h
+          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
     """.trimIndent()
 
     /** `GET` a url and give back the body text, or the error, as a Str. */
@@ -69,7 +75,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let out = fetch { url = ${url("/users/42")} }
                   h.stop {}
                   out
@@ -77,6 +83,66 @@ class HelidonHttpServerTest {
             """.trimIndent(),
         )
         assertEquals("42", r, "the path parameter made it through the socket and back")
+    }
+
+    @Test
+    fun `a bare status-body fallback is served over the socket`() {
+        // The fallback returns a bare `{ status, body }` record — adopted as
+        // StatusBody, answered through `impl IntoResponse for StatusBody`. Every
+        // other server test uses a Response-returning fallback (needs no
+        // adoption), so this is the one that exercises bare-record IntoResponse
+        // dispatch over a real socket. The adoption itself (independent of the
+        // server) is pinned by the direct-dispatch test below (B-16).
+        val r = MezzeTestHelper.run(
+            """
+            $head
+            $fetch
+            use std::effects::http_server::{ router }
+            let app = router { path = "" }
+              .get { path = "/ok", handler = { m } -> "ok" }
+              .otherwise { fallback = { req } -> { status = 404, body = "nope-bare" } }
+            let go: {} -> Str <*> = {} ->
+              perform HelidonHttpServerWith { config = listen_on_any_port } in
+                perform SimpleHttpClient in do
+                  let h = serve_ok { app = app }
+                  let out = fetch { url = ${url("/miss")} }
+                  h.stop {}
+                  out
+            go {}
+            """.trimIndent(),
+        )
+        assertEquals("nope-bare", r, "a bare {status, body} fallback must be served, not raise Field not found")
+    }
+
+    @Test
+    fun `a bare record adopts to a record-alias impl target at op dispatch`() {
+        // B-16. `StatusBody = { status: Int, body: Str }` is a record ALIAS with
+        // `impl IntoResponse for StatusBody`, so its impl target is recorded as
+        // the nominal `TypeApplication(StatusBody)`. A bare, anonymous
+        // `{ status, body }` literal must adopt to it when `.into_response {}`
+        // dispatches — the compiler resolves the op by expanding the alias target
+        // through its identity HASH (never by the literal carrying the name
+        // "StatusBody"). Without that, dispatch fell through to a structural field
+        // read and raised "Field not found: into_response" at runtime. A DIRECT
+        // call pins it: the receiver is the literal's structural RecordType with
+        // no mono specialization to mask the resolution, so it reproduces the bug
+        // deterministically where the server test's polymorphic path did not.
+        // The receiver is a parameter annotated with the bare record type — NOT
+        // `StatusBody` — so it stays a structural RecordType at dispatch and the
+        // solver cannot nominalize it away. That is the shape mono produces for a
+        // router fallback's return on the CLI path, and the one the bug hit.
+        val r = MezzeTestHelper.run(
+            """
+            use std::effects::http::{ IntoResponse, Response }
+            let answer: { it: { status: Int, body: Str } } -> Response = { it } ->
+              it.into_response {}
+            let probe: {} -> Int = {} -> do
+              let resp = answer { it = { status = 404, body = "gone" } }
+              resp.status
+            probe {}
+            """.trimIndent(),
+        )
+        assertEquals(404L, r, "a bare {status, body} must adopt to StatusBody and answer through its IntoResponse impl")
     }
 
     @Test
@@ -99,7 +165,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = one_at_a_time } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let a = fetch { url = ${url("/users/1")} }
                   let b = fetch { url = ${url("/users/2")} }
                   let c = fetch { url = ${url("/users/3")} }
@@ -123,7 +189,7 @@ class HelidonHttpServerTest {
             }
             let go: {} -> Int <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in do
-                let h = HttpServer.serve { handler = app }
+                let h = serve_ok { app = app }
                 let p = h.port
                 h.stop {}
                 p
@@ -147,7 +213,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let sent = request { url = ${url("/echo")} }
                     .with_method { val = Post }
                     .with_text { val = "hello from the client" }
@@ -177,7 +243,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let out = fetch { url = ${url("/nothing/here")} }
                   h.stop {}
                   out
@@ -201,7 +267,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let out = fetch { url = ${url("/users/7?page=2&sort=name")} }
                   h.stop {}
                   out
@@ -232,7 +298,7 @@ class HelidonHttpServerTest {
               perform WithReader { val = "tenant-9" } in
                 perform HelidonHttpServerWith { config = listen_on_any_port } in
                   perform SimpleHttpClient in do
-                    let h = HttpServer.serve { handler = app }
+                    let h = serve_ok { app = app }
                     let out = fetch { url = ${url("/whoami")} }
                     h.stop {}
                     out
@@ -266,7 +332,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let sent = request { url = ${url("/q")} }
                     .with_query { params = { tags = ["a", "b"] } }
                     .send {}
@@ -304,7 +370,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let sent = request { url = ${url("/search")} }
                     .with_query { params = { q = "mezze", page = 3 } }
                     .send {}
@@ -340,7 +406,7 @@ class HelidonHttpServerTest {
               perform ImmediateSignal in
                 perform HelidonHttpServerWith { config = listen_on_any_port } in
                   perform SimpleHttpClient in do
-                    let h = HttpServer.serve { handler = app }
+                    let h = serve_ok { app = app }
                     let before = fetch { url = ${url("/")} }
                     h.with_graceful_shutdown { on = { } -> ctrl_c {} }
                     let after = fetch { url = ${url("/")} }
@@ -369,7 +435,7 @@ class HelidonHttpServerTest {
             let go: {} -> Str <*> = {} ->
               perform HelidonHttpServerWith { config = listen_on_any_port } in
                 perform SimpleHttpClient in do
-                  let h = HttpServer.serve { handler = app }
+                  let h = serve_ok { app = app }
                   let a = fetch { url = ${url("/n/one")} }
                   let b = fetch { url = ${url("/n/two")} }
                   h.stop {}

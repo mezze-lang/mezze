@@ -107,6 +107,7 @@ object WireRunner {
         }
 
         initStore(currentDir)
+        if (!depsFetchedOrReport(currentDir)) return 4
         val compile = compile(currentDir, appFile, entryName, appName, timing, t0) ?: return 4
 
         val session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
@@ -155,6 +156,7 @@ object WireRunner {
             return 1
         }
         initStore(currentDir)
+        if (!depsFetchedOrReport(currentDir)) return 4
 
         // Publish a runtime session so editor tools (the sample lens, a REPL)
         // can attach to THIS warm `mez dev` runtime and EVAL against it — on the
@@ -217,6 +219,41 @@ object WireRunner {
             return true
         }
 
+        // A run can be long-lived — a server parks until Ctrl-C. If the watch
+        // loop ran it inline it would block here forever and never reach the
+        // file-watch loop below, so a save would never reload (the exact bug for
+        // `mez dev --app server`). So each run goes on its own daemon thread, and
+        // the loop stays free to notice saves. `lastRunOutcome` is what the most
+        // recent run that actually FINISHED reported (null while one is parked).
+        val lastRunOutcome = java.util.concurrent.atomic.AtomicReference<WireSession.RunOutcome?>(null)
+        var runThread: Thread? = null
+        fun launchRun(c: CompileResult, evict: Set<Hash>?) {
+            val t = Thread({
+                try {
+                    lastRunOutcome.set(session.runOnce(c, evict = evict))
+                } catch (_: Throwable) {
+                    // The session was killed under us (reload/quit) or the child
+                    // died — expected on this thread; the loop handles the rest.
+                }
+            }, "mez-dev-run")
+            t.isDaemon = true
+            runThread = t
+            t.start()
+        }
+
+        // Replace the child with a fresh one, force-killing whatever it was
+        // running. A parked server will not answer a graceful QUIT, so this uses
+        // `kill()` rather than `close()` — otherwise reload would hang.
+        fun killAndRestart(): Boolean {
+            try { session.kill() } catch (_: Exception) {}
+            val fresh = WireSession.start(currentDir, timing, System.nanoTime(), devFlagsWithListen)
+                ?: return false
+            session = fresh
+            prevHashes = emptySet()
+            installQuitHook()
+            return true
+        }
+
         // TTY detection: colour only when stderr is an interactive terminal.
         val console = DevConsole(appName, color = System.console() != null)
         val watchedDirLabel = appFile.parentFile?.let {
@@ -233,7 +270,7 @@ object WireRunner {
             System.err.println(console.separator("running · ^C to stop"))
             System.err.println(console.blank())
             if (lastCompile != null) {
-                session.runOnce(lastCompile)
+                launchRun(lastCompile, null)
                 prevHashes = lastCompile.hashes
             }
 
@@ -303,31 +340,46 @@ object WireRunner {
                             inErrorState = false
                             System.err.println(console.blank())
 
-                            // EVICT: hashes that were in the previous closure
-                            // but aren't in the new one. They identify
-                            // functions whose source changed (so the hash
-                            // changed) and we need the runtime to drop the
-                            // stale CallTarget. New hashes don't need EVICT
-                            // — they were never cached.
-                            val evict = prevHashes - next.hashes
-                            val outcome = session.runOnce(next, evict = if (evict.isEmpty()) null else evict)
-                            prevHashes = next.hashes
-                            lastCompile = next
-                            priorOutcome = when (outcome.reason) {
-                                "exit_called" -> DevConsole.RunResult.Exited(outcome.exitCode)
-                                "wire_error", "crashed" -> DevConsole.RunResult.Crashed
-                                else -> DevConsole.RunResult.Exited(outcome.exitCode)
-                            }
-                            if (outcome.reason == "wire_error" || outcome.reason == "crashed") {
-                                // Session is unusable — wire corrupted or
-                                // child died. Restart so the next file save
-                                // gets a fresh runtime. Bail entirely if
-                                // even the restart fails.
-                                if (!restartSession()) {
+                            // Is the previous run still going? A parked server
+                            // is — and it holds its socket — so it must be
+                            // force-killed and replaced with a fresh child
+                            // before the recompiled code can bind. A run that
+                            // already returned (the tour) keeps its child and
+                            // hot-reloads with EVICT, which is faster.
+                            val stillRunning = runThread?.isAlive == true
+                            if (stillRunning) {
+                                priorOutcome = DevConsole.RunResult.Reloading
+                                if (!killAndRestart()) {
                                     System.err.println(console.separator("couldn't restart runtime — exiting"))
                                     return 1
                                 }
+                                launchRun(next, null)  // fresh child: no cached state to EVICT
+                            } else {
+                                // EVICT: hashes that were in the previous closure
+                                // but aren't in the new one — functions whose
+                                // source changed. New hashes were never cached.
+                                val evict = prevHashes - next.hashes
+                                val done = lastRunOutcome.get()
+                                priorOutcome = when (done?.reason) {
+                                    null -> DevConsole.RunResult.Reloading
+                                    "wire_error", "crashed" -> DevConsole.RunResult.Crashed
+                                    "exit_called" -> DevConsole.RunResult.Exited(done.exitCode)
+                                    else -> DevConsole.RunResult.Exited(done.exitCode)
+                                }
+                                // A dead/corrupt child can't be hot-reloaded —
+                                // bring up a fresh one first.
+                                if (done?.reason == "wire_error" || done?.reason == "crashed") {
+                                    if (!killAndRestart()) {
+                                        System.err.println(console.separator("couldn't restart runtime — exiting"))
+                                        return 1
+                                    }
+                                    launchRun(next, null)
+                                } else {
+                                    launchRun(next, if (evict.isEmpty()) null else evict)
+                                }
                             }
+                            prevHashes = next.hashes
+                            lastCompile = next
                         }
                         syncWatchedDirs(watcher, watchedDirs, appFile, currentDir)
                         // Drain any duplicate FS events from the same save.
@@ -443,6 +495,22 @@ object WireRunner {
                 if (files.isNotEmpty()) events.add(DevEvent.FilesChanged(files))
             }
         }.apply { isDaemon = true; name = "mez-watch-fs" }.start()
+    }
+
+    /**
+     * Pre-flight: a run needs its declared JVM deps fetched, and those jars are
+     * a RUNTIME requirement a compile can't supply. Check BEFORE compiling (and
+     * before spawning the runtime) so a missing dep stops the dev flow at once
+     * with an actionable `mez sync` message, instead of after a wasted compile —
+     * and on every watch reload. Returns false (message printed) when deps are
+     * missing; the caller aborts. `mez check` deliberately does NOT gate on this
+     * — typechecking needs the package interfaces, not the runtime jars.
+     */
+    private fun depsFetchedOrReport(currentDir: File): Boolean {
+        val msg = com.mezze.language.cli.`package`.ResolvedJarsClasspath.collect(currentDir).missingSyncMessage()
+            ?: return true
+        System.err.println("${Glyphs.CROSS} $msg")
+        return false
     }
 
     /** Set up the project store + typechecker singletons. */
@@ -1056,6 +1124,29 @@ internal class WireSession private constructor(
         try { toChild.close() } catch (_: Exception) {}
         try { process.waitFor() } catch (_: Exception) {}
         try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: IllegalStateException) {}
+    }
+
+    /**
+     * Force-terminate the child now, skipping the graceful QUIT/BYE handshake.
+     * Used on RELOAD: a parked server (e.g. `with_graceful_shutdown`) never
+     * returns to read a QUIT frame, so [close] would hang on `waitFor()` and the
+     * listening socket would not be released. `destroy()` (SIGTERM) then
+     * `destroyForcibly()` (SIGKILL) as a backstop guarantees the old run is gone
+     * before the fresh one binds.
+     */
+    fun kill() {
+        try { signalHandler.uninstall() } catch (_: Exception) {}
+        try { winchForwarder.uninstall() } catch (_: Exception) {}
+        try { sigtermForwarder.uninstall() } catch (_: Exception) {}
+        try { rawModeManager.restore() } catch (_: Exception) {}
+        try { toChild.close() } catch (_: Exception) {}
+        try {
+            process.destroy()
+            if (!process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly().waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        } catch (_: Exception) {}
+        try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: Exception) {}
     }
 
     @Synchronized

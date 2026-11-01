@@ -80,7 +80,9 @@ class HttpRouterChainTest {
         val r = MezzeTestHelper.run("""
             $head
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
-              let h = HttpServer.serve { handler = app }
+              let h = match HttpServer.serve { handler = app } is
+                Ok { val = hh } -> hh
+                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())

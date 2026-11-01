@@ -83,6 +83,44 @@ public final class HttpServerNatives {
     private HttpServerNatives() {
     }
 
+    static {
+        // Helidon logs via JUL straight to stderr — a start failure dumps a full
+        // Java stack trace there. A language runtime must not leak its embedded
+        // server's internals to the user's terminal; the guest gets a typed
+        // `ServerError` instead (see `startError`). Silence the whole `io.helidon`
+        // tree, unless MEZZE_HELIDON_LOG is set as an escape hatch for debugging.
+        if (System.getenv("MEZZE_HELIDON_LOG") == null) {
+            java.util.logging.Logger.getLogger("io.helidon").setLevel(java.util.logging.Level.OFF);
+        }
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean HELIDON_BOOTSTRAP_MUTED =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
+     * Helidon's {@code LogConfig.configureRuntime()} prints "There is no Helidon
+     * logging implementation on classpath…" to {@code System.err} DIRECTLY (not
+     * through a logger, so the JUL silencing above cannot reach it), once,
+     * guarded by its own flag. Run it here with stderr muted BEFORE the server
+     * starts — the later {@code start()} finds it already configured and stays
+     * silent, so that line never reaches the terminal. Lazy (server-only) and
+     * once per process; no-op under MEZZE_HELIDON_LOG.
+     */
+    @TruffleBoundary
+    private static void muteHelidonBootstrapLine() {
+        if (System.getenv("MEZZE_HELIDON_LOG") != null) return;
+        if (!HELIDON_BOOTSTRAP_MUTED.compareAndSet(false, true)) return;
+        java.io.PrintStream realErr = System.err;
+        try {
+            System.setErr(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
+            io.helidon.logging.common.LogConfig.configureRuntime();
+        } catch (Throwable ignored) {
+            // Best-effort cosmetic suppression — never let it affect startup.
+        } finally {
+            System.setErr(realErr);
+        }
+    }
+
     /**
      * How many handlers may run at once when the config does not say.
      *
@@ -190,6 +228,7 @@ public final class HttpServerNatives {
      */
     @TruffleBoundary
     public static Object httpServerStart(MezzeRecord args) {
+        muteHelidonBootstrapLine();
         Object handlerObj = getField(args, "handler");
         if (!(handlerObj instanceof MezzeFunction handler)) {
             throw new NativeTypeMismatchException("Expected 'handler' to be a function");
@@ -220,13 +259,83 @@ public final class HttpServerNatives {
                 dispatch(truffleCtx, handler, chain, scope, inFlight, streamBodies, req, res)))
             .build();
 
-        server.start();
+        // Starting can fail: the port may be taken, privileged, or name an
+        // address this host can't assign. We return a `Result ServerHandle
+        // ServerError` so the guest handles it as a value — never a dead handle,
+        // and never Helidon's Java stack trace on the terminal (that is silenced
+        // in the static block below; the typed error carries the reason).
+        //
+        // A specific port is probed first, because Helidon logs-and-continues
+        // rather than throwing on a bind clash, so `start()` alone would hand
+        // back a server that is not listening. The probe makes the common cases
+        // (in use / permission / unassignable) precise; `start()`'s own throw and
+        // the `isRunning` check after it catch everything else. Port 0 lets the
+        // OS choose, so it cannot be in use — skip the probe there.
+        if (port > 0) {
+            java.io.IOException bindFailure = probeBind(host, port);
+            if (bindFailure != null) return startError(host, port, bindFailure);
+        }
+        try {
+            server.start();
+        } catch (RuntimeException e) {
+            return startError(host, port, rootCause(e));
+        }
+        if (!server.isRunning()) {
+            return startError(host, port, null);
+        }
         RunningServer running = new RunningServer(server, server.port());
         // The guest gets a `stop`, and may never call it. The context closing is
         // the backstop: a listening socket must not outlive the program that
         // opened it.
         context.registerForDispose(running);
-        return running;
+        return MezzeVariant.ok(running);
+    }
+
+    /**
+     * Try to bind [host]:[port] ourselves, closing the probe immediately on
+     * success. Returns the IOException if the port cannot be taken (so the
+     * caller can map it to a precise {@code ServerError}), or null if it is free.
+     * {@code setReuseAddress(false)} so a port already in use actually fails
+     * rather than being re-bound on platforms that permit it.
+     */
+    @TruffleBoundary
+    private static java.io.IOException probeBind(String host, int port) {
+        try (java.net.ServerSocket probe = new java.net.ServerSocket()) {
+            probe.setReuseAddress(false);
+            probe.bind(new java.net.InetSocketAddress(java.net.InetAddress.getByName(host), port));
+            return null;
+        } catch (java.io.IOException e) {
+            return e;
+        }
+    }
+
+    private static Throwable rootCause(Throwable t) {
+        Throwable c = t;
+        while (c.getCause() != null && c.getCause() != c) c = c.getCause();
+        return c;
+    }
+
+    /**
+     * Map a start/bind failure to the matching {@code ServerError} constructor,
+     * wrapped as {@code Err}. The three precise variants carry {@code {host,
+     * port}}; the {@code StartFailed} catch-all also carries the raw {@code
+     * reason} so nothing is lost for a failure mode we did not enumerate.
+     */
+    @TruffleBoundary
+    private static MezzeVariant startError(String host, int port, Throwable cause) {
+        String reason = cause == null ? "the server failed to start"
+            : (cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName());
+        String low = reason.toLowerCase(java.util.Locale.ROOT);
+        String ctor;
+        if (low.contains("already in use")) ctor = "AddressInUse";
+        else if (low.contains("permission denied")) ctor = "PermissionDenied";
+        else if (low.contains("cannot assign requested address") || low.contains("assign requested")) ctor = "AddressNotAvailable";
+        else ctor = "StartFailed";
+        MezzeRecord payload = ctor.equals("StartFailed")
+            ? MezzeRecord.fromFields(new String[]{"host", "port", "reason"}, new Object[]{host, (long) port, reason})
+            : MezzeRecord.fromFields(new String[]{"host", "port"}, new Object[]{host, (long) port});
+        MezzeVariant.TagRegistry reg = MezzeVariant.TagRegistry.getGlobal();
+        return MezzeVariant.err(MezzeVariant.singlePayload(reg, reg.getOrCreateTag(ctor), payload));
     }
 
     /** The bound port. Interesting when the caller asked for 0. */

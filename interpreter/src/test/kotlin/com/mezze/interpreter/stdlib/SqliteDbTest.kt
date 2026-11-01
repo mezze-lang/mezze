@@ -486,7 +486,9 @@ class SqliteDbTest {
                       perform SimpleHttpClient in do
                         let _ = Db.apply { q = sql { text = "create table t (a int)" } }
                         let _ = Db.apply { q = sql { text = "insert into t values (1), (2)" } }
-                        let h = HttpServer.serve { handler = handler }
+                        let h = match HttpServer.serve { handler = handler } is
+                          Ok { val = hh } -> hh
+                          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                         let out = get { port = h.port, path = "/" }
                         h.stop {}
                         out
@@ -517,7 +519,9 @@ class SqliteDbTest {
                     perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
                       perform SimpleHttpClient in do
                         let _ = Db.apply { q = sql { text = "create table t (a int)" } }
-                        let h = HttpServer.serve { handler = handler }
+                        let h = match HttpServer.serve { handler = handler } is
+                          Ok { val = hh } -> hh
+                          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                         let first = get { port = h.port, path = "/" }
                         let second = get { port = h.port, path = "/" }
                         let third = get { port = h.port, path = "/" }
@@ -551,7 +555,9 @@ class SqliteDbTest {
                     perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
                       perform SimpleHttpClient in do
                         let _ = Db.apply { q = sql { text = "create table t (a int)" } }
-                        let h = HttpServer.serve { handler = handler }
+                        let h = match HttpServer.serve { handler = handler } is
+                          Ok { val = hh } -> hh
+                          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                         let first = get { port = h.port, path = "/" }
                         let second = get { port = h.port, path = "/" }
                         h.stop {}
@@ -593,7 +599,9 @@ class SqliteDbTest {
                       perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 8, stream_bodies = False } } in
                         perform SimpleHttpClient in do
                           let _ = Db.apply { q = sql { text = "create table t (a int)" } }
-                          let h = HttpServer.serve { handler = handler }
+                          let h = match HttpServer.serve { handler = handler } is
+                            Ok { val = hh } -> hh
+                            Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                           let both = Parallel.join {
                             l = {} -> Parallel.join {
                               l = {} -> get { port = h.port, path = "/" },
@@ -637,7 +645,9 @@ class SqliteDbTest {
                     perform SqliteDb { path = ":memory:" } in
                       perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False } } in
                         perform SimpleHttpClient in do
-                          let h = HttpServer.serve { handler = handler }
+                          let h = match HttpServer.serve { handler = handler } is
+                            Ok { val = hh } -> hh
+                            Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                           let out = get { port = h.port, path = "/" }
                           h.stop {}
                           out

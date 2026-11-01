@@ -84,7 +84,9 @@ class HttpStreamedDownloadTest {
         let go: {} -> Str <*> = {} ->
           perform HelidonHttpServerWith { config = listen_on_any_port } in
             perform SimpleHttpClient in perform SimpleHttpDownload in do
-              let h = HttpServer.serve { handler = app }
+              let h = match HttpServer.serve { handler = app } is
+                Ok { val = hh } -> hh
+                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
               let out = $expr
               h.stop {}
               out

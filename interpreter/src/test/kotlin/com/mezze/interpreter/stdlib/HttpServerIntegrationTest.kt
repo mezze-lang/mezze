@@ -49,7 +49,9 @@ class HttpServerIntegrationTest {
         val r = MezzeTestHelper.run("""
             $head
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
-              let h = HttpServer.serve { handler = app }
+              let h = match HttpServer.serve { handler = app } is
+                Ok { val = hh } -> hh
+                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())
@@ -78,7 +80,9 @@ class HttpServerIntegrationTest {
             $head
             use std::effects::async::{ Async, LoomAsync }
             let go: {} -> Int <*> = {} -> perform LoomAsync in perform MockHttpServer in do
-              let h = HttpServer.serve { handler = app }
+              let h = match HttpServer.serve { handler = app } is
+                Ok { val = hh } -> hh
+                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())

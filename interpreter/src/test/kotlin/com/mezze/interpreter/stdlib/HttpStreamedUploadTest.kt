@@ -137,7 +137,9 @@ class HttpStreamedUploadTest {
                 let go: {} -> Str <*> = {} ->
                   perform HelidonHttpServerWith { config = streaming } in
                     perform SimpleHttpClient in do
-                      let h = HttpServer.serve { handler = app }
+                      let h = match HttpServer.serve { handler = app } is
+                        Ok { val = hh } -> hh
+                        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                       let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/u" }
                         .with_method { val = Post }
                         .with_text { val = "hello over the wire" }
@@ -191,7 +193,9 @@ class HttpStreamedUploadTest {
                     let go: {} -> Str <*> = {} ->
                       perform HelidonHttpServerWith { config = streaming } in
                         perform SimpleHttpClient in do
-                          let h = HttpServer.serve { handler = app }
+                          let h = match HttpServer.serve { handler = app } is
+                            Ok { val = hh } -> hh
+                            Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                           let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/u" }
                             .with_method { val = Post }
                             .with_text { val = "$sent" }
@@ -224,7 +228,9 @@ class HttpStreamedUploadTest {
                 let go: {} -> Str <*> = {} ->
                   perform HelidonHttpServerWith { config = buffering } in
                     perform SimpleHttpClient in do
-                      let h = HttpServer.serve { handler = app }
+                      let h = match HttpServer.serve { handler = app } is
+                        Ok { val = hh } -> hh
+                        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                       let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/u" }
                         .with_method { val = Post }
                         .with_text { val = "hello over the wire" }

@@ -1,2 +1,15 @@
 error[M0801]: Module not found: std::doesnotexist. Searched in: stdlib/std/doesnotexist.mz
   = hint: check the module path spelling and ensure the file exists
+
+error[V0702]: Undefined variable or function: foo. Did you mean: Err, Some, Ok
+  --> m0801-module-not-found.mz:2:18
+   |
+ 1 | use std::doesnotexist::{ foo }
+ 2 | let main = {} -> foo
+                      ^^^
+ 3 | 
+   |
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `mez --explain M0801`.

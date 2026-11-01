@@ -56,7 +56,9 @@ let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream
 let main = {} -> perform Console in
     perform HelidonHttpServerWith { config = any_port } in
         perform SimpleHttpClient in do
-            let h = HttpServer.serve { handler = app }
+            let h = match HttpServer.serve { handler = app } is
+              Ok { val = hh } -> hh
+              Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
             let base = "http://127.0.0.1:$(int::to_str { n = h.port })"
             let hit = fetch {
                 url = request { url = "$(base)/hello/world" }

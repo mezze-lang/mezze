@@ -3623,7 +3623,8 @@ class TypedASTCompiler(
         // evidence discharges, and refusing it breaks a user `Ord`/`Eq` on a
         // container element.
         if (receiverType.holdsUnknownPlaceholder()) return null
-        val effectiveType = receiverType
+        // B-16: a bare `{ … }` receiver adopts to its record-ALIAS impl target so it dispatches.
+        val effectiveType = adoptBareRecord(receiverType)
         val allCandidates = abilityOpIndex[methodName] ?: return null
         val candidates =
             if (abilityHash != null) allCandidates.filter { it.abilityHash == abilityHash }
