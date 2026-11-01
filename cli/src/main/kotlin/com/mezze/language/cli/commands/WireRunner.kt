@@ -228,9 +228,13 @@ object WireRunner {
         val lastRunOutcome = java.util.concurrent.atomic.AtomicReference<WireSession.RunOutcome?>(null)
         var runThread: Thread? = null
         fun launchRun(c: CompileResult, evict: Set<Hash>?) {
+            // Pin the thread to the session it was launched with: a later reload
+            // reassigns `session`, and this thread must keep draining the child it
+            // started on (which killAndRestart then kills), never the new one.
+            val s = session
             val t = Thread({
                 try {
-                    lastRunOutcome.set(session.runOnce(c, evict = evict))
+                    lastRunOutcome.set(s.runOnce(c, evict = evict))
                 } catch (_: Throwable) {
                     // The session was killed under us (reload/quit) or the child
                     // died — expected on this thread; the loop handles the rest.
@@ -394,7 +398,13 @@ object WireRunner {
             // "terminated by SIGINT" exit code.
             return 130
         } finally {
-            session.close()
+            // Force-kill rather than close(): a run is still on its background
+            // thread draining the child, and close() would drain the SAME stream
+            // concurrently — interleaved reads corrupt frame boundaries (seen as
+            // a bogus "unexpected frame: CLOSE_SESSION" on Ctrl-C). kill() does
+            // not read the wire; the run thread just takes EOF and ends quietly.
+            // The child already got SIGINT (forwarded) and is shutting down.
+            session.kill()
         }
     }
 
@@ -665,6 +675,9 @@ internal class WireSession private constructor(
      * closing the pipe. -1 means "not dead yet".
      */
     @Volatile private var childExitCode: Int = -1
+    /** Set by [kill] so a drain hitting EOF from the forced teardown reports a
+     *  quiet end instead of "the runtime exited unexpectedly". */
+    @Volatile private var killing: Boolean = false
 
     /**
      * Captured tail of the child's real stderr (fd 2). Normal user stderr rides
@@ -915,7 +928,11 @@ internal class WireSession private constructor(
                     } catch (_: Exception) { /* still alive or timeout */ }
                 }
                 val ec = childExitCode
-                if (ec >= 0) {
+                if (killing) {
+                    // We tore the child down on purpose (reload/quit). EOF here is
+                    // expected; say nothing and let the caller end quietly.
+                    Drained.Run(RunOutcome(exitCode = if (ec >= 0) ec else 0, reason = "killed"))
+                } else if (ec >= 0) {
                     val signal = signalFromExitCode(ec)
                     val msg = if (signal != null) {
                         "${Glyphs.CROSS} the runtime was killed by $signal"
@@ -1135,6 +1152,9 @@ internal class WireSession private constructor(
      * before the fresh one binds.
      */
     fun kill() {
+        // Tell any in-flight drain that the child is going down on purpose, so
+        // the EOF it is about to hit is reported as a quiet end, not a crash.
+        killing = true
         try { signalHandler.uninstall() } catch (_: Exception) {}
         try { winchForwarder.uninstall() } catch (_: Exception) {}
         try { sigtermForwarder.uninstall() } catch (_: Exception) {}
