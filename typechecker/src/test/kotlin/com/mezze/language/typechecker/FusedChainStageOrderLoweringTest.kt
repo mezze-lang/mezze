@@ -49,7 +49,15 @@ class FusedChainStageOrderLoweringTest {
         return r.loweredFunctions
     }
 
-    /** Stage kinds of every fused chain lowered from `p.mz`, in list order. */
+    /**
+     * The DISTINCT stage orders of the fused chains lowered from `p.mz`.
+     *
+     * Distinct, not one per function: the same chain is lowered into more than
+     * one function whenever a wrapper holding it is also inlined into its
+     * caller, so `go` and the `main` that calls it both carry it. The count is
+     * an artefact of inlining decisions; the ORDER is the contract, and every
+     * copy must agree on it.
+     */
     private fun stageKinds(src: String): List<List<String>> =
         lower(src)
             .filter { it.sourceFile == "p.mz" }
@@ -67,6 +75,7 @@ class FusedChainStageOrderLoweringTest {
                     }
                 }
             }
+            .distinct()
 
     @Test
     fun `the count sink's own predicate is the LAST-applied stage`() {

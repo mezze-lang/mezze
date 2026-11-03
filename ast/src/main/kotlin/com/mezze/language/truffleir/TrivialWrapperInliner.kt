@@ -442,7 +442,26 @@ object TrivialWrapperInliner {
                 }
                 true
             }
-            // Everything else (Lambda, Match, Perform, Handle, indirect
+            // A CLOSED lambda reads nothing from the frame it is built in, so
+            // it contributes no param reads and relocating it is a no-op: its
+            // `functionHash` is content-addressed and its capture list is
+            // empty. One WITH captures is refused, because `CaptureIR` holds a
+            // frame SLOT INDEX, not an expression — moved into a caller those
+            // indices address unrelated values, and an argument that is itself
+            // a lambda literal has no slot to point at. That is not a tweak
+            // away; it needs the captured values materialised into caller
+            // locals.
+            //
+            // This is the commonest shape the whitelist met — 263 occurrences
+            // in one build against 90 for the next — and refusing it kept the
+            // mono-specialised `Iter` impl forwarders from being inlined. Those
+            // forwarders are where a dot-chained pipeline lives: mono bakes the
+            // user's stage lambda into the forwarder as a closed constant and
+            // leaves the callback parameter unused, so `{ it, f } -> map { it,
+            // <baked f> }` was within one substitution of the free-function
+            // shape that fuses, and never took it.
+            is MakeLambdaIR -> node.captures.isEmpty()
+            // Everything else (Match, Perform, Handle, indirect
             // calls, `WriteLocal`, `PartialApply`, `DictMethodCall`,
             // `SpecializedCall`, `CallLocal`, `CallIndirect*`) still bails.
             else -> {

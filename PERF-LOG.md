@@ -184,6 +184,58 @@ measured on a pipeline whose filter kept every element, so its checksum was
 wrong and its element count was 3× the intended one. Re-measure before quoting
 it.
 
+### 5. A dot-chained pipeline never fused at all — one line, and a soundness hole under it
+
+`.map{}.filter{}.fold{}` ran completely unfused while the free-function
+spelling of the same program fused. The cause was one entry missing from a
+whitelist.
+
+`TrivialWrapperInliner.countParamReads` walks a candidate wrapper's body
+counting parameter reads, and bailed on `MakeLambdaIR` — by a wide margin the
+commonest shape it met, 263 occurrences in one build against 90 for the next.
+Bailing disqualifies the whole function, and the functions in question are the
+mono-specialised `Iter` impl forwarders every dot-chained stage goes through.
+`ChainCanonicalizer` then saw opaque calls where it looks for the underlying
+natives and declined, so nothing fused.
+
+What made it fixable is what mono does to those forwarders: it bakes the user's
+stage lambda in as a CLOSED constant and leaves the callback parameter unused.
+Measured on the IR: `captures=[]` on every one, pointing at `{x} -> MUL`,
+`{x} -> __native_int_lt`, `{acc,x} -> ADD`. A closed lambda reads nothing from
+the frame it was built in, so relocating it is a no-op and the forwarder is one
+substitution away from the shape that already fuses. `is MakeLambdaIR ->
+node.captures.isEmpty()` — accept the closed ones, keep refusing the rest,
+because `CaptureIR` holds a frame SLOT INDEX and a caller's lambda-literal
+argument has no slot to point at.
+
+**It then crashed, and the crash was a real bug it had exposed.**
+`ChainCanonicalizer.peekThroughMonoWrapper` substitutes a call's arguments into
+its callee's body; it rewrote a field whose value IS a parameter read and copied
+every other field VERBATIM. So a `MakeLambdaIR` argument travelled into the
+caller still addressing the callee's slots. With dot-chain fusion producing
+chains inside functions that take parameters, `go = { k, lim, bump } -> …` called
+from a `main` with an EMPTY frame landed a chain whose stages captured slots 0
+and 1 — an out-of-bounds read at emit.
+
+A crash was the lucky outcome. **This also explains a wrong number I had
+blamed on stage order**: the `chain` bench's `freefn` predicate is
+`{ x } -> x < n`, which CAPTURES `n`, and relocated into another frame it
+compared each element against whatever sat in that slot — so the filter kept
+everything and the checksum was `599999970000000` instead of
+`66666663333333`. Removing the guard fails the free-function case in
+`FusedChainCaptureFrameTest` too, so this was reachable on any capturing
+pipeline whose caller has a different frame; dot-chain fusion only made it loud.
+
+Fixed by re-expressing each capture against the caller via the
+`remapLambdaCaptures` that already existed for the sibling path, and refusing
+the move when it cannot be expressed — which costs a fusion opportunity, never
+an answer. `go` itself still fuses; only the move into `main` is declined.
+
+Guarded by `FusedChainCaptureFrameTest`, which asserts the property every
+relocation path must preserve — no fused chain may capture a slot outside its
+own function's frame — over whole programs rather than one case, since the
+paths are several and each could lose captures differently.
+
 ---
 
 ## Measured and corrected — claims in the tree that were wrong

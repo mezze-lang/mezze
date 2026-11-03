@@ -411,13 +411,49 @@ object ChainCanonicalizer {
         }
         val newFields = mr.fields.map { fld ->
             val v = fld.value
-            if (v is ReadLocalIR && v.slot < paramCount) {
-                FieldIR(fld.name, slotValues[v.slot] ?: return null)
-            } else {
-                fld
+            when {
+                v is ReadLocalIR && v.slot < paramCount ->
+                    FieldIR(fld.name, slotValues[v.slot] ?: return null)
+                // A LAMBDA CARRIES SLOT INDICES, NOT VALUES. `CaptureIR` names a
+                // slot in the frame the lambda was BUILT in, so copying one into
+                // the caller leaves it addressing the callee's frame: with a
+                // smaller caller frame that is an out-of-bounds read at emit,
+                // and with a merely different one it is a silent wrong value.
+                // [remapLambdaCaptures] re-expresses each capture against the
+                // caller and refuses when it cannot — which costs a fusion, never
+                // an answer.
+                v is MakeLambdaIR ->
+                    FieldIR(fld.name, remapLambdaCaptures(v, slotValues, paramCount) ?: return null)
+                // Anything else is copied verbatim, so it must not depend on the
+                // callee's frame at all: a param read nested deeper than a field
+                // value is not substituted here, and a lambda nested inside one
+                // would keep the captures this branch cannot reach.
+                mentionsCalleeFrame(v, paramCount) -> return null
+                else -> fld
             }
         }
         return nativeCall.copy(arg = MakeRecordIR(newFields, mr.src))
+    }
+
+    /**
+     * True when [node] reads anything from the frame of the function it sits
+     * in — a parameter slot, or a lambda holding captures of one.
+     *
+     * Used to refuse relocating a subtree that a caller-side substitution does
+     * not reach. The substitution in [peekThroughMonoWrapper] rewrites a param
+     * read only when it IS the field's value, so a read one level deeper would
+     * travel unchanged into a frame where that slot means something else.
+     */
+    private fun mentionsCalleeFrame(node: NodeIR, paramCount: Int): Boolean {
+        if (node is ReadLocalIR && node.slot < paramCount) return true
+        if (node is ReadCaptureIR) return true
+        if (node is MakeLambdaIR && node.captures.isNotEmpty()) return true
+        var found = false
+        recurseChildren(node) { child ->
+            if (!found && mentionsCalleeFrame(child, paramCount)) found = true
+            child
+        }
+        return found
     }
 
     /**
