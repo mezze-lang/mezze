@@ -800,10 +800,27 @@ THE THREE GAPS, in payoff order:
    classifier does support a captured operand, so `acc + x * k` is unaffected;
    only a DEEPER body with a capture declines. `CompoundFoldFusionTest` asserts
    that case's VALUE and says why it is not asserting fusion.
-3. **A SECOND stage of any kind — 6-7.6x.** One map or one filter is free;
-   adding either costs 7x, because `tryBuildFusedLongPipeline` accepts at most
-   one of each and everything else falls to the general loop. So does
-   `filter+take` (needs a counter, not a source clamp), `take_while` and `drop`.
+3. **A SECOND stage of any kind — 6-7.6x, and it is the SIMD WIDTH.** One map
+   or one filter is free; adding either costs 7x, because
+   `tryBuildFusedLongPipeline` accepts at most one of each and everything else
+   falls to the general loop — as do `filter+take` (needs a counter, not a
+   source clamp), `take_while` and `drop`.
+
+   NOT an overhead problem. 625 ps/elem is about 2 cycles for a six-operation
+   loop, which means Graal compiles the general loop WELL; the fast path is at
+   86 ps because it VECTORISES, 4-8 elements per iteration. The 7x is the vector
+   width. Closing it means extending the vectorised path to a multi-stage
+   pipeline — a stage PROGRAM rather than FLP's one-map-one-filter config — not
+   shaving overhead off the scalar loop.
+
+   MEASURED AND REJECTED: `boxingEliminationTypes = {long, double, boolean}`
+   does nothing for this tier. Min of 15 timings per kernel, off vs on:
+   map+map 629/630, drop+map 625/635, filter+filter 498/540, map+filter 84/90,
+   map 85/74, compound fold 1399/1040. One kernel gains 26%, two regress ~8%,
+   the tier does not move — so the flag stays off, as the comment in
+   `MezzeBytecodeRootNode` already argued from the tail-loop evidence. An
+   earlier run of this same experiment, before one-kernel-per-process, "showed"
+   two 17x wins; that was the compiler lottery.
 
 ### Two methodology corrections, both of which produced published-looking numbers
 
