@@ -404,8 +404,8 @@ object MonoDriver {
                         val closureArgs: Map<String, com.mezze.language.typedast.Hash>
                         val closureBodies: Map<String, com.mezze.language.typedast.TypedLambda>
                         if (Monomorphizer.closuresEnabled) {
-                            closureArgs = Monomorphizer.closureArgsAt(expr)
-                            closureBodies = Monomorphizer.closureBodiesAt(expr)
+                            closureArgs = Monomorphizer.closureArgsAt(expr, declIndex)
+                            closureBodies = Monomorphizer.closureBodiesAt(expr, declIndex)
                         } else {
                             closureArgs = emptyMap()
                             closureBodies = emptyMap()

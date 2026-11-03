@@ -1523,15 +1523,42 @@ class Monomorphizer(
          * Returns an empty map if the call's arg is not a record
          * literal, or contains no lambda-literal fields.
          */
-        fun closureArgsAt(call: TypedCall): Map<String, Hash> {
+        fun closureArgsAt(
+            call: TypedCall,
+            declIndex: Map<Hash, com.mezze.language.typedast.TypedLetDecl> = emptyMap(),
+        ): Map<String, Hash> {
             val arg = call.arg
             if (arg !is com.mezze.language.typedast.TypedRecord) return emptyMap()
             val out = LinkedHashMap<String, Hash>()
             for (entry in arg.entries) {
                 if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
-                val value = entry.value
-                if (value !is com.mezze.language.typedast.TypedLambda) continue
-                out[entry.name] = hashClosure(value)
+                when (val value = entry.value) {
+                    is com.mezze.language.typedast.TypedLambda ->
+                        out[entry.name] = hashClosure(value)
+                    // A NAMED function reference — `fold { f = add2 }` rather
+                    // than `fold { f = {a,b} -> a+b }`. The doc above excludes
+                    // non-lambda values because "those can't be specialized
+                    // without escape analysis", which is true of a general
+                    // variable but NOT of a `ByHash` reference: that names a
+                    // top-level function statically, and its hash IS its
+                    // identity — exactly what the spec is keyed on. No escape
+                    // analysis is involved.
+                    //
+                    // WHY IT MATTERS: without this the HOF is not specialised
+                    // on its callback, so the callback's parameter type stays a
+                    // type VARIABLE, so the referenced function cannot be
+                    // monomorphised either, so lowering falls back to
+                    // `dict_wrapper_<name>`. Measured, that wrapper is 52 of the
+                    // 57 ns a generic closure call costs.
+                    is TypedVar -> {
+                        val b = value.binding
+                        if (b is BindingRef.ByHash && declIndex[b.hash]?.value is
+                                com.mezze.language.typedast.TypedLambda) {
+                            out[entry.name] = b.hash
+                        }
+                    }
+                    else -> Unit
+                }
             }
             return out
         }
@@ -1539,15 +1566,30 @@ class Monomorphizer(
         /** Companion to [closureArgsAt]: for the same fields, return the
          *  actual `TypedLambda` IR — Piece 3 splices these into the
          *  specialized body. */
-        fun closureBodiesAt(call: TypedCall): Map<String, com.mezze.language.typedast.TypedLambda> {
+        fun closureBodiesAt(
+            call: TypedCall,
+            declIndex: Map<Hash, com.mezze.language.typedast.TypedLetDecl> = emptyMap(),
+        ): Map<String, com.mezze.language.typedast.TypedLambda> {
             val arg = call.arg
             if (arg !is com.mezze.language.typedast.TypedRecord) return emptyMap()
             val out = LinkedHashMap<String, com.mezze.language.typedast.TypedLambda>()
             for (entry in arg.entries) {
                 if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
-                val value = entry.value
-                if (value !is com.mezze.language.typedast.TypedLambda) continue
-                out[entry.name] = value
+                when (val value = entry.value) {
+                    is com.mezze.language.typedast.TypedLambda -> out[entry.name] = value
+                    // Companion to the reference case in closureArgsAt: the body
+                    // to splice is the referenced declaration's own lambda.
+                    is TypedVar -> {
+                        val b = value.binding
+                        if (b is BindingRef.ByHash) {
+                            val referenced = declIndex[b.hash]?.value
+                            if (referenced is com.mezze.language.typedast.TypedLambda) {
+                                out[entry.name] = referenced
+                            }
+                        }
+                    }
+                    else -> Unit
+                }
             }
             return out
         }

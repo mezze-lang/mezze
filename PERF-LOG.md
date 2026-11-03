@@ -287,7 +287,38 @@ compiler had everything needed to resolve the impl. Consistent with what was
 already known: `MonoDriver` seeds ZERO specialisations for HOF callsites, so the
 callback's body never resolves `+` statically.
 
-### Two speculative fixes that measured nothing and were REVERTED
+### FIXED: specialise a HOF on a NAMED callback — 9.5x
+
+The 52 ns above is gone. Mono's closure-arg specialisation only harvested a
+LAMBDA LITERAL:
+
+```kotlin
+if (value !is TypedLambda) continue
+```
+
+so `fold { f = {a,b} -> a+b }` specialised and `fold { f = add2 }` did not. The
+documented reason — non-lambdas "can't be specialized without escape analysis" —
+holds for a general variable but NOT for a `BindingRef.ByHash`, which names a
+top-level function statically and whose hash IS the key the specialisation uses.
+Accepting that one case closes the whole chain: HOF specialises -> callback type
+becomes concrete -> referenced function monomorphises -> no dictionary, no
+wrapper.
+
+| route | before | after |
+|---|---|---|
+| `via_hof` | 1145 ms · 57 ns/iter | **131 ms · 6 ns/iter** |
+| `dict_wrapper_add2` | compiled | **not compiled at all** |
+
+Now level with `via_hof_nodict` (4 ns), i.e. the non-generic floor. Cost: +3
+specialisations and +5-8% compile time — against +46 and +21% for the broad
+value-reference attempt that bought nothing, which is the difference between a
+surgical fix and a scattergun one.
+
+Tests: `ClosureArgRefSpecializationTest`, 6 cases, coverage proven by injecting
+a wrong-body splice (3 of 6 failed). Gates: interpreter 7311/0, typechecker
+4747/0.
+
+### Four attempts that measured nothing and were REVERTED
 
 Recorded so they are not re-attempted as if new. Both closed genuine gaps;
 neither was on the real path.
@@ -407,7 +438,18 @@ under test. Every measurement after a compiler change now begins with a fresh
    "The fused tail-loop tier stopped at two parameters" above. Arity 4+ still
    falls off the same cliff and is a mechanical addition when something needs
    it; nothing measured yet asks for it.
-2. **Static dictionary resolution — 52 ns/iter, the largest measured gap.**
+1. **Ability-method specialisation fails on 105 of 110 sites.**
+   `method visited=110 seeded=2 (rcvVarType=3 noImpl=105 unifyFail=0)`. The
+   receiver type is CONCRETE and still matches no candidate impl via
+   `typeMatchesTarget`, with more than one candidate so the single-candidate
+   fallbacks do not apply. A matching problem, not missing information.
+   Ability methods are what dot-chaining lowers to, so this is the likely reason
+   `ChainCanonicalizer` refuses a dot-chained pipeline (2.8x measured) — one fix,
+   two wins. NEEDS a diagnostic on that branch first: guessing at
+   `typeMatchesTarget` risks binding the WRONG impl, which is a wrong-answer bug
+   rather than a slow one.
+
+2. ~~Static dictionary resolution — 52 ns/iter.~~ **FIXED** — see above.
    A generic callee reached through `dict_wrapper_<name>` costs 57 ns/iter
    where the same closure call to a NON-generic callee costs 4. The call site
    is monomorphic `Int`, so the impl is known at compile time and the wrapper
