@@ -248,6 +248,49 @@ class TypedASTCompiler(
      */
     private val localConstrainedLambdas = mutableMapOf<String, Hash>()
 
+    /**
+     * Local slot of a `let`-bound lambda that captures nothing and carries no
+     * `with` constraints → the hash of the function it is. Such a lambda is the
+     * SAME function at every call through its name, so the call need not read the
+     * slot and dispatch on the value: it can be a direct call by hash, which is
+     * what makes the callee reachable to [tryInlineDirectCall] and so to the
+     * record scalarizer — a record a local helper builds and the caller only
+     * reads fields of is erased only once the two sit in one function.
+     *
+     * Keyed by SLOT rather than by name, which is what makes it exact:
+     * [forceAllocLocal] mints a fresh slot for every `let`, so a shadowing
+     * rebinding cannot alias an older entry, and nothing has to be saved and
+     * restored per block. Cleared per FUNCTION, where slot numbering restarts.
+     */
+    private val plainLocalLambdaBySlot = mutableMapOf<Int, Hash>()
+
+    /**
+     * The same fact, carried across a closure boundary: capture INDEX in the
+     * function being compiled → the hash of the capture-free lambda that slot
+     * holds. A helper is usually called from a nested lambda rather than from
+     * the frame it was bound in —
+     *
+     *     let split = { i } -> { lo = i - 1, add = i }
+     *     let go = { i, acc } -> … split { i = i } …
+     *
+     * — where `split` is a CAPTURE of `go`, so [plainLocalLambdaBySlot], which
+     * only knows the current frame's slots, cannot answer. Built in
+     * [compileLambda] from the parent's two maps before the body is compiled,
+     * which also chains: a capture whose parent entry is itself a capture
+     * carries through to any depth.
+     *
+     * Passed INTO [compileFunctionBody] rather than set around it, so a body
+     * that is not a closure gets the empty default and cannot read a stale
+     * parent's indices as its own.
+     */
+    private var currentCaptureLambdaHashes = mapOf<Int, Hash>()
+
+    /** Kill switch, as [emitCallDirect] has for the scalar ABI and
+     *  [tryInlineDirectCall] for inlining. An A/B of a compile-time pass is two
+     *  BUILDS otherwise, and measuring one build while believing it is the other
+     *  is how two wrong numbers reached PERF-LOG. */
+    private val devirtDisabled = System.getenv("MEZZE_DISABLE_DEVIRT") == "true"
+
     private data class RecursiveLetInfo(
         val hash: Hash,
         val captureKinds: List<SlotKind>
@@ -658,7 +701,10 @@ class TypedASTCompiler(
         loc: Loc,
         captureInfo: List<Pair<String, SlotKind>> = emptyList(),
         // Enclosing impl's associated-type bindings (see paramConcreteReceiverTypes).
-        assocBindings: Map<String, MezzeType> = emptyMap()
+        assocBindings: Map<String, MezzeType> = emptyMap(),
+        // Capture index → capture-free lambda hash, for devirtualising a call
+        // to a captured helper. See [currentCaptureLambdaHashes].
+        captureLambdaHashes: Map<Int, Hash> = emptyMap()
     ): FunctionIR {
         // Save and reset state
         val prevParamConcrete = paramConcreteReceiverTypes.toMap()
@@ -667,6 +713,8 @@ class TypedASTCompiler(
         val prevLocals = localsByName.toMap()
         val prevParamNames = currentParamNames
         val prevCaptureNames = currentCaptureNames
+        val prevCaptureLambdaHashes = currentCaptureLambdaHashes
+        currentCaptureLambdaHashes = captureLambdaHashes
         val prevCaptureCount = currentCaptureCount
         val prevDictParams = currentDictParams
         val prevFunctionHash = currentFunctionHash
@@ -699,6 +747,8 @@ class TypedASTCompiler(
         localsByName.clear()
         val prevSlotToName = slotToNameForCurrentFn.toMap()
         slotToNameForCurrentFn.clear()
+        val prevPlainLambdas = plainLocalLambdaBySlot.toMap()
+        plainLocalLambdaBySlot.clear()
         currentParamNames = allParamNames
         // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
         // For non-lambda functions (called from compileLetDecl), it should be empty.
@@ -734,6 +784,8 @@ class TypedASTCompiler(
         // Restore parent fn's slot-name map (nested lambdas save/restore).
         slotToNameForCurrentFn.clear()
         slotToNameForCurrentFn.putAll(prevSlotToName)
+        plainLocalLambdaBySlot.clear()
+        plainLocalLambdaBySlot.putAll(prevPlainLambdas)
 
         // Restore state
         currentParamCount = prevParamCount
@@ -741,6 +793,7 @@ class TypedASTCompiler(
         localsByName.clear()
         localsByName.putAll(prevLocals)
         currentCaptureNames = prevCaptureNames
+        currentCaptureLambdaHashes = prevCaptureLambdaHashes
         currentParamNames = prevParamNames
         currentCaptureCount = prevCaptureCount
         currentDictParams = prevDictParams
@@ -2042,6 +2095,19 @@ class TypedASTCompiler(
                         return emitCallDirect(aliasTargetHash, enrichedArgIR, expr.isTailCall, src)
                     }
                     if (resolvedSlot >= 0) {
+                        // Devirtualise a call through a capture-free let-bound
+                        // lambda. `depth == 0` is required: at depth > 0 the name
+                        // resolves in an ENCLOSING scope and the index it yields
+                        // is not this map's — captures and locals share one index
+                        // space, so a name-keyed or depth-blind lookup could answer
+                        // for an unrelated slot. A site the monomorphiser rewrote
+                        // is left exactly as it was.
+                        val devirtTarget = if (binding.depth == 0 && !devirtDisabled)
+                            plainLocalLambdaBySlot[resolvedSlot] else null
+                        if (devirtTarget != null && monoCallSiteRewrites[expr.loc] == null) {
+                            census.byHashPlain++
+                            return emitCallDirect(devirtTarget, argIR, expr.isTailCall, src)
+                        }
                         census.indirect++
                         emitCallIndirect(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
@@ -2059,6 +2125,20 @@ class TypedASTCompiler(
                         if (recursiveLet != null && expr.isTailCall) {
                             census.byHashPlain++
                             return emitCallDirect(recursiveLet.hash, argIR, true, src)
+                        }
+                        // A call to a CAPTURED capture-free helper. `fnIR` is
+                        // what says so: `compileVar` has already resolved this
+                        // name, and only a genuine capture read reaches here as
+                        // ReadCaptureIR — a by-name lookup would answer for an
+                        // unrelated declaration that shares the name, which is
+                        // the bug the comment below this records.
+                        val capturedFn = fnIR
+                        if (capturedFn is ReadCaptureIR && !devirtDisabled &&
+                            monoCallSiteRewrites[expr.loc] == null) {
+                            currentCaptureLambdaHashes[capturedFn.index]?.let { ownHash ->
+                                census.byHashPlain++
+                                return emitCallDirect(ownHash, argIR, expr.isTailCall, src)
+                            }
                         }
                         // If depth > 0 and not found locally, check if it's a top-level
                         // declaration. Use CallDirectIR for better performance.
@@ -3408,13 +3488,27 @@ class TypedASTCompiler(
         if (ownDicts.isNotEmpty()) dictMethodsForHash[lambdaHash] = ownDicts
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
             dictsToCapture.map { it.first to SlotKind.OBJECT }
+        // Which of this lambda's captures are capture-free helpers, by the index
+        // the body will read them at. Resolved against the PARENT's frame, which
+        // is still the current one here — `compileFunctionBody` has not yet
+        // cleared it — and from the parent's capture map too, so a helper two
+        // closures out carries through. Built before the body compiles because
+        // the body is what reads it; the positional capture list below is built
+        // after, from the same `expr.captures`, so the two stay aligned.
+        val captureLambdaHashes = mutableMapOf<Int, Hash>()
+        for ((i, c) in expr.captures.withIndex()) {
+            val fromLocal = localsByName[c.name]?.let { plainLocalLambdaBySlot[it] }
+            val fromParentCapture = parentCaptureNames[c.name]?.let { currentCaptureLambdaHashes[it] }
+            (fromLocal ?: fromParentCapture)?.let { captureLambdaHashes[i] = it }
+        }
         val fnIR = compileFunctionBody(
             hash = lambdaHash,
             name = "lambda",
             params = expr.params,
             body = expr.body,
             loc = expr.loc,
-            captureInfo = lambdaCaptureInfo
+            captureInfo = lambdaCaptureInfo,
+            captureLambdaHashes = captureLambdaHashes
         )
         extractedFunctions.add(fnIR)
 
@@ -3581,6 +3675,29 @@ class TypedASTCompiler(
                         }
                     } else {
                         compileExpr(stmtValue)
+                    }
+                    // A capture-free, unconstrained, non-recursive let-bound
+                    // lambda: record its hash against its slot so a call through
+                    // the name goes direct (see [plainLocalLambdaBySlot]), and
+                    // publish its FunctionIR, which only top-level decls are in —
+                    // without it the devirtualised call cannot be INLINED, and
+                    // the direct call alone leaves the callee building a record
+                    // and returning it where nothing can erase it.
+                    //
+                    // Published only for the shape being devirtualised, so no
+                    // other direct-call path (the recursive-let tail call) starts
+                    // resolving param names it did not resolve before and silently
+                    // changes ABI.
+                    val plainLambdaIR = valueIR as? MakeLambdaIR
+                    if (!stmt.isRecursive && ownDicts.isEmpty() && stmtValue is TypedLambda &&
+                        plainLambdaIR != null && plainLambdaIR.captures.isEmpty()) {
+                        val calleeIR = hashToFunctionIR[plainLambdaIR.functionHash]
+                            ?: extractedFunctions.lastOrNull { it.hash == plainLambdaIR.functionHash }
+                        if (calleeIR != null) {
+                            hashToFunctionIR.putIfAbsent(calleeIR.hash, calleeIR)
+                            hashToParamNames.putIfAbsent(calleeIR.hash, calleeIR.paramNames)
+                            plainLocalLambdaBySlot[slot] = calleeIR.hash
+                        }
                     }
                     // The let has completed: from here the name is its own slot.
                     if (!stmt.isRecursive) localsByName[stmt.name] = slot
@@ -4229,6 +4346,26 @@ class TypedASTCompiler(
         is CallNativeIR -> (node.isPure || isPureNative(node.name)) && isInlinable(node.arg, paramCount) &&
             node.args.all { isInlinable(it, paramCount) }
         is CallDirectIR -> !node.isTailCall && node.args.all { isInlinable(it, paramCount) }
+        // A field read is pure. Reading one off a param is how any helper that
+        // takes a record works, and without this arm none of them inlines.
+        is ReadFieldIR -> isInlinable(node.record, paramCount)
+        // `i - 1` where `i`'s type is still a variable lowers to `i.sub { r = 1 }`
+        // — a call THROUGH a field read, which the bytecode compiler turns back
+        // into arithmetic once it knows the receiver. A local helper's params are
+        // generic (let-generalisation hands the body one compilation for all
+        // types), so this is the shape nearly every local helper's body is in,
+        // and refusing it refused the helper.
+        //
+        // Inlining is what makes it concrete: spliced into a caller whose
+        // receiver is a known Int, the op the callee could not resolve resolves.
+        // That is monomorphisation by substitution, and it is why the generic
+        // shape is worth accepting rather than requiring the type to be known
+        // before the body was compiled.
+        //
+        // Not a tail call, for the same reason a CallDirectIR may not be: the
+        // caller's position is not the callee's.
+        is CallIndirectIR -> !node.isTailCall && node.function is ReadFieldIR &&
+            isInlinable(node.function, paramCount) && isInlinable(node.arg, paramCount)
         else -> false
     }
 
@@ -4272,7 +4409,17 @@ class TypedASTCompiler(
                 }
                 used
             }
-            else -> 1
+            // Anything else: count it and its children through the walker, so
+            // widening [isInlinable] cannot smuggle a large body past the budget.
+            // The arms above are the hot shapes, kept for their early bail-out.
+            else -> {
+                var used = 1
+                node.transformChildren { c ->
+                    if (used < max) used += countNodes(c, max - used)
+                    c
+                }
+                used
+            }
         }
     }
 
@@ -4287,37 +4434,25 @@ class TypedASTCompiler(
     private fun substituteArgs(node: NodeIR, args: List<NodeIR>, depth: Int = 0): NodeIR = when (node) {
         is ReadArgIR -> args.getOrNull(node.index) ?: node
         is ReadLocalIR -> if (node.slot < args.size) args[node.slot] else node
-        is InlineBinaryOpIR -> InlineBinaryOpIR(
-            node.op, substituteArgs(node.left, args, depth), substituteArgs(node.right, args, depth), node.src
+        is CallNativeIR -> maybeCollapseInlineOp(
+            node.transformChildren { substituteArgs(it, args, depth) }
         )
-        is IfIR -> IfIR(
-            substituteArgs(node.cond, args, depth),
-            substituteArgs(node.thenBr, args, depth),
-            substituteArgs(node.elseBr, args, depth),
-            node.src
-        )
-        is MakeRecordIR -> MakeRecordIR(
-            node.fields.map { f ->
-                when (f) {
-                    is FieldIR -> FieldIR(f.name, substituteArgs(f.value, args, depth))
-                    else -> f
-                }
-            },
-            node.src, node.typeTag
-        )
-        is CallNativeIR -> {
-            val newArg = substituteArgs(node.arg, args, depth)
-            val newArgs = node.args.map { substituteArgs(it, args, depth) }
-            maybeCollapseInlineOp(
-                node.copy(arg = newArg, args = newArgs)
-            )
-        }
         is CallDirectIR -> {
             val newArgs = node.args.map { substituteArgs(it, args, depth) }
             val recursed = tryInlineDirectCall(node.targetHash, newArgs, depth + 1)
             recursed ?: node.copy(args = newArgs)
         }
-        else -> node
+        // STRUCTURAL, not a list of node types. This `when` and [isInlinable]
+        // must accept exactly the same set: a shape the whitelist allows and
+        // this one does not rewrite keeps the CALLEE's param reads — bare slot
+        // indices — in the CALLER's frame, where they name whatever happens to
+        // live there. That is a wrong value, not a crash, so it would not show
+        // up as a failure anywhere near the cause.
+        //
+        // `transformChildren` reaches every child slot of every node type, and
+        // IRWalkTest pins that, so the only thing [isInlinable] now has to
+        // decide is what is SAFE to inline — never what this can rewrite.
+        else -> node.transformChildren { substituteArgs(it, args, depth) }
     }
 
     /** After substitution, if we produce a CallNativeIR whose signature

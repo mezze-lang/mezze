@@ -567,8 +567,8 @@ measured flat and reverted TWICE before the order above was known, and the
 second reversion was on an A/B that tested only the shapes it cannot reach.
 What the two reversions did establish is real: with Object-typed locals it
 trades one allocation for two, and it sees nothing at all unless the record's
-producer is inlined. It still sees nothing when the producer is a LOCAL helper, because the record
-is built inside that helper and returned — which is the open item below.
+producer is inlined. A LOCAL helper's producer is now inlined too, once the
+call to it is devirtualised — see the record section below.
 
 ---
 
@@ -1171,8 +1171,8 @@ striking-through is the point of this log.
 **"A local helper is never inlined — 8.8x" was wrong.** That 8.8x was this pass
 being present in one CLI build, not the top-level-versus-local distinction. With
 the pass off the two forms measure 5 026 and 5 513 ps — no real difference. A
-local helper still is not inlined, and that remains the open item below, but it
-is not worth 8.8x on its own.
+a local helper really was not inlined, which is now fixed on its own terms
+below and worth 7.3x — but it was not what that 8.8x measured.
 
 **"The scalarizer is useless" was wrong.** It was A/B'd on the two kernels whose
 helper is LOCAL — the shapes it cannot reach, since the record is built inside
@@ -1184,7 +1184,93 @@ rebuilt before measuring, so a "clean tree" reading was really the pass still
 running. Every A/B since uses one CLI and the pass's own kill switch at build
 time, which cannot drift that way.
 
-### MEASURED AND REJECTED: an unboxed record layout### MEASURED AND REJECTED: an unboxed record layout
+### FIXED: the same record behind a LOCAL helper — 7.3x, and the abstraction is now free
+
+The open item above. A/B on one CLI, `MEZZE_DISABLE_DEVIRT` read by
+`mez build`, n=2e7, min of 5, one kernel per process:
+
+| kernel | off | on | | young GCs off → on |
+|---|---|---|---|---|
+| 1 positional (control, no record) | 230 | 224 | — | 2 → 2 |
+| **4 record from a LOCAL helper** | **5 207** | **715** | **7.3x** | **36 → 3** |
+| 6 the same loop hand-inlined, no record | 687 | 707 | — | 3 → 3 |
+| 7 the same helper at MODULE level | 623 | 625 | — | 3 → 3 |
+
+THE POINT IS KERNEL 4 AGAINST KERNEL 6, not the speedup. 715 against 707: a
+helper that builds a record now costs what writing its two fields out by hand
+costs. The abstraction is free, which is the property worth having — the 7.3x
+is just how far it was from free. Three young collections against the control's
+two says nothing is allocated per iteration. The control moving 230 → 224 says
+the machine was honest while this was measured, and the checksums are identical
+across all four.
+
+WHAT WAS ACTUALLY WRONG. A `let`-bound lambda was called through its SLOT:
+`CallIndirectScalarIR(ReadCapture(k), …)`, a dispatch on a function value. Being
+indirect, nothing downstream would look at it — not `tryInlineDirectCall`, so
+the record stayed inside the helper and was RETURNED, which put it out of reach
+of the scalarizer, which is why that pass measured as nothing on this shape.
+A capture-free lambda is the same function at every call through its name, so
+the call can be direct, and then the existing machinery does the rest:
+
+    devirtualise → inline → scalarize → no allocation
+
+Each step is worth nothing without the next. That is why this looked like three
+failed attempts rather than one unfinished chain.
+
+THE CAPTURED CASE IS THE WHOLE JOB. A helper is almost never called from the
+frame that bound it — `go` captures `split` — so inside the loop the name is a
+capture read, not a local slot. A version that knew only the current frame's
+slots devirtualised nothing in any realistic shape. The map is therefore carried
+across the closure boundary by capture INDEX, built from the parent's locals and
+the parent's own capture map, so it chains to any nesting depth.
+
+KEYED BY SLOT, NOT BY NAME, which is what makes it exact rather than heuristic:
+every `let` mints a fresh slot, so a shadowing binding cannot alias an older
+entry and nothing needs saving per block. Shadowing in ONE block turned out to
+be impossible anyway — Mezze rejects a second `let f` outright.
+
+AND THE INLINER HAD TO LEARN THE GENERIC SHAPE. `i - 1` inside a local helper
+is not arithmetic in the IR: let-generalisation gives the body ONE compilation
+for all types, so it lowers to `i.sub { r = 1 }` — a call through a field read —
+and `isInlinable` refused exactly that. Accepting it is what makes inlining
+monomorphise: spliced into a caller whose receiver is a known Int, the op the
+callee could not resolve resolves. The generic body becomes concrete code at the
+call site, with no annotation anywhere.
+
+A DRIFT HAZARD CLOSED ON THE WAY. Three `when`s had to agree on the node set —
+`isInlinable` (what is safe), `substituteArgs` (what gets rewritten) and
+`countNodes` (what the budget sees). A shape the first allowed and the second
+missed would keep the CALLEE's param reads, bare slot indices, in the CALLER's
+frame: a wrong value, not a crash, surfacing nowhere near the cause. The latter
+two are now structural walks over `transformChildren`, which `IRWalkTest` pins
+to reach every child slot, so only the whitelist decides anything.
+
+GUARDED BY `LocalHelperDevirtualizationTest` (4 lowering cases) and
+`LocalHelperCallShapesTest` (8 behavioural ones). With the kill switch on,
+exactly the two devirtualisation cases fail and the refusal and control cases
+still pass. The behavioural file exists because a lowering test cannot see what
+breaks here: a direct call commits to arity and parameter order, so partial
+application, a spread argument, the helper handed around as a value, a capturing
+helper and an inner block's shadow all have to keep working, and the IR looks
+reasonable either way. Two of those cases failed on first run — both my own test
+sources, one of which showed that the language forbids the rebinding I was
+testing for.
+
+NOT COUNTED BY `ReadFieldIR`. An ability op on a receiver lowers to a field read
+too, so counting those as record reads mixes the two completely, and `acc + p.add`
+makes the name `add` ambiguous with the op of the same name. The tests count
+records built and reads of field names only the record uses.
+
+### NEXT, now that it is isolated: a `let` in a loop body costs ~240 ps
+
+Kernels 6 and 7 sit at ~700 ps where kernel 1, the same arithmetic carried
+positionally, is 225. Two `let` bindings in the loop body are the whole
+difference, and the record is no longer any part of it — kernel 6 has no record
+at all. ~240 ps per binding, three young collections either way, so it is not
+allocation. That is the next thing to measure, and it is now a clean question
+rather than one confounded with records.
+
+### MEASURED AND REJECTED: an unboxed record layout
 
 The obvious reading of the table above is that the cost is BOXING — every record
 is all-object storage, so an `{ i, acc }` of two Ints holds two `Long` boxes in

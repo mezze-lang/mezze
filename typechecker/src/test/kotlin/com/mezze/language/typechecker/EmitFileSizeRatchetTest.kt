@@ -94,7 +94,7 @@ class EmitFileSizeRatchetTest {
             // measured flat and reverted twice before that order was known.
             // The pass itself lives in ast/truffleir; what is here is the
             // pipeline, which is this file's subject.
-            C + "TypedASTCompiler.kt" to 4387,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            C + "TypedASTCompiler.kt" to 4522,   // was 5,580; +135 for devirtualising a call to a capture-free let-bound lambda and inlining a generic body into a concrete caller
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and
