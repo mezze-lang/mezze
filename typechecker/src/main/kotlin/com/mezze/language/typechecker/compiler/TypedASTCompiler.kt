@@ -553,6 +553,14 @@ class TypedASTCompiler(
             // `comptime`'s `{ eval } -> eval {}` body, which is a textbook trivial
             // wrapper. As an effect operation there is no wrapper to delete.
             else com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
+        // A record that never escapes its binding is not built: its fields
+        // become locals. AFTER the inliner, because the shape it matches —
+        // `let p = { … }` with every use a field read — is what a helper
+        // returning a record looks like once that helper is inlined. It needs
+        // boxing elimination on to pay, and an inlined producer to see anything
+        // at all. Off with MEZZE_RECORD_SCALARIZE=0.
+        val scalarizedMap = com.mezze.language.truffleir.RecordScalarizer.scalarize(inlinedMap)
+
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
         // go through; stdlib was already canonicalized at precompile time
@@ -563,13 +571,13 @@ class TypedASTCompiler(
         // runtime (list::sum → BuiltinSumLongSeq with List input).
         val userHashes = deduped.map { it.hash }.toHashSet()
         val userFunctions = HashMap<Hash, FunctionIR>(userHashes.size)
-        for ((h, fn) in inlinedMap) {
+        for ((h, fn) in scalarizedMap) {
             if (h in userHashes) userFunctions[h] = fn
         }
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
-            .canonicalize(userFunctions, inlinedMap)
+            .canonicalize(userFunctions, scalarizedMap)
         // Merge back: canonicalized user functions over the full inlined map.
-        val canonicalizedMap = HashMap(inlinedMap)
+        val canonicalizedMap = HashMap(scalarizedMap)
         canonicalizedMap.putAll(canonicalizedUser)
         // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
         // The pass exists but its purity check needs work — see

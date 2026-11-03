@@ -88,7 +88,13 @@ class EmitFileSizeRatchetTest {
             // top-level `n` used to die with `FrameSlotTypeException … got
             // Illegal`. The edit belongs where the slot is allocated, so the bound
             // moves rather than the code.
-            C + "TypedASTCompiler.kt" to 4380,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +7 for running RecordScalarizer in the lowering pipeline: one call
+            // plus the comment recording that it only pays with boxing
+            // elimination on AND an inlined producer, because it was written,
+            // measured flat and reverted twice before that order was known.
+            // The pass itself lives in ast/truffleir; what is here is the
+            // pipeline, which is this file's subject.
+            C + "TypedASTCompiler.kt" to 4387,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

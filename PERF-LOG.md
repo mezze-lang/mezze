@@ -562,27 +562,13 @@ reason: the stack is boxed either way, so primitive parameters only move the
 unboxing into generated code. The operation was rewritten GENERIC in the field
 count, and making it generic is what showed the approach flat.
 
-**Scalar replacement of a non-escaping record.** A pass that turns
-`let p = { lo = …, add = … }` with every use a field read into per-field locals,
-so the record is never built. Verified in the IR — `MakeRecord=3 ReadField=2`
-became `ReadField=0` — and it changed nothing. Written, measured and reverted
-TWICE, for two different reasons, and the second attempt is the instructive one:
-
-- First attempt, before the boxing flag: 5 217 -> 5 321 ps and the GC count
-  unchanged, because it traded one record for two Object-typed local stores and
-  locals were the expensive thing.
-- Second attempt, after the flag made local stores free: an A/B of the two
-  binaries showed kernel 4 at 35 GCs with the pass against 36 without, and
-  kernel 2 at 26 against 25 — no effect at all. An earlier "35 -> 25" reading
-  that looked like a win was two runs compared rather than an A/B.
-- AND IT WAS UNSOUND. The gate failed `UnaryOperatorIntegrationTest >
-  testNegativeWithRecords` and `BasicLanguageFeaturesTest > test basic records`,
-  both of which pass with the pass removed. A rewrite of record bindings that
-  looks right in one probe is not right; the gate is what said so.
-
-It achieved nothing because the record it was removing is not the one being
-allocated — see the section above: the allocation happens inside a LOCAL helper
-that is never inlined, which this pass never sees.
+**Scalar replacement of a non-escaping record.** LANDED — see above. Written,
+measured flat and reverted TWICE before the order above was known, and the
+second reversion was on an A/B that tested only the shapes it cannot reach.
+What the two reversions did establish is real: with Object-typed locals it
+trades one allocation for two, and it sees nothing at all unless the record's
+producer is inlined. It still sees nothing when the producer is a LOCAL helper, because the record
+is built inside that helper and returned — which is the open item below.
 
 ---
 
@@ -1143,51 +1129,62 @@ reaching Graal in a form its escape analysis can virtualise.
 Kernel 5 is the floor on what call-site erasure can ever reach, because a spread
 is one of the three shapes that falls back to the record ABI by construction.
 
-### THE RECORD WAS NEVER THE COST — a local helper is never inlined, 8.8x
+### FIXED: a record that never escapes its binding is not built — 7x
 
-The table above says a record RETURNED per iteration costs 5 146 ps/iter against
-237 for the same values passed positionally, and four attempts to make that
-cheaper by attacking the record all measured zero. They measured zero because
-the record was not the cost.
+A/B on one CLI with the pass's kill switch, a loop whose module-level helper
+returns a two-field record, n=2e7:
 
-The same kernel, with the helper and the loop moved from `let`-bound INSIDE the
-kernel to MODULE level and nothing else changed:
-
-| kernel (n=2e7) | ps/iter | young GCs |
+| | ps/iter | young GCs |
 |---|---|---|
-| control, no record at all | 244 | 2 |
-| record via a LOCAL helper | 5 643 | 34 |
-| record via a TOP-LEVEL helper | **644** | **3** |
+| without the pass | 5 026 | 33 |
+| with it | **713** | **3** |
+| the same loop with no record at all | 229 | 2 |
 
-**The record is already fully erased in the top-level form** — 3 young
-collections against the control's 2, so nothing is allocated per iteration, and
-8.8x the speed. `tryInlineDirectCall` inlines the helper, construction and uses
-land in one function, and from there the record never escapes.
+Three young collections against the control's two: nothing is allocated per
+iteration, so the record really is gone. A JFR profile of the slow form names
+what goes away — `java.lang.Long` 211 samples, `Object[]` 86, `MezzeRecord` 61,
+the 1:1:2 a two-field all-object record predicts.
 
-A LOCAL lambda is compiled as its own function and never inlined. It shows up
-in `MEZZE_DUMP_FN` output as `lambda params=[i]` beside the loop's
-`lambda params=[i, acc]`, so the record is built inside it and returned, where
-nothing downstream can reach it. `countParamReads` bails on `CallLocal` and
-`CallIndirect*`, and the inliner only ever rewrites a `CallDirectIR` — so a
-`let`-bound helper called in a loop costs a real call AND blocks inlining,
-scalar replacement and fusion behind it.
+THREE CHANGES IN THIS ORDER, and none of them pays without the ones before it:
 
-HOW THIS WAS MISSED FOR FOUR ATTEMPTS: the IR probe used TOP-LEVEL helpers while
-the benchmark used `let`-bound ones. The probe showed the record being erased,
-the benchmark showed the allocation staying, and I trusted the probe over the
-thing being measured. Same shape as the in-process-versus-`mez build`
-divergence recorded earlier — a probe has to reproduce the program it is
-explaining.
+1. `boxingEliminationTypes` on, so a store into a local is free. Before it this
+   pass traded one allocation for two and measured flat.
+2. The producer INLINED, so the record's construction and its uses sit in one
+   function. A module-level helper is inlined by `tryInlineDirectCall`.
+3. This pass, which replaces the binding with one local per field.
 
-THE TARGET IS THEREFORE DEVIRTUALISATION, not records: a `CallLocalIR` whose
-slot was bound by `Let(slot, MakeLambdaIR(hash, …))` has a statically known
-target and can become a `CallDirectIR`, after which the existing inlining,
-scalar-replacement and fusion machinery all apply unchanged. The harder case is
-a helper called from inside ANOTHER local lambda — kernel 4's shape — where the
-helper arrives as a CAPTURE, and knowing it needs the closure specialisation
-that already exists for HOF callbacks.
+THE REFUSALS MATTER MORE THAN THE REWRITE. A bare use of the binding, a lambda
+capturing it, a read of a field it does not declare, a spread, a duplicate
+name — each disqualifies it, because in those cases the record is a value in
+its own right. And the ENTRY BLOCK is never touched: a module-level `let` lives
+there and its binding is read from other functions BY HASH rather than through
+the block the use check scans, so rewriting one removed a record something else
+still read and `BasicLanguageFeaturesTest > test basic records` failed with
+"null cannot be cast to MezzeRecord". The gate caught that; four cases in
+`RecordScalarizationTest` pin it and the other refusals.
 
-### MEASURED AND REJECTED: an unboxed record layout
+### TWO CORRECTIONS TO WHAT THIS LOG SAID EARLIER
+
+Both were mine, both were measurement errors with the same root, and the
+striking-through is the point of this log.
+
+**"A local helper is never inlined — 8.8x" was wrong.** That 8.8x was this pass
+being present in one CLI build, not the top-level-versus-local distinction. With
+the pass off the two forms measure 5 026 and 5 513 ps — no real difference. A
+local helper still is not inlined, and that remains the open item below, but it
+is not worth 8.8x on its own.
+
+**"The scalarizer is useless" was wrong.** It was A/B'd on the two kernels whose
+helper is LOCAL — the shapes it cannot reach, since the record is built inside
+the helper and returned — and never on the one whose helper is top-level, which
+is the shape it fixes. It is 7x there.
+
+THE ROOT OF BOTH: the pass was edited out of the source but the CLI was NOT
+rebuilt before measuring, so a "clean tree" reading was really the pass still
+running. Every A/B since uses one CLI and the pass's own kill switch at build
+time, which cannot drift that way.
+
+### MEASURED AND REJECTED: an unboxed record layout### MEASURED AND REJECTED: an unboxed record layout
 
 The obvious reading of the table above is that the cost is BOXING — every record
 is all-object storage, so an `{ i, acc }` of two Ints holds two `Long` boxes in
