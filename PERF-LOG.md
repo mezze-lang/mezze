@@ -345,6 +345,52 @@ measurable effect. Only removing the wrapper itself — monomorphising the gener
 callee so no adapter is needed — will move the 52 ns. Do not spend another pass
 shaving the wrapper; specialise the callee.
 
+### FOURTH attempt: mono does run — the blocker is that the site type is a VARIABLE
+
+The recorded claim that `MonoDriver` "produces ZERO specialisations" is **STALE**.
+With `MEZZE_TYPECHECK_DEBUG=true MEZZE_TYPECHECK_DEBUG_CATEGORIES=Monomorphization`:
+
+```
+[mono] seeds=204(generic=204) specs=125 fallbacks=0 siteHits=168
+[mono]   byHash visited=212 seeded=202 (fnType=202 argType=0 fail=10)
+[mono]   method visited=110 seeded=2   (rcvVarType=3 noImpl=105 unifyFail=0)
+```
+
+So direct calls specialise well (202/212). The METHOD path mostly fails
+(`noImpl=105`), which is its own open question.
+
+**What was tried.** `collectSeedsFromExpr` only seeds `if (expr is TypedCall)`,
+so a generic function used as a VALUE — `use_it { g = add2 }` — was never
+seeded at all. Added a `TypedVar` branch deriving type args from the site type.
+It worked: `valueRef visited=224 seeded=202`, specs 125 -> 171.
+
+**And it bought nothing, because the site type is not concrete:**
+
+```
+valueRef-visit name=add2 typeParams=['f13, 'g13, out]
+  siteType=({a: ''f13#2136, b: ''g13#2137} -> 'out#2138)
+```
+
+`via_hof = { n, acc, f }` is annotation-free, so its callback parameter's type
+is a VARIABLE. `add2`'s instantiation at the reference site unifies with that
+variable and stays generic, so there is nothing concrete to specialise on. A/B
+on the same binary, toggled by env var:
+
+| | build | kernels |
+|---|---|---|
+| valueRef seeding ON | 3968 ms | identical |
+| OFF | 3290 ms | identical |
+
+**+21% compile time, zero runtime benefit.** Reverted.
+
+**So the blocker is upstream of mono's seeding.** To specialise the callback,
+the HOF ITSELF has to be specialised on its closure argument, which makes `f`'s
+type concrete inside the specialised body. That is the #424 closure-arg
+machinery (`SpecRequest.closureArgs`, `Monomorphizer.closuresEnabled`, on by
+default) — and it does not fire for these call sites. **That is the next thing
+to look at, and it is the first candidate that is actually upstream of the
+problem rather than beside it.**
+
 ### A measurement error worth not repeating
 
 One round of "still 57 ns, the fix did nothing" was measured against a STALE
