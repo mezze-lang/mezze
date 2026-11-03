@@ -1469,7 +1469,16 @@ class TypeChecker(
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError(
-                        "Type checking failed with unknown error",
+                        // Not "unknown": the fault is precisely that a Failure
+                        // result carries no diagnostic, which is the compiler
+                        // contradicting itself rather than anything about the
+                        // program being checked.
+                        "Internal compiler error: the typechecker reported failure but " +
+                            "recorded no diagnostic, so there is nothing to report about " +
+                            "it. This is a bug in the compiler, not an error in your " +
+                            "program — please report it. Re-run with --verbose for the " +
+                            "full stack trace.",
+                        errorType = ErrorType.INTERNAL_ERROR,
                         code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
                     )
                 // EVERY field, `fixHints` above all. This conversion dropped them,
@@ -1510,7 +1519,12 @@ class TypeChecker(
             is TypeCheckResult.Success -> {
                 val typedModule = result.typedModule
                     ?: throw TypeCheckError(
-                        "the typecheck pipeline did not emit a TypedModule",
+                        "Internal compiler error: the typecheck pipeline succeeded but " +
+                            "emitted no typed module, so there is nothing to hand back. " +
+                            "This is a bug in the compiler, not an error in your program — " +
+                            "please report it. Re-run with --verbose for the full stack " +
+                            "trace.",
+                        errorType = ErrorType.INTERNAL_ERROR,
                         code = ErrorCode.I0002_PIPELINE_NO_TYPED_MODULE,
                     )
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
@@ -1518,7 +1532,16 @@ class TypeChecker(
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError(
-                        "Type checking failed with unknown error",
+                        // Not "unknown": the fault is precisely that a Failure
+                        // result carries no diagnostic, which is the compiler
+                        // contradicting itself rather than anything about the
+                        // program being checked.
+                        "Internal compiler error: the typechecker reported failure but " +
+                            "recorded no diagnostic, so there is nothing to report about " +
+                            "it. This is a bug in the compiler, not an error in your " +
+                            "program — please report it. Re-run with --verbose for the " +
+                            "full stack trace.",
+                        errorType = ErrorType.INTERNAL_ERROR,
                         code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
                     )
                 // EVERY field, `fixHints` above all. This conversion dropped them,

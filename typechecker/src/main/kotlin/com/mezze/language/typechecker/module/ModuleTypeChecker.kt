@@ -390,7 +390,8 @@ class ModuleTypeChecker(
                             modulePath = module.modulePath,
                             phase = error.phase,
                             message = error.message,
-                            loc = error.loc
+                            loc = error.loc,
+                            code = error.code
                         )
                     }
                     ModuleTypeCheckResult.Failure(errors)

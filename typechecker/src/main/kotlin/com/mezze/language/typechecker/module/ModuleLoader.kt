@@ -16,7 +16,15 @@ class ModuleLoader(
     } catch (e: ResolverModuleError) {
         ModuleLoadResult.Failure(listOf(convertResolverError(e)))
     } catch (e: Exception) {
-        ModuleLoadResult.Failure(listOf(ModuleError.ParseError(path.fullPath, "Unexpected error: ${e.message ?: "Unknown error"}")))
+        // An exception with no message still has a CLASS, and naming it beats
+        // "Unknown error" — which told the reader nothing while the one fact
+        // available went unprinted.
+        ModuleLoadResult.Failure(listOf(ModuleError.ParseError(
+            path.fullPath,
+            "Could not load this module: " + (e.message ?: e::class.simpleName
+                ?: "a failure that carried neither a message nor a type") +
+                ". Re-run with --verbose for the full stack trace.",
+        )))
     }
 
     fun loadModule(modulePath: String): ModuleLoadResult = loadModule(ModulePath.parse(modulePath))
@@ -125,7 +133,13 @@ class ModuleLoader(
             is ResolverModuleError.ParseError -> ModuleError.ParseError(error.modulePath, error.error)
             is ResolverModuleError.AmbiguousModule -> ModuleError.AmbiguousModule(error.modulePath, error.locations)
             is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(error.modulePath, error.exportName, error.loc)
-            else -> ModuleError.ParseError("unknown", error.message ?: "Unknown error")
+            // The module path is genuinely not known on this arm -- the error
+            // shape that reaches it carries none -- so say that rather than
+            // printing "unknown" as if it were a filename.
+            else -> ModuleError.ParseError(
+                "<module not identified>",
+                error.message ?: ("a " + error::class.simpleName + " that carried no message"),
+            )
         }
 
         @JvmOverloads

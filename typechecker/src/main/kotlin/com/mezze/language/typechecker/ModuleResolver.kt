@@ -809,7 +809,12 @@ class ModuleResolver(
     } catch (e: ParseException) {
         throw ModuleError.ParseError(src.modulePath, e.message ?: "Unknown parse error")
     } catch (e: Exception) {
-        throw ModuleError.ParseError(src.modulePath, "Unexpected error: ${e.message}")
+        throw ModuleError.ParseError(
+            src.modulePath,
+            "Could not parse this module: " + (e.message ?: e::class.simpleName
+                ?: "a failure that carried neither a message nor a type") +
+                ". Re-run with --verbose for the full stack trace.",
+        )
     }
 
     /**

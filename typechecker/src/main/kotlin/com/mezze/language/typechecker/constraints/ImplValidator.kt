@@ -367,7 +367,11 @@ internal class ImplValidator(
                         }
                         if (!allNonRecordReceiverFieldErrors) {
                             throw TypeCheckError(
-                                "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
+                                "Type error in ability '${abilityName}' operation '${implOp.name}' " +
+                                    "implementation: " + (solveResult.errors.firstOrNull()?.message
+                                    ?: "the solver reported failure but recorded no " +
+                                        "diagnostic, which is a bug in the compiler — " +
+                                        "please report it"),
                                 implOp.loc,
                                 code = ErrorCode.T0201_TYPE_MISMATCH,
                             )
@@ -625,7 +629,10 @@ internal class ImplValidator(
                 val handled = onSolveFailure != null && onSolveFailure(solveResult)
                 if (!handled) {
                     throw TypeCheckError(
-                        "Type error in $implLabel operation '$opName' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
+                        "Type error in $implLabel operation '$opName' implementation: " +
+                            (solveResult.errors.firstOrNull()?.message
+                                ?: "the solver reported failure but recorded no diagnostic, " +
+                                    "which is a bug in the compiler — please report it"),
                         opLoc,
                         code = ErrorCode.T0201_TYPE_MISMATCH,
                     )

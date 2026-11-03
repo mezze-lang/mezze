@@ -199,7 +199,8 @@ object DuplicateDeclarationValidator {
                 "It's bound inside op handler bodies (call site of " +
                 "`abort {val = ...}` / `resume {val = ...}` / `scope`) and " +
                 "cannot be used as a user-defined binding.",
-                loc
+                loc,
+                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
             )
         }
     }

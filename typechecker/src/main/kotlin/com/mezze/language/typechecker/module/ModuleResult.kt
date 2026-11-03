@@ -182,7 +182,17 @@ sealed class ModuleTypeCheckResult {
         val modulePath: String,
         val phase: String,
         val message: String,
-        val loc: Loc? = null
+        val loc: Loc? = null,
+        /**
+         * The inner error's code, carried across the boundary.
+         *
+         * It used to stop here: an error inside an imported module had a code,
+         * this shape had no field for one, and the diagnostic the user saw was
+         * an import failure with the message embedded and the code gone. A
+         * diagnostic that cannot be `--explain`ed is a worse diagnostic, and
+         * nothing about crossing a module boundary changes what went wrong.
+         */
+        val code: ErrorCode = ErrorCode.UNCATEGORIZED,
     )
 }
 
