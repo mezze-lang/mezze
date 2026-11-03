@@ -132,6 +132,33 @@ class LetCopyPropagationTest {
     }
 
     @Test
+    fun `a binding is not moved past a statement that is not inert`() {
+        // Substituting reorders a value after everything between the binding
+        // and its use. `heavy` is over the inline budget so it stays a CALL,
+        // and `nxt` would have to cross it to reach the tail call. Arithmetic
+        // on primitives would not care; an `InlineBinaryOpIR` reaching a USER
+        // numeric impl would, since an ability's `add` is an ordinary function.
+        // So the binding stays.
+        val src = """
+            let heavy = { i } ->
+              i * 3 + i * 5 + i * 7 + i * 11 + i * 13 + i * 17 + i * 19 + i * 23
+            let main = { n } -> do
+              let go = { i, acc } ->
+                if i <= 0 then acc
+                else do
+                  let nxt = i - 1
+                  let h = heavy { i = i }
+                  go { i = nxt, acc = acc + h }
+              go { i = n, acc = 0 }
+        """
+        // BOTH bindings, not just one: `h` survives either way (its value is a
+        // call), so `>= 1` would pass whether or not the refusal works. Without
+        // it, `nxt` is substituted and only `h` is left.
+        assertTrue(lets(loopFn(src)) >= 2,
+            "a binding was moved past a call: " + lets(loopFn(src)) + " left")
+    }
+
+    @Test
     fun `a binding CAPTURED by a lambda is kept`() {
         // `CaptureIR` names a frame slot: after a substitution that slot holds
         // nothing, and the closure reads whatever is there.

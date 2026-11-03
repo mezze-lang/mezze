@@ -146,6 +146,21 @@ object LetCopyPropagation {
                 val reads = scope.sumOf { countReads(it, st.slot) }
                 if (reads > 1) continue
 
+                // AND IT MAY NOT MOVE PAST ANYTHING THAT IS NOT ITSELF
+                // RECOMPUTABLE. Substituting reorders this value after every
+                // statement between the binding and its use, which is
+                // unobservable only when those statements are as inert as the
+                // value is. `InlineBinaryOpIR` is in the recomputable set and
+                // CAN reach a user numeric impl — an ability's `add` is an
+                // ordinary function — so moving one past a call would be a
+                // reorder of two things that may both do something. Every
+                // binding in a loop body of arithmetic passes this; the
+                // measured kernels are unaffected.
+                val crossesOnlyInert = tail
+                    .takeWhile { s -> countReads(valueOf(s), st.slot) == 0 }
+                    .all { s -> s is StmtIR.Let && isRecomputable(s.value) }
+                if (!crossesOnlyInert) continue
+
                 stmts = if (reads == 0) {
                     stmts.take(i) + tail
                 } else {
