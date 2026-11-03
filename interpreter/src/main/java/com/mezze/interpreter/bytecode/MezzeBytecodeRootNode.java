@@ -938,6 +938,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     private static final long[] EMPTY_LONGS = new long[0];
     private static final double[] EMPTY_DOUBLES = new double[0];
 
+    static final int STORAGE_OBJECT = 0;
+    static final int STORAGE_LONG = 1;
+    static final int STORAGE_DOUBLE = 2;
+
     /**
      * Specialized single-field record creation for the very common
      * pattern: {@code { val = i }}, {@code { x = v }}, etc.
@@ -1178,11 +1182,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 MezzeRecord record,
                 @Cached("record.getShape()") Shape cachedShape,
                 @Cached("cachedShape.findFieldIndex(fieldName)") int fieldIndex,
-                @Cached("resolveLocationIndex(cachedShape, fieldIndex)") int locationIndex) {
+                @Cached("resolveLocationIndex(cachedShape, fieldIndex)") int locationIndex,
+                @Cached("resolveStorageKind(cachedShape, fieldIndex)") int storageKind) {
             if (fieldIndex < 0) {
                 return fallbackNotFound(record, fieldName);
             }
-            return record.getObjectField(locationIndex);
+            // STORAGE IS PART OF THE SHAPE, so it is cached beside the location
+            // and the switch folds away with it. Reading `objectFields`
+            // unconditionally — which this did — meant no record could use the
+            // unboxed LONG layout the Shape machinery has always supported:
+            // every read of such a field hit `objectFields`, length 0, and threw
+            // ArrayIndexOutOfBoundsException. That is why
+            // `ShapeCache.getOrCreateSingleLong` was dead code.
+            return switch (storageKind) {
+                case STORAGE_LONG -> record.getLongField(locationIndex);
+                case STORAGE_DOUBLE -> record.getDoubleField(locationIndex);
+                default -> record.getObjectField(locationIndex);
+            };
         }
 
         // Megamorphic fallback (>6 distinct shapes at one site).
@@ -1261,6 +1277,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             if (fieldIndex < 0) return -1;
             FieldLocation loc = shape.getFieldLocation(fieldIndex);
             return loc.index;
+        }
+
+        /** Which of the three arrays a field lives in, as a PE constant. */
+        protected static int resolveStorageKind(Shape shape, int fieldIndex) {
+            if (fieldIndex < 0) return STORAGE_OBJECT;
+            return switch (shape.getFieldLocation(fieldIndex).storageType) {
+                case LONG -> STORAGE_LONG;
+                case DOUBLE -> STORAGE_DOUBLE;
+                case OBJECT -> STORAGE_OBJECT;
+            };
         }
 
         @TruffleBoundary

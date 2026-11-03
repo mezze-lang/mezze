@@ -1074,6 +1074,54 @@ reaching Graal in a form its escape analysis can virtualise.
 Kernel 5 is the floor on what call-site erasure can ever reach, because a spread
 is one of the three shapes that falls back to the record ABI by construction.
 
+### MEASURED AND REJECTED: an unboxed record layout
+
+The obvious reading of the table above is that the cost is BOXING — every record
+is all-object storage, so an `{ i, acc }` of two Ints holds two `Long` boxes in
+an `Object[]` and unboxes on every read. `MezzeRecord` has had `longFields`
+and a typed `FieldLocation` all along, and `MakeRecord`'s own comment says a
+later phase can use them. So: use them.
+
+It does not pay. True minimums, before and after a typed all-long layout:
+
+| kernel | all-object | all-long |
+|---|---|---|
+| 1 positional | 237 | 239 |
+| 2 record state | 2 844 | 2 875 |
+| 3 field read | 564 | 546 |
+| 4 record return | 5 146 | 5 320 |
+| 5 record spread | 9 558 | **12 842** |
+
+Nothing gained and the spread 34% worse, so it is reverted. **The reason is
+that the boxes are not created by the record.** With
+`boxingEliminationTypes = {}` the BDSL operand stack is boxed, so the values
+arrive at record construction already boxed whatever the record then does with
+them: a typed layout only adds a `long[]` allocation and an unbox loop, and the
+spread path clones one more array.
+
+That also kills the arity question. A fixed-arity ladder of operations was
+written first, on the theory that `@Variadic` — which is an `Object[]` — would
+box operands that `long v0, long v1` parameters would not. That is wrong for the
+same reason: the stack is boxed either way, so declaring primitive parameters
+only moves the unboxing into generated code. The operation was rewritten
+GENERIC in the field count, which is what showed the whole approach flat.
+
+SO THE 12-40x IS NOT BOXING INSIDE THE RECORD. It is the allocation itself, a
+boxed operand stack, and escape analysis not firing on a record that never
+escapes its iteration. The routes that remain are therefore: do not build the
+record at all for a non-escaping one with a statically known shape — scalar
+replacement, the "erase it" half of the principle — or make the operand stack
+carry primitives, which `boxingEliminationTypes` was measured not to do for the
+pipeline tier and would need its own investigation.
+
+ONE LATENT BUG CAME OUT OF IT AND IS FIXED. `ReadFieldByName`'s hot path read
+`objectFields` unconditionally while caching a location index resolved from the
+shape, so NO record could use the LONG or DOUBLE layout the Shape machinery
+supports — every such read hit a zero-length array and threw
+ArrayIndexOutOfBoundsException. That is why `ShapeCache.getOrCreateSingleLong`
+was dead code. Storage is part of the shape, so it is now cached beside the
+location and the switch folds with it.
+
 MEASUREMENT NOTE: at n=2e6 these numbers are warmup-dominated and reorder
 themselves — kernel 3 reads 23 451 ps there against 564 at n=2e7. The size has
 to be large enough that the loop is compiled, which is the same trap as the
