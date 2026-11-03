@@ -744,7 +744,8 @@ public final class IterNatives {
     private static Object foldWalk(IterNode node, Object acc, MezzeFunction folder,
                                    IndirectCallNode callNode) {
         if (node instanceof RangeIterNode range) {
-            return foldRange(range, acc, folder, callNode, /*mapper*/ null, /*filter*/ null);
+            return foldRange(range, acc, folder, callNode,
+                    /*mapper*/ null, /*filter*/ null, /*filterAfterMap*/ false);
         }
         if (node instanceof SeqIterNode || node instanceof TakeIterNode || node instanceof DropIterNode
                 || node instanceof ListIterNode || node instanceof OnceIterNode || node instanceof EmptyIterNode
@@ -762,6 +763,15 @@ public final class IterNatives {
             // coded.
             MezzeFunction mapper = null;
             MezzeFunction pred = null;
+            // WHICH STAGE IS OUTERMOST, i.e. which the user wrote LAST.
+            // `xs.map(f).filter(p)` builds Filter(Map(range)), so this inward
+            // walk meets the PREDICATE first; `xs.filter(p).map(f)` builds
+            // Map(Filter(range)) and meets the MAPPER first. Without recording
+            // that, both chains peeled to the same (mapper, pred) pair and
+            // foldRange applied a fixed order — so `map(*10).filter(<40)` over
+            // 0..4 tested the predicate against the RAW element, kept
+            // everything, and summed 100 where the answer is 60. Silently.
+            boolean filterAfterMap = false;
             IterNode cursor = unary;
             while (cursor instanceof UnaryOpIterNode u) {
                 if (u.isMap()) {
@@ -770,11 +780,14 @@ public final class IterNatives {
                 } else {
                     if (pred != null) break; // multi-filter: bail
                     pred = (MezzeFunction) u.fn;
+                    // Predicate seen before any mapper on the way in: the
+                    // filter sits ABOVE the map, so it must see mapped values.
+                    if (mapper == null) filterAfterMap = true;
                 }
                 cursor = u.src;
             }
             if (cursor instanceof RangeIterNode range && !(cursor instanceof UnaryOpIterNode)) {
-                return foldRange(range, acc, folder, callNode, mapper, pred);
+                return foldRange(range, acc, folder, callNode, mapper, pred, filterAfterMap);
             }
             // Deeper stacks fall back to a per-element recursion — slow
             // but correct.
@@ -785,14 +798,22 @@ public final class IterNatives {
 
     /**
      * Range walker with optional map + optional filter peeled above it.
-     * Data-flow order matches the BDSL sink: filter first (raw element),
-     * then map, then fold. Keeping both in one loop avoids the per-stage
-     * intermediate structures that make eager collections slow.
+     *
+     * STAGE ORDER IS CARRIED, NOT ASSUMED. [filterAfterMap] says the filter
+     * sits above the map in the chain, so the predicate must run on the MAPPED
+     * element. This used to be fixed at "filter first (raw element), then map",
+     * which is right for `filter(p).map(f)` and silently wrong for
+     * `map(f).filter(p)` — the common order — because the predicate then tested
+     * a value the user never wrote a predicate for.
+     *
+     * Keeping both stages in one loop still avoids the per-stage intermediate
+     * structures that make eager collections slow.
      */
     @TruffleBoundary
     private static Object foldRange(RangeIterNode range, Object initAcc,
                                     MezzeFunction folder, IndirectCallNode callNode,
-                                    MezzeFunction mapper, MezzeFunction pred) {
+                                    MezzeFunction mapper, MezzeFunction pred,
+                                    boolean filterAfterMap) {
         Object acc = initAcc;
         long i = range.start;
         long end = range.end;
@@ -864,7 +885,8 @@ public final class IterNatives {
         while (ascending ? (i < end) : (i > end)) {
             Object x = (Object) i;
 
-            if (pred != null) {
+            // Filter BELOW the map: the predicate sees the raw element.
+            if (pred != null && !filterAfterMap) {
                 if (predInner != null) {
                     pArgs[predClosureLen] = x;
                     Object r = callNode.call(predInner, pArgs);
@@ -882,6 +904,18 @@ public final class IterNatives {
                 } else {
                     mArgs[mapperClosureLen] = MezzeRecord.wrapX(x);
                     x = callNode.call(mapperTarget, mArgs);
+                }
+            }
+            // Filter ABOVE the map: the predicate sees the mapped element.
+            if (pred != null && filterAfterMap) {
+                if (predInner != null) {
+                    pArgs[predClosureLen] = x;
+                    Object r = callNode.call(predInner, pArgs);
+                    if (!(r instanceof Boolean) || !((Boolean) r)) { i += step; continue; }
+                } else {
+                    pArgs[predClosureLen] = MezzeRecord.wrapX(x);
+                    Object r = callNode.call(predTarget, pArgs);
+                    if (!(r instanceof Boolean) || !((Boolean) r)) { i += step; continue; }
                 }
             }
             if (folderScalar) {

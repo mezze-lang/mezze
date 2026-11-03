@@ -490,7 +490,10 @@ object ChainCanonicalizer {
 
         if (sourceExpr != null) {
             val (peeledStages, peeledSource) = peelSource(sourceExpr, classifier, allFunctions)
-            val combinedStages = peeledStages + remappedStages
+            // The callee's stages sit ABOVE the caller's argument expression —
+            // the callee consumes what the argument produces — so they are
+            // applied later and, outer-to-inner, come first.
+            val combinedStages = remappedStages + peeledStages
             // If we peeled to a known source, use it. Otherwise preserve
             // the substituted source type (RawSeq stays RawSeq, etc.).
             val finalSource = if (peeledSource is SourceIR.Opaque && newSource is SourceIR.RawSeq) {
@@ -770,7 +773,11 @@ object ChainCanonicalizer {
                 val pLambda = asMakeLambda(p) ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions)
                 val effectiveSource = promoteOpaqueSource(source, node.name) ?: return null
-                val allStages = stages + StageIR.Filter(pLambda)
+                // The sink's own predicate is applied LAST, after every peeled
+                // stage, so under the outer-to-inner convention it goes FIRST.
+                // Appending it made it the innermost stage and it filtered the
+                // SOURCE: `range{0,5}.map{*10}.count{<40}` answered 5, not 4.
+                val allStages = listOf<StageIR>(StageIR.Filter(pLambda)) + stages
                 val candidate = FusedChainIR(effectiveSource, allStages, SinkIR.Count, node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
@@ -1256,10 +1263,23 @@ object ChainCanonicalizer {
     /**
      * Peel iter::map / iter::filter / iter::from_seq layers off
      * [sourceExpr] and classify the resulting terminal expression as
-     * a [SourceIR]. Stages are returned in *outer-to-inner* semantic
-     * order — the first stage in the list is the one closest to the
-     * sink, which is the outermost `iter::map` or `iter::filter` in
-     * the source.
+     * a [SourceIR].
+     *
+     * STAGE ORDER IS OUTER-TO-INNER — `stages[0]` is the stage closest to the
+     * SINK, i.e. the one applied LAST. The peel walks the nesting inward and
+     * `xs.map(f).filter(p)` nests as `filter(map(xs))`, so the predicate is met
+     * first and lands at index 0. `BytecodeCompiler.emitCanonicalIterChain`
+     * reverses the list once it has classified the stages, and from there on
+     * everything downstream — the fused loop's emission order, the
+     * `filterFirst` flag, the take-after-filter refusal — reads application
+     * order.
+     *
+     * ANYTHING THAT BUILDS A STAGE LIST BY HAND MUST MATCH THIS. A stage that
+     * runs LAST goes at the FRONT. Appending one instead makes it run FIRST,
+     * which is how `range{0,5}.map{*10}.count{<40}` counted RAW elements and
+     * answered 5 where the answer is 4 — the predicate the user wrote for
+     * mapped values was tested against the source. A wrong number, no
+     * diagnostic.
      *
      * MVP scope: handles CallDirect to iter::map/filter/from_seq only.
      * Inlined MakeRecord descriptor shapes (post-inliner) are the
