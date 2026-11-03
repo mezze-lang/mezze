@@ -311,6 +311,29 @@ object TypeAnnotationConverter {
                 // nominal identity to display; the printer renders their
                 // arm-set literally.
                 val isClosedInlineWall = config.inlineVariantNaming && !annotation.isOpen
+                // Spec 9.8 / 9.2: one tag, once. A group is a SET, so a repeat has
+                // no effect, and identity is the NAME — `| Red, Red { val: Int } |`
+                // is one tag written twice, not two tags.
+                //
+                // Caught here because this is where the information is lost: the
+                // constructors become a Map keyed by name, so a duplicate silently
+                // overwrites. `| Red, Red { val: Int } |` came out as
+                // `| Red { val: Int } |` with the nullary Red DISCARDED, so a
+                // signature declared two members and accepted one. That is worse
+                // than accepting the duplicate, and it is invisible.
+                val seenCtorNames = mutableSetOf<String>()
+                for (ctor in annotation.constructors) {
+                    if (!seenCtorNames.add(ctor.name)) {
+                        throw com.mezze.language.typechecker.TypeCheckError(
+                            "Constructor '" + ctor.name + "' appears twice in this variant " +
+                                "group. A group is a set, so the repeat has no effect; and " +
+                                "identity is the name, so a different payload does not make " +
+                                "it a second constructor. Remove one.",
+                            annotation.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                        )
+                    }
+                }
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { recurse(it) }
