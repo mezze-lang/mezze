@@ -563,7 +563,23 @@ class ConstraintSolver(
             }
         }
 
-        return if (updatedMappings.isNotEmpty()) Substitution(substitution.mappings + updatedMappings, substitution.rowVarMappings) else null
+        // `copy`, not a positional rebuild. This read
+        //   Substitution(substitution.mappings + updatedMappings, substitution.rowVarMappings)
+        // which names two of the three channels, so every record row extension
+        // accumulated so far was DISCARDED whenever a variant merge happened —
+        // an open record that had grown a field silently lost it, in a function
+        // about variants. Positional construction of a type that gains channels
+        // is how that happens quietly.
+        return if (updatedMappings.isNotEmpty()) {
+            substitution.copy(mappings = substitution.mappings + updatedMappings)
+        } else {
+            // The merge was computed and there was no variable to attach it to,
+            // so it is dropped here. That is the fragile shape `recordRowMappings`
+            // was introduced to replace for records — hunting for THE type
+            // variable whose binding compares equal to this type, and losing the
+            // extension when none matches. Variants still do the hunt.
+            null
+        }
     }
 
     private fun solveMainWorklist(
