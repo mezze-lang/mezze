@@ -90,6 +90,20 @@ let k_hand_inlined = { n } -> do
       go { i = lo, acc = acc + add }
   go { i = n, acc = 0 }
 
+## 7. Kernel 4 with the helper and the loop at MODULE level instead of `let`-bound
+## inside the kernel. Everything else is identical. A local lambda is compiled as
+## its own function and never inlined — `split` shows up in MEZZE_DUMP_FN output —
+## so the record is built inside it and returned, which puts it out of reach of
+## anything downstream. A top-level helper goes through tryInlineDirectCall. If 7
+## is faster than 4, the gap is devirtualisation of a local call, not records.
+let split_top = { i } -> { lo = i - 1, add = i }
+let go_top = { i, acc } ->
+  if i <= 0 then acc
+  else do
+    let p = split_top { i = i }
+    go_top { i = p.lo, acc = acc + p.add }
+let k_top_level = { n } -> go_top { i = n, acc = 0 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -139,4 +153,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
     report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
     report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
+  else if k == 7 then do
+    k_top_level { n = n }
+    k_top_level { n = n }
+    k_top_level { n = n }
+    report { name = "7 top-level fns", n = n, r = time_it { f = {} -> k_top_level { n = n } } }
+    report { name = "7 top-level fns", n = n, r = time_it { f = {} -> k_top_level { n = n } } }
+    report { name = "7 top-level fns", n = n, r = time_it { f = {} -> k_top_level { n = n } } }
   else println { msg = "unknown kernel" }

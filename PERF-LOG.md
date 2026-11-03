@@ -1129,6 +1129,50 @@ reaching Graal in a form its escape analysis can virtualise.
 Kernel 5 is the floor on what call-site erasure can ever reach, because a spread
 is one of the three shapes that falls back to the record ABI by construction.
 
+### THE RECORD WAS NEVER THE COST — a local helper is never inlined, 8.8x
+
+The table above says a record RETURNED per iteration costs 5 146 ps/iter against
+237 for the same values passed positionally, and four attempts to make that
+cheaper by attacking the record all measured zero. They measured zero because
+the record was not the cost.
+
+The same kernel, with the helper and the loop moved from `let`-bound INSIDE the
+kernel to MODULE level and nothing else changed:
+
+| kernel (n=2e7) | ps/iter | young GCs |
+|---|---|---|
+| control, no record at all | 244 | 2 |
+| record via a LOCAL helper | 5 643 | 34 |
+| record via a TOP-LEVEL helper | **644** | **3** |
+
+**The record is already fully erased in the top-level form** — 3 young
+collections against the control's 2, so nothing is allocated per iteration, and
+8.8x the speed. `tryInlineDirectCall` inlines the helper, construction and uses
+land in one function, and from there the record never escapes.
+
+A LOCAL lambda is compiled as its own function and never inlined. It shows up
+in `MEZZE_DUMP_FN` output as `lambda params=[i]` beside the loop's
+`lambda params=[i, acc]`, so the record is built inside it and returned, where
+nothing downstream can reach it. `countParamReads` bails on `CallLocal` and
+`CallIndirect*`, and the inliner only ever rewrites a `CallDirectIR` — so a
+`let`-bound helper called in a loop costs a real call AND blocks inlining,
+scalar replacement and fusion behind it.
+
+HOW THIS WAS MISSED FOR FOUR ATTEMPTS: the IR probe used TOP-LEVEL helpers while
+the benchmark used `let`-bound ones. The probe showed the record being erased,
+the benchmark showed the allocation staying, and I trusted the probe over the
+thing being measured. Same shape as the in-process-versus-`mez build`
+divergence recorded earlier — a probe has to reproduce the program it is
+explaining.
+
+THE TARGET IS THEREFORE DEVIRTUALISATION, not records: a `CallLocalIR` whose
+slot was bound by `Let(slot, MakeLambdaIR(hash, …))` has a statically known
+target and can become a `CallDirectIR`, after which the existing inlining,
+scalar-replacement and fusion machinery all apply unchanged. The harder case is
+a helper called from inside ANOTHER local lambda — kernel 4's shape — where the
+helper arrives as a CAPTURE, and knowing it needs the closure specialisation
+that already exists for HOF callbacks.
+
 ### MEASURED AND REJECTED: an unboxed record layout
 
 The obvious reading of the table above is that the cost is BOXING — every record
