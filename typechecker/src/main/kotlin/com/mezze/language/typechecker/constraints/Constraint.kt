@@ -61,6 +61,22 @@ sealed interface Constraint {
         override val context: String? = null,
         override val loc: Loc? = null,
         val isMatchCaseContext: Boolean = false,
+        /**
+         * These two types are ALTERNATIVES reaching one place, so when both are
+         * variants their constructors JOIN rather than having to match.
+         *
+         * `isMatchCaseContext` is the same idea under a narrower name — match
+         * arms were the first place it was needed. Branches of an `if` and the
+         * elements of a seq literal are the same question: `[Red, Pink]` is a
+         * seq of `| Red, Pink |`, not a type error and not `[| Red |]`.
+         *
+         * Without it the seq literal equated every element to one fresh var,
+         * `mergeVariantConstructors` declined to merge (neither a match context
+         * nor two open rows), and whichever element bound the var first won —
+         * so `[Red, Pink]` was `[| Red |]` and `[Pink, Red]` was `[| Pink |]`,
+         * the answer decided by the order they were written in.
+         */
+        val isAlternativesJoin: Boolean = false,
         val errorContext: ErrorContext? = null,
         /**
          * #376: effect names discharged by enclosing `perform` blocks at the

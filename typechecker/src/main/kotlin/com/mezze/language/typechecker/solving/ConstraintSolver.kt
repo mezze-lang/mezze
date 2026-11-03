@@ -529,7 +529,8 @@ class ConstraintSolver(
         // UNDETERMINED identities (genuine row-poly) still merge below.
         if (identityVerdict(leftType.identity, rightType.identity) == IdentityVerdict.DISTINCT) return null
 
-        val isMatchContext = originalConstraint.isMatchCaseContext
+        val isMatchContext = originalConstraint.isMatchCaseContext ||
+            originalConstraint.isAlternativesJoin
         val bothOpen = leftType.rowVar != null && rightType.rowVar != null
         val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||
                                  (rightType.rowVar != null && patternBasedRowVars.contains(rightType.rowVar))

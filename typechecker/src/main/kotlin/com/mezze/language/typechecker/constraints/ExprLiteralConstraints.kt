@@ -107,8 +107,9 @@ internal fun ExpressionConstraintGenerator.generateSeqLiteral(expr: ParsedSeqLit
                     Constraint.Equality(
                         left = result.type,
                         right = elementType,
-                        context = "Seq elements must have same type",
+                        context = "Seq elements join into one element type",
                         loc = element.expr.loc,
+                        isAlternativesJoin = true,
                         errorContext = ErrorContext.SeqElement(elementIndex)
                     )
                 )
