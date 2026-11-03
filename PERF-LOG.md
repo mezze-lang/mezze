@@ -771,16 +771,40 @@ every checksum printed and hand-checkable.
 | filter+take | 666 | **7.6** |
 | drop+map | 671 | **7.6** |
 | to_seq (materialises) | 4 394 | **50** |
-| **compound fold** (`acc + x*2 - 1`) | 14 025 | **159** |
-| **enumerate+map** | 124 247 | **1412** |
+| compound fold (`acc + x*2 - 1`) | 14 025 -> **1 448** | 159 -> **16** |
+| enumerate+map | 124 247 -> **556** | 1412 -> **6.3** |
 
 THE THREE GAPS, in payoff order:
 
-1. **`enumerate` is not fusable at all — 1412x.** `ChainCanonicalizer` has no
-   `StageIR.Enumerate` and zero mentions of enumerate, so a chain containing
-   `.enumerate{}` cannot be peeled: the source classifies as Opaque, nothing
-   fuses, and a `{i, val}` RECORD is allocated per element. This is the
-   records-are-syntax principle with a number attached.
+1. ~~**`enumerate` is not fusable at all — 1412x.**~~ **FIXED — 124247 -> 556
+   ps/elem, 223x.** There was no `StageIR.Enumerate` and no mention of
+   enumerate anywhere in `ChainCanonicalizer`, so a chain containing
+   `.enumerate{}` could not be peeled: the source classified as Opaque, nothing
+   fused, and a `{i, val}` RECORD was allocated per element.
+
+   THE RECORD IS NOW GONE, which is the records-are-syntax principle actually
+   carried out. The stage carries nothing: the loop keeps a counter, the element
+   stays where it is, and a downstream `x.val` resolves to the element while
+   `x.i` resolves to the counter. Two locals rather than one, because the
+   element needs ITS index while the counter moves on. The increment sits at the
+   stage's own position, so it numbers exactly the elements that REACH the
+   enumerate — a filter above it drops elements that have already been numbered,
+   which is what `enumerate` means, and a filter BELOW it numbers only the
+   survivors.
+
+   WHERE IT DECLINES. The record is live from the enumerate until a MAP consumes
+   it; a filter or take passes it through. If it is still live at a predicate or
+   at the sink — whose classifiers do not resolve its fields — the chain
+   declines and the original record-building pipeline runs, correct and slow.
+   A BARE read of the parameter also declines, because the record does not exist
+   for a bare read to denote; handing out the raw element in its place would be
+   a wrong answer rather than a slow one. `to_seq` of an enumerate is exactly
+   the case that must decline, since the records ARE the result.
+
+   Still on the table: a predicate over the record (needs the same field
+   resolution a mapper now has), and the vectorised path, which declines an
+   Enumerate stage — so this lands in the general-loop tier at 556 rather than
+   the 89 ps floor. Gap 3 covers that tier.
 2. ~~**A compound fold body — 159x.**~~ **FIXED — 14025 -> 1448 ps/elem, 9.7x.**
    `classifyFolderBody` matched `acc OP x` plus one element transform, which is
    two of the three nodes in `acc + x * 2 - 1`; a refused folder declines the

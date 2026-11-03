@@ -932,6 +932,8 @@ object ChainCanonicalizer {
                     if (nn !== stage.n) changed = true
                     StageIR.Drop(nn)
                 }
+                // No lambda, no expression — nothing addresses a frame.
+                StageIR.Enumerate -> stage
             }
         }
         return if (changed) result else stages
@@ -1351,6 +1353,8 @@ object ChainCanonicalizer {
         ChainHofClassifier.HofKind.DROP,
         ChainHofClassifier.HofKind.TAKE_WHILE,
         ChainHofClassifier.HofKind.DROP_WHILE,
+        // A STAGE, never a sink: enumerate belongs to the peel, not here.
+        ChainHofClassifier.HofKind.ENUMERATE,
         ChainHofClassifier.HofKind.FROM_SEQ -> null
     }
 
@@ -1582,6 +1586,12 @@ object ChainCanonicalizer {
                 current = filterPeeled.second
                 continue
             }
+            val enumPeeled = tryPeelIterEnumerate(current, classifier)
+            if (enumPeeled != null) {
+                stages.add(StageIR.Enumerate)
+                current = enumPeeled
+                continue
+            }
             val takePeeled = tryPeelIterTake(current, classifier)
             if (takePeeled != null) {
                 stages.add(StageIR.Take(takePeeled.first))
@@ -1761,6 +1771,41 @@ object ChainCanonicalizer {
     }
 
     /** take { src = <src>, n = <count> } — returns (nExpr, srcExpr). */
+    /**
+     * Peel an `enumerate` layer, which has a source and no callback.
+     *
+     * Returns the inner source. The stage itself carries nothing: the index is
+     * the loop's counter, and the `{i, val}` record it nominally produces is
+     * never built — the emitter resolves a downstream `x.val` to the element and
+     * `x.i` to that counter. A chain containing `.enumerate{}` previously could
+     * not be peeled at all, so it fused nothing and allocated a record per
+     * element: 124247 ps/elem against 93 for the shapes that fuse.
+     */
+    private fun tryPeelIterEnumerate(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+    ): NodeIR? {
+        if (node is CallNativeIR
+            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_ENUMERATE)
+            && !node.isScalarABI) {
+            val mr = node.arg as? MakeRecordIR ?: return null
+            if (mr.fields.size != 1) return null
+            val fld = mr.fields[0]
+            if (fld.name !in NativeHofNames.SRC_FIELDS) return null
+            return fld.value
+        }
+        if (node !is CallDirectIR) return null
+        val callee = classifier.lookup(node.targetHash) ?: return null
+        if (callee.kind != ChainHofClassifier.HofKind.ENUMERATE) return null
+        if (node.isScalarABI) {
+            if (node.args.size != 1) return null
+            return node.args[0]
+        }
+        val rec = node.args.singleOrNull() as? MakeRecordIR ?: return null
+        val srcFld = rec.fields.singleOrNull { it.name in SRC_NAMES } ?: return null
+        return srcFld.value
+    }
+
     private fun tryPeelIterTake(
         node: NodeIR,
         classifier: ChainHofClassifier,
@@ -2047,6 +2092,7 @@ object ChainCanonicalizer {
                 var stagesChanged = false
                 val newStages: List<StageIR> = node.stages.map { stage ->
                     when (stage) {
+                        StageIR.Enumerate -> stage
                         is StageIR.Map, is StageIR.Filter,
                         is StageIR.TakeWhile, is StageIR.DropWhile -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
@@ -2096,7 +2142,8 @@ internal class ChainHofClassifier private constructor(
         FOLD, SUM, SUM_FLOAT, PRODUCT, PRODUCT_FLOAT, FOR_EACH, MAP, FILTER, TAKE, DROP, FROM_SEQ,
         COUNT, REDUCE, ANY, ALL, FIND, FIND_INDEX, TO_SEQ, TO_LIST,
         TAKE_WHILE, DROP_WHILE, NONE, FIRST, LAST, MIN, MAX,
-        MIN_BY, MAX_BY, PARTITION, SCAN
+        MIN_BY, MAX_BY, PARTITION, SCAN,
+        ENUMERATE
     }
     internal data class Callee(val kind: HofKind)
 
@@ -2236,6 +2283,11 @@ internal class ChainHofClassifier private constructor(
                 params.size in 1..2 && name == NativeHofNames.OP_SUM -> HofKind.SUM
                 params.size in 1..2 && name.isEmpty()
                     && classifyByBody(fn, mapOf(NativeHofNames.OP_SUM to HofKind.SUM), null) == HofKind.SUM -> HofKind.SUM
+                // enumerate(src) — one param and no callback, so it needs its own
+                // arm before the catch-alls below.
+                params.size == 1 && name == NativeHofNames.OP_ENUMERATE -> HofKind.ENUMERATE
+                params.size == 1 && name.isEmpty()
+                    && classifyByBody(fn, mapOf(NativeHofNames.OP_ENUMERATE to HofKind.ENUMERATE), null) == HofKind.ENUMERATE -> HofKind.ENUMERATE
                 params.size == 1 && name == NativeHofNames.OP_FROM_SEQ -> HofKind.FROM_SEQ
                 params.size == 1 && name.isEmpty()
                     && classifyByBody(fn, mapOf(NativeHofNames.OP_FROM_SEQ to HofKind.FROM_SEQ), null) == HofKind.FROM_SEQ -> HofKind.FROM_SEQ

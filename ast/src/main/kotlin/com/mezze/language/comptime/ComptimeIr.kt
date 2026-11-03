@@ -319,6 +319,7 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
                 when (st) {
                     is StageIR.Take -> st.copy(n = f(st.n))
                     is StageIR.Drop -> st.copy(n = f(st.n))
+                    StageIR.Enumerate -> st
                     is StageIR.Map, is StageIR.Filter,
                     is StageIR.TakeWhile, is StageIR.DropWhile -> st
                 }

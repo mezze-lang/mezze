@@ -464,6 +464,20 @@ sealed interface StageIR {
     @Serializable data class TakeWhile(val p: MakeLambdaIR) : StageIR
     /** Skip elements while predicate holds, then keep the rest. */
     @Serializable data class DropWhile(val p: MakeLambdaIR) : StageIR
+    /**
+     * Attach each element's position, as `iter::enumerate` does.
+     *
+     * Carries nothing: the index is the loop's own counter, and the `{i, val}`
+     * RECORD the stage nominally produces is never built. Downstream lambdas
+     * read it as `x.val` and `x.i`, which the emitter resolves to the element
+     * and the counter — records are syntax, and this is where one disappears.
+     *
+     * Before this existed a chain containing `.enumerate{}` could not be peeled
+     * at all: the source classified Opaque, nothing fused, and a record was
+     * allocated per element. Measured at 124247 ps/elem against 93 for the
+     * shapes that fuse.
+     */
+    @Serializable data object Enumerate : StageIR
 }
 
 /** How elements are combined. */

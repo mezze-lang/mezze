@@ -933,6 +933,7 @@ object TrivialWrapperInliner {
                 val newStages = node.stages.map { stage ->
                     when (stage) {
                         is StageIR.Map, is StageIR.Filter, is StageIR.TakeWhile, is StageIR.DropWhile -> stage
+                        StageIR.Enumerate -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
                     }

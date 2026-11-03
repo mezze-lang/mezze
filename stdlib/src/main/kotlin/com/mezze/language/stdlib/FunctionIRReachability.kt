@@ -242,6 +242,8 @@ object FunctionIRReachability {
                         is com.mezze.language.truffleir.StageIR.Drop -> collectHashesFromNode(stage.n, queue)
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> queue.add(stage.p.functionHash)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> queue.add(stage.p.functionHash)
+                        // No lambda and no expression, so nothing to keep reachable.
+                        com.mezze.language.truffleir.StageIR.Enumerate -> {}
                     }
                 }
                 when (val sk = node.sink) {

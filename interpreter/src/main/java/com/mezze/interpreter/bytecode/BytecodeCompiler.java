@@ -4749,10 +4749,56 @@ public final class BytecodeCompiler {
         if (sinkMode == null) return false;
 
         // ── Phase 4b: classify pipeline stages ──
+        // WHICH STAGES SEE THE ENUMERATE RECORD. `chain.getStages()` is
+        // outer-to-inner, so this loop meets the LAST-applied stage first and
+        // cannot tell on the fly whether an Enumerate has already run. So walk
+        // application order once up front — list end to start — and record, for
+        // each stage, whether the element arriving at it is the `{i, val}`
+        // record. The record is live from the Enumerate until a MAP consumes it
+        // and produces a plain value; a filter or a take passes it through
+        // unchanged, so it stays live across those.
+        var stageList = chain.getStages();
+        boolean[] recordLiveAt = new boolean[stageList.size()];
+        boolean recordLive = false;
+        for (int i = stageList.size() - 1; i >= 0; i--) {
+            recordLiveAt[i] = recordLive;
+            var st = stageList.get(i);
+            if (st instanceof StageIR.Enumerate) recordLive = true;
+            else if (st instanceof StageIR.Map) recordLive = false;
+        }
+        // Whatever is still live after the outermost stage reaches the SINK,
+        // whose classifiers do not read the record — decline rather than feed
+        // them an element that is not the shape they expect.
+        if (recordLive) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: enumerate record reaches the sink");
+            return false;
+        }
         var classifiedStages = new java.util.ArrayList<ClassifiedStage>();
-        for (var stage : chain.getStages()) {
+        for (int si = 0; si < stageList.size(); si++) {
+            var stage = stageList.get(si);
+            boolean elemIsEnumRecord = recordLiveAt[si];
+            if (stage instanceof StageIR.Enumerate) {
+                classifiedStages.add(new ClassifiedStage.EnumerateStep());
+                continue;
+            }
+            if (elemIsEnumRecord
+                    && !(stage instanceof StageIR.Map)
+                    && !(stage instanceof StageIR.Take)
+                    && !(stage instanceof StageIR.Drop)) {
+                // A predicate over the record would need the same field
+                // resolution as a mapper; until it has it, decline.
+                if (dbg) System.err.println("[chain-canon-emit] reject: "
+                        + stage.getClass().getSimpleName() + " over an enumerate record");
+                return false;
+            }
             if (stage instanceof StageIR.Map mapStage) {
-                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language);
+                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language, elemIsEnumRecord);
+                if (elemIsEnumRecord && shape != null && shape.callHash != null) {
+                    // A call form would be handed the element where the lambda
+                    // expects the record. Never emit that.
+                    if (dbg) System.err.println("[chain-canon-emit] reject: call-form map over an enumerate record");
+                    return false;
+                }
                 if (shape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
@@ -4769,7 +4815,8 @@ public final class BytecodeCompiler {
                         }
                     }
                     classifiedStages.add(new ClassifiedStage.MapInline(
-                        shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp));
+                        shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp,
+                        shape.leftIsIndex));
                 }
             } else if (stage instanceof StageIR.Filter filterStage) {
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
@@ -5776,7 +5823,14 @@ public final class BytecodeCompiler {
      * filter predicate. Built from the canonicalizer's StageIR list.
      */
     private sealed interface ClassifiedStage {
-        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp) implements ClassifiedStage {}
+        /** [leftIsIndex] when the mapped expression reads `x.i` rather than the
+         *  element — the left operand is then the enumerate counter. */
+        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp,
+                         boolean leftIsIndex) implements ClassifiedStage {
+            MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp) {
+                this(op, rhsLit, rhsNode, selfOp, false);
+            }
+        }
         record MapCall(Hash callHash, boolean scalarABI, String fieldName) implements ClassifiedStage {}
         record FilterStep(FilterPeel peel) implements ClassifiedStage {}
         record TakeStep(NodeIR n) implements ClassifiedStage {}
@@ -5785,6 +5839,13 @@ public final class BytecodeCompiler {
         record TakeWhileStep(FilterPeel peel) implements ClassifiedStage {}
         /** DropWhile: boolean state; skip elements while predicate is true. */
         record DropWhileStep(FilterPeel peel) implements ClassifiedStage {}
+        /**
+         * Enumerate: carries nothing, because the `{i, val}` record it
+         * nominally produces is never built. The loop keeps a counter, the
+         * element stays where it is, and the next stage's `x.val` and `x.i`
+         * resolve to the element and that counter.
+         */
+        record EnumerateStep() implements ClassifiedStage {}
     }
 
     // ── Sink mode: the per-element action and post-loop result ──────────
@@ -6673,6 +6734,22 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
         }
 
+        // ── Pre-allocate the enumerate counter and the current index ──
+        // Two locals, not one: the element needs ITS index while the counter
+        // moves on, and the index has to be read before the increment.
+        com.oracle.truffle.api.bytecode.BytecodeLocal enumCounter = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal enumIndex = null;
+        if (stages.stream().anyMatch(st -> st instanceof ClassifiedStage.EnumerateStep)) {
+            enumCounter = b.createLocal();
+            b.beginStoreLocal(enumCounter);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+            enumIndex = b.createLocal();
+            b.beginStoreLocal(enumIndex);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+
         // ── Pre-allocate Take/Drop counter locals + DropWhile state ──
         var takeDropCounters = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
         var dropWhileFlags = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
@@ -6754,8 +6831,32 @@ public final class BytecodeCompiler {
                       b.beginBlock();
                     filterDepth++;
                 }
+                // The index of the element now passing, then the counter moves
+                // on. Placed at the stage's own position, so it counts exactly
+                // the elements that REACH the enumerate — a filter above it
+                // drops elements that have already been numbered, which is what
+                // `enumerate` means.
+                case ClassifiedStage.EnumerateStep ignored -> {
+                    b.beginStoreLocal(enumIndex);
+                      b.emitLoadLocal(enumCounter);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(enumCounter);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(enumCounter); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
+                }
                 case ClassifiedStage.MapInline mi -> {
-                    if (mi.selfOp()) {
+                    if (mi.leftIsIndex()) {
+                        // `x.i <op> rhs` — the record's index field, which is
+                        // the counter, never a materialised field read.
+                        b.beginStoreLocal(xSlot);
+                          beginInlineArithOp(mi.op(), b);
+                            b.emitLoadLocal(enumIndex);
+                            emitFLPOperand(mi.rhsLit(), mi.rhsNode(), b, argCount, localMap);
+                          endInlineArithOp(mi.op(), b);
+                        b.endStoreLocal();
+                    } else if (mi.selfOp()) {
                         b.beginStoreLocal(xSlot);
                         emitInlineOpTwoLocals(mi.op(), xSlot, xSlot, b);
                         b.endStoreLocal();
@@ -7318,6 +7419,10 @@ public final class BytecodeCompiler {
         final Hash callHash;
         final boolean callScalarABI;
         final String callFieldName;
+        /** True when the body reads `x.i` — the enumerate counter — rather than
+         *  the element. Only reachable after an Enumerate stage. */
+        boolean leftIsIndex;
+        UnaryLitShape withLeftIsIndex() { this.leftIsIndex = true; return this; }
         UnaryLitShape(InlineOp op, long rhsLit) {
             this.op = op; this.rhsLit = rhsLit; this.rhsNode = null; this.selfOp = false;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
@@ -7674,8 +7779,31 @@ public final class BytecodeCompiler {
         return false;
     }
 
+    /**
+     * How [node] reads the `{i, val}` record a preceding Enumerate stage
+     * nominally produced: 0 for `.val` (the element), 1 for `.i` (the counter),
+     * -1 for anything else.
+     *
+     * A BARE read of the parameter is -1 on purpose. The record is never built,
+     * so there is nothing for a bare read to denote — the chain must decline
+     * rather than hand out the raw element in its place.
+     */
+    private static int enumFieldRead(NodeIR node, int paramSlot) {
+        if (!(node instanceof ReadFieldIR rf)) return -1;
+        if (!(rf.getRecord() instanceof ReadLocalIR rl) || rl.getSlot() != paramSlot) return -1;
+        if ("val".equals(rf.getFieldName())) return 0;
+        if ("i".equals(rf.getFieldName())) return 1;
+        return -1;
+    }
+
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
+        return classifyUnaryLiteralLambda(ml, language, false);
+    }
+
+    private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
+                                                     MezzeLanguage language,
+                                                     boolean elemIsEnumRecord) {
         // #515 — accept captures for Shape A/B/C only. Call-form (Shape D)
         // still refuses captures — a captured user_fn callee isn't safe
         // to inline as a mapper without further work.
@@ -7689,6 +7817,26 @@ public final class BytecodeCompiler {
         // param sits at slot equal to captures.size().
         int paramSlot = caps.size();
         NodeIR body = fnIR.getBody();
+        if (elemIsEnumRecord) {
+            // The parameter is the enumerate record, which is never built, so
+            // only a field read can be honoured — `x.val` is the element and
+            // `x.i` is the counter. Restricted to the left operand of an inline
+            // arithmetic shape; anything else declines and the chain falls back
+            // to the real, record-building pipeline.
+            if (!(body instanceof InlineBinaryOpIR bin)) return null;
+            int which = enumFieldRead(bin.getLeft(), paramSlot);
+            if (which < 0) return null;
+            NodeIR right = bin.getRight();
+            UnaryLitShape shape;
+            if (right instanceof LongLitIR r) {
+                shape = new UnaryLitShape(bin.getOp(), r.getValue());
+            } else if (isParamFree(right, paramSlot)) {
+                shape = new UnaryLitShape(bin.getOp(), right);
+            } else {
+                return null;
+            }
+            return which == 1 ? shape.withLeftIsIndex() : shape;
+        }
         // Shape A: InlineBinaryOp(ReadLocal(paramSlot), rhs) where rhs is
         // LongLit OR ReadCapture(i).
         if (body instanceof InlineBinaryOpIR bin

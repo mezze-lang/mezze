@@ -83,6 +83,7 @@ class FusedChainStageOrderLoweringTest {
                         is StageIR.Drop -> "drop"
                         is StageIR.TakeWhile -> "take_while"
                         is StageIR.DropWhile -> "drop_while"
+                        StageIR.Enumerate -> "enumerate"
                     }
                 }
             }

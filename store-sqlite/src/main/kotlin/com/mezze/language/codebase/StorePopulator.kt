@@ -940,6 +940,8 @@ object StorePopulator {
                         is com.mezze.language.truffleir.StageIR.Drop -> collectEdgesFromNode(stage.n, report)
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
+                        // No lambda and no expression: no edge to record.
+                        com.mezze.language.truffleir.StageIR.Enumerate -> {}
                     }
                 }
                 when (val sk = node.sink) {

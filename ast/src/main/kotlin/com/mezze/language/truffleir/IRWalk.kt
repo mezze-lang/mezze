@@ -78,6 +78,7 @@ fun NodeIR.transformChildren(f: (NodeIR) -> NodeIR): NodeIR = when (this) {
                 is StageIR.Take -> StageIR.Take(f(st.n))
                 is StageIR.Drop -> StageIR.Drop(f(st.n))
                 is StageIR.Map, is StageIR.Filter, is StageIR.TakeWhile, is StageIR.DropWhile -> st
+                StageIR.Enumerate -> st
             }
         },
         sink = when (val k = sink) {

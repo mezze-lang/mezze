@@ -62,6 +62,8 @@ class FusedChainCaptureFrameTest {
                 is StageIR.TakeWhile -> out.add(st.p)
                 is StageIR.DropWhile -> out.add(st.p)
                 is StageIR.Take, is StageIR.Drop -> {}
+                // No lambda, so no capture to check.
+                StageIR.Enumerate -> {}
             }
         }
         when (val sk = chain.sink) {
