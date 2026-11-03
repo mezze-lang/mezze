@@ -846,6 +846,44 @@ THE THREE GAPS, in payoff order:
    earlier run of this same experiment, before one-kernel-per-process, "showed"
    two 17x wins; that was the compiler lottery.
 
+### THE BIGGEST REMAINING GAP: a pipeline behind a higher-order parameter — 460x, and it is INFERENCE
+
+| kernel (n=2e7, min of five) | ps/elem | x floor |
+|---|---|---|
+| 01 called directly, inferred | 90 | 1 |
+| 16 reached through a function VALUE, inferred | 41 600 | **460** |
+| 17 reached through a LAMBDA argument, inferred | 43 000 | **480** |
+| 18 reached through a function value, ANNOTATED | **99** | **1** |
+
+Kernel 18 is kernel 16 with every type written down. It runs at the floor. So
+the indirection costs nothing, the extra call costs nothing, and the 460x is
+what inference leaves on the table: a function reached only through a
+higher-order parameter keeps its generic, dictionary-passing copy, and that copy
+is what executes.
+
+**This is a soundness-adjacent perf bug by the project's own rule — if an
+annotation fixes it, inference is buggy.** The repro is four lines.
+
+THREE EXPLANATIONS RULED OUT, each by measurement:
+
+- NOT a fusion failure. Lowered in the typechecker (the `mez build` route), the
+  chain is `FUSED` in every one of these shapes — direct, via a value, via a
+  lambda, annotated — and in the enclosing functions too.
+- NOT an emit-time rejection. With `MEZZE_CHAIN_CANON_EMIT_DEBUG=1` the direct
+  and indirect runs log IDENTICAL emissions: the same
+  `FusedLongRangePipeline (Accumulate, 2 stages)` counts, the same fused loops.
+  Both kernels live in one binary, so the same compiled code serves both — which
+  is also why that log cannot say which copy RUNS.
+- NOT warmup or a measurement artifact. 41 606 / 41 566 / 41 665 / 41 661 /
+  41 632 ps across five consecutive timings, and flat from n=2e6 to n=2e7. An
+  earlier reading of this gap used a sort key on the wrong field, so the figures
+  above come from printing every timing rather than selecting one.
+
+What is left, therefore, is which COPY of the function the indirect call reaches.
+Fixing it belongs in monomorphisation, and the note in this log's "FOURTH
+attempt" section — mono runs, but the reference site's type is a VARIABLE — is
+the same wall from the other side.
+
 ### Two methodology corrections, both of which produced published-looking numbers
 
 **A higher-order harness destroys what it measures.** The first version of this

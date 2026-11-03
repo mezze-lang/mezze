@@ -140,6 +140,30 @@ let k_to_seq = { n } -> seq::size {
 ## it five times and prints every timing. The caller takes the minimum — the
 ## speed once compiled — and the spread across the five is itself the evidence
 ## that the measurement settled.
+## 16. The SAME pipeline as 01, reached through a function VALUE. Measured by
+## accident while building this bench: taking a pipeline function as a value
+## appeared to cost 350x, because the reference site carries a type variable and
+## the specialisation never happens. Measured here on purpose.
+let apply_to = { f, n } -> f { n = n }
+let k_via_value = { n } -> apply_to { f = k_map_filter, n = n }
+
+## 17. Control for 16: the same indirection depth with the pipeline INLINE, so
+## the difference is the function value and not the extra call.
+let k_via_lambda = { n } -> apply_to { f = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }, n = n }
+
+## 18. Kernel 16 with every type ANNOTATED. If this is fast while 16 is slow,
+## the indirection is not the problem — inference is, and the generic copy is
+## what runs.
+let k_annot: { n: Int } -> Int = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+let apply_annot: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } -> f { n = n }
+let k_via_annot = { n } -> apply_annot { f = k_annot, n = n }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
 
@@ -318,4 +342,35 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
     report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
     report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
+  else if k == 16 then do
+    k_via_value { n = n }
+    k_via_value { n = n }
+    k_via_value { n = n }
+    k_via_value { n = n }
+    k_via_value { n = n }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+  else if k == 17 then do
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+  else if k == 18 then do
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
+    report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
+    report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
   else println { msg = "unknown kernel" }
