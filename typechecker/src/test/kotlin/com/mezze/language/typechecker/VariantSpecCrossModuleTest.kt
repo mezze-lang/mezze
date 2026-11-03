@@ -72,7 +72,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("mt", "pub type T = | Red, Pink |")
         rejectsMain(
             "use mt::{ T, Red }\n$MAIN",
-            null,
+            "M0801",
             "a tag belongs to no module, so there is nothing to import. `use mt::{ Red }` " +
                 "names something the module does not export",
         )
@@ -92,7 +92,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         )
         rejectsMain(
             "use tb::{ handle }\npub let u = {} -> handle { c = Blue }\n$MAIN",
-            null,
+            "V0704",
             "handle has no arm for Blue. This is the stuck call: accepted today, and it " +
                 "reaches the interpreter as `no variant tag matched`",
         )
@@ -152,7 +152,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("cb", "pub type U = | Red, Blue |")
         rejectsMain(
             "use ca::{ T }\nuse cb::{ U }\npub let u = {} -> 1\n$MAIN",
-            null,
+            "V0701",
             "two claimants is two claimants: an import is not a special case. Refused " +
                 "at the IMPORT, not deferred to the first use of Red — the clash exists " +
                 "whether or not the tag is ever written",
@@ -163,7 +163,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("cc", "pub type T = | Red, Pink |")
         rejectsMain(
             "use cc::{ T }\ntype U = | Red, Blue |\n$MAIN",
-            null,
+            "V0701",
             "same clash, half declared and half imported",
         )
     }
@@ -172,7 +172,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("cd", "pub type T = | Red, Pink |")
         rejectsMain(
             "use cd::{ T }\npub let f = { c: | Red | } -> 1\n$MAIN",
-            null,
+            "V0701",
             "the imported name claims Red here, so the inline group contradicts it — " +
                 "6.3 applied to an imported claim",
         )
@@ -227,7 +227,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("hte2", "pub type HtErr = | Refused, Timeout { url: Str, ms: Int } |")
         rejectsMain(
             "use dbe2::{ DbErr }\nuse hte2::{ HtErr }\npub let u = {} -> 1\n$MAIN",
-            null,
+            "V0701",
             "the other half: two names, two claims on Timeout. Refused even though the " +
                 "payloads differ — identity is the name (9.2)",
         )
@@ -245,7 +245,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
             pub let h = { c: Open } -> f { c = c }
             $MAIN
             """,
-            null,
+            "V0704",
             "h accepts any tag and f handles two, so h could hand f a Blue. Open is " +
                 "permissive as a TARGET and maximally restrictive as a SOURCE",
         )
@@ -281,7 +281,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("re4", "pub use re3::{ T }")
         rejectsMain(
             "use re4::{ T }\ntype L = | Red, Blue |\n$MAIN",
-            null,
+            "V0701",
             "the route a name arrived by does not change its claim",
         )
     }
@@ -325,7 +325,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
             pub let q = { c: Small } -> c.describe {}
             $MAIN
             """,
-            null,
+            "V0701",
             "dispatch is equality on the group: Small is not Color. Note this program " +
                 "should ALSO be refused one step earlier — Color and Small both claim " +
                 "Red, so 8.3 refuses the two imports. Either diagnostic is correct; what " +
@@ -370,7 +370,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         rejectsMain(
             "use np::{ Outer }\npub let f = { o: Outer } -> match o is\n" +
                 "  Wrap { inner = A } -> 1\n$MAIN",
-            null,
+            "V0601",
             "the inner group's B has no arm; nesting does not hide it",
         )
     }

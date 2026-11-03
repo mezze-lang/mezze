@@ -53,7 +53,7 @@ class VariantSpecMatchingTest : VariantSpecBase() {
         rejects(
             "pub let f = { c: | Red, Pink | } -> match c is\n" +
                 "  Red -> 1\n  Pink -> 2\n  Blue -> 3\n$MAIN",
-            null,
+            "V0704",
             "Blue is not a member and the group is closed, so no arm can introduce it",
         )
     }
@@ -81,7 +81,7 @@ class VariantSpecMatchingTest : VariantSpecBase() {
         rejects(
             "pub let f = { c: | Red, Pink, ... | } -> match c is\n" +
                 "  Red -> 1\n  Pink -> 2\n  Blue -> 3\n  _ -> 4\n$MAIN",
-            null,
+            "V0704",
             "Blue is not in the named part, so naming it in an arm claims a membership " +
                 "the group does not state; the tail is reached by `_`, not by name",
         )

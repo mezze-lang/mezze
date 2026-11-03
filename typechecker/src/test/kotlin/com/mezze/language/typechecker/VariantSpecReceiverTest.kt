@@ -118,7 +118,7 @@ class VariantSpecReceiverTest : VariantSpecBase() {
               widen { m = m }
             $MAIN
             """,
-            null,
+            "T0201",
             "a mutable cell is WRITTEN (so it receives: element ⊆ declared) and READ " +
                 "(so it sends: declared ⊆ element). Only equality satisfies both, which " +
                 "is where invariance comes from — it is derived, not a special rule",

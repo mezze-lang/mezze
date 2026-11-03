@@ -80,7 +80,7 @@ class VariantSpecAbilityTest : VariantSpecBase() {
             impl Describe for | Red, Green | where { describe = { it } -> "c" }
             $MAIN
             """,
-            null,
+            "V0701",
             "a declaration-site restriction in the spirit of an orphan rule: an impl " +
                 "must be attributable to a declared thing. Used NOWHERE in the codebase — " +
                 "not in source, tests, or the compiler — so banning it costs nothing",
@@ -94,7 +94,7 @@ class VariantSpecAbilityTest : VariantSpecBase() {
             impl Describe for { x: Int } where { describe = { it } -> "r" }
             $MAIN
             """,
-            null,
+            "V0701",
             "same rule. Note the restriction is on SOURCE: the derive generator " +
                 "synthesizes `impl Eq for { f1: T1, … }` for an anonymous shape holding a " +
                 "newtype, and that must keep working",
@@ -108,7 +108,7 @@ class VariantSpecAbilityTest : VariantSpecBase() {
             impl Describe for { x: Int, ... } where { describe = { it } -> "r" }
             $MAIN
             """,
-            null,
+            "V0701",
             "openness is not what 10.1 restricts — anonymity is",
         )
     }
@@ -120,7 +120,7 @@ class VariantSpecAbilityTest : VariantSpecBase() {
             impl Describe for Red where { describe = { it } -> "r" }
             $MAIN
             """,
-            null,
+            "V0701",
             "a tag is a MEMBER of a group, not a type of its own, so there is nothing " +
                 "an ability could usefully attach to: `impl Describe for Red` says " +
                 "nothing `impl Describe for Color` does not say better. The performer " +
@@ -139,7 +139,7 @@ class VariantSpecAbilityTest : VariantSpecBase() {
             impl Describe for | Red, Green | where { describe = { it } -> "b" }
             $MAIN
             """,
-            null,
+            "V0701",
             "an alias is transparent (6.1), so these name ONE group and this is a " +
                 "duplicate definition — the same error as writing `let x` twice. Today " +
                 "both are accepted and the spelling silently decides which body runs",
@@ -191,7 +191,7 @@ class VariantSpecAbilityTest : VariantSpecBase() {
             pub let u = {} -> f { c = Green }
             $MAIN
             """,
-            null,
+            "V0601",
             "`it` has exactly the target group, so section 5 applies with nothing added. " +
                 "This is the identity-gated coverage bug reaching impl bodies, and it " +
                 "crashes the interpreter with `exhaustiveness guarantee violated`",

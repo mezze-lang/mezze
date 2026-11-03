@@ -362,19 +362,22 @@ class ConstraintSolver(
     }
 
     private fun collectInferenceErrors(
-        inferenceErrors: List<String>,
+        inferenceErrors: List<Pair<String, ErrorCode>>,
         constraints: List<Constraint>,
         errors: MutableList<ConstraintError>
     ) {
         if (inferenceErrors.isNotEmpty() && constraints.isNotEmpty()) {
             val contextConstraint = constraints.first()
-            for (errorMsg in inferenceErrors) {
+            for ((errorMsg, code) in inferenceErrors) {
                 errors.add(ConstraintError(
                     message = errorMsg,
                     constraint = contextConstraint,
-                    // These come from variant-inference reporting, not from a
-                    // solver Failure, so there is no site-level code to carry.
-                    code = ErrorCode.UNCATEGORIZED,
+                    // Carried from the reporting site. These used to be
+                    // UNCATEGORIZED on the grounds that variant inference is not a
+                    // solver Failure — but a diagnostic without a code cannot be
+                    // asserted on or `--explain`ed, and "Green is not in T" is a
+                    // perfectly ordinary V0704.
+                    code = code,
                     context = "Variant type inference"
                 ))
             }

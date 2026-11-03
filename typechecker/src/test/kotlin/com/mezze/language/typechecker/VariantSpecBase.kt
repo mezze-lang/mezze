@@ -72,14 +72,19 @@ abstract class VariantSpecBase {
     }
 
     /**
-     * The rule says this program is refused. [code] names the diagnostic when
-     * the rule fixes one; pass null only where the rule genuinely does not care
-     * which check fires.
+     * The rule says this program is refused, with [code] naming the diagnostic.
+     *
+     * The code is REQUIRED. A refusal without one cannot be asserted on and
+     * cannot be `--explain`ed, so "it errored" would be all the test pins — and
+     * a diagnostic rendering as E0000 UNCATEGORIZED reads to a user as an
+     * internal failure rather than a rule. Where a site has no code to carry,
+     * the fix is to give it one, not to stop asking: that is how the variant
+     * inference channel got its codes.
      */
-    protected fun rejects(src: String, code: String?, why: String) {
+    protected fun rejects(src: String, code: String, why: String) {
         val r = check(src)
         if (r.isSuccess) {
-            fail("$why\n\nexpected: refused${code?.let { " ($it)" } ?: ""}\n     got: accepted\n\n$src")
+            fail("$why\n\nexpected: refused ($code)\n     got: accepted\n\n$src")
         }
         assertCode(r, code, why)
     }
@@ -89,8 +94,7 @@ abstract class VariantSpecBase {
      * from the message: the prose moves, the code does not, and the `T0201`
      * header is added by the CLI so it never appears in `message` at all.
      */
-    private fun assertCode(r: Result<TypeCheckResult>, code: String?, why: String) {
-        if (code == null) return
+    private fun assertCode(r: Result<TypeCheckResult>, code: String, why: String) {
         val e = r.exceptionOrNull()
         val actual = (e as? TypeCheckError)?.code?.display()
         assertTrue(
@@ -151,10 +155,10 @@ abstract class VariantSpecBase {
         }
     }
 
-    protected fun rejectsMain(mainSrc: String, code: String?, why: String) {
+    protected fun rejectsMain(mainSrc: String, code: String, why: String) {
         val r = checkMain(mainSrc)
         if (r.isSuccess) {
-            fail("$why\n\nexpected: refused${code?.let { " ($it)" } ?: ""}\n     got: accepted")
+            fail("$why\n\nexpected: refused ($code)\n     got: accepted")
         }
         assertCode(r, code, why)
     }

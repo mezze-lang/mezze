@@ -84,7 +84,7 @@ class VariantSpecClaimsTest : VariantSpecBase() {
             pub let gp = { c: | Red { s: Str } | } -> 2
             $MAIN
             """,
-            null,
+            "V0701",
             "8.2: getting one name to carry two payloads in a module needs two groups " +
                 "claiming it, and the error should arrive at the second signature rather " +
                 "than as a payload mismatch somewhere later",
@@ -96,7 +96,7 @@ class VariantSpecClaimsTest : VariantSpecBase() {
     @Test fun `a repeated tag in an inline group`() {
         rejects(
             "pub let f = { c: | Red, Red | } -> 1\n$MAIN",
-            null,
+            "V0701",
             "a group is a set, so the repeat has no effect — and writing something with " +
                 "no effect is a mistake about intent (9.8)",
         )
@@ -113,7 +113,7 @@ class VariantSpecClaimsTest : VariantSpecBase() {
     @Test fun `one name may not appear twice with different payloads`() {
         rejects(
             "pub let f = { c: | Red, Red { val: Int } | } -> 1\n$MAIN",
-            null,
+            "V0701",
             "identity is the NAME (9.2), so this is one tag written twice. Worse than " +
                 "accepting it: today the group collapses to | Red { val: Int } | and the " +
                 "nullary Red is silently DISCARDED, so the signature declares two members " +
@@ -126,7 +126,7 @@ class VariantSpecClaimsTest : VariantSpecBase() {
     @Test fun `an undeclared type name in an annotation`() {
         rejects(
             "pub let f = { c: Pink } -> 1\n$MAIN",
-            null,
+            "T0213",
             "a bare name with no | | is a type name, not a group, so an undeclared one " +
                 "is unknown and the error belongs on this line. Otherwise it becomes an " +
                 "uninhabited opaque type: declarable, uncallable, and the diagnostic " +
@@ -137,7 +137,7 @@ class VariantSpecClaimsTest : VariantSpecBase() {
     @Test fun `an undeclared type name inside a list`() {
         rejects(
             "pub let g = { xs: [Pink] } -> 1\n$MAIN",
-            null,
+            "T0213",
             "the notation trap: [Pink] is a list of an undeclared Pink, where " +
                 "[| Pink |] was meant — and it used to typecheck",
         )

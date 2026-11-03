@@ -68,7 +68,7 @@ class VariantSpecInclusionTest : VariantSpecBase() {
     @Test fun `a user group may not claim Bool's tags`() {
         rejects(
             "type MyBool = | True, False |\n$MAIN",
-            null,
+            "V0701",
             "Bool claims True and False, so a second claimant is refused by 8.3",
         )
     }
@@ -76,7 +76,7 @@ class VariantSpecInclusionTest : VariantSpecBase() {
     @Test fun `an inline group may not claim a builtin tag`() {
         rejects(
             "pub let f = { c: | True | } -> 1\n$MAIN",
-            null,
+            "V0701",
             "writing | True | contradicts Bool's claim on True — the inline half of 8.3, " +
                 "and the reason a reservation list is not enough",
         )
@@ -85,7 +85,7 @@ class VariantSpecInclusionTest : VariantSpecBase() {
     @Test fun `a reshaped builtin tag is refused`() {
         rejects(
             "pub let g = {} -> False { val = 6 }\n$MAIN",
-            null,
+            "V0604",
             "identity is the NAME (9.2), so a payload does not buy a second False",
         )
     }

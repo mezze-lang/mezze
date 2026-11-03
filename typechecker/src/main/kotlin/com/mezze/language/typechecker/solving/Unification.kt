@@ -548,6 +548,7 @@ private fun directionalParamVariantCheck(value: MezzeType, demand: MezzeType): U
                 "accepts, never more",
             type1 = value,
             type2 = demand,
+            code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
         )
     }
     return null
@@ -1142,7 +1143,8 @@ private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.Vari
                 return UnificationResult.Failure(
                     message = "Constructor(s) '$invalid' not found in ${describeVariant(closedVar)}.",
                     type1 = var1,
-                    type2 = var2
+                    type2 = var2,
+                    code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
                 )
             }
         }
@@ -1269,7 +1271,8 @@ private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.Vari
             return UnificationResult.Failure(
                 message = "Constructor(s) '$invalid' not found in ${describeVariant(declaredVar)}.",
                 type1 = var1,
-                type2 = var2
+                type2 = var2,
+                code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
             )
         }
     }

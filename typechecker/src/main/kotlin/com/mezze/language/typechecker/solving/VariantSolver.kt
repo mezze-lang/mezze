@@ -27,10 +27,22 @@ internal class VariantSolver(
             val variantType: MezzeType,
             val payloadConstraints: List<Constraint.Equality> = emptyList()
         ) : VariantInferenceResult()
-        data class Failure(val errorMessage: String) : VariantInferenceResult()
+        /**
+         * [code] rides along so the diagnostic keeps its identity out of this
+         * channel. It used to be message-only, so everything reported from
+         * variant inference rendered as E0000 UNCATEGORIZED — unassertable and
+         * not `--explain`able, which is how a correct refusal ("Green is not in
+         * T") looked like an uncategorised internal failure.
+         */
+        data class Failure(
+            val errorMessage: String,
+            val code: ErrorCode = ErrorCode.T0201_TYPE_MISMATCH,
+        ) : VariantInferenceResult()
     }
 
-    fun inferVariantTypes(constraints: List<Constraint>): Pair<List<Constraint.Equality>, List<String>> {
+    fun inferVariantTypes(
+        constraints: List<Constraint>,
+    ): Pair<List<Constraint.Equality>, List<Pair<String, ErrorCode>>> {
         val constructorsByType = mutableMapOf<MezzeType, MutableMap<String, MezzeType?>>()
         val firstLocByType = mutableMapOf<MezzeType, Loc?>()
 
@@ -46,7 +58,7 @@ internal class VariantSolver(
         }
 
         val inferredEqualities = mutableListOf<Constraint.Equality>()
-        val errors = mutableListOf<String>()
+        val errors = mutableListOf<Pair<String, ErrorCode>>()
 
         for ((typeVar, constructorsWithPayloads) in constructorsByType) {
             val constructorNames = constructorsWithPayloads.keys
@@ -69,7 +81,7 @@ internal class VariantSolver(
                     inferredEqualities.addAll(result.payloadConstraints)
                 }
                 result is VariantInferenceResult.Failure -> {
-                    errors.add(result.errorMessage)
+                    errors.add(result.errorMessage to result.code)
                 }
                 result == null -> {
                     // No matching variant found - anonymous/structural variant
@@ -143,7 +155,10 @@ internal class VariantSolver(
                         }
                         val errorMsg = "Constructor(s) ${suggestions.joinToString()} not found in closed variant '$typeName'. " +
                                       "Available constructors: ${declaredConstructors.joinToString()}"
-                        deferredFailure = VariantInferenceResult.Failure(errorMsg)
+                        deferredFailure = VariantInferenceResult.Failure(
+                            errorMsg,
+                            ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
+                        )
                     }
                     continue
                 }
