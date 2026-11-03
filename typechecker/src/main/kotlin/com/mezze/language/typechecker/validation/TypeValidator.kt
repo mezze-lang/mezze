@@ -95,7 +95,7 @@ class TypeValidator(
                         constraintResults[decl.variableName]?.type?.let { substitution.apply(it) }
                     } else null
                     if (scrutineeType != null) errors.addAll(validateLetPattern(decl.pattern, scrutineeType))
-                    errors.addAll(validatePatternsInExpression(decl.value, substitution))
+                    errors.addAll(validatePatternsInExpression(decl.value, substitution, decidedScrutineeTypes))
                 }
                 is ParsedTopLevelExpr -> {
                     // A bare expression at the top level parses (it's the REPL/eval
@@ -108,7 +108,7 @@ class TypeValidator(
                     if (strictTopLevel) {
                         errors.add(ValidationError.TopLevelExpression(decl.loc))
                     }
-                    errors.addAll(validatePatternsInExpression(decl.expression, substitution))
+                    errors.addAll(validatePatternsInExpression(decl.expression, substitution, decidedScrutineeTypes))
                 }
                 is ParsedEffectDecl -> errors.addAll(effectValidator.validateEffectDeclaration(decl))
                 is ParsedPerformerDecl -> {
@@ -741,8 +741,14 @@ class TypeValidator(
         )) else emptyList()
     }
 
-    private fun validatePatternsInExpression(expr: ParsedExpr, substitution: Substitution): List<ValidationError> = buildList {
-        fun recurse(e: ParsedExpr) { addAll(validatePatternsInExpression(e, substitution)) }
+    private fun validatePatternsInExpression(
+        expr: ParsedExpr,
+        substitution: Substitution,
+        decidedScrutineeTypes: Map<Loc, MezzeType> = emptyMap(),
+    ): List<ValidationError> = buildList {
+        fun recurse(e: ParsedExpr) {
+            addAll(validatePatternsInExpression(e, substitution, decidedScrutineeTypes))
+        }
         when (expr) {
             is ParsedDo -> {
                 for (stmt in expr.statements) when (stmt) {
@@ -762,9 +768,34 @@ class TypeValidator(
             }
             is ParsedMatch -> {
                 recurse(expr.scrutinee)
-                matchValidator.inferParsedScrutineeTypeFromPatterns(expr)?.let { scrutineeType ->
+                // Coverage is judged against the group the scrutinee SOLVED to,
+                // not against a group reconstructed from the arms.
+                //
+                // `inferParsedScrutineeTypeFromPatterns` builds a variant out of
+                // the patterns present, so the arms cover it by construction and
+                // a missing arm can never be reported. It is the right fallback
+                // when nothing decided a type — a scrutinee whose group is still
+                // open — but it must not be the first choice, or whether a match
+                // is checked depends on whether its group happens to carry a
+                // declared NAME. That was measurable: the same group, the same
+                // single arm, accepted inline and correctly refused behind a
+                // `type` alias.
+                // Both sources are consulted, and either may report. Neither is
+                // reliably the better one: the DECIDED type can come back erased
+                // or closed for an unannotated parameter, where the pattern walk
+                // still sees the declaration's open tail; and the pattern walk
+                // builds its group OUT OF the arms, so on its own it can never
+                // report a missing arm. Taking the first failure of the two is
+                // sound in the direction that matters — it can only add errors,
+                // never hide one — and it is what lets a group be checked whether
+                // or not it carries a declared name.
+                val candidates = listOfNotNull(
+                    decidedScrutineeTypes[expr.loc],
+                    matchValidator.inferParsedScrutineeTypeFromPatterns(expr),
+                )
+                for (scrutineeType in candidates) {
                     val result = validateParsedExhaustiveness(expr, substitution.apply(scrutineeType))
-                    if (result is ValidationResult.Failure) addAll(result.errors)
+                    if (result is ValidationResult.Failure) { addAll(result.errors); break }
                 }
                 (matchValidator.validateParsedUnreachablePatterns(expr) as? ValidationResult.Failure)?.let { addAll(it.errors) }
                 for (case in expr.cases) { recurse(case.body); case.guard?.let { recurse(it) } }
