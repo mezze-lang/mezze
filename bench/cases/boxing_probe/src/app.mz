@@ -1,0 +1,166 @@
+## BOXING + CALL-DISPATCH PROBE — in-process, steady-state, no startup noise.
+##
+## Times each kernel repeatedly inside one process using the monotonic clock, so
+## the ~800ms JAR startup never enters the number and the JIT has warmed by the
+## measured runs. Cross-process timing cannot answer "ns per iteration" at this
+## resolution; this can.
+##
+## THE THREE KERNELS, each isolating one thing:
+##
+##   sum_tr   tail recursion + one Int add per iteration. The floor: if a
+##            boxed Long is allocated per operation, it shows up here first.
+##   fib      NON-tail recursion. THE CASE THAT MATTERS for re-enabling boxing
+##            elimination: @GenerateBytecode's comment says quickenings with
+##            "recursive call patterns (fib)" caused an infinite compile->deopt
+##            storm where "compiled code address stays 0x0". So fib is both the
+##            call-overhead benchmark AND the regression test for the flag.
+##   arith    several ops per iteration (mul, div, mod, add) to separate
+##            per-CALL cost from per-OPERATION cost. If sum_tr and arith differ
+##            only slightly, the cost is the call; if arith is much worse, it is
+##            the operations.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::int
+
+## SIZES COME FROM ARGV, and that is not a convenience — it is correctness.
+##
+## With literal sizes, fib(30) measured 2 ms for ~2.7M calls = 0.74 ns/call,
+## which would be faster than Java. A pure function of a compile-time constant
+## is foldable, so that number was the optimiser returning a cached answer, not
+## a measurement. Reading the size at runtime removes the constant and makes the
+## call count real.
+let size_or = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let sum_tr = { n, acc } ->
+  if n <= 0 then acc
+  else sum_tr { n = n - 1, acc = acc + n }
+
+let fib = { n } ->
+  if n < 2 then n
+  else fib { n = n - 1 } + fib { n = n - 2 }
+
+## Four arithmetic ops per iteration instead of one.
+let arith = { n, acc } ->
+  if n <= 0 then acc
+  else arith { n = n - 1, acc = acc + n * 3 / 2 % 1000 }
+
+## SAME TOTAL WORK, reached by many short calls instead of one long loop.
+##
+## THE OSR HYPOTHESIS. `sum_tr` takes the self-tail LOOP path (verified with a
+## compiler probe: hasTail=true params=2 -> LOOP=true), so it should be a
+## backward branch inside one compilation unit. Yet it costs 12 ns/iter while
+## `fib` — which is NOT loop-converted — costs 1.1 ns/call.
+##
+## A loop losing to recursive calls by 11x points at WHEN compilation happens,
+## not at the code. `sum_tr` is INVOKED ONCE and iterates 10M times inside, so
+## the invocation-count trigger never fires and the loop can only be compiled by
+## on-stack replacement. `fib` is invoked 2.7M times, so it compiles on
+## invocation count immediately.
+##
+## If OSR is not kicking in, the loop body runs in the BDSL INTERPRETER for the
+## whole run. This kernel distinguishes the two: outer*inner is the same total
+## iteration count, but now the function is invoked `outer` times, which triggers
+## ordinary invocation-count compilation. Much cheaper per iteration here means
+## the long loop is never getting compiled.
+let sum_many = { outer, inner, acc } ->
+  if outer <= 0 then acc
+  else sum_many {
+    outer = outer - 1,
+    inner = inner,
+    acc = acc + sum_tr { n = inner, acc = 0 },
+  }
+
+let time_sum_many = { outer, inner } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = sum_many { outer = outer, inner = inner, acc = 0 }
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_sum = { n } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = sum_tr { n = n, acc = 0 }
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_fib = { n } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = fib { n = n }
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let time_arith = { n } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = arith { n = n, acc = 0 }
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let report = { label, ns, iters, result } -> do
+  ## `int::to_str` and not `.to_str{}` throughout: in a helper like this the
+  ## parameters are unconstrained, and inherent-method dispatch needs a known
+  ## receiver —
+  ##   error[T0206]: Cannot resolve inherent method 'to_str': the receiver's
+  ##                 type could not be determined
+  ## Naming the module pins each one to Int without an annotation.
+  println { msg = "  $(label)  $(int::to_str { n = ns / 1000000 }) ms   $(int::to_str { n = ns / iters }) ns/iter   result=$(int::to_str { n = result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = size_or { args = args, i = 0, def = 10000000 }
+  let fibn = size_or { args = args, i = 1, def = 30 }
+  ## fib(n) makes 2*fib(n+1)-1 calls; for the default 30 that is 2692537.
+  let fibcalls = size_or { args = args, i = 2, def = 2692537 }
+  println { msg = "boxing+dispatch probe   sum_tr/arith N=$(n.to_str{})  fib($(fibn.to_str{}))" }
+
+  ## warm every kernel before any measurement
+  time_sum { n = n }
+  time_sum { n = n }
+  time_sum { n = n }
+  time_fib { n = fibn }
+  time_fib { n = fibn }
+  time_fib { n = fibn }
+  time_arith { n = n }
+  time_arith { n = n }
+  time_arith { n = n }
+
+  println { msg = "--- sum_tr: tail recursion, 1 add/iter ---" }
+  let s1 = time_sum { n = n }
+  let s2 = time_sum { n = n }
+  let s3 = time_sum { n = n }
+  report { label = "run1", ns = s1.ns, iters = n, result = s1.result }
+  report { label = "run2", ns = s2.ns, iters = n, result = s2.result }
+  report { label = "run3", ns = s3.ns, iters = n, result = s3.result }
+
+  println { msg = "--- fib: NON-tail recursion (the deopt-storm case) ---" }
+  let f1 = time_fib { n = fibn }
+  let f2 = time_fib { n = fibn }
+  let f3 = time_fib { n = fibn }
+  report { label = "run1", ns = f1.ns, iters = fibcalls, result = f1.result }
+  report { label = "run2", ns = f2.ns, iters = fibcalls, result = f2.result }
+  report { label = "run3", ns = f3.ns, iters = fibcalls, result = f3.result }
+
+  ## Same 10M total iterations as sum_tr, but as 100000 calls of 100 each.
+  println { msg = "--- sum_many: 100000 calls x 100 iters = same 10M (OSR test) ---" }
+  time_sum_many { outer = 100000, inner = 100 }
+  time_sum_many { outer = 100000, inner = 100 }
+  time_sum_many { outer = 100000, inner = 100 }
+  let m1 = time_sum_many { outer = 100000, inner = 100 }
+  let m2 = time_sum_many { outer = 100000, inner = 100 }
+  let m3 = time_sum_many { outer = 100000, inner = 100 }
+  report { label = "run1", ns = m1.ns, iters = n, result = m1.result }
+  report { label = "run2", ns = m2.ns, iters = n, result = m2.result }
+  report { label = "run3", ns = m3.ns, iters = n, result = m3.result }
+
+  println { msg = "--- arith: 4 ops/iter ---" }
+  let a1 = time_arith { n = n }
+  let a2 = time_arith { n = n }
+  let a3 = time_arith { n = n }
+  report { label = "run1", ns = a1.ns, iters = n, result = a1.result }
+  report { label = "run2", ns = a2.ns, iters = n, result = a2.result }
+  report { label = "run3", ns = a3.ns, iters = n, result = a3.result }

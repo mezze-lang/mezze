@@ -1,0 +1,39 @@
+## ONE KERNEL ONLY — a self-tail-recursive Int loop, nothing else.
+##
+## boxing_probe runs four kernels in one process, so a JFR allocation profile
+## taken from it cannot attribute a MezzeRecord to any particular loop. This
+## case exists purely so the attribution is unambiguous: a MezzeRecord sampled
+## here was allocated by THIS loop.
+##
+## THE DESIGN INTENT BEING TESTED: a record is Mezze's SYNTAX, for the
+## typechecker. Once lowered it should disappear into positional arguments for
+## the Bytecode DSL. So a MezzeRecord allocated per iteration of a tail loop is
+## a LOWERING failure — the record survived a stage that should have erased it —
+## not a runtime cost to be optimised around.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::int
+
+let size_or = { args, def } -> match seq::get { xs = args, i = 0 } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let sum_tr: { n: Int, acc: Int } -> Int = { n, acc } ->
+  if n <= 0 then acc
+  else sum_tr { n = n - 1, acc = acc + n }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let n = size_or { args = argv {}, def = 20000000 }
+  sum_tr { n = n, acc = 0 }
+  sum_tr { n = n, acc = 0 }
+  sum_tr { n = n, acc = 0 }
+  let t0 = monotonic {}
+  let r = sum_tr { n = n, acc = 0 }
+  let t1 = monotonic {}
+  let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+  println { msg = "sum_tr n=$(int::to_str { n = n })  $(int::to_str { n = ns / 1000000 }) ms  $(int::to_str { n = ns / n }) ns/iter  result=$(int::to_str { n = r })" }

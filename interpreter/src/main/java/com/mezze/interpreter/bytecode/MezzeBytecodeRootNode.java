@@ -125,6 +125,35 @@ import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
     // quickenings to stabilize, the invalidation cycle persists.
     // Requires upstream Truffle fix (quickening-aware compilation
     // assumption) or BDSL-level manual typed locals.
+    // MEASURED 2026-11-03 (mez nightly-202611030641, Truffle 25.0.3), and the
+    // numbers correct two things in the note above.
+    //
+    //  1. THE STORM NO LONGER REPRODUCES. Flipping this to
+    //     {long,double,boolean} and running bench/cases/boxing_probe gives
+    //     fib(30) in 3ms across three warmed runs, with no compile->deopt
+    //     storm and no `Addr 0x0`. The blocker the note describes is stale on
+    //     25.0.3. Left OFF regardless, because:
+    //  2. TURNING IT ON CHANGES NOTHING MEASURABLE. A tail loop stays at
+    //     13 ns/iter against 12 ns/iter with it off — inside noise. So the flag
+    //     alone is not the win the note implies; the quickenings it enables do
+    //     not reach the loop's hot locals.
+    //
+    // WHAT THE LOOP COST ACTUALLY IS: a self-tail LOOP keeps its parameters in
+    // BDSL locals across the backward branch, and sum_tr (1 arithmetic op per
+    // iteration) and arith (4 ops) BOTH cost 12-13 ns/iter — identical. A fixed
+    // per-iteration cost that does not move with the amount of arithmetic is
+    // not the arithmetic. Meanwhile fib, which passes values on the operand
+    // stack inside one recursively-inlined compilation unit, is at PARITY with
+    // Java (1.1 vs 1.06 ns/call) because escape analysis removes the boxing
+    // there.
+    //
+    // The open lead is NOT this flag but a hard compile failure visible in the
+    // same trace, present with the flag either way:
+    //     opt failed MezzeRootNode[__entry__] Reason: SourceStackTraceBailout:
+    //     Object of type FrameWithoutBoxing should not be materialized
+    //     (must not pass virtual object into an invoke that cannot be inlined)
+    // A materialized frame cannot have its slots virtualized, which would
+    // explain a fixed per-iteration cost that no boxing flag can touch.
     boxingEliminationTypes = {},
     enableUncachedInterpreter = true,
     enableYield = true,

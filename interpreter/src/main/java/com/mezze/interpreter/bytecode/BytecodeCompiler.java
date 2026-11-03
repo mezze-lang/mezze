@@ -1532,7 +1532,20 @@ public final class BytecodeCompiler {
                                 b, argCount, localMap);
                     }
                 }
-
+                // WHY THIS DIAGNOSTIC EXISTS. The three self-tail tiers all
+                // refuse SILENTLY — a declined function simply compiles the
+                // slow way, with no diagnostic anywhere. That is how a 48x
+                // regression hid in plain sight: every annotation-free numeric
+                // tail loop was declined by tier 1 because its operands arrived
+                // in a record, and the only visible symptom was that programs
+                // were slow. `MEZZE_TRACE_SELFTAIL=1` names the tier per
+                // function so a refusal is a fact you can read rather than a
+                // number you have to go hunting for.
+                if (System.getenv("MEZZE_TRACE_SELFTAIL") != null) {
+                    System.err.println("[selftail] " + ir.getName()
+                            + " params=" + paramCount
+                            + " tier=" + (emittedDirect ? "FUSED" : "not-fused"));
+                }
                 // ── Try direct-while optimization ──
                 // When body = IfIR(cond, base, selfTailCall), emit a
                 // tight While loop using the source condition directly
@@ -3411,6 +3424,45 @@ public final class BytecodeCompiler {
                 // Emit inline BDSL operations directly, skipping MakeRecord
                 // allocation and NativeDispatch HashMap lookup.
                 String recName = cn.getName();
+                // ── GENERIC record-ABI collapse ──────────────────────────────
+                // Any native whose signature declares an inlineOp and exactly
+                // two params becomes that inline op, with the operands read out
+                // of the record by DECLARED PARAMETER NAME. This replaces
+                // writing a hand-rolled fast path per native (the
+                // `__native_string_concat` arm below is one such) and covers
+                // every arithmetic and comparison native at once.
+                //
+                // WHY IT IS NEEDED AT ALL: a record is Mezze's SYNTAX, for the
+                // typechecker, and should be gone by emission. It is not,
+                // because the compile-time collapse cannot run — under
+                // `mez build` the NativeSignatures registry is EMPTY (the
+                // interpreter module is `compileOnly` in the CLI), so
+                // `__native_int_add { l = acc, r = n }` reaches us intact with
+                // inlineOp=null. HERE the registry IS loaded, so here it can be
+                // undone.
+                //
+                // MEASURED on a 20M-iteration numeric tail loop: 12 ns/iter
+                // with the record, 0.2 ns/iter without it, and allocation drops
+                // from ~100 bytes/iteration to nothing (young-GC count flat from
+                // 20M to 40M iterations instead of 46 then 92).
+                //
+                // ORDER IS PRESERVED, not assumed: an InlineBinaryOp evaluates
+                // left then right, while the record evaluates its fields in the
+                // order they are WRITTEN. Those can differ, and an operand can
+                // be a call, so this takes the path only when the written field
+                // order already matches the signature's parameter order.
+                if (cn.getArg() instanceof MakeRecordIR genMr) {
+                    var genSig = NativeSignatures.INSTANCE.signatureOf(recName);
+                    java.util.List<NodeIR> genOps =
+                            (genSig == null) ? null : fltlRecordOperands(cn, genSig);
+                    if (genOps != null && fltlRecordFieldsInSigOrder(genMr, genSig)) {
+                        emitNode(new InlineBinaryOpIR(
+                                genSig.getInlineOp(),
+                                genOps.get(0), genOps.get(1), cn.getSrc()),
+                                b, argCount, localMap);
+                        return;
+                    }
+                }
                 if (cn.getArg() instanceof MakeRecordIR mr) {
                     // str::concat { l, r } → DirectAdd (addStrings specialization)
                     if ("__native_string_concat".equals(recName) && mr.getFields().size() == 2) {
@@ -8454,6 +8506,18 @@ public final class BytecodeCompiler {
      * Returns true if emission succeeded; the caller should skip the
      * direct-while fallback in that case.
      */
+    /**
+     * PROBE (temporary): names the refusal site when FusedLongTailLoop — the
+     * tier that runs a whole tail loop in Java with no per-iteration BDSL
+     * dispatch — declines a function. Refusal is otherwise silent, which is how
+     * an 11 ns/iter loop allocating ~100 bytes/iter went unnoticed.
+     */
+    private static void fltlRefuse(String where) {
+        if (System.getenv("MEZZE_TRACE_SELFTAIL") != null) {
+            System.err.println("[selftail]   tier-1 declined at " + where);
+        }
+    }
+
     private boolean tryEmitFusedLongTailLoop(
             IfIR ifBody, FunctionIR ir, int paramCount, int captureCount,
             MezzeBytecodeRootNodeGen.Builder b, int argCount,
@@ -8480,7 +8544,7 @@ public final class BytecodeCompiler {
             tailCall = tc; baseExpr = elseBr;
             invertCond = true;
         }
-        if (tailCall == null) return false;
+        if (tailCall == null) { fltlRefuse("line8520"); return false; }
 
         // Helper: resolve IR node to param index (0-based), or -1.
         // Params appear as ReadLocalIR(slot < argCount, slot >= captureCount)
@@ -8496,16 +8560,16 @@ public final class BytecodeCompiler {
 
         // Base case must read one of the params.
         int resultIdx = paramIdx.applyAsInt(baseExpr);
-        if (resultIdx < 0) return false;
+        if (resultIdx < 0) { fltlRefuse("line8536"); return false; }
 
         // Condition must be a comparison (param CMP constant) or
         // (constant CMP param). Accepted IR shapes: InlineBinaryOpIR,
         // CallNativeIR (scalar-ABI 2-arg), or CallIndirectIR wrapping
         // ReadField(<op>, receiver) + MakeRecord{r = ...} (VarType path).
         InlineOp condOp = fltlExtractOp(cond);
-        if (condOp == null) return false;
+        if (condOp == null) { fltlRefuse("line8543"); return false; }
         int condCmpOp = fltlClassifyCmp(condOp);
-        if (condCmpOp < 0) return false;
+        if (condCmpOp < 0) { fltlRefuse("line8545"); return false; }
         NodeIR condLeft = fltlExtractChild(cond, 0);
         NodeIR condRight = fltlExtractChild(cond, 1);
 
@@ -8521,7 +8585,7 @@ public final class BytecodeCompiler {
             condCmpOp = fltlSwapCmp(condCmpOp);
             condRhsVal = clit.getValue();
         } else {
-            return false;
+            { fltlRefuse("line8561"); return false; }
         }
 
         // If tail call was in the then-branch, negate the condition.
@@ -8542,15 +8606,15 @@ public final class BytecodeCompiler {
             // CallNativeIR (scalar-ABI 2-arg), or CallIndirectIR
             // (VarType ability-dispatch: ReadField + MakeRecord).
             InlineOp extractedOp = fltlExtractOp(arg);
-            if (extractedOp == null) return false;
+            if (extractedOp == null) { fltlRefuse("line8582"); return false; }
             int op = fltlClassifyArithOp(extractedOp);
-            if (op < 0) return false;
+            if (op < 0) { fltlRefuse("line8584"); return false; }
             NodeIR leftNode = fltlExtractChild(arg, 0);
             NodeIR rightNode = fltlExtractChild(arg, 1);
 
             // Left must be THIS param
             int lpi = paramIdx.applyAsInt(leftNode);
-            if (lpi != i) return false;
+            if (lpi != i) { fltlRefuse("line8590"); return false; }
 
             // Right: LongLitIR or OTHER param
             if (rightNode instanceof LongLitIR rlit) {
@@ -8559,7 +8623,7 @@ public final class BytecodeCompiler {
                 rhsIsOther[i] = false;
             } else {
                 int rpi = paramIdx.applyAsInt(rightNode);
-                if (rpi < 0 || rpi == i) return false;
+                if (rpi < 0 || rpi == i) { fltlRefuse("line8599"); return false; }
                 updateOp[i] = op;
                 updateRhs[i] = 0;
                 rhsIsOther[i] = true;
@@ -8775,14 +8839,91 @@ public final class BytecodeCompiler {
      * </ol>
      * Returns the InlineOp, or null if the node doesn't match any shape.
      */
+    /**
+     * The two operands of a record-form scalar native, in the SIGNATURE's
+     * parameter order, or null when the record does not supply exactly those
+     * parameters.
+     *
+     * Binding by declared parameter name rather than by field position is what
+     * makes this safe: the record is a Mezze record, so its fields carry names
+     * and may be written in any order.
+     */
+    /* package-private for NativeRecordOperandTest */
+    static java.util.List<NodeIR> fltlRecordOperands(
+            CallNativeIR cnir,
+            com.mezze.language.truffleir.NativeSignature sig) {
+        if (sig.getInlineOp() == null) return null;
+        if (sig.getParams().size() != 2) return null;
+        if (!(cnir.getArg() instanceof MakeRecordIR mr)) return null;
+        java.util.List<NodeIR> out = new java.util.ArrayList<>(2);
+        for (var p : sig.getParams()) {
+            NodeIR found = null;
+            int seen = 0;
+            for (FieldIR f : mr.getFields()) {
+                if (p.getName().equals(f.getName())) { found = f.getValue(); seen++; }
+            }
+            // A spread or a duplicate field means we cannot be sure which value
+            // binds, so decline rather than guess.
+            if (found == null || seen != 1) return null;
+            out.add(found);
+        }
+        // Every field must be accounted for; an extra one would be dropped.
+        long fieldCount = mr.getFields().stream().filter(f -> f instanceof FieldIR).count();
+        if (fieldCount != mr.getFields().size() || fieldCount != 2) return null;
+        return out;
+    }
+
+    /**
+     * True when the record writes its fields in exactly the signature's
+     * parameter order, so collapsing it to a left-then-right inline op cannot
+     * reorder two operand expressions.
+     */
+    /* package-private for NativeRecordOperandTest */
+    static boolean fltlRecordFieldsInSigOrder(
+            MakeRecordIR mr,
+            com.mezze.language.truffleir.NativeSignature sig) {
+        var params = sig.getParams();
+        var fields = mr.getFields();
+        if (fields.size() != params.size()) return false;
+        for (int i = 0; i < fields.size(); i++) {
+            if (!(fields.get(i) instanceof FieldIR f)) return false;
+            if (!params.get(i).getName().equals(f.getName())) return false;
+        }
+        return true;
+    }
+
     private InlineOp fltlExtractOp(NodeIR node) {
         if (node instanceof InlineBinaryOpIR bin) {
             return bin.getOp();
         }
-        if (node instanceof CallNativeIR cnir
-                && cnir.isScalarABI() && cnir.getArgs().size() == 2) {
+        if (node instanceof CallNativeIR cnir) {
             var sig = NativeSignatures.INSTANCE.signatureOf(cnir.getName());
-            return (sig != null) ? sig.getInlineOp() : null;
+            if (sig == null) return null;
+            // Positional (scalar-ABI) form.
+            if (cnir.isScalarABI() && cnir.getArgs().size() == 2) {
+                return sig.getInlineOp();
+            }
+            // RECORD form. A record is Mezze's SYNTAX, for the typechecker; by
+            // the time we are emitting bytecode it should have become
+            // positional operands. It has not here, and it cannot be fixed at
+            // compile time: under `mez build` the NativeSignatures registry is
+            // EMPTY (the interpreter module is `compileOnly` in the CLI), so
+            // the lowering-side collapse to InlineBinaryOpIR never runs and
+            // `__native_int_add { l = acc, r = n }` survives into the IR with
+            // inlineOp=null. We ARE in the interpreter, where the registry is
+            // loaded, so read the operands out of the record by the
+            // signature's parameter names instead of refusing the function.
+            //
+            // WHY IT MATTERS: refusing here made FusedLongTailLoop decline
+            // every annotation-free numeric tail loop, which then ran as BDSL
+            // bytecode allocating a MezzeRecord per iteration. Measured on a
+            // 20M-iteration sum: 12 ns/iter refused vs 0.25 ns/iter fused —
+            // 48x, and the fused form allocates nothing (GC count flat from
+            // 20M to 40M iterations).
+            if (fltlRecordOperands(cnir, sig) != null) {
+                return sig.getInlineOp();
+            }
+            return null;
         }
         if (node instanceof CallIndirectIR ci
                 && ci.getFunction() instanceof ReadFieldIR rf
@@ -8800,8 +8941,19 @@ public final class BytecodeCompiler {
         if (node instanceof InlineBinaryOpIR bin) {
             return childIdx == 0 ? bin.getLeft() : bin.getRight();
         }
-        if (node instanceof CallNativeIR cnir && cnir.isScalarABI()) {
-            return cnir.getArgs().get(childIdx);
+        if (node instanceof CallNativeIR cnir) {
+            if (cnir.isScalarABI() && childIdx < cnir.getArgs().size()) {
+                return cnir.getArgs().get(childIdx);
+            }
+            // Record form — see fltlExtractOp. Operand order follows the
+            // SIGNATURE's parameter order, not the order the fields happen to
+            // be written in, so `{ r = .., l = .. }` still binds correctly.
+            var sig = NativeSignatures.INSTANCE.signatureOf(cnir.getName());
+            if (sig != null) {
+                java.util.List<NodeIR> ops = fltlRecordOperands(cnir, sig);
+                if (ops != null && childIdx < ops.size()) return ops.get(childIdx);
+            }
+            return null;
         }
         if (node instanceof CallIndirectIR ci
                 && ci.getFunction() instanceof ReadFieldIR rf) {

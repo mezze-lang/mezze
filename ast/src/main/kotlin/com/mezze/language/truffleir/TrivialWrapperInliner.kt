@@ -105,7 +105,29 @@ object TrivialWrapperInliner {
             if (hash !in wrappers && hash !in doNotInline && isTrivialWrapper(fn)) wrappers[hash] = fn
         }
 
-        if (wrappers.isEmpty()) return functions
+        // NO WRAPPERS STILL MEANS WORK TO DO. Collapsing a record-form native
+        // into an inline op is NORMALISATION, not a side effect of inlining, so
+        // it cannot be gated on having something to inline.
+        //
+        // MEASURED CAVEAT, 2026-11-03: this cannot fire under `mez build`
+        // today, because the NativeSignatures registry is EMPTY there — the
+        // interpreter module is `compileOnly` in the CLI, so nothing registers
+        // `__native_int_add`. Probed directly:
+        //     [inliner] inline() entered, 3913 functions; registrySize=0 int_add=NULL
+        // So every `signatureOf(name) ?: return node` bails and no native
+        // collapses at compile time. Interpreter tests LOAD the registry and
+        // therefore cannot see this. The collapse stays because it is correct
+        // and becomes live the moment the registry is populated in the compile
+        // path; until then the RUNTIME side (BytecodeCompiler.fltlExtractOp)
+        // has to recognise the record form, which is where the fix landed.
+        //
+        // MEASURED: `tailonly`'s `sum_tr` has no trivial wrapper to inline —
+        // the stdlib `add` body was already inlined at precompile time — so
+        // this early return skipped every body and `acc + n` kept its
+        // MakeRecordIR operands. That cost 48x (12 vs 0.25 ns/iter): the record
+        // allocates ~100 bytes per iteration AND makes FusedLongTailLoop refuse
+        // the function, because the fused tier needs positional operands.
+        if (wrappers.isEmpty()) return collapseOnly(functions)
 
         // #432 — iterate to fixpoint. A single pass only handles direct
         // A→B wrapping. Chains like `sum_to → fold_method_impl → fold_module`
@@ -416,6 +438,30 @@ object TrivialWrapperInliner {
      * inside it. Walks the whole tree (not just the top level) so calls
      * nested inside another non-trivial body still get the speedup.
      */
+    /**
+     * Normalise every body with no inlining: collapse record-form native calls
+     * into inline ops. Used when there is no trivial wrapper to inline, so the
+     * normalisation still happens — see the comment at the `wrappers.isEmpty()`
+     * return.
+     */
+    private fun collapseOnly(functions: Map<Hash, FunctionIR>): Map<Hash, FunctionIR> {
+        var changed = false
+        val out = HashMap<Hash, FunctionIR>(functions.size)
+        for ((hash, fn) in functions) {
+            val nb = collapseWalk(fn.body)
+            if (nb === fn.body) {
+                out[hash] = fn
+            } else {
+                out[hash] = fn.copy(body = nb)
+                changed = true
+            }
+        }
+        return if (changed) out else functions
+    }
+
+    private fun collapseWalk(node: NodeIR): NodeIR =
+        maybeCollapseInlineOp(recurseChildren(node) { collapseWalk(it) })
+
     private fun rewrite(node: NodeIR, wrappers: Map<Hash, FunctionIR>, stats: InlineStats, self: Hash): NodeIR {
         // Top-level case: this node is itself a wrappable call.
         if (node is CallDirectIR && node.isScalarABI) {
@@ -481,7 +527,22 @@ object TrivialWrapperInliner {
                 return node
             }
         }
-        return recurseChildren(node) { rewrite(it, wrappers, stats, self) }
+        // Collapse on the way OUT of every node, not only after a wrapper
+        // substitution. MEASURED: `acc + n` in an annotation-free tail loop
+        // arrives as
+        //     CallNativeIR(__native_int_add,
+        //         arg=MakeRecordIR([l=ReadLocal(kind=LONG), r=ReadLocal(kind=LONG)]),
+        //         args=[], inlineOp=null, src=fileIndex=50)
+        // i.e. already inlined from the stdlib snapshot (int.mz's `add` body),
+        // in RECORD form, by a path that never reached the collapse. Everything
+        // needed was present — field names match the signature and both
+        // operands are LONG — so the record survived lowering purely because
+        // nothing asked. That cost 48x: 12 ns/iter against 0.25 for the same
+        // loop with the operands positional, because the record both allocates
+        // per iteration AND makes FusedLongTailLoop refuse the function.
+        return maybeCollapseInlineOp(
+            recurseChildren(node) { rewrite(it, wrappers, stats, self) }
+        )
     }
 
     /**
@@ -542,6 +603,19 @@ object TrivialWrapperInliner {
             else -> null
         }
         if (positional == null || positional.size != 2) return node
+        // EVALUATION ORDER: InlineBinaryOpIR evaluates left then right. The
+        // record form evaluates its fields in the order they are written, which
+        // is not necessarily the signature's parameter order. Collapsing a
+        // record whose fields are written out of signature order would silently
+        // reorder two operand expressions, so decline it — an operand can be a
+        // call. Arithmetic written `{ l = .., r = .. }` (every stdlib numeric
+        // body) is in order and collapses.
+        if (node.arg is MakeRecordIR) {
+            val written = (node.arg as MakeRecordIR).fields
+                .filterIsInstance<FieldIR>().map { it.name }
+            val declared = sig?.params?.map { it.name } ?: return node
+            if (written != declared) return node
+        }
         return InlineBinaryOpIR(op, positional[0], positional[1], node.src)
     }
 
