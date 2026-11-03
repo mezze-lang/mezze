@@ -23,6 +23,112 @@ baseline.
 
 ---
 
+## Status at a glance
+
+Every number measured on this branch, from a `mez build` JAR on GraalVM CE
+25.0.2. The fusion figures are ps/elem at n=2e7, min of five timed calls after
+five warmups, ONE KERNEL PER PROCESS — see the methodology corrections below
+for why that last condition is not optional.
+
+### Landed, with the gain
+
+| what | before | after |
+|---|---|---|
+| tail loop, 1 op | 12 ns/iter | **0.2** |
+| tail loop, 4 ops | 12.8 ns/iter | **1.05** (Java 1.06 — parity) |
+| tail loop, 3 params | 25–34 ns/iter | **1.05** |
+| per-iteration allocation, numeric loop | ~100 B | **0** |
+| user HOF, generic callback | 57 ns/iter | **5–6** |
+| dot-chained pipeline | 40 600 ps/elem | **75** (540x) |
+| `enumerate` + map | 124 247 ps/elem | **556** (223x) |
+| compound fold | 14 025 ps/elem | **1 448** (9.7x) |
+| pipeline split across a call | never fused | fused |
+
+The fusion floor is ~85 ps/elem — about 0.25 cycles, i.e. vectorised — and
+map, filter, map+filter, count(pred) and take+filter are all at it.
+
+### FIVE SILENT WRONG ANSWERS, found and fixed
+
+All in machinery that exists only to make things fast, every one of them
+returning a plausible number rather than failing:
+
+1. The lazy `iter` walker ignored stage order — `map(*10).filter(<40)` summed
+   100 where 60 is right.
+2. The `count` sink appended its predicate to a reverse-ordered list — 5
+   instead of 4.
+3. `composeThroughFusedCallee` spliced two stage lists the wrong way round.
+4. `peekThroughMonoWrapper` relocated a lambda's capture into a frame where
+   that slot meant something else.
+5. `FlpSimd` took a `filterFirst` flag and never read it, in four loops —
+   wrong ONLY above `SIMD_THRESHOLD`, which is why every small test passed.
+
+### HOW FAR RECORD ERASURE ACTUALLY GOES
+
+Worth stating precisely, because §1's title ("into an arithmetic call site") is
+narrower than the principle and the two get conflated:
+
+- **At a direct CALL SITE it is general, and predates this branch.** When the
+  callee's parameter names are known and the call's fields match them,
+  `TypedASTCompiler` emits positional arguments and the record is gone —
+  for any type, not just numbers. A tiny pure callee is spliced outright by
+  `tryInlineDirectCall` and the call disappears with it.
+- **§1 is the arithmetic-shaped REPAIR for that**, not the mechanism. Under
+  `mez build` the native registry is empty at lowering time, so native arith
+  calls kept their record all the way to emission; it is now collapsed there,
+  but only for a native with a two-operand `inlineOp` — add/sub/mul/div/mod and
+  the comparisons. The 50x and the zero allocation are numeric-loop results.
+- **NOT erased:** a record-ABI call that falls back (callee not statically
+  known, a SPREAD `..x`, or names that do not match); a record used as a VALUE
+  — constructed, stored, returned, kept — which is a real `MezzeRecord`
+  allocation that nothing here touched; `enumerate`'s `{i, val}` outside a
+  fused pipeline; and field access on a real record.
+
+So the outstanding half of "records are syntax and must disappear" is records
+as VALUES, which is also still unmeasured — see the surface table.
+
+### What is missing from what landed
+
+Chosen limits, recorded at the time, not discovered later:
+
+- **Capture materialisation takes only pure, cheap values.** An effectful
+  argument declines, because `FusedChainIR` keeps the original call as its
+  fallback and would evaluate it twice. Substituting the fallback's arguments
+  too would lift that.
+- **The compound-fold tree refuses CAPTURES**, so a modulo — whose operand
+  needs a dictionary — still declines. The one-level shape classifier does
+  handle a captured operand; only the deeper tree does not.
+- **Compound fold and `enumerate` both land in the general-loop tier**, not the
+  85 ps floor, because `FusedLongPipeline` encodes one op per stage and cannot
+  hold a tree, and declines an Enumerate stage outright.
+- **`enumerate` resolves `.val`/`.i` only in the left operand of an inline
+  arithmetic MAP.** A predicate over the record declines, and so does the
+  record reaching the sink — which is correct for `to_seq`, whose result IS the
+  records.
+- **The inliner's closure-capture gate is untouched on purpose.** Its three
+  motivating suites pass without it, which suggests the `saltedLambdaHash` fix
+  in the same commit was the real cause — but that is unproven, and a guard
+  added for a measured failure does not come out on a hunch.
+- **`countParamReads` still bails** on `PerformOpIR` (90 occurrences in one
+  build), `FusedChainIR` (80), `HandleIR` (51), `DictMethodCallIR` (24) and
+  `MatchIR` (13). Each one disqualifies a whole function from inlining.
+- **Two bounds were picked, not measured:** `MAX_PEEK_HOPS = 4` and
+  `FOLD_TREE_MAX_DEPTH = 8`.
+
+### Ranked next
+
+1. **460x — a pipeline behind a higher-order parameter.** Diagnosed to
+   INFERENCE: annotating gives 99 ps against 41 600. Biggest number left.
+2. **7x general-loop tier** — map+map, filter+filter, filter+take, take_while,
+   drop. It is the SIMD WIDTH, so it needs a stage PROGRAM in FLP.
+3. **`to_seq` at 50x** (4 394 ps).
+4. **Records as values** — unmeasured, and the remaining half of the erasure
+   principle.
+5. The frame-materialisation bailout, the empty native registry under
+   `mez build`, tail-loop tier 1 declining compound updates, and `%`/NumMod
+   class-param resolution (same root as the fold-modulo decline).
+
+---
+
 ## Fixed
 
 ### 1. Records survived lowering into every arithmetic call site — 50× on tail loops
