@@ -1,0 +1,48 @@
+## DOES REFERENCING A GENERIC FUNCTION ALLOCATE PER REFERENCE?
+##
+## `add2` is generic over `NumAdd`, so a reference to it as a VALUE needs its
+## dictionary bound. That used to be done by a wrapper lambda that CAPTURED the
+## resolved dict, which means a closure allocation every time the reference is
+## evaluated. Inlining the dict into the wrapper body instead makes the wrapper
+## closure-free, so evaluating the reference allocates nothing.
+##
+## In `bench/cases/dispatch_probe` the reference is evaluated ONCE outside the
+## loop, so that benchmark cannot see the difference — and measured no change.
+## Here the reference is inside the loop, evaluated every iteration, which is
+## the shape where it counts (passing a generic function to a HOF in a loop).
+##
+## Read this with `-Xlog:gc` and compare young-GC counts across sizes: flat
+## means the reference is free, linear means a closure per iteration.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::int
+
+let size_or = { args, def } -> match seq::get { xs = args, i = 0 } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let add2 = { a, b } -> a + b
+
+## Takes the function as a value, so the caller must materialise a reference.
+let use_it = { g, x } -> g { a = x, b = 1 }
+
+## The `add2` reference is INSIDE the loop body, so it is evaluated per
+## iteration rather than hoisted.
+let loop_ref = { n, acc } ->
+  if n <= 0 then acc
+  else loop_ref { n = n - 1, acc = acc + use_it { g = add2, x = n } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let n = size_or { args = argv {}, def = 5000000 }
+  loop_ref { n = n, acc = 0 }
+  loop_ref { n = n, acc = 0 }
+  let t0 = monotonic {}
+  let r = loop_ref { n = n, acc = 0 }
+  let t1 = monotonic {}
+  let ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+  println { msg = "loop_ref n=$(int::to_str { n = n })  $(int::to_str { n = ns / 1000000 }) ms  $(int::to_str { n = ns / n }) ns/iter  sum=$(int::to_str { n = r })" }

@@ -317,6 +317,34 @@ neither was on the real path.
 Reverted both rather than debugged: no measured benefit, and in one case a real
 correctness break.
 
+### THIRD attempt at the wrapper machinery, also zero — the HOP is the cost
+
+After the two reverts above, a third: making the dict wrapper CLOSURE-FREE.
+When every resolved dict is a constant `ReadGlobalFnByHashIR`, it can be
+inlined into the wrapper's body instead of captured — which is exactly what
+`refToDictedOp` in the same file already does — removing the closure
+allocation, the `__wrap_*` locals and Let statements, and a capture read per
+call.
+
+It fired (confirmed: the compiled root became `dict_wrapper_const_add2`) and
+measured NOTHING, in both shapes that could show it:
+
+- `dispatch_probe`, where the reference is hoisted out of the loop: 59 ns/iter,
+  unchanged.
+- `wrapalloc`, written specifically so the generic reference is evaluated INSIDE
+  the loop: per-iteration allocation stayed LINEAR (26/51 young GCs across
+  5M/10M, against 27/52 for baseline).
+
+A single run looked like a 16% win (48 vs 57 ns/iter) until the baseline was run
+five times and ranged 48-56 on its own. Reverted.
+
+**The conclusion, now evidenced three independent ways:** the dict wrapper's
+cost is the extra CALL LAYER, not the machinery around it. Captures, the bypass
+guard, and the closure allocation have each been removed or extended with no
+measurable effect. Only removing the wrapper itself — monomorphising the generic
+callee so no adapter is needed — will move the 52 ns. Do not spend another pass
+shaving the wrapper; specialise the callee.
+
 ### A measurement error worth not repeating
 
 One round of "still 57 ns, the fix did nothing" was measured against a STALE
