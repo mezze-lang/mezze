@@ -218,7 +218,7 @@ class OrPatternBindingTest {
         val code = """
             type Outer = | A { inner: Int }, B { inner: Int } |
 
-            let process = {o, r: Result Int String} ->
+            let process = {o, r: Result Int Str} ->
                 match o is
                     A { inner = x } | B { inner = x } ->
                         match r is

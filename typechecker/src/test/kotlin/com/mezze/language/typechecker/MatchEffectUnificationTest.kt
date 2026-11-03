@@ -95,7 +95,7 @@ class MatchEffectUnificationTest {
 
             type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
 
-            let test = { either: Either Int String } -> do
+            let test = { either: Either Int Str } -> do
                 match either is
                     Left { val } -> do
                         Log.info { msg = "Left" }

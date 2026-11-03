@@ -39,7 +39,17 @@ internal class UnknownTypeValidator(
         val errors = mutableListOf<ValidationError>()
         for (decl in module.decls) {
             when (decl) {
-                is ParsedLetDecl -> decl.typeAnnotation?.let { walk(it, errors) }
+                is ParsedLetDecl -> {
+                    decl.typeAnnotation?.let { walk(it, errors) }
+                    // A signature written as `{ c: Pink } -> 1` puts its parameter
+                    // annotations on the LAMBDA, not on the let — and the lambda form
+                    // is how Mezze normally writes one, so walking only
+                    // `decl.typeAnnotation` missed almost every annotation in the
+                    // language. `{ c: Pink }` with no `type Pink` anywhere was
+                    // accepted, became an uninhabited opaque type, and the error then
+                    // surfaced at every call site except the one with the typo.
+                    walkLambdaSignatures(decl.value, errors)
+                }
                 is ParsedTypeDecl -> walkTypeDef(decl.definition, errors)
                 is ParsedAbilityDecl -> for (op in decl.operations) {
                     walk(op.paramType, errors)
@@ -132,12 +142,66 @@ internal class UnknownTypeValidator(
         ))
     }
 
+    /**
+     * Type annotations written in a lambda's own signature.
+     *
+     * Only the SIGNATURE is walked — parameter types, the return type, ability
+     * constraints — never the body's expressions, which are not type positions.
+     * Nested lambdas are reached through a let's value and through a lambda's
+     * body, since a signature can sit at either depth.
+     */
+    private fun walkLambdaSignatures(expr: ParsedExpr, errors: MutableList<ValidationError>) {
+        when (expr) {
+            is ParsedLambda -> {
+                when (val ps = expr.params) {
+                    is ParsedLambdaParams.Typed -> for (f in ps.fields) walk(f.type, errors)
+                    else -> {}
+                }
+                expr.returnType?.let { walk(it, errors) }
+                for (c in expr.abilityConstraints) walkConstraint(c, errors)
+                walkLambdaSignatures(expr.body, errors)
+            }
+            is ParsedDo -> {
+                for (stmt in expr.statements) when (stmt) {
+                    is ParsedStatement.Let -> {
+                        stmt.typeAnnotation?.let { walk(it, errors) }
+                        walkLambdaSignatures(stmt.value, errors)
+                    }
+                    is ParsedStatement.Expr -> walkLambdaSignatures(stmt.expr, errors)
+                }
+                walkLambdaSignatures(expr.result, errors)
+            }
+            is ParsedIf -> {
+                walkLambdaSignatures(expr.condition, errors)
+                walkLambdaSignatures(expr.thenBranch, errors)
+                walkLambdaSignatures(expr.elseBranch, errors)
+            }
+            is ParsedMatch -> {
+                walkLambdaSignatures(expr.scrutinee, errors)
+                for (case in expr.cases) walkLambdaSignatures(case.body, errors)
+            }
+            is ParsedFunctionCall -> {
+                walkLambdaSignatures(expr.function, errors)
+                walkLambdaSignatures(expr.arguments, errors)
+            }
+            else -> {}
+        }
+    }
+
     private fun checkName(name: String, loc: Loc, errors: MutableList<ValidationError>) {
         if (name.isTypeVarName()) return
         if (BuiltinTypes.isBuiltinTypeName(name)) return
         if (registry.lookupType(name) != null) return
         if (registry.typeHashFor(name) != null) return          // import-scoped / transitive
         if (WellKnownHashConstants.resolveTypeHash(name) != null) return  // stdlib well-known
+        // An ABILITY or EFFECT name is a declared thing in another namespace.
+        // Whether one may stand in a type position is its own question and not
+        // one this validator decides: widening the walk to lambda signatures
+        // brought `{ x: ToUrl }` into view, where naming the ability is how a
+        // test proves the import resolved. Reporting it as an UNKNOWN type would
+        // be wrong twice over — it is known, and it is not a type.
+        if (registry.abilityDeclarations.containsKey(name)) return
+        if (registry.effectDeclarations.containsKey(name)) return
         errors.add(ValidationError.UnknownType(
             typeName = name,
             availableTypes = registry.typeNames.sorted(),
