@@ -1530,6 +1530,10 @@ public final class BytecodeCompiler {
                         emittedDirect = tryEmitFusedLongTailLoop(
                                 ifBody, ir, paramCount, captureCount,
                                 b, argCount, localMap);
+                    } else if (paramCount == 3) {
+                        emittedDirect = tryEmitFusedLongTailLoop3P(
+                                ifBody, ir, captureCount,
+                                b, argCount, localMap);
                     }
                 }
                 // WHY THIS DIAGNOSTIC EXISTS. The three self-tail tiers all
@@ -8649,6 +8653,146 @@ public final class BytecodeCompiler {
         // p1UpdateRhs
         b.emitLoadLongConstant(updateRhs[1]);
         b.endFusedLongTailLoop();
+
+        return true;
+    }
+
+    /**
+     * Try to emit a {@link MezzeBytecodeRootNode.FusedLongTailLoop3P} for a
+     * 3-param tail-recursive function — the same shape the 2-param version
+     * accepts, one parameter wider:
+     * <pre>
+     *   let f = { p0, p1, p2 } ->
+     *     if pK cmp lit then pR
+     *     else f { p0 = p0 op rhs, p1 = p1 op rhs, p2 = p2 op rhs }
+     * </pre>
+     * where each `rhs` is a long literal or ANOTHER parameter, and any update
+     * may be the identity.
+     *
+     * Added because the tiers stopping at two parameters was itself a cliff: a
+     * 3-param loop doing ordinary direct arithmetic measured 34 ns/iter against
+     * 0.45 for the identical 2-param loop. See `bench/cases/dispatch_probe`.
+     */
+    private boolean tryEmitFusedLongTailLoop3P(
+            IfIR ifBody, FunctionIR ir, int captureCount,
+            MezzeBytecodeRootNodeGen.Builder b, int argCount,
+            BytecodeLocal[] localMap) {
+        final int paramCount = 3;
+        NodeIR cond = ifBody.getCond();
+        NodeIR thenBr = ifBody.getThenBr();
+        NodeIR elseBr = ifBody.getElseBr();
+
+        CallDirectIR tailCall = null;
+        NodeIR baseExpr = null;
+        boolean invertCond = false;
+        if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
+                && ec.getTargetHash().equals(ir.getHash())
+                && ec.getArgs().size() == paramCount) {
+            tailCall = ec; baseExpr = thenBr;
+        } else if (thenBr instanceof CallDirectIR tc && tc.isTailCall()
+                && tc.getTargetHash().equals(ir.getHash())
+                && tc.getArgs().size() == paramCount) {
+            tailCall = tc; baseExpr = elseBr; invertCond = true;
+        }
+        if (tailCall == null) { fltlRefuse("3P:no-self-tail"); return false; }
+
+        final int ac = captureCount + paramCount;
+        java.util.function.ToIntFunction<NodeIR> paramIdx = n -> {
+            if (n instanceof ReadLocalIR rl && rl.getSlot() < ac && rl.getSlot() >= captureCount)
+                return rl.getSlot() - captureCount;
+            if (n instanceof ReadArgIR ra && ra.getIndex() >= captureCount && ra.getIndex() < ac)
+                return ra.getIndex() - captureCount;
+            return -1;
+        };
+
+        // The base case must return one of the params.
+        int resultIdx = paramIdx.applyAsInt(baseExpr);
+        if (resultIdx < 0) { fltlRefuse("3P:base-not-param"); return false; }
+
+        InlineOp condOp = fltlExtractOp(cond);
+        if (condOp == null) { fltlRefuse("3P:cond-not-op"); return false; }
+        int condCmpOp = fltlClassifyCmp(condOp);
+        if (condCmpOp < 0) { fltlRefuse("3P:cond-not-cmp"); return false; }
+        NodeIR condLeft = fltlExtractChild(cond, 0);
+        NodeIR condRight = fltlExtractChild(cond, 1);
+        if (condLeft == null || condRight == null) { fltlRefuse("3P:cond-children"); return false; }
+
+        int condOnIdx;
+        long condRhsVal;
+        int leftPI = paramIdx.applyAsInt(condLeft);
+        int rightPI = paramIdx.applyAsInt(condRight);
+        if (leftPI >= 0 && condRight instanceof LongLitIR clit) {
+            condOnIdx = leftPI;
+            condRhsVal = clit.getValue();
+        } else if (rightPI >= 0 && condLeft instanceof LongLitIR clit) {
+            // `0 < n` means the same as `n > 0`; swap so the param is on the left.
+            condOnIdx = rightPI;
+            condCmpOp = fltlSwapCmp(condCmpOp);
+            condRhsVal = clit.getValue();
+        } else {
+            fltlRefuse("3P:cond-shape");
+            return false;
+        }
+        if (invertCond) condCmpOp = fltlNegateCmp(condCmpOp);
+
+        // Classify each parameter update.
+        int[] updateOp = new int[paramCount];
+        long[] updateRhs = new long[paramCount];
+        int[] rhsSrc = new int[paramCount];   // 0 = literal, else param index + 1
+
+        for (int i = 0; i < paramCount; i++) {
+            NodeIR arg = tailCall.getArgs().get(i);
+            int pi = paramIdx.applyAsInt(arg);
+            if (pi == i) {                      // identity: carried unchanged
+                updateOp[i] = -1;
+                continue;
+            }
+            if (pi >= 0) {
+                // `p0 = p1` — a pure permutation, which this operation has no
+                // encoding for (every update is `self op rhs`).
+                fltlRefuse("3P:update-is-other-param");
+                return false;
+            }
+            InlineOp extracted = fltlExtractOp(arg);
+            if (extracted == null) {
+                fltlRefuse("3P:update-not-op kind=" + arg.getClass().getSimpleName());
+                return false;
+            }
+            int op = fltlClassifyArithOp(extracted);
+            if (op < 0) { fltlRefuse("3P:update-not-arith"); return false; }
+            NodeIR leftNode = fltlExtractChild(arg, 0);
+            NodeIR rightNode = fltlExtractChild(arg, 1);
+            if (leftNode == null || rightNode == null) { fltlRefuse("3P:update-children"); return false; }
+            // Left must be THIS param: the operation computes `self op rhs`.
+            if (paramIdx.applyAsInt(leftNode) != i) { fltlRefuse("3P:update-left"); return false; }
+            if (rightNode instanceof LongLitIR rlit) {
+                updateOp[i] = op;
+                updateRhs[i] = rlit.getValue();
+                rhsSrc[i] = 0;
+            } else {
+                int rpi = paramIdx.applyAsInt(rightNode);
+                if (rpi < 0) { fltlRefuse("3P:update-rhs"); return false; }
+                updateOp[i] = op;
+                updateRhs[i] = 0;
+                rhsSrc[i] = rpi + 1;   // NAME the source param, don't just flag it
+            }
+        }
+
+        int config = MezzeBytecodeRootNode.fltlPack3(
+                condCmpOp, condOnIdx,
+                updateOp[0], updateOp[1], updateOp[2],
+                resultIdx,
+                rhsSrc[0], rhsSrc[1], rhsSrc[2]);
+
+        b.beginFusedLongTailLoop3P(config);
+        b.emitLoadArgument(captureCount);          // p0Init
+        b.emitLoadArgument(captureCount + 1);      // p1Init
+        b.emitLoadArgument(captureCount + 2);      // p2Init
+        b.emitLoadLongConstant(condRhsVal);        // condRhs
+        b.emitLoadLongConstant(updateRhs[0]);      // p0UpdateRhs
+        b.emitLoadLongConstant(updateRhs[1]);      // p1UpdateRhs
+        b.emitLoadLongConstant(updateRhs[2]);      // p2UpdateRhs
+        b.endFusedLongTailLoop3P();
 
         return true;
     }

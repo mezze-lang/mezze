@@ -97,7 +97,50 @@ operand extraction (name-not-position binding, missing/extra/duplicate fields
 declined, no-inline-op declined, order gate). **Verified: 3 fail without the
 fix.**
 
-### 2. Silent refusal made observable
+### 2. The fused tail-loop tier stopped at two parameters — 25× on a third
+
+**Symptom.** A 3-param tail loop doing ordinary direct arithmetic — no closure,
+no generics, nothing exotic — cost 25–34 ns/iter against 0.45 for the identical
+2-param loop. Confirmed as the arity and nothing else by `MEZZE_TRACE_SELFTAIL`:
+
+```
+[selftail]  params=2 tier=FUSED
+[selftail]  params=3 tier=not-fused
+```
+
+**Cause.** `FusedLongTailLoop` existed at arity 1 and 2 only, with the arity
+baked into each. Anything wider fell to the general BDSL loop and paid
+per-iteration dispatch.
+
+**Fix.** `FusedLongTailLoop3P` plus its recogniser, modelled on the 2-param
+pair.
+
+**Why another hand-written arity rather than one variadic operation.**
+`@Variadic Object[]` allocates a fresh array per execution — this file's own
+record operation says so — and an `Object[]` would re-box the longs the
+operation exists to keep unboxed. Specialising the arity is the same reason
+`CallDirect1/2/3` are separate. So this is three copies by design, not by
+neglect, and a fourth is a mechanical addition when something needs it.
+
+**One real difference at this arity.** The 2-param config packs a single
+`pNRhsIsOtherP` *flag*, which works only because with two params "the other
+one" is unambiguous. With three it must NAME the source, so 3P packs two bits
+per update (0 = literal, else param index + 1). Had that stayed a flag,
+`acc = acc + k` and `acc = acc + n` would pack identically and the loop would
+quietly compute the wrong sum.
+
+**Measured, N = 20,000,000:** `via_3p` 503 ms → **21 ms**, 25 → **1.05
+ns/iter**, checksum verified (n × k).
+
+**Tests.** `FusedTailLoop3PTest` — 7 cases, each pinning one packed field by
+making a wrong value produce a different answer (rhs source naming, which param
+the condition reads, result index, identity updates, the old-value rule, a
+literal-on-the-left condition, multiplication). **Verified: a single wrong shift
+in the packing fails 6 of the 7.** They are correctness tests for a new code
+path, not failure-without-the-fix tests — the old path computed the same
+answers, just slowly — so the bit-flip check is what establishes they cover it.
+
+### 3. Silent refusal made observable
 
 `MEZZE_TRACE_SELFTAIL=1` now reports which self-tail tier each function took.
 Added because the above regression was invisible by construction: three tiers,
@@ -149,14 +192,39 @@ what it does not cover. This is why "verify the break" is a rule.
 only difference between them is the dispatch mechanism. N = 20,000,000,
 in-process, warmed.
 
-| route | ns/iter | vs direct |
-|---|---|---|
-| `direct` — monomorphic tail loop | 0.45 | 1× |
-| `via_fn` — add behind a named function | 0.30 | free |
-| **`via_ability`** — ability method, one impl | **0.30** | **free** |
-| **`via_hof`** — add arrives as a closure parameter | **59** | **~130×** |
+| route | params | tier | ns/iter |
+|---|---|---|---|
+| `direct` — monomorphic tail loop | 2 | FUSED | 0.45 |
+| `via_fn` — add behind a named function | 2 | FUSED | 0.30 |
+| **`via_ability`** — ability method, one impl | 2 | FUSED | **0.30** |
+| **`via_3p`** — direct arithmetic, one extra param | 3 | not-fused | **34** |
+| `via_hof` — add arrives as a closure parameter | 3 | not-fused | 80 |
 
-Two results, and the first is good news.
+### CORRECTION: most of the "closure cost" was ARITY, not the closure
+
+Reported first as "a closure parameter costs 59 ns/iter, ~130×". That
+attribution was wrong, and the control that caught it is `via_3p`: the same
+loop with three parameters and DIRECT arithmetic, no closure anywhere.
+
+**Three parameters alone cost 34 ns/iter**, because `FusedLongTailLoop` accepts
+only one or two and declines everything wider — confirmed directly with
+`MEZZE_TRACE_SELFTAIL=1`:
+
+```
+[selftail]  params=2 tier=FUSED
+[selftail]  params=3 tier=not-fused
+```
+
+So of `via_hof`'s 80 ns, roughly 34 is "this loop has three parameters" and
+roughly 46 is the closure call itself. Two separate problems, and the cheaper
+one to fix is the arity limit — it is a bound in one predicate, not a new
+calling convention.
+
+The lesson is the one that keeps recurring here: a single number compares two
+programs that differ in more than one way. The control is what makes it a
+measurement.
+
+Two further results, and the first is good news.
 
 ### Ability dispatch with a statically-known impl is ALREADY free
 
@@ -193,18 +261,91 @@ is a typed calling convention rather than a record collapse.
 
 ---
 
+## Measured: the dictionary wrapper is the cost — 52 of 56 ns
+
+Reported first as "a closure parameter costs 56 ns/iter". Attributing it needed
+the call shape held fixed while only the callee's genericity varied:
+
+| route | callee | ns/iter |
+|---|---|---|
+| `via_fn` | named, direct call | 0.30 |
+| `via_hof_nodict` | closure param, callee NOT generic | **4** |
+| `via_hof` | closure param, callee generic | **57** |
+
+`via_hof`'s callee is `add2 = { a, b } -> a + b`, generic over `NumAdd`, and it
+is reached through **`dict_wrapper_add2`** — observed by probing which root the
+call actually lands on, not inferred:
+
+```
+23 x root=LazyStubRootNode    name=lambda$stub
+ 2 x root=TrampolineRootNode  name=dict_wrapper_add2
+```
+
+So the closure call MACHINERY costs ~4 ns and the **dictionary wrapper ~52** —
+14x on this shape — paid even though the call site is monomorphic `Int` and the
+compiler had everything needed to resolve the impl. Consistent with what was
+already known: `MonoDriver` seeds ZERO specialisations for HOF callsites, so the
+callback's body never resolves `+` statically.
+
+### Two speculative fixes that measured nothing and were REVERTED
+
+Recorded so they are not re-attempted as if new. Both closed genuine gaps;
+neither was on the real path.
+
+1. **`canBypassTarget` accepting a raw BDSL root.** The scalar positional path
+   is gated on the callee being a `TrampolineRootNode`, and a trampoline is only
+   attached when a body HAS tail calls — so a plain `{ a, b } -> a + b` could
+   never be answered yes, and fell to the record-building specialisation.
+   Extending it changed nothing, because the callee's root is a
+   `LazyStubRootNode` wrapping a dict wrapper and neither arm applies.
+2. **Giving `CallLocalIR` the scalar treatment.** It emitted
+   `beginCallIndirect` unconditionally, so a closure held in a local always
+   built a record while `CallIndirectIR` had the scalar path. **UNSOUND, and the
+   suite caught it:**
+
+   ```
+   CallLocal on a lambda in a local slot yields expected result
+     -> RuntimeException: Expected record for field 'x', got: Long
+   ```
+
+   The scalar node's record fallback is a `@Cached` specialisation, so on the
+   UNCACHED interpreter the raw value reaches a callee that reads its argument
+   as a record. That is exactly why the original code deferred to the record
+   path, and a standing reminder that "the fast node handles it at run time"
+   holds only on the cached path.
+
+Reverted both rather than debugged: no measured benefit, and in one case a real
+correctness break.
+
+### A measurement error worth not repeating
+
+One round of "still 57 ns, the fix did nothing" was measured against a STALE
+jar. `mez build` bundles the interpreter, so rebuilding the CLI is not enough —
+the benchmark app must be rebuilt too, or the change is simply not in the binary
+under test. Every measurement after a compiler change now begins with a fresh
+`mez build`.
+
+---
+
 ## Open — ranked by measured or expected payoff
 
-1. **Closure calls box and allocate — 59 ns/iter, ~130×.** The biggest measured
-   gap left, and it is every HOF callback. Needs a typed calling convention for
-   scalar closure parameters: `CallIndirectScalar2`'s specialisation takes
-   `Object arg1, Object arg2`, so Longs box and the varargs array materialises
-   even though the inline cache has already resolved a constant target. See
-   "Where dispatch actually costs" above.
-   *(This supersedes "make dictionary passing static" as written: measured,
-   ability dispatch with a known impl is already free. The dictionary cost that
-   remains is the polymorphic-callback one, which is this item.)*
-2. **Dot-chaining refuses fusion — 2.8× measured.** `ChainCanonicalizer` rewrites
+1. ~~`FusedLongTailLoop` accepts only 1–2 parameters.~~ **FIXED** — see
+   "The fused tail-loop tier stopped at two parameters" above. Arity 4+ still
+   falls off the same cliff and is a mechanical addition when something needs
+   it; nothing measured yet asks for it.
+2. **Static dictionary resolution — 52 ns/iter, the largest measured gap.**
+   A generic callee reached through `dict_wrapper_<name>` costs 57 ns/iter
+   where the same closure call to a NON-generic callee costs 4. The call site
+   is monomorphic `Int`, so the impl is known at compile time and the wrapper
+   should not exist. This is monomorphisation work rather than a patch:
+   `MonoDriver` seeds zero specialisations for HOF callsites (see
+   `docs/perf/407-mono-fusion-investigation.md`).
+   *Supersedes this item's previous wording, which blamed a typed calling
+   convention. Measured, the boxing is ~4 ns of it and the wrapper is ~52 —
+   and ability dispatch with a statically-known impl is already free at
+   0.30 ns/iter, so the dictionary cost that remains is this one.*
+
+3. **Dot-chaining refuses fusion — 2.8× measured.** `ChainCanonicalizer` rewrites
    `iter` chains into `FusedChainIR`, is on by default, and **refuses the
    dot-chained form**: `.map{}.filter{}.sum{}` runs at 35.1 ns/elem with the
    pass on and 29.9 with it off (identical — it never fired), while the
@@ -213,22 +354,22 @@ is a typed calling convention rather than a record collapse.
    runs post-`TrivialWrapperInliner`, so unlinlined ability dispatch leaves
    opaque calls where a peelable chain should be. This conflicts with
    dot-chaining as the idiomatic form; fix the compiler, not the style.
-3. **Tier 1 declines compound updates.** `arith` is at Java parity but still
+4. **Tier 1 declines compound updates.** `arith` is at Java parity but still
    runs the BDSL loop, because `FusedLongTailLoop` only accepts single-op
    parameter updates (`left` must be the param, `right` a literal or another
    param). `acc + n * 3 / 2 % 1000` is declined. Extending tier 1 to compound
    expressions is the remaining headroom there.
-4. **`seq` chains do not fuse at all.** `seq` dies with `Java heap space` at
+5. **`seq` chains do not fuse at all.** `seq` dies with `Java heap space` at
    1e8 where `iter` streams to 4e8. Real fusion would be O(1) memory. Switching
    the filter operator only moved the OOM (peak ~1.5n vs ~2n elements).
-5. **`%` / NumMod class-param resolution is documented broken** and blocks
+6. **`%` / NumMod class-param resolution is documented broken** and blocks
    fusion outright (`bench/cases/filter_map_fold` uses `<` instead and says so).
-6. **A frame-materialization bailout on every run**, present with the boxing
+7. **A frame-materialization bailout on every run**, present with the boxing
    flag either way: `opt failed MezzeRootNode[__entry__] Reason:
    SourceStackTraceBailout: Object of type FrameWithoutBoxing should not be
    materialized (must not pass virtual object into an invoke that cannot be
    inlined)`. A materialized frame cannot have its slots virtualized.
-7. **Populate the registry in the compile path.** The deeper fix behind §1: with
+8. **Populate the registry in the compile path.** The deeper fix behind §1: with
    `NativeSignatures` available under `mez build`, the compile-time collapse,
    the canonicalizer and the emitter would all reason about natives instead of
    each working around the gap. Blast radius: a dependency change (interpreter

@@ -3280,6 +3280,127 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    // Config packing for FusedLongTailLoop3P:
+    //   bits 0-3:   condCmpOp   (cmp op for the loop condition)
+    //   bits 4-5:   condOnIdx   (which param the condition compares: 0/1/2)
+    //   bits 6-9:   p0UpdateOp  (arith op, +1 bias: 0 = identity)
+    //   bits 10-13: p1UpdateOp
+    //   bits 14-17: p2UpdateOp
+    //   bits 18-19: resultIdx   (which param the base case returns)
+    //   bits 20-21: p0RhsSrc    (0 = literal child, else param index + 1)
+    //   bits 22-23: p1RhsSrc
+    //   bits 24-25: p2RhsSrc
+    //
+    // WHY RhsSrc IS TWO BITS AND NOT A FLAG. The 2-param packing above uses a
+    // single `pNRhsIsOtherP` bit, which works only because with two params
+    // "the other one" is unambiguous. With three it has to NAME the source, or
+    // `acc = acc + k` and `acc = acc + n` pack identically and the loop
+    // silently computes the wrong one.
+
+    static int fltlPack3(int condCmpOp, int condOnIdx,
+                         int p0Op, int p1Op, int p2Op,
+                         int resultIdx,
+                         int p0RhsSrc, int p1RhsSrc, int p2RhsSrc) {
+        return (condCmpOp & 0xF)
+             | ((condOnIdx & 0x3) << 4)
+             | (((p0Op + 1) & 0xF) << 6)
+             | (((p1Op + 1) & 0xF) << 10)
+             | (((p2Op + 1) & 0xF) << 14)
+             | ((resultIdx & 0x3) << 18)
+             | ((p0RhsSrc & 0x3) << 20)
+             | ((p1RhsSrc & 0x3) << 22)
+             | ((p2RhsSrc & 0x3) << 24);
+    }
+
+    /** Right-hand operand for one param update: a literal, or another param. */
+    private static long fltl3Rhs(int src, long lit, long p0, long p1, long p2) {
+        switch (src) {
+            case 1: return p0;
+            case 2: return p1;
+            case 3: return p2;
+            default: return lit;
+        }
+    }
+
+    /**
+     * Fused THREE-parameter long tail-loop. Same shape as
+     * {@link FusedLongTailLoop}, one parameter wider:
+     * <pre>
+     *   let f = { p0, p1, p2 } ->
+     *     if pK cmpOp condRhs
+     *       then resultParam
+     *       else f { p0 = p0 op0 rhs0, p1 = p1 op1 rhs1, p2 = p2 op2 rhs2 }
+     * </pre>
+     *
+     * WHY A THIRD HAND-WRITTEN ARITY RATHER THAN ONE VARIADIC OPERATION.
+     * `@Variadic Object[]` allocates a fresh array per execution — the record
+     * operation in this file says so in its own comment — and an Object[] would
+     * re-box the longs this operation exists to keep unboxed. So the arity is
+     * specialised, which is the same reason CallDirect1/2/3 are separate.
+     *
+     * WHY IT IS WORTH IT, MEASURED: a 3-param tail loop with ordinary direct
+     * arithmetic and no closure anywhere cost 34 ns/iter against 0.45 for the
+     * identical 2-param loop, purely because the tiers stopped at two and it
+     * fell through to the BDSL loop. `bench/cases/dispatch_probe` carries that
+     * comparison as `via_3p` against `direct`.
+     *
+     * <p>Children (in order): p0Init, p1Init, p2Init, condRhs, p0UpdateRhs,
+     * p1UpdateRhs, p2UpdateRhs.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)  // config: packed ops (PE constant)
+    public static final class FusedLongTailLoop3P {
+
+        @Specialization
+        public static long doLoop(
+                int config,
+                long p0Init, long p1Init, long p2Init,
+                long condRhs, long p0Rhs, long p1Rhs, long p2Rhs,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            CompilerAsserts.partialEvaluationConstant(config);
+            int condCmpOp = config & 0xF;
+            int condOnIdx = (config >> 4) & 0x3;
+            int p0Op      = ((config >> 6) & 0xF) - 1;
+            int p1Op      = ((config >> 10) & 0xF) - 1;
+            int p2Op      = ((config >> 14) & 0xF) - 1;
+            int resultIdx = (config >> 18) & 0x3;
+            int p0Src     = (config >> 20) & 0x3;
+            int p1Src     = (config >> 22) & 0x3;
+            int p2Src     = (config >> 24) & 0x3;
+
+            long p0 = p0Init, p1 = p1Init, p2 = p2Init;
+            int count = 0;
+
+            // Loop while the condition is NOT met: the condition triggers the
+            // base case, exactly as in the 2-param operation.
+            while (loopProfile.inject(node,
+                    !FusedLongPipeline.flpCmp(condCmpOp,
+                            condOnIdx == 0 ? p0 : condOnIdx == 1 ? p1 : p2,
+                            condRhs))) {
+                // All three new values are computed from the OLD ones before
+                // any is stored, so `p1 = p1 + p0` sees the old p0 — the same
+                // rule the 2-param operation follows.
+                long newP0 = p0Op >= 0
+                        ? FusedLongPipeline.flpOp(p0Op, p0, fltl3Rhs(p0Src, p0Rhs, p0, p1, p2))
+                        : p0;
+                long newP1 = p1Op >= 0
+                        ? FusedLongPipeline.flpOp(p1Op, p1, fltl3Rhs(p1Src, p1Rhs, p0, p1, p2))
+                        : p1;
+                long newP2 = p2Op >= 0
+                        ? FusedLongPipeline.flpOp(p2Op, p2, fltl3Rhs(p2Src, p2Rhs, p0, p1, p2))
+                        : p2;
+                p0 = newP0;
+                p1 = newP1;
+                p2 = newP2;
+                count++;
+            }
+            LoopNode.reportLoopCount(node, count);
+
+            return resultIdx == 0 ? p0 : resultIdx == 1 ? p1 : p2;
+        }
+    }
+
     // Config packing for FusedLongTailLoop1P:
     //   bits 0-3:   condCmpOp      (cmp op for loop condition)
     //   bits 4-7:   p0UpdateOp     (arith op for p0, +1 bias: 0=identity)
