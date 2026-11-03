@@ -236,6 +236,70 @@ relocation path must preserve — no fused chain may capture a slot outside its
 own function's frame — over whole programs rather than one case, since the
 paths are several and each could lose captures differently.
 
+### 6. A pipeline split across a call now fuses too — captures get a slot
+
+After §5, three shapes remained apart. A pipeline written as a dot chain fused;
+one whose stages sat in a callee and whose sink sat in the caller did NOT, and
+measured on the lowered IR it produced no fused chain ANYWHERE:
+
+    let stage = { k } -> iter::map { it = xs, f = { x } -> x * k }   # stages here
+    let main  = {} -> iter::fold { it = stage { k = 2 }, … }          # sink here
+
+The identical program with a non-capturing stage (`x * 2`) fused. The capture
+was the only difference, so this was not a per-call cost — it was the whole
+fusion, element-at-a-time, decided by whether a lambda mentioned a parameter.
+
+WHY A CAPTURE BLOCKED IT. `CaptureIR` holds a frame SLOT INDEX, not a value, so
+moving a lambda into a caller means re-expressing every capture against the
+caller's frame. That works when the caller holds the value in a slot of its own
+and is impossible when it passed a literal — there is no slot to point at — so
+the move was refused, and with it the fusion.
+
+THREE CHANGES, each needed by the next:
+
+1. **Bind the value, then point at it.** A `FrameExtender` appends a local to
+   the function being rewritten, binds the captured value there, and the
+   capture names that slot: the let-binding form of inlining. The binding is
+   emitted around the chain rather than hoisted to the function's entry, so an
+   argument is still evaluated where it was written and not on a path that never
+   runs. Restricted to values that are pure and cheap, because a `FusedChainIR`
+   keeps the original call as its `fallback` and that call still contains the
+   expression — a literal evaluated twice is free, a call is not.
+
+2. **Look through a CHAIN of wrappers, not one.** A user function forwarding to
+   the stdlib function whose body is the native is two hops. Stopping at one
+   left the source `Opaque`.
+
+3. **Substitute structurally, don't refuse at depth.** A nested stage call
+   (`filter { it = map { … }, p = … }`) carries parameter reads and lambdas
+   below the top level. Refusing those declined exactly the pipelines worth
+   fusing. The walk leans on `recurseChildren`, an exhaustive `when` over the
+   sealed node hierarchy, so a new node kind cannot escape it silently.
+
+RESULT, measured on the lowered IR:
+
+| shape | before | after |
+|---|---|---|
+| spanning, capturing stage | nothing fused | `main` fused + 1 binding |
+| spanning, closed stage | `main` fused | unchanged |
+| dot-chained, capturing stages | `go` only | `go` AND `main` fused + 2 bindings |
+
+The dot-chained row is the one §5 left as "declined": the chain now relocates
+into its caller instead of costing a call there.
+
+GUARDED BY `SpanningPipelineFusionTest` (7 value cases) and two cases in
+`FusedChainCaptureFrameTest`. Pointing a capture at the wrong slot does not
+crash, it silently multiplies by whatever lives there, so every value case pins
+an answer a misread slot would change — several pass two captured values of
+different magnitude so a swap is visible, and one captures a value the caller
+holds in a slot while another captures a literal, which take different paths
+through the remap. The two IR cases assert fusion HAPPENS (`chains > 0`) and
+that no capture escapes its frame; both fail with the peel retry removed.
+
+Both IR tests also had to stop matching on `body as? FusedChainIR`: a relocated
+chain is the RESULT of the binding block, so that pattern is null for it and the
+tests would have quietly stopped checking the case relocation introduced.
+
 ---
 
 ## Measured and corrected — claims in the tree that were wrong

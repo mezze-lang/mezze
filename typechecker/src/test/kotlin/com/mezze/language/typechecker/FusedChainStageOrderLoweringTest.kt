@@ -1,8 +1,10 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.truffleir.BlockIR
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.truffleir.FusedChainIR
+import com.mezze.language.truffleir.NodeIR
 import com.mezze.language.truffleir.StageIR
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -49,6 +51,15 @@ class FusedChainStageOrderLoweringTest {
         return r.loweredFunctions
     }
 
+    /** The fused chain a body computes, through any binding wrapper: a
+     *  relocated chain is the result of a BlockIR that binds what its captures
+     *  point at. */
+    private fun chainIn(node: NodeIR): FusedChainIR? = when (node) {
+        is FusedChainIR -> node
+        is BlockIR -> chainIn(node.result)
+        else -> null
+    }
+
     /**
      * The DISTINCT stage orders of the fused chains lowered from `p.mz`.
      *
@@ -61,7 +72,7 @@ class FusedChainStageOrderLoweringTest {
     private fun stageKinds(src: String): List<List<String>> =
         lower(src)
             .filter { it.sourceFile == "p.mz" }
-            .mapNotNull { it.body as? FusedChainIR }
+            .mapNotNull { chainIn(it.body) }
             .filter { it.stages.isNotEmpty() }
             .map { chain ->
                 chain.stages.map { st ->

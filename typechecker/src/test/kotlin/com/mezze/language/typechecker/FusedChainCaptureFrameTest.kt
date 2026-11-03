@@ -1,9 +1,11 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.truffleir.BlockIR
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.truffleir.FusedChainIR
 import com.mezze.language.truffleir.MakeLambdaIR
+import com.mezze.language.truffleir.NodeIR
 import com.mezze.language.truffleir.SinkIR
 import com.mezze.language.truffleir.StageIR
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -80,12 +82,23 @@ class FusedChainCaptureFrameTest {
         return out
     }
 
+    /** The fused chain a body computes, through any binding wrapper. */
+    private fun chainIn(node: NodeIR): FusedChainIR? = when (node) {
+        is FusedChainIR -> node
+        is BlockIR -> chainIn(node.result)
+        else -> null
+    }
+
     /** Every capture of every fused chain must index its own function's frame. */
     private fun check(label: String, src: String) {
         val violations = mutableListOf<String>()
         var chains = 0
         for (fn in lower(src)) {
-            val chain = fn.body as? FusedChainIR ?: continue
+            // A relocated chain is wrapped in a BlockIR that BINDS the values
+            // its captures were re-pointed at, so the chain is the block's
+            // result rather than the body. Matching only on the body would quietly
+            // stop checking the very case that relocation introduced.
+            val chain = chainIn(fn.body) ?: continue
             chains++
             val frame = fn.captureSlots.size + fn.paramSlots.size + fn.localSlots.size
             for (lam in lambdasOf(chain)) {
@@ -156,4 +169,39 @@ class FusedChainCaptureFrameTest {
             """,
         )
     }
+
+    @Test
+    fun `a pipeline split across a call fuses, with its captures in frame`() {
+        // THE SHAPE THAT NEEDED THIS. The stage is in the callee and the sink
+        // in the caller, so the chain only fuses if the peel looks through the
+        // call — and the stage lambda captures `k`, which the caller passed as
+        // a LITERAL and so holds in no slot. Binding it to a fresh local is
+        // what makes the move possible; `chains > 0` below fails without that,
+        // because refusing the move lost the fusion entirely rather than
+        // costing one call.
+        check(
+            "spanning capturing stage",
+            """
+            use std::collections::iter
+            let stage = { k } -> iter::map { it = iter::range { start = 0, end = 5 }, f = { x } -> x * k }
+            let main = {} -> iter::fold { it = stage { k = 2 }, init = 0, f = { acc, x } -> acc + x }
+            """,
+        )
+    }
+
+    @Test
+    fun `a pipeline split across a call with two captures keeps both in frame`() {
+        check(
+            "spanning, two captures",
+            """
+            use std::collections::iter
+            let stage = { mul, lim } -> iter::filter {
+              it = iter::map { it = iter::range { start = 0, end = 5 }, f = { x } -> x * mul },
+              p = { x } -> x < lim,
+            }
+            let main = {} -> iter::fold { it = stage { mul = 10, lim = 40 }, init = 0, f = { acc, x } -> acc + x }
+            """,
+        )
+    }
+
 }
