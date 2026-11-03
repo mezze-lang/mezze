@@ -97,7 +97,61 @@ class ContextBuilder {
             resolvedParsedPerformerDecls +
             abilityImplDecls +
             module.decls.filterIsInstance<ParsedLetDecl>()
-        DuplicateDeclarationValidator.validateDecls(allDeclsForValidation)
+        // Every tag an IMPORTED group claims, so 8.3 sees imported and declared
+        // claims alike. A group's own name maps to itself and is filtered out by
+        // the validator, so re-importing the same group by two routes is not a
+        // clash — only a second, different group is.
+        // Only names the module imported BY NAME claim anything.
+        //
+        // `importedTypes` is the TRANSITIVE set of loaded type decls, not the
+        // by-name imports, and using it directly is the "too broad" failure the
+        // spec warns about: `http.mz` imports FUNCTIONS from `async`, which
+        // dragged `AsyncError`'s claim on `Timeout` into a module that declares
+        // its own `Timeout`, and the stdlib stopped compiling. A group inside an
+        // imported function's signature travels as STRUCTURE; a claim comes from
+        // importing the name (spec 8.4, and the reason two libraries sharing a
+        // tag still compose).
+        val importedByName: Set<String> = buildSet {
+            for (decl in module.decls.filterIsInstance<ParsedUseDecl>()) {
+                when (val path = decl.path) {
+                    is ParsedUsePath.Selective ->
+                        for (item in path.items) add(item.alias ?: item.name)
+                    else -> {}
+                }
+            }
+        }
+        val importedClaims: Map<String, String> = buildMap {
+            for ((typeName, decl) in importedTypes) {
+                if (typeName !in importedByName) continue
+                fun claim(tag: String) {
+                    val holder = this@buildMap[tag]
+                    // Two IMPORTED groups claiming one tag is the same clash as two
+                    // declared ones (8.3) -- the route a name arrived by does not
+                    // change its claim. Refused at the import, not deferred to the
+                    // first use of the tag: the clash exists whether or not the tag
+                    // is ever written, and a module that imports both names has no
+                    // answer for a bare one.
+                    if (holder != null && holder != typeName) {
+                        throw com.mezze.language.typechecker.TypeCheckError(
+                            "Constructor '" + tag + "' is claimed by both '" + holder +
+                                "' and '" + typeName + "', which are different groups. A tag " +
+                                "belongs to one group per module, however the name arrived — " +
+                                "import only one of them, or reach the other module through a " +
+                                "function in its signature.",
+                            decl.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                        )
+                    }
+                    put(tag, typeName)
+                }
+                when (val def = decl.definition) {
+                    is ParsedVariantDef -> for (ctor in def.constructors) claim(ctor.name)
+                    is ParsedNewtypeDef -> claim(def.constructor)
+                    else -> {}
+                }
+            }
+        }
+        DuplicateDeclarationValidator.validateDecls(allDeclsForValidation, importedClaims)
 
         val allEffectDecls = effectDecls + importedEffects
         currentEffectDecls = allEffectDecls

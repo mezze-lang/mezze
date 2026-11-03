@@ -8,10 +8,13 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.ast.ScopedEffectConstants
 
 object DuplicateDeclarationValidator {
-        fun validateModule(module: ParsedModule) {
+        fun validateModule(
+            module: ParsedModule,
+            alreadyClaimed: Map<String, String> = emptyMap(),
+        ) {
         validateReservedTypeNames(module)
         validateDuplicateTypes(module)
-        validateDuplicateConstructors(module)
+        validateDuplicateConstructors(module, alreadyClaimed)
         validateNewtypeConstructors(module)
         validateFreeTypeVariables(module)
         validateDuplicateEffects(module)
@@ -57,9 +60,30 @@ object DuplicateDeclarationValidator {
         }
     }
 
-        fun validateDecls(decls: List<ParsedDecl>) {
+        /**
+         * Spec 8.3: within a module a tag belongs to exactly ONE named group,
+         * and it makes no difference whether that name arrived by declaration or
+         * by import. Two claimants is two claimants.
+         *
+         * [alreadyClaimed] seeds the claim table with the groups whose names are
+         * in scope from elsewhere — imports and re-exports — so a local
+         * declaration colliding with an imported one is refused exactly as two
+         * local declarations are. Without it the clash was detected globally and
+         * only at the first USE of the shared tag, which is both too late
+         * (import two names, never write the tag, and nothing is said) and too
+         * broad (importing only a FUNCTION subjected you to the global claim, so
+         * two libraries sharing a tag could not be used together at all).
+         *
+         * The group's own origin is not a claim against itself, which is how
+         * `std::option` declares `Option`: a name mapping to the same group it is
+         * declaring is skipped.
+         */
+        fun validateDecls(
+            decls: List<ParsedDecl>,
+            alreadyClaimed: Map<String, String> = emptyMap(),
+        ) {
         val syntheticModule = ParsedModule("<validation>", decls)
-        validateModule(syntheticModule)
+        validateModule(syntheticModule, alreadyClaimed)
     }
 
     /**
@@ -186,7 +210,10 @@ object DuplicateDeclarationValidator {
         // when a user variant tries to redeclare them.
         private val BUILTIN_CONSTRUCTORS = BuiltinTypes.reservedConstructorOwner
 
-        private fun validateDuplicateConstructors(module: ParsedModule) {
+        private fun validateDuplicateConstructors(
+            module: ParsedModule,
+            alreadyClaimed: Map<String, String> = emptyMap(),
+        ) {
         val constructorToTypeMap = mutableMapOf<String, String>()
         // Every locally-declared type/newtype name. A variant constructor may
         // share its OWN type's name (the single-constructor idiom
@@ -202,6 +229,11 @@ object DuplicateDeclarationValidator {
         // second, mirroring the variant duplicate-constructor rule. The nominal
         // "two distinct single-field types" case is what `newtype` is for.
         val recordShapeToType = mutableMapOf<String, String>()
+        // Imported claims come first, so a local declaration colliding with
+        // one is refused with the imported group named (spec 8.3).
+        constructorToTypeMap.putAll(
+            alreadyClaimed.filterKeys { it !in declaredTypeNames }
+        )
 
         for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
             val definition = typeDecl.definition
