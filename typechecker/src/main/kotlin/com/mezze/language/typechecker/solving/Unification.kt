@@ -519,6 +519,121 @@ private fun directionalParamFieldCheck(value: MezzeType, demand: MezzeType): Uni
     return null
 }
 
+/**
+ * Spec 2.1, the direction unification cannot supply: a variant group fits a
+ * position expecting another iff it is a SUBSET of it — the DEMAND's arms are an
+ * upper bound on what may arrive.
+ *
+ * Same contract and same orientation as [directionalParamFieldCheck], and for
+ * the same reason: `unifyVariants` is symmetric and admits a subset either way
+ * (see the `armsRelated` note there), so the illegal orientation has to be
+ * rejected where the direction is known. A parameter is contravariant and a
+ * return covariant, but both land on `value ⊆ demand` here — an argument's group
+ * must be within what the callee handles, and a returned group within what the
+ * caller handles.
+ *
+ * Only CLOSED demands bind. An open demand is unbounded, so everything fits it
+ * (2.4), and a still-open value is inference in progress rather than a value
+ * that genuinely carries the extra tags — left to the solver.
+ */
+private fun directionalParamVariantCheck(value: MezzeType, demand: MezzeType): UnificationResult.Failure? {
+    if (demand !is MezzeType.VariantType || value !is MezzeType.VariantType) return null
+    if (demand.rowVar != null) return null
+    if (value.rowVar != null) return null
+    val extra = value.constructors.keys - demand.constructors.keys
+    if (extra.isNotEmpty()) {
+        return UnificationResult.Failure(
+            message = "Constructor(s) '${extra.sorted().joinToString(", ")}' not found in " +
+                "${describeVariant(demand)}: a value may carry FEWER tags than the position " +
+                "accepts, never more",
+            type1 = value,
+            type2 = demand,
+        )
+    }
+    return null
+}
+
+/**
+ * The nested walk for [directionalParamVariantCheck], and the place the receiver
+ * rule earns its keep.
+ *
+ * Descending through a record field keeps the orientation. Descending into a
+ * FUNCTION-typed position FLIPS it for that function's parameter, because the
+ * party that receives has changed: the callback itself now receives whatever the
+ * caller will send it, so the callback may accept MORE than the position asks
+ * and still fit (spec 3.2). Its return keeps the outer orientation, since the
+ * caller receives that.
+ *
+ * Getting this wrong in either direction is silent. Applying one orientation
+ * everywhere made `feed_pink { f = narrow }` typecheck — a callback that handles
+ * only `| Red |` installed where `| Red, Pink |` will be sent — which is the
+ * launder this walk exists to stop.
+ */
+private fun directionalVariantFieldCheck(value: MezzeType, demand: MezzeType): UnificationResult.Failure? {
+    directionalParamVariantCheck(value, demand)?.let { return it }
+
+    if (demand is MezzeType.RecordType && value is MezzeType.RecordType) {
+        for ((fieldName, demandFieldType) in demand.fields) {
+            val valueFieldType = value.fields[fieldName] ?: continue
+            directionalVariantFieldCheck(valueFieldType, demandFieldType)?.let {
+                return UnificationResult.Failure(
+                    message = "Field `$fieldName`: ${it.message}",
+                    type1 = value,
+                    type2 = demand,
+                )
+            }
+        }
+    }
+
+    if (demand is MezzeType.FunctionType && value is MezzeType.FunctionType) {
+        // Parameter: swapped — the callback is the receiver.
+        directionalVariantFieldCheck(
+            value = demand.paramType,
+            demand = value.paramType,
+        )?.let { return it }
+        // Return: unswapped — the caller is the receiver.
+        directionalVariantFieldCheck(
+            value = value.returnType,
+            demand = demand.returnType,
+        )?.let { return it }
+    }
+    return null
+}
+
+/**
+ * Spec 3.5: a variant used as a TYPE ARGUMENT may not widen.
+ *
+ * The relaxation in [unifyVariantBodies] is correct for a value flowing into a
+ * position, because [unifyFunctions] knows which side receives and
+ * [directionalVariantFieldCheck] enforces it. A type argument has no such site:
+ * `MutSeq | Red |` against `MutSeq | Red, Pink |` is just two arguments meeting,
+ * and a mutable container both receives (written) and sends (read), so only
+ * equality satisfies both obligations.
+ *
+ * Applied to every type argument rather than only the mutable ones, because the
+ * typechecker carries no variance information and the alternative is deciding it
+ * from the constructor's NAME. Immutable containers lose deep widening through a
+ * written argument as a result; a literal or inferred element is unaffected,
+ * which is every case the suite exercises for 2.8/3.4.
+ */
+private fun variantArgsMustMatch(
+    arg1: MezzeType,
+    arg2: MezzeType,
+    outer1: MezzeType,
+    outer2: MezzeType,
+): UnificationResult.Failure? {
+    if (arg1 !is MezzeType.VariantType || arg2 !is MezzeType.VariantType) return null
+    if (arg1.rowVar != null || arg2.rowVar != null) return null
+    if (arg1.constructors.keys == arg2.constructors.keys) return null
+    return UnificationResult.Failure(
+        message = "Cannot unify ${describeVariant(arg1)} with ${describeVariant(arg2)} as a " +
+            "type argument: a variant in an argument position may not widen, because the " +
+            "container may be written as well as read",
+        type1 = outer1,
+        type2 = outer2,
+    )
+}
+
 private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, registry: DeclarationRegistry): UnificationResult {
     val paramSubst = unify(fn1.paramType, fn2.paramType, registry).getOrElse { return it }
     // #11 directional param check. By the call-argument convention documented
@@ -538,6 +653,10 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         value = __dfcValue,
         demand = __dfcDemand,
     )?.let { return it }
+    directionalVariantFieldCheck(
+        value = __dfcValue,
+        demand = __dfcDemand,
+    )?.let { return it }
     val return1 = paramSubst.apply(fn1.returnType)
     val return2 = paramSubst.apply(fn2.returnType)
     val returnSubst = unify(return1, return2, registry).getOrElse { return it }
@@ -554,6 +673,10 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     // land on the same question here — every concrete field the demand names must
     // be PRESENT in the value, and the value's extra fields stay fine.
     directionalParamFieldCheck(
+        value = returnSubst.apply(return1),
+        demand = returnSubst.apply(return2),
+    )?.let { return it }
+    directionalVariantFieldCheck(
         value = returnSubst.apply(return1),
         demand = returnSubst.apply(return2),
     )?.let { return it }
@@ -944,6 +1067,7 @@ private fun unifyVariantTypeArgs(
     for (i in var1.typeArgs.indices) {
         val arg1 = substitution.apply(var1.typeArgs[i])
         val arg2 = substitution.apply(var2.typeArgs[i])
+        variantArgsMustMatch(arg1, arg2, var1, var2)?.let { return it }
         when (val argResult = unify(arg1, arg2, registry)) {
             is UnificationResult.Success -> substitution = argResult.substitution.compose(substitution)
             is UnificationResult.Failure -> return UnificationResult.Failure(
@@ -1102,8 +1226,24 @@ private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.Vari
             // anonymous `| Some, None |` — an inferred shape recognised as the
             // declaration it matches. Zero Declared/Declared pairs, as the
             // argument above requires.
-            val sameArms = var1.constructors.keys == var2.constructors.keys
-            if (!sameArms) {
+            // Inclusion, not equality (spec 2.1). Requiring EQUAL arms here is
+            // what made `| Red |` into `| Red, Pink |` unexpressible: unification
+            // is symmetric, so this site cannot know which side is the value and
+            // which the demand, and insisting they match is the only answer it
+            // can give on its own. Accept a SUBSET either way and let
+            // `directionalParamVariantCheck` — called from unifyFunctions, which
+            // does know the direction — reject the illegal orientation. Exactly
+            // the division of labour unifyRecords and directionalParamFieldCheck
+            // already use for fields.
+            //
+            // Nothing is laundered by relaxing it: the pair still has to agree on
+            // every shared arm's payload below, two provably distinct declarations
+            // were vetoed as DISTINCT further up, and a wider value reaching a
+            // narrower demand is caught by the directional check.
+            val armsRelated =
+                var1.constructors.keys.containsAll(var2.constructors.keys) ||
+                    var2.constructors.keys.containsAll(var1.constructors.keys)
+            if (!armsRelated) {
                 return UnificationResult.Failure(
                     message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)}",
                     type1 = var1,
