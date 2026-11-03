@@ -560,6 +560,24 @@ object MonoDriver {
                 entry.impl.targetTypes.any { anonymousRecordMatchesDeclaredRecord(receiverType, it, recordShapes) }
             } ?: run {
                 counters.methodNoMatchingImpl++
+                // NOT NECESSARILY A MISS, despite the counter's name. A
+                // receiver whose impl is CONCRETE (`impl NumAdd Int for Int`)
+                // has no entry in `genericCandidates` at all — only impls with
+                // `forallVars` are candidates — so it lands here legitimately,
+                // needing no specialisation. Measured on a dispatch benchmark:
+                // 105 of 110 method sites land here and the top entries are
+                // `add`/`ge`/`eq` on Int, Float and Str against Seq/Option/List
+                // candidates, i.e. primitives already resolved statically
+                // (`via_ability` costs 0.30 ns/iter, the same as a direct call).
+                // Read this trace before treating the count as a gap: it cost
+                // one wrong hypothesis already.
+                DebugLogger.debug(DebugLogger.Category.Monomorphization) {
+                    "[mono-trace] method-noImpl field=${fa.field} " +
+                        "receiver=${detailed(receiverType)} " +
+                        "candidates=" + genericCandidates.joinToString("; ") { c ->
+                            c.impl.targetTypes.joinToString(",") { detailed(it) }
+                        }
+                }
                 return
             }
         }

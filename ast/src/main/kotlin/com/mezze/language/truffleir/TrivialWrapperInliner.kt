@@ -197,23 +197,39 @@ object TrivialWrapperInliner {
      * `captureSlots.size + i`, which is what `ReadLocalIR` indices into
      * inside the body.
      */
-    private fun isTrivialWrapper(fn: FunctionIR): Boolean {
-        if (fn.captureSlots.isNotEmpty()) return false
-        if (fn.localSlots.isNotEmpty()) return false
-        if (fn.paramSlots.isEmpty()) {
-            // Zero-param wrappers
+    private fun isTrivialWrapper(fn: FunctionIR): Boolean = wrapperReason(fn) == null
+
+    /**
+     * Why [fn] is NOT a trivial wrapper, or null when it is.
+     *
+     * Split out so the decision is observable: a function that fails here is
+     * never inlined, and nothing anywhere says so. That matters because a
+     * chain of un-inlined trivial forwarders is invisible to
+     * `ChainCanonicalizer` — it looks for the underlying natives and finds
+     * impl-op calls instead, so it silently declines and the whole pipeline
+     * runs unfused. `MEZZE_TRACE_WRAPPER=1` prints these.
+     */
+    private fun wrapperReason(fn: FunctionIR): String? {
+        val why: String? = run {
+            if (fn.captureSlots.isNotEmpty()) return@run "has-captures"
+            if (fn.localSlots.isNotEmpty()) return@run "has-locals"
+            val paramStart = fn.captureSlots.size
+            val paramEnd = paramStart + fn.paramSlots.size
+            val body = fn.body
+            if (body is ReadCaptureIR || body is ReadArgIR) return@run "body-is-bare-read"
+            val counts = IntArray(paramEnd - paramStart)
+            if (!countParamReads(body, paramStart, paramEnd, counts)) return@run "param-read-count-failed"
+            if (body is CallDirectIR && !body.isScalarABI) return@run "body-call-not-scalar-abi"
+            if (containsSelfCall(body, fn.hash)) return@run "self-call"
+            val sz = sizeOf(body)
+            if (sz > INLINE_SIZE_BUDGET) return@run "too-big($sz>$INLINE_SIZE_BUDGET)"
+            null
         }
-        val paramStart = fn.captureSlots.size
-        val paramEnd = paramStart + fn.paramSlots.size
-        val body = fn.body
-        if (body is ReadCaptureIR || body is ReadArgIR) return false
-        val counts = IntArray(paramEnd - paramStart)
-        if (!countParamReads(body, paramStart, paramEnd, counts)) return false
-        if (body is CallDirectIR && !body.isScalarABI) return false
-        if (containsSelfCall(body, fn.hash)) return false
-        val sz = sizeOf(body)
-        if (sz > INLINE_SIZE_BUDGET) return false
-        return true
+        if (why != null && System.getenv("MEZZE_TRACE_WRAPPER") != null) {
+            System.err.println("[wrapper] declined ${fn.name} hash=${fn.hash.hex.take(8)} " +
+                "reason=$why bodyKind=${fn.body::class.simpleName}")
+        }
+        return why
     }
 
     /** Max IR-node count for a body to be considered a "trivial" wrapper. */
@@ -429,7 +445,18 @@ object TrivialWrapperInliner {
             // Everything else (Lambda, Match, Perform, Handle, indirect
             // calls, `WriteLocal`, `PartialApply`, `DictMethodCall`,
             // `SpecializedCall`, `CallLocal`, `CallIndirect*`) still bails.
-            else -> false
+            else -> {
+                // Name the shape the whitelist does not cover. A `false` here
+                // disqualifies the whole function from inlining, silently, and
+                // an un-inlined trivial forwarder is invisible to
+                // ChainCanonicalizer — which is how a dot-chained pipeline ends
+                // up running completely unfused.
+                if (System.getenv("MEZZE_TRACE_WRAPPER") != null) {
+                    System.err.println("[wrapper]   countParamReads gave up on " +
+                        node::class.simpleName)
+                }
+                false
+            }
         }
     }
 

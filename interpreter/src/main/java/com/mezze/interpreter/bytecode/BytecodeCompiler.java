@@ -1381,6 +1381,22 @@ public final class BytecodeCompiler {
         // Consumed here, so a nested compile during this emit cannot inherit it.
         final boolean isEntryParse = this.compilingEntry;
         this.compilingEntry = false;
+        // MEZZE_DUMP_FN=<name> prints this function's lowered IR before emission.
+        // The passes that consume this IR — ChainCanonicalizer, the self-tail
+        // tiers, the native collapses — all refuse SILENTLY, so without a way to
+        // see what they were handed, a refusal can only be inferred from a
+        // timing. Comma-separated names are accepted; `*` dumps everything.
+        String dumpWanted = System.getenv("MEZZE_DUMP_FN");
+        if (dumpWanted != null && ir.getName() != null) {
+            for (String want : dumpWanted.split(",")) {
+                if (want.trim().equals("*") || want.trim().equals(ir.getName())) {
+                    System.err.println("[dump-fn] " + ir.getName()
+                            + " params=" + ir.getParamNames()
+                            + "\n  body=" + ir.getBody());
+                    break;
+                }
+            }
+        }
         var nodes = MezzeBytecodeRootNodeGen.create(language, config, b -> {
             // Rebuilt per parse, and the previous value restored on the way out
             // so a compile nested inside this emit does not strand the outer one

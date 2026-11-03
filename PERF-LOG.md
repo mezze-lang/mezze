@@ -146,6 +146,44 @@ answers, just slowly — so the bit-flip check is what establishes they cover it
 Added because the above regression was invisible by construction: three tiers,
 all declining without a word. A refusal is now a fact you can read.
 
+### 4. Pipeline stages ran out of order — two WRONG ANSWERS, not slow ones
+
+Chasing fusion turned up two correctness bugs in the machinery that exists
+purely to make pipelines fast. Both produced a wrong number with no crash and
+no diagnostic.
+
+**The lazy `iter` walker ignored stage order.** `IterNatives.foldRange` peels a
+map and a filter sitting above a range into one loop — that peel is what keeps a
+lazy pipeline from materialising intermediates. It recorded WHICH stages were
+present but not which the user wrote last, then always ran the predicate on the
+RAW element. Its own comment said so: "filter first (raw element), then map" —
+right for `filter(p).map(f)`, silently wrong for the commoner `map(f).filter(p)`.
+Over 0..4, `map(*10).filter(<40)` kept everything and summed 100 where the
+answer is 60. Eager `seq` was always correct, so the two forms of the same
+program disagreed. Fixed by carrying a `filterAfterMap` flag through the peel.
+
+**The `count` sink appended its predicate to an outer-to-inner list.** A
+`FusedChainIR`'s stages run outer-to-inner — `stages[0]` is applied LAST — and
+`count` has no filter stage of its own, so the canonicalizer adds its predicate
+to the peeled stages. It APPENDED, making the predicate the innermost stage, so
+a predicate written for mapped values was tested against the source:
+`range{0,5}.map{*10}.count{<40}` answered 5, not 4, because every raw element is
+under 40. `composeThroughFusedCallee` spliced two stage lists the same way round
+and is fixed with it (inert today — the callees that reach it are stage-free
+wrappers like `seq::sum`).
+
+Guarded four ways, one per route to the same answer:
+`FusedChainStageOrderLoweringTest` asserts the ORDER in the lowered IR,
+`FusedChainStageOrderTest` the values through the fused loop,
+`IterStageOrderTest` the lazy walker, `DotChainedPipelineTest` the unfused dot
+chain. Each case is chosen so the two orders DISAGREE — most map/filter pairs
+give the same answer either way, which is how both bugs survived.
+
+**This invalidated one of my own numbers.** The dot-chain figure below was
+measured on a pipeline whose filter kept every element, so its checksum was
+wrong and its element count was 3× the intended one. Re-measure before quoting
+it.
+
 ---
 
 ## Measured and corrected — claims in the tree that were wrong
@@ -429,6 +467,17 @@ jar. `mez build` bundles the interpreter, so rebuilding the CLI is not enough �
 the benchmark app must be rebuilt too, or the change is simply not in the binary
 under test. Every measurement after a compiler change now begins with a fresh
 `mez build`.
+
+A second one, from the stage-order work: **in-process tests and `mez build` take
+different fusion routes.** Every interpreter unit test printed the right value
+for `map(f).filter(p)` while the built jar printed a wrong one, because
+in-process the emitter declines and falls back to the lazy walker. Worse, the
+producer looked like the bug — five consumers read stages in application order
+— so I reversed `peelSource`. `BytecodeCompiler.emitCanonicalIterChain` already
+does a bare `Collections.reverse` with no comment on it, so that double-reversed
+and turned every correct in-process value wrong. Reproduce the `mez build` route
+by lowering in the TYPECHECKER with no interpreter on the classpath, and assert
+the order in the IR rather than inferring it from a value.
 
 ---
 

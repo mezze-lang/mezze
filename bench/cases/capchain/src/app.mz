@@ -1,0 +1,51 @@
+## STAGE ORDER in a lazy `iter` pipeline, both ways round, against `seq`.
+##
+## `foldRange` peeled a map and a filter above a range into one loop but did not
+## record which the user wrote LAST, then always ran the predicate on the RAW
+## element. Correct for `filter(p).map(f)`, silently wrong for the commoner
+## `map(f).filter(p)`: over 0..4, `map(*10).filter(<40)` kept everything and
+## summed 100 where the answer is 60.
+##
+## Every line below has a hand-checkable answer, and the `seq` rows are the
+## control — eager `seq` was always right, so a disagreement localises the bug
+## to the lazy path.
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::int
+
+pub let main = {} -> perform Console in do
+  ## map THEN filter: 0,10,20,30,40 -> keep <40 -> 0,10,20,30 -> 60
+  let i_mf = iter::range { start = 0, end = 5 }
+    .map { f = { x } -> x * 10 }
+    .filter { p = { x } -> x < 40 }
+    .fold { init = 0, f = { acc, x } -> acc + x }
+  println { msg = "iter map->filter (expect 60): $(int::to_str { n = i_mf })" }
+
+  ## filter THEN map: keep <4 -> 0,1,2,3 -> *10 -> 0,10,20,30 -> 60
+  let i_fm = iter::range { start = 0, end = 5 }
+    .filter { p = { x } -> x < 4 }
+    .map { f = { x } -> x * 10 }
+    .fold { init = 0, f = { acc, x } -> acc + x }
+  println { msg = "iter filter->map (expect 60): $(int::to_str { n = i_fm })" }
+
+  ## The two orders are NOT interchangeable in general: filter(<4) after map(*10)
+  ## keeps only 0 -> 0. This is the case that proves the predicate sees mapped
+  ## values rather than raw ones.
+  let i_strict = iter::range { start = 0, end = 5 }
+    .map { f = { x } -> x * 10 }
+    .filter { p = { x } -> x < 4 }
+    .fold { init = 0, f = { acc, x } -> acc + x }
+  println { msg = "iter map->filter<4 (expect 0): $(int::to_str { n = i_strict })" }
+
+  let s_mf = seq::range { start = 0, end = 5 }
+    .map { f = { x } -> x * 10 }
+    .filter { p = { x } -> x < 40 }
+    .fold { init = 0, f = { acc, x } -> acc + x }
+  println { msg = "seq  map->filter (expect 60): $(int::to_str { n = s_mf })" }
+
+  let s_strict = seq::range { start = 0, end = 5 }
+    .map { f = { x } -> x * 10 }
+    .filter { p = { x } -> x < 4 }
+    .fold { init = 0, f = { acc, x } -> acc + x }
+  println { msg = "seq  map->filter<4 (expect 0): $(int::to_str { n = s_strict })" }
