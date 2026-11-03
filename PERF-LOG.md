@@ -1369,23 +1369,52 @@ so `i + 0` does NOT pin `i`: each `+` threads a fresh `'out` into the next
 operand position. Eight operators, eight genuinely distinct constraints, eight
 dictionaries. The constraints then leak outward: `main` picks up twelve of them.
 
-THREE WAYS OUT, and they are not equivalent:
+WHERE IT STOPS, read straight off `mez check`, which prints every inferred
+signature. This is the probe to start any further work from:
 
-1. **Monomorphise the concrete call site.** `inferred { i = 1 }` has an Int
-   argument; a specialised copy would have no dictionaries. Pure compiler work,
-   identical semantics, nothing for a user to decide. `MonoDriver`'s seed
-   requires the callee's `typeParams` to be non-empty, and these are
-   constraint variables, so the call is never seeded — that is the thing to
-   check first.
-2. **Default an unconstrained numeric variable** at generalisation, which is
-   what Haskell's defaulting rules are for.
-3. **Make `+`, `-` and `%` homogeneous again.** Worth noting that this is what
-   the recorded design decision already says — "leave NumAdd/NumSub/NumMod
-   homogeneous (heterogeneous + is usually a bug worth rejecting)", with
-   heterogeneity intended for `*` and `/` only. The shipped stdlib gives all
-   five the associated type, so the signature above is broader than the
-   decision behind it. This one changes what programs type-check, so it is not
-   a performance decision to make unilaterally.
+    one          : { i: 'a } with NumAdd Int 'a having 'out = 'b -> 'b
+    two          : { i: 'a } with NumAdd Int 'a having 'out = 'c,
+                               NumAdd Int 'c having 'out = 'b -> 'b
+    from_literal : {} -> Int
+    main         : {} with NumAdd Int 'a having 'out = Int -> {}
+
+THREE FACTS IN FOUR LINES:
+
+- **ONE operator is already enough.** `one` is generic too, so a chain is not
+  required and the count of operators is only a multiplier on the cost. (An
+  earlier note in this log said a single operator "always worked" — that was
+  wrong, and it was wrong for a bad reason: a one-operator helper is small
+  enough to be INLINED, so no function is emitted and nothing shows up in a
+  dump. Absence from a dump is not evidence of a concrete type.)
+- **`from_literal` collapses to `Int`.** `1 + 0 + 0 + 0` resolves completely,
+  so the machinery that threads one operator's `out` into the next operand DOES
+  work. What it needs is a concrete starting receiver. The chain is not the
+  problem; the unpinned parameter is.
+- **`main` keeps a constraint it should not.** Every call passes `i = 1`, yet
+  `main` still carries `NumAdd Int 'a having 'out = Int` with the OPERAND
+  unresolved. A concrete call site is not collapsing its callee's constraint.
+
+TWO WAYS OUT, and they are not equivalent:
+
+1. **Monomorphise the concrete call site.** `one { i = 1 }` has an Int argument;
+   a specialised copy would have no dictionaries. Pure compiler work, identical
+   semantics, nothing for a user to decide. With
+   `MEZZE_TYPECHECK_DEBUG=true MEZZE_TYPECHECK_DEBUG_CATEGORIES=Monomorphization`
+   this call prints NO visit counter at all, so it is either not reached on this
+   path or rejected before counting; `MonoDriver`'s seed gate wants the callee's
+   `typeParams` non-empty, and these variables come from constraints rather than
+   from anything the user declared. That is the thing to establish first, and it
+   is unestablished — an attempt at `fillHavingOutTypeArgs`, on the theory that
+   its single pass could not chain one `out` into the next operand, changed the
+   lowering NOT AT ALL and was reverted. The single-pass reading of that
+   function is correct; it is simply not what is blocking this.
+2. **Make `+`, `-` and `%` homogeneous again**, which is what the recorded
+   design decision already says — "leave NumAdd/NumSub/NumMod homogeneous
+   (heterogeneous + is usually a bug worth rejecting)", with heterogeneity
+   intended for `*` and `/` only. The shipped stdlib gives all five the
+   associated type, so the signature above is broader than the decision behind
+   it. This changes what programs type-check, so it is not a performance
+   decision to make unilaterally.
 
 (1) is the one to try first: it is the only one that costs nothing in semantics.
 
