@@ -133,8 +133,11 @@ Chosen limits, recorded at the time, not discovered later:
    `map+map` and `filter+filter` have no equivalent escape: `x*3` then `x+1` is
    genuinely two ops, and two filters are genuinely two comparisons.
 2. **`to_seq` at 50x** (4 541 ps) — the one shape that did not move.
-3. **Records as values** — unmeasured, and the remaining half of the erasure
-   principle.
+3. **Records as values — 12x to 40x, MEASURED.** See the section below. This is
+   now the largest measured gap on the branch and the remaining half of the
+   erasure principle: a record carried, returned or spread costs 12-40x the
+   same values passed positionally, and a record that never escapes its
+   iteration still costs 22x.
 4. The frame-materialisation bailout, the empty native registry under
    `mez build`, tail-loop tier 1 declining compound updates, and `%`/NumMod
    class-param resolution (same root as the fold-modulo decline).
@@ -1042,6 +1045,39 @@ draft of this table reported the 6-7x tier as 15-22x and `count` as 31x purely
 from that noise, and a boxing-elimination experiment "showed" two 17x wins and
 six regressions that were all noise. One kernel per process, five warmups, five
 timings, take the minimum.
+
+---
+
+## Measured: what a record costs when it is a VALUE
+
+`bench/cases/recordcost`, n=2e7, min of three timed calls after three warmups,
+one kernel per process. All five kernels compute the SAME checksum
+(`200000010000000`), so a kernel that were fast because it dropped work would
+show up as a different number rather than a better time.
+
+| kernel | ps/iter | x control |
+|---|---|---|
+| 1 two values carried POSITIONALLY (control) | 237 | 1 |
+| 3 record built ONCE, fields read per iteration | 564 | **2.4** |
+| 2 record carried as loop STATE, one built per iteration | 2 844 | **12** |
+| 4 record RETURNED per iteration, born and dies inside it | 5 146 | **22** |
+| 5 record SPREAD update `{...st, i = ...}` per iteration | 9 558 | **40** |
+
+**This is the larger prize, and bigger than the pipeline tier it was weighed
+against.** Erasure at a direct call site is general and lands these same two
+values at 237 ps when they travel as arguments; the moment the record is a
+VALUE — carried, returned, updated — it costs 12x to 40x. Kernel 4 is the one
+that should not be possible: the record is created and discarded inside a single
+iteration, never escapes, and still costs 22x, which says these records are not
+reaching Graal in a form its escape analysis can virtualise.
+
+Kernel 5 is the floor on what call-site erasure can ever reach, because a spread
+is one of the three shapes that falls back to the record ABI by construction.
+
+MEASUREMENT NOTE: at n=2e6 these numbers are warmup-dominated and reorder
+themselves — kernel 3 reads 23 451 ps there against 564 at n=2e7. The size has
+to be large enough that the loop is compiled, which is the same trap as the
+compiler lottery recorded above.
 
 ---
 
