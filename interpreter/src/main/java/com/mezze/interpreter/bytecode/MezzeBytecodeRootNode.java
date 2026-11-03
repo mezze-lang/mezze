@@ -154,7 +154,24 @@ import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
     //     (must not pass virtual object into an invoke that cannot be inlined)
     // A materialized frame cannot have its slots virtualized, which would
     // explain a fixed per-iteration cost that no boxing flag can touch.
-    boxingEliminationTypes = {},
+    //
+    // 2026-11-03 — ENABLED, and everything above is still true of the case it
+    // measured. That case was a tail loop with NO locals, where the values
+    // never leave the operand stack; the flag cannot help there and does not.
+    // A tail loop whose body BINDS anything is a different shape: every store
+    // into an Object-typed BDSL local boxes, so
+    //     else do { let lo = i - 1  let add = i  go { i = lo, acc = acc + add } }
+    // ran 2 665 ps/iter against 242 for the same arithmetic with no lets — 11x
+    // for two bindings. With the flag on it is 705 ps, a 3.8x improvement, and
+    // that shape is any loop carrying a `let`.
+    //
+    // MEASURED NEUTRAL ON PIPELINES, which is why the earlier reading said the
+    // flag was worthless: bench/cases/fusegaps off vs on, map+filter 92/92,
+    // map 82/87, filter 101/87, map+map 641/640-675, filter+filter 570/523,
+    // drop+map 84/75, count 75/77, compound fold 877/782. One sample showed
+    // map+map at 882 and three more put it back at 640-675, so that was an
+    // outlier — the kind this log has been caught by twice before.
+    boxingEliminationTypes = {long.class, double.class, boolean.class},
     enableUncachedInterpreter = true,
     enableYield = true,
     enableSerialization = true,

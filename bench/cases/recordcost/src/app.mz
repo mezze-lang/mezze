@@ -78,6 +78,18 @@ let k_record_spread = { n } -> do
     else go { st = { ...st, i = st.i - 1, acc = st.acc + st.i } }
   go { st = { i = n, acc = 0 } }
 
+## 6. Kernel 4 with the helper HAND-INLINED and no record at all — two lets in
+## a do-block, which is exactly what the scalarizer turns kernel 4 into. If this
+## is as slow as 4, the cost is the locals and the block, not the record.
+let k_hand_inlined = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let lo = i - 1
+      let add = i
+      go { i = lo, acc = acc + add }
+  go { i = n, acc = 0 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -120,4 +132,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "5 record spread", n = n, r = time_it { f = {} -> k_record_spread { n = n } } }
     report { name = "5 record spread", n = n, r = time_it { f = {} -> k_record_spread { n = n } } }
     report { name = "5 record spread", n = n, r = time_it { f = {} -> k_record_spread { n = n } } }
+  else if k == 6 then do
+    k_hand_inlined { n = n }
+    k_hand_inlined { n = n }
+    k_hand_inlined { n = n }
+    report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
+    report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
+    report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
   else println { msg = "unknown kernel" }

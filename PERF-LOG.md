@@ -481,7 +481,7 @@ wrong in its own way while the other two were right.
 
 ## Measured and corrected — claims in the tree that were wrong
 
-### Boxing elimination is NOT the blocker the comment claims
+### Boxing elimination: worthless for a loop with no locals, 3.8x for one with them
 
 `@GenerateBytecode(boxingEliminationTypes = {})` in `MezzeBytecodeRootNode`
 carries a long note about an "infinite compile→deopt storm" with "recursive call
@@ -514,6 +514,61 @@ The first regression test asserted allocation scaling end-to-end. It passed
 NativeSignatures registry and the bug only exists when the registry is empty.
 Kept (the invariant is worth holding) with its docs rewritten to say plainly
 what it does not cover. This is why "verify the break" is a rule.
+
+---
+
+### FIXED: every store into a BDSL local boxed — 3.8x on any loop carrying a `let`
+
+`boxingEliminationTypes` was measured twice on this branch and rejected twice.
+Both readings were right about what they measured and wrong as a conclusion,
+because both measured a loop whose values never leave the operand stack — a
+tail loop with NO locals, where the flag cannot help and does not.
+
+A loop whose body BINDS anything is a different shape. Every store into an
+Object-typed BDSL local boxes, so the same arithmetic costs 11x once it goes
+through two lets:
+
+| kernel (n=2e7, min of three) | ps/iter |
+|---|---|
+| tail loop, values straight into the tail call | 242 |
+| the SAME arithmetic through `let lo = i - 1` and `let add = i` | **2 665** |
+| …with `boxingEliminationTypes = {long, double, boolean}` | **705** |
+
+3.8x, on what is simply "a loop with a local in it".
+
+MEASURED NEUTRAL ON PIPELINES, which is why this took three attempts to find.
+`bench/cases/fusegaps`, off vs on: map+filter 92/92, map 82/87, filter 101/87,
+map+map 641/640-675, filter+filter 570/523, drop+map 84/75, count 75/77,
+compound fold 877/782, via-a-function-value 94/98. One sample put map+map at
+882 and three more put it back at 640-675 — an outlier of exactly the kind this
+log has already been caught by twice.
+
+### TWO THINGS MEASURED AND REVERTED on the way to that
+
+Both looked like the obvious fix for records-as-values and both did nothing,
+which is how the real cause was cornered.
+
+**An unboxed record layout.** Every record is all-object storage, so two Ints
+are two boxes in an `Object[]`; `MezzeRecord` has carried `longFields` and a
+typed `FieldLocation` all along. Using them gained nothing and made a spread 34%
+worse — because the boxes are not created by the record. The operand stack is
+boxed, so the values arrive at construction already boxed whatever the record
+does with them; a typed layout only adds a `long[]` and an unbox loop.
+
+That also settles an arity question. A fixed-arity ladder of operations was
+written first on the theory that `@Variadic` — an `Object[]` — would box
+operands that `long v0, long v1` parameters would not. Wrong for the same
+reason: the stack is boxed either way, so primitive parameters only move the
+unboxing into generated code. The operation was rewritten GENERIC in the field
+count, and making it generic is what showed the approach flat.
+
+**Scalar replacement of a non-escaping record.** A pass that turns
+`let p = { lo = …, add = … }` with every use a field read into per-field locals,
+so the record is never built. Verified in the IR — `MakeRecord=3 ReadField=2`
+became `ReadField=0` — and it changed nothing: 5 217 -> 5 321 ps, and the young
+GC count stayed at 35 against 2 for the same loop without a record. Because it
+trades a record for LOCALS, and locals were the expensive thing. Reverted; it
+becomes worth revisiting now that a local store is cheap.
 
 ---
 
