@@ -43,6 +43,8 @@ for why that last condition is not optional.
 | `enumerate` + map | 124 247 ps/elem | **556** (223x) |
 | compound fold | 14 025 ps/elem | **1 448** (9.7x) |
 | pipeline split across a call | never fused | fused |
+| pipeline behind a higher-order parameter | 41 600 ps/elem | **94** (440x) |
+| `seq` map+filter | 229 ps/elem | **92** |
 
 The fusion floor is ~85 ps/elem — about 0.25 cycles, i.e. vectorised — and
 map, filter, map+filter, count(pred) and take+filter are all at it.
@@ -116,14 +118,12 @@ Chosen limits, recorded at the time, not discovered later:
 
 ### Ranked next
 
-1. **460x — a pipeline behind a higher-order parameter.** Diagnosed to
-   INFERENCE: annotating gives 99 ps against 41 600. Biggest number left.
-2. **7x general-loop tier** — map+map, filter+filter, filter+take, take_while,
+1. **7x general-loop tier** — map+map, filter+filter, filter+take, take_while,
    drop. It is the SIMD WIDTH, so it needs a stage PROGRAM in FLP.
-3. **`to_seq` at 50x** (4 394 ps).
-4. **Records as values** — unmeasured, and the remaining half of the erasure
+2. **`to_seq` at 50x** (4 541 ps) — the one shape that did not move.
+3. **Records as values** — unmeasured, and the remaining half of the erasure
    principle.
-5. The frame-materialisation bailout, the empty native registry under
+4. The frame-materialisation bailout, the empty native registry under
    `mez build`, tail-loop tier 1 declining compound updates, and `%`/NumMod
    class-param resolution (same root as the fold-modulo decline).
 
@@ -952,43 +952,64 @@ THE THREE GAPS, in payoff order:
    earlier run of this same experiment, before one-kernel-per-process, "showed"
    two 17x wins; that was the compiler lottery.
 
-### THE BIGGEST REMAINING GAP: a pipeline behind a higher-order parameter — 460x, and it is INFERENCE
+### FIXED: a pipeline behind a higher-order parameter — was 460x, now at the floor
 
-| kernel (n=2e7, min of five) | ps/elem | x floor |
+| kernel (n=2e7, min of five) | was | now |
 |---|---|---|
-| 01 called directly, inferred | 90 | 1 |
-| 16 reached through a function VALUE, inferred | 41 600 | **460** |
-| 17 reached through a LAMBDA argument, inferred | 43 000 | **480** |
-| 18 reached through a function value, ANNOTATED | **99** | **1** |
+| 01 called directly, inferred | 90 | 92 |
+| 16 reached through a function VALUE, inferred | 41 600 | **94** |
+| 17 reached through a LAMBDA argument, inferred | 43 000 | **93** |
+| 19 own single-use HOF, inferred | 71 000 | **101** |
+| 18 reached through a function value, ANNOTATED | 99 | 84 |
 
-Kernel 18 is kernel 16 with every type written down. It runs at the floor. So
-the indirection costs nothing, the extra call costs nothing, and the 460x is
-what inference leaves on the table: a function reached only through a
-higher-order parameter keeps its generic, dictionary-passing copy, and that copy
-is what executes.
+**THE CAUSE, and it was one missing shape.** The registry that says
+`__native_int_lt` IS `LT` belongs to the interpreter, so under `mez build` the
+compiler cannot collapse the call and a predicate reaches the emitter as
+`__native_int_lt { l = x, r = <captured n> }` wherever monomorphisation did not
+inline the impl. `classifyFolderBody` already recognised that form — there is a
+test for it — but the UNARY classifiers did not, so the predicate was
+unclassifiable, and an unclassifiable stage declines the WHOLE chain. The
+pipeline then ran the lazy walker: `IterNatives.foldRange`, caught
+OSR-compiling in the slow run under `-XX:+PrintCompilation` and absent from the
+fast one.
 
-**This is a soundness-adjacent perf bug by the project's own rule — if an
-annotation fixes it, inference is buggy.** The repro is four lines.
+Both unary classifiers now normalise a native arith/compare body to the inline
+op it denotes before matching shapes, so fusion no longer depends on whether
+mono fired. The order guard matters and is tested: a record evaluates its
+fields in the order WRITTEN while an InlineBinaryOp evaluates left then right,
+so the record form collapses only when the written order already matches the
+signature's — otherwise two evaluations would swap.
 
-THREE EXPLANATIONS RULED OUT, each by measurement:
+**IT WAS BROADER THAN THE HOF CASE.** Two other shapes met the same
+unclassifiable predicate and moved with it: `seq` map+filter 229 -> **92**, now
+at the floor, and the compound fold 1448 -> **877**. Nothing else moved outside
+noise.
 
-- NOT a fusion failure. Lowered in the typechecker (the `mez build` route), the
-  chain is `FUSED` in every one of these shapes — direct, via a value, via a
-  lambda, annotated — and in the enclosing functions too.
-- NOT an emit-time rejection. With `MEZZE_CHAIN_CANON_EMIT_DEBUG=1` the direct
-  and indirect runs log IDENTICAL emissions: the same
-  `FusedLongRangePipeline (Accumulate, 2 stages)` counts, the same fused loops.
-  Both kernels live in one binary, so the same compiled code serves both — which
-  is also why that log cannot say which copy RUNS.
-- NOT warmup or a measurement artifact. 41 606 / 41 566 / 41 665 / 41 661 /
-  41 632 ps across five consecutive timings, and flat from n=2e6 to n=2e7. An
-  earlier reading of this gap used a sort key on the wrong field, so the figures
-  above come from printing every timing rather than selecting one.
+HOW THE DIAGNOSIS WENT, since three of the four steps were wrong turns:
 
-What is left, therefore, is which COPY of the function the indirect call reaches.
-Fixing it belongs in monomorphisation, and the note in this log's "FOURTH
-attempt" section — mono runs, but the reference site's type is a VARIABLE — is
-the same wall from the other side.
+- A CONFOUND I nearly shipped as the finding. Kernels 16 and 17 share one HOF
+  with two callbacks, while the annotated 18 has its own HOF used once — so
+  "annotated" and "one callback" were not separated. Kernel 19 holds the
+  callback count at one with types inferred: still 71 000. The annotation was
+  the variable after all.
+- THE IR WAS A RED HERRING. Lowered in the typechecker — the `mez build` route
+  — the chain is `FUSED` in every shape, and the INFERRED version fuses MORE
+  than the annotated one (which simply calls `k`). Fusion in the IR says
+  nothing about what the emitter then accepts.
+- SO WAS THE EMIT LOG. `MEZZE_CHAIN_CANON_EMIT_DEBUG=1` prints identical
+  emissions for the fast and slow kernels, because both kernels live in one
+  binary and the whole program is compiled either way. It cannot say which copy
+  RUNS.
+- WHAT ACTUALLY FOUND IT: `-XX:+PrintCompilation`, which showed the slow kernel
+  OSR-compiling `IterNatives::foldRange` — the lazy walker — and the fast one
+  never touching it. Then the lowered IR of the two versions side by side, where
+  the inferred one carries one extra lambda the annotated one does not:
+  `params=[x] caps=1 -> CallNative`.
+
+ONE MORE OF MY OWN MEASUREMENTS WAS WRONG on the way: the first reading sorted
+on the wrong field to pick a minimum, and a later one took the third of five
+timings instead of the least. The figures here come from extracting the number
+and sorting it numerically.
 
 ### Two methodology corrections, both of which produced published-looking numbers
 

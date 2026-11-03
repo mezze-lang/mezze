@@ -164,6 +164,14 @@ let k_annot: { n: Int } -> Int = { n } -> iter::range { start = 0, end = n }
 let apply_annot: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } -> f { n = n }
 let k_via_annot = { n } -> apply_annot { f = k_annot, n = n }
 
+## 19. Kernel 16 with its OWN single-use HOF and NO annotations. Kernels 16 and
+## 17 share one `apply_to` with two different callbacks, while the annotated 18
+## has a HOF of its own used once — so "annotation" and "one callback" were
+## confounded. This holds the callback count at one and leaves the types
+## inferred.
+let apply_solo = { f, n } -> f { n = n }
+let k_via_solo = { n } -> apply_solo { f = k_map_filter, n = n }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
 
@@ -373,4 +381,13 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
     report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
     report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
+  else if k == 19 then do
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    report { name = "19 solo HOF infer", n = n, r = time_it { f = {} -> k_via_solo { n = n } } }
+    report { name = "19 solo HOF infer", n = n, r = time_it { f = {} -> k_via_solo { n = n } } }
+    report { name = "19 solo HOF infer", n = n, r = time_it { f = {} -> k_via_solo { n = n } } }
   else println { msg = "unknown kernel" }

@@ -7479,6 +7479,57 @@ public final class BytecodeCompiler {
             this.callFieldName = callFieldName;
         }
     }
+    /**
+     * A native arith/compare call still carrying its argument record, rewritten
+     * to the inline op it denotes. Any other body is returned unchanged.
+     *
+     * The registry that says `__native_int_lt` IS `LT` belongs to the
+     * interpreter, so the compiler cannot collapse this itself and the call
+     * reaches the lambda classifiers intact wherever monomorphisation did not
+     * inline the impl. {@link #classifyFolderBody} already recognises the form;
+     * the UNARY classifiers did not, so a predicate like `{x} -> x < n` with `n`
+     * captured was unclassifiable — and an unclassifiable stage declines the
+     * WHOLE chain.
+     *
+     * MEASURED: a pipeline reached through a higher-order parameter ran at
+     * 71000 ps/elem against 90 called directly, because that copy's predicate
+     * was left in this form and the chain fell back to the lazy walker —
+     * `IterNatives.foldRange`, caught OSR-compiling in the slow run and absent
+     * from the fast one. Writing the types out made it fast, which is the
+     * signature of a cliff that inference alone should not be able to create:
+     * fusion must not depend on whether mono happened to fire.
+     *
+     * ORDER IS PRESERVED, not assumed. A record evaluates its fields in the
+     * order they are WRITTEN while an InlineBinaryOp evaluates left then right,
+     * and an operand can be a call — so the record form collapses only when the
+     * written order already matches the signature's parameter order. Same
+     * reasoning as the emission-time collapse in {@link #emitNode}.
+     */
+    static NodeIR normalizeNativeArith(NodeIR body) {  // package-visible for NativeArithNormalisationTest
+        if (!(body instanceof CallNativeIR nat)) return body;
+        var sig = com.mezze.language.truffleir.NativeSignatures.INSTANCE.signatureOf(nat.getName());
+        if (sig == null || sig.getInlineOp() == null || sig.getParams().size() != 2) return body;
+        NodeIR[] operands = new NodeIR[2];
+        if (nat.isScalarABI()) {
+            if (nat.getArgs().size() != 2) return body;
+            operands[0] = nat.getArgs().get(0);
+            operands[1] = nat.getArgs().get(1);
+        } else {
+            if (!(nat.getArg() instanceof MakeRecordIR rec)) return body;
+            if (rec.getFields().size() != 2) return body;
+            for (int i = 0; i < 2; i++) {
+                var fld = rec.getFields().get(i);
+                int at = sig.indexOf(fld.getName());
+                // `at != i` means the fields were written in the other order,
+                // so collapsing would reorder two evaluations.
+                if (at != i) return body;
+                operands[at] = fld.getValue();
+            }
+        }
+        if (operands[0] == null || operands[1] == null) return body;
+        return new InlineBinaryOpIR(sig.getInlineOp(), operands[0], operands[1], nat.getSrc());
+    }
+
     private PredShape classifyUnaryPredicateLambda(MakeLambdaIR ml, MezzeLanguage language) {
         // #515 — captures OK: RHS resolution below lifts ReadCaptureIR(i)
         // to a ReadLocalIR(ml.captures[i].slot) at emit time. Call-form
@@ -7494,7 +7545,7 @@ public final class BytecodeCompiler {
         // N captures + one param → param slot = captureCount (frame layout
         //   is [captures..., params..., locals...]). Adjust below.
         int paramSlot = caps.size();
-        NodeIR body = fnIR.getBody();
+        NodeIR body = normalizeNativeArith(fnIR.getBody());
         // #442 Day 9 — Shape D first: arbitrary pure single-arg call.
         //   {x} -> user_pred { arg = x }   returning Bool
         // Same 2 recognized IR forms as classifyUnaryLiteralLambda's Shape D.
@@ -7816,7 +7867,7 @@ public final class BytecodeCompiler {
         // Frame layout: [captures..., params..., locals...] so the single
         // param sits at slot equal to captures.size().
         int paramSlot = caps.size();
-        NodeIR body = fnIR.getBody();
+        NodeIR body = normalizeNativeArith(fnIR.getBody());
         if (elemIsEnumRecord) {
             // The parameter is the enumerate record, which is never built, so
             // only a field read can be honoured — `x.val` is the element and
