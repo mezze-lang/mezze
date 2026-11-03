@@ -300,6 +300,62 @@ Both IR tests also had to stop matching on `body as? FusedChainIR`: a relocated
 chain is the RESULT of the binding block, so that pattern is null for it and the
 tests would have quietly stopped checking the case relocation introduced.
 
+### 7. The VECTORISED path ignored stage order — a wrong answer only at scale
+
+With the dot chain fusing, `bench/cases/chain` was rebuilt and still reported
+`sum=599999970000000` where the answer is `66666663333333` — the checksum you get
+if the filter kept every element. I had blamed this on §4's stage order and then
+on §5's captures. It was neither.
+
+HOW IT WAS CORNERED. `bench/cases/capchain` runs the same shapes at n=5 with
+LITERAL thresholds and all five lines were correct, so order was fine through
+`mez build`. A new `bench/cases/capthresh` runs `chain`'s kernel shrunk to n=5
+with the threshold CAPTURED, and all five lines were correct too, so the capture
+was fine. That left size. Sweeping `chain`:
+
+| n | sum | correct? |
+|---|---|---|
+| 5 | 3 | yes |
+| 1 000 | 1 498 500 | NO — equals `3·Σ(0..999)`, everything passed |
+| 100 000 | 14 999 850 000 | NO |
+| 20 000 000 | 599 999 970 000 000 | NO |
+
+Correct at 5, wrong from 1000 up, and every wrong answer exactly "the filter
+kept everything". A size-dependent switch, which named the suspect: SIMD.
+
+THE BUG. `FlpSimd` has two vector pipelines — one generating a range into lanes,
+one loading a materialised `long[]` — and both take a `filterFirst` flag and
+never read it. The flag appeared exactly twice in the file, in the two
+signatures, and nowhere in either body. Each loop computed its mask from the RAW
+lane values and only then applied the map: right for `filter(p).map(f)`, wrong
+for `map(f).filter(p)`. Both scalar tails had the same inversion, so all four
+loops were affected. `SIMD_THRESHOLD` is `VL * 4`, which is why every small test
+passed and the benchmark did not.
+
+After the fix, every size agrees and the two spellings agree with each other:
+
+| n | sum | correct |
+|---|---|---|
+| 5 | 3 | yes |
+| 1 000 | 166 833 | yes |
+| 100 000 | 1 666 683 333 | yes |
+| 20 000 000 | 66 666 663 333 333 | yes |
+
+THE LESSON, which cost three wrong hypotheses: **a fast path that engages on
+SIZE needs a test sized past its trigger.** Every stage-order test written for
+§4 and §6 stayed small enough to miss this entirely, and the shapes they cover
+are exactly the ones this broke. `SimdStageOrderTest` is sized past
+`SIMD_THRESHOLD` on purpose, covers both pipelines (`iter::range` generates
+lanes, `seq::range` materialises an array — separate loops, same defect), and
+includes a length that is not a whole number of vectors so the scalar tail runs.
+Five of its seven cases fail with the fix removed, with the predicted values:
+1498500 for "everything passed", 1000 for the count sink, 2340 just past the
+threshold.
+
+That is three places that decided stage order independently — the lazy walker,
+the `count` sink's hand-built list, and now two vector loops — and each was
+wrong in its own way while the other two were right.
+
 ---
 
 ## Measured and corrected — claims in the tree that were wrong

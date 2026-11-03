@@ -103,9 +103,16 @@ final class FlpSimd {
             // Generate: v[lane] = start + i + lane
             LongVector v = LongVector.broadcast(Vectors.SPECIES, start + i).add(iota);
 
-            // ── Filter ──
+            // ── Filter, when the predicate sees the RAW element ──
+            // STAGE ORDER. `filterFirst` says the user wrote the filter before
+            // the map. This loop used to ignore it and always mask on the raw
+            // value, which is right for `filter(p).map(f)` and wrong for
+            // `map(f).filter(p)`: the predicate then tested a value the user
+            // wrote no predicate for. Every element passed, and because SIMD
+            // only engages past SIMD_THRESHOLD the same program was CORRECT at
+            // small sizes and wrong at scale.
             VectorMask<Long> mask;
-            if (filterCmpOp >= 0) {
+            if (filterCmpOp >= 0 && filterFirst) {
                 LongVector fv = filterPreOp >= 0
                         ? simdOp(filterPreOp, v, filterPreRhsVec) : v;
                 mask = simdCmp(filterCmpOp, fv, filterCmpRhsVec);
@@ -116,6 +123,13 @@ final class FlpSimd {
             // ── Map ──
             if (mapOp >= 0) {
                 v = simdOp(mapOp, v, selfMap ? v : mapOperandVec);
+            }
+
+            // ── Filter, when the predicate sees the MAPPED element ──
+            if (filterCmpOp >= 0 && !filterFirst) {
+                LongVector fv = filterPreOp >= 0
+                        ? simdOp(filterPreOp, v, filterPreRhsVec) : v;
+                mask = simdCmp(filterCmpOp, fv, filterCmpRhsVec);
             }
 
             // ── Sink ──
@@ -164,12 +178,17 @@ final class FlpSimd {
         // ── Scalar tail ──
         for (; i < n; i++) {
             long v = start + i;
-            if (filterCmpOp >= 0) {
+            if (filterCmpOp >= 0 && filterFirst) {
                 long fv = filterPreOp >= 0
                         ? flpOp(filterPreOp, v, filterPreRhs) : v;
                 if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
             }
             if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+            if (filterCmpOp >= 0 && !filterFirst) {
+                long fv = filterPreOp >= 0
+                        ? flpOp(filterPreOp, v, filterPreRhs) : v;
+                if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+            }
             if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_SUM) {
                 scalarAcc = flpOp(foldOp, scalarAcc, v);
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_COUNT) {
@@ -224,8 +243,10 @@ final class FlpSimd {
         for (; i < bound; i += Vectors.VL) {
             LongVector v = LongVector.fromArray(Vectors.SPECIES, data, i);
 
+            // Filter before or after the map, as written — see the range
+            // pipeline above for what ignoring this cost.
             VectorMask<Long> mask;
-            if (filterCmpOp >= 0) {
+            if (filterCmpOp >= 0 && filterFirst) {
                 LongVector fv = filterPreOp >= 0
                         ? simdOp(filterPreOp, v, filterPreRhsVec) : v;
                 mask = simdCmp(filterCmpOp, fv, filterCmpRhsVec);
@@ -235,6 +256,12 @@ final class FlpSimd {
 
             if (mapOp >= 0) {
                 v = simdOp(mapOp, v, selfMap ? v : mapOperandVec);
+            }
+
+            if (filterCmpOp >= 0 && !filterFirst) {
+                LongVector fv = filterPreOp >= 0
+                        ? simdOp(filterPreOp, v, filterPreRhsVec) : v;
+                mask = simdCmp(filterCmpOp, fv, filterCmpRhsVec);
             }
 
             if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_SUM) {
@@ -275,11 +302,15 @@ final class FlpSimd {
         // Scalar tail
         for (; i < n; i++) {
             long v = data[i];
-            if (filterCmpOp >= 0) {
+            if (filterCmpOp >= 0 && filterFirst) {
                 long fv = filterPreOp >= 0 ? flpOp(filterPreOp, v, filterPreRhs) : v;
                 if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
             }
             if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+            if (filterCmpOp >= 0 && !filterFirst) {
+                long fv = filterPreOp >= 0 ? flpOp(filterPreOp, v, filterPreRhs) : v;
+                if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
+            }
             if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_SUM) {
                 scalarAcc = flpOp(foldOp, scalarAcc, v);
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_COUNT) {
