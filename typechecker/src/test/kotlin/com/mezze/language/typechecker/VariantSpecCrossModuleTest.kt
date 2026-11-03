@@ -132,16 +132,20 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         rejectsMain(
             """
             use ta3::{ take }
-            pub let f = { c } -> match c is
-              Red -> 1
-            pub let link = {} -> take { c = Red } + f { c = Red }
+            pub let f = { c } -> do
+              let n = match c is
+                Red -> 1
+              take { c = c }
             $MAIN
             """,
             "V0601",
-            "7.7, and the control experiment for identity-gated checking: the same group " +
-                "arrives through `take`'s signature, but WITHOUT its name — and checking " +
-                "switches off. Read against the test above, which differs only in " +
-                "importing T",
+            "7.7, the control experiment for identity-gated checking. The SAME value " +
+                "is matched and then passed to `take`, so c's group is T — arriving " +
+                "through take's signature, without its name. Coverage must still see " +
+                "Pink.\n\nThe first version of this test matched one literal and passed " +
+                "another (`take { c = Red } + f { c = Red }`), which links nothing: by 4.3 " +
+                "each literal is fitted at its own site, so c was | Red | and one arm " +
+                "covered it exactly as the spec says. The test was wrong, not the checker.",
         )
     }
 
