@@ -1537,6 +1537,49 @@ object ChainCanonicalizer {
     }
 
     /**
+     * Fold a `drop` that is applied directly to a counted range into the
+     * range's start, so the stage disappears.
+     *
+     * `range{start, end}` yields `start + i`, so skipping the first k elements
+     * is exactly `range{start + k, end}` — and when k exceeds the length the
+     * element count `end - start` goes negative, which the loops already treat
+     * as empty, so an over-drop needs no clamp.
+     *
+     * WHY IT IS WORTH A PEEPHOLE: `FusedLongPipeline` has no drop stage at all,
+     * so one drop sent the whole pipeline to the general scalar loop — measured
+     * 658 ps/elem for `drop+map` against 88 for the same map alone, a 7x cliff
+     * bought by a stage that does nothing but move the start. Folding it keeps
+     * the vectorised path.
+     *
+     * ONLY THE FIRST-APPLIED STAGE QUALIFIES. Stages are outer-to-inner, so the
+     * innermost is the LAST element: a drop with a map or filter below it
+     * applies to transformed or filtered elements, where the range's own
+     * positions no longer say which elements to skip.
+     *
+     * Step ranges are left alone. `drop` on one is `start + k*step`, which is
+     * expressible, but its element count is computed differently and that is
+     * not verified here — a stepped range keeps the general loop.
+     */
+    private fun foldLeadingDropIntoRange(
+        stages: List<StageIR>,
+        source: SourceIR,
+    ): Pair<List<StageIR>, SourceIR> {
+        var stagesOut = stages
+        var src = source
+        while (stagesOut.isNotEmpty()) {
+            val innermost = stagesOut.last()
+            if (innermost !is StageIR.Drop) break
+            val range = src as? SourceIR.RangeSeq ?: break
+            src = SourceIR.RangeSeq(
+                InlineBinaryOpIR(InlineOp.ADD, range.start, innermost.n, range.start.src),
+                range.end,
+            )
+            stagesOut = stagesOut.dropLast(1)
+        }
+        return stagesOut to src
+    }
+
+    /**
      * Peel iter::map / iter::filter / iter::from_seq layers off
      * [sourceExpr] and classify the resulting terminal expression as
      * a [SourceIR].
@@ -1620,7 +1663,7 @@ object ChainCanonicalizer {
             if (fromSeqPeeled != null) {
                 // from_seq terminates the iter chain — the peeled inner is
                 // now a Seq expression. Classify it and return.
-                return stages to classifyTerminalSource(fromSeqPeeled, allFunctions)
+                return foldLeadingDropIntoRange(stages, classifyTerminalSource(fromSeqPeeled, allFunctions))
             }
             // Nothing peeled. If this is a call to a forwarding wrapper,
             // look through it and try again — the stages may be on the other
@@ -1635,10 +1678,10 @@ object ChainCanonicalizer {
                 }
             }
             // Nothing peeled — treat current as the terminal source.
-            return stages to classifyTerminalSource(current, allFunctions)
+            return foldLeadingDropIntoRange(stages, classifyTerminalSource(current, allFunctions))
         }
         // Guard exhausted — chain too deep. Bail with what we have.
-        return stages to classifyTerminalSource(current, allFunctions)
+        return foldLeadingDropIntoRange(stages, classifyTerminalSource(current, allFunctions))
     }
 
     /** Recognize `__native_seq_range` / `__native_iter_range` for a fusable

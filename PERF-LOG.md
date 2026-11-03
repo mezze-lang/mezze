@@ -119,7 +119,19 @@ Chosen limits, recorded at the time, not discovered later:
 ### Ranked next
 
 1. **7x general-loop tier** — map+map, filter+filter, filter+take, take_while,
-   drop. It is the SIMD WIDTH, so it needs a stage PROGRAM in FLP.
+   `enumerate`, and what is left of the compound fold. It is the SIMD WIDTH, so
+   it needs a stage PROGRAM in FLP, not overhead shaving.
+
+   TWO ROWS CAME OFF WITHOUT TOUCHING FLP. `take` before a filter was already a
+   source clamp (91 ps), and `drop` applied straight to a range is now folded
+   into the range's START — `range{start,end}` yields `start + i`, so skipping k
+   is exactly `range{start + k, end}`, and an over-drop needs no clamp because
+   the count going negative is already treated as empty. 658 -> **84 ps/elem**.
+   Only the FIRST-APPLIED stage qualifies: a drop below a filter counts
+   SURVIVORS, so over 0..9 keeping odds then dropping two leaves 5,7,9 while
+   moving the start first leaves 3,5,7,9 — a wrong answer, not a slow one.
+   `map+map` and `filter+filter` have no equivalent escape: `x*3` then `x+1` is
+   genuinely two ops, and two filters are genuinely two comparisons.
 2. **`to_seq` at 50x** (4 541 ps) — the one shape that did not move.
 3. **Records as values** — unmeasured, and the remaining half of the erasure
    principle.
