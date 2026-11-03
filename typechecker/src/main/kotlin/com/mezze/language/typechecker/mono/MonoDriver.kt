@@ -1011,60 +1011,84 @@ object MonoDriver {
     ): List<MezzeType> {
         // Nothing to do if everything is already concrete.
         if (derived.all { isConcrete(it) }) return derived
-        // The MONO scheme's `type` is constraint-less; the ability constraints live
-        // on `scheme.abilityConstraints` (abilityHash + typeArgs — the typedast
-        // TypedAbilityConstraint has NO associated-type bindings, so we recover the
-        // `out` type structurally from the resolved IMPL, not the constraint).
-        val schemeConstraints = callee.scheme.abilityConstraints
-        if (schemeConstraints.isEmpty()) return derived
+        // THE CONSTRAINTS OFF THE TYPE, not off the mono scheme. Both carry
+        // abilityHash + typeArgs, but only the type-level `AbilityConstraint`
+        // carries `associatedTypeBindings` — the `having 'out = 'c` map whose
+        // VALUE is the var this constraint's output IS. Without it there is
+        // nothing to say WHICH param a resolved impl's `out` belongs to, and the
+        // previous version guessed: "the first unresolved param that is not among
+        // this constraint's own args".
+        //
+        // That guess is right for one constraint and wrong for a chain. In
+        //
+        //     { i } -> i + 0 + 0 + …
+        //     'y12 -> NumAdd Int 'y12 having 'out = 'b13
+        //             NumAdd Int 'b13 having 'out = 'e13        … -> 'out
+        //
+        // the typeParams are ['y12, out, 'b13, 'e13, …] and the first unresolved
+        // one is the function's RETURN, so constraint #1's output was assigned to
+        // the return instead of to `'b13`. `'b13` then stayed a variable, every
+        // later constraint was skipped for having a non-concrete argument, the
+        // all-concrete gate failed, and nothing was specialised.
+        //
+        // MEASURED, `bench/cases/letcost` kernel 6 at n=2e7: the unspecialised
+        // form costs 161 285 ps/iter with ~400 young collections — eight
+        // dictionary PARAMETERS and eight DictMethodCallIR, each allocating a
+        // three-field record — against 222 ps for the same function written
+        // `{ i: Int } -> Int`. 700x, on an annotation.
+        //
+        // AND TO A FIXPOINT, because one constraint's `out` is the next one's
+        // operand: each fill is fed back into `nameToConcrete` so the following
+        // round can read it as concrete. Order-independent, so it does not matter
+        // which order the constraints arrive in.
+        val typeConstraints = (callee.scheme.type as? MezzeType.FunctionType)
+            ?.abilityConstraints ?: return derived
+        if (typeConstraints.isEmpty()) return derived
 
         // name -> concrete, from what we've derived so far.
         val nameToConcrete = HashMap<String, MezzeType>(callee.typeParams.size)
         for (i in callee.typeParams.indices) nameToConcrete[callee.typeParams[i].name] = derived[i]
+        val indexOfParam = HashMap<String, Int>(callee.typeParams.size)
+        for (i in callee.typeParams.indices) indexOfParam[callee.typeParams[i].name] = i
 
-        // The set of typeParams still unresolved (candidates for an `out` fill).
-        val unresolvedParamNames = callee.typeParams
-            .filter { nameToConcrete[it.name]?.let { t -> t is MezzeType.VarType && !isConcrete(t) } == true }
-            .map { it.name }
-            .toMutableSet()
-        if (unresolvedParamNames.isEmpty()) return derived
-
-        // For each constraint whose class/receiver args are all concrete, resolve the
-        // impl and read its associated `out`. Fill the unresolved return typeParam.
-        val outFills = HashMap<String, MezzeType>()
-        for (c in schemeConstraints) {
-            val abilityHash = c.abilityHash
-            val concreteArgs = c.typeArgs.map { ta ->
-                if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
+        val filled = derived.toMutableList()
+        val settled = HashSet<Int>()
+        var progress = true
+        while (progress && filled.any { !isConcrete(it) }) {
+            progress = false
+            for ((ci, c) in typeConstraints.withIndex()) {
+                if (ci in settled) continue
+                val abilityHash = c.abilityHash ?: continue
+                if (c.associatedTypeBindings.isEmpty()) continue
+                val concreteArgs = c.typeArgs.map { ta ->
+                    if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
+                }
+                if (concreteArgs.isEmpty() || concreteArgs.any { !isConcrete(it) }) continue
+                val candidates = abilityImpls.filter {
+                    it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
+                }
+                val m = candidates.firstOrNull { impl ->
+                    impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target, MonoDriver::variantDeclHasConstructors) }
+                } ?: continue
+                settled.add(ci)
+                // Each binding names its own target var, so there is no guessing
+                // even when an ability has several associated types.
+                for ((assocName, boundTo) in c.associatedTypeBindings) {
+                    val target = (boundTo as? MezzeType.VarType) ?: continue
+                    val idx = indexOfParam[target.variable.name] ?: continue
+                    if (isConcrete(filled[idx])) continue
+                    val implOut = m.associatedTypeBindings[assocName]
+                        ?: m.associatedTypeBindings["'" + assocName.removePrefix("'")]
+                        ?: m.associatedTypeBindings[assocName.removePrefix("'")]
+                        ?: continue
+                    if (!isConcrete(implOut)) continue
+                    filled[idx] = implOut
+                    nameToConcrete[target.variable.name] = implOut
+                    progress = true
+                }
             }
-            if (concreteArgs.isEmpty() || concreteArgs.any { !isConcrete(it) }) continue
-            val candidates = abilityImpls.filter {
-                it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
-            }
-            val match = candidates.firstOrNull { impl ->
-                impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target, MonoDriver::variantDeclHasConstructors) }
-            }
-            val m = match ?: continue
-            // The impl's associatedTypeBindings hold the concrete `out` for this
-            // (receiver, class-args) instantiation. There is typically one `out`.
-            val implOut = m.associatedTypeBindings["out"]
-                ?: m.associatedTypeBindings["'out"]
-                ?: m.associatedTypeBindings.values.firstOrNull()
-                ?: continue
-            if (!isConcrete(implOut)) continue
-            // Assign it to the still-unresolved return typeParam. When exactly one param
-            // is unresolved, it IS the `out` (the return); otherwise assign to any
-            // unresolved param that does not appear among the constraint's own args (so
-            // we never clobber a receiver/class-arg var).
-            val argVarNames = c.typeArgs.filterIsInstance<MezzeType.VarType>().map { it.variable.name }.toSet()
-            val target = unresolvedParamNames.firstOrNull { it !in argVarNames } ?: continue
-            outFills[target] = implOut
-            unresolvedParamNames.remove(target)
         }
-        if (outFills.isEmpty()) return derived
-        return callee.typeParams.indices.map { i ->
-            outFills[callee.typeParams[i].name] ?: derived[i]
-        }
+        return filled
     }
 
     /**

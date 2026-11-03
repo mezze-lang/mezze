@@ -1394,29 +1394,85 @@ THREE FACTS IN FOUR LINES:
   `main` still carries `NumAdd Int 'a having 'out = Int` with the OPERAND
   unresolved. A concrete call site is not collapsing its callee's constraint.
 
-TWO WAYS OUT, and they are not equivalent:
+### FIXED: the chain is monomorphised — 249x, and the annotation is worth nothing again
 
-1. **Monomorphise the concrete call site.** `one { i = 1 }` has an Int argument;
-   a specialised copy would have no dictionaries. Pure compiler work, identical
-   semantics, nothing for a user to decide. With
-   `MEZZE_TYPECHECK_DEBUG=true MEZZE_TYPECHECK_DEBUG_CATEGORIES=Monomorphization`
-   this call prints NO visit counter at all, so it is either not reached on this
-   path or rejected before counting; `MonoDriver`'s seed gate wants the callee's
-   `typeParams` non-empty, and these variables come from constraints rather than
-   from anything the user declared. That is the thing to establish first, and it
-   is unestablished — an attempt at `fillHavingOutTypeArgs`, on the theory that
-   its single pass could not chain one `out` into the next operand, changed the
-   lowering NOT AT ALL and was reverted. The single-pass reading of that
-   function is correct; it is simply not what is blocking this.
-2. **Make `+`, `-` and `%` homogeneous again**, which is what the recorded
-   design decision already says — "leave NumAdd/NumSub/NumMod homogeneous
-   (heterogeneous + is usually a bug worth rejecting)", with heterogeneity
-   intended for `*` and `/` only. The shipped stdlib gives all five the
-   associated type, so the signature above is broader than the decision behind
-   it. This changes what programs type-check, so it is not a performance
-   decision to make unilaterally.
+`bench/cases/letcost` kernel 6, same CLI, n=2e7, min of 3:
 
-(1) is the one to try first: it is the only one that costs nothing in semantics.
+| | ps/iter | young GCs |
+|---|---|---|
+| before | 161 285 | 370 |
+| after | **647** | **3** |
+| control (kernel 1), either way | 220 | 2 |
+
+249x, identical checksums, and the control says the machine was honest. 647 is
+the ordinary "binding holds a call" level from the table above, so the
+dictionary cost is entirely gone and what is left is the tier decline already
+documented. The annotated form is no longer faster than the inferred one, which
+was the whole point.
+
+HOW IT WAS FOUND, since the first two guesses were wrong and the trace was
+right there. `MEZZE_TYPECHECK_DEBUG=true` with
+`MEZZE_TYPECHECK_DEBUG_CATEGORIES=Monomorphization` prints a per-run summary and
+a refusal line per call:
+
+    [mono] byHash visited=135 seeded=130 (fnType=130 argType=0 fail=5)
+    [mono-trace] byHash-fail callee=chain
+      typeParams=['y12, out, 'b13, 'e13, 'h13, 'k13, 'n13, 'q13, 't13]
+      scheme=({i: ''y12#2038} -> 'out#2068)
+      fn.type=({i: Int} -> Int)
+
+NINE type params, of which the scheme TYPE mentions two. Unifying the surface
+type against the call site binds those two; the other seven exist only inside
+the constraints, and `fillHavingOutTypeArgs` is the function whose whole job is
+to fill them from each resolved impl's associated `out`.
+
+IT FILLED THE WRONG ONE. The target was chosen as "the first unresolved param
+that is not among this constraint's own args" — and in the list above that is
+`out`, the function's RETURN. So constraint #1's output was assigned to the
+return instead of to `'b13`; `'b13` stayed a variable; every later constraint
+was skipped for having a non-concrete argument; the all-concrete gate failed.
+Accidentally correct for ONE constraint, wrong for a chain of any length.
+
+THE FIX READS EACH CONSTRAINT'S OWN BINDING. A type-level `AbilityConstraint`
+carries `associatedTypeBindings` — the `having 'out = 'c` map whose value is the
+variable that constraint's output IS — so there is nothing to guess. The
+typedast `TypedAbilityConstraint` the function used instead does NOT carry them,
+which is why it was guessing at all; taking the constraints off
+`scheme.type.abilityConstraints` is the enabling change. And it iterates to a
+fixpoint, because one constraint's `out` is the next one's operand.
+
+Afterwards: `byHash … seeded=131 (fnType=130 argType=1 fail=4)`, `chain` gone
+from the refusal list, specialisations 104 → 106, and `chain` no longer compiled
+at all — the specialised copy inlines into its caller as eight
+`__native_int_add`.
+
+TWO WRONG TURNS WORTH KEEPING, both of which looked like the answer:
+
+- **The single pass.** `fillHavingOutTypeArgs` genuinely did not feed its own
+  fills forward, which cannot chain one `out` into the next operand. Fixing only
+  that changed the lowering NOT AT ALL, because the mis-targeting above defeats
+  it: the one fill it does make goes to the wrong variable. It was reverted
+  rather than kept as a plausible-looking no-op, and the log said so before this
+  entry corrected it. Both halves were needed; only one was visible.
+- **`method-noImpl field=add receiver=Int`**, which appears 90 times in the
+  trace and looks exactly like the bug. It is not: the comment at that site says
+  a receiver whose impl is CONCRETE has no entry among the generic candidates
+  and lands there legitimately, and that reading it as a gap "cost one wrong
+  hypothesis already". It nearly cost a second.
+
+STILL OPEN, and now the honest residue: `recordcost` kernels 4 and 7 did NOT
+move (669 and 628). Their helper is small enough to INLINE, so there is no call
+site left for mono to specialise — the generic body is spliced in and its
+`i.sub { r = 1 }` stays a call. Inlining and specialising are competing for the
+same helper, and inlining wins by being first.
+
+AND NOT DONE, deliberately: making `+`, `-` and `%` homogeneous again. The
+recorded design decision says "leave NumAdd/NumSub/NumMod homogeneous
+(heterogeneous + is usually a bug worth rejecting)" with heterogeneity intended
+for `*` and `/` only, so the shipped `ability NumAdd 'r for 'l having 'out` is
+broader than the decision behind it. That changes what programs type-check, so
+it is not a performance decision to make unilaterally — and after this fix it
+is no longer a performance decision at all.
 
 SCOPE LIMIT WORTH KNOWING: this pass and the record scalarizer are wired into
 the user-code pipeline only. `StdlibPrecompiler` runs MutEraser,
