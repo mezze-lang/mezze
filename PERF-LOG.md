@@ -749,6 +749,69 @@ TWO MEASUREMENT TRAPS HIT HERE, both worth not repeating:
 
 ---
 
+## Measured: which pipeline shapes fall off the fast path
+
+One shape at the floor is not an answer. `bench/cases/fusegaps` runs the shapes
+a real program writes through one harness so the cliffs rank themselves.
+n = 2e7, min of five timed calls after five warmups, ONE KERNEL PER PROCESS,
+every checksum printed and hand-checkable.
+
+| shape | ps/elem | x floor |
+|---|---|---|
+| map | 86 | 1.0 |
+| count(pred) | 79 | 0.9 |
+| filter | 88 | 1.0 |
+| take+filter | 91 | 1.0 |
+| map+filter | 93 | 1.1 |
+| any(pred) — short-circuits, not comparable | 190 | — |
+| seq (array source) map+filter | 229 | 2.6 |
+| filter+filter | 530 | **6.0** |
+| take_while+map | 575 | **6.5** |
+| map+map | 631 | **7.2** |
+| filter+take | 666 | **7.6** |
+| drop+map | 671 | **7.6** |
+| to_seq (materialises) | 4 394 | **50** |
+| **compound fold** (`acc + x*2 - 1`) | 14 025 | **159** |
+| **enumerate+map** | 124 247 | **1412** |
+
+THE THREE GAPS, in payoff order:
+
+1. **`enumerate` is not fusable at all — 1412x.** `ChainCanonicalizer` has no
+   `StageIR.Enumerate` and zero mentions of enumerate, so a chain containing
+   `.enumerate{}` cannot be peeled: the source classifies as Opaque, nothing
+   fuses, and a `{i, val}` RECORD is allocated per element. This is the
+   records-are-syntax principle with a number attached.
+2. **A compound fold body — 159x.** `isFoldBodyEmittable` accepts `acc OP g(x)`
+   one level deep, so `acc + x * 2 - 1` is refused and the whole chain declines.
+   The fix is to accept an arbitrary pure expression over {acc, x, literals} and
+   emit it directly rather than match a fixed shape.
+3. **A SECOND stage of any kind — 6-7.6x.** One map or one filter is free;
+   adding either costs 7x, because `tryBuildFusedLongPipeline` accepts at most
+   one of each and everything else falls to the general loop. So does
+   `filter+take` (needs a counter, not a source clamp), `take_while` and `drop`.
+
+### Two methodology corrections, both of which produced published-looking numbers
+
+**A higher-order harness destroys what it measures.** The first version of this
+bench passed each kernel to a `bench { name, n, f }`. Taking a pipeline function
+as a VALUE blocks its monomorphisation — the reference site carries a type
+variable — so every kernel measured its generic, unfused copy: `map+filter` read
+32 258 ps/elem through the harness against 93 called directly. A 350x
+measurement artifact, and also a real cliff worth its own entry: a function used
+as a value loses fusion.
+
+**Fifteen kernels in one JVM measure a compiler-thread lottery, not shapes.**
+With two warmups each, three consecutive runs of the SAME binary gave
+`03 filter` 215, 7097 and 7474 ps/elem, and `10 count` 5867, 248, 5254. Every
+kernel lands in a fast or a slow mode depending on whether its compiled code
+happened to be ready by its timed call — bimodal, up to 35x apart. An earlier
+draft of this table reported the 6-7x tier as 15-22x and `count` as 31x purely
+from that noise, and a boxing-elimination experiment "showed" two 17x wins and
+six regressions that were all noise. One kernel per process, five warmups, five
+timings, take the minimum.
+
+---
+
 ## Surface still to cover
 
 Not yet measured on this branch. Listed so the gaps are visible rather than
