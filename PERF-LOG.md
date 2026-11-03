@@ -179,10 +179,10 @@ Guarded four ways, one per route to the same answer:
 chain. Each case is chosen so the two orders DISAGREE — most map/filter pairs
 give the same answer either way, which is how both bugs survived.
 
-**This invalidated one of my own numbers.** The dot-chain figure below was
-measured on a pipeline whose filter kept every element, so its checksum was
-wrong and its element count was 3× the intended one. Re-measure before quoting
-it.
+**This invalidated one of my own numbers**, which has now been re-measured on a
+correct program — see "Measured: what fusion is worth" below. The old
+dot-chain figure was taken on a pipeline whose filter kept every element, so its
+checksum was wrong and it folded 3× the intended number of elements.
 
 ### 5. A dot-chained pipeline never fused at all — one line, and a soundness hole under it
 
@@ -682,15 +682,11 @@ the order in the IR rather than inferring it from a value.
    and ability dispatch with a statically-known impl is already free at
    0.30 ns/iter, so the dictionary cost that remains is this one.*
 
-3. **Dot-chaining refuses fusion — 2.8× measured.** `ChainCanonicalizer` rewrites
-   `iter` chains into `FusedChainIR`, is on by default, and **refuses the
-   dot-chained form**: `.map{}.filter{}.sum{}` runs at 35.1 ns/elem with the
-   pass on and 29.9 with it off (identical — it never fired), while the
-   free-function form `iter::map/filter/sum` runs at 12.5–14.2 ns/elem and does
-   fuse. Dot-chaining dispatches through the `Iter` ability impl, and the pass
-   runs post-`TrivialWrapperInliner`, so unlinlined ability dispatch leaves
-   opaque calls where a peelable chain should be. This conflicts with
-   dot-chaining as the idiomatic form; fix the compiler, not the style.
+3. ~~**Dot-chaining refuses fusion.**~~ **FIXED** — see "A dot-chained pipeline
+   now fuses" and "Measured: what fusion is worth". The cause was
+   `countParamReads` bailing on `MakeLambdaIR`, which disqualified every
+   mono-specialised `Iter` impl forwarder a dotted stage goes through. The
+   dot-chained and free-function spellings now measure the same.
 4. **Tier 1 declines compound updates.** `arith` is at Java parity but still
    runs the BDSL loop, because `FusedLongTailLoop` only accepts single-op
    parameter updates (`left` must be the param, `right` a literal or another
@@ -711,6 +707,45 @@ the order in the IR rather than inferring it from a value.
    the canonicalizer and the emitter would all reason about natives instead of
    each working around the gap. Blast radius: a dependency change (interpreter
    is `compileOnly` in the CLI).
+
+---
+
+## Measured: what fusion is worth
+
+`bench/cases/chain`, `iter::range{0,n}.map{x*3}.filter{x<n}.fold{+}` both ways
+round, on GraalVM CE 25.0.2 from a `mez build` JAR, three runs per size. The
+app warms up twice per form and times the third call, so JVM startup is outside
+the measurement. Every checksum below was verified by hand against
+`3·Σ(0..(n−1)/3)` — the figures this replaces were not, which is how a wrong
+filter rode along in them for so long.
+
+**Slope**, `(t(2N) − t(N)) / N`:
+
+| build | dotted | free-function |
+|---|---|---|
+| canonicalizer OFF (`MEZZE_CHAIN_CANONICALIZE=0`) | 40.6 ns/elem | 40.6 ns/elem |
+| canonicalizer ON | 0.075 ns/elem | 0.075 ns/elem |
+
+Raw times behind the slopes, fused: 3 ms at 2e7, 5 ms at 4e7, 17 ms at 2e8,
+32 ms at 4e8. Unfused: 399 ms at 1e7, 805 ms at 2e7.
+
+**~540× for the dot-chained form**, which is what the dot-chain fix bought: it
+was in the first row with the pass ON before, and is in the second now. The
+free-function form already fused and did not move. 0.075 ns/elem is ~0.25 cycles
+per element, which is what a vectorised masked-add sum should cost and is
+consistent with the SIMD path being the one that runs.
+
+TWO MEASUREMENT TRAPS HIT HERE, both worth not repeating:
+
+- **`mez build` caches in `.mez`.** Setting `MEZZE_CHAIN_CANONICALIZE=0` and
+  rebuilding changed nothing — same times, same binary — because the build was
+  reused. Deleting `.build` alone is not enough; the unfused baseline only
+  appeared after `rm -rf .build .mez`. A flag that silently does nothing looks
+  exactly like a flag that proves your hypothesis wrong.
+- **The bench's own `ns/elem` column is integer division.** At 2e7 elements and
+  4 ms it prints `0`, which reads like a dead measurement and is really 0.2.
+  The slope has to come from the millisecond figures at sizes where they are
+  large enough to divide.
 
 ---
 
