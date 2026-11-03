@@ -1261,14 +1261,138 @@ too, so counting those as record reads mixes the two completely, and `acc + p.ad
 makes the name `add` ambiguous with the op of the same name. The tests count
 records built and reads of field names only the record uses.
 
-### NEXT, now that it is isolated: a `let` in a loop body costs ~240 ps
+### FIXED: a `let` in a loop body cost 3x — and it was not the binding
 
-Kernels 6 and 7 sit at ~700 ps where kernel 1, the same arithmetic carried
-positionally, is 225. Two `let` bindings in the loop body are the whole
-difference, and the record is no longer any part of it — kernel 6 has no record
-at all. ~240 ps per binding, three young collections either way, so it is not
-allocation. That is the next thing to measure, and it is now a clean question
-rather than one confounded with records.
+The question above, measured. `bench/cases/letcost`, A/B on one CLI with
+`MEZZE_LET_PROPAGATE=0` read by `mez build`, n=2e7, min of 5:
+
+| kernel | off | on | | young GCs off → on |
+|---|---|---|---|---|
+| 1 no binding (control) | 222 | 226 | — | 2 → 2 |
+| 2 ONE binding | 638 | **224** | 2.85x | 3 → 2 |
+| 3 two bindings | 677 | **220** | 3.08x | 3 → 2 |
+| 4 four bindings | 711 | **223** | 3.19x | 3 → 2 |
+| 5 one binding read TWICE | 773 | 786 | — | 3 → 2 |
+| 7 binding in a cold branch | 642 | 634 | — | 3 → 3 |
+
+and on `recordcost`, where kernel 6 is the same loop with the record's helper
+hand-inlined: 687 → **227**, 3.03x, against its own control at 224.
+
+ONE, TWO AND FOUR BINDINGS NOW COST WHAT NONE COST: 224, 220, 223 against the
+control's 226. The `off` column is what says why — 638 for the first binding,
+then 677 and 711 for two and four. A 415 ps STEP for writing any binding at
+all, then ~37 ps for each one after it. A per-binding cost cannot look like
+that. It was never the binding.
+
+IT WAS A TIER DECLINING. Three tiers compile a self-tail loop, and the fastest —
+`FusedLongTailLoop`, which runs the whole loop in Java with no per-iteration
+bytecode dispatch — matches on the loop branch BEING the self tail call:
+
+    if (elseBr instanceof CallDirectIR ec && ec.isTailCall() …)
+
+A `do` block makes that branch a `BlockIR` whose RESULT is the call, so the
+match fails, the tier declines silently, and the loop drops to the general path.
+Writing the step as a named binding cost 3x for no reason visible in the program.
+
+THE TWO BODIES ARE THE SAME IR. Dumped side by side, the fused loop and the
+declined one differ in exactly the block:
+
+    elseBr = CallDirect(self, [SUB(i,1), acc.add{r=i}])                 FUSED
+    elseBr = Block([Let(nxt, SUB(i,1)), Let(cur, i)],
+                   CallDirect(self, [nxt, acc.add{r=cur}]))             declined
+
+Substituting the bindings produces the first form node for node, which is why
+the fix is a substitution rather than a new tier. And the emptied block has to
+COLLAPSE: an empty `BlockIR` around the call is still a `BlockIR` and still
+declines, so substituting and leaving the wrapper would have measured as
+nothing. Its test therefore asserts the SHAPE the tier tests for, not a count of
+bindings — a count would have passed with the wrapper still in the way.
+
+### THE SCOPE RESTRICTION IS A BUG FIX, NOT A PRECAUTION — the debugger caught it
+
+Run over every block in the program, the pass broke `DapEndToEndTest`, and
+correctly. A breakpoint set on a `let` line stopped on the line AFTER it
+("expected: <2> but was: <5>") because there was no longer any code on that
+line, and a conditional breakpoint over a local found no local to read. Three
+tests, all real.
+
+The fix is not to weaken the pass but to put it where it pays: the tail-call
+branch of a self-tail loop, which is the only place a block costs anything. An
+ordinary binding elsewhere was being removed for NO GAIN — outside such a loop
+there is no tier to qualify for — so the DAP failures were pure cost. Inside
+one there is nothing to lose, because that tier compiles the loop to Java with
+no per-iteration bytecode and a breakpoint in its body could never have stopped
+there anyway. Narrowing it kept every number above unchanged.
+
+WORTH GENERALISING FROM: "this optimisation is sound" and "this optimisation is
+worth doing here" are different questions, and only the second one was actually
+in doubt. The debugger is the part of the system that can tell the difference,
+and it is the only test that did.
+
+### WHAT REFUSING LEAVES, and it is now the largest measured gap in the log
+
+The refusals are honest in the table rather than argued: a binding read twice
+(786 ps) would duplicate work, and a binding holding a CALL (kernels 4 and 7 of
+the record section, 640 and 623 ps) cannot move because nothing in the IR says
+whether the callee has effects.
+
+Then kernel 6 of `letcost` — a binding holding a call too big to inline —
+measured **161 285 ps/iter** against the control's 222, with ~400 young
+collections. 700x, and copy propagation moves it by 1.01x, so it is not the
+binding and not the block.
+
+`MEZZE_DUMP_FN` says what it is. The helper is
+
+    let ident = { i } -> i + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0
+
+and it lowers to EIGHT dictionary parameters and eight `DictMethodCallIR`, each
+allocating a three-field record and reading a global by hash:
+
+    ident params=[i, __dict_add@c13, __dict_add@f13, … , __dict_add@z12]
+    body=DictMethodCall(dictSlot=7, {it=DictMethodCall(dictSlot=6, …), r=0,
+                                     __dict_lt=ReadGlobalFnByHash(…)})
+
+Zero `InlineBinaryOpIR`. Annotated `{ i: Int } -> Int`, the same function is
+inlined into its caller as eight `InlineBinaryOpIR` and four native calls — no
+dictionaries, no allocation. **An annotation is worth 700x here**, which is the
+one thing this effort is not allowed to leave standing.
+
+IT IS NOT A DICTIONARY BUG. `mez check` prints the inferred signature:
+
+    inferred : { i: 'a } with NumAdd Int 'a having 'out = 'c,
+                             NumAdd Int 'c having 'out = 'd, … -> 'b
+
+and `inferred { i = 1.5 }` type-checks. The function really is polymorphic,
+because every numeric ability is heterogeneous —
+`ability NumAdd 'r for 'l having 'out` in `stdlib/std/abilities/numeric.mz` —
+so `i + 0` does NOT pin `i`: each `+` threads a fresh `'out` into the next
+operand position. Eight operators, eight genuinely distinct constraints, eight
+dictionaries. The constraints then leak outward: `main` picks up twelve of them.
+
+THREE WAYS OUT, and they are not equivalent:
+
+1. **Monomorphise the concrete call site.** `inferred { i = 1 }` has an Int
+   argument; a specialised copy would have no dictionaries. Pure compiler work,
+   identical semantics, nothing for a user to decide. `MonoDriver`'s seed
+   requires the callee's `typeParams` to be non-empty, and these are
+   constraint variables, so the call is never seeded — that is the thing to
+   check first.
+2. **Default an unconstrained numeric variable** at generalisation, which is
+   what Haskell's defaulting rules are for.
+3. **Make `+`, `-` and `%` homogeneous again.** Worth noting that this is what
+   the recorded design decision already says — "leave NumAdd/NumSub/NumMod
+   homogeneous (heterogeneous + is usually a bug worth rejecting)", with
+   heterogeneity intended for `*` and `/` only. The shipped stdlib gives all
+   five the associated type, so the signature above is broader than the
+   decision behind it. This one changes what programs type-check, so it is not
+   a performance decision to make unilaterally.
+
+(1) is the one to try first: it is the only one that costs nothing in semantics.
+
+SCOPE LIMIT WORTH KNOWING: this pass and the record scalarizer are wired into
+the user-code pipeline only. `StdlibPrecompiler` runs MutEraser,
+TrivialWrapperInliner and ChainCanonicalizer — not these two — so a stdlib loop
+carrying a binding still declines the tier.
 
 ### MEASURED AND REJECTED: an unboxed record layout
 

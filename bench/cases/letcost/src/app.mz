@@ -1,0 +1,163 @@
+## WHAT A `let` IN A LOOP BODY COSTS.
+##
+## §"what a record costs" left one number unexplained. Kernel 6 there — the
+## record's helper hand-inlined, so no record exists at all — sits at ~700
+## ps/iter where kernel 1, the same arithmetic carried positionally, is ~225.
+## The difference is two `let` bindings in the loop body and nothing else, and
+## the young-collection counts are equal, so it is not allocation.
+##
+## These kernels measure the SLOPE per binding. Every one computes the same
+## checksum as kernel 1, so a kernel that got fast by dropping work shows up as
+## a different number. Reported in picoseconds per iteration.
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## 1. CONTROL: no bindings in the body.
+let k_none = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + i }
+  go { i = n, acc = 0 }
+
+## 2. ONE binding, read once.
+let k_one = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let nxt = i - 1
+      go { i = nxt, acc = acc + i }
+  go { i = n, acc = 0 }
+
+## 3. TWO bindings, each read once. This is kernel 6 of the record section.
+let k_two = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let nxt = i - 1
+      let cur = i
+      go { i = nxt, acc = acc + cur }
+  go { i = n, acc = 0 }
+
+## 4. FOUR bindings. Two more than kernel 3 for the same work, so the slope
+##    between 3 and 4 is the cost of a binding with nothing else moving.
+let k_four = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let nxt = i - 1
+      let cur = i
+      let a = cur
+      let b = nxt
+      go { i = b, acc = acc + a }
+  go { i = n, acc = 0 }
+
+## 5. ONE binding read TWICE, so it cannot simply be substituted back. If this
+##    costs the same as kernel 2, the binding itself is the cost; if it costs
+##    less than two reads of separate bindings, the read is.
+let k_read_twice = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let nxt = i - 1
+      go { i = nxt, acc = acc + nxt + 1 }
+  go { i = n, acc = 0 }
+
+## 6. ONE binding holding a CALL that is too big to inline. This is the shape
+##    copy propagation REFUSES — nothing in the IR says whether the callee has
+##    effects, so moving it to the read could change whether it runs — so this
+##    kernel measures the gap that is LEFT once the propagatable shapes are
+##    handled. `ident` returns its argument, so the checksum is unchanged.
+let ident = { i } -> i + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0
+let k_refused = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let cur = ident { i = i }
+      go { i = i - 1, acc = acc + cur }
+  go { i = n, acc = 0 }
+
+## 7. A binding in a branch that is almost never taken. The binding exists in
+##    the body either way, so if the cost is the SLOT rather than the store,
+##    this is as slow as kernel 2.
+let k_cold = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else if i == 7 then do
+      let cold = i - 1
+      go { i = cold, acc = acc + i }
+    else go { i = i - 1, acc = acc + i }
+  go { i = n, acc = 0 }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_none { n = n }
+    k_none { n = n }
+    k_none { n = n }
+    report { name = "1 no binding   ", n = n, r = time_it { f = {} -> k_none { n = n } } }
+    report { name = "1 no binding   ", n = n, r = time_it { f = {} -> k_none { n = n } } }
+    report { name = "1 no binding   ", n = n, r = time_it { f = {} -> k_none { n = n } } }
+  else if k == 2 then do
+    k_one { n = n }
+    k_one { n = n }
+    k_one { n = n }
+    report { name = "2 one binding  ", n = n, r = time_it { f = {} -> k_one { n = n } } }
+    report { name = "2 one binding  ", n = n, r = time_it { f = {} -> k_one { n = n } } }
+    report { name = "2 one binding  ", n = n, r = time_it { f = {} -> k_one { n = n } } }
+  else if k == 3 then do
+    k_two { n = n }
+    k_two { n = n }
+    k_two { n = n }
+    report { name = "3 two bindings ", n = n, r = time_it { f = {} -> k_two { n = n } } }
+    report { name = "3 two bindings ", n = n, r = time_it { f = {} -> k_two { n = n } } }
+    report { name = "3 two bindings ", n = n, r = time_it { f = {} -> k_two { n = n } } }
+  else if k == 4 then do
+    k_four { n = n }
+    k_four { n = n }
+    k_four { n = n }
+    report { name = "4 four bindings", n = n, r = time_it { f = {} -> k_four { n = n } } }
+    report { name = "4 four bindings", n = n, r = time_it { f = {} -> k_four { n = n } } }
+    report { name = "4 four bindings", n = n, r = time_it { f = {} -> k_four { n = n } } }
+  else if k == 5 then do
+    k_read_twice { n = n }
+    k_read_twice { n = n }
+    k_read_twice { n = n }
+    report { name = "5 read twice   ", n = n, r = time_it { f = {} -> k_read_twice { n = n } } }
+    report { name = "5 read twice   ", n = n, r = time_it { f = {} -> k_read_twice { n = n } } }
+    report { name = "5 read twice   ", n = n, r = time_it { f = {} -> k_read_twice { n = n } } }
+  else if k == 6 then do
+    k_refused { n = n }
+    k_refused { n = n }
+    k_refused { n = n }
+    report { name = "6 call binding ", n = n, r = time_it { f = {} -> k_refused { n = n } } }
+    report { name = "6 call binding ", n = n, r = time_it { f = {} -> k_refused { n = n } } }
+    report { name = "6 call binding ", n = n, r = time_it { f = {} -> k_refused { n = n } } }
+  else if k == 7 then do
+    k_cold { n = n }
+    k_cold { n = n }
+    k_cold { n = n }
+    report { name = "7 cold binding ", n = n, r = time_it { f = {} -> k_cold { n = n } } }
+    report { name = "7 cold binding ", n = n, r = time_it { f = {} -> k_cold { n = n } } }
+    report { name = "7 cold binding ", n = n, r = time_it { f = {} -> k_cold { n = n } } }
+  else println { msg = "unknown kernel" }

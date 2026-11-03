@@ -603,6 +603,14 @@ class TypedASTCompiler(
         // boxing elimination on to pay, and an inlined producer to see anything
         // at all. Off with MEZZE_RECORD_SCALARIZE=0.
         val scalarizedMap = com.mezze.language.truffleir.RecordScalarizer.scalarize(inlinedMap)
+        // A binding read once, holding a value that can be recomputed at the
+        // read, is substituted and dropped. AFTER the scalarizer, whose
+        // per-field locals are exactly that shape, and before canonicalization
+        // so the chain matcher sees the collapsed form. The point is not the
+        // slot: the fastest self-tail-loop tier matches on the branch BEING the
+        // tail call, and a `do` block around it declined the whole tier — 3x on
+        // a formatting choice. Off with MEZZE_LET_PROPAGATE=0.
+        val propagatedMap = com.mezze.language.truffleir.LetCopyPropagation.propagate(scalarizedMap)
 
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
@@ -614,13 +622,13 @@ class TypedASTCompiler(
         // runtime (list::sum → BuiltinSumLongSeq with List input).
         val userHashes = deduped.map { it.hash }.toHashSet()
         val userFunctions = HashMap<Hash, FunctionIR>(userHashes.size)
-        for ((h, fn) in scalarizedMap) {
+        for ((h, fn) in propagatedMap) {
             if (h in userHashes) userFunctions[h] = fn
         }
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
-            .canonicalize(userFunctions, scalarizedMap)
+            .canonicalize(userFunctions, propagatedMap)
         // Merge back: canonicalized user functions over the full inlined map.
-        val canonicalizedMap = HashMap(scalarizedMap)
+        val canonicalizedMap = HashMap(propagatedMap)
         canonicalizedMap.putAll(canonicalizedUser)
         // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
         // The pass exists but its purity check needs work — see
