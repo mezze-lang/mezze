@@ -565,10 +565,24 @@ count, and making it generic is what showed the approach flat.
 **Scalar replacement of a non-escaping record.** A pass that turns
 `let p = { lo = …, add = … }` with every use a field read into per-field locals,
 so the record is never built. Verified in the IR — `MakeRecord=3 ReadField=2`
-became `ReadField=0` — and it changed nothing: 5 217 -> 5 321 ps, and the young
-GC count stayed at 35 against 2 for the same loop without a record. Because it
-trades a record for LOCALS, and locals were the expensive thing. Reverted; it
-becomes worth revisiting now that a local store is cheap.
+became `ReadField=0` — and it changed nothing. Written, measured and reverted
+TWICE, for two different reasons, and the second attempt is the instructive one:
+
+- First attempt, before the boxing flag: 5 217 -> 5 321 ps and the GC count
+  unchanged, because it traded one record for two Object-typed local stores and
+  locals were the expensive thing.
+- Second attempt, after the flag made local stores free: an A/B of the two
+  binaries showed kernel 4 at 35 GCs with the pass against 36 without, and
+  kernel 2 at 26 against 25 — no effect at all. An earlier "35 -> 25" reading
+  that looked like a win was two runs compared rather than an A/B.
+- AND IT WAS UNSOUND. The gate failed `UnaryOperatorIntegrationTest >
+  testNegativeWithRecords` and `BasicLanguageFeaturesTest > test basic records`,
+  both of which pass with the pass removed. A rewrite of record bindings that
+  looks right in one probe is not right; the gate is what said so.
+
+It achieved nothing because the record it was removing is not the one being
+allocated — see the section above: the allocation happens inside a LOCAL helper
+that is never inlined, which this pass never sees.
 
 ---
 
