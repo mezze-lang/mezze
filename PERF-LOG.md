@@ -781,10 +781,25 @@ THE THREE GAPS, in payoff order:
    `.enumerate{}` cannot be peeled: the source classifies as Opaque, nothing
    fuses, and a `{i, val}` RECORD is allocated per element. This is the
    records-are-syntax principle with a number attached.
-2. **A compound fold body — 159x.** `isFoldBodyEmittable` accepts `acc OP g(x)`
-   one level deep, so `acc + x * 2 - 1` is refused and the whole chain declines.
-   The fix is to accept an arbitrary pure expression over {acc, x, literals} and
-   emit it directly rather than match a fixed shape.
+2. ~~**A compound fold body — 159x.**~~ **FIXED — 14025 -> 1448 ps/elem, 9.7x.**
+   `classifyFolderBody` matched `acc OP x` plus one element transform, which is
+   two of the three nodes in `acc + x * 2 - 1`; a refused folder declines the
+   WHOLE chain, so the map before it stopped fusing too. Such a body needs no
+   shape: it is a pure arithmetic tree over the folder's two parameters and
+   integer literals, so the loop emits it as written with the parameter reads
+   rewritten to the accumulator and element locals. Every operator is the same
+   overflow-checked operation the unfused folder would run, so the inline form
+   computes exactly what calling it computes. `map+filter` (91) and `map+map`
+   (641) were unmoved. It now sits in the general-loop tier, so gap 3 below is
+   what remains of it.
+
+   ONE LIMITATION, recorded rather than hidden: a MODULO in a fold body still
+   declines. Its operand needs a dictionary, which makes the folder CAPTURE, and
+   the tree path refuses captures — a capture addresses the lambda's own capture
+   array and needs lifting to the enclosing frame first. The one-level shape
+   classifier does support a captured operand, so `acc + x * k` is unaffected;
+   only a DEEPER body with a capture declines. `CompoundFoldFusionTest` asserts
+   that case's VALUE and says why it is not asserting fusion.
 3. **A SECOND stage of any kind — 6-7.6x.** One map or one filter is free;
    adding either costs 7x, because `tryBuildFusedLongPipeline` accepts at most
    one of each and everything else falls to the general loop. So does

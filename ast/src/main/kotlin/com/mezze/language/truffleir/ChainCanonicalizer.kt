@@ -411,6 +411,19 @@ object ChainCanonicalizer {
                 // The emitter decomposes this into map(f) + fold(OP).
                 (body.left is ReadLocalIR && isUnaryExpr(body.right))
                         || (body.right is ReadLocalIR && isUnaryExpr(body.left))
+                        // Pattern 1c: ANY pure arithmetic tree over the two
+                        // params and literals. The two patterns above cover
+                        // `acc OP x` and one element transform, which is two of
+                        // the three nodes in `acc + x * 2 - 1` — so that fold
+                        // was refused, and a refused folder declines the WHOLE
+                        // chain. Measured at 14025 ps/elem against 93 for the
+                        // shapes that fuse: a 159x cliff on any fold that is not
+                        // a bare `acc + x`. The emitter emits such a body as
+                        // written (`BytecodeCompiler.emitFoldTree`); the two
+                        // predicates agree on the grammar, and if the emitter
+                        // ever disagrees, `FusedChainIR.fallback` runs the real
+                        // folder.
+                        || isPureArithTree(body, 0)
             }
         }
         // Pattern 2: CallDirectIR to a known arith op (scalar-ABI, 2 ReadLocal
@@ -452,6 +465,36 @@ object ChainCanonicalizer {
     /** Check if [node] is a unary expression over a single ReadLocal param —
      *  i.e. `x <OP> x`, `x <OP> lit`, or `lit <OP> x`. Used to detect
      *  compound fold bodies like `acc + x * x`. */
+    /** How deep a fold body may be before it stops being worth emitting inline.
+     *  Mirrors `BytecodeCompiler.FOLD_TREE_MAX_DEPTH`. */
+    private const val FOLD_TREE_MAX_DEPTH = 8
+
+    /**
+     * True when [node] is a pure arithmetic expression over parameter reads and
+     * integer literals — nothing that calls, allocates or performs.
+     *
+     * Such a body can be emitted inline exactly as written, because every
+     * operator becomes the same overflow-checked operation the unfused folder
+     * would run. Comparisons are excluded: an accumulator update has to produce
+     * a number, not a Bool. A CAPTURED operand is excluded too, since a capture
+     * addresses the lambda's own capture array and needs lifting to the
+     * enclosing frame — the one-level patterns above already handle that case
+     * and keep it.
+     */
+    private fun isPureArithTree(node: NodeIR, depth: Int): Boolean {
+        if (depth > FOLD_TREE_MAX_DEPTH) return false
+        return when (node) {
+            is ReadLocalIR -> true
+            is LongLitIR -> true
+            is InlineBinaryOpIR -> when (node.op) {
+                InlineOp.ADD, InlineOp.SUB, InlineOp.MUL, InlineOp.DIV, InlineOp.MOD ->
+                    isPureArithTree(node.left, depth + 1) && isPureArithTree(node.right, depth + 1)
+                else -> false
+            }
+            else -> false
+        }
+    }
+
     private fun isUnaryExpr(node: NodeIR): Boolean = when (node) {
         is InlineBinaryOpIR -> {
             val l = node.left; val r = node.right

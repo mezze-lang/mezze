@@ -5819,6 +5819,23 @@ public final class BytecodeCompiler {
                            boolean scalarABI, String fieldName) implements FusedSinkMode {}
         /** Partition: predicate split into {pass, fail} record of two Seqs. */
         record PartitionPred(FilterPeel predPeel) implements FusedSinkMode {}
+        /**
+         * Fold whose body is an arbitrary PURE ARITHMETIC TREE over its two
+         * parameters, emitted as written rather than matched against a shape.
+         *
+         * {@link FolderShape} can express `acc OP x` and one level of element
+         * transform (`acc OP x*k`), which is two of the three nodes in
+         * `acc + x * 2 - 1`. That fold was refused, and a refused folder
+         * declines the WHOLE chain — measured at 14025 ps/elem against 93 for
+         * the shapes that fuse, a 159x cliff on any fold that is not a bare
+         * `acc + x`.
+         *
+         * [accParamSlot] and [elemParamSlot] are the folder's own frame slots,
+         * which the emitter rewrites to the loop's accumulator and element
+         * locals.
+         */
+        record AccumulateTree(NodeIR body, int accParamSlot, int elemParamSlot,
+                              NodeIR initExpr) implements FusedSinkMode {}
 
         enum ShortCircuitKind { ANY, ALL, FIND, NONE, FIND_INDEX }
         enum MaterializeTarget { SEQ, LIST }
@@ -5832,10 +5849,17 @@ public final class BytecodeCompiler {
     private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
         if (chain.getSink() instanceof SinkIR.Fold foldSink) {
             var folderShape = classifyBinaryFolder(foldSink.getF(), dbg, "folder");
-            if (folderShape == null) return null;
-            return new FusedSinkMode.Accumulate(folderShape.op, foldSink.getInit(), false,
-                    folderShape.elemOp, folderShape.elemRhs, folderShape.elemRhsNode,
-                    folderShape.elemSelfOp);
+            if (folderShape != null) {
+                return new FusedSinkMode.Accumulate(folderShape.op, foldSink.getInit(), false,
+                        folderShape.elemOp, folderShape.elemRhs, folderShape.elemRhsNode,
+                        folderShape.elemSelfOp);
+            }
+            // The shape match covers `acc OP x` and one element transform. A
+            // deeper body is still a pure expression the loop can emit as
+            // written, so try that before declining the whole chain.
+            var tree = classifyFolderTree(foldSink, dbg);
+            if (tree != null) return tree;
+            return null;
         }
         if (chain.getSink() instanceof SinkIR.Sum) {
             return new FusedSinkMode.Accumulate(InlineOp.ADD,
@@ -5988,6 +6012,117 @@ public final class BytecodeCompiler {
     }
 
     /** Shared classification for Fold and Reduce combining functions. */
+    /** How deep a fold body may be before it stops being worth emitting inline. */
+    private static final int FOLD_TREE_MAX_DEPTH = 8;
+
+    /**
+     * Accept a fold body that is a pure arithmetic tree over the folder's two
+     * parameters and integer literals.
+     *
+     * PURE AND TOTAL-AS-WRITTEN is the whole requirement: every operator emitted
+     * here is the same overflow-checked `Direct*` operation the unfused path
+     * would run, every leaf is a parameter read or a constant, and there are no
+     * calls, no allocation and no effects — so emitting the tree inline computes
+     * exactly what calling the folder would. Comparisons are excluded because an
+     * accumulator update must produce a number, not a Bool.
+     */
+    static boolean isPureArithFoldTree(NodeIR node, int accParam, int elemParam, int depth) {
+        if (depth > FOLD_TREE_MAX_DEPTH) return false;
+        if (node instanceof ReadLocalIR rl) {
+            return rl.getSlot() == accParam || rl.getSlot() == elemParam;
+        }
+        if (node instanceof LongLitIR) return true;
+        if (node instanceof InlineBinaryOpIR bin) {
+            switch (bin.getOp()) {
+                case ADD, SUB, MUL, DIV, MOD -> { }
+                default -> { return false; }
+            }
+            return isPureArithFoldTree(bin.getLeft(), accParam, elemParam, depth + 1)
+                    && isPureArithFoldTree(bin.getRight(), accParam, elemParam, depth + 1);
+        }
+        return false;
+    }
+
+    /**
+     * Classify a fold whose body the shape matcher refused into an
+     * {@link FusedSinkMode.AccumulateTree}, or null to leave the chain unfused.
+     *
+     * A CAPTURED operand is deliberately not accepted here. A `ReadCaptureIR`
+     * addresses the lambda's capture array, so emitting it in the loop's frame
+     * needs the capture lifted to an enclosing-frame expression — which
+     * {@link FolderShape#withElemRhsNode} already does for the one-level shape
+     * it supports. Those bodies keep taking that path; a deeper body with a
+     * capture declines and runs unfused, correctly.
+     */
+    private FusedSinkMode classifyFolderTree(SinkIR.Fold foldSink, boolean dbg) {
+        var lambda = foldSink.getF();
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getCaptureSlots().size() != lambda.getCaptures().size()
+                || ir.getParamSlots().size() != 2 || !ir.getLocalSlots().isEmpty()) {
+            return null;
+        }
+        if (!lambda.getCaptures().isEmpty()) return null;
+        int accAt = 0, elemAt = 1;
+        if (!isPureArithFoldTree(ir.getBody(), accAt, elemAt, 0)) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: folder body not a pure arith tree");
+            return null;
+        }
+        if (dbg) System.err.println("[chain-canon-emit] folder body emitted as a tree");
+        return new FusedSinkMode.AccumulateTree(ir.getBody(), accAt, elemAt, foldSink.getInit());
+    }
+
+    /** Begin the BDSL operation for an arithmetic [op]; the caller emits both
+     *  operands and then calls {@link #endInlineArithOp}. Split from
+     *  {@link #emitInlineOpTwoLocals} so an operand can itself be a tree. */
+    private void beginInlineArithOp(InlineOp op, MezzeBytecodeRootNodeGen.Builder b) {
+        switch (op) {
+            case ADD -> b.beginDirectAdd();
+            case SUB -> b.beginDirectSubtract();
+            case MUL -> b.beginDirectMultiply();
+            case DIV -> b.beginDirectDivide();
+            case MOD -> b.beginDirectModulo();
+            default -> throw new IllegalStateException("beginInlineArithOp: " + op);
+        }
+    }
+
+    private void endInlineArithOp(InlineOp op, MezzeBytecodeRootNodeGen.Builder b) {
+        switch (op) {
+            case ADD -> b.endDirectAdd();
+            case SUB -> b.endDirectSubtract();
+            case MUL -> b.endDirectMultiply();
+            case DIV -> b.endDirectDivide();
+            case MOD -> b.endDirectModulo();
+            default -> throw new IllegalStateException("endInlineArithOp: " + op);
+        }
+    }
+
+    /**
+     * Emit a fold body tree with the folder's parameter reads rewritten to the
+     * loop's accumulator and element locals. Only the shapes
+     * {@link #isPureArithFoldTree} accepts can reach here.
+     */
+    private void emitFoldTree(NodeIR node, int accParam, int elemParam,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
+                              MezzeBytecodeRootNodeGen.Builder b) {
+        if (node instanceof InlineBinaryOpIR bin) {
+            beginInlineArithOp(bin.getOp(), b);
+              emitFoldTree(bin.getLeft(), accParam, elemParam, accLocal, xLocal, b);
+              emitFoldTree(bin.getRight(), accParam, elemParam, accLocal, xLocal, b);
+            endInlineArithOp(bin.getOp(), b);
+            return;
+        }
+        if (node instanceof ReadLocalIR rl) {
+            b.emitLoadLocal(rl.getSlot() == accParam ? accLocal : xLocal);
+            return;
+        }
+        if (node instanceof LongLitIR lit) {
+            b.emitLoadLongConstant(lit.getValue());
+            return;
+        }
+        throw new IllegalStateException("emitFoldTree: unvetted node " + node.getClass().getSimpleName());
+    }
+
     private FolderShape classifyBinaryFolder(MakeLambdaIR lambda, boolean dbg, String label) {
         var caps = lambda.getCaptures();
         var ir = language.lookupFunctionIR(lambda.getFunctionHash());
@@ -6213,6 +6348,13 @@ public final class BytecodeCompiler {
                 accSlot = b.createLocal();
                 b.beginStoreLocal(accSlot);
                   emitNode(a.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+            }
+            // Same accumulator, same seed — only the update differs.
+            case FusedSinkMode.AccumulateTree t -> {
+                accSlot = b.createLocal();
+                b.beginStoreLocal(accSlot);
+                  emitNode(t.initExpr(), b, argCount, localMap);
                 b.endStoreLocal();
             }
             case FusedSinkMode.CallEach ignored -> { /* no extra state */ }
@@ -6726,6 +6868,14 @@ public final class BytecodeCompiler {
                     b.endStoreLocal();
                 }
             }
+            case FusedSinkMode.AccumulateTree t -> {
+                // acc = <the folder's own body, with its params rewritten to
+                // the loop's locals>.
+                b.beginStoreLocal(accSlot);
+                  emitFoldTree(t.body(), t.accParamSlot(), t.elemParamSlot(),
+                               accSlot, xSlot, b);
+                b.endStoreLocal();
+            }
             case FusedSinkMode.CallEach ce -> {
                 var argCopy = b.createLocal();
                 b.beginStoreLocal(argCopy);
@@ -7019,6 +7169,8 @@ public final class BytecodeCompiler {
         // ── Post-loop result (mode-specific) ──
         switch (mode) {
             case FusedSinkMode.Accumulate ignored ->
+                b.emitLoadLocal(accSlot);
+            case FusedSinkMode.AccumulateTree ignored ->
                 b.emitLoadLocal(accSlot);
             case FusedSinkMode.CallEach ignored ->
                 b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeRecord.empty());
