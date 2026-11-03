@@ -35,8 +35,15 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 internal class UnknownTypeValidator(
     private val registry: DeclarationRegistry,
 ) {
+    /**
+     * Which named group claims each tag IN THIS MODULE — see [checkInlineGroupClaims].
+     * Set per `validate` run; empty outside one.
+     */
+    private var claimOwners: Map<String, String> = emptyMap()
+
     fun validate(module: ParsedModule): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
+        claimOwners = buildClaimOwners(module)
         for (decl in module.decls) {
             when (decl) {
                 is ParsedLetDecl -> {
@@ -100,7 +107,10 @@ internal class UnknownTypeValidator(
             }
             is ParsedSeqType -> walk(annotation.elementType, errors)
             is ParsedRecordType -> for (e in annotation.entries) walk(e.type, errors)
-            is ParsedVariantType -> for (c in annotation.constructors) c.dataType?.let { walk(it, errors) }
+            is ParsedVariantType -> {
+                checkInlineGroupClaims(annotation, errors)
+                for (c in annotation.constructors) c.dataType?.let { walk(it, errors) }
+            }
             is ParsedFunctionType -> {
                 walk(annotation.paramType, errors)
                 walk(annotation.returnType, errors)
@@ -185,6 +195,64 @@ internal class UnknownTypeValidator(
                 walkLambdaSignatures(expr.arguments, errors)
             }
             else -> {}
+        }
+    }
+
+    /**
+     * Spec 8.3, the inline half: an inline group may not hold a tag that a NAMED
+     * group in scope already claims.
+     *
+     * The asymmetry is the point. A `type` name CLAIMS its tags for the module,
+     * deciding what a bare tag means there; an inline group claims nothing,
+     * because nothing could ever adopt it — adoption needs a name. So two inline
+     * groups sharing a tag are always fine, while an inline group holding an
+     * already-claimed tag contradicts a decision the module has made. Writing
+     * `| Red |` once `T = | Red, Pink |` is in scope is refused on THAT line
+     * rather than letting the call that later fails carry the blame.
+     */
+    private fun checkInlineGroupClaims(
+        annotation: ParsedVariantType,
+        errors: MutableList<ValidationError>,
+    ) {
+        for (ctor in annotation.constructors) {
+            val owner = claimOwners[ctor.name] ?: continue
+            errors.add(ValidationError.ConflictingInlineGroup(
+                constructorName = ctor.name,
+                owningType = owner,
+                loc = annotation.loc,
+            ))
+        }
+    }
+
+    /**
+     * The groups whose names are in scope HERE: declared in this module, or
+     * imported by name. Deliberately not `registry.typeDeclarations`, which is
+     * the TRANSITIVE set of everything loaded.
+     *
+     * That distinction is the whole rule. Using the registry at large made
+     * `Option` claim `Some`, so every inline `| Some { val: 'a }, None |` the
+     * stdlib and twenty-seven if-let tests legitimately write was refused — 32
+     * failures. "In scope by name" and "loaded" are different sets, and the
+     * claim rules need the first: a group inside an imported function's
+     * signature travels as structure, and only importing the NAME claims
+     * anything.
+     */
+    private fun buildClaimOwners(module: ParsedModule): Map<String, String> = buildMap {
+        fun claimAll(typeName: String, decl: ParsedTypeDecl) {
+            when (val def = decl.definition) {
+                is ParsedVariantDef -> for (c in def.constructors) put(c.name, typeName)
+                is ParsedNewtypeDef -> put(def.constructor, typeName)
+                else -> {}
+            }
+        }
+        for (decl in module.decls.filterIsInstance<ParsedTypeDecl>()) claimAll(decl.name, decl)
+        for (decl in module.decls.filterIsInstance<ParsedUseDecl>()) {
+            val path = decl.path
+            if (path !is ParsedUsePath.Selective) continue
+            for (item in path.items) {
+                val local = item.alias ?: item.name
+                registry.lookupType(item.name)?.let { claimAll(local, it) }
+            }
         }
     }
 

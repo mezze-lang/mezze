@@ -266,6 +266,26 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
+    /**
+     * Spec 8.3, inline half: an inline group holding a tag that a NAMED group in
+     * scope already claims. The named group decided what the tag means in this
+     * module, and an inline group may not overrule that decision.
+     */
+    data class ConflictingInlineGroup(
+        val constructorName: String,
+        val owningType: String,
+        val loc: Loc? = null,
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0701_DUPLICATE_DECLARATION
+
+        override fun message(): String =
+            "'$constructorName' belongs to '$owningType' in this module, so it cannot also " +
+                "be written into an inline variant group. Use '$owningType' as the type, or " +
+                "choose a different constructor name."
+
+        override fun location(): Loc? = loc
+    }
+
     data class UnknownType(
         val typeName: String,
         val availableTypes: List<String> = emptyList(),
