@@ -154,7 +154,8 @@ class AbilityConstraintAnnotationsTest {
                 getValue: {it: 'c} -> 'value,
             }
 
-            impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
+            type KvPair = {k: Int, v: Str}
+            impl BiContainer for KvPair having 'key = Int, 'value = Str where {
                 getKey = {it} -> it.k,
                 getValue = {it} -> it.v,
             }
@@ -175,7 +176,8 @@ class AbilityConstraintAnnotationsTest {
                 getValue: {it: 'c} -> 'value,
             }
 
-            impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
+            type KvPair = {k: Int, v: Str}
+            impl BiContainer for KvPair having 'key = Int, 'value = Str where {
                 getKey = {it} -> it.k,
                 getValue = {it} -> it.v,
             }
@@ -282,7 +284,8 @@ class AbilityConstraintAnnotationsTest {
                 getAll: {it: 'c} -> ['item],
             }
 
-            impl Container for {items: [Str]} having 'item = Str where {
+            type StrItems = {items: [Str]}
+            impl Container for StrItems having 'item = Str where {
                 getAll = {it} -> it.items,
             }
 
@@ -407,7 +410,8 @@ class AbilityConstraintAnnotationsTest {
                 getValue: {it: 'c} -> 'value,
             }
 
-            impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
+            type KvPair = {k: Int, v: Str}
+            impl BiContainer for KvPair having 'key = Int, 'value = Str where {
                 getKey = {it} -> it.k,
                 getValue = {it} -> it.v,
             }

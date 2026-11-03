@@ -216,7 +216,8 @@ class AbilityAssociatedTypesTest {
                 put: {it: 's, value: 'value} -> 's,
             }
 
-            impl Store for {value: Int} having 'value = Int where {
+            type IntBox = {value: Int}
+            impl Store for IntBox having 'value = Int where {
                 get = {it} -> it.value,
                 put = {it, value} -> {value = value},
             }
@@ -225,8 +226,9 @@ class AbilityAssociatedTypesTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Should have 2 items: ability and impl
-        assertEquals(2, parsedModule.decls.size)
+        // ability, the impl's named target, and the impl (spec 10.1 — an impl
+        // target must be a named type, so the shape gets a `type` of its own)
+        assertEquals(3, parsedModule.decls.size)
     }
 
     @Test
@@ -387,7 +389,8 @@ class AbilityAssociatedTypesTest {
                 third: {it: 't} -> 'c,
             }
 
-            impl Triple for {x: Int, y: Str, z: Bool} having 'a = Int, 'b = Str, 'c = Bool where {
+            type Trip = {x: Int, y: Str, z: Bool}
+            impl Triple for Trip having 'a = Int, 'b = Str, 'c = Bool where {
                 first = {it} -> it.x,
                 second = {it} -> it.y,
                 third = {it} -> it.z,
@@ -397,7 +400,9 @@ class AbilityAssociatedTypesTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(2, parsedModule.decls.size)
+        // ability, the impl's named target, and the impl — spec 10.1 gives the
+        // shape a `type` of its own, so the module has one more decl
+        assertEquals(3, parsedModule.decls.size)
     }
 
     @Test
@@ -452,7 +457,8 @@ class AbilityAssociatedTypesTest {
                 third: {it: 't} -> 'c,
             }
 
-            impl Triple for {x: Int} having 'a = Int where {
+            type XOnly = {x: Int}
+            impl Triple for XOnly having 'a = Int where {
                 first = {it} -> it.x,
                 second = {it} -> 0,
                 third = {it} -> 0,
@@ -500,7 +506,8 @@ class AbilityAssociatedTypesTest {
                 getSecond: {it: 'p} -> 'second,
             }
 
-            impl Pair for {x: Int, y: Str} having 'first = Int, 'second = Str where {
+            type XY = {x: Int, y: Str}
+            impl Pair for XY having 'first = Int, 'second = Str where {
                 getFirst = {it} -> it.x,
                 getSecond = {it} -> it.y,
             }
@@ -510,7 +517,9 @@ class AbilityAssociatedTypesTest {
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Just verify the program type checks successfully
-        assertEquals(2, parsedModule.decls.size)
+        // ability, the impl's named target, and the impl — spec 10.1 gives the
+        // shape a `type` of its own, so the module has one more decl
+        assertEquals(3, parsedModule.decls.size)
     }
 
     @Test
@@ -657,7 +666,8 @@ class AbilityAssociatedTypesTest {
                 getValue: {it: 'c} -> 'value,
             }
 
-            impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
+            type KvPair = {k: Int, v: Str}
+            impl BiContainer for KvPair having 'key = Int, 'value = Str where {
                 getKey = {it} -> it.k,
                 getValue = {it} -> it.v,
             }

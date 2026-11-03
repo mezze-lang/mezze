@@ -87,6 +87,42 @@ object AbilityValidator {
         }
     }
 
+    /**
+     * Spec 10.1: an ability impl targets a NAMED type — a `type` alias, a
+     * `newtype`, or a builtin name, optionally applied to type arguments. The
+     * arguments are ordinary types, so `[{ k: Str, v: Str }]` stays fine; it is
+     * the target's own spelling that must be a name.
+     *
+     * A declaration-site restriction in the spirit of an orphan rule: an impl
+     * must be attributable to a declared thing, so an inline record shape or an
+     * inline group cannot carry one.
+     *
+     * Measured before adding this: anonymous records, anonymous and open variant
+     * groups and open records were all accepted, and a bare record dispatched to
+     * an anonymous-record impl. No user-written `.mz` in the repo uses any of
+     * them — the only uses were test scaffolding. The restriction is on SOURCE:
+     * `DerivedImplGenerator` synthesizes `impl Eq for { f1: T1, … }` for an
+     * anonymous shape holding a newtype, and that path builds the decl directly.
+     */
+    private fun validateTargetIsNamed(impl: ParsedImplAbilityDecl, loc: Loc) {
+        if (impl.isInherent) return
+        for (target in impl.targetTypes) {
+            val what = when (target) {
+                is ParsedVariantType -> "an inline variant group"
+                is ParsedRecordType -> "an inline record shape"
+                else -> continue
+            }
+            throw TypeCheckError(
+                "An ability impl must target a named type, but this one targets " + what +
+                    ". Give the type a name with `type` or `newtype` and implement the " +
+                    "ability for that name — an impl has to be attributable to a declared " +
+                    "type.",
+                loc,
+                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+            )
+        }
+    }
+
     fun validateAbilityImplementation(
         impl: ParsedImplAbilityDecl,
         registry: DeclarationRegistry,
@@ -96,6 +132,7 @@ object AbilityValidator {
         val typeDeclarations = registry.typeDeclarations
         val sourceLocation = impl.loc
 
+        validateTargetIsNamed(impl, sourceLocation)
         validateNoFieldMethodConflict(impl, typeDeclarations, sourceLocation)
         if (impl.isInherent) {
             validateInherentImplTargetType(impl, typeDeclarations, sourceLocation)
