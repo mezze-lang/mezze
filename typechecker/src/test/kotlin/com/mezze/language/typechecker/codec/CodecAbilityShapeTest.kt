@@ -601,7 +601,7 @@ class CodecAbilityShapeTest {
         checkPasses(
             """
             use std::codec::core::{ Encode }
-            use std::codec::json::{ Json, JsonC, JString }
+            use std::codec::json::{ Json, JsonC }
 
             newtype Money = Int
 
@@ -620,7 +620,7 @@ class CodecAbilityShapeTest {
         checkPasses(
             """
             use std::codec::core::{ Encode }
-            use std::codec::json::{ Json, JsonC, JsonUtf8C, JString }
+            use std::codec::json::{ Json, JsonC, JsonUtf8C }
             use std::collections::bytes
 
             newtype Money = Int
@@ -660,7 +660,7 @@ class CodecAbilityShapeTest {
         checkPasses(
             """
             use std::codec::core::{ Encode }
-            use std::codec::json::{ Json, JsonC, JString, json_default }
+            use std::codec::json::{ Json, JsonC, json_default }
 
             newtype Money = Int
             newtype UserId = Int

@@ -1,6 +1,6 @@
 use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
 use std::collections::iter
-use std::effects::filesystem::{ FileStreaming, FsError, Read }
+use std::effects::filesystem::{ FileStreaming, FsError }
 use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
 # pub use, not use: ToQuery's blanket impl must be in scope at every call site
 # that adds a query parameter.

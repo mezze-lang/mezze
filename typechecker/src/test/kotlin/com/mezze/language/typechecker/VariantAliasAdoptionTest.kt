@@ -63,7 +63,7 @@ class VariantAliasAdoptionTest {
         fun mod(n: String, s: String) = Files.writeString(dir.resolve("$n.mz"), s.trimIndent())
         mod("colors", "pub type Color = | Red, Green, Blue |")
         mod("user", """
-            use colors::{ Color, Red }
+            use colors::{ Color }
             pub let x = Red
         """)
         val r = tc.typeCheck(parser.parseParsedModule(Files.readString(dir.resolve("user.mz")), "user.mz"), dir)

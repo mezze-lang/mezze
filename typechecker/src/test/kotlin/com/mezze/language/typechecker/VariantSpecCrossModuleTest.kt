@@ -72,7 +72,10 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         writeModule("mt", "pub type T = | Red, Pink |")
         rejectsMain(
             "use mt::{ T, Red }\n$MAIN",
-            "M0801",
+            // M0804, the import-error code: the module resolved fine, the ITEM
+            // named in the `use` is not importable. M0801 is "module not found",
+            // which this is not.
+            "M0804",
             "a tag belongs to no module, so there is nothing to import. `use mt::{ Red }` " +
                 "names something the module does not export",
         )

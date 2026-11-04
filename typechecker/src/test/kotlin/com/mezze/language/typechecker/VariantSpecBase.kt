@@ -96,7 +96,14 @@ abstract class VariantSpecBase {
      */
     private fun assertCode(r: Result<TypeCheckResult>, code: String, why: String) {
         val e = r.exceptionOrNull()
-        val actual = (e as? TypeCheckError)?.code?.display()
+        // Either channel. A refusal can arrive as a TypeCheckError or, when it
+        // comes from import resolution, as a ModuleError — both carry a code, and
+        // a test should not have to know which path refused it.
+        val actual = when (e) {
+            is TypeCheckError -> e.code.display()
+            is com.mezze.language.typechecker.module.ModuleError -> e.code.display()
+            else -> null
+        }
         assertTrue(
             actual == code,
             "$why\n\nrefused, but with the wrong diagnostic.\n" +

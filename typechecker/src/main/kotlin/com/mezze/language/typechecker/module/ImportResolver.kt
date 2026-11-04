@@ -283,6 +283,30 @@ class ImportResolver(
                 val reexportedPerformers = mutableMapOf<String, ParsedPerformerDecl>()
 
                 for (item in path.items) {
+                    // Spec 7.2: a tag belongs to no module, so there is nothing to
+                    // import. A tag is written freely wherever its group is in
+                    // scope — naming it in a `use` adds nothing and reads as if it
+                    // did. `use http::{ Method }` is enough for `Get`.
+                    //
+                    // A constructor whose name IS its type's name is a different
+                    // thing: `type Box = | Box { n: Int } |` exports as CONSTRUCTOR,
+                    // and `use m::{ Box }` imports the TYPE. That case has a
+                    // matching type declaration; a bare tag does not, and that is
+                    // the whole discriminator.
+                    val asCtor = module.exports[item.name]
+                    if (asCtor != null && asCtor.type == ExportedItemType.CONSTRUCTOR &&
+                        module.index.typeDeclarations[asCtor.originalName] == null
+                    ) {
+                        errors.add(ModuleError.ImportError(
+                            modulePath = modulePath,
+                            itemName = item.name,
+                            reason = "'${item.name}' is a variant constructor, not an " +
+                                "exportable item. A constructor belongs to no module — " +
+                                "write it freely wherever its type is in scope, and import " +
+                                "the type instead.",
+                        ))
+                        continue
+                    }
                     if (!module.exports.containsKey(item.name)) {
                         val reexport = resolvePubUseReexport(module, item.name, mutableSetOf())
                         if (reexport != null) {

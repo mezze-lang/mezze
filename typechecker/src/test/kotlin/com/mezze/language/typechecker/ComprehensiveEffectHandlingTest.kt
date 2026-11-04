@@ -108,7 +108,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -129,7 +129,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -198,7 +198,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -220,7 +220,7 @@ class ComprehensiveEffectHandlingTest {
         assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -246,7 +246,7 @@ class ComprehensiveEffectHandlingTest {
         assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -275,7 +275,7 @@ class ComprehensiveEffectHandlingTest {
         val result = parseAndTypeCheck(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -323,7 +323,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -345,7 +345,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckFails(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -367,7 +367,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckFails(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -390,7 +390,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -414,7 +414,7 @@ class ComprehensiveEffectHandlingTest {
         assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
@@ -485,7 +485,7 @@ class ComprehensiveEffectHandlingTest {
         assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
-            use std::effects::filesystem::{FileSystem, LocalFileSystem, CreateOrTruncate}
+            use std::effects::filesystem::{FileSystem, LocalFileSystem}
             use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
