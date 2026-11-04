@@ -261,33 +261,24 @@ public final class BytesNatives {
         return new MezzeBytes(result);
     }
 
-    /** Companion to {@link #fold}: same bypass, same reasons. */
+    /**
+     * Companion to {@link #fold}: same helper, same reasons.
+     *
+     * The callback field is `x`, NOT `byte` — `std::collections::bytes` declares
+     * `map`'s as `{ x: Int } -> Int` while `fold`'s is `{ acc, byte }`. Writing
+     * `byte` for both is invisible on the scalar path, which is positional, and
+     * `map` turns out not to take that path here at all, so the name is
+     * load-bearing: both of `BytesHofScalarBypassTest`'s map cases fail when it
+     * is wrong, and neither of its fold cases does.
+     */
     public static MezzeBytes map(MezzeBytes bytes, MezzeFunction mapper,
                                                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object[] closureValues = mapper.getClosureValues();
-        int closureLen = closureValues.length;
+        var ctx = com.mezze.interpreter.nodes.builtin.collections.ScalarCall
+            .prepare1(mapper, "x");
         int size = bytes.length();
         byte[] result = new byte[size];
-
-        com.oracle.truffle.api.CallTarget innerTarget =
-            com.mezze.interpreter.nodes.builtin.collections.ScalarBypass.tryResolve(mapper);
-        if (innerTarget != null) {
-            Object[] args = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            for (int i = 0; i < size; i++) {
-                args[closureLen] = (long) (bytes.get(i) & 0xFF);
-                result[i] = ((Long) callNode.call(innerTarget, args)).byteValue();
-            }
-            return new MezzeBytes(result);
-        }
-
-        com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
-        Object[] args = new Object[closureLen + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = 0; i < size; i++) {
-            args[closureLen] = MezzeRecord.fromFields(
-                MAP_FIELDS, new Object[]{(long) (bytes.get(i) & 0xFF)});
-            result[i] = ((Long) callNode.call(target, args)).byteValue();
+            result[i] = ((Long) ctx.call1(callNode, (long) (bytes.get(i) & 0xFF))).byteValue();
         }
         return new MezzeBytes(result);
     }
@@ -297,67 +288,37 @@ public final class BytesNatives {
      *
      * NOT {@code @TruffleBoundary}, and that is the point. A boundary on a HOF's
      * loop means the loop never compiles and the callback is never inlined into
-     * it — the opposite of what a hot fold wants. {@link
-     * com.mezze.interpreter.nodes.builtin.collections.SeqNatives#fold} has never
-     * had one.
+     * it — the opposite of what a hot fold wants. The seq, list, iter and
+     * nonemptylist folds have never had one.
      *
-     * Takes the same scalar-ABI bypass as the seq fold: when the folder is a
-     * trampoline with no tail calls and no dict params, call its inner target
-     * with a POSITIONAL argument array reused across the whole loop. The old
-     * code called `prepareArgsTwo` per element, which allocated four objects
-     * every iteration — two `Object[]`, the field-name `String[]`, and a
-     * `MezzeRecord` — on top of running interpreted.
+     * {@link com.mezze.interpreter.nodes.builtin.collections.ScalarCall} is the
+     * shared way to do this: it resolves the scalar-ABI bypass ONCE, reuses one
+     * positional args array for the whole loop, and falls back to a record built
+     * from the declared field names — prepending closure values, which the
+     * hand-rolled code in these natives used to get wrong. The old loop called a
+     * local `prepareArgsTwo` per element, which allocated four objects every
+     * iteration: two `Object[]`, the field-name `String[]`, and a
+     * `MezzeRecord`.
      *
-     * MEASURED, `bench/cases/fuseall` kernel 4 against kernel 1 at the same
-     * size: a bytes fold cost 38 171 ps/elem where an UNFUSED seq fold cost
-     * 3 704 and a fused one 910. Fusion accounted for ~4x of that; this path
-     * accounted for the remaining 10x.
+     * MEASURED, `bench/cases/fuseall` kernel 4 against kernel 1 at n=2M:
+     * 41 076 ps/elem to 8 089, with the control steady at 385 to 383. Fusion
+     * accounts for ~4x of the original gap (`MEZZE_CHAIN_CANONICALIZE=0` on the
+     * seq fold costs 910 to 3 704); this path accounted for the other 10x.
+     *
+     * The field names are `acc` and `byte`, per `std::collections::bytes` — and
+     * see {@link #map}, whose callback is named differently.
      */
     public static Object fold(MezzeBytes bytes, Object init, MezzeFunction folder,
                                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object[] closureValues = folder.getClosureValues();
-        int closureLen = closureValues.length;
+        var ctx = com.mezze.interpreter.nodes.builtin.collections.ScalarCall
+            .prepare2(folder, "acc", "byte");
         int size = bytes.length();
         Object acc = init;
-
-        com.oracle.truffle.api.CallTarget innerTarget =
-            com.mezze.interpreter.nodes.builtin.collections.ScalarBypass.tryResolve(folder);
-        if (innerTarget != null) {
-            String[] params = folder.getParameterNames();
-            boolean accFirst = params == null || params.length < 2 || "acc".equals(params[0]);
-            int accSlot = accFirst ? closureLen : closureLen + 1;
-            int elemSlot = accFirst ? closureLen + 1 : closureLen;
-            Object[] args = new Object[closureLen + 2];
-            System.arraycopy(closureValues, 0, args, 0, closureLen);
-            for (int i = 0; i < size; i++) {
-                args[accSlot] = acc;
-                args[elemSlot] = (long) (bytes.get(i) & 0xFF);
-                acc = callNode.call(innerTarget, args);
-            }
-            return acc;
-        }
-
-        // Record path for a folder the bypass cannot take. Still hoists the
-        // closure copy and the field names out of the loop; only the record
-        // itself has to be fresh, because the callee may retain it.
-        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
-        Object[] args = new Object[closureLen + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureLen);
         for (int i = 0; i < size; i++) {
-            args[closureLen] = MezzeRecord.fromFields(
-                FOLD_FIELDS, new Object[]{acc, (long) (bytes.get(i) & 0xFF)});
-            acc = callNode.call(target, args);
+            acc = ctx.call2(callNode, acc, (long) (bytes.get(i) & 0xFF));
         }
         return acc;
     }
-
-    /** Hoisted: the folder's argument-record field names never change. */
-    private static final String[] FOLD_FIELDS = {"acc", "byte"};
-    /** Hoisted: likewise the mapper's. `x`, not `byte` — std::collections::bytes
-     *  declares `map`'s callback as `{ x: Int } -> Int` while `fold`'s is
-     *  `{ acc, byte }`. The scalar bypass is positional and would not have
-     *  noticed the difference. */
-    private static final String[] MAP_FIELDS = {"x"};
 
     // ==================== Conversion ====================
 

@@ -13,7 +13,7 @@ import com.oracle.truffle.api.RootCallTarget;
  * arguments as raw scalars — eliminating MezzeRecord allocation per
  * iteration.
  */
-public final class ScalarBypass {
+final class ScalarBypass {
     private ScalarBypass() {}
 
     /**
@@ -27,7 +27,7 @@ public final class ScalarBypass {
      * resolution, causing AIOOB when the inner BDSL target expects more args
      * than the caller supplies.
      */
-    public static CallTarget tryResolve(MezzeFunction fn) {
+    static CallTarget tryResolve(MezzeFunction fn) {
         if (fn.hasPartialArgs()) return null;
         CallTarget target = fn.getCallTarget();
         if (target instanceof RootCallTarget rct

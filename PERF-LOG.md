@@ -3343,6 +3343,47 @@ operation plain and capturing so that stays true if the bypass's reach changes.
 
 ---
 
+## Correction, and a 15% that belongs to every collection HOF
+
+The entry above landed a hand-rolled scalar bypass in `BytesNatives` and claimed
+41 076 → 8 089 ps/elem. Then I found `ScalarCall`, which already does exactly
+that — resolves the bypass once, reuses one positional args array, and falls
+back to a record from declared field names while prepending closure values,
+which the hand-rolled code in these natives historically got wrong. It has
+`prepare1/2/3`, and `nonemptylist`, `list` and `iter` all use it.
+
+So the bytes natives now use it too: 39 fewer lines, one rule for how a native
+calls a guest callback instead of two. I should have looked first —
+`feedback_check_existing_helper_before_adding` says so.
+
+**It costs 15%, measured, and the corrected number is smaller:**
+
+| at n=2M, min of 5 | hand-rolled | `ScalarCall` |
+|---|---|---|
+| bytes fold | 8 089 | **9 275** |
+| seq fused (CONTROL) | 383 | **366** |
+
+The control came back FASTER, so the machine was not slower — the 1.15x is the
+helper. `ScalarCall.call2` reads `scalar`, `args`, `slot0/slot1` off the object
+per element where the inlined loop held them in locals.
+
+Corrected headline: **41 076 → 9 275 ps/elem, 4.4x**, not 5.1x.
+
+**Why keep the slower one.** The 15% is not a fact about bytes. If `ScalarCall`
+costs 15% against an inlined loop, then seq, list, iter, nonemptylist and deque
+are all paying it on every element of every fold — and that is a far larger
+lever than clawing it back in one native, with the ugly alternative being five
+more hand-rolled copies of a helper that exists. Taking the consistent path and
+writing the cost down beats taking the fast path and hiding it.
+
+**OPEN, and now the interesting question:** is `ScalarCall` scalar-replaced at
+all? If the `ctx` object survives into the loop, every native HOF in the
+language pays an object field read per element. The way to find out is a
+compiled-graph dump of a seq fold, not another timing run — a 15% on one native
+is within reach of noise, but the same 15% across every HOF is not.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
