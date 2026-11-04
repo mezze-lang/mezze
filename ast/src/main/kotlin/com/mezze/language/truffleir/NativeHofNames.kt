@@ -61,6 +61,8 @@ object NativeHofNames {
     const val LIST = "list"
     const val SET = "set"
     const val BYTES = "bytes"
+    /** `nonemptylist`'s natives are spelled `__native_nel_*`. */
+    const val NEL = "nel"
     const val SORTED_SET = "sorted_set"
     const val DEQUE = "deque"
 

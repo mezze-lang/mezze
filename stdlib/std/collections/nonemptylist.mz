@@ -97,6 +97,9 @@ pub let flat_map
   = { xs, f } -> __native_nel_flat_map { xs = xs, f = f }
 
 ## Left fold with an initial accumulator value.
+## Returns the sum of all integer elements.
+pub let sum: { xs: NonEmptyList Int } -> Int = { xs } -> __native_nel_sum { xs = xs }
+
 pub let fold_left
   : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
   -> 'acc <...>

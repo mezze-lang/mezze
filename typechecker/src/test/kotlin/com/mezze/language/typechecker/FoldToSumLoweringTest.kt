@@ -83,6 +83,34 @@ class FoldToSumLoweringTest {
     }
 
     /**
+     * The same rewrite for `nonemptylist`, which spells its natives `nel` and
+     * its fold `fold_left`.
+     *
+     * Its `sum` did not exist until this rewrite gave it a reason to — every
+     * other element-based collection had one, and the absence was costing 8.9 ns
+     * per element. `bench/cases/fuseall` kernel 3: 8 858 ps/elem to 1 206, 7.3x.
+     */
+    @Test
+    fun `a zero-init add fold_left over a nonemptylist becomes sum`() {
+        val src = """
+            use std::collections::nonemptylist
+            use std::collections::seq
+            pub let total = { xs: NonEmptyList Int } -> nonemptylist::fold_left {
+              xs = xs, init = 0, f = { acc, x } -> acc + x
+            }
+        """
+        val found = natives(src)
+        assertTrue(
+            "__native_nel_sum" in found,
+            "the summing fold_left was not rewritten to `sum`; natives: $found",
+        )
+        assertTrue(
+            "__native_nel_fold_left" !in found,
+            "the `fold_left` call survived alongside the rewrite; natives: $found",
+        )
+    }
+
+    /**
      * CONTROL, AND A CORRECTNESS CASE. A fold over FLOATS must keep its folder.
      *
      * `sum`'s boxed path reads Long/Integer and drops everything else, so

@@ -1909,6 +1909,8 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.fromArray(getArray(r, "xs")));
         HANDLERS.put("__native_nel_size", (r, c) ->
             NonEmptyListNatives.length(getNonEmptyList(r, "xs")));
+        HANDLERS.put("__native_nel_sum", (r, c) ->
+            NonEmptyListNatives.sum(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_head", (r, c) ->
             NonEmptyListNatives.head(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_tail", (r, c) ->

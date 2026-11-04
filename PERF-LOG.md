@@ -3622,6 +3622,53 @@ reason — which is what the ratchet asks for.
 
 ---
 
+## 7.3x: the missing `sum`
+
+`nonemptylist` was the one element-based collection with no `sum`, so
+`FoldToSumRewriter` had nothing to rewrite its fold to and it sat at 8 858
+ps/elem — the only collection still paying the ~8 ns guest callback per element.
+A missing stdlib function gets ADDED, not worked around, so `nel::sum` now
+exists: an indexed loop reading `Long`/`Integer`, matching its deque and set
+siblings, one `@TruffleBoundary` for the whole loop rather than one per element.
+
+| at n=2M, min of 3 | before | after |
+|---|---|---|
+| nel `fold_left` | 8 858 | **1 206** |
+
+**7.3x**, checksum identical, and it lands where the deque row did (1 670) —
+which is what two array-backed collections walking without a callback should
+cost.
+
+### The collection ledger, after this session's three passes
+
+| kernel | ps/elem | vs seq | how |
+|---|---|---|---|
+| bytes | 257 | 0.66x | `BuiltinSumBytes` — recognise the folder |
+| seq fused | 372 | — | existing SIMD/long pipeline |
+| nel | 1 206 | 3.2x | **new `sum` + rewrite** |
+| list fused | 1 478 | 4.0x | existing FusedLongPipeline |
+| deque | 1 670 | 4.5x | rewrite to existing `sum` |
+| set | 7 447 | 20x | rewrite to existing `sum` |
+
+Against where it started: nel 23x → 3.2x, deque 25x → 4.5x, set 47x → 20x,
+bytes 107x → 0.66x.
+
+**Set is now the outlier for a different reason.** Its remaining 7 447 ps/elem
+is the WALK, not a callback — `set::sum` measured 7 270 before any of this, and
+the rewrite delivered 7 447. Visiting one element of a persistent hash set
+costs ~7 ns, which is scattered-memory territory: 2M boxed `Long`s plus trie
+nodes is far past L3, so this is a layout problem, not a dispatch one. The
+lever would be primitive-specialised storage, the way `LongSeqStorage` backs a
+seq — a data-structure change, not a compiler one.
+
+A control note worth keeping: the seq row read 512 once in the middle of this
+and I resampled rather than report it — min of 5 came back 372, consistent with
+the 383-391 from earlier in the session, while deque and set were steady across
+the same window. One sample above the 1.15x bar is a sample, not a shift; the
+check is whether the OTHER rows moved with it.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup

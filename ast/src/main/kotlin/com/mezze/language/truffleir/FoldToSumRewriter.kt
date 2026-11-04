@@ -51,6 +51,10 @@ object FoldToSumRewriter {
             to NativeHofNames.native(NativeHofNames.SORTED_SET, NativeHofNames.OP_SUM),
         NativeHofNames.native(NativeHofNames.DEQUE, NativeHofNames.OP_FOLD)
             to NativeHofNames.native(NativeHofNames.DEQUE, NativeHofNames.OP_SUM),
+        // `nonemptylist` spells its natives `nel` and its fold `fold_left`. Its
+        // `sum` did not exist until this rewrite gave it a reason to.
+        NativeHofNames.native(NativeHofNames.NEL, NativeHofNames.OP_FOLD_LEFT)
+            to NativeHofNames.native(NativeHofNames.NEL, NativeHofNames.OP_SUM),
     )
 
     fun rewrite(node: NodeIR, allFunctions: Map<Hash, FunctionIR>): NodeIR {

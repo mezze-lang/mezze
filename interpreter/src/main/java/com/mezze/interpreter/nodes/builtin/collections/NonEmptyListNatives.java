@@ -209,6 +209,39 @@ public final class NonEmptyListNatives {
         return new MezzeNonEmptyList(result.toArray());
     }
 
+    /**
+     * Sum the integer elements, without a guest callback.
+     *
+     * Added because it was MISSING, and its absence was costing 8.9 ns per
+     * element: `FoldToSumRewriter` turns a plain summing fold into the
+     * collection's own `sum`, and every element-based collection had one except
+     * this. Measured on `bench/cases/fuseall` kernel 3, a nonemptylist fold cost
+     * 8 858 ps/elem where the identical deque fold cost 9 638 and dropped to
+     * 1 726 once it had a `sum` to rewrite to.
+     *
+     * Reads Long/Integer and ignores anything else, matching
+     * {@code DequeNatives.sum} and {@code SetNatives.sum}. The stdlib signature
+     * is `{ xs: NonEmptyList Int } -> Int`, so a caller cannot reach the ignored
+     * cases, and the rewriter additionally requires the folder's parameter slots
+     * to be LONG before it will redirect to here.
+     *
+     * `@TruffleBoundary` is ONE crossing for the whole loop, not one per
+     * element — the same shape the sibling sums use. What must never be
+     * boundary-wrapped is a loop that calls BACK into guest code, which this
+     * one does not.
+     */
+    @TruffleBoundary
+    public static long sum(MezzeNonEmptyList list) {
+        long total = 0;
+        int n = list.size();
+        for (int i = 0; i < n; i++) {
+            Object elem = list.get(i);
+            if (elem instanceof Long l) total += l;
+            else if (elem instanceof Integer x) total += x;
+        }
+        return total;
+    }
+
     public static Object foldLeft(MezzeNonEmptyList list, Object init, MezzeFunction folder,
                                                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(folder, "acc", "x");
