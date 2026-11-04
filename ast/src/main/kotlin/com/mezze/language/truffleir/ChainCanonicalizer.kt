@@ -1448,7 +1448,31 @@ object ChainCanonicalizer {
             wrapAsSeqSource(source.expr, "__native_sorted_set_to_seq", NativeHofNames.S)
         NativeHofNames.isDequeNative(nativeName) ->
             wrapAsSeqSource(source.expr, "__native_deque_to_seq", NativeHofNames.D)
-        else -> null  // iter — can't determine concrete source type
+        else -> {
+            // THE REFUSAL THAT MATTERS, and this file's own header says it is
+            // silent. An Opaque source is not itself a problem — every
+            // collection whose concrete type is known gets promoted above. It
+            // is reaching HERE, with a source the walk could not type, that
+            // makes a pipeline run element-at-a-time with nothing anywhere
+            // saying so. Every gap found in this effort arrived looking
+            // identical: a chain that simply did not fuse.
+            //
+            // `MEZZE_TRACE_FUSION=1` names the native and the node, which is
+            // what tells those cases apart. The same device as
+            // MEZZE_TRACE_SELFTAIL and MEZZE_TRACE_WRAPPER, which between them
+            // turned two of these from an afternoon into one run.
+            if (System.getenv("MEZZE_TRACE_FUSION") != null) {
+                val e = source.expr
+                System.err.println(
+                    "[fusion] refused: native=" + nativeName +
+                        " source=" + e::class.simpleName +
+                        (if (e is CallNativeIR) ":" + e.name else "") +
+                        (if (e is ReadLocalIR) ":slot=" + e.slot else "") +
+                        (if (e is CallIndirectScalarIR || e is CallIndirectIR) ":through-a-slot" else "")
+                )
+            }
+            null  // iter, or a collection whose concrete type is unknown
+        }
     }
 
     /** Wrap a collection expression in a synthetic `to_seq` native call,

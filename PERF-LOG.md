@@ -78,8 +78,11 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
+| **`bytes` fold — no fusion at all** | **19x** a storage-matched baseline (35 173 vs 1 815 ps/elem) | `bytes` is absent from `NativeHofNames.isAnyElementCollection`. Adding the prefix is the WRONG fix: `promoteOpaqueSource`'s `to_seq` route would copy a packed byte array into a seq of boxed `Int`s. Wants a source that walks the array in place |
+| **`nel` fold — no fusion at all** | **5.0x** (9 058 vs 1 815) | also absent from the vocabulary, but element-shaped and cons-like, and `__native_nel_to_seq` already exists — the cheapest of these |
+| `map` / `sorted_map` HOFs — no fusion at all | unmeasured | 19 HOFs between them, all absent. `map::fold`'s folder takes THREE arguments, `{ acc, k, v }`, where every sink the fuser has takes two: a design extension, not a prefix |
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
-| **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | the call survives to the final IR as `CallIndirectScalarIR(function=ReadLocalIR(slot))` — a call through a frame slot, which `peelSource` cannot follow. An attempted pre-canonicalizer pass NEVER SAW that node, so whatever produces it runs LATER than the canonicalizer: the fix belongs in the canonicalizer's own walk, resolving a slot-held lambda, not in a pre-pass. `dotprobe` k3 |
+| **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | `MEZZE_TRACE_FUSION` names it exactly: `native=__native_iter_fold source=CallIndirectScalarIR:through-a-slot`. `peelSource` cannot follow a call through a frame slot. The node IS present when the canonicalizer runs — an earlier note here said otherwise, from a pass whose own trace had untraced early-outs. `dotprobe` k3 |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
@@ -2716,6 +2719,107 @@ chain-returning helper — it currently refuses any body containing a
 `MakeLambdaIR`, which is exactly what a staged pipeline has — rather than
 special-casing the peek. Unmeasured; the kernels above are the instrument for
 it.
+
+---
+
+## Which collections the fuser knows about at all
+
+`ChainCanonicalizer` recognises a chain by collection PREFIX:
+`NativeHofNames.isAnyElementCollection` covers seq, iter, list, set, sorted_set
+and deque, and nothing else. Four more collections ship HOFs that look exactly
+like the ones it fuses, and cannot:
+
+| collection | HOFs it ships | in the fuser's vocabulary |
+|---|---|---|
+| map | 10 — fold filter filter_keys filter_values map_keys map_values any all count reduce | **no** |
+| sorted_map | 9 — the same, less reduce | **no** |
+| nel | 6 — fold_left fold_right map any all reduce | **no** |
+| bytes | 2 — fold map | **no** |
+
+`bench/cases/fuseall` folds n elements of each, n = 1e6, and states each
+kernel's own checksum because they cannot all be equal — a `Bytes` element is
+0-255 and a map folds entries rather than elements.
+
+| kernel | ps/elem | vs seq | vs list |
+|---|---|---|---|
+| 1 seq, fused, counted range | **566** | — | — |
+| 2 list, fused, walks cells | 1 815 | 3.2x | — |
+| 3 nel, UNFUSED | 9 058 | 16x | **5.0x** |
+| 4 bytes, UNFUSED | 35 173 | 62x | **19x** |
+
+### Read these against the right baseline, and time only the fold
+
+Two things had to be fixed before these numbers meant anything, and the first
+version of this case got both wrong.
+
+**Construction was inside the timed region.** Every kernel called `from_seq`
+within `time_it` while kernel 1's range is lazy and materialises nothing, so the
+readings were list 24x, nel 152x, bytes 237x — almost entirely the cost of
+building the collection. Hoisting construction out moved them to 3.2x, 16x and
+62x. An order of magnitude, from one line in the wrong place.
+
+**The baseline depends on the storage.** A counted range is not the comparison
+for a cons-cell walk. Kernel 1 is the fused floor; kernel 2 is the fused floor
+for a structure that has to be walked, and a cons-like collection belongs
+against kernel 2. That is what makes `nel` a 5x gap rather than a 16x one.
+
+The corrected list number is also the instrument validating itself: 3.2x matches
+the "List ops vs Seq, 3-5x, storage" row that has been in this ledger for
+months, measured independently.
+
+### What each one would actually need
+
+Not the same work, and not all of it cheap:
+
+- **nel** is element-shaped and cons-like, so it is the closest to free:
+  `__native_nel_to_seq` already exists, and `promoteOpaqueSource` already
+  synthesises exactly that kind of call for set, sorted_set and deque.
+- **bytes** is element-shaped too, but the same route would copy a byte array
+  into a seq of boxed `Int`s. `promoteOpaqueSource`'s `to_seq` trick is an O(n)
+  materialisation — fine for a set, wrong for a packed array. Bytes wants a
+  source that walks the array in place, which is a new `SourceIR` and emit
+  support, not a new prefix.
+- **map** and **sorted_map** fold ENTRIES: `map::fold`'s folder takes three
+  arguments, `{ acc, k, v }`, where every sink the fuser has takes two. That is
+  a design extension — though `StageIR.Enumerate` already produces a record per
+  element, so the shape is not unprecedented.
+
+So "add the prefixes" is right for nel, actively wrong for bytes, and not
+applicable to map.
+
+### A refusal trace, and the wrong conclusion it corrected
+
+`MEZZE_TRACE_FUSION=1` names the native and the node at the point where
+`promoteOpaqueSource` cannot type a source — the place a pipeline silently
+becomes element-at-a-time. Not at `SourceIR.Opaque`, which is NOT a refusal: a
+seq, list, set, sorted_set or deque source is promoted from Opaque and fuses
+fine, and tracing there reported 179 hits in one small program, nearly all of
+them healthy. The refusal is reaching the `else`.
+
+On `dotprobe` it prints, per build:
+
+    6  native=__native_iter_to_seq  source=CallNativeIR:__native_string_split
+    6  native=__native_iter_fold    source=ReadLocalIR:slot=0
+    4  native=__native_iter_fold    source=CallDirectIR
+    2  native=__native_iter_fold    source=CallIndirectScalarIR:through-a-slot
+
+**The last line corrects a conclusion recorded one commit earlier.** That commit
+said the `CallIndirectScalarIR` the capturing-helper gap needs "does not exist at
+that point in the pipeline... it is produced after the canonicalizer". It is
+there, and the canonicalizer sees it.
+
+What actually happened is that the reverted pass bailed on an UNTRACED
+early-out — `(node.function as? ReadLocalIR)?.slot ?: return null`, which fires
+silently when the lambda is reached as a capture rather than a local. So the
+refusal trace I had added to that pass, and trusted, had exits it did not cover,
+and the gap in the instrument became a confident claim about the compiler. **A
+refusal trace with untraced early-outs is worse than no trace**: it converts
+"I do not know" into the wrong answer.
+
+The fix for that gap therefore does belong in the canonicalizer, as recorded —
+but because `peelSource` must resolve a call through a slot, not because the
+node arrives too late.
+
 
 ---
 

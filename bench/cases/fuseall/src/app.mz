@@ -1,0 +1,116 @@
+## WHICH COLLECTIONS FUSE AT ALL.
+##
+## `ChainCanonicalizer` recognises a chain by collection PREFIX:
+## `NativeHofNames.isAnyElementCollection` covers seq, iter, list, set,
+## sorted_set and deque — and nothing else. But four more collections ship HOFs
+## that look exactly like the ones it fuses:
+##
+##   map          10  fold filter filter_keys filter_values map_keys map_values
+##                    any all count reduce
+##   sorted_map    9  the same, less reduce
+##   nel           6  fold_left fold_right map any all reduce
+##   bytes         2  fold map
+##
+## None of those names is in the fuser's vocabulary, so none of them can fuse,
+## however the pipeline is written. This case measures what that costs, per
+## element, against a collection that does fuse.
+##
+## EVERY KERNEL FOLDS THE SAME n ELEMENTS. The checksums are NOT all equal and
+## cannot be: a `Bytes` element is 0-255, and a map folds entries rather than
+## elements. Each kernel states its own expected value, and a kernel that got
+## fast by folding fewer elements reads as a different number.
+## CONSTRUCTION IS BUILT OUTSIDE THE TIMED REGION, and the first version of this
+## case did not do that — every kernel called `from_seq` inside `time_it`, so it
+## timed materialising the collection PLUS folding it while kernel 1's range is
+## lazy and materialises nothing. The readings were 24x for list and 152x for
+## nel, almost all of it construction. Each kernel now takes a collection that
+## was already built, so ps/elem is the fold.
+##
+## AND THE BASELINE DEPENDS ON THE STORAGE. A counted range is not the right
+## comparison for a cons-cell walk: kernel 1 is the fused floor, kernel 2 is the
+## fused floor for a structure you have to walk, and a cons-like collection
+## should be read against kernel 2.
+use std::collections::seq
+use std::collections::list
+use std::collections::map
+use std::collections::bytes
+use std::collections::nonemptylist
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── 1. THE FUSED BASELINE. `seq` is in the fuser's vocabulary.
+##      sum of 0..n-1 = n*(n-1)/2.
+let k_seq = { xs } -> seq::fold { xs = xs, init = 0, f = { acc, x } -> acc + x }
+
+## ── 2. A SECOND FUSED CONTROL, so that kernel 1 being fast is not a property of
+##      ranges alone. `list` is in the vocabulary too. Same checksum.
+let k_list = { xs } -> list::fold_left { xs = xs, init = 0, f = { acc, x } -> acc + x }
+
+## ── 3. NonEmptyList. Element-shaped and structurally identical to a list fold —
+##      the folder is `{ acc, x }` — and `nel` is absent from the vocabulary.
+##      `from_seq` returns an Option, so the empty case folds to 0 and the
+##      checksum is the same as kernel 1 for any n > 0.
+let k_nel = { xs } -> nonemptylist::fold_left { xs = xs, init = 0, f = { acc, x } -> acc + x }
+
+## ── 4. Bytes. Also element-shaped, folder `{ acc, byte }`, also absent. A byte
+##      is 0-255, so the elements are `i % 256` and the checksum differs from
+##      every other kernel BY CONSTRUCTION — it is stated here rather than
+##      shared: sum of (i % 256) for i in 0..n-1.
+let k_bytes = { b } -> bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte }
+
+## ── 5. Map. The folder is THREE arguments, `{ acc, k, v }`, because a map folds
+##      ENTRIES and not elements — which is why fusing it is a design extension
+##      rather than another prefix in the vocabulary. Keys are 0..n-1 and values
+##      equal keys, so folding the values gives kernel 1's checksum.
+let k_map = { m } -> map::fold { m = m, init = 0, f = { acc, k, v } -> acc + v }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 1000000 }
+  let src = seq::range { start = 0, end = n }
+  if k == 1 then do
+    k_seq { xs = src }
+    report { name = "1 seq   fused   ", n = n, r = time_it { f = {} -> k_seq { xs = src } } }
+    report { name = "1 seq   fused   ", n = n, r = time_it { f = {} -> k_seq { xs = src } } }
+  else if k == 2 then do
+    let built = list::from_seq { xs = src }
+    k_list { xs = built }
+    report { name = "2 list  fused   ", n = n, r = time_it { f = {} -> k_list { xs = built } } }
+    report { name = "2 list  fused   ", n = n, r = time_it { f = {} -> k_list { xs = built } } }
+  else if k == 3 then match nonemptylist::from_seq { xs = src } is
+    Some { val } -> do
+      k_nel { xs = val }
+      report { name = "3 nel   unfused ", n = n, r = time_it { f = {} -> k_nel { xs = val } } }
+      report { name = "3 nel   unfused ", n = n, r = time_it { f = {} -> k_nel { xs = val } } }
+    None -> println { msg = "empty" }
+  else if k == 4 then do
+    let built = bytes::from_seq { arr = seq::map { xs = src, f = { x } -> x % 256 } }
+    k_bytes { b = built }
+    report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
+    report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
+  else do
+    let built = map::from_list {
+      xs = list::from_seq { xs = seq::map { xs = src, f = { x } -> { k = x, v = x } } },
+    }
+    k_map { m = built }
+    report { name = "5 map   unfused ", n = n, r = time_it { f = {} -> k_map { m = built } } }
+    report { name = "5 map   unfused ", n = n, r = time_it { f = {} -> k_map { m = built } } }
