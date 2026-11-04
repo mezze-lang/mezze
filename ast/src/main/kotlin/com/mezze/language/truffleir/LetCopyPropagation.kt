@@ -138,7 +138,17 @@ object LetCopyPropagation {
             progress = false
             for (i in stmts.indices) {
                 val st = stmts[i] as? StmtIR.Let ?: continue
-                if (!isRecomputable(st.value)) continue
+                // FOLDED FIRST. `i - 1` on a receiver whose type was not known
+                // when the body was compiled is a CALL in the IR, not
+                // arithmetic: `i.sub { r = 1 }`. The bytecode compiler folds
+                // that back at emit time, so folding it here produces nothing
+                // it would not have produced anyway — but it happens early
+                // enough for the binding to be substitutable, which is what
+                // lets the loop reach the fused tier. Without it a record
+                // helper's own arithmetic keeps its binding and the loop stays
+                // 3x off the control.
+                val value = InlineOpMapping.foldAbilityOp(st.value)
+                if (!isRecomputable(value)) continue
 
                 val tail = stmts.drop(i + 1)
                 val scope = tail.map { valueOf(it) } + result
@@ -158,15 +168,15 @@ object LetCopyPropagation {
                 // measured kernels are unaffected.
                 val crossesOnlyInert = tail
                     .takeWhile { s -> countReads(valueOf(s), st.slot) == 0 }
-                    .all { s -> s is StmtIR.Let && isRecomputable(s.value) }
+                    .all { s -> s is StmtIR.Let && isRecomputable(InlineOpMapping.foldAbilityOp(s.value)) }
                 if (!crossesOnlyInert) continue
 
                 stmts = if (reads == 0) {
                     stmts.take(i) + tail
                 } else {
-                    stmts.take(i) + tail.map { replaceRead(it, st.slot, st.value) }
+                    stmts.take(i) + tail.map { replaceRead(it, st.slot, value) }
                 }
-                if (reads == 1) result = replaceRead(result, st.slot, st.value)
+                if (reads == 1) result = replaceRead(result, st.slot, value)
                 changed = true
                 progress = true
                 break

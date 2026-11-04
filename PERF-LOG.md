@@ -1460,11 +1460,70 @@ TWO WRONG TURNS WORTH KEEPING, both of which looked like the answer:
   and lands there legitimately, and that reading it as a gap "cost one wrong
   hypothesis already". It nearly cost a second.
 
-STILL OPEN, and now the honest residue: `recordcost` kernels 4 and 7 did NOT
-move (669 and 628). Their helper is small enough to INLINE, so there is no call
-site left for mono to specialise — the generic body is spliced in and its
-`i.sub { r = 1 }` stays a call. Inlining and specialising are competing for the
-same helper, and inlining wins by being first.
+### FIXED: fold the desugared operator before judging a binding — kernel 4 reaches the control
+
+`recordcost`, same A/B (`MEZZE_LET_PROPAGATE=0` vs on), n=2e7, min of 5:
+
+| kernel | off | on | |
+|---|---|---|---|
+| 1 positional (control) | 233 | 225 | — |
+| **4 record from a helper** | 688 | **221** | 3.11x |
+| 6 the same, hand-inlined | 693 | **218** | 3.18x |
+| 7 helper at MODULE level | 623 | 631 | — |
+
+KERNEL 4 IS NOW AT THE CONTROL: 221 against 225. A loop whose helper returns a
+record — 5 207 ps/iter when this effort started — costs what the same loop
+written with no record and no helper costs. The same A/B before this change gave
+kernel 4 694 → 642, a 1.08x, so the delta is this fold and nothing else.
+
+`x + y` desugars to `x.add { r = y }` and STAYS a call through a field read
+whenever the receiver's type was unknown when the body was compiled — which for
+a `let`-bound helper is always, since let-generalisation gives the body one
+compilation for all types. A binding holding one is a binding holding a CALL as
+far as copy propagation can tell, so the block survived and the tier declined.
+The bytecode compiler already folds that shape at emit time, so folding it
+earlier produces nothing new; it just happens early enough to matter. Chain:
+fold → substitute → block empties → tier fires.
+
+ONE TABLE. `inlineOpFor` was a switch over operation names in the bytecode
+compiler and now delegates to `InlineOpMapping` in `ast`, whose binary half is
+DERIVED from `OperatorMapping.BINARY_OPERATORS`. Two copies would have drifted
+silently — a new operator would stop folding and the only symptom would be
+slower programs.
+
+### OPEN, and newly diagnosed: the native signature registry is EMPTY for user code
+
+Kernel 7 did not move, and it is not the pass. Its helper is top-level, so its
+parameter type IS pinned and the operator resolves all the way to a native:
+
+    Let(__rec_p_lo, CallNativeIR(name=__native_int_subtract,
+                                arg=MakeRecordIR({l = i, r = 1}),
+                                args=[], argKinds=[],
+                                isPure=false, inlineOp=null))
+
+while the declaration in `IntOps.kt` reads
+`NativeOp("__native_int_subtract", …, pure = true, inlineOp = InlineOp.SUB)`.
+Three things are missing from that node, and all three are declared:
+
+- `inlineOp`, so the peephole cannot collapse it to `InlineBinaryOpIR` — no JIT
+  fast path, and no fused tier for the loop around it.
+- `pure`, so nothing downstream may move or elide it.
+- `params`, so `args`/`argKinds` are EMPTY and the call goes out on the legacy
+  record ABI — a record built per call.
+
+WHY. `NativeSignatures` lives in `ast` and is populated by interpreter
+class-load. The hook that forces those declarations to load, `NativeBootstrap`,
+installs itself into `NativeSignatures` from its OWN static initialiser — so
+until something touches that class the registry is empty, and `signatureOf`
+latches `bootstrapped = true` after running a null hook, so it stays empty for
+the rest of the process. `MezzeLanguage` calls the bootstrap when the Truffle
+language initialises, which is after user code has been lowered.
+`StdlibPrecompiler` calls it for its own run — so the STDLIB was compiled with
+the metadata and user code never was. Nothing in `mez` itself called it.
+
+This is the "`mez build` EMPTY native registry" note from the earlier
+`list_fold_routes` work, now with the mechanism and the three consequences
+named rather than just the symptom.
 
 AND NOT DONE, deliberately: making `+`, `-` and `%` homogeneous again. The
 recorded design decision says "leave NumAdd/NumSub/NumMod homogeneous

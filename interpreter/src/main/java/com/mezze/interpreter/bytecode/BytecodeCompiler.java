@@ -3888,31 +3888,25 @@ public final class BytecodeCompiler {
         return null;
     }
 
+    /**
+     * The inline form of an ability operation, from the ONE table that says so.
+     *
+     * This was a switch over operation names, a second copy of a mapping
+     * {@link com.mezze.language.truffleir.InlineOpMapping} also needs — it folds
+     * the same shape earlier, so a binding holding `i.sub { r = 1 }` can be
+     * substituted and its loop can reach the fused tail-loop tier. Two copies
+     * would drift SILENTLY: a new operator would stop folding and the only
+     * symptom would be slower programs. The table's binary half is derived from
+     * {@code OperatorMapping.BINARY_OPERATORS} and pinned by
+     * {@code InlineOpMappingTest}.
+     *
+     * The eq/neq note the switch carried is worth keeping: these two must fold
+     * unconditionally, or `let x: Int = …; if x == 0 …` inside a `perform` block
+     * emits ReadFieldByName("eq") on a Long and dies in the @Fallback with
+     * "Expected record for field 'eq', got: Long" (#346).
+     */
     private static InlineOp inlineOpFor(String opName) {
-        switch (opName) {
-            case "add": return InlineOp.ADD;
-            case "sub": return InlineOp.SUB;
-            case "mul": return InlineOp.MUL;
-            case "div": return InlineOp.DIV;
-            case "mod": return InlineOp.MOD;
-            // eq/neq: fold to inline op, mirroring AST's tryCompileInlineOp
-            // which unconditionally folds these. Without this, code shaped
-            // like `let x : Int = ...; if x == 0 then ...` inside a `perform`
-            // block emits ReadFieldByName("eq") on the scalar Long, hitting
-            // ReadFieldByName.doNotRecord @Fallback → "Expected record for
-            // field 'eq', got: Long" at runtime. See task #346.
-            case "eq":  return InlineOp.EQ;
-            case "neq": return InlineOp.NEQ;
-            case "lt":  return InlineOp.LT;
-            case "le":  return InlineOp.LE;
-            case "gt":  return InlineOp.GT;
-            case "ge":  return InlineOp.GE;
-            case "and": return InlineOp.AND;
-            case "or":  return InlineOp.OR;
-            case "neg": return InlineOp.NEG;
-            case "not": return InlineOp.NOT;
-            default: return null;
-        }
+        return com.mezze.language.truffleir.InlineOpMapping.INSTANCE.forAbilityMethod(opName);
     }
 
     private void emitInlineBinaryOp(InlineBinaryOpIR bin,
