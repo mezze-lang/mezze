@@ -662,7 +662,43 @@ private fun variantArgsMustMatch(
     )
 }
 
+/**
+ * How many function arrows this unification has descended through.
+ *
+ * [directionalVariantFieldCheck] walks a type and FLIPS orientation at every
+ * function-typed position, which is correct — a callback is the receiver for its
+ * own parameter. But [unifyFunctions] is re-entered for every nested function
+ * pair, and each entry ran the walk again from its own local orientation, so a
+ * nested pair was checked twice: once correctly by the enclosing walk, once with
+ * the orientation of a top-level comparison.
+ *
+ * That is what refused an over-qualified callback. `needs_narrow { f = wide }`
+ * is fine — `wide` accepts everything the caller will send — and the enclosing
+ * walk says so, but the nested `unifyFunctions(wide, narrow)` then asked whether
+ * `wide`'s parameter fits `narrow`'s, which is the question for a value flowing
+ * into a position, not for a callback being installed.
+ *
+ * Neither orientation is right for both levels, so only the OUTERMOST level
+ * runs the check and the walk handles every depth below it from there.
+ */
+private val unifyFunctionDepth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
+
 private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, registry: DeclarationRegistry): UnificationResult {
+    val depth = unifyFunctionDepth.get()
+    unifyFunctionDepth.set(depth + 1)
+    try {
+        return unifyFunctionsInner(fn1, fn2, registry, isOutermost = depth == 0)
+    } finally {
+        unifyFunctionDepth.set(depth)
+    }
+}
+
+private fun unifyFunctionsInner(
+    fn1: MezzeType.FunctionType,
+    fn2: MezzeType.FunctionType,
+    registry: DeclarationRegistry,
+    isOutermost: Boolean,
+): UnificationResult {
     val paramSubst = unify(fn1.paramType, fn2.paramType, registry).getOrElse { return it }
     // #11 directional param check. By the call-argument convention documented
     // for the effect rows below — Equality(left = arg, right = param) →
@@ -681,10 +717,12 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         value = __dfcValue,
         demand = __dfcDemand,
     )?.let { return it }
-    directionalVariantFieldCheck(
-        value = __dfcValue,
-        demand = __dfcDemand,
-    )?.let { return it }
+    if (isOutermost) {
+        directionalVariantFieldCheck(
+            value = __dfcValue,
+            demand = __dfcDemand,
+        )?.let { return it }
+    }
     val return1 = paramSubst.apply(fn1.returnType)
     val return2 = paramSubst.apply(fn2.returnType)
     val returnSubst = unify(return1, return2, registry).getOrElse { return it }
@@ -704,10 +742,12 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         value = returnSubst.apply(return1),
         demand = returnSubst.apply(return2),
     )?.let { return it }
-    directionalVariantFieldCheck(
-        value = returnSubst.apply(return1),
-        demand = returnSubst.apply(return2),
-    )?.let { return it }
+    if (isOutermost) {
+        directionalVariantFieldCheck(
+            value = returnSubst.apply(return1),
+            demand = returnSubst.apply(return2),
+        )?.let { return it }
+    }
     val effects1 = fn1.effects
     val effects2 = fn2.effects
 
