@@ -2880,6 +2880,75 @@ node arrives too late.
 
 ---
 
+## Dictionaries in dev, mono in build? No — one path, and here is the number
+
+The proposal is reasonable on its face: monomorphisation is the slow part of a
+build, so let `dev` keep dictionary-passing for a fast loop and let `build` pay
+for full specialisation. It rests on an assumption nobody had measured.
+
+MEASURED. `MEZZE_MONO_CLOSURES=0` is the only lever that separates part of mono,
+so these are a LOWER BOUND on its cost, not the whole of it:
+
+| job | closure mono on | off | cost |
+|---|---|---|---|
+| stdlib precompile, 78 modules — the largest compile here | 41 497 ms | 38 041 ms | **8.3%** |
+| user app, no-change incremental rebuild | ~3 950 ms | — | — |
+
+**The second row is the answer.** An incremental rebuild with no source change
+takes about four seconds WITH mono on, and that time is fixed cost — JVM start,
+snapshot hydration — not specialisation. So a dictionary dev mode would buy
+roughly 8% on a full build and approximately NOTHING on the rebuilds a developer
+actually waits for. The dev loop is not mono-bound; it is bound by a four-second
+floor somewhere else, and that is where the effort belongs.
+
+### And the semantics would diverge, not just the speed
+
+The decisive argument is not the 8%. In Mezze, **mono is a prerequisite for
+other optimisations, not a constant factor on top of them.** `dotprobe` k3 is the
+proof: a stage lambda that stays dictionary-passing lowers `x * factor` to a read
+of a dict field rather than arithmetic, `classifyUnaryLiteralLambda` cannot
+classify it, and **the chain does not fuse** — 49 280 ps/elem against 152. The
+190x row is the same thing (the dict wrapper is 52 of 57 ns) and so is the 460x
+HOF row.
+
+So a dict-passing `dev` would not be a slower build of the same program. It
+would FUSE DIFFERENTLY. Which means a perf bug found in dev need not reproduce
+in build; a fusion regression could ship because dev never exercised the fused
+path; and `MEZZE_TRACE_FUSION` would print different refusals in the two modes,
+so the diagnostics would be wrong in one of them.
+
+This codebase has already shown twice, in one session, what an
+under-exercised second path costs: `MEZZE_NATIVE_SIGS=0` silently did not
+disable what it claimed, and set/deque fusion was a **7x pessimisation nobody had
+noticed** because nothing compared fused against unfused. A dev/build semantic
+split is that failure mode by construction.
+
+### What to do about mono instead
+
+Not architecture — three bugs, all small, all diagnosed:
+
+1. **The seed gate refuses MONOMORPHIC functions.** `typeParams` over-collects
+   constraint-only variables that occur nowhere in the type, so a function whose
+   type is `({n: Int} -> Int)` — no variables at all — fails the all-concrete
+   gate and is never seeded. Require only the type args that OCCUR in
+   `scheme.type` to be concrete: ~5 lines, and it strictly widens seeding. This
+   is the root of all four dict rows.
+2. **HOF call-site seeding produces zero specialisations** — the 460x row.
+3. **`MEZZE_MONO_STRIP` crashes the compiler**; the liveness scan counts a
+   nested lambda's capture as dead. Fix written, unapplied.
+
+And the knob is worth having, but as ONE BUDGET ON ONE PATH:
+`mezze.mono.effort = fast | full` controlling how far mono chases specialisations
+— depth, call-site breadth — never whether dictionaries exist. Same passes, same
+semantics, different thoroughness. That is the only form of the idea that does
+not create a second language.
+
+If mono ever does become expensive at scale, the lever is incremental caching of
+specialisations, keyed the way the rest of the pipeline already keys on content
+hashes — not a different dev semantics.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
