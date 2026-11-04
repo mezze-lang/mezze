@@ -305,6 +305,13 @@ val compileStdlib by tasks.registering(JavaExec::class) {
     // Sibling schema fingerprint StdlibPrecompiler writes next to the cbor; checked
     // at load before decode to reject a schema-skewed snapshot cleanly.
     outputs.file(layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.fp"))
+    // Sibling table of native signatures (name, purity, inline form, param
+    // order). This process has :interpreter on its class path and so has the
+    // declarations; `mez` does not and reads them back from here. Without it
+    // every native call in USER code lowers without purity, without an inline
+    // form, and on the record ABI. Tracked as an output so a change to the
+    // declarations — which changes this task's classpath — regenerates it.
+    outputs.file(layout.buildDirectory.file("generated/resources/META-INF/mezze/native-signatures.tsv"))
     inputs.dir(rootProject.projectDir.resolve("stdlib/std"))
 
     // Needs access to stdlib source files for parsing

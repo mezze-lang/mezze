@@ -1628,7 +1628,45 @@ above, and the smallest of the three.
 **Kernel 7, 2.7x**, which is the native-metadata item below and not about
 records at all.
 
-### OPEN, and newly diagnosed: the native signature registry is EMPTY for user code
+### FIXED: the build writes the native signatures down — 2.9x, and kernel 7 reaches the control
+
+A/B on one CLI with `MEZZE_NATIVE_SIGS=0`, n=2e7, min of 5:
+
+| kernel | off | on | | young GCs |
+|---|---|---|---|---|
+| 1 positional (control) | 229 | 242 | — | 2 → 2 |
+| **7 helper at module level** | **671** | **229** | **2.93x** | 3 → 2 |
+| 3 record built once, read | 536 | 536 | — | 3 → 3 |
+
+At the control, and `letcost` is neutral (k3 234/230 against a 260/242
+control). Its loop body is now three `InlineBinaryOpIR` with no native call and
+no record, where it had `CallNativeIR(__native_int_subtract,
+arg=MakeRecordIR(…), isPure=false, inlineOp=null)` plus a surviving binding. The
+whole chain fires at once: metadata → collapse to arithmetic → recomputable →
+the binding substitutes → the block empties → `tier=FUSED`.
+
+THE FIX IS DATA, not a dependency. `StdlibPrecompiler` already runs with
+`:interpreter` on its class path and already loads the declarations — its
+comment says why — so it now also writes them out:
+
+    __native_int_add	true	ADD	LONG	l:LONG,r:LONG
+    __native_int_subtract	true	SUB	LONG	l:LONG,r:LONG
+
+128 lines into `META-INF/mezze/native-signatures.tsv`, read by
+`NativeSignatures` when no bootstrap hook is installed. Data crosses the
+boundary Truffle must not, so `ComptimeHost`'s rule — "keeping Truffle out of
+its own process is what keeps `mez` starting quickly" — stays intact, and
+`mez dev`'s subprocess split stops mattering.
+
+`register` now accepts an IDENTICAL re-registration, because a test JVM or the
+interpreter itself has both the resource and the declarations; a CONFLICTING one
+still throws, since two disagreeing descriptions of one native's ABI would
+mis-order its arguments. The gradle task tracks `:interpreter` on its classpath,
+so editing a declaration regenerates the table rather than leaving a stale one —
+a wrong param order being worse than no metadata at all. Absent or malformed is
+not an error: the behaviour that was there before, slower and correct.
+
+### WHAT THE DIAGNOSIS WAS, kept because the first two attempts were wrong
 
 Kernel 7 did not move, and it is not the pass. Its helper is top-level, so its
 parameter type IS pinned and the operator resolves all the way to a native:

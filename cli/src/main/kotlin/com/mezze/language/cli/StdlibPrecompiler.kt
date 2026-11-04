@@ -372,7 +372,15 @@ fun main(args: Array<String>) {
     // StdlibSnapshotData / StdlibSnapshot.schemaFingerprint).
     snapshotFile.resolveSibling("stdlib-snapshot.fp")
         .writeText(com.mezze.language.typechecker.StdlibSnapshot.schemaFingerprint)
+    // Sibling table of native signatures, for every process that compiles
+    // WITHOUT the interpreter on its class path — which is `mez` itself. This
+    // process has the declarations (it loaded them above, for exactly the
+    // reason stated there); nothing in the CLI ever does, so the facts are
+    // written down as data for it to read back. See NativeSignatures.export.
+    snapshotFile.resolveSibling("native-signatures.tsv")
+        .writeText(com.mezze.language.truffleir.NativeSignatures.export())
     println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) + fingerprint — SQLite-free snapshot")
+    println("Wrote native-signatures.tsv (${com.mezze.language.truffleir.NativeSignatures.size()} natives)")
 }
 
 /**
