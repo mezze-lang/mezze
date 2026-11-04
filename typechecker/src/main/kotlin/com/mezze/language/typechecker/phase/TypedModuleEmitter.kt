@@ -426,8 +426,14 @@ private fun compileModule(
     val printTypes = com.mezze.language.typechecker.compiler.PrintTypeDefs.forModule(typedModule, importedModules)
     compiler.setPrintTypeDefs(printTypes.defs, printTypes.params)
 
+    // Compile the decls the local-lambda pass produced, not the ones handed to
+    // mono: a polymorphic local lambda is monomorphised in place, and the only
+    // record of that is this list. See LocalLambdaSpecializer.
+    val moduleToCompile = monoResult.entryDecls
+        ?.let { wrapped.copy(decls = it) } ?: wrapped
+
     val result = compiler.compile(
-        module = wrapped,
+        module = moduleToCompile,
         additionalModules = importedModules,
         additionalPerformers = importedPerformers,
         monoSpecializations = monoResult.specializations.values.toList()

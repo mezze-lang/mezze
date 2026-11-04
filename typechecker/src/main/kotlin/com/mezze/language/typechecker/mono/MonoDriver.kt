@@ -119,6 +119,12 @@ object MonoDriver {
          *  the specialized decl. Populated for HOF call sites whose
          *  callee's closure params were dead-code eliminated. */
         val stripBySiteLoc: Map<Loc, Set<String>> = emptyMap(),
+        /**
+         * The entry module's decls with polymorphic LOCAL lambdas monomorphised
+         * in place. Null when the pass did not run. The caller compiles THESE
+         * rather than the module it passed in — see [LocalLambdaSpecializer].
+         */
+        val entryDecls: List<com.mezze.language.typedast.TypedDecl>? = null,
     ) {
         val specializations get() = mono.specializations
         val fallbacks get() = mono.fallbacks
@@ -233,26 +239,12 @@ object MonoDriver {
         // Off by default. The gate exists so we can measure the coverage
         // lift without risking a default-on regression on the ~496 generic
         // decls in stdlib (bulk unification cost).
-        val seeds = ArrayList<Monomorphizer.SpecRequest>()
-        val seedLocs = ArrayList<Loc>()
-        val counters = Counters()
-        val seedStdlib = System.getenv("MEZZE_MONO_SEED_STDLIB") == "1"
-        val seedFrom = if (seedStdlib) listOf(entry) + imported + resolutionOnly
-                       else            listOf(entry) + imported
-        for (m in seedFrom) {
-            for (d in m.decls) {
-                if (d !is TypedLetDecl) continue
-                if (d.typeParams.isNotEmpty()) continue
-                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash)
-            }
-        }
-
         // Index impls by their content hash so the constraint-aware
         // rewriter (Piece 2 of #267) can look up operation names from the
         // AbilityImplRefs in each SpecRequest.
         val implIndex = HashMap<Hash, TypedAbilityImpl>(abilityImpls.size)
         for (impl in abilityImpls) implIndex[impl.hash] = impl
-        val result = Monomorphizer(
+        val monomorphizer = Monomorphizer(
             resolveDecl = declIndex::get,
             implIndex = implIndex,
             // C.1 — let a transitive specialization resolve its OWN constraints
@@ -262,7 +254,67 @@ object MonoDriver {
             resolveEvidence = { decl, args ->
                 resolveAbilityConstraints(decl, args, abilityImpls, recordShapeByHash)
             },
-        ).run(seeds)
+        )
+
+        // Monomorphise POLYMORPHIC LOCAL LAMBDAS before seeding.
+        //
+        // Monomorphizer specializes DECLS, keyed by content hash, and emits new
+        // ones. A do-block `let` bound to a lambda generalizes (#76), which makes
+        // a local polymorphic function that is not a decl and sits inside a
+        // function that is already concrete — so no specialization of it is ever
+        // produced and its body keeps its dictionary. That is worth two orders of
+        // magnitude on a named pipeline step; see [LocalLambdaSpecializer].
+        //
+        // BEFORE the seed walk, not after, and that ordering is the whole point.
+        // Making the body concrete is only half the job: the `iter::map` inside it
+        // must then be SEEDED at the now-known element type, or it stays a generic
+        // call, never lowers to `__native_iter_map`, and the chain the pass was
+        // meant to free still cannot fuse. Seeding therefore walks the specialized
+        // decls.
+        //
+        // It also reuses `rewriteConstrainedMethodCalls`, the same step the decl
+        // path uses to turn a constraint-driven method call into a direct one, so
+        // there is one rule for discharging a constraint and not two.
+        val entryDecls = LocalLambdaSpecializer.specializeDecls(
+            entry.decls, abilityImpls, recordShapeByHash,
+        ) { expr, impls -> monomorphizer.rewriteConstrainedMethodCalls(expr, impls) }
+        // Point the index at the specialized bodies so a TRANSITIVE
+        // specialization is cloned from one too. `resolveDecl` is a function
+        // reference into this same map, so updating it now is seen by the
+        // monomorphizer constructed above. The pass preserves each decl's hash —
+        // it rewrites a local binding inside a body, not the decl's identity — so
+        // these replace rather than add.
+        for (d in entryDecls) if (d is TypedLetDecl) declIndex[d.hash] = d
+
+        // Seed only from concrete (non-generic) decls. Track per-seed call
+        // site loc in a parallel list so we can map back from each
+        // SpecRequest to the originating TypedCall after mono runs.
+        //
+        // #441 Day 8 (Mono Gap B): env-gated stdlib seed walk. When
+        // MEZZE_MONO_SEED_STDLIB=1, also walk stdlib CONCRETE decls
+        // (typeParams.isEmpty()) for callsites — no seeding from generic
+        // decls' bodies (still polymorphic; would produce VarType bindings).
+        // Off by default. The gate exists so we can measure the coverage
+        // lift without risking a default-on regression on the ~496 generic
+        // decls in stdlib (bulk unification cost).
+        val seeds = ArrayList<Monomorphizer.SpecRequest>()
+        val seedLocs = ArrayList<Loc>()
+        val counters = Counters()
+        val seedStdlib = System.getenv("MEZZE_MONO_SEED_STDLIB") == "1"
+        // Decl LISTS, not modules: the entry's contribution is the specialized
+        // list above, which no TypedModule holds.
+        val seedFrom: List<List<com.mezze.language.typedast.TypedDecl>> =
+            if (seedStdlib) listOf(entryDecls) + (imported + resolutionOnly).map { it.decls }
+            else            listOf(entryDecls) + imported.map { it.decls }
+        for (declList in seedFrom) {
+            for (d in declList) {
+                if (d !is TypedLetDecl) continue
+                if (d.typeParams.isNotEmpty()) continue
+                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash)
+            }
+        }
+
+        val result = monomorphizer.run(seeds)
 
         // Build the per-call-site lookup the compiler consumes. For each
         // seed loc, look up the SpecRequest in the rewrite map; if mono
@@ -310,7 +362,7 @@ object MonoDriver {
                 }
             }
         }
-        return Result(mono = result, bySiteLoc = bySiteLoc, stripBySiteLoc = stripBySiteLoc)
+        return Result(mono = result, bySiteLoc = bySiteLoc, stripBySiteLoc = stripBySiteLoc, entryDecls = entryDecls)
     }
 
     private data class AbilityOpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
@@ -1143,7 +1195,7 @@ object MonoDriver {
      * but no `TypedLetDecl` behind it, so it could not reach the decl-shaped entry
      * point above and recorded NO evidence at all.
      */
-    private fun resolveAbilityConstraintsOf(
+    internal fun resolveAbilityConstraintsOf(
         fnType: MezzeType.FunctionType?,
         typeParamNames: List<String>,
         typeArgs: List<MezzeType>,

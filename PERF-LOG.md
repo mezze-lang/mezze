@@ -3063,6 +3063,114 @@ is the one to build.
 
 ---
 
+## 314x: the local lambda nobody could monomorphise
+
+The largest measured gap on this branch, and the one four ledger rows were
+really about. Naming a step in a pipeline cost two orders of magnitude.
+
+```
+let scaled = { xs } -> iter::map { it = xs, f = { x } -> x * factor }
+```
+
+A do-block `let` bound to a lambda GENERALIZES (#76), and generalization is
+suppressed only for a NON-GROUND capture (#15) — `factor : Int` is ground, so
+capturing it does not suppress. The capture is not the trigger at all; the
+non-capturing spelling behaves identically. What results is a local POLYMORPHIC
+function, and the typed AST holds both halves of the problem at once:
+
+```
+LET  scaled  ({xs: Iter['h660]} -> Iter['o659])  with <NumMul Int 'h660 having out='o659>
+CALL scaled  ({xs: Iter[Int]}   -> Iter[Int])    with <NumMul Int Int    having out=Int>
+```
+
+**The call site was always concrete and always named the impl.** Only the body
+kept the variables — so `x * factor` lowered to a dictionary field read rather
+than arithmetic, `classifyUnaryLiteralLambda` could not classify the stage, and
+the chain did not fuse.
+
+`Monomorphizer` could not reach it. It specializes DECLS, keyed by content hash,
+and emits new ones; a local binding is not a decl, and the function around it is
+already concrete so no specialization of it is ever produced. Hence
+`LocalLambdaSpecializer`: substitute the call site's type arguments into the
+binding's body and rewrite its constraint-driven method calls against the
+resolved impls — the decl path's own two steps (`TypeSubstitution.applyExpr`,
+`rewriteConstrainedMethodCalls`), reused, so there is one rule for discharging a
+constraint and not two.
+
+No lambda lifting and no closure conversion: the binding stays where it is, so
+its captures are untouched. That is the reason to specialize in place.
+
+### ORDERING IS HALF THE FIX
+
+It runs BEFORE mono's seed walk, and seeding reads its output. Making the body
+concrete is only half the job — the `iter::map` inside it must then be SEEDED at
+the now-known element type, or it stays a generic call, never lowers to
+`__native_iter_map`, and the chain is still unfusable. Measured: with the pass
+after the seed walk, the mono trace was byte-identical to no pass at all.
+
+| | k3 capturing | k1 inline control |
+|---|---|---|
+| pass disabled | **64 672 ps/elem** | 171 |
+| pass enabled | **206 ps/elem** | 129 |
+
+**314x.** Same kernel, same harness, the change's own switch, identical
+checksums (5999997000000), control steady — so the table is readable. All four
+`dotprobe` kernels now sit in a 149-245 ps band; the capturing case is no longer
+an outlier. Mono counters: seeds 170 → 192, byHash 168/9 → 190/4, specs
+119 → 120, and `map` left the failure list entirely.
+
+Gates: `:typechecker:test` and `:interpreter:test` both green.
+
+### WHAT I COULD NOT TEST, AND WHY THAT IS WORTH WRITING DOWN
+
+Two harnesses look like they should catch this and neither does. I wrote the
+first, watched it pass with the pass disabled, and nearly committed it as
+evidence:
+
+- **A typechecker lowering test is blind.** That path type-checks and lowers the
+  stdlib FROM SOURCE; `mez build` serves `PrecompiledStdlib.preloweredFunctions`.
+  On the from-source path the pipeline fuses either way. Even the strong
+  assertion — source is `RangeSeq`, two or more stages, no residual natives —
+  passed with the pass off.
+- **`BytecodeCompiler.FUSED_EMITS` records nothing for an `iter` chain.** Not a
+  weaker signal, no signal: measured empty for the inline spelling too, which
+  does fuse.
+
+So the perf claim rests on the switched measurement above, and the automated
+tests assert what they can actually see: `LocalLambdaSpecializerTest` pins the
+TRANSFORMATION (the binding loses its variables and its discharged obligation,
+and a binding used at two types is left alone), and
+`NamedPipelineStepFusionTest` RUNS the specialized code, because picking the
+wrong impl is a wrong number rather than a type error.
+
+This is the `project_aot_tag_dispatch` lesson again: a test on the from-source
+path says nothing about the path that ships.
+
+### A NOTE ON THE PHANTOM REMOVAL AND THE RULE THAT REFUSES THEM
+
+`project_undetermined_codec_target_three_steps` records an existing rule: an
+ability constraint on a type variable appearing in neither the parameters nor
+the result of the solved signature is one no caller can discharge, and is
+REFUSED — asked per-binding, never at emit. The phantom-constraint fix removes
+constraints of exactly that shape, so it had to be checked that it did not turn
+a refusal into a silent drop.
+
+It does not, and the reason is the scope of the removal: it fires only where the
+local's own SCHEME carries the same ability on the same variable, so the demand
+still travels and every use still re-demands it. `UndeterminedClassArgTest` and
+`UndeterminedCodecTargetTest` both pass 5/5 — the refusals still fire.
+
+### STILL OPEN after this
+
+`allocsurface` k11 is unchanged at ~30 675 ps/iter. It is a TOP-LEVEL 4-param
+recursive function whose base case `acc + p + q` raises extra `NumAdd`
+constraints, so it carries two dictionaries — a different route to a dictionary,
+correctly untouched by a pass about local bindings. That is now the largest
+remaining dict row, and it is the seed-gate question the phantom-constraint fix
+was originally aimed at.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup

@@ -1047,7 +1047,7 @@ class Monomorphizer(
      *  position — same shape as [tryResolveAbilityOp] in the compiler. */
     private data class OpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
 
-    private fun rewriteConstrainedMethodCalls(
+    internal fun rewriteConstrainedMethodCalls(
         expr: TypedExpr,
         abilityImpls: List<AbilityImplRef>,
     ): TypedExpr {
