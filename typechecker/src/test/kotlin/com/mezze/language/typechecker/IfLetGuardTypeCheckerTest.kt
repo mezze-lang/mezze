@@ -384,7 +384,7 @@ class IfLetGuardTypeCheckerTest {
     @Test
     fun `variant with if let needs wildcard for exhaustiveness`() {
         val code = """
-            type Status = | Active, Inactive, Pending |
+            type Status = | Active, Inactive, PromisePending |
 
             let check: {s: Status} -> | Some {val: Int}, None | = {s} ->
                 match s is
@@ -395,7 +395,7 @@ class IfLetGuardTypeCheckerTest {
                 match s is
                     Active if let Some {val = v} = check {s = Active} -> v
                     Inactive -> 0
-                    Pending -> 0
+                    PromisePending -> 0
         """.trimIndent()
 
         // Should fail - Active is only covered conditionally (with if-let), no unconditional fallback
@@ -407,7 +407,7 @@ class IfLetGuardTypeCheckerTest {
     @Test
     fun `variant with wildcard after if let cases is exhaustive`() {
         val code = """
-            type Status = | Active, Inactive, Pending |
+            type Status = | Active, Inactive, PromisePending |
 
             let check: {s: Status} -> | Some {val: Int}, None | = {s} ->
                 match s is

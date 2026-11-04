@@ -70,11 +70,11 @@ pub type Rows = {
 
 ## What went wrong, as data.
 ##
-## Separated by what a caller can DO about it: `Unavailable` and `Timeout` are
+## Separated by what a caller can DO about it: `DbUnavailable` and `DbTimeout` are
 ## worth retrying, `Rejected` means the query is wrong and never will not be,
-## `Conflict` means retry the transaction, `Decode` means the rows did not fit
+## `DbConflict` means retry the transaction, `DbDecodeError` means the rows did not fit
 ## the shape asked for.
-pub type DbError = | Unavailable { msg: Str }, Rejected { sql: Str, msg: Str }, Conflict { msg: Str }, Timeout { ms: Int }, Decode { msg: Str } |
+pub type DbError = | DbUnavailable { msg: Str }, DbRejected { sql: Str, msg: Str }, DbConflict { msg: Str }, DbTimeout { ms: Int }, DbDecodeError { msg: Str } |
 
 ## Run queries. `tx`'s body row is `<...>`, so a transaction body may perform
 ## whatever the surrounding program installed (`Log`, `Time`, another `Db`) and
@@ -356,7 +356,7 @@ pub let first_row: { rows: Rows } -> Option Rows = { rows } ->
 ## So operations in a scope SERIALIZE, and a `tx` holds the connection from
 ## begin to commit — without that a concurrent query would read rows that may
 ## yet be rolled back. Waiting is normal and is not a failure; waiting forever
-## is, so a wait that runs out answers `Timeout` rather than pinning the caller.
+## is, so a wait that runs out answers `DbTimeout` rather than pinning the caller.
 ## The fix for the serializing is a POOL of connections (W-D4), not a connection
 ## per thread.
 ##
@@ -372,7 +372,7 @@ pub let first_row: { rows: Rows } -> Option Rows = { rows } ->
 ##
 ## `":memory:"` is a fresh private database per scope — what a test wants.
 ## A path that cannot be opened makes every operation in the scope answer
-## `Unavailable`: `initialize_scope` has nowhere to put a failure, so rather
+## `DbUnavailable`: `initialize_scope` has nowhere to put a failure, so rather
 ## than crash the program at `perform` it leaves no connection open, and the
 ## first operation says so. That is the one place this design pays for the
 ## connection not being a value.

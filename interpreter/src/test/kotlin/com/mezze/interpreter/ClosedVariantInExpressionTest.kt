@@ -259,12 +259,12 @@ class ClosedVariantInExpressionTest {
     @Test
     fun `test variant inside record`() {
         val source = """
-            type Status = | Pending, Complete |
+            type Status = | PromisePending, Complete |
 
-            let task = {name = "test", status = Pending}
+            let task = {name = "test", status = PromisePending}
 
             match task.status is
-                Pending -> "waiting"
+                PromisePending -> "waiting"
                 Complete -> "done"
         """.trimIndent()
 

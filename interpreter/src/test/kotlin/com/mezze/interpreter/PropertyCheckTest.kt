@@ -28,8 +28,8 @@ class PropertyCheckTest {
     fun `a property that holds passes every run`() {
         val out = run("""
             let main = {} -> match check { gen = ints, holds = { x } -> x == x, runs = 50, seed = 3 } is
-                Passed { runs } -> "passed $(runs.to_str {})"
-                Failed { input, original, shrinks } -> "failed"
+                PropPassed { runs } -> "passed $(runs.to_str {})"
+                PropFailed { input, original, shrinks } -> "failed"
             main {}
         """)
         assertEquals("passed 50", out)
@@ -42,8 +42,8 @@ class PropertyCheckTest {
         // itself — see the special-values test below.)
         val out = run("""
             let main = {} -> match check { gen = ints, holds = { x } -> x < 10 || x == 9223372036854775807, runs = 200, seed = 1 } is
-                Passed { runs } -> "passed"
-                Failed { input, original, shrinks } -> input.to_str {}
+                PropPassed { runs } -> "passed"
+                PropFailed { input, original, shrinks } -> input.to_str {}
             main {}
         """)
         assertEquals("10", out)
@@ -54,8 +54,8 @@ class PropertyCheckTest {
         // Fails once the list has 3 or more elements: [0, 0, 0] is simplest.
         val out = run("""
             let main = {} -> match check { gen = lists, holds = { x } -> x.size {} < 3, runs = 200, seed = 5 } is
-                Passed { runs } -> "passed"
-                Failed { input, original, shrinks } -> input.to_dbg {}
+                PropPassed { runs } -> "passed"
+                PropFailed { input, original, shrinks } -> input.to_dbg {}
             main {}
         """)
         assertEquals("[0, 0, 0]", out)
@@ -65,8 +65,8 @@ class PropertyCheckTest {
     fun `the original failing input is kept beside the shrunk one`() {
         val out = run("""
             let main = {} -> match check { gen = ints, holds = { x } -> x < 10, runs = 200, seed = 1 } is
-                Passed { runs } -> "passed"
-                Failed { input, original, shrinks } -> "$(original.to_str {}) $(shrinks.to_str {})"
+                PropPassed { runs } -> "passed"
+                PropFailed { input, original, shrinks } -> "$(original.to_str {}) $(shrinks.to_str {})"
             main {}
         """)
         val (original, shrinks) = out.split(" ").map { it.toLong() }
@@ -79,8 +79,8 @@ class PropertyCheckTest {
         val out = run("""
             let strs: {} -> Str <Sample> = {} -> Arbitrary.arbitrary {}
             let main = {} -> match check { gen = strs, holds = { x } -> x.size {} > 100, runs = 20, seed = 4 } is
-                Passed { runs } -> "passed"
-                Failed { input, original, shrinks } -> input.to_dbg {}
+                PropPassed { runs } -> "passed"
+                PropFailed { input, original, shrinks } -> input.to_dbg {}
             main {}
         """)
         assertEquals("\"\"", out)
@@ -92,8 +92,8 @@ class PropertyCheckTest {
         // special values — the shrunk input is that value, found by draws alone.
         val out = run("""
             let main = {} -> match check { gen = ints, holds = { x } -> x < 9223372036854775807, runs = 300, seed = 2 } is
-                Passed { runs } -> "passed"
-                Failed { input, original, shrinks } -> input.to_str {}
+                PropPassed { runs } -> "passed"
+                PropFailed { input, original, shrinks } -> input.to_str {}
             main {}
         """)
         assertEquals("9223372036854775807", out)
@@ -105,8 +105,8 @@ class PropertyCheckTest {
         // and exactly the kind a branch plan pins.
         val out = run("""
             let main = {} -> match check_from { first = [0, 7, 100], gen = ints, holds = { x } -> x != 7, runs = 50, seed = 3 } is
-                Passed { runs } -> "passed $(runs.to_str {})"
-                Failed { input, original, shrinks } -> "failed at $(input.to_str {}) after $(shrinks.to_str {}) shrinks"
+                PropPassed { runs } -> "passed $(runs.to_str {})"
+                PropFailed { input, original, shrinks } -> "failed at $(input.to_str {}) after $(shrinks.to_str {}) shrinks"
             main {}
         """)
         assertEquals("failed at 7 after 0 shrinks", out)
@@ -116,8 +116,8 @@ class PropertyCheckTest {
     fun `when every pinned input holds the drawn runs follow and the count includes both`() {
         val out = run("""
             let main = {} -> match check_from { first = [1, 2], gen = ints, holds = { x } -> x == x, runs = 50, seed = 3 } is
-                Passed { runs } -> "passed $(runs.to_str {})"
-                Failed { input, original, shrinks } -> "failed"
+                PropPassed { runs } -> "passed $(runs.to_str {})"
+                PropFailed { input, original, shrinks } -> "failed"
             main {}
         """)
         assertEquals("passed 52", out)

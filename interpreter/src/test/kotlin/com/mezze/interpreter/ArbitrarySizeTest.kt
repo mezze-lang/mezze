@@ -104,8 +104,8 @@ class ArbitrarySizeTest {
     fun `a property check reaches large values in its later runs`() {
         val out = run("""
             match check { gen = one_int, holds = { x } -> x < 1000000000, runs = 100, seed = 3 } is
-              Passed { runs } -> "passed"
-              Failed { input, original, shrinks } -> "failed"
+              PropPassed { runs } -> "passed"
+              PropFailed { input, original, shrinks } -> "failed"
         """)
         assertEquals("failed", out)
     }

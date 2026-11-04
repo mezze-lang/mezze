@@ -164,7 +164,7 @@ public final class AsyncNatives {
          * cancel() call can propagate to a foreign scheduler (Kotlin
          * Job, CompletableFuture, etc.) with the cancel reason.
          *
-         * The hook receives the reason (or null → ExternalInterrupt
+         * The hook receives the reason (or null → CancelExternalInterrupt
          * fallback). Runs on the thread that won the cancel CAS.
          * Errors thrown by the hook are swallowed — cancel semantics
          * do not depend on hook success.
@@ -275,7 +275,7 @@ public final class AsyncNatives {
          * `reason` is a Mezze CancelReason variant (opaque Object here —
          * this native code just stores and re-emits it). Null means the
          * caller didn't supply one; downstream construction of
-         * AsyncCancelled substitutes ExternalInterrupt as the fallback.
+         * AsyncCancelled substitutes CancelExternalInterrupt as the fallback.
          *
          * Under #79's design: the reason is embedded in the CancelledOutcome
          * installed by the CAS winner. Losing racers cannot overwrite it.
@@ -332,7 +332,7 @@ public final class AsyncNatives {
          * Null when the Promise wasn't cancelled or the winner passed
          * no reason. Callers converting to AsyncCancelled pass this
          * through {@link #createAsyncCancelled(Object)}, which
-         * substitutes ExternalInterrupt when this is null.
+         * substitutes CancelExternalInterrupt when this is null.
          */
         public Object getCancelReason() {
             Object o = outcome;
@@ -1259,7 +1259,7 @@ public final class AsyncNatives {
                 // parent already CAS'd to CANCELLED with a reason via
                 // cancelOutcome, this cancel(null) is a no-op. Otherwise
                 // (external interrupt), we finalize with null → the
-                // ExternalInterrupt fallback inside AsyncCancelled.
+                // CancelExternalInterrupt fallback inside AsyncCancelled.
                 promise.cancel(null);
             } catch (Throwable e) {
                 promise.fail(e);
@@ -1328,13 +1328,13 @@ public final class AsyncNatives {
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errRec);
     }
 
-    // Cached ExternalInterrupt singleton — no-payload variant, so we can
+    // Cached CancelExternalInterrupt singleton — no-payload variant, so we can
     // reuse it across every native path that needs a fallback reason.
     private static volatile MezzeVariant EXTERNAL_INTERRUPT_REASON = null;
     private static MezzeVariant externalInterruptReason() {
         MezzeVariant v = EXTERNAL_INTERRUPT_REASON;
         if (v != null) return v;
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ExternalInterrupt");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("CancelExternalInterrupt");
         v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
         EXTERNAL_INTERRUPT_REASON = v;
         return v;
@@ -1361,18 +1361,18 @@ public final class AsyncNatives {
     private static MezzeVariant promiseStatePending() {
         MezzeVariant v = PENDING_SINGLETON;
         if (v != null) return v;
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Pending");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromisePending");
         v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
         PENDING_SINGLETON = v;
         return v;
     }
     private static MezzeVariant promiseStateCompleted(Object val) {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Completed");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromiseCompleted");
         MezzeRecord rec = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
     }
     private static MezzeVariant promiseStateFailed(Object errVariant) {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Failed");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromiseFailed");
         MezzeRecord rec = MezzeRecord.fromFields(new String[]{"err"}, new Object[]{errVariant});
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
     }
@@ -1387,7 +1387,7 @@ public final class AsyncNatives {
             case MezzePromise.CANCEL_DID_CANCEL -> {
                 MezzeVariant v = CANCEL_DID_CANCEL_V;
                 if (v == null) {
-                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Cancelled");
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("CancelDone");
                     v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
                     CANCEL_DID_CANCEL_V = v;
                 }
@@ -1396,7 +1396,7 @@ public final class AsyncNatives {
             case MezzePromise.CANCEL_ALREADY_COMPLETED -> {
                 MezzeVariant v = CANCEL_ALREADY_COMPLETED_V;
                 if (v == null) {
-                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AlreadyCompleted");
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("CancelAlreadyCompleted");
                     v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
                     CANCEL_ALREADY_COMPLETED_V = v;
                 }
@@ -1405,7 +1405,7 @@ public final class AsyncNatives {
             case MezzePromise.CANCEL_ALREADY_FAILED -> {
                 MezzeVariant v = CANCEL_ALREADY_FAILED_V;
                 if (v == null) {
-                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AlreadyFailed");
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("CancelAlreadyFailed");
                     v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
                     CANCEL_ALREADY_FAILED_V = v;
                 }
@@ -1414,7 +1414,7 @@ public final class AsyncNatives {
             default -> {
                 MezzeVariant v = CANCEL_NOT_CANCELLABLE_V;
                 if (v == null) {
-                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("NotCancellable");
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("CancelNotCancellable");
                     v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
                     CANCEL_NOT_CANCELLABLE_V = v;
                 }
@@ -1877,7 +1877,7 @@ public final class AsyncNatives {
      * and saw a tag mismatch. Matches Loom's promiseAwaitResult.
      *
      * `reason` is a CancelReason variant (from the cancelled promise's
-     * stored reason). Null falls back to ExternalInterrupt inside
+     * stored reason). Null falls back to CancelExternalInterrupt inside
      * createAsyncCancelled.
      */
     static MezzeVariant asyncCancelledResult() {

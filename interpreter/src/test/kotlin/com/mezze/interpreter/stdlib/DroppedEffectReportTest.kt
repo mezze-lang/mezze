@@ -52,7 +52,7 @@ class DroppedEffectReportTest {
                   # op at all, so there is nothing yet to report. `yield_now`
                   # needs only Async — anything that waited on the promise would
                   # wait forever, since a task parked on an unhandled op reads
-                  # as Pending and never settles.
+                  # as PromisePending and never settles.
                   seq::for_each { xs = seq::range { start = 0, end = 200 }, f = { x } -> yield_now {} }
                   7
                 """.trimIndent(),

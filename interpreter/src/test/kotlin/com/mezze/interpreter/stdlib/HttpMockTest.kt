@@ -57,7 +57,7 @@ class HttpMockTest {
             use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
-                { methods = [Get], url = Glob { pattern = "/error" }, response = Err { error = ConnectionFailed { url = "/error", reason = "mock error" } } }
+                { methods = [Get], url = Glob { pattern = "/error" }, response = Err { error = HttpConnectionFailed { url = "/error", reason = "mock error" } } }
             ]
 
             perform MockHttpClient { rules = rules } in do
@@ -65,7 +65,7 @@ class HttpMockTest {
                 match resp is
                     Ok { val } -> "success"
                     Err { error } -> match error is
-                        ConnectionFailed { url, reason } -> reason
+                        HttpConnectionFailed { url, reason } -> reason
                         _ -> "other error"
         """)
         assertEquals("mock error", result)
@@ -387,7 +387,7 @@ class HttpMockTest {
             use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Err { error = Timeout { url = "/slow", ms = 5000 } } }
+                { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpTimeout { url = "/slow", ms = 5000 } } }
             ]
 
             perform MockHttpClient { rules = rules } in do
@@ -395,7 +395,7 @@ class HttpMockTest {
                 match resp is
                     Ok { val } -> -1
                     Err { error } -> match error is
-                        Timeout { url, ms } -> ms
+                        HttpTimeout { url, ms } -> ms
                         _ -> -1
         """)
         assertEquals(5000L, result)
@@ -407,7 +407,7 @@ class HttpMockTest {
             use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Err { error = Cancelled } }
+                { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpCancelled } }
             ]
 
             perform MockHttpClient { rules = rules } in do
@@ -415,7 +415,7 @@ class HttpMockTest {
                 match resp is
                     Ok { val } -> "success"
                     Err { error } -> match error is
-                        Cancelled -> "cancelled"
+                        HttpCancelled -> "cancelled"
                         _ -> "other"
         """)
         assertEquals("cancelled", result)

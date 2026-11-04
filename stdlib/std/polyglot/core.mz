@@ -26,17 +26,17 @@ pub type Foreign = __NativeForeign
 ##
 ## - NotFound       — the requested member / binding does not exist.
 ## - TypeError      — the guest value did not accept the requested op.
-## - GuestError     — the guest language raised an exception; message
+## - InteropGuestError     — the guest language raised an exception; message
 ##                    and stack are propagated verbatim.
-## - ArityMismatch  — execute/invoke arg count mismatched the target.
-## - UnsupportedMessage — the underlying Truffle message is not
+## - InteropArityMismatch  — execute/invoke arg count mismatched the target.
+## - InteropUnsupportedMessage — the underlying Truffle message is not
 ##                    supported by the receiver.
 pub type InteropError = |
-  NotFound { name: Str },
-  TypeError { message: Str },
-  GuestError { message: Str, guest_stack: Str },
-  ArityMismatch { expected: Int, actual: Int },
-  UnsupportedMessage,
+  InteropNotFound { name: Str },
+  InteropTypeError { message: Str },
+  InteropGuestError { message: Str, guest_stack: Str },
+  InteropArityMismatch { expected: Int, actual: Int },
+  InteropUnsupportedMessage,
 |
 
 ## The low-level polyglot capability effect. For polyglot LIBRARY implementers

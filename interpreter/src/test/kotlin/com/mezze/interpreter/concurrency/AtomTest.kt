@@ -469,13 +469,13 @@ class AtomTest {
     @Test
     fun `test atom_validated rejects invalid initial value returns Err`() {
         // Rejecting the initial value no longer crashes: it returns
-        // Err { error = ValidatorRejected { val } } carrying the rejected value.
+        // Err { error = AtomRejected { val } } carrying the rejected value.
         val code = """
             $atomSetup
 
             match atom_validated {val = -5, validator = {val} -> val >= 0} is
               Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+              Err { error = AtomRejected { val } } -> val
         """
         assertEquals(-5L, eval(code))
     }
@@ -483,13 +483,13 @@ class AtomTest {
     @Test
     fun `391 repro atom_validated rejecting initial value returns Err not crash`() {
         // The exact #391 repro: initial value 10 fails validator val < 0.
-        // Must return Err { error = ValidatorRejected { val = 10 } }, not crash.
+        // Must return Err { error = AtomRejected { val = 10 } }, not crash.
         val code = """
             $atomSetup
 
             match atom_validated {val = 10, validator = {val} -> val < 0} is
               Ok { val = _ } -> 999
-              Err { error = ValidatorRejected { val } } -> val
+              Err { error = AtomRejected { val } } -> val
         """
         assertEquals(10L, eval(code))
     }
@@ -527,7 +527,7 @@ class AtomTest {
 
     @Test
     fun `test validator rejects invalid swap returns Err and leaves atom unchanged`() {
-        // ValidatedAtom.swap returns Err { error = ValidatorRejected { val } } on reject.
+        // ValidatedAtom.swap returns Err { error = AtomRejected { val } } on reject.
         val code = """
             $atomSetup
 
@@ -536,7 +536,7 @@ class AtomTest {
                 let outcome = swap_validated {atom = positive, f = {current} -> current - 100}
                 match outcome is
                   Ok { val = _ } -> 999
-                  Err { error = ValidatorRejected { val } } -> val
+                  Err { error = AtomRejected { val } } -> val
               Err { error = _ } -> 0-1
         """
         // The rejected value (5 - 100 = -95) is carried in the Err.
@@ -567,7 +567,7 @@ class AtomTest {
                 let outcome = reset_validated {atom = positive, val = -10}
                 match outcome is
                   Ok { val = _ } -> 999
-                  Err { error = ValidatorRejected { val } } -> val
+                  Err { error = AtomRejected { val } } -> val
               Err { error = _ } -> 0-1
         """
         assertEquals(-10L, eval(code))
@@ -616,7 +616,7 @@ class AtomTest {
                 let outcome = swap_validated {atom = counter, f = {current} -> current + 100}
                 match outcome is
                   Ok { val = _ } -> 999
-                  Err { error = ValidatorRejected { val } } -> val
+                  Err { error = AtomRejected { val } } -> val
               Err { error = _ } -> 0-1
         """
         assertEquals(110L, eval(code))
@@ -689,7 +689,7 @@ class AtomTest {
                 let outcome = swap_with_validated {atom = a, f = {current, arg} -> current - arg, arg = 100}
                 match outcome is
                   Ok { val = _ } -> 999
-                  Err { error = ValidatorRejected { val } } -> val
+                  Err { error = AtomRejected { val } } -> val
               Err { error = _ } -> 0-1
         """
         // 10 - 100 = -90, rejected; the rejected value is carried in the Err.
@@ -722,7 +722,7 @@ class AtomTest {
                 let outcome = get_and_swap_validated {atom = a, f = {current} -> current - 100}
                 match outcome is
                   Ok { val = _ } -> 999
-                  Err { error = ValidatorRejected { val } } -> val
+                  Err { error = AtomRejected { val } } -> val
               Err { error = _ } -> 0-1
         """
         assertEquals(-90L, eval(code))
@@ -753,7 +753,7 @@ class AtomTest {
                 let r = swap_validated {atom = a, f = {current} -> current - 100}
                 match r is
                   Ok { val = _ } -> 999
-                  Err { error = ValidatorRejected { val } } -> val
+                  Err { error = AtomRejected { val } } -> val
               Err { error = _ } -> 0-1
         """
         assertEquals(-90L, eval(err))

@@ -103,7 +103,7 @@ public final class DbNatives {
         // SQLite's codes: 5 = BUSY, 6 = LOCKED — the transaction can be retried.
         if (e.getErrorCode() == 5 || e.getErrorCode() == 6 || state.startsWith("40")) {
             return MezzeVariant.singlePayload(
-                MezzeVariant.TagRegistry.getGlobal(), tag("Conflict"),
+                MezzeVariant.TagRegistry.getGlobal(), tag("DbConflict"),
                 MezzeRecord.fromFields(new String[]{"msg"}, new Object[]{msg}));
         }
         // 08xxx is "connection exception" in SQLSTATE; a file SQLite cannot open
@@ -125,13 +125,13 @@ public final class DbNatives {
         }
         // Everything else is the statement's fault and will not improve on retry.
         return MezzeVariant.singlePayload(
-            MezzeVariant.TagRegistry.getGlobal(), tag("Rejected"),
+            MezzeVariant.TagRegistry.getGlobal(), tag("DbRejected"),
             MezzeRecord.fromFields(new String[]{"sql", "msg"}, new Object[]{sql, msg}));
     }
 
     private static MezzeVariant unavailable(String msg) {
         return MezzeVariant.singlePayload(
-            MezzeVariant.TagRegistry.getGlobal(), tag("Unavailable"),
+            MezzeVariant.TagRegistry.getGlobal(), tag("DbUnavailable"),
             MezzeRecord.fromFields(new String[]{"msg"}, new Object[]{msg}));
     }
 
@@ -298,7 +298,7 @@ public final class DbNatives {
      *              any thread-local state the chain was built beside.
      *
      * Without `live`, the one case the whole effect exists for — a route
-     * querying a database — answered `Unavailable` on every request.
+     * querying a database — answered `DbUnavailable` on every request.
      */
     static final class DbScopes implements AutoCloseable {
         private final ThreadLocal<ArrayList<Scope>> entered =
@@ -371,7 +371,7 @@ public final class DbNatives {
 
     private static MezzeVariant timedOut() {
         return MezzeVariant.err(MezzeVariant.singlePayload(
-            MezzeVariant.TagRegistry.getGlobal(), tag("Timeout"),
+            MezzeVariant.TagRegistry.getGlobal(), tag("DbTimeout"),
             MezzeRecord.fromFields(new String[]{"ms"}, new Object[]{LOCK_WAIT_MS})));
     }
 

@@ -64,14 +64,14 @@ pub type Response = {
 
 ## HTTP error variants.
 pub type HttpError = |
-  ConnectionFailed { url: Str, reason: Str },
-  Timeout { url: Str, ms: Int },
-  InvalidUrl { url: Str, reason: Str },
-  TlsError { url: Str, reason: Str },
-  RequestFailed { url: Str, status: Int, body: Str },
-  DecodeError { url: Str, message: Str },
-  EncodeError { url: Str, message: Str },
-  Cancelled,
+  HttpConnectionFailed { url: Str, reason: Str },
+  HttpTimeout { url: Str, ms: Int },
+  HttpInvalidUrl { url: Str, reason: Str },
+  HttpTlsError { url: Str, reason: Str },
+  HttpRequestFailed { url: Str, status: Int, body: Str },
+  HttpDecodeError { url: Str, message: Str },
+  HttpEncodeError { url: Str, message: Str },
+  HttpCancelled,
 |
 
 ## URL pattern for mock matching.
@@ -350,11 +350,11 @@ pub let with_api_key: { req: Request, name: Str, val: Str } -> Request =
     with_auth { req = req, auth = ApiKey { name = name, val = val } }
 
 ## Decode the response body as a UTF-8 string. A failure is an
-## `HttpError.DecodeError` carrying the response's url.
+## `HttpError.HttpDecodeError` carrying the response's url.
 pub let body_str: { resp: Response } -> Result Str HttpError = { resp } ->
   map_err {
     result = bytes::to_str { b = resp.body },
-    f = { error } -> DecodeError { url = resp.url, message = error },
+    f = { error } -> HttpDecodeError { url = resp.url, message = error },
   }
 
 ## Decode the response body as JSON.
@@ -480,7 +480,7 @@ pub let ensure_ok
         Err { error = _ } -> ""
 
       Err {
-        error = RequestFailed { url = val.url, status = val.status, body = body_text },
+        error = HttpRequestFailed { url = val.url, status = val.status, body = body_text },
       }
 
 
@@ -611,27 +611,27 @@ impl IntoErrorResponse for Str where {
   into_error_response = { it } -> response_status { code = 500, body = it },
 }
 
-## Gateway statuses for a failed upstream call. `RequestFailed` is reported as
+## Gateway statuses for a failed upstream call. `HttpRequestFailed` is reported as
 ## 502, not the upstream's own status — an upstream 404 is not this service's.
 impl IntoErrorResponse for HttpError where {
   into_error_response = { it } -> match it is
-    ConnectionFailed { url = _, reason = _ } ->
+    HttpConnectionFailed { url = _, reason = _ } ->
       response_status { code = 502, body = "upstream connection failed" }
-    Timeout { url = _, ms = _ } ->
+    HttpTimeout { url = _, ms = _ } ->
       response_status { code = 504, body = "upstream timed out" }
-    TlsError { url = _, reason = _ } ->
+    HttpTlsError { url = _, reason = _ } ->
       response_status { code = 502, body = "upstream TLS failure" }
-    RequestFailed { url = _, status = _, body = _ } ->
+    HttpRequestFailed { url = _, status = _, body = _ } ->
       response_status { code = 502, body = "upstream returned an error" }
-    DecodeError { url = _, message = _ } ->
+    HttpDecodeError { url = _, message = _ } ->
       response_status { code = 502, body = "could not decode the upstream reply" }
     # The remaining three are THIS service's own mistakes, not the upstream's:
     # a url we built wrong, a body we failed to encode, a request we gave up on.
-    InvalidUrl { url = _, reason = _ } ->
+    HttpInvalidUrl { url = _, reason = _ } ->
       response_status { code = 500, body = "internal error" }
-    EncodeError { url = _, message = _ } ->
+    HttpEncodeError { url = _, message = _ } ->
       response_status { code = 500, body = "internal error" }
-    Cancelled -> response_status { code = 503, body = "request cancelled" },
+    HttpCancelled -> response_status { code = 503, body = "request cancelled" },
 }
 
 ## Ok answers through IntoResponse, Err through IntoErrorResponse.
@@ -818,7 +818,7 @@ let retry_loop
 
 ## Send a Request with retry on transient failures. A failure is
 ## considered retryable when `is_retryable { err }` returns True —
-## namely ConnectionFailed, Timeout, and 5xx RequestFailed (see the
+## namely HttpConnectionFailed, HttpTimeout, and 5xx HttpRequestFailed (see the
 ## predicate below). Sleeps `backoff_ms` between attempts.
 ##
 ##   request { url = "https://api.acme.com/users/42" }
@@ -841,14 +841,14 @@ pub let retry
     }
 
 ## Fetch multiple URLs concurrently, returning one Result per URL (each spawn's
-## failure collapsed to a `ConnectionFailed`).
+## failure collapsed to a `HttpConnectionFailed`).
 pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <HttpClient, Async> = { urls } ->
   seq::map {
     xs = par_map { xs = urls, f = { x } -> request { url = x }.send {} },
     f = { x } -> match x is
       Ok { val = inner } -> inner
       Err { error = e } -> Err {
-        error = ConnectionFailed { url = "<spawn>", reason = "async task failed" },
+        error = HttpConnectionFailed { url = "<spawn>", reason = "async task failed" },
       }
 ,
   }
@@ -886,69 +886,69 @@ let collect_results_loop
 
 ## Format an HttpError as a human-readable string.
 pub let format_error: { err: HttpError } -> Str = { err } -> match err is
-  ConnectionFailed { url, reason } -> str::concat {
+  HttpConnectionFailed { url, reason } -> str::concat {
     l = "Connection failed to ",
     r = str::concat { l = url, r = str::concat { l = ": ", r = reason } },
   }
-  Timeout { url, ms } -> str::concat {
+  HttpTimeout { url, ms } -> str::concat {
     l = "Request timed out after ",
     r = str::concat {
       l = int::to_str { n = ms },
       r = str::concat { l = "ms: ", r = url },
     },
   }
-  InvalidUrl { url, reason } -> str::concat {
+  HttpInvalidUrl { url, reason } -> str::concat {
     l = "Invalid URL '",
     r = str::concat { l = url, r = str::concat { l = "': ", r = reason } },
   }
-  TlsError { url, reason } -> str::concat {
+  HttpTlsError { url, reason } -> str::concat {
     l = "TLS error for ",
     r = str::concat { l = url, r = str::concat { l = ": ", r = reason } },
   }
-  RequestFailed { url, status, body } -> str::concat {
+  HttpRequestFailed { url, status, body } -> str::concat {
     l = "Request failed with status ",
     r = str::concat {
       l = int::to_str { n = status },
       r = str::concat { l = ": ", r = body },
     },
   }
-  DecodeError { url, message } -> str::concat {
+  HttpDecodeError { url, message } -> str::concat {
     l = "Failed to decode response from ",
     r = str::concat { l = url, r = str::concat { l = ": ", r = message } },
   }
-  EncodeError { url, message } -> str::concat {
+  HttpEncodeError { url, message } -> str::concat {
     l = "Failed to encode request for ",
     r = str::concat { l = url, r = str::concat { l = ": ", r = message } },
   }
-  Cancelled -> "Request was cancelled"
+  HttpCancelled -> "Request was cancelled"
 
 
 ## Check if an HTTP error is retryable (connection/timeout/5xx).
 pub let is_retryable: { err: HttpError } -> Bool = { err } -> match err is
-  ConnectionFailed { url, reason } -> True
-  Timeout { url, ms } -> True
-  TlsError { url, reason } -> False
-  InvalidUrl { url, reason } -> False
-  RequestFailed { url, status, body } -> status >= 500
-  DecodeError { url, message } -> False
-  EncodeError { url, message } -> False
-  Cancelled -> False
+  HttpConnectionFailed { url, reason } -> True
+  HttpTimeout { url, ms } -> True
+  HttpTlsError { url, reason } -> False
+  HttpInvalidUrl { url, reason } -> False
+  HttpRequestFailed { url, status, body } -> status >= 500
+  HttpDecodeError { url, message } -> False
+  HttpEncodeError { url, message } -> False
+  HttpCancelled -> False
 
 
 ## Check if the error is a client-side issue (4xx / bad input).
 pub let is_client_issue: { err: HttpError } -> Bool = { err } -> match err is
-  InvalidUrl { url, reason } -> True
-  EncodeError { url, message } -> True
-  RequestFailed { url, status, body } -> status >= 400 && status < 500
+  HttpInvalidUrl { url, reason } -> True
+  HttpEncodeError { url, message } -> True
+  HttpRequestFailed { url, status, body } -> status >= 400 && status < 500
   _ -> False
 
 
 ## Check if the error is a server-side issue (5xx / network).
 pub let is_server_issue: { err: HttpError } -> Bool = { err } -> match err is
-  RequestFailed { url, status, body } -> status >= 500
-  ConnectionFailed { url, reason } -> True
-  Timeout { url, ms } -> True
-  TlsError { url, reason } -> True
+  HttpRequestFailed { url, status, body } -> status >= 500
+  HttpConnectionFailed { url, reason } -> True
+  HttpTimeout { url, ms } -> True
+  HttpTlsError { url, reason } -> True
   _ -> False
 
 ## A Response with an arbitrary status code and a plain-text body.
@@ -1239,11 +1239,11 @@ impl MockRule where {
   ## Answer with a timeout after `ms`. The url is filled in by the client, so
   ## it is left empty here.
   times_out = { it: 'it, ms: Int } ->
-    { methods = it.methods, url = it.url, response = Err { error = Timeout { url = "", ms = ms } } },
+    { methods = it.methods, url = it.url, response = Err { error = HttpTimeout { url = "", ms = ms } } },
   ## Answer as though the connection never opened.
   unreachable = { it: 'it, reason: Str } ->
     { methods = it.methods, url = it.url,
-      response = Err { error = ConnectionFailed { url = "", reason = reason } } },
+      response = Err { error = HttpConnectionFailed { url = "", reason = reason } } },
 }
 
 
@@ -1317,7 +1317,7 @@ pub let on_err
 ## Decode the Ok Response body as UTF-8, staying inside `Result`. Unlike
 ## `text_or` (which needs a `def` and collapses to a bare `Str`), this keeps
 ## the error channel: a network `Err` passes through unchanged, and a body that
-## is not valid UTF-8 becomes an `HttpError.DecodeError`. So the whole fetch is
+## is not valid UTF-8 becomes an `HttpError.HttpDecodeError`. So the whole fetch is
 ## still one `Result Str HttpError` to `match` or chain on.
 ##
 ##   request { url }.send {}.text {}    # Result Str HttpError
@@ -1327,7 +1327,7 @@ pub let text_result: { resp: Result Response HttpError } -> Result Str HttpError
 
 ## Decode the Ok Response body as JSON, staying inside `Result`. A network `Err`
 ## passes through; a body that is not valid JSON becomes an
-## `HttpError.DecodeError`. Returns a raw `Json` value — use `.decode {}` to go
+## `HttpError.HttpDecodeError`. Returns a raw `Json` value — use `.decode {}` to go
 ## straight to a typed value.
 ##
 ##   request { url }.send {}.json {}    # Result Json HttpError
@@ -1335,7 +1335,7 @@ pub let json_result: { resp: Result Response HttpError } -> Result Json HttpErro
   match resp is
     Ok { val } -> match body_json { resp = val } is
       Ok { val = j } -> Ok { val = j }
-      Err { error = e } -> Err { error = DecodeError { url = val.url, message = e.message } }
+      Err { error = e } -> Err { error = HttpDecodeError { url = val.url, message = e.message } }
     Err { error } -> Err { error = error }
 
 
@@ -1343,7 +1343,7 @@ pub let json_result: { resp: Result Response HttpError } -> Result Json HttpErro
 ## staying inside `Result`. The target type is inferred from the use site (the
 ## same target-directed decode as `body.from_json {}`), so no schema is
 ## declared. A network `Err` passes through; JSON that does not fit the inferred
-## shape becomes an `HttpError.DecodeError`. This is the typed counterpart to
+## shape becomes an `HttpError.HttpDecodeError`. This is the typed counterpart to
 ## `.json {}` and the `Result`-keeping counterpart to `json_or`.
 ##
 ##   let user: Result { name: Str } HttpError =
@@ -1355,7 +1355,7 @@ pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a S
       Err { error } -> Err { error = error }
       Ok { val = s } -> match s.from_json {} is
         Ok { val = d } -> Ok { val = d }
-        Err { error } -> Err { error = DecodeError { url = val.url, message = error.message } }
+        Err { error } -> Err { error = HttpDecodeError { url = val.url, message = error.message } }
 
 
 ## Chainable finishers on the `Result Response HttpError` from `.send {}`. The

@@ -237,9 +237,9 @@ class DbEffectTest {
             """
             $head
             let main = {} -> perform MockDb in
-              match Db.tx { body = {} -> Err { error = Conflict { msg = "serialization" } } } is
+              match Db.tx { body = {} -> Err { error = DbConflict { msg = "serialization" } } } is
                 Ok { val = _ } -> "committed"
-                Err { error = Conflict { msg = m } } -> m
+                Err { error = DbConflict { msg = m } } -> m
                 Err { error = _ } -> "other"
             main {}
             """.trimIndent(),
@@ -252,10 +252,10 @@ class DbEffectTest {
         val r = MezzeTestHelper.run(
             """
             $head
-            let main = {} -> perform FailingDb { error = Unavailable { msg = "no route to host" } } in
+            let main = {} -> perform FailingDb { error = DbUnavailable { msg = "no route to host" } } in
               match Db.run { q = sql { text = "select 1" } } is
                 Ok { val = _ } -> "unexpectedly fine"
-                Err { error = Unavailable { msg = m } } -> m
+                Err { error = DbUnavailable { msg = m } } -> m
                 Err { error = _ } -> "other"
             main {}
             """.trimIndent(),

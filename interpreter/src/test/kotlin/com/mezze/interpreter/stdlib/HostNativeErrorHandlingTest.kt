@@ -87,23 +87,23 @@ class HostNativeErrorHandlingTest {
         assertEquals("err", eval(code))
     }
 
-    // ==================== 5. HTTP: bad URL → InvalidUrl error variant ====================
+    // ==================== 5. HTTP: bad URL → HttpInvalidUrl error variant ====================
 
     @Test
-    fun `http request with a malformed URL returns InvalidUrl error variant, not a thrown exception`() {
+    fun `http request with a malformed URL returns HttpInvalidUrl error variant, not a thrown exception`() {
         // SimpleHttpClient performs a real request; a syntactically bad
-        // URL must map to InvalidUrl at the native boundary (no network).
+        // URL must map to HttpInvalidUrl at the native boundary (no network).
         val code = """
             use std::effects::http::{ HttpClient, SimpleHttpClient, request }
             perform SimpleHttpClient in
               match request { url = "://bad" }.send {} is
                 Ok { val } -> "unexpected-ok"
                 Err { error } -> match error is
-                  InvalidUrl { url, reason } -> "invalid-url"
-                  ConnectionFailed { url, reason } -> "connection-failed"
+                  HttpInvalidUrl { url, reason } -> "invalid-url"
+                  HttpConnectionFailed { url, reason } -> "connection-failed"
                   _ -> "other-err"
         """.trimIndent()
-        // Accept either InvalidUrl (preferred) or ConnectionFailed — the
+        // Accept either HttpInvalidUrl (preferred) or HttpConnectionFailed — the
         // key lock-in is that a bad URL yields a Mezze Err, never a throw.
         val result = eval(code)
         assertTrue(
@@ -112,10 +112,10 @@ class HostNativeErrorHandlingTest {
         )
     }
 
-    // ==================== 6. HTTP: unreachable host → ConnectionFailed/timeout ====================
+    // ==================== 6. HTTP: unreachable host → HttpConnectionFailed/timeout ====================
 
     @Test
-    fun `http request to an unreachable port returns ConnectionFailed or Timeout, not a thrown exception`() {
+    fun `http request to an unreachable port returns HttpConnectionFailed or Timeout, not a thrown exception`() {
         // 127.0.0.1:1 — nothing listens there, connection is refused
         // immediately (no network round-trip, no external dependency).
         // A short connect timeout keeps the test fast even if the OS
@@ -128,15 +128,15 @@ class HostNativeErrorHandlingTest {
               } is
                 Ok { val } -> "unexpected-ok"
                 Err { error } -> match error is
-                  ConnectionFailed { url, reason } -> "connection-failed"
-                  Timeout { url, ms } -> "timeout"
-                  InvalidUrl { url, reason } -> "invalid-url"
+                  HttpConnectionFailed { url, reason } -> "connection-failed"
+                  HttpTimeout { url, ms } -> "timeout"
+                  HttpInvalidUrl { url, reason } -> "invalid-url"
                   _ -> "other-err"
         """.trimIndent()
         val result = eval(code)
         assertTrue(
             result == "connection-failed" || result == "timeout",
-            "Expected ConnectionFailed/Timeout for an unreachable port, got: $result"
+            "Expected HttpConnectionFailed/Timeout for an unreachable port, got: $result"
         )
     }
 

@@ -877,13 +877,13 @@ class LazyEffectsTest {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
-            type Status = | Active, Inactive, Pending {reason: Str} |
+            type Status = | Active, Inactive, PromisePending {reason: Str} |
 
             let get_status = {code} ->
                 if code < 0 then Exception.throw {error = "invalid code"}
                 else if code == 0 then Active
                 else if code == 1 then Inactive
-                else Pending {reason = "unknown code"}
+                else PromisePending {reason = "unknown code"}
 
             let handle = {} -> perform ExceptionToResult in Ok {val = get_status {code = 2}}
             handle {}
@@ -894,7 +894,7 @@ class LazyEffectsTest {
         assertEquals("Ok", (result as MezzeVariant).constructorName)
         val payload = result.payloadValue as MezzeRecord
         val status = payload.getField("val") as MezzeVariant
-        assertEquals("Pending", status.constructorName)
+        assertEquals("PromisePending", status.constructorName)
     }
 
     // ========================================================================

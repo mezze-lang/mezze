@@ -245,7 +245,7 @@ class ParallelErrorPropagationTest {
             }
 
             # Cancel the slow operation
-            let _ = cancel {p = slow_op, reason = UserRequested { msg = "test" }}
+            let _ = cancel {p = slow_op, reason = CancelUserRequested { msg = "test" }}
 
             # Use settle to see the cancelled state
             let results = settle {ps = [slow_op]}
@@ -298,7 +298,7 @@ class ParallelErrorPropagationTest {
             }
 
             # Cancel before it completes
-            let _ = cancel {p = op, reason = UserRequested { msg = "test" }}
+            let _ = cancel {p = op, reason = CancelUserRequested { msg = "test" }}
 
             let _ = sleep {ms = 50}
 
@@ -324,7 +324,7 @@ class ParallelErrorPropagationTest {
             }
 
             # Cancel immediately
-            let _ = cancel {p = op, reason = UserRequested { msg = "test" }}
+            let _ = cancel {p = op, reason = CancelUserRequested { msg = "test" }}
 
             # Wait a bit to ensure operation would have run if not cancelled
             let _ = sleep {ms = 100}

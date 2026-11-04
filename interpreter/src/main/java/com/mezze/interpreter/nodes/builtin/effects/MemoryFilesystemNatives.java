@@ -299,7 +299,7 @@ public final class MemoryFilesystemNatives {
         boolean follow = getBool(args, "follow_symlinks");
         Entry direct = files().get(path);
         if (direct != null && direct.symlinkTarget != null) {
-            if (!follow) return ok(fileStatRecord("Other", 0L, direct.modifiedMs));
+            if (!follow) return ok(fileStatRecord("FileOther", 0L, direct.modifiedMs));
             // Follow the whole CHAIN, not one hop: NIO resolves link -> link
             // -> file, so stopping after one would report NotFound here for a
             // path LocalFileSystem reports as a File. Bounded, because a
@@ -317,13 +317,13 @@ public final class MemoryFilesystemNatives {
             }
         }
         if (isDir(path)) {
-            return ok(fileStatRecord("Directory", 0L, 0L));
+            return ok(fileStatRecord("FileDirectory", 0L, 0L));
         }
         Entry e = files().get(path);
         if (e == null) {
-            return ok(fileStatRecord("NotFound", 0L, 0L));
+            return ok(fileStatRecord("FileMissing", 0L, 0L));
         }
-        return ok(fileStatRecord("File", (long) e.bytes.length, e.modifiedMs));
+        return ok(fileStatRecord("FileRegular", (long) e.bytes.length, e.modifiedMs));
     }
 
     @TruffleBoundary
@@ -349,11 +349,11 @@ public final class MemoryFilesystemNatives {
             String childPath = path.equals("/") ? "/" + name : path + "/" + name;
             Object stat;
             if (isDir(childPath)) {
-                stat = fileStatRecord("Directory", 0L, 0L);
+                stat = fileStatRecord("FileDirectory", 0L, 0L);
             } else {
                 Entry e = files().get(childPath);
                 if (e == null) continue;  // race with delete; skip
-                stat = fileStatRecord("File", (long) e.bytes.length, e.modifiedMs);
+                stat = fileStatRecord("FileRegular", (long) e.bytes.length, e.modifiedMs);
             }
             entries.add(dirEntryRecord(name, stat));
         }

@@ -163,7 +163,7 @@ class HttpStreamedDownloadTest {
      * ought to be.
      *
      * `read_chunk` does report the closure: it answers a named
-     * `ConnectionFailed` saying this download is already closed. But
+     * `HttpConnectionFailed` saying this download is already closed. But
      * `chunks_of` ends the stream on any error, because a step can only say
      * Yield or Done, so the caller sees an empty walk rather than a failure.
      * `with_lines` claims the stronger property for files; this does not, and

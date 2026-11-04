@@ -50,31 +50,31 @@ public final class PolyglotNatives {
 
     @TruffleBoundary
     static MezzeVariant errorNotFound(String name) {
-        return makeErrorVariant("NotFound", new String[]{"name"}, new Object[]{name});
+        return makeErrorVariant("InteropNotFound", new String[]{"name"}, new Object[]{name});
     }
 
     @TruffleBoundary
     public static MezzeVariant errorTypeError(String message) {
-        return makeErrorVariant("TypeError", new String[]{"message"}, new Object[]{message});
+        return makeErrorVariant("InteropTypeError", new String[]{"message"}, new Object[]{message});
     }
 
     @TruffleBoundary
     static MezzeVariant errorGuestError(String message, String stack) {
-        return makeErrorVariant("GuestError",
+        return makeErrorVariant("InteropGuestError",
             new String[]{"message", "guest_stack"},
             new Object[]{message, stack == null ? "" : stack});
     }
 
     @TruffleBoundary
     static MezzeVariant errorArityMismatch(long expected, long actual) {
-        return makeErrorVariant("ArityMismatch",
+        return makeErrorVariant("InteropArityMismatch",
             new String[]{"expected", "actual"},
             new Object[]{expected, actual});
     }
 
     @TruffleBoundary
     static MezzeVariant errorUnsupported() {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("UnsupportedMessage");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("InteropUnsupportedMessage");
         return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
     }
 
@@ -677,7 +677,7 @@ public final class PolyglotNatives {
     /**
      * numpy scalars (numpy.int64 / float64 / bool_ / str_ …) do NOT implement the
      * interop number/string/boolean messages — asLong/asDouble/… all throw
-     * UnsupportedMessage on them. They unwrap to a plain, coercible Python scalar
+     * InteropUnsupportedMessage on them. They unwrap to a plain, coercible Python scalar
      * via `.item()`. Returns that unwrapped value if the receiver has an invocable
      * no-arg `item`, else null.
      */

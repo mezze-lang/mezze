@@ -75,11 +75,11 @@ class OrPatternBindingTest {
     @Test
     fun `test or-pattern with three alternatives same bindings should pass`() {
         val code = """
-            type Status = | Active { id: Int }, Pending { id: Int }, Cancelled { id: Int } |
+            type Status = | Active { id: Int }, PromisePending { id: Int }, Cancelled { id: Int } |
 
             let get_id = {s} ->
                 match s is
-                    Active { id = x } | Pending { id = x } | Cancelled { id = x } -> x
+                    Active { id = x } | PromisePending { id = x } | Cancelled { id = x } -> x
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

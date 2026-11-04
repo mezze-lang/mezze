@@ -232,14 +232,14 @@ public final class FilesystemNatives {
                 ? Files.readAttributes(p, BasicFileAttributes.class)
                 : Files.readAttributes(p, BasicFileAttributes.class,
                                        java.nio.file.LinkOption.NOFOLLOW_LINKS);
-            String kind = attrs.isDirectory() ? "Directory"
-                        : attrs.isRegularFile() ? "File"
-                        : "Other";
+            String kind = attrs.isDirectory() ? "FileDirectory"
+                        : attrs.isRegularFile() ? "FileRegular"
+                        : "FileOther";
             return ok(fileStatRecord(kind, attrs.size(), attrs.lastModifiedTime().toMillis()));
         } catch (NoSuchFileException e) {
             // NotFound is a legal FileKind, not an FsError — inspection
             // path stays fast for existence checks in tight loops.
-            return ok(fileStatRecord("NotFound", 0L, 0L));
+            return ok(fileStatRecord("FileMissing", 0L, 0L));
         } catch (AccessDeniedException e) {
             return errPermissionDenied(path, "stat");
         } catch (IOException e) {
@@ -277,9 +277,9 @@ public final class FilesystemNatives {
             for (Path child : stream) {
                 try {
                     BasicFileAttributes a = Files.readAttributes(child, BasicFileAttributes.class);
-                    String kind = a.isDirectory() ? "Directory"
-                                : a.isRegularFile() ? "File"
-                                : "Other";
+                    String kind = a.isDirectory() ? "FileDirectory"
+                                : a.isRegularFile() ? "FileRegular"
+                                : "FileOther";
                     Object stat = fileStatRecord(kind, a.size(), a.lastModifiedTime().toMillis());
                     entries.add(dirEntryRecord(child.getFileName().toString(), stat));
                 } catch (IOException perEntry) {

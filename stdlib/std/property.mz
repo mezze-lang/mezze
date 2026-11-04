@@ -28,7 +28,7 @@ use std::nat
 use std::effects::sample::{ Sample, default_size }
 
 ## What a check found.
-pub type Verdict 'a = | Passed { runs: Int }, Failed { input: 'a, original: 'a, shrinks: Int } |
+pub type Verdict 'a = | PropPassed { runs: Int }, PropFailed { input: 'a, original: 'a, shrinks: Int } |
 
 ## The most simplifications a failure is given.
 pub let max_shrinks = 500
@@ -106,14 +106,14 @@ let first_then_draw: { first: ['a], gen: {} -> 'a <Sample>, holds: { x: 'a } -> 
     match __native_seq_get { xs = first, i = i } is
       Some { val } ->
         if holds { x = val } then first_then_draw { first = first, gen = gen, holds = holds, runs = runs, seed = seed, i = i + 1 }
-        else Failed { input = val, original = val, shrinks = 0 }
+        else PropFailed { input = val, original = val, shrinks = 0 }
       None -> match check { gen = gen, holds = holds, runs = runs, seed = seed } is
-        Passed { runs = drawn } -> Passed { runs = drawn + i }
-        Failed { input, original, shrinks } -> Failed { input = input, original = original, shrinks = shrinks }
+        PropPassed { runs = drawn } -> PropPassed { runs = drawn + i }
+        PropFailed { input, original, shrinks } -> PropFailed { input = input, original = original, shrinks = shrinks }
 
 let run_from: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int, i: Int } -> Verdict 'a <*> =
   { gen, holds, runs, seed, i } ->
-    if i >= runs then Passed { runs = runs }
+    if i >= runs then PropPassed { runs = runs }
     else do
       let size = size_of_run { i = i, runs = runs }
       let x = perform Recording { seed = seed + i, key = 0, size = size } in gen {}
@@ -126,10 +126,10 @@ let run_from: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, see
 ## Keep taking the first simpler sequence that still fails, until none does.
 let shrink: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, size: Nat, draws: [Int], best: 'a, original: 'a, steps: Int } -> Verdict 'a <*> =
   { gen, holds, size, draws, best, original, steps } ->
-    if steps >= max_shrinks then Failed { input = best, original = original, shrinks = steps }
+    if steps >= max_shrinks then PropFailed { input = best, original = original, shrinks = steps }
     else match simpler_failure { gen = gen, holds = holds, size = size, current = draws, candidates = __native_shrink_candidates { draws = draws }, i = 0 } is
       Some { val } -> shrink { gen = gen, holds = holds, size = size, draws = val.draws, best = val.x, original = original, steps = steps + 1 }
-      None -> Failed { input = best, original = original, shrinks = steps }
+      None -> PropFailed { input = best, original = original, shrinks = steps }
 
 ## The first candidate whose replay still fails AND is strictly simpler than
 ## `current` — the second condition is what makes shrinking terminate.

@@ -295,14 +295,14 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let statuses = [
-              Timeout { url = "http://u/x", ms = 50 }.into_error_response {}.status,
-              ConnectionFailed { url = "http://u/x", reason = "refused" }.into_error_response {}.status,
-              TlsError { url = "http://u/x", reason = "bad cert" }.into_error_response {}.status,
-              RequestFailed { url = "http://u/x", status = 404, body = "nope" }.into_error_response {}.status,
-              DecodeError { url = "http://u/x", message = "bad json" }.into_error_response {}.status,
-              InvalidUrl { url = "::", reason = "malformed" }.into_error_response {}.status,
-              EncodeError { url = "http://u/x", message = "bad body" }.into_error_response {}.status,
-              Cancelled.into_error_response {}.status,
+              HttpTimeout { url = "http://u/x", ms = 50 }.into_error_response {}.status,
+              HttpConnectionFailed { url = "http://u/x", reason = "refused" }.into_error_response {}.status,
+              HttpTlsError { url = "http://u/x", reason = "bad cert" }.into_error_response {}.status,
+              HttpRequestFailed { url = "http://u/x", status = 404, body = "nope" }.into_error_response {}.status,
+              HttpDecodeError { url = "http://u/x", message = "bad json" }.into_error_response {}.status,
+              HttpInvalidUrl { url = "::", reason = "malformed" }.into_error_response {}.status,
+              HttpEncodeError { url = "http://u/x", message = "bad body" }.into_error_response {}.status,
+              HttpCancelled.into_error_response {}.status,
             ]
             seq::join { xs = seq::map { xs = statuses, f = { x } -> int::to_str { n = x } }, sep = "," }
             """.trimIndent()
@@ -318,7 +318,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             body_of {
-              resp = RequestFailed { url = "http://internal.svc/secret", status = 404,
+              resp = HttpRequestFailed { url = "http://internal.svc/secret", status = 404,
                                      body = "row 7 missing" }.into_error_response {},
             }
             """.trimIndent()
@@ -381,7 +381,7 @@ class HttpIntoResponseTest {
               path = "/gw",
               handler = { m } -> do
                 let outcome = perform ExceptionToResult in do
-                  let v = unwrap { result = Err { error = Timeout { url = "http://u/x", ms = 50 } } }
+                  let v = unwrap { result = Err { error = HttpTimeout { url = "http://u/x", ms = 50 } } }
                   Ok { val = v }
                 outcome.into_response {},
             }.otherwise { fallback = fallback }
@@ -522,7 +522,7 @@ class HttpIntoResponseTest {
             let app = router { path = "" }.get {
               path = "/gw",
               handler = catching { handler = { m } -> do
-                let upstream = Timeout { url = "http://u/x", ms = 50 }
+                let upstream = HttpTimeout { url = "http://u/x", ms = 50 }
                 throw { error = upstream.into_error_response {} } },
             }.otherwise { fallback = fallback }
             app { req = get_request { url = "/gw" } }.status
@@ -583,7 +583,7 @@ class HttpIntoResponseTest {
         let load: { id: Str } -> Result Str Str = { id } ->
           if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
         let upstream: { id: Str } -> Result Str HttpError = { id } ->
-          Err { error = Timeout { url = "http://u/x", ms = 50 } }
+          Err { error = HttpTimeout { url = "http://u/x", ms = 50 } }
         let app = router { path = "" }.get {
           path = "/u/:id",
           handler = catching { handler = { m } -> do
@@ -623,7 +623,7 @@ class HttpIntoResponseTest {
 
     /**
      * The error's own type picks the status — the SAME or_throw call site
-     * yields 500 for a Str and 504 for a Timeout, because IntoErrorResponse
+     * yields 500 for a Str and 504 for a HttpTimeout, because IntoErrorResponse
      * decides, not the route.
      */
     @Test
@@ -791,7 +791,7 @@ class HttpIntoResponseTest {
         let load: { id: Str } -> Result Str Str = { id } ->
           if id == "7" then Ok { val = "seven" } else Err { error = "no such id" }
         let upstream: { id: Str } -> Result Str HttpError = { id } ->
-          Err { error = Timeout { url = "http://u/x", ms = 50 } }
+          Err { error = HttpTimeout { url = "http://u/x", ms = 50 } }
     """.trimIndent()
 
     /**
@@ -925,7 +925,7 @@ class HttpIntoResponseTest {
         val r = run(
             """
             let upstream: { id: Str } -> Result Str HttpError = { id } ->
-              Err { error = Timeout { url = "http://u/x", ms = 50 } }
+              Err { error = HttpTimeout { url = "http://u/x", ms = 50 } }
             let app = router { path = "" }
               .get { path = "/ok", handler = { m } -> "fine" }
               .get { path = "/gw", handler = { m } -> upstream { id = "x" } }

@@ -422,7 +422,7 @@ class VariantStructuralAliasExtTest {
             let render = { s } -> match s is
               Ok2 { code } -> "ok"
               Err2 { msg } -> "err"
-              Pending -> "pending"
+              PromisePending -> "pending"
 
             render { s = Ok2 { code = 200 } }
         """

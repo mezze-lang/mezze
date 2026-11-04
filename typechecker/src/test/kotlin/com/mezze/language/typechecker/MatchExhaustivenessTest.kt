@@ -233,14 +233,14 @@ class MatchExhaustivenessTest {
     @Test
     fun `test complex nested patterns with guards`() {
         val code = """
-            type Status = | Active { priority: Int }, Inactive, Pending { reason: Str } |
+            type Status = | Active { priority: Int }, Inactive, PromisePending { reason: Str } |
             
             let test: {status: Status} -> Str = {status} -> match status is
               Active { priority } if priority > 5 -> "high priority"
               Active { priority } if priority > 0 -> "normal priority" 
               Active { priority } -> "low priority"
               Inactive -> "inactive"
-              Pending { reason } -> "pending: $(reason)"
+              PromisePending { reason } -> "pending: $(reason)"
         """.trimIndent()
 
         // Should not throw - all Active cases covered by guards, others explicit

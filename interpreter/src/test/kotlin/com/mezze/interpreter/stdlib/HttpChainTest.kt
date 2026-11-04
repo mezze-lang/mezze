@@ -505,7 +505,7 @@ class HttpChainTest {
 
             perform MockHttpClient { rules = [
                 { methods = [], url = Glob { pattern = "**" },
-                  response = Err { error = ConnectionFailed { url = "http://test.com/x", reason = "refused" } } }
+                  response = Err { error = HttpConnectionFailed { url = "http://test.com/x", reason = "refused" } } }
             ] } in do
               let req = request { url = "http://test.com/x" }
               let result_text = HttpClient.request { req = req, config = default_http_config }.text {}

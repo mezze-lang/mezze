@@ -449,8 +449,8 @@ class FileWriteModeTest {
               match FileSystem.stat { path = "$link", follow_symlinks = False } is
                 Ok { val = unfollowed } -> match FileSystem.stat { path = "$link", follow_symlinks = True } is
                   Ok { val = followed } -> match unfollowed.kind is
-                    Other -> match followed.kind is
-                      NotFound -> "other-then-notfound"
+                    FileOther -> match followed.kind is
+                      FileMissing -> "other-then-notfound"
                       _ -> "followed-wrong"
                     _ -> "unfollowed-wrong"
                   Err { error = _ } -> "followed-errored"
@@ -468,8 +468,8 @@ class FileWriteModeTest {
               match FileSystem.stat { path = "/link", follow_symlinks = False } is
                 Ok { val = unfollowed } -> match FileSystem.stat { path = "/link", follow_symlinks = True } is
                   Ok { val = followed } -> match unfollowed.kind is
-                    Other -> match followed.kind is
-                      NotFound -> "other-then-notfound"
+                    FileOther -> match followed.kind is
+                      FileMissing -> "other-then-notfound"
                       _ -> "followed-wrong"
                     _ -> "unfollowed-wrong"
                   Err { error = _ } -> "followed-errored"

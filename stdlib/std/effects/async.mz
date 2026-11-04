@@ -61,22 +61,22 @@ pub let inspect: { p: Promise 'a } -> PromiseState 'a = { p } ->
   __native_promise_inspect { p = p }
 
 pub let is_done: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
-  Pending -> False
+  PromisePending -> False
   _ -> True
 
 
 pub let is_pending: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
-  Pending -> True
+  PromisePending -> True
   _ -> False
 
 
 pub let is_failed: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
-  Failed { err = _ } -> True
+  PromiseFailed { err = _ } -> True
   _ -> False
 
 
 pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
-  Failed { err = AsyncCancelled { reason = _ } } -> True
+  PromiseFailed { err = AsyncCancelled { reason = _ } } -> True
   _ -> False
 
 
@@ -85,7 +85,7 @@ pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promis
 ## The reason is propagated into the cancelled Promise's error state as
 ## `AsyncCancelled { reason }`, visible to awaiters and `inspect`
 ## observers. If you don't have a natural category, pass
-## `Custom { tag = "...", detail = "..." }`.
+## `CancelCustom { tag = "...", detail = "..." }`.
 pub let cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
   __native_promise_cancel { p = p, reason = reason }
 
@@ -93,7 +93,7 @@ pub let cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>
 ## `{ complete, fail, on_cancel }` capability record. Whichever resolve
 ## capability `setup` invokes atomically transitions the promise; later
 ## transitions are no-ops. If `setup` raises, the promise is auto-failed so it
-## never leaks in Pending.
+## never leaks in PromisePending.
 ##
 ## `setup` may invoke:
 ##   - `complete { val = ... }` — resolve successfully.
@@ -225,41 +225,41 @@ impl [Promise 'a] where {
 ## Why a cancellation happened. Every cancel path names a category —
 ## there is no "no reason" case. Consumers pattern-match on the variant.
 ##
-## - `UserRequested`   — direct caller cancel with a human message.
-## - `Timeout`         — a deadline elapsed (with_timeout, scope_join_until).
-## - `ScopeTeardown`   — implicit propagation from a closing scope
+## - `CancelUserRequested`   — direct caller cancel with a human message.
+## - `CancelTimeout`   — a deadline elapsed (with_timeout, scope_join_until).
+## - `CancelScopeTeardown`   — implicit propagation from a closing scope
 ##                       (scope_cancel_all, exit-on-failure paths).
-## - `SiblingFailed`   — a peer under a join policy failed and dragged
+## - `CancelSiblingFailed`   — a peer under a join policy failed and dragged
 ##                       this task down. `at` is the failed peer's index
 ##                       in the input order.
-## - `LostRace`        — a peer settled first under `race` / `OnSuccess`
+## - `CancelLostRace`  — a peer settled first under `race` / `OnSuccess`
 ##                       / `OnFirst` and the losers are being torn down.
 ##                       The winner's index is not tracked to keep the
 ##                       combinator's inner loop cheap; if you need it,
 ##                       reconstruct via `inspect` on all siblings.
-## - `ExternalInterrupt` — the underlying thread was interrupted by a
+## - `CancelExternalInterrupt` — the underlying thread was interrupted by a
 ##                       source Mezze doesn't own (Ctrl-C, JVM shutdown,
 ##                       native code Thread.interrupt).
-## - `Custom`          — escape hatch for application-defined reasons
+## - `CancelCustom`          — escape hatch for application-defined reasons
 ##                       that don't fit the above. Both `tag` and
 ##                       `detail` are load-bearing — pick a stable tag
 ##                       for programmatic matching, put the specifics in
 ##                       detail.
 pub type CancelReason = |
-  UserRequested { msg: Str },
-  Timeout { deadline_ms: Int },
-  ScopeTeardown,
-  SiblingFailed { at: Int },
-  LostRace,
-  ExternalInterrupt,
-  Custom { tag: Str, detail: Str },
+  CancelUserRequested { msg: Str },
+  CancelTimeout { deadline_ms: Int },
+  CancelScopeTeardown,
+  CancelSiblingFailed { at: Int },
+  CancelLostRace,
+  CancelExternalInterrupt,
+  CancelCustom { tag: Str, detail: Str },
 |
 
 ## Error type for async operations.
 ##
 ## `AsyncCancelled.reason` is mandatory — every cancel path names why.
 ## No `Option` here: if you don't have a category to pass, use
-## `Custom { tag = "…", detail = "…" }`. Awaiters and `inspect` observers
+## `CancelCustom { tag = "…", detail = "…" }`. Awaiters and `inspect` observers
 ## see the reason via `AsyncCancelled { reason }`.
 pub type AsyncError = |
   AsyncFailed { msg: Str },
@@ -270,19 +270,19 @@ pub type AsyncError = |
 ## Snapshot of a Promise's state at one moment in time.
 ## Returned by `Promise.inspect {}` — never blocks, never raises.
 pub type PromiseState 'a = |
-  Pending,
-  Completed { val: 'a },
-  Failed { err: AsyncError },
+  PromisePending,
+  PromiseCompleted { val: 'a },
+  PromiseFailed { err: AsyncError },
 |
 
 ## What happened when you tried to cancel a Promise.
 ## Returned by `Promise.cancel {}` — never loses information about
 ## whether the cancellation actually took effect.
 pub type CancelOutcome = |
-  Cancelled,
-  AlreadyCompleted,
-  AlreadyFailed,
-  NotCancellable,
+  CancelDone,
+  CancelAlreadyCompleted,
+  CancelAlreadyFailed,
+  CancelNotCancellable,
 |
 
 ## How `scoped_with` decides when to stop waiting for its children.
@@ -413,14 +413,14 @@ pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps }
         seq::for_each { xs = ps, f = { x } -> match is_done { p = x } is
           True -> {}
           False -> do
-            cancel { p = x, reason = LostRace }
+            cancel { p = x, reason = CancelLostRace }
             {}
  }
         match inspect { p = winner } is
-          Completed { val = v } -> Ok { val = v }
-          Failed { err = e } -> Err { error = e }
-          Pending -> Err {
-            error = AsyncFailed { msg = "race: winner reverted to Pending" },
+          PromiseCompleted { val = v } -> Ok { val = v }
+          PromiseFailed { err = e } -> Err { error = e }
+          PromisePending -> Err {
+            error = AsyncFailed { msg = "race: winner reverted to PromisePending" },
           }
 
 
@@ -662,11 +662,11 @@ pub let par_filter
 pub let with_timeout: { ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async, ...> = { ms, p } ->
   match park_until { predicate = {} -> is_done { p = p }, ms = ms } is
     True -> match inspect { p = p } is
-      Completed { val = v } -> Ok { val = v }
-      Failed { err = e } -> Err { error = e }
-      Pending -> Err { error = AsyncTimedOut { ms = ms } }
+      PromiseCompleted { val = v } -> Ok { val = v }
+      PromiseFailed { err = e } -> Err { error = e }
+      PromisePending -> Err { error = AsyncTimedOut { ms = ms } }
     False -> do
-      cancel { p = p, reason = Timeout { deadline_ms = ms } }
+      cancel { p = p, reason = CancelTimeout { deadline_ms = ms } }
       Err { error = AsyncTimedOut { ms = ms } }
 
 
@@ -699,7 +699,7 @@ pub let try_join
     let pr = Async.spawn { f = r }
     match await { p = pl } is
       Err { error = e } -> do
-        cancel { p = pr, reason = SiblingFailed { at = 0 } }
+        cancel { p = pr, reason = CancelSiblingFailed { at = 0 } }
         await { p = pr }
         Err { error = e }
       Ok { val = vl } -> match await { p = pr } is
@@ -717,14 +717,14 @@ pub let try_join3
     let pc = Async.spawn { f = c }
     match await { p = pa } is
       Err { error = e } -> do
-        cancel { p = pb, reason = SiblingFailed { at = 0 } }
-        cancel { p = pc, reason = SiblingFailed { at = 0 } }
+        cancel { p = pb, reason = CancelSiblingFailed { at = 0 } }
+        cancel { p = pc, reason = CancelSiblingFailed { at = 0 } }
         await { p = pb }
         await { p = pc }
         Err { error = e }
       Ok { val = va } -> match await { p = pb } is
         Err { error = e } -> do
-          cancel { p = pc, reason = SiblingFailed { at = 1 } }
+          cancel { p = pc, reason = CancelSiblingFailed { at = 1 } }
           await { p = pc }
           Err { error = e }
         Ok { val = vb } -> match await { p = pc } is
@@ -879,9 +879,9 @@ pub let join_on_success
     match winner_opt is
       Some { val = winner } -> do
         let winner_val = match inspect { p = winner } is
-          Completed { val = v } -> v
-          Failed { err = _ } -> crash { msg = "on_success: winner reverted to Failed" }
-          Pending -> crash { msg = "on_success: winner reverted to Pending" }
+          PromiseCompleted { val = v } -> v
+          PromiseFailed { err = _ } -> crash { msg = "on_success: winner reverted to PromiseFailed" }
+          PromisePending -> crash { msg = "on_success: winner reverted to PromisePending" }
 
         scope_cancel_all { sc = sc }
         let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } -> match promise_eq { l = x, r = winner } is
@@ -893,9 +893,9 @@ pub let join_on_success
         OnSuccessOutcome { winner = winner_val, losers_cancelled = cancelled }
       None -> OnSuccessAllFailed {
         errs = seq::map { xs = ps, f = { x } -> match inspect { p = x } is
-          Failed { err = e } -> e
-          Completed { val = _ } -> AsyncFailed { msg = "on_success: expected Failed, got Completed" }
-          Pending -> AsyncFailed { msg = "on_success: expected Failed, got Pending" }
+          PromiseFailed { err = e } -> e
+          PromiseCompleted { val = _ } -> AsyncFailed { msg = "on_success: expected PromiseFailed, got PromiseCompleted" }
+          PromisePending -> AsyncFailed { msg = "on_success: expected PromiseFailed, got PromisePending" }
  },
       }
 
@@ -958,9 +958,9 @@ pub let join_on_first: { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Asy
           None -> crash { msg = "on_first: nth=None at idx" }
 
         let result = match inspect { p = winner } is
-          Completed { val = v } -> Ok { val = v }
-          Failed { err = e } -> Err { error = e }
-          Pending -> Err {
+          PromiseCompleted { val = v } -> Ok { val = v }
+          PromiseFailed { err = e } -> Err { error = e }
+          PromisePending -> Err {
             error = AsyncFailed { msg = "on_first: winner reverted" },
           }
 

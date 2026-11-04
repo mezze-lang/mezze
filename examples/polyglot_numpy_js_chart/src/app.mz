@@ -107,11 +107,11 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
       let _ = match chart_r is
         Ok  { val = chart } -> println { msg = chart }
         Err { error } -> match error is
-          NotFound { name = n } -> println { msg = "  js: not found: $(n)" }
-          TypeError { message = m } -> println { msg = "  js: type error: $(m)" }
-          GuestError { message = m, guest_stack = _ } -> println { msg = "  js: guest error: $(m)" }
-          ArityMismatch { expected = _, actual = _ } -> println { msg = "  js: arity mismatch" }
-          UnsupportedMessage -> println { msg = "  js: unsupported message" }
+          InteropNotFound { name = n } -> println { msg = "  js: not found: $(n)" }
+          InteropTypeError { message = m } -> println { msg = "  js: type error: $(m)" }
+          InteropGuestError { message = m, guest_stack = _ } -> println { msg = "  js: guest error: $(m)" }
+          InteropArityMismatch { expected = _, actual = _ } -> println { msg = "  js: arity mismatch" }
+          InteropUnsupportedMessage -> println { msg = "  js: unsupported message" }
 
       println { msg = "" }
       println { msg = "== done ==" }

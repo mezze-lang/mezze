@@ -440,13 +440,13 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type DatabaseError = | ConnectionFailed, QueryFailed {query: Str} |
+            type DatabaseError = | HttpConnectionFailed, QueryFailed {query: Str} |
             type NetworkError = | Timeout, ConnectionRefused |
 
             impl Exception for DbHandler having 'error = DatabaseError where {
                 throw = {error} ->
                     match error is
-                        ConnectionFailed -> {status = "db_error"}
+                        HttpConnectionFailed -> {status = "db_error"}
                         QueryFailed {query} -> {status = "query_error"}
             }
 
@@ -607,13 +607,13 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type DatabaseError = | ConnectionFailed, QueryFailed {query: Str} |
+            type DatabaseError = | HttpConnectionFailed, QueryFailed {query: Str} |
             type ValidationError = | InvalidInput {field: Str} |
 
             impl Exception for DbHandler having 'error = DatabaseError where {
                 throw = {error} ->
                     match error is
-                        ConnectionFailed -> {status = "db_error"}
+                        HttpConnectionFailed -> {status = "db_error"}
                         QueryFailed {query} -> {status = "query_error"}
             }
 

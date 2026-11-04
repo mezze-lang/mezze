@@ -112,17 +112,17 @@ class OpenVariantUnificationTest {
     @Test
     fun `closed variant should unify with open variant in function parameter`() {
         assertTypeChecks("""
-            type Status = | Pending, Running, Done, ... |
+            type Status = | PromisePending, Running, Done, ... |
 
             let describe: { s: Status } -> Str = { s } ->
                 match s is
-                    Pending -> "waiting"
+                    PromisePending -> "waiting"
                     Running -> "in progress"
                     Done -> "finished"
                     _ -> "unknown"
 
             # All of these should work
-            let r1 = describe { s = Pending }
+            let r1 = describe { s = PromisePending }
             let r2 = describe { s = Running }
             let r3 = describe { s = Done }
         """.trimIndent())

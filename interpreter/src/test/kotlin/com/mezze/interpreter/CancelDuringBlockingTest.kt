@@ -38,7 +38,7 @@ class CancelDuringBlockingTest {
                 "should-not-reach"
               }
               sleep { ms = 50 }
-              cancel { p = child, reason = UserRequested { msg = "cancel test" } }
+              cancel { p = child, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = child } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
@@ -85,10 +85,10 @@ class CancelDuringBlockingTest {
                 f = {} -> "ran"
               } }
               sleep { ms = 50 }
-              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               let waiter_result = await { p = waiter }
               # Clean up holder.
-              cancel { p = holder, reason = UserRequested { msg = "cancel test" } }
+              cancel { p = holder, reason = CancelUserRequested { msg = "cancel test" } }
               await { p = holder }
               match waiter_result is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
@@ -116,7 +116,7 @@ class CancelDuringBlockingTest {
                 "ran"
               }
               sleep { ms = 50 }
-              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = waiter } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
@@ -140,7 +140,7 @@ class CancelDuringBlockingTest {
                 "ran"
               }
               sleep { ms = 50 }
-              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = waiter } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
@@ -165,7 +165,7 @@ class CancelDuringBlockingTest {
                 "ran"
               }
               sleep { ms = 50 }
-              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = waiter } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"

@@ -1,117 +1,102 @@
 package com.mezze.interpreter
 
+import com.mezze.language.typechecker.ModuleResolver
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * One tag, one group per module — and what that costs a name two modules share.
+ * One tag, one group per module — and the arity check that asks which candidate
+ * a literal fits.
  *
- * Two stdlib modules declare a `Timeout`: `std::effects::http`'s
- * `HttpError.Timeout { url, ms }` and `std::effects::async`'s
- * `CancelReason.Timeout { deadline_ms }`.
+ * This class used to be written against a collision the stdlib HAPPENED to have:
+ * `std::effects::http`'s `HttpError.Timeout { url, ms }` beside
+ * `std::effects::async`'s `CancelReason.Timeout { deadline_ms }`. It asserted that
+ * a module importing both names could write either one, the solver choosing from
+ * the fields.
  *
- * This class used to assert that a module importing BOTH names could write
- * either one, the solver choosing from the fields. It no longer can: a tag
- * belongs to one group per module however the name arrived, so importing both
- * names is refused at the import, before any `Timeout` is written. The clash
- * exists whether or not the tag is ever used, and a module holding both names
- * has no answer for a bare one.
+ * Both premises are gone, in opposite directions:
  *
- * The practical case the old doc raised is real — a retrying HTTP call needs
- * `Http` and an async runtime — and it still works, by the route the refusal
- * names: import one group's name and reach the other through a function in its
- * signature. A group inside an imported function's signature travels as
- * STRUCTURE; a claim comes from importing the NAME. That asymmetry is the whole
- * reason two libraries sharing a tag still compose.
+ *  - Holding two groups that claim one tag is REFUSED, whether the names were
+ *    declared or imported, and it is refused before any `Timeout` is written.
+ *  - There is no longer a stdlib pair to borrow. Error groups carry their domain
+ *    (`HttpTimeout`, `DbTimeout`, `CancelTimeout`), so no two stdlib groups share
+ *    a tag — which is the point of the convention, and why this class cannot
+ *    depend on one. A test that needs two library types to collide breaks the
+ *    next time either is renamed, which is what happened here.
  *
- * What survives unchanged from the original bug: the arity check asks the
- * question the solver asks — is there a candidate these fields fit? — rather
- * than walking declarations and throwing on the first disagreement, which read
- * a set of alternatives as a conjunction.
+ * So the rule is exercised with types declared in the program itself. The IMPORT
+ * route — the same rule arriving through `use` — is covered where a suite can
+ * write modules: `VariantSpecCrossModuleTest`'s `importing two claimants of one
+ * tag` and `one claimant declared, one imported`.
  */
 class ConstructorNameCollisionTest {
 
     @BeforeEach
     fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
+        ModuleResolver.clearCache()
+    }
+
+    private fun failure(source: String): String {
+        val thrown = runCatching { MezzeTestHelper.run(source.trimIndent()) }
+            .exceptionOrNull() ?: error("expected this program to be refused, but it ran")
+        return generateSequence(thrown) { it.cause }.mapNotNull { it.message }.joinToString(" | ")
     }
 
     @Test
-    fun `importing two groups that share a tag is refused`() {
-        // The rule itself, and the former premise of this whole class.
-        val e = runCatching {
-            MezzeTestHelper.run(
-                """
-                use std::effects::http::{ HttpError }
-                use std::effects::async::{ CancelReason }
-                let x = 1
-                x
-                """.trimIndent(),
-            )
-        }.exceptionOrNull()
-        val msg = generateSequence(e) { it.cause }.mapNotNull { it.message }.joinToString(" | ")
+    fun `two groups declared here that share a tag is refused`() {
+        val msg = failure(
+            """
+            type ErrA = | Shared { msg: Str }, OnlyA |
+            type ErrB = | Shared { code: Int }, OnlyB |
+            let x = 1
+            x
+            """,
+        )
         assertTrue(
-            msg.contains("claimed by both") &&
-                msg.contains("HttpError") && msg.contains("CancelReason"),
-            "Both names claim `Timeout`, so the module has two groups for one tag. Refused at " +
-                "the import — note the program never writes `Timeout`.\n\ngot: $msg",
+            msg.contains("Shared"),
+            "Both groups claim `Shared`, so the module holds two groups for one tag and has no " +
+                "answer for a bare `Shared`. Note the program never writes it — the clash exists " +
+                "whether or not the tag is used.\n\ngot: $msg",
         )
     }
 
     @Test
-    fun `the http Timeout is constructible with its own group in scope`() {
+    fun `one group alone is fine, and its tag is writable`() {
+        // The mirror. Without the second declaration the same tag is ordinary.
         assertEquals(
-            "x",
+            "hi",
             MezzeTestHelper.run(
                 """
-                use std::effects::http::{ HttpError }
-                let e: HttpError = Timeout { url = "x", ms = 100 }
+                type ErrA = | Shared { msg: Str }, OnlyA |
+                let e: ErrA = Shared { msg = "hi" }
                 match e is
-                  Timeout { url, ms } -> url
-                  _ -> "other"
+                  Shared { msg } -> msg
+                  OnlyA -> "other"
                 """.trimIndent(),
             ),
         )
     }
 
     @Test
-    fun `the async Timeout is constructible with its own group in scope`() {
-        // The same name, the other group. Each works in its own scope, which is
-        // what still rules out "resolve the name once, globally" — the two
-        // declarations are both live, just never in one module at once.
-        assertEquals(
-            100L,
-            MezzeTestHelper.run(
-                """
-                use std::effects::async::{ CancelReason }
-                let r: CancelReason = Timeout { deadline_ms = 100 }
-                match r is
-                  Timeout { deadline_ms } -> deadline_ms
-                  _ -> 0
-                """.trimIndent(),
-            ),
-        )
-    }
-
-    @Test
-    fun `fields that fit no candidate are still an arity error`() {
-        // The arity check is a disjunction, NOT removed: a literal no candidate
-        // accepts is still rejected. `{ url }` alone is not `{ url, ms }`.
+    fun `fields that fit no candidate are an arity error`() {
+        // The arity check asks the question the solver asks — is there a candidate
+        // these fields fit? — rather than walking declarations and throwing on the
+        // first disagreement, which read a set of alternatives as a conjunction.
         val e = runCatching {
             MezzeTestHelper.run(
                 """
                 use std::effects::http::{ HttpError }
-                let e: HttpError = Timeout { url = "x" }
+                let e: HttpError = HttpTimeout { url = "x" }
                 match e is
                   _ -> "unreachable"
                 """.trimIndent(),
             )
         }.exceptionOrNull()
         assertTrue(
-            e?.message?.contains("Variant constructor Timeout expects fields ms, url") == true,
-            "expected the arity error named against the candidate in scope; got: ${e?.message}",
+            e?.message?.contains("HttpTimeout") == true,
+            "expected the arity error to name the constructor; got: ${e?.message}",
         )
     }
 
@@ -121,7 +106,7 @@ class ConstructorNameCollisionTest {
             MezzeTestHelper.run(
                 """
                 use std::effects::http::{ HttpError }
-                let e: HttpError = InvalidUrl { url = "x", reason = "r", extra = 1 }
+                let e: HttpError = HttpInvalidUrl { url = "x", reason = "r", extra = 1 }
                 match e is
                   _ -> "unreachable"
                 """.trimIndent(),

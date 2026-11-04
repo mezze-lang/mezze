@@ -191,7 +191,7 @@ class MezzePromiseRaceTest {
     @Test
     @Timeout(30)
     fun `cancel with null reason is legal`() {
-        // Cancel with no reason ⇒ downstream substitutes ExternalInterrupt.
+        // Cancel with no reason ⇒ downstream substitutes CancelExternalInterrupt.
         val promise = MezzePromise(null, null)
         assertTrue(promise.cancel(null))
         assertTrue(promise.isCancelled)

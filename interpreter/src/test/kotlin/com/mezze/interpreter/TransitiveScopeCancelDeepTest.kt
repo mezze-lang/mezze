@@ -57,7 +57,7 @@ class TransitiveScopeCancelDeepTest {
                         # Without it `sleep` has no handler: the sleeper suspends,
                         # its effect is DROPPED, and `timed_out` can never flip —
                         # so the guard this comment promises did not exist, and a
-                        # broken cancel wave would have hung to the 15s @Timeout
+                        # broken cancel wave would have hung to the 15s @CancelTimeout
                         # instead of reporting "escaped". Found by the
                         # dropped-effect check in MezzeTestHelper.run (C1); it is
                         # the same shape as the `with_timeout` flake, a sleeper

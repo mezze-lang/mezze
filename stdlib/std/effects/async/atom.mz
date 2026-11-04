@@ -5,7 +5,7 @@ use std::effects::async::{ Async }
 ## the proposed new value. Carries the rejected value so callers can inspect
 ## what was refused. The atom is left unchanged on rejection.
 pub type AtomError 'a = |
-  ValidatorRejected { val: 'a },
+  AtomRejected { val: 'a },
 |
 
 ## Lock-free atomic reference for shared mutable state.
@@ -18,7 +18,7 @@ pub newtype Atom 'a = __NativeAtomicRef
 ##
 ## `ValidatedAtom` mutations run the validator on the proposed value and
 ## return a `Result`: `Ok` with the installed value on success, or
-## `Err { error = ValidatorRejected { val } }` when rejected (atom unchanged).
+## `Err { error = AtomRejected { val } }` when rejected (atom unchanged).
 pub newtype ValidatedAtom 'a = __NativeAtomicRef
 
 ## Structural hash, paired with the `Eq` below.
@@ -125,7 +125,7 @@ pub let remove_watch: { atom: Atom 'a, key: Str } -> {} <Async> = { atom, key } 
 ## Create a validated atom whose mutations must pass `validator`.
 ## The initial value must pass too, so construction returns a `Result`:
 ## `Ok { val }` with the atom when the initial value passes, or
-## `Err { error = ValidatorRejected { val } }` when the initial value is
+## `Err { error = AtomRejected { val } }` when the initial value is
 ## rejected (no atom is created). Mutations also return a `Result`.
 pub let atom_validated
   : { val: 'a, validator: { val: 'a } -> Bool }
@@ -137,7 +137,7 @@ pub let deref_validated: { atom: ValidatedAtom 'a } -> 'a <Async> = { atom } ->
   __native_atom_deref { atom = atom }
 
 ## Set a validated atom directly. Returns `Ok { val }` on success or
-## `Err { error = ValidatorRejected { val } }` if the validator rejects.
+## `Err { error = AtomRejected { val } }` if the validator rejects.
 pub let reset_validated
   : { atom: ValidatedAtom 'a, val: 'a }
   -> Result 'a (AtomError 'a) <Async>

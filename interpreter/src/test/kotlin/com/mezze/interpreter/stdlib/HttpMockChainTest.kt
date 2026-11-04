@@ -217,7 +217,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = [ mock { url = "**" }.times_out { ms = 30 } ] } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = Timeout { url = _, ms } } -> "timeout-$(int::to_str { n = ms })"
+                    Err { error = HttpTimeout { url = _, ms } } -> "timeout-$(int::to_str { n = ms })"
                     Err { error = _ } -> "other-error"
                 """.trimIndent(),
             ),
@@ -225,7 +225,7 @@ class HttpMockChainTest {
     }
 
     @Test
-    fun `unreachable answers a ConnectionFailed error`() {
+    fun `unreachable answers a HttpConnectionFailed error`() {
         assertEquals(
             "reset by peer",
             run(
@@ -235,7 +235,7 @@ class HttpMockChainTest {
                 ] } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = ConnectionFailed { url = _, reason } } -> reason
+                    Err { error = HttpConnectionFailed { url = _, reason } } -> reason
                     Err { error = _ } -> "other-error"
                 """.trimIndent(),
             ),
@@ -250,12 +250,12 @@ class HttpMockChainTest {
                 """
                 perform MockHttpClient { rules = [
                   mock { url = "**" }.fails {
-                    error = RequestFailed { url = "http://x/y", status = 500, body = "boom" },
+                    error = HttpRequestFailed { url = "http://x/y", status = 500, body = "boom" },
                   },
                 ] } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = RequestFailed { url = _, status, body = _ } } -> int::to_str { n = status }
+                    Err { error = HttpRequestFailed { url = _, status, body = _ } } -> int::to_str { n = status }
                     Err { error = _ } -> "other-error"
                 """.trimIndent(),
             ),

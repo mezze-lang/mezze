@@ -78,7 +78,7 @@ class VariantUnionTest {
             let test3 = {x} -> match x is
               Success -> Result {status = "ok"}
               Failure {msg} -> ErrorResult {message = msg}
-              Pending -> Loading
+              PromisePending -> Loading
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -233,7 +233,7 @@ class VariantUnionTest {
             let test3 = {cond} -> if cond then
               match cond is
                 True -> Success
-                False -> Pending
+                False -> PromisePending
             else
               Failure
         """.trimIndent()

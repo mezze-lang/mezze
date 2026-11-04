@@ -217,7 +217,7 @@ class SqliteDbTest {
             """
             match Db.run { q = sql { text = "select * from no_such_table" } } is
               Ok { val = _ } -> "unexpectedly succeeded"
-              Err { error = Rejected { sql = s, msg = _ } } -> s
+              Err { error = DbRejected { sql = s, msg = _ } } -> s
               Err { error = _ } -> "wrong error kind"
             """.trimIndent(),
         )
@@ -243,14 +243,14 @@ class SqliteDbTest {
     }
 
     @Test
-    fun `a path that cannot be opened makes operations answer Unavailable`() {
+    fun `a path that cannot be opened makes operations answer DbUnavailable`() {
         val r = MezzeTestHelper.run(
             """
             $head
             let main = {} -> perform SqliteDb { path = "/nonexistent-directory-xyz/db.sqlite" } in
               match Db.run { q = sql { text = "select 1" } } is
                 Ok { val = _ } -> "unexpectedly succeeded"
-                Err { error = Unavailable { msg = _ } } -> "unavailable"
+                Err { error = DbUnavailable { msg = _ } } -> "unavailable"
                 Err { error = _ } -> "wrong error kind"
             main {}
             """.trimIndent(),
@@ -289,7 +289,7 @@ class SqliteDbTest {
             """
             let _ = Db.tx { body = {} -> do
               let _ = Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a')" } }
-              Err { error = Conflict { msg = "the body decided to stop" } } }
+              Err { error = DbConflict { msg = "the body decided to stop" } } }
             match Db.run { q = sql { text = "select count(*) from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
@@ -304,9 +304,9 @@ class SqliteDbTest {
     fun `the body's error is what tx answers`() {
         val r = onMemory(
             """
-            match Db.tx { body = {} -> Err { error = Conflict { msg = "mine" } } } is
+            match Db.tx { body = {} -> Err { error = DbConflict { msg = "mine" } } } is
               Ok { val = _ } -> "unexpectedly succeeded"
-              Err { error = Conflict { msg = m } } -> m
+              Err { error = DbConflict { msg = m } } -> m
               Err { error = _ } -> "the rollback replaced the body's error"
             """.trimIndent(),
         )
@@ -334,7 +334,7 @@ class SqliteDbTest {
             let _ = Db.tx { body = {} -> do
               let _ = Db.tx { body = {} ->
                 Db.apply { q = sql { text = "insert into users (id, name) values (1, 'inner')" } } }
-              Err { error = Conflict { msg = "outer stops" } } }
+              Err { error = DbConflict { msg = "outer stops" } } }
             match Db.run { q = sql { text = "select count(*) from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
@@ -475,7 +475,7 @@ class SqliteDbTest {
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
                       _ -> reply { code = 200, text = "wrong cell", url = req.url }
-                    Err { error = Unavailable { msg = m } } -> reply { code = 200, text = "unavailable", url = req.url }
+                    Err { error = DbUnavailable { msg = m } } -> reply { code = 200, text = "unavailable", url = req.url }
                     Err { error = _ } -> reply { code = 200, text = "db error", url = req.url }
 
                 let go: {} -> Str <*> = {} ->
@@ -632,7 +632,7 @@ class SqliteDbTest {
                 let handler: { req: Request } -> Response <Db> = { req } ->
                   match Db.run { q = sql { text = "select count(*) from t" } } is
                     Ok { val = _ } -> reply { code = 200, text = "answered anyway", url = req.url }
-                    Err { error = Unavailable { msg = _ } } -> reply { code = 200, text = "ambiguous", url = req.url }
+                    Err { error = DbUnavailable { msg = _ } } -> reply { code = 200, text = "ambiguous", url = req.url }
                     Err { error = _ } -> reply { code = 200, text = "wrong error kind", url = req.url }
 
                 let go: {} -> Str <*> = {} ->

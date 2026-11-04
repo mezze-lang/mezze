@@ -518,7 +518,7 @@ public final class IONatives {
             new String[]{"url", "reason"},
             new Object[]{url, "No mock rule matched for " + method + " " + url}
         );
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ConnectionFailed");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("HttpConnectionFailed");
         MezzeVariant error = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errorRecord);
         return MezzeVariant.err(error);
     }
@@ -538,10 +538,10 @@ public final class IONatives {
 
     /**
      * Inject the request URL into a mock rule's Ok-wrapped Response so
-     * the stdlib's `ensure_ok` can build a `RequestFailed { url, ... }`
+     * the stdlib's `ensure_ok` can build a `HttpRequestFailed { url, ... }`
      * without callers having to hand-write `url = "..."` in every test
      * fixture. Err responses pass through unchanged — they already carry
-     * a URL in their payload (`ConnectionFailed { url, ... }` etc.).
+     * a URL in their payload (`HttpConnectionFailed { url, ... }` etc.).
      *
      * If the response isn't a recognisable Ok-Response shape, return
      * it verbatim — defensive against malformed test rules.
@@ -1286,7 +1286,7 @@ public final class IONatives {
      * record. Header names are lowercased to match the prior contract
      * (case-insensitive lookup via response.get_header is the stdlib
      * pattern). The request URL is threaded in so the stdlib's
-     * `ensure_ok` can build a `RequestFailed { url, ... }` on non-2xx.
+     * `ensure_ok` can build a `HttpRequestFailed { url, ... }` on non-2xx.
      */
     private static MezzeRecord responseToMezze(HttpClientResponse response, String url) {
         Map<Object, Object> headersOut = new HashMap<>();
@@ -1419,7 +1419,7 @@ public final class IONatives {
             new String[]{"url", "reason"},
             new Object[]{url, reason}
         );
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ConnectionFailed");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("HttpConnectionFailed");
         MezzeVariant errorVariant = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
         return MezzeVariant.err(errorVariant);
     }
@@ -1429,7 +1429,7 @@ public final class IONatives {
             new String[]{"url", "ms"},
             new Object[]{url, (long) ms}
         );
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Timeout");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("HttpTimeout");
         MezzeVariant errorVariant = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
         return MezzeVariant.err(errorVariant);
     }
@@ -1439,7 +1439,7 @@ public final class IONatives {
             new String[]{"url", "reason"},
             new Object[]{url, reason}
         );
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("InvalidUrl");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("HttpInvalidUrl");
         MezzeVariant errorVariant = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
         return MezzeVariant.err(errorVariant);
     }
@@ -1449,7 +1449,7 @@ public final class IONatives {
             new String[]{"url", "reason"},
             new Object[]{url, reason}
         );
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("TlsError");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("HttpTlsError");
         MezzeVariant errorVariant = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
         return MezzeVariant.err(errorVariant);
     }

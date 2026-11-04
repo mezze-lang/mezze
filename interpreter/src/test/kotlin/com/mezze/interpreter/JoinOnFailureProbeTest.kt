@@ -38,7 +38,7 @@ class JoinOnFailureProbeTest {
                     sleep { ms = 30 }
                     1
                   }
-                  cancel { p = child, reason = UserRequested { msg = "test" } }
+                  cancel { p = child, reason = CancelUserRequested { msg = "test" } }
                   [child]
               }
               1

@@ -133,10 +133,10 @@ class CompleteInferenceDemo {
     @Test
     fun `multiple patterns with inference`() {
         val code = """
-            type Status = | Active, Inactive, Pending, Error |
+            type Status = | Active, Inactive, PromisePending, Error |
             
             let isWorking = {status} -> match status is
-              Active | Pending -> True
+              Active | PromisePending -> True
               Inactive | Error -> False
         """.trimIndent()
 

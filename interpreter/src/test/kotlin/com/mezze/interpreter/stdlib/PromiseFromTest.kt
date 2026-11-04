@@ -191,7 +191,7 @@ class PromiseFromTest {
                 {}
               }
               }
-              cancel { p = p, reason = LostRace }
+              cancel { p = p, reason = CancelLostRace }
               deref { atom = observed }
         """.trimIndent()
         assertEquals(42L, eval(code))
@@ -242,7 +242,7 @@ class PromiseFromTest {
 
     @Test
     fun `on_cancel hook receives the cancel reason`() {
-        // Verify the reason variant reaches the hook. Use LostRace as
+        // Verify the reason variant reaches the hook. Use CancelLostRace as
         // the marker so we can distinguish it from other CancelReason cases.
         val code = """
             use std::effects::async::{ Async, LoomAsync, promise_from, cancel, CancelReason }
@@ -252,7 +252,7 @@ class PromiseFromTest {
               let observed = atom { val = 0 }
               let p = promise_from { setup = { complete, fail, on_cancel } ->
                 on_cancel { hook = { reason } -> match reason is
-                  LostRace -> do
+                  CancelLostRace -> do
                     reset { atom = observed, val = 1 }
                     {}
                   _ -> do
@@ -260,7 +260,7 @@ class PromiseFromTest {
                     {}
                 }
               }
-              cancel { p = p, reason = LostRace }
+              cancel { p = p, reason = CancelLostRace }
               deref { atom = observed }
         """.trimIndent()
         assertEquals(1L, eval(code))
@@ -272,7 +272,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, promise_from, cancel, is_cancelled, CancelReason }
             perform LoomAsync in do
               let p = promise_from { setup = { complete, fail, on_cancel } -> {} }
-              cancel { p = p, reason = LostRace }
+              cancel { p = p, reason = CancelLostRace }
               is_cancelled { p = p }
         """.trimIndent()
         assertEquals(true, eval(code))
@@ -296,7 +296,7 @@ class PromiseFromTest {
                   {}
                 }
               }
-              cancel { p = p, reason = LostRace }
+              cancel { p = p, reason = CancelLostRace }
               deref { atom = observed }
         """.trimIndent()
         // Second on_cancel wins → observed = 2

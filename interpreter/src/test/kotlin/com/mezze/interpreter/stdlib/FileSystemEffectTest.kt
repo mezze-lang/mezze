@@ -70,10 +70,10 @@ class FileSystemEffectTest {
             perform MemoryFileSystem in
               match FileSystem.stat { path = "/nope", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
-                  NotFound -> "not-found"
-                  File -> "file"
-                  Directory -> "dir"
-                  Other -> "other"
+                  FileMissing -> "not-found"
+                  FileRegular -> "file"
+                  FileDirectory -> "dir"
+                  FileOther -> "other"
                 Err { error } -> "err"
         """.trimIndent()
         assertEquals("not-found", eval(code))
@@ -91,7 +91,7 @@ class FileSystemEffectTest {
               }
               match FileSystem.stat { path = "/f", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
-                  File -> s.size
+                  FileRegular -> s.size
                   _ -> 0 - 1
                 Err { error } -> 0 - 2
         """.trimIndent()
@@ -106,7 +106,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.create_directory { path = "/d" }
               match FileSystem.stat { path = "/d", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
-                  Directory -> "dir"
+                  FileDirectory -> "dir"
                   _ -> "wrong"
                 Err { error } -> "err"
         """.trimIndent()
@@ -168,7 +168,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.delete { path = "/f" }
               match FileSystem.stat { path = "/f", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
-                  NotFound -> "gone"
+                  FileMissing -> "gone"
                   _ -> "still-here"
                 Err { error } -> "err"
         """.trimIndent()
@@ -243,7 +243,7 @@ class FileSystemEffectTest {
               let _ = FileSystem.move_file { src = "/src", dest = "/dest", replace_existing = False, require_atomic = False }
               match FileSystem.stat { path = "/src", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
-                  NotFound -> match FileSystem.read_bytes { path = "/dest" } is
+                  FileMissing -> match FileSystem.read_bytes { path = "/dest" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
                       Err { error } -> "utf8-fail"
@@ -610,7 +610,7 @@ class FileSystemEffectTest {
             perform LocalFileSystem in
               match FileSystem.stat { path = "$path", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
-                  NotFound -> "not-found"
+                  FileMissing -> "not-found"
                   _ -> "wrong"
                 Err { error } -> "err"
         """.trimIndent()

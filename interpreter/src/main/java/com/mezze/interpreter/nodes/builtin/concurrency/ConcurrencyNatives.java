@@ -580,9 +580,9 @@ public final class ConcurrencyNatives {
         }
     }
 
-    /** Build {@code Err { error = ValidatorRejected { val = <rejected> } }}. */
+    /** Build {@code Err { error = AtomRejected { val = <rejected> } }}. */
     private static MezzeVariant validatorRejectedErr(Object rejectedValue) {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ValidatorRejected");
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AtomRejected");
         MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{rejectedValue});
         MezzeVariant rejected = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
         return MezzeVariant.err(rejected);

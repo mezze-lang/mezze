@@ -20,10 +20,10 @@ use std::fs
 
 ## Kind of a filesystem entry. Returned inside FileStat.
 ##
-## NotFound is a legal FileKind, not an FsError — inspection stays
+## FileMissing is a legal FileKind, not an FsError — inspection stays
 ## fast for existence checks in tight loops. Errors from stat only
 ## fire on permission / IO failures.
-pub type FileKind = | File, Directory, NotFound, Other |
+pub type FileKind = | FileRegular, FileDirectory, FileMissing, FileOther |
 
 ## Metadata for a single entry. Returned by stat and inside DirEntry.
 pub type FileStat = { kind: FileKind, size: Int, modified: Int }
@@ -49,9 +49,9 @@ pub type DirEntry = { name: Str, stat: FileStat }
 ## durability and the only half it can offer.
 pub type OpenMode = | Read, Write, Append, WriteSync |
 
-## Errors returned by FileSystem ops. Constructor names are prefixed
-## with `Fs` to avoid collisions with FileKind's `NotFound` and with
-## other stdlib error ADTs.
+## Errors returned by FileSystem ops. Constructor names carry the `Fs`
+## domain, as every stdlib error group carries its own: a tag is written
+## bare, so the prefix is what tells two groups' conditions apart.
 pub type FsError = |
   FsNotFound { path: Str },
   ## The backend does not implement this capability at all — an object
@@ -112,11 +112,11 @@ effect FileSystem where {
   ## "the file is already there" are genuinely different operations, and
   ## the dangerous one is the one people get by accident.
   write_bytes: { path: Str, bytes: Bytes, mode: WriteMode } -> Result {} FsError <FileSystem>,
-  ## Metadata — stat returns NotFound as a FileKind, not an error.
+  ## Metadata — stat returns FileMissing as a FileKind, not an error.
   ##
   ## `follow_symlinks = True` reports on what the link POINTS AT (NIO's
   ## default); `False` reports on the link itself, which is the only way
-  ## to see a dangling one — following it reports NotFound and a caller
+  ## to see a dangling one — following it reports FileMissing and a caller
   ## cannot tell that from "no such path".
   stat: { path: Str, follow_symlinks: Bool } -> Result FileStat FsError <FileSystem>,
   list: { path: Str } -> Result [Str] FsError <FileSystem>,
@@ -498,7 +498,7 @@ pub let read_text_or: { path: Str, def: Str } -> Str <FileSystem> = { path, def 
 ## Metadata queries derived from stat
 pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> match FileSystem.stat { path = path, follow_symlinks = True } is
   Ok { val = s } -> match s.kind is
-    NotFound -> Ok { val = False }
+    FileMissing -> Ok { val = False }
     _ -> Ok { val = True }
   Err { error } -> Err { error = error }
 
@@ -506,7 +506,7 @@ pub let exists: { path: Str } -> Result Bool FsError <FileSystem> = { path } -> 
 pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
-      File -> Ok { val = True }
+      FileRegular -> Ok { val = True }
       _ -> Ok { val = False }
     Err { error } -> Err { error = error }
 
@@ -514,7 +514,7 @@ pub let is_file: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
 pub let is_directory: { path: Str } -> Result Bool FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
-      Directory -> Ok { val = True }
+      FileDirectory -> Ok { val = True }
       _ -> Ok { val = False }
     Err { error } -> Err { error = error }
 
@@ -577,8 +577,8 @@ pub let create_directories: { path: Str } -> Result {} FsError <FileSystem> = { 
 pub let ensure_directory: { path: Str } -> Result {} FsError <FileSystem> = { path } ->
   match FileSystem.stat { path = path, follow_symlinks = True } is
     Ok { val = s } -> match s.kind is
-      Directory -> Ok { val = {} }
-      NotFound -> create_directories { path = path }
+      FileDirectory -> Ok { val = {} }
+      FileMissing -> create_directories { path = path }
       _ -> Err { error = FsNotADirectory { path = path } }
     Err { error } -> Err { error = error }
 
@@ -603,10 +603,10 @@ pub let delete_recursive: { path: Str } -> Result {} FsError <FileSystem> = { pa
   match FileSystem.stat { path = path, follow_symlinks = True } is
     Err { error } -> Err { error = error }
     Ok { val = s } -> match s.kind is
-      NotFound -> Err { error = FsNotFound { path = path } }
-      File -> FileSystem.delete { path = path }
-      Other -> FileSystem.delete { path = path }
-      Directory -> match FileSystem.list_with_stat { path = path } is
+      FileMissing -> Err { error = FsNotFound { path = path } }
+      FileRegular -> FileSystem.delete { path = path }
+      FileOther -> FileSystem.delete { path = path }
+      FileDirectory -> match FileSystem.list_with_stat { path = path } is
         Err { error } -> Err { error = error }
         Ok { val = entries } -> match seq::fold {
           xs = entries,

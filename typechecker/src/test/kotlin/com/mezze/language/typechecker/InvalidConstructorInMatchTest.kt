@@ -124,12 +124,12 @@ class InvalidConstructorInMatchTest {
     @Test
     fun `test open variant with all defined constructors should pass`() {
         val code = """
-            type Status = | Active, Pending, ... |
+            type Status = | Active, PromisePending, ... |
 
             let status_check = {status} ->
                 match status is
                     Active -> 1
-                    Pending -> 0
+                    PromisePending -> 0
                     _ -> -1
         """.trimIndent()
 
@@ -319,11 +319,11 @@ class InvalidConstructorInMatchTest {
     @Test
     fun `test match branches with different closed variants should unify`() {
         val code = """
-            type Status = | Active, Pending |
+            type Status = | Active, PromisePending |
 
             let get_status = {x} -> match x is
               1 -> Active
-              _ -> Pending
+              _ -> PromisePending
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

@@ -246,7 +246,7 @@ class PunnedRecordClosureTest {
     @Test
     fun `test effect impl with match expression using punned params`() {
         val source = """
-            type Status = | Active, Inactive, Pending |
+            type Status = | Active, Inactive, PromisePending |
 
             effect StatusChecker where {
                 getStatus: {} -> Status <StatusChecker>
@@ -261,7 +261,7 @@ class PunnedRecordClosureTest {
                 match StatusChecker.getStatus {} is
                     Active -> 1
                     Inactive -> 2
-                    Pending -> 3
+                    PromisePending -> 3
         """.trimIndent()
 
         val result = eval(source)

@@ -190,7 +190,7 @@ class HttpStageDTest {
     }
 
     @Test
-    fun `ensure_ok promotes 404 to RequestFailed`() {
+    fun `ensure_ok promotes 404 to HttpRequestFailed`() {
         val result = eval("""
             use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
             use std::collections::map
@@ -209,16 +209,16 @@ class HttpStageDTest {
               match ensure_ok { resp = resp } is
                 Ok { val } -> -1
                 Err { error } -> match error is
-                  RequestFailed { url, status, body } -> status
+                  HttpRequestFailed { url, status, body } -> status
                   _ -> -2
         """)
         assertEquals(404L, result)
     }
 
     @Test
-    fun `ensure_ok propagates the request URL into RequestFailed`() {
+    fun `ensure_ok propagates the request URL into HttpRequestFailed`() {
         // The mock layer injects the request URL into the Response so that
-        // ensure_ok can build a RequestFailed { url, ... } that identifies
+        // ensure_ok can build a HttpRequestFailed { url, ... } that identifies
         // the source. Verifies #179-followup.
         val result = eval("""
             use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
@@ -238,7 +238,7 @@ class HttpStageDTest {
               match ensure_ok { resp = resp } is
                 Ok { val = _ } -> "ok"
                 Err { error } -> match error is
-                  RequestFailed { url, status, body } -> url
+                  HttpRequestFailed { url, status, body } -> url
                   _ -> "other"
         """)
         assertEquals("http://test.com/api/v2/users/42", result)
@@ -250,14 +250,14 @@ class HttpStageDTest {
             use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, ensure_ok}
 
             let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Err { error = Cancelled } }
+                { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpCancelled } }
             ]
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/x" }.send {}
               match ensure_ok { resp = resp } is
                 Ok { val } -> "ok"
                 Err { error } -> match error is
-                  Cancelled -> "cancelled"
+                  HttpCancelled -> "cancelled"
                   _ -> "other"
         """)
         assertEquals("cancelled", result)
@@ -284,7 +284,7 @@ class HttpStageDTest {
                 Ok { val } -> match val.ensure_ok {} is
                   Ok { val = _ } -> -1
                   Err { error } -> match error is
-                    RequestFailed { url, status, body } -> status
+                    HttpRequestFailed { url, status, body } -> status
                     _ -> -2
                 Err { error = _ } -> -3
         """)
@@ -331,7 +331,7 @@ class HttpStageDTest {
             use std::effects::time::{Time, SystemTime}
 
             let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Err { error = InvalidUrl { url = "x", reason = "bad" } } }
+                { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpInvalidUrl { url = "x", reason = "bad" } } }
             ]
             perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
@@ -340,7 +340,7 @@ class HttpStageDTest {
                 match resp is
                   Ok { val } -> "ok"
                   Err { error } -> match error is
-                    InvalidUrl { url, reason } -> "invalid"
+                    HttpInvalidUrl { url, reason } -> "invalid"
                     _ -> "other"
         """)
         assertEquals("invalid", result)
@@ -354,7 +354,7 @@ class HttpStageDTest {
             use std::effects::time::{Time, SystemTime}
 
             let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Err { error = Timeout { url = "x", ms = 100 } } }
+                { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpTimeout { url = "x", ms = 100 } } }
             ]
             perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
@@ -363,7 +363,7 @@ class HttpStageDTest {
                 match resp is
                   Ok { val } -> "ok"
                   Err { error } -> match error is
-                    Timeout { url, ms } -> "timed-out"
+                    HttpTimeout { url, ms } -> "timed-out"
                     _ -> "other"
         """)
         assertEquals("timed-out", result)

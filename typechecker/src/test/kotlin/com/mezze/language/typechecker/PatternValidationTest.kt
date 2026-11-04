@@ -91,13 +91,13 @@ class PatternValidationTest {
     @Test
     fun `test multiple unit variants with payload patterns should fail`() {
         val code = """
-            type Status = | Active, Inactive, Pending |
+            type Status = | Active, Inactive, PromisePending |
 
             let check = {status} ->
                 match status is
                     Active { id } -> id
                     Inactive -> 0
-                    Pending { reason } -> 1
+                    PromisePending { reason } -> 1
         """.trimIndent()
 
         // Should throw - both Active and Pending have no payload
