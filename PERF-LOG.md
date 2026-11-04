@@ -84,6 +84,7 @@ a defect, not a conservative default.
 | closure param, non-generic | 13x (4 ns) | call layers + arg record |
 | `MEZZE_MONO_STRIP=1` | **crashes the compiler** | liveness scan counts a capture as dead. Fix written, unapplied |
 | HOF call-site seeding | zero specialisations | `MonoDriver` seed gate |
+| a MONOMORPHIC function refused by mono | no specialisation, so its callees stay dict-passing | `typeParams` over-collects: constraint-only vars that occur nowhere in the type |
 | `to_seq` | ~4 500 ps/elem | materialising |
 | List ops vs Seq | 3-5x | storage |
 | record built once, fields read in loop | 2.2x | captured-record field reads |
@@ -100,6 +101,51 @@ a single work item**, taking `mezze.mono.effort = fast | full` as ONE budget on
 ONE code path — not two paths, because this session already produced a
 build-only-shaped bug: a specialisation whose self-call still targeted the
 generic hash.
+
+### DIAGNOSED 2026-11-04: mono refuses a function whose type is already concrete
+
+Found while writing `bench/cases/effectsurface`, from the trace and not a
+timing. `MEZZE_TYPECHECK_DEBUG_CATEGORIES=Monomorphization`:
+
+    byHash-fail callee=k_tier
+      typeParams=['n23, 'o23, 'p23, 'q23, 'r23, 's23, 't23]
+      scheme   = ({n: Int} -> Int)
+      fn.type  = ({n: Int} -> Int)
+      arg.type = {n: Int}
+
+**The type has no variables at all.** `k_tier` is monomorphic. Yet `typeParams`
+lists SEVEN variables, none of which occur in the type — they are constraint
+vars from the `NumAdd`/`NumSub` chains inside the BODY. `deriveTypeArgs` unifies
+`{n: Int} -> Int` against `{n: Int} -> Int`, which binds nothing, so all seven
+stay unresolved, the all-concrete gate fails, and the call is not seeded.
+
+THE CONSEQUENCE IS TRANSITIVE, which is why it matters. `MonoDriver`'s own doc
+says a generic decl's self-calls are skipped deliberately because "their
+concrete callers will reach them transitively through the worklist" — so when
+the concrete caller is itself refused, the loop inside it is never specialised
+either. `go_t` is declared with TWO parameters and compiles with FOUR: the
+extras are `__dict_` params, it allocates per iteration, and it declines the
+fused tier at `3P:update-rhs`.
+
+A VARIABLE THAT OCCURS ONLY INSIDE THE BODY IS NOT A TYPE PARAMETER. It is an
+internal unknown the body's own inference already settled. `freeVars =
+collectTypeVarsInOrder(type)` collects it because that walk descends into a
+function type's `abilityConstraints.typeArgs`, and the same over-collection put
+the associated-type name `out` into `typeParams` in the 249x case below.
+
+TWO FIXES, SMALLEST FIRST:
+
+1. **In the seed gate**, require only the type args that actually OCCUR in
+   `scheme.type` to be concrete; leave the rest to `resolveAbilityConstraints`
+   and `fillHavingOutTypeArgs`. Roughly five lines, strictly widens seeding.
+2. **At the source**, stop `freeVars` collecting a var that appears nowhere in
+   the type. Correct, and the shared root of both failures — but `typeParams`
+   drives instantiation and annotation validation too, so the blast radius is
+   wide.
+
+Queued rather than fixed: mono is a parked work item, and the payoff needs a
+quiet machine to measure. The diagnosis is load-independent, which is why it
+could be done now.
 
 ### UNKNOWN — never measured
 
