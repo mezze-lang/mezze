@@ -44,7 +44,17 @@ nobody had run at a realistic N.
   hides wins.
 - **CLOSED** — cannot reach the floor; reason recorded so it is not
   re-investigated. A `perform` in a loop can never be on tier 1, because that
-  tier runs the whole loop in Java and cannot call a guest handler.
+  tier runs the whole loop in Java and cannot call a guest handler. Also used
+  for a row reached by a DIFFERENT route than the one predicted — `bytes` is
+  at floor, and not by the fusion this ledger expected.
+
+**A FIFTH STATE THE TABLE CANNOT SHOW, so it is written in the cell:
+UNVERIFIED.** A row whose cause was attributed to a subsystem that has since
+CHANGED is no longer a measurement, it is a memory. The four MONO rows below
+were all attributed to mono's dict wrapper, and mono was fixed in three places
+since they were taken — so they are marked, and re-measuring them outranks
+acting on them. A stale ledger is worse than a short one: its whole job is
+answering "is X done?" without recollection.
 
 **Floors, defined up front so the work terminates.** Java-equivalent for
 arithmetic and loops · 0.30 ns for anything statically resolvable · the
@@ -73,34 +83,38 @@ a defect, not a conservative default.
 | ability method, single impl | 0.30 ns | — |
 | effect operation, marginal | ~0.38 ns | — |
 | `seq::fold` / `sum` / `any` | 0.37 / 0.36 / 0.42 ns/elem | — |
+| `bytes` fold | 41 076 → **257** ps/elem, FASTER than the fused seq fold | BytesSumPrimitiveTest |
+| a pipeline step bound to a `let` | 64 672 → **206** ps/elem | LocalLambdaSpecializerTest, NamedPipelineStepFusionTest |
+| a specialized recursive fn's self-call | 30 675 → **682** ps/iter | RecursiveSpecSelfCallTest |
 
 ### ABOVE FLOOR — cause named
 
 | cell | gap | cause |
 |---|---|---|
-| **`bytes` fold — no fusion at all** | **19x** a storage-matched baseline (35 173 vs 1 815 ps/elem) | `bytes` is absent from `NativeHofNames.isAnyElementCollection`. Adding the prefix is the WRONG fix, now MEASURED on nel: the `to_seq` route made that 22x worse, and it is what made set and deque 7x slower. Wants a `byte[]` indexed walk, which should reach near the seq floor |
-| `set` / `deque` bare fold | was **7x SLOWER FUSED than unfused**; FIXED | `promoteOpaqueSource` materialised the whole collection into a Seq to fuse it. Now refuses the copy when there are no stages to pay for it — the same guard `size` already had. deque 71 508 -> 14 041, set 188 633 -> 19 826 |
-| **`nel` fold — no fusion at all** | **5.0x** (9 058 vs 1 815) | absent from the vocabulary. Adding it via `to_seq` measured **22x WORSE** and was reverted: it needs its own source walk, not a conversion. Cons-like, so `RawList` may serve as it stands |
-| **`map` fold — no fusion at all** | **40.7x** a storage-matched baseline (73 873 vs 1 815 ps/elem), 130x seq — the LARGEST collection gap | 19 HOFs across map and sorted_map, all absent from the vocabulary. `map::fold`'s folder takes THREE arguments, `{ acc, k, v }`, where every sink the fuser has takes two: a design extension, not a prefix |
+| ~~`bytes` fold~~ | **CLOSED — AT FLOOR at 257 ps/elem** | Two causes, neither of them fusion. (1) `BytesNatives.fold` was `@TruffleBoundary` and allocated FOUR objects per element → 41 076 → 9 275. (2) `BuiltinSumBytes` recognises a zero-init ADD folder instead of calling it → 257, below the fused seq fold. The predicted `byte[]` indexed walk WAS built and REVERTED: the generic fused loop is slower than the native fold, because a bare fold has nothing to eliminate |
+| `set` / `deque` bare fold | deque **CLOSED at 1 670**; set **ABOVE FLOOR at 7 447 for a NEW reason** | Two rounds. First: `promoteOpaqueSource` materialised the collection into a Seq to fuse it; refusing that copy when no stages pay for it gave deque 71 508 → 14 041, set 188 633 → 19 826. Then `FoldToSumRewriter` replaced the summing fold with the collection's own `sum` — deque 9 638 → 1 670 (5.6x), set 17 376 → 7 447 (2.3x). Set's remainder is the WALK, not a callback (`set::sum` measured 7 270 BEFORE any of this): ~7 ns to visit one element of a persistent hash set is scattered memory. The lever is primitive-specialised storage, a DATA-STRUCTURE change |
+| ~~`nel` fold~~ | **CLOSED — 8 858 → 1 206 ps/elem (7.3x)** | Not a fusion gap either. It was the one element-based collection with no `sum`, so `FoldToSumRewriter` had nothing to rewrite its fold to. Added `nel::sum`; lands on the deque row, which is what two array-backed collections walking without a callback cost |
+| **`map` fold** | **~160x seq — the LARGEST collection gap, still open** | Cause now named exactly, and it is THREE costs where every other collection paid one: `MezzeMap`'s iterator does `new Entry<>(keys[i], values[i])` PER ELEMENT, the folder takes three arguments, and the keys are read and boxed even when the folder ignores them. None is necessary — keys and values are PARALLEL ARRAYS and `MapStorage.forEach` walks them without intermediate arrays. Fix prepared: `map::sum_values` (named so, because a map has two things to sum) plus a rewrite requiring the KEY parameter unused |
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
-| **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | `MEZZE_TRACE_FUSION` names it exactly: `native=__native_iter_fold source=CallIndirectScalarIR:through-a-slot`. `peelSource` cannot follow a call through a frame slot. The node IS present when the canonicalizer runs — an earlier note here said otherwise, from a pass whose own trace had untraced early-outs. `dotprobe` k3 |
+| ~~a stage from a CAPTURING local helper~~ | **CLOSED — 64 672 → 206 ps/elem (314x)** | And the capture was NEVER the trigger. A do-block `let` bound to a lambda GENERALIZES (#76), suppressed only for a non-ground capture (#15), so a named step is a local POLYMORPHIC function whose body compiles once with a dictionary. `Monomorphizer` cannot reach it — a local binding is not a decl. `LocalLambdaSpecializer` pins it in place, BEFORE the seed walk so the inner `map` gets seeded too |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
-| **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
+| ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
 | a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
 | `map::insert`, new map per iteration | 20.4x its own control, 31 GCs (was 35.8x / 47) | persistent map nodes, which it must allocate; the argument record came off it with the scalar-ABI port. Floor unknown but no longer dominated by the ABI |
 | string interpolation | 1.8x the concat it desugars to (18 571 vs 10 084 ps) | the one row where a desugaring costs more than its target. Cause not isolated |
 | an `Option` returned by a native | +2.5 ns, +10 GCs over the `Bool`-returning lookup | `VariantMatchFolder` folds a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
 | record update, record outlives the expression | 18.1x (14 517 ps), 24 GCs | no record pass can erase a record that outlives its expression — but this is close to a bare native call, so the split is not yet made |
-| closure param, generic callee | **190x** (57 ns) | dict wrapper; 52 of 57 ns. MONO |
-| HOF-reached pipeline | **460x** | generic dict-passing copy executes. MONO |
-| `iter.fold` with a real closure | 30x (9 ns) | MONO |
-| closure param, non-generic | 13x (4 ns) | call layers + arg record |
+| closure param, generic callee | **190x** (57 ns) — **UNVERIFIED since the mono fixes** | dict wrapper; 52 of 57 ns. MONO |
+| HOF-reached pipeline | **460x** — **UNVERIFIED since the mono fixes** | generic dict-passing copy executes. MONO |
+| `iter.fold` with a real closure | 30x (9 ns) — **UNVERIFIED since the mono fixes** | MONO |
+| closure param, non-generic | 13x (4 ns) — **UNVERIFIED since the mono fixes** | call layers + arg record |
+| **`ScalarCall` vs an inlined loop** | **15%**, paid by six collections on every element of every fold | MEASURED on one native, same kernel: 8 089 hand-rolled against 9 275, control 383 → 366. NOT escape analysis — `@CompilerDirectives.ValueType` changed nothing (9 323 vs 9 275). `call2` is already small with final fields, which leaves the branch on `scalar` and the call-site inlining decision: graph questions |
 | `MEZZE_MONO_STRIP=1` | **crashes the compiler** | liveness scan counts a capture as dead. Fix written, unapplied |
 | HOF call-site seeding | zero specialisations | `MonoDriver` seed gate |
-| a MONOMORPHIC function refused by mono | no specialisation, so its callees stay dict-passing | `typeParams` over-collects: constraint-only vars that occur nowhere in the type |
+| ~~a MONOMORPHIC function refused by mono~~ | **CLOSED as a defect; worth ~0 on its own** | `collectTypeVarsInOrder` walks a constraint's type args, so an obligation about variables the signature never names became a phantom type PARAMETER. Root cause was upstream: generalizing a do-block `let` quantifies its vars and the obligation recorded against them rides out onto the enclosing signature. seeds 170 → 188. **It moved the 324x by ZERO** — recorded because a correctly-diagnosed fix that shifts its target by nothing is the useful kind of result |
 | `to_seq` | ~4 500 ps/elem | materialising |
 | List ops vs Seq | 3-5x | storage |
 | record built once, fields read in loop | 2.2x | captured-record field reads |
