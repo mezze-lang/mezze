@@ -102,7 +102,7 @@ a defect, not a conservative default.
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
-| a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
+| a loop with 4+ parameters | **2.4x** (584 vs 239 ps), no allocation — **CAUSE NOW UNKNOWN** | The old cause said "there is no 4-param branch". **BUILT IT AND IT WAS 1.46x SLOWER** (855 against 584), so the missing tier was never the cause: a 4-param loop already falls to the direct-while path, which emits straight-line bytecode and beats a fused operation that has to decode a 36-bit config per call. Reverted. And the EXISTING 3P tier measures ~neutral on `via_3p` — 12 ms against 13 with it switched off, the OFF readings tighter — so the fused tail tiers above 2 params may be redundant rather than load-bearing. What the remaining 2.4x IS, is now unknown |
 | `map::insert`, new map per iteration | 20.4x its own control, 31 GCs (was 35.8x / 47) | persistent map nodes, which it must allocate; the argument record came off it with the scalar-ABI port. Floor unknown but no longer dominated by the ABI |
 | string interpolation | 1.8x the concat it desugars to (18 571 vs 10 084 ps) | the one row where a desugaring costs more than its target. Cause not isolated |
 | an `Option` returned by a native | +2.5 ns, +10 GCs over the `Bool`-returning lookup | `VariantMatchFolder` folds a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
@@ -3839,6 +3839,70 @@ experiment that would settle the floor is the same scan over a DENSE array of
 the same element count — which is also the argument for why a sorted/dense
 storage would be worth reaching for bulk-built sets, the thing
 `LongSetStorage` exists for and apparently never gets used for.
+
+---
+
+## The 4-param tier: built, 1.46x SLOWER, reverted — and the cause was wrong
+
+The ledger said a 4+ parameter loop costs 3.5x because `BytecodeCompiler`
+dispatches the fused tail tier only for paramCount 1, 2 and 3, and noted
+helpfully that the 3P analysis was already arity-generic so only the config
+packing and operand emission were fixed. That was accurate about the code and
+wrong about the cause.
+
+I built it: `FusedLongTailLoop4P` (36-bit config, so a `long` constant operand —
+four params need 3-bit rhs sources where three need 2-bit), `fltlPack4`,
+`fltl4Rhs`, and the 3P emitter GENERALISED rather than copied, since everything
+from the param-index resolver through the per-parameter update loop was already
+written against `paramCount`.
+
+It works. `MEZZE_TRACE_SELFTAIL` shows `params=4 tier=FUSED`, and the sibling
+4-param function whose base case is `acc + p + q` correctly declines at
+`4P:base-not-param`. Checksums identical.
+
+| `allocsurface` k10, 4-param loop, min of 5 | ps/iter |
+|---|---|
+| 4P tier OFF — the direct-while path | **584** |
+| 4P tier ON — the new operation | **855** |
+| k1 control | 239 |
+
+**1.46x SLOWER.** A 4-param loop was never falling to the slow general path — it
+was already taking the "direct-while optimization" that sits immediately below
+the tier dispatch, which emits straight-line bytecode with no dispatch at all.
+The fused operation has to decode a packed config and run two `switch`es per
+parameter per iteration; at four parameters that costs more than it saves.
+Reverted in full.
+
+### And the tier it was modelled on is ~neutral
+
+If direct-while beats a fused op at four params, the obvious question is whether
+it already matches at three. `dispatch_probe`'s `via_3p`, min of 3, control
+steady at 5-6 ms:
+
+| | min |
+|---|---|
+| 3P tier ON | 12 ms |
+| 3P tier OFF | **13 ms** |
+
+Equal within 8%, and the OFF readings are TIGHTER (13-15 against 12-23). So the
+existing 3P tier is buying approximately nothing on this shape. The big
+3-param win this log records (25-34 ns/iter → 1.05) is real — with 3P off,
+`via_3p` still measures 0.65 ns/iter — but it is NOT attributable to the 3P
+tier; the direct-while path now delivers it.
+
+**Not removed.** One kernel is not grounds for deleting a tier that other
+3-param shapes may still need, and `via_3p` is a single shape. It is recorded as
+the next thing to settle, not a conclusion.
+
+### What this says about reading a ledger row
+
+The row named a cause that was true of the code — there really is no 4-param
+branch — and false as an explanation. "The fast path is missing" and "the slow
+path is what runs" are different claims, and only the second one makes a gap. I
+checked which path ran for `set::sum` by poisoning it; I did not check it here
+before building, and that is the whole cost of this detour.
+
+The 2.4x gap is real and now has NO named cause, which is the honest state.
 
 ---
 
