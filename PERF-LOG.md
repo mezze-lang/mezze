@@ -1808,6 +1808,58 @@ compiler lottery recorded above.
 
 ---
 
+## MEASURED AT LAST: the unmeasured surface — `bench/cases/coresurface`
+
+Everything above was records, bindings, calls and loops. Three parts of the
+language had never been benchmarked at all, so there was no way to rank them —
+and the live risk was that a session spent on records had left something
+STRUCTURAL costing 100x. n=2e7, min of 3, one kernel per process, every kernel
+computing the SAME checksum as the control:
+
+| kernel | ps/iter | young GCs | vs control |
+|---|---|---|---|
+| 1 positional control | 222 | 2 | — |
+| 2 ONE EFFECT OPERATION per iteration | 1 119 | 5 | 5.0x |
+| 3 Option constructed + matched | 1 892 | **17** | 8.5x |
+| 4 three-constructor variant matched | 1 940 | **17** | 8.7x |
+
+**EFFECTS ARE NOT STRUCTURALLY EXPENSIVE, and that was the question worth
+answering.** 5x, with five young collections against the control's two — so
+reaching a handler and returning costs about 1.1 ns and allocates almost
+nothing. If effect operations had needed a real continuation capture each, this
+is where it would have shown, and no peephole would have fixed it. They are
+cliff-shaped like everything else.
+
+VERIFIED NOT FOLDED, because the checksum cannot tell: the operation returns 1
+and is used as the loop's decrement, so a constant-folded `one` would compute
+the same answer at the control's speed. `MEZZE_DUMP_FN` shows
+`PerformOpIR(effectHash=…, operationName=one, …)` still in the loop body. The
+measurement is of a real effect operation.
+
+**THE VARIANT NUMBERS ARE AN ALLOCATION CLIFF**, and the same one as records.
+Seventeen young collections against two, and the two variant kernels cost the
+same (1 892 and 1 940) although one has two constructors and the other three —
+so it is not match dispatch, it is the construction. The IR says exactly why:
+
+    MatchIR(scrutinee = MakeVariantIR(tag=…, tagName=Some,
+                                      payload=MakeRecordIR([val = i])),
+            cases = [CaseIR(pattern=Variant(tag=…, fieldNames=[val],
+                                            fieldSlots=[3]),
+                            bindings=[BindingIR(slot=3, LONG)], body=…), …])
+
+The variant is CONSTRUCTED AS THE SCRUTINEE OF THE MATCH THAT IMMEDIATELY
+DESTRUCTURES IT. Per iteration that allocates a payload record, a box for the
+Int inside it, and a wrapper carrying the tag — none of which outlives the
+expression. Same shape as `let p = { … }` with every use a field read, one level
+up, and the tags are known on both sides at compile time.
+
+NEXT, and it composes with what is already here: fold a match whose scrutinee is
+a `MakeVariantIR` of a known tag into the one case that matches, binding the
+pattern's `fieldSlots` — which already exist — to the construction's field
+values. That turns the loop branch into `BlockIR([Let(slot, value)], <tail
+call>)`, which is precisely the shape [LetCopyPropagation] substitutes and
+collapses, after which the tier fuses. The expected landing is the control.
+
 ## Surface still to cover
 
 Not yet measured on this branch. Listed so the gaps are visible rather than
