@@ -34,6 +34,8 @@ use std::collections::seq
 use std::collections::list
 use std::collections::map
 use std::collections::bytes
+use std::collections::set
+use std::collections::deque
 use std::collections::nonemptylist
 use std::effects::log::{ println, Console }
 use std::effects::time::{ SystemTime, monotonic }
@@ -79,6 +81,15 @@ let k_bytes = { b } -> bytes::fold { b = b, init = 0, f = { acc, byte } -> acc +
 ##      equal keys, so folding the values gives kernel 1's checksum.
 let k_map = { m } -> map::fold { m = m, init = 0, f = { acc, k, v } -> acc + v }
 
+## ── 6/7. Deque and Set. These ARE in the fuser's vocabulary, and they are
+##        promoted through `promoteOpaqueSource`'s synthetic `to_seq` call — an
+##        O(n) materialisation on every fold. Adding `nel` the same way made it
+##        22x SLOWER (9 058 -> 201 016 ps/elem), so these two are here to ask
+##        whether the shipped compiler is already paying that. A/B them with
+##        MEZZE_CHAIN_CANONICALIZE=0, which turns the promotion off.
+let k_deque = { d } -> deque::fold { d = d, init = 0, f = { acc, x } -> acc + x }
+let k_set = { s } -> set::fold { s = s, init = 0, f = { acc, x } -> acc + x }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
 
@@ -107,6 +118,16 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     k_bytes { b = built }
     report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
     report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
+  else if k == 6 then do
+    let built = deque::from_seq { xs = src }
+    k_deque { d = built }
+    report { name = "6 deque fused?  ", n = n, r = time_it { f = {} -> k_deque { d = built } } }
+    report { name = "6 deque fused?  ", n = n, r = time_it { f = {} -> k_deque { d = built } } }
+  else if k == 7 then do
+    let built = set::from_seq { xs = src }
+    k_set { s = built }
+    report { name = "7 set   fused?  ", n = n, r = time_it { f = {} -> k_set { s = built } } }
+    report { name = "7 set   fused?  ", n = n, r = time_it { f = {} -> k_set { s = built } } }
   else do
     let built = map::from_list {
       xs = list::from_seq { xs = seq::map { xs = src, f = { x } -> { k = x, v = x } } },

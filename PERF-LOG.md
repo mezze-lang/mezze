@@ -78,8 +78,9 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
-| **`bytes` fold — no fusion at all** | **19x** a storage-matched baseline (35 173 vs 1 815 ps/elem) | `bytes` is absent from `NativeHofNames.isAnyElementCollection`. Adding the prefix is the WRONG fix: `promoteOpaqueSource`'s `to_seq` route would copy a packed byte array into a seq of boxed `Int`s. Wants a source that walks the array in place |
-| **`nel` fold — no fusion at all** | **5.0x** (9 058 vs 1 815) | also absent from the vocabulary, but element-shaped and cons-like, and `__native_nel_to_seq` already exists — the cheapest of these |
+| **`bytes` fold — no fusion at all** | **19x** a storage-matched baseline (35 173 vs 1 815 ps/elem) | `bytes` is absent from `NativeHofNames.isAnyElementCollection`. Adding the prefix is the WRONG fix, now MEASURED on nel: the `to_seq` route made that 22x worse, and it is what made set and deque 7x slower. Wants a `byte[]` indexed walk, which should reach near the seq floor |
+| `set` / `deque` bare fold | was **7x SLOWER FUSED than unfused**; FIXED | `promoteOpaqueSource` materialised the whole collection into a Seq to fuse it. Now refuses the copy when there are no stages to pay for it — the same guard `size` already had. deque 71 508 -> 14 041, set 188 633 -> 19 826 |
+| **`nel` fold — no fusion at all** | **5.0x** (9 058 vs 1 815) | absent from the vocabulary. Adding it via `to_seq` measured **22x WORSE** and was reverted: it needs its own source walk, not a conversion. Cons-like, so `RawList` may serve as it stands |
 | **`map` fold — no fusion at all** | **40.7x** a storage-matched baseline (73 873 vs 1 815 ps/elem), 130x seq — the LARGEST collection gap | 19 HOFs across map and sorted_map, all absent from the vocabulary. `map::fold`'s folder takes THREE arguments, `{ acc, k, v }`, where every sink the fuser has takes two: a design extension, not a prefix |
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
 | **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | `MEZZE_TRACE_FUSION` names it exactly: `native=__native_iter_fold source=CallIndirectScalarIR:through-a-slot`. `peelSource` cannot follow a call through a frame slot. The node IS present when the canonicalizer runs — an earlier note here said otherwise, from a pass whose own trace had untraced early-outs. `dotprobe` k3 |
@@ -2787,6 +2788,61 @@ Not the same work, and not all of it cheap:
 
 So "add the prefixes" is right for nel, actively wrong for bytes, and not
 applicable to map.
+
+### Fusion was making set and deque SEVEN TIMES slower
+
+The four collections above are absent from the fuser's vocabulary. Adding `nel`
+the documented way — a prefix plus `promoteOpaqueSource`'s synthetic `to_seq`
+call, exactly as set, sorted_set and deque are handled — measured **22x WORSE**
+(9 058 -> 201 016 ps/elem) and was reverted. Which raised the obvious question
+about the three collections already on that path.
+
+A/B on one CLI with `MEZZE_CHAIN_CANONICALIZE=0`, so "off" is the direct walk and
+"on" is the shipped compiler. Fold over 1e6 elements, identical checksums:
+
+| kernel | fusion off | fusion on | |
+|---|---|---|---|
+| seq | 14 763 | **697** | 21x faster |
+| list | 18 252 | **1 915** | 9.5x faster |
+| deque | **10 955** | 71 508 | **6.5x SLOWER** |
+| set | **26 776** | 188 633 | **7.0x SLOWER** |
+
+**A shipped optimisation was a 7x de-optimisation for two collections.**
+
+### Why, and why seq and list are different
+
+The fused emit is driven by its source kind, and two kinds walk the structure
+where it lies: `RawSeq` indexes, `RawList` walks cons cells. That is the whole
+reason seq and list gain — they never copy. Set, sorted_set and deque have no
+such walk, so they were promoted by MATERIALISING the entire collection into a
+Seq first: O(n) allocation on every chain. With stages to fuse, the copy buys a
+tight loop. For a bare fold it buys nothing and costs the copy.
+
+The fix is the guard this file already applies to `size`, whose comment states
+the principle: "size on a materialised collection is O(1), and routing it
+through a counting sink would make it O(n) — a regression dressed as an
+optimisation". Two of `promoteOpaqueSource`'s twelve call sites tested
+`stages.isNotEmpty()` by hand; the rule now lives in the function.
+
+| | before the guard | after | direct walk |
+|---|---|---|---|
+| deque | 71 508 | **14 041** | 10 955 |
+| set | 188 633 | **19 826** | 26 776 |
+
+seq and list are untouched. Set now beats its own unfused path.
+
+The staged case is left promoting, because a bare fold is what the measurement
+covers — whether copy-then-fuse beats a direct walk with two callbacks is a
+separate question.
+
+### What these collections actually need
+
+Their own walk, not a conversion. Per storage: a `SourceIR` variant, the
+canonicalizer producing it, and a BDSL loop operation that iterates that
+storage — the third being the real work and the reason `to_seq` was used
+instead. `bytes` is the most rewarding, a `byte[]` indexed walk with no boxing,
+which should land near the seq floor from 35 173; `nel` the easiest, cons-like
+and possibly able to reuse `RawList` as it stands.
 
 ### A refusal trace, and the wrong conclusion it corrected
 
