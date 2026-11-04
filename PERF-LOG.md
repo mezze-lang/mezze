@@ -3401,6 +3401,80 @@ variant per storage with a BDSL loop that walks it in place.
 
 ---
 
+## Bytes chain fusion: BUILT, MEASURED, REVERTED
+
+This log listed own-source-walk fusion for bytes as the next piece, on the
+strength of the bytes fold sitting 23x off the fused seq fold. I built it end to
+end, measured it, and took it out. The gap is real; fusion is not the thing that
+closes it.
+
+### What was built
+
+- `SourceIR.RawBytes(xs)` — a bytes source walked IN PLACE. Unlike Set,
+  SortedSet and Deque, which reach the loop through a synthetic `to_seq` that
+  copies every element on every fold, a byte array is already indexable.
+- `SeqGet` (`SeqAccessNode`) and `SeqSize` gained a bytes specialization, with
+  `& 0xFF` so the element arrives as the `Int` in 0-255 that
+  `std::collections::bytes` declares.
+- `__native_bytes_fold` as a sink, and `take`/`drop` as the only fusable stages.
+- Kernel 8 in `fuseall`: a STAGED bytes chain, which is where fusion could pay.
+
+### Two correctness traps on the way, both real
+
+**`bytes::map` and `bytes::from_seq` TRUNCATE.** Both push every result through
+`byteValue()`, so peeling either as an ordinary element stage would drop the
+truncation and make a fused chain compute a DIFFERENT answer:
+`bytes::map { f = { x } -> x * 2 }` over a byte of 200 is 144, not 400. Adding
+bytes to `isAnyElementCollection` — the obvious move — enables exactly that, and
+`ELEMENT_COLLECTION_PREFIXES` enables it again by another route through
+`extractNativeOp`. Bytes therefore belongs in neither; it needs per-operation
+admission, which is why `isPeelableStage` exists as ONE gate rather than the
+question being asked in two places with two answers. It was asked in two places
+first, and the staged chain silently did not fuse.
+
+**The first kernel 8 could not fail.** It dropped ONE element — and element 0 of
+`i % 256` is the byte 0, so the checksum was identical to kernel 4 whether the
+drop happened or was ignored. Dropping three makes it 124 713 against 124 716.
+
+### The measurement, and why it ends here
+
+Same binary, same kernel, fusion's own switch (`MEZZE_CHAIN_CANONICALIZE=0`),
+min of 5 at n=2M:
+
+| | fusion ON | fusion OFF |
+|---|---|---|
+| kernel 4, bare fold | 8 229 | 13 183 |
+| kernel 8, `drop` + fold | **13 492** | **11 256** |
+
+The bare-fold row looks like a win and is not readable: across runs that same
+configuration gave 6 633, 8 229, 9 679, 11 191, 12 662 and 39 899 ps/elem on one
+binary. The staged row is the one that decides, and it goes the wrong way.
+
+The emitter said why before the stopwatch did — `emitted fused loop (Accumulate,
+0 stages)`. For a BARE fold there is nothing to eliminate, so fusing only
+replaces `BytesNatives.fold` — a tight loop on the scalar-ABI bypass — with the
+generic BDSL loop, a boxed accumulator and a bounds-checked `SeqGet`. And WITH a
+stage it still does not pay, because `bytes::take`/`drop` are a single
+`System.arraycopy`: fusing them saves one memory-bandwidth-bound memcpy and
+charges a slower per-element loop for the privilege.
+
+**The criterion, which is the part worth keeping.** Adding a collection to the
+fuser pays only when the fused loop is faster per element than that collection's
+own natives, or when it removes per-element work. For bytes neither holds: the
+natives are already tight and the stages are not per-element. `nonemptylist`
+going 22x SLOWER was the same thing with a `to_seq` copy on top, and this is that
+lesson without the copy to blame it on.
+
+So the 23x against the fused seq fold is NOT fusion overhead — it is what a
+boxed per-element guest callback costs against a SIMD-able primitive loop, and
+closing it means attacking the callback, not the chain. `ScalarCall`'s 15%
+(above) is the near end of that thread.
+
+Reverted: all 14 compiler files. Kept: kernel 8, which is the instrument that
+measured it, and this entry.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup

@@ -75,6 +75,28 @@ let k_nel = { xs } -> nonemptylist::fold_left { xs = xs, init = 0, f = { acc, x 
 ##      shared: sum of (i % 256) for i in 0..n-1.
 let k_bytes = { b } -> bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte }
 
+## ── 8. BYTES WITH A STAGE. Kernel 4 is a BARE fold, where fusing can only
+##      lose: `BytesNatives.fold` is already a tight loop on the scalar-ABI
+##      bypass, so replacing it with the generic BDSL loop buys nothing and
+##      costs a boxed accumulator. Measured as such, which is why the
+##      canonicalizer refuses a bytes source with no stages.
+##
+##      THIS is where it pays. `bytes::drop` ALLOCATES a whole new byte array;
+##      fused into the walk it allocates nothing and the fold reads straight
+##      past the dropped prefix. `take`/`drop` are the only bytes stages the
+##      fuser accepts — `map` truncates each result to 8 bits and a plain Map
+##      stage would silently drop that.
+##
+##      sum of (i % 256) for i in 3..n-1 — the first THREE elements dropped.
+##      Three and not one: element 0 is the byte 0, so dropping it leaves the
+##      checksum identical to kernel 4 and the kernel cannot tell a drop that
+##      happened from one that was ignored. Dropping 0,1,2 takes 3 off the
+##      total, so at n=1000 this must read 124713 against kernel 4's 124716.
+let k_bytes_staged = { b } -> bytes::fold {
+  b = bytes::drop { b = b, n = 3 },
+  init = 0, f = { acc, byte } -> acc + byte,
+}
+
 ## ── 5. Map. The folder is THREE arguments, `{ acc, k, v }`, because a map folds
 ##      ENTRIES and not elements — which is why fusing it is a design extension
 ##      rather than another prefix in the vocabulary. Keys are 0..n-1 and values
@@ -118,6 +140,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     k_bytes { b = built }
     report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
     report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
+  else if k == 8 then do
+    let built = bytes::from_seq { arr = seq::map { xs = src, f = { x } -> x % 256 } }
+    k_bytes_staged { b = built }
+    report { name = "8 bytes staged  ", n = n, r = time_it { f = {} -> k_bytes_staged { b = built } } }
+    report { name = "8 bytes staged  ", n = n, r = time_it { f = {} -> k_bytes_staged { b = built } } }
   else if k == 6 then do
     let built = deque::from_seq { xs = src }
     k_deque { d = built }
