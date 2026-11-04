@@ -1,0 +1,12 @@
+[package]
+name = "dotprobe"
+version = "0.1.0"
+
+[[app]]
+name = "dotprobe"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

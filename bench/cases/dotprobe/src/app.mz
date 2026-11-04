@@ -1,0 +1,96 @@
+## ONE pipeline per build, so the IR can be attributed.
+##
+## `fusecross` cannot settle whether its kernel 1 fuses: every kernel is a
+## top-level function, the trivial-wrapper inliner folds most of them into
+## `main`, and `main` then holds a mixture of fused and unfused chains that no
+## per-function scan can separate. Its kernel 1 measured 11 511 ps/elem against
+## kernel 3's 209 — 55x — which would mean the DOT form, the way pipelines are
+## normally written, does not fuse. That is too important to infer.
+##
+## So: one chain, one module, and the spelling chosen by argv so neither branch
+## is a compile-time constant that could fold the other away.
+##
+##   k=1  dot form          xs.map{}.filter{}.fold{}
+##   k=2  free-function     iter::fold{ it = iter::filter{ it = iter::map{…} } }
+##
+## Both compute the same checksum. Read the IR with
+##   MEZZE_DUMP_FN='*' ./.build/dotprobe <k> 100 2>&1 | grep -c FusedChainIR
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let k_dot = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x > 2 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+let k_free = { n } -> iter::fold {
+  it = iter::filter {
+    it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x > 2,
+  },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
+let factor_of = { n } -> if n > 0 then 3 else 1
+
+let k_capturing = { n } -> do
+  let factor = factor_of { n = n }
+  let scaled = { xs } -> iter::map { it = xs, f = { x } -> x * factor }
+  iter::fold {
+    it = iter::filter { it = scaled { xs = iter::range { start = 0, end = n } }, p = { x } -> x > 2 },
+    init = 0, f = { acc, x } -> acc + x,
+  }
+
+let stages_cond = { xs, on } ->
+  if on then iter::filter { it = iter::map { it = xs, f = { x } -> x * 3 }, p = { x } -> x > 2 }
+  else xs
+
+let k_cond = { n } -> iter::fold {
+  it = stages_cond { xs = iter::range { start = 0, end = n }, on = n > 0 },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 2000000 }
+  if k == 1 then do
+    k_dot { n = n }
+    k_dot { n = n }
+    report { name = "1 dot ", n = n, r = time_it { f = {} -> k_dot { n = n } } }
+    report { name = "1 dot ", n = n, r = time_it { f = {} -> k_dot { n = n } } }
+  else if k == 2 then do
+    k_free { n = n }
+    k_free { n = n }
+    report { name = "2 free", n = n, r = time_it { f = {} -> k_free { n = n } } }
+    report { name = "2 free", n = n, r = time_it { f = {} -> k_free { n = n } } }
+  else if k == 3 then do
+    k_capturing { n = n }
+    k_capturing { n = n }
+    report { name = "3 capt", n = n, r = time_it { f = {} -> k_capturing { n = n } } }
+    report { name = "3 capt", n = n, r = time_it { f = {} -> k_capturing { n = n } } }
+  else do
+    k_cond { n = n }
+    k_cond { n = n }
+    report { name = "4 cond", n = n, r = time_it { f = {} -> k_cond { n = n } } }
+    report { name = "4 cond", n = n, r = time_it { f = {} -> k_cond { n = n } } }

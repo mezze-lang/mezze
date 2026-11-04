@@ -121,6 +121,48 @@ let k_two_hops = { n } -> iter::fold {
   init = 0, f = { acc, x } -> acc + x,
 }
 
+## ── 7. A CAPTURING HELPER. The stage closes over a value from the enclosing
+##      scope, so the helper function itself has a capture slot — and
+##      `peekThroughMonoWrapper` refuses outright on
+##      `captureSlots.isNotEmpty()`. Closing over a factor is an ordinary thing
+##      to write, so if this refuses, every parameterised pipeline helper is off
+##      the fused path.
+let k_capturing = { n } -> do
+  let factor = 3
+  let scaled = { xs } -> iter::map { it = xs, f = { x } -> x * factor }
+  iter::fold {
+    it = iter::filter { it = scaled { xs = iter::range { start = 0, end = n } }, p = { x } -> x > 2 },
+    init = 0, f = { acc, x } -> acc + x,
+  }
+
+## ── 8. A CALLEE WHOSE BODY IS A CONDITIONAL, choosing between two pipelines.
+##      `peekThroughMonoWrapper` accepts a body that is a single call and
+##      nothing else, so an `IfIR` refuses. `on` is derived from `n` so the
+##      branch is not a compile-time constant; it is always true, which keeps
+##      the checksum equal to every other kernel.
+let stages_cond = { xs, on } ->
+  if on then iter::filter { it = iter::map { it = xs, f = { x } -> x * 3 }, p = { x } -> x > 2 }
+  else xs
+
+let k_cond = { n } -> iter::fold {
+  it = stages_cond { xs = iter::range { start = 0, end = n }, on = n > 0 },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
+## ── 9. FIVE FORWARDING HOPS, one past `MAX_PEEK_HOPS = 4`. Nothing about this
+##      pipeline is harder than kernel 6; it is only spelled through more
+##      functions. The bound is a budget, not a semantic limit, so this kernel
+##      is what says whether the budget is in the right place.
+let hop_a = { xs } -> stages_clean { xs = xs }
+let hop_b = { xs } -> hop_a { xs = xs }
+let hop_c = { xs } -> hop_b { xs = xs }
+let hop_d = { xs } -> hop_c { xs = xs }
+
+let k_five_hops = { n } -> iter::fold {
+  it = hop_d { xs = iter::range { start = 0, end = n } },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
 
@@ -152,4 +194,16 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     k_two_hops { n = n }
     report { name = "6 two hops       ", n = n, r = time_it { f = {} -> k_two_hops { n = n } } }
     report { name = "6 two hops       ", n = n, r = time_it { f = {} -> k_two_hops { n = n } } }
+  else if k == 7 then do
+    k_capturing { n = n }
+    report { name = "7 capturing helper", n = n, r = time_it { f = {} -> k_capturing { n = n } } }
+    report { name = "7 capturing helper", n = n, r = time_it { f = {} -> k_capturing { n = n } } }
+  else if k == 8 then do
+    k_cond { n = n }
+    report { name = "8 conditional body", n = n, r = time_it { f = {} -> k_cond { n = n } } }
+    report { name = "8 conditional body", n = n, r = time_it { f = {} -> k_cond { n = n } } }
+  else if k == 9 then do
+    k_five_hops { n = n }
+    report { name = "9 five hops      ", n = n, r = time_it { f = {} -> k_five_hops { n = n } } }
+    report { name = "9 five hops      ", n = n, r = time_it { f = {} -> k_five_hops { n = n } } }
   else println { msg = "unknown kernel" }

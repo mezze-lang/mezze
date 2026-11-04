@@ -79,9 +79,9 @@ a defect, not a conservative default.
 | cell | gap | cause |
 |---|---|---|
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
-| a fusable chain through a CAPTURING helper | unmeasured | `peekThroughMonoWrapper` refuses on `captureSlots.isNotEmpty()`, which is any nested helper closing over a value. `fusecross` k7 |
-| a callee whose body is an `if` over two pipelines | unmeasured | the peek accepts a body that is a single call and nothing else. `fusecross` k8 |
-| a chain through more than 4 forwarding hops | unmeasured | `MAX_PEEK_HOPS = 4`, a budget rather than a semantic limit. `fusecross` k9 |
+| **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | the call is a `CallIndirectIR`, so `peelSource` stops before the cross-function peek is even consulted. `dotprobe` k3 |
+| **a callee whose body is an `if` over two pipelines** | **286x** (43 416 vs 152) | the peek accepts a body that is a single call and nothing else. `dotprobe` k4. Same root as the row above: `TrivialWrapperInliner` refuses any body holding a `MakeLambdaIR`, which every staged helper has |
+| a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
 | **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
@@ -2617,6 +2617,47 @@ so a helper mono declined to specialise would keep its binding and keep costing
 its caller the pipeline — which ties this to the open `typeParams`
 over-collection, since that is a reason mono declines. The predicate now sees
 through a direct call to a chain op within two hops.
+
+### The two fusion gaps, sized — 324x and 286x
+
+`bench/cases/dotprobe` is one pipeline per spelling in a small module, built
+because `fusecross` could not settle its own kernel 1: nine kernels, most folded
+into `main` by the trivial-wrapper inliner, and `main` then holds a mixture of
+fused and unfused chains that no per-function scan separates. It read 11 511
+ps/elem for the dot form against kernel 3's 209, which would have meant the DOT
+form — how pipelines are normally written — does not fuse.
+
+It does. n = 2e6, identical checksums, four kernels in one module:
+
+| kernel | ps/elem | vs floor |
+|---|---|---|
+| 1 dot form `xs.map{}.filter{}.fold{}` | **152** | at floor |
+| 2 free-function form | **209** | at floor |
+| 3 stage from a CAPTURING local helper | **49 280** | **324x** |
+| 4 callee whose body is an `if` over two pipelines | **43 416** | **286x** |
+
+So the dot form is at the floor and marginally faster than the free-function
+spelling, and `fusecross`'s reading for it was an artefact of that case. Its IR
+evidence stands — that is a compile-time property attributed to named functions —
+but **its absolute numbers cannot rank anything**, and the two gaps it pointed at
+are confirmed here on a second instrument at the same ordering.
+
+### One root under both
+
+`k_capturing`'s helper is a LOCAL lambda, so the call is a `CallIndirectIR` and
+`peelSource` stops before `peekThroughMonoWrapper` is consulted at all;
+`stages_cond` is a top-level function whose body is an `IfIR`, which that peek
+refuses because it accepts a body that is a single call and nothing else. Both
+reduce to the same thing: `TrivialWrapperInliner.countParamReads` returns false
+on any body containing a `MakeLambdaIR` — "those make inlining unsafe at this
+level" — and a staged pipeline helper always contains one. So no staged helper is
+ever inlined, and the canonicalizer's narrow peek is the only route across a
+function boundary.
+
+The structural fix is to let that inliner take a body with lambdas, remapping
+their `CaptureIR` slots into the caller's frame — which `FrameExtender` already
+does for the peek path, so the machinery exists. 324x and 286x is what it is
+worth.
 
 ### Still above floor
 
