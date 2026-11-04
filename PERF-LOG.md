@@ -107,10 +107,8 @@ a defect, not a conservative default.
 | string interpolation | 1.8x the concat it desugars to (18 571 vs 10 084 ps) | the one row where a desugaring costs more than its target. Cause not isolated |
 | an `Option` returned by a native | +2.5 ns, +10 GCs over the `Bool`-returning lookup | `VariantMatchFolder` folds a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
 | record update, record outlives the expression | 18.1x (14 517 ps), 24 GCs | no record pass can erase a record that outlives its expression — but this is close to a bare native call, so the split is not yet made |
-| closure param, generic callee | **190x** (57 ns) — **UNVERIFIED since the mono fixes** | dict wrapper; 52 of 57 ns. MONO |
-| HOF-reached pipeline | **460x** — **UNVERIFIED since the mono fixes** | generic dict-passing copy executes. MONO |
-| `iter.fold` with a real closure | 30x (9 ns) — **UNVERIFIED since the mono fixes** | MONO |
-| closure param, non-generic | 13x (4 ns) — **UNVERIFIED since the mono fixes** | call layers + arg record |
+| ~~HOF-reached pipeline~~ | **CLOSED — AT FLOOR.** 86 ps/elem against kernel 1's 91 | `fusegaps` 16 re-measured. The 460x was fixed earlier ON THIS BRANCH and this row was never struck; the narrative below and the "Landed" table both said so while this table did not |
+| **a call through a closure / function parameter** | **~8-11x** a 0.25 ns control: generic 2.65 ns, non-generic 2.35, `iter.fold` with an unreducible folder 1.95 (min of 4, control 5 ms in all four) | **THREE ROWS COLLAPSED INTO THIS ONE, and the old cause is WRONG.** They claimed 190x / 30x / 13x and named the dict wrapper. The wrapper is GONE: generic against non-generic was 57 vs 4 ns, a 14x spread, and is now 2.65 vs 2.35 — **13%**. So what remains is one cost shared by every closure-calling route, and it is the indirect call plus argument plumbing, NOT mono. UNMEASURED: what the floor for an indirect call even is |
 | **`ScalarCall` vs an inlined loop** | **15%**, paid by six collections on every element of every fold | MEASURED on one native, same kernel: 8 089 hand-rolled against 9 275, control 383 → 366. NOT escape analysis — `@CompilerDirectives.ValueType` changed nothing (9 323 vs 9 275). `call2` is already small with final fields, which leaves the branch on `scalar` and the call-site inlining decision: graph questions |
 | `MEZZE_MONO_STRIP=1` | **crashes the compiler** | liveness scan counts a capture as dead. Fix written, unapplied |
 | HOF call-site seeding | zero specialisations | `MonoDriver` seed gate |
@@ -3680,6 +3678,58 @@ and I resampled rather than report it — min of 5 came back 372, consistent wit
 the 383-391 from earlier in the session, while deque and set were steady across
 the same window. One sample above the 1.15x bar is a sample, not a shift; the
 check is whether the OTHER rows moved with it.
+
+---
+
+## Re-measuring beat acting: four rows claiming 190x, 460x, 30x and 13x
+
+The ledger's own instruction is that a row whose cause was attributed to a
+subsystem that has since changed is a memory, not a measurement. Mono was fixed
+in three places this session, so the four rows resting on its dict wrapper were
+marked UNVERIFIED and re-measured before anything was done about them. All four
+were wrong, and one of them would have been actively wasted work.
+
+### `dispatch_probe`, n=2e7, min of 4 — control 5 ms in all four runs
+
+| route | the ledger claimed | measured |
+|---|---|---|
+| `direct` (control) | — | 5 ms = **0.25 ns/iter** |
+| `via_hof` — closure param, generic | **190x**, 57 ns | 53 ms = **2.65 ns** (10.6x) |
+| `via_hof_nodict` — non-generic | 13x, 4 ns | 47 ms = **2.35 ns** (9.4x) |
+| `via_iterfold2` — unreducible folder | 30x, 9 ns | 39 ms = **1.95 ns** (7.8x) |
+| `via_ability` | — | 6 ms = **0.30 ns** (at floor) |
+
+**Three rows are one row, and the cause they named is gone.** They all blamed
+the dictionary wrapper. Generic against non-generic used to be 57 ns against 4 —
+a 14x spread that WAS the wrapper. It is now 2.65 against 2.35, **13%**. So the
+wrapper has stopped being the cost from two directions at once, and what is left
+is a single ~2-2.65 ns charge shared by every route that calls through a closure
+— the indirect call and its argument plumbing, which is not mono's business.
+
+### `fusegaps` 16, the 460x row
+
+| kernel | was | now |
+|---|---|---|
+| 01 map+filter (control) | 90 | 91 |
+| 16 reached through a function VALUE | 41 600 | **86** |
+
+**At the fusion floor** (~85 ps/elem), level with the control, identical
+checksums. And it was fixed EARLIER ON THIS BRANCH: the narrative section
+"FIXED: a pipeline behind a higher-order parameter — was 460x, now at the floor"
+records 41 600 → 94, and the "Landed" table says 440x. The ABOVE FLOOR table
+just never had the row struck, so one document carried both the fix and the
+claim it had not happened.
+
+### What this cost, and what it saved
+
+I had named the 460x as the largest remaining claimed gap and said re-measuring
+it outranked acting on it. That was right by luck as much as judgement: acting
+on it would have been optimising something already AT THE FLOOR, and the only
+thing that distinguishes those two outcomes is which one you do first.
+
+The rule the ledger now carries: **a stale row is worse than a missing one.** A
+missing row reads as unknown, which is true. A stale row reads as measured,
+which is false, and it sorts into the queue ahead of things that are real.
 
 ---
 
