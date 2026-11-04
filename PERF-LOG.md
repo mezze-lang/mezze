@@ -79,7 +79,7 @@ a defect, not a conservative default.
 | cell | gap | cause |
 |---|---|---|
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
-| **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | the call is a `CallIndirectIR`, so `peelSource` stops before the cross-function peek is even consulted. `dotprobe` k3 |
+| **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | the call survives to the final IR as `CallIndirectScalarIR(function=ReadLocalIR(slot))` — a call through a frame slot, which `peelSource` cannot follow. An attempted pre-canonicalizer pass NEVER SAW that node, so whatever produces it runs LATER than the canonicalizer: the fix belongs in the canonicalizer's own walk, resolving a slot-held lambda, not in a pre-pass. `dotprobe` k3 |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
@@ -2658,6 +2658,44 @@ The structural fix is to let that inliner take a body with lambdas, remapping
 their `CaptureIR` slots into the caller's frame — which `FrameExtender` already
 does for the peek path, so the machinery exists. 324x and 286x is what it is
 worth.
+
+### The capturing-helper gap: where the fix does NOT go
+
+An attempt at this one was written and reverted, because it fired on nothing.
+The reasoning is worth keeping, since it says where the fix belongs.
+
+`LocalStageInliner` was to inline a call to a let-bound lambda whose body is a
+chain stage, remapping `ReadCaptureIR(i)` to the caller slot behind capture `i`
+and a nested `MakeLambdaIR`'s `CaptureIR(slot=j)` likewise — all of which is
+decidable, because the binding names the target and the capture mapping in one
+node and the frame is `[captures…, params…, locals…]`.
+
+It was placed before `ChainCanonicalizer`, and a refusal trace
+(`MEZZE_TRACE_LOCAL_STAGE=1`, named reasons, the same device as
+`MEZZE_TRACE_WRAPPER`) showed why nothing happened — in four steps, each of which
+corrected a guess:
+
+1. `body-not-a-stage:CallDirectIR` — a stage is a `CallNativeIR` only in a
+   MONOMORPHISED clone; the generic body still calls `iter::map`. Widened, the
+   same correction [ChainLetInliner] needed.
+2. Then nothing fired at all: the call is a `CallIndirectScalarIR` in the FINAL
+   IR but the record-arg `CallIndirectIR` earlier, and only the first was
+   handled. Both handled.
+3. Then a per-function trace confirmed the block IS walked and DOES bind the
+   lambda — `fn=k_capturing bodyKind=BlockIR lambdaLets=[scaled@2]`.
+4. And yet the complete refusal list still held no entry for it, with every
+   call-shaped node otherwise named.
+
+So the call node this pass needs **does not exist at that point in the
+pipeline**. It appears in the final IR and not before the canonicalizer, which
+means it is produced after it — and a pre-canonicalizer pass can never see it.
+The fix has to be in the canonicalizer's own walk: teach `peelSource` to resolve
+a source that is a read of a slot holding a lambda, using the binding in the
+enclosing block.
+
+Reverted rather than kept: a pass that fires on nothing is not worth a pipeline
+stage and a raised file-size bound, and "plausible" is not a measurement — the
+same call made twice already in this effort.
 
 ### Still above floor
 
