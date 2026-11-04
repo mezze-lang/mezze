@@ -107,8 +107,8 @@ class VariantSpecReceiverTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `a mutable container element is invariant`() {
-        rejects(
+    @Test fun `a mutable container element may be narrower, like any container`() {
+        accepts(
             """
             use std::effects::mutation::{ Mut, LocalMut, MutSeq, seq_to_mut, push }
             pub let widen = { m: MutSeq (| Red, Pink |) } -> push { seq = m, v = Pink }
@@ -118,10 +118,15 @@ class VariantSpecReceiverTest : VariantSpecBase() {
               widen { m = m }
             $MAIN
             """,
-            "T0201",
-            "a mutable cell is WRITTEN (so it receives: element ⊆ declared) and READ " +
-                "(so it sends: declared ⊆ element). Only equality satisfies both, which " +
-                "is where invariance comes from — it is derived, not a special rule",
+            "MutSeq has the SAME semantics as Seq — it is a memory optimisation, not a " +
+                "different kind of container — so its element behaves exactly as a list's " +
+                "does (3.4) and may be narrower.\n\nThis test previously demanded " +
+                "invariance, on the reasoning that a mutable cell is written as well as " +
+                "read and so must satisfy both directions at once. That derivation is " +
+                "sound for a genuinely mutable cell and simply does not describe MutSeq. " +
+                "It was also the only rule in the suite that would have needed variance " +
+                "information the typechecker does not carry, and the only lever available " +
+                "was the constructor's NAME.",
         )
     }
 

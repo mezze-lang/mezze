@@ -104,30 +104,34 @@ class VariantSpecMatchingTest : VariantSpecBase() {
     }
 
     /** 5.5 — arms widen a bound value, and the widened value fits less. */
-    @Test fun `arms widen a bound value`() {
-        accepts(
+    @Test fun `an arm outside a bound value's group is extra`() {
+        rejects(
             "pub let u = {} -> do\n  let v = Red\n  match v is\n    Red -> 1\n    Pink -> 2\n$MAIN",
-            "the arms contribute Red and Pink, so v's group widens rather than arm 2 " +
-                "being dead",
+            "V0704",
+            "A bound value's group is FIXED at the binding: `let v = Red` makes it " +
+                "| Red |, and the Pink arm is an extra arm on a group that does not hold " +
+                "Pink.\n\nArms widen an UNANNOTATED PARAMETER, where there is no group yet " +
+                "and the arms are the only evidence (5.9). A binding already has one. An " +
+                "earlier draft of this suite had arms widening a bound value too, which " +
+                "contradicted 4.1 — a bound value keeps its group and each use is checked " +
+                "— and the two could not both hold.",
         )
     }
 
-    @Test fun `a widened bound value no longer fits the narrow group`() {
-        rejects(
+    @Test fun `a bound value keeps its group through a match`() {
+        accepts(
             """
             pub let only_red = { c: | Red | } -> 1
             pub let u = {} -> do
               let v = Red
               let n = match v is
                 Red -> 1
-                Pink -> 2
               only_red { c = v }
             $MAIN
             """,
-            "T0201",
-            "this is the OTHER half of the rule above: if the arms really widened v to " +
-                "| Red, Pink |, it cannot then be passed where only | Red | is accepted. " +
-                "Accepting both is incoherent — the widening either happened or it did not",
+            "The mirror of the test above: with no extra arm, v is still | Red | after " +
+                "the match and fits a | Red | position. Nothing widened it, which is the " +
+                "point — a match READS a value, it does not retype it.",
         )
     }
 
@@ -276,8 +280,8 @@ class VariantSpecMatchingTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `arms widen a group at depth`() {
-        accepts(
+    @Test fun `an arm outside a payload's group is extra, at depth`() {
+        rejects(
             """
             pub let a = {} -> do
               let v = Some { val = Red }
@@ -287,9 +291,17 @@ class VariantSpecMatchingTest : VariantSpecBase() {
                 None -> 3
             $MAIN
             """,
-            "widening recurses, by bidirectional checking: the expected type pushes down " +
-                "into each pattern and what the arms name pushes up. Depth cannot matter, " +
-                "or position would change the rule in one place only",
+            // T0201: the user sees a FIELD mismatch on `val`, whose inner cause
+            // is the membership failure (V0704). Three wrappers in that chain
+            // were carrying the inner code by the end of this work and a fourth
+            // still flattens it; the outer tag is defensible either way, since
+            // the fault at the outer level genuinely is a field mismatch.
+            "T0201",
+            "Same rule as at the top level, one level down: `val`'s group is | Red | " +
+                "from the literal, so the Pink arm is extra. A payload is a record and " +
+                "its fields are ordinary types, so nothing about depth changes the " +
+                "answer.\n\nThis test previously expected the two arms to JOIN into " +
+                "| Red, Pink |, which is what widening a bound value would have implied.",
         )
     }
 }
