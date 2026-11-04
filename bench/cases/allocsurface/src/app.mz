@@ -1,0 +1,180 @@
+## WHAT ALLOCATES, PER ITERATION.
+##
+## Young-collection counts do NOT care about CPU contention, which makes them
+## the one kind of evidence that survives a loaded machine — and the one that
+## caught three findings in this effort already. So this case asks only "does it
+## allocate", across shapes the ledger had as UNKNOWN, and leaves the
+## picoseconds for a quiet box.
+##
+## READ IT AS: kernel 1's collection count is the floor. A kernel near it
+## allocates nothing per iteration; a kernel far above it allocates, and the
+## multiple is roughly how much.
+##
+##   MEZZE_JAVA_OPTS=-Xlog:gc ./.build/allocsurface <k> <n> 2>&1 | grep -c "Pause Young"
+##
+## Every kernel computes a checksum that depends on the operation, so none of
+## them can be folded away — but the checksums DIFFER between kernels here,
+## unlike every other case in this directory, because the operations are not
+## interchangeable. Each kernel's expected value is stated beside it.
+use std::collections::seq
+use std::collections::map
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::str
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## 1. CONTROL — nothing allocates. sum = n*(n+1)/2.
+let go_c = { i, acc } ->
+  if i <= 0 then acc
+  else go_c { i = i - 1, acc = acc + i }
+let k_control = { n } -> go_c { i = n, acc = 0 }
+
+## 2. RECORD UPDATE per iteration: `{ ...r, a = … }` where the record OUTLIVES
+##    the expression, so none of the record passes can erase it. This is the
+##    shape every "update one field of my state" writes.
+let go_u = { i, acc, r } ->
+  if i <= 0 then acc + r.a
+  else go_u { i = i - 1, acc = acc + r.a, r = { ...r, a = i } }
+let k_update = { n } -> go_u { i = n, acc = 0, r = { a = 0, b = 7 } }
+
+## 3. STRING CONCAT per iteration. Two fixed strings, so the result is the same
+##    every time and only the allocation varies. sum = n (one per length-2).
+let go_s = { i, acc } ->
+  if i <= 0 then acc
+  else go_s { i = i - 1, acc = acc + str::size { s = str::concat { l = "a", r = "b" } } }
+let k_concat = { n } -> go_s { i = n, acc = 0 }
+
+## 4. STRING INTERPOLATION per iteration — the same two characters, built the
+##    way a program actually builds strings.
+let go_p = { i, acc } ->
+  if i <= 0 then acc
+  else go_p { i = i - 1, acc = acc + str::size { s = "a$("b")" } }
+let k_interp = { n } -> go_p { i = n, acc = 0 }
+
+## 5. MAP GET per iteration against a map built ONCE. A lookup should allocate
+##    nothing except the `Option` it returns — which, per the variant fold, is
+##    exactly the shape that should now disappear.
+let go_m = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_m { i = i - 1, acc = acc + (match map::get { m = m, k = 1 } is
+                                       Some { val } -> val
+                                       None -> 0), m = m }
+let k_map_get = { n } -> go_m { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+## 6. MAP INSERT per iteration, each one producing a new map. A persistent map
+##    must allocate here; the question is how much.
+let go_i = { i, acc } ->
+  if i <= 0 then acc
+  else go_i { i = i - 1, acc = acc + map::size { m = map::insert { m = map::empty {}, k = i, v = i } } }
+let k_map_insert = { n } -> go_i { i = n, acc = 0 }
+
+## 7. SEQ INDEX per iteration against a seq built once. Should allocate nothing
+##    beyond the Option.
+let go_g = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_g { i = i - 1, acc = acc + (match seq::get { xs = xs, i = 0 } is
+                                        Some { val } -> val
+                                        None -> 0), xs = xs }
+let k_seq_get = { n } -> go_g { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
+
+## 8. MAP CONTAINS_KEY per iteration — the DISCRIMINATOR for kernel 5. Same map,
+##    same key, same hash-and-probe native; the only difference is that this one
+##    returns a Bool where `get` returns an `Option`. If this sits at the control
+##    and kernel 5 does not, the allocation in kernel 5 is the Option and not the
+##    lookup.
+let go_k = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_k { i = i - 1, acc = acc + (if map::contains_key { m = m, k = 1 } then 1 else 0), m = m }
+let k_map_has = { n } -> go_k { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+## 9. MAP SIZE per iteration — a native call that does NO lookup and returns an
+##    Int. This is the "does calling a native in a loop allocate at all" control,
+##    so that kernel 8 reading low cannot be mistaken for the call being free
+##    while kernel 5 reading high is blamed on the wrong thing.
+let go_z = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_z { i = i - 1, acc = acc + map::size { m = m }, m = m }
+let k_map_size = { n } -> go_z { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+## 10. TIER CONTROL — and the most important kernel in this case.
+##
+## Kernel 1 is on the FUSED tail-loop tier: the whole loop runs as Java with no
+## per-iteration bytecode. Every kernel from 2 onwards is off that tier, so
+## "kernel N minus kernel 1" charges the tier gap to whatever N was testing. This
+## kernel is off the tier too, for a reason that has nothing to do with anything
+## else here: it takes FOUR parameters, and the fused tier handles three. Its
+## body is pure arithmetic over its own parameters -- no call, no native, no
+## record, no string, nothing that can allocate.
+##
+## So if THIS reads near kernel 1, the tier is free and each kernel's excess is
+## its own. If it reads near kernels 8 and 9, the per-iteration allocation is the
+## off-tier loop itself and every other number here is mostly that.
+##
+## sum = n*(n+1)/2, the same as kernel 1.
+let go_4 = { i, acc, p, q } ->
+  if i <= 0 then acc + p + q
+  else go_4 { i = i - 1, acc = acc + i, p = p, q = q }
+let k_tier = { n } -> go_4 { i = n, acc = 0, p = 0, q = 0 }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_control { n = n }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+  else if k == 2 then do
+    k_update { n = n }
+    report { name = "2 record update", n = n, r = time_it { f = {} -> k_update { n = n } } }
+    report { name = "2 record update", n = n, r = time_it { f = {} -> k_update { n = n } } }
+  else if k == 3 then do
+    k_concat { n = n }
+    report { name = "3 str concat   ", n = n, r = time_it { f = {} -> k_concat { n = n } } }
+    report { name = "3 str concat   ", n = n, r = time_it { f = {} -> k_concat { n = n } } }
+  else if k == 4 then do
+    k_interp { n = n }
+    report { name = "4 str interp   ", n = n, r = time_it { f = {} -> k_interp { n = n } } }
+    report { name = "4 str interp   ", n = n, r = time_it { f = {} -> k_interp { n = n } } }
+  else if k == 5 then do
+    k_map_get { n = n }
+    report { name = "5 map get      ", n = n, r = time_it { f = {} -> k_map_get { n = n } } }
+    report { name = "5 map get      ", n = n, r = time_it { f = {} -> k_map_get { n = n } } }
+  else if k == 6 then do
+    k_map_insert { n = n }
+    report { name = "6 map insert   ", n = n, r = time_it { f = {} -> k_map_insert { n = n } } }
+    report { name = "6 map insert   ", n = n, r = time_it { f = {} -> k_map_insert { n = n } } }
+  else if k == 7 then do
+    k_seq_get { n = n }
+    report { name = "7 seq get      ", n = n, r = time_it { f = {} -> k_seq_get { n = n } } }
+    report { name = "7 seq get      ", n = n, r = time_it { f = {} -> k_seq_get { n = n } } }
+  else if k == 8 then do
+    k_map_has { n = n }
+    report { name = "8 map has      ", n = n, r = time_it { f = {} -> k_map_has { n = n } } }
+    report { name = "8 map has      ", n = n, r = time_it { f = {} -> k_map_has { n = n } } }
+  else if k == 9 then do
+    k_map_size { n = n }
+    report { name = "9 map size     ", n = n, r = time_it { f = {} -> k_map_size { n = n } } }
+    report { name = "9 map size     ", n = n, r = time_it { f = {} -> k_map_size { n = n } } }
+  else if k == 10 then do
+    k_tier { n = n }
+    report { name = "10 tier control", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+    report { name = "10 tier control", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+  else println { msg = "unknown kernel" }
