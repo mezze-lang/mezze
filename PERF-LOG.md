@@ -23,6 +23,142 @@ baseline.
 
 ---
 
+## THE LEDGER — every cell, four states, no blanks
+
+The ranking instrument. Everything below this section is narrative and evidence;
+this is the index, and it is what makes "is X done?" answerable without
+recollection.
+
+**Why it exists.** "Take the largest measured gap" only works once everything is
+measured. Applied to a partial set it means "largest among the handful I happen
+to have", and every new measurement reshuffles the queue — which is how a
+session lands seventeen real commits and still cannot say what fraction of the
+language is fast. The 1503x `size` win was sitting in an EXISTING bench that
+nobody had run at a realistic N.
+
+**Four states. `done` is not one of them.**
+
+- **AT FLOOR** — with evidence and a ratchet test holding it there.
+- **ABOVE FLOOR** — with the *named cause*, never a guess.
+- **UNKNOWN** — never measured. A row, not an absence. This is the state that
+  hides wins.
+- **CLOSED** — cannot reach the floor; reason recorded so it is not
+  re-investigated. A `perform` in a loop can never be on tier 1, because that
+  tier runs the whole loop in Java and cannot call a guest handler.
+
+**Floors, defined up front so the work terminates.** Java-equivalent for
+arithmetic and loops · 0.30 ns for anything statically resolvable · the
+control's GC count for shapes that must not allocate · ~85 ps/elem where fusion
+applies · raw array-write cost where materialising is unavoidable · otherwise
+"floor unknown" plus the experiment that would settle it.
+
+**A cell is AT FLOOR only if it is also BOX-FREE.** Unboxed is a column, not a
+nice-to-have: a pass that emits `SlotKind.OBJECT` without looking up the type is
+a defect, not a conservative default.
+
+### AT FLOOR — verified on this branch, control ~230 ps/iter
+
+| cell | before → after | holding test |
+|---|---|---|
+| record from a local helper | 5 207 → 221 | RecordScalarizationTest, LocalHelperDevirtualizationTest |
+| record as loop state | 2 766 → 225 | ParamScalarizationTest |
+| record spread, fully overridden | ~9 400 → 278 | ParamScalarizationTest |
+| `let` in a loop body | 638 → 224 | LetCopyPropagationTest |
+| variant constructed + matched | 1 751 → 222 | VariantMatchFoldTest |
+| helper at module level | 671 → 229 | (native signature table) |
+| operator chain, inferred | 161 285 → 647 | ChainedOpMonoTest |
+| `seq::map` + size | 1503x | SizeChainSink{,Lowering}Test |
+| `seq::filter` + size | 36x | SizeChainSink{,Lowering}Test |
+| tail loops, 1-op / 4-op | 0.2 / 1.05 ns/iter (Java 1.06) | — |
+| ability method, single impl | 0.30 ns | — |
+| effect operation, marginal | ~0.38 ns | — |
+| `seq::fold` / `sum` / `any` | 0.37 / 0.36 / 0.42 ns/elem | — |
+
+### ABOVE FLOOR — cause named
+
+| cell | gap | cause |
+|---|---|---|
+| closure param, generic callee | **190x** (57 ns) | dict wrapper; 52 of 57 ns. MONO |
+| HOF-reached pipeline | **460x** | generic dict-passing copy executes. MONO |
+| `iter.fold` with a real closure | 30x (9 ns) | MONO |
+| closure param, non-generic | 13x (4 ns) | call layers + arg record |
+| `MEZZE_MONO_STRIP=1` | **crashes the compiler** | liveness scan counts a capture as dead. Fix written, unapplied |
+| HOF call-site seeding | zero specialisations | `MonoDriver` seed gate |
+| `to_seq` | ~4 500 ps/elem | materialising |
+| List ops vs Seq | 3-5x | storage |
+| record built once, fields read in loop | 2.2x | captured-record field reads |
+| binding read twice | ~3.5x | copy propagation refuses two reads |
+| binding in a cold branch | ~2.9x | two tail calls → tier declines |
+| partial spread | unmeasured | runtime merge; blocked on field order = Shape |
+| general-path floor | ~237 ps/iter | paid by every tier-1-inexpressible loop |
+| general-loop tier | 7x | IS the SIMD width; needs a stage program in FLP |
+| uniformly-OBJECT local/param slots | boxes | `localSlots` discards each `StmtIR.Let`'s kind |
+| `Object[] args` callback ABI | boxes twice per element | `SeqNatives.map` boxes on read AND on write |
+
+Every row in the first four lines is one subsystem. **Mono and HOF dispatch are
+a single work item**, taking `mezze.mono.effort = fast | full` as ONE budget on
+ONE code path — not two paths, because this session already produced a
+build-only-shaped bug: a specialisation whose self-call still targeted the
+generic hash.
+
+### UNKNOWN — never measured
+
+**Effects / continuations.** Handler install and uninstall · handler-chain depth
+· innermost vs outermost perform · scoped performers · the `abort` path ·
+**real continuation capture** (resume stored, deferred, or invoked twice — the
+~0.38 ns above is the fall-through single-return path ONLY) · a loop that
+installs a handler per iteration, which invalidates the cached path each time ·
+**effects with threads**: once a second thread installs handlers the
+`singleThreaded` assumption is invalidated FOR THE LIFE OF THE PROCESS and every
+op takes the re-resolving path.
+
+**Async / Loom.** spawn · join · channels · STM · atoms · parallel map ·
+cancellation · structured scope.
+
+**Strings.** concat · interpolate · split · format · compare · length · slice ·
+builder.
+
+**Collections.** Map · Set · SortedMap · SortedSet · Deque · NonEmptyList, every
+op; and `sort`, `group_by`, `zip`, `flat_map`, `to_seq`/`to_list`.
+
+**Scalars.** Float · Frac · Nat · Char · Bytes — arithmetic, conversion,
+comparison.
+
+**Pattern matching.** seq patterns · record patterns · string-interpolation
+patterns · guards · nesting · many-constructor dispatch.
+
+**Records, remaining.** `RecordUpdateIR` · records as collection elements ·
+records across a non-lambda boundary.
+
+**Other.** codec encode/decode · polyglot crossing · failure and exception paths
+· comptime · startup time · memory footprint.
+
+### CLOSED
+
+| cell | why |
+|---|---|
+| a `perform` inside a tier-1 loop | that tier runs the loop in Java; it cannot call a guest handler |
+| loading the runtime into the CLI's JVM | `ComptimeHost`: keeping Truffle out of that process is what keeps `mez` starting quickly |
+
+### Re-measure before trusting
+
+Every number in ABOVE FLOOR drawn from `dispatch_probe` and the HOF cases was
+recorded in an earlier round and NOT re-verified here. Two harnesses disagreed
+**9x** on `seq::fold` in this session, so a recorded number is a hypothesis
+until re-measured on the common harness.
+
+### The loop, per cell
+
+measure → **dump the IR and name the refusal** → fix → A/B with a kill switch on
+ONE build → gate the suites separately → commit with the number AND the refusals
+→ ratchet → update this table. Re-rank only when a measurement invalidates the
+order.
+
+**Termination:** zero UNKNOWN rows; every cell AT FLOOR, or ABOVE FLOOR with a
+cause being worked, or CLOSED.
+
+---
+
 ## Status at a glance
 
 Every number measured on this branch, from a `mez build` JAR on GraalVM CE
