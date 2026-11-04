@@ -18,6 +18,8 @@
 ## interchangeable. Each kernel's expected value is stated beside it.
 use std::collections::seq
 use std::collections::map
+use std::collections::list
+use std::collections::set
 use std::effects::log::{ println, Console }
 use std::effects::time::{ SystemTime, monotonic }
 use std::datetime::{ duration_to_nanos, sub_duration }
@@ -185,6 +187,26 @@ let go_y = { i, acc, s } ->
   else go_y { i = i - 1, acc = acc + str::size { s = s }, s = s }
 let k_str_size = { n } -> go_y { i = n, acc = 0, s = "a" }
 
+## 13. LIST GET per iteration against a list built ONCE. Same shape as kernel 7
+##     (`seq::get`): a lookup returning an `Option`, nothing it must allocate.
+##     `list::get` routes to `__native_list_get`, whose declared field is
+##     `index` rather than `i` — a positional port that guessed `i` would miss
+##     the all-params-present check and fall back to the record path in silence,
+##     so this kernel is also what proves the field name right.
+let go_l = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_l { i = i - 1, acc = acc + (match list::get { xs = xs, index = 0 } is
+                                        Some { val } -> val
+                                        None -> 0), xs = xs }
+let k_list_get = { n } -> go_l { i = n, acc = 0, xs = list::from_seq { xs = seq::range { start = 1, end = 3 } } }
+
+## 14. SET CONTAINS per iteration against a set built ONCE. Returns a `Bool`, so
+##     like kernel 8 it has no `Option` in the way, and nothing it must allocate.
+let go_st = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_st { i = i - 1, acc = acc + (if set::contains { s = s, x = 1 } then 1 else 0), s = s }
+let k_set_has = { n } -> go_st { i = n, acc = 0, s = set::from_seq { xs = seq::range { start = 1, end = 2 } } }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -240,4 +262,12 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_str_size { n = n }
     report { name = "12 str size    ", n = n, r = time_it { f = {} -> k_str_size { n = n } } }
     report { name = "12 str size    ", n = n, r = time_it { f = {} -> k_str_size { n = n } } }
+  else if k == 13 then do
+    k_list_get { n = n }
+    report { name = "13 list get    ", n = n, r = time_it { f = {} -> k_list_get { n = n } } }
+    report { name = "13 list get    ", n = n, r = time_it { f = {} -> k_list_get { n = n } } }
+  else if k == 14 then do
+    k_set_has { n = n }
+    report { name = "14 set has     ", n = n, r = time_it { f = {} -> k_set_has { n = n } } }
+    report { name = "14 set has     ", n = n, r = time_it { f = {} -> k_set_has { n = n } } }
   else println { msg = "unknown kernel" }

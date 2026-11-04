@@ -78,7 +78,7 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
-| **a native on the LEGACY RECORD ABI** | **13x** a scalar-ABI call (7 586 vs 577 ps), +16 GCs | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. A native on the SCALAR ABI is at floor — 577 ps against a 611 ps control. 128 ops were declared against 1298 legacy handlers; map and seq accessors now ported, 2-3x each. list/set/sorted/deque/mut remain |
+| **a native on the LEGACY RECORD ABI** | **13x** a scalar-ABI call (7 586 vs 577 ps), +16 GCs | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. A native on the SCALAR ABI is at floor — 577 ps against a 611 ps control. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared), 2-3x each. sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain |
 | a scalar-ABI MAP op vs the same shape on a string | 6x (3 762 vs 755 ps), 13 GCs vs 3 | EA is not removing `NativeDispatchScalarNode`'s `values` array and `PositionalArgs` wrapper for the map op though it does for the string one. `handler` is `@CompilationFinal`; candidate blocker is `MezzeMap.size()` -> `storage.size()` on the 9-impl sealed `MapStorage`. Next: dump the compiled graph rather than assume |
 | **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
 | a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
@@ -2437,6 +2437,59 @@ care about load:
 So **1.75x on the ratio and a quarter of the allocation gone**, with the two
 already-ported ops flat as controls. A persistent map must allocate nodes, so
 `map::insert` will not reach the floor; what came off it was the argument record.
+
+### Third round: list and set, and measuring a port with no "before"
+
+`ListOps.kt` (12 ops) and `SetOps.kt` (7 ops) followed, taking the signature
+table from 128 to **174**. `size` is absent from both — it is a fusion sink —
+along with list's `last`, `take`, `drop`, `concat`, `empty` and set's `to_list`,
+all of which are in `NativeHofNames`. The guard test accepted all nineteen.
+
+**The problem: these kernels are new, so there is no "before" to compare to.**
+`MEZZE_NATIVE_SIGS=0` cannot serve as the kill switch, because the stdlib
+snapshot is precompiled with signatures on and `list::get`'s body is inlined
+from it — turning the flag off at user-build time does not undo the snapshot.
+
+Two things settle it instead. First, the lowering is DIRECTLY observable:
+
+    CallNativeIR(name=__native_list_get,      arg=UnitLitIR    …)
+    CallNativeIR(name=__native_set_contains,  arg=UnitLitIR    …)
+    CallNativeIR(name=__native_list_from_seq, arg=MakeRecordIR …)
+    CallNativeIR(name=__native_set_from_seq,  arg=MakeRecordIR …)
+
+so the two hot ops moved and the two once-per-run constructors did not. Second,
+each new op has a STRUCTURAL TWIN already measured on both ABIs, and the twins
+were run in the SAME process under the SAME load:
+
+| kernel | ps/iter | young GCs | the twin's unported reading |
+|---|---|---|---|
+| 1 control | 456 | 2 | — |
+| 10 tier control | 984 | 2 | — |
+| **14 `set::contains`** — new | **6 270** | **12** | — |
+| 8 `map::contains_key` — twin, ported | 5 494 | 13 | 21 |
+| **13 `list::get`** — new | **11 339** | **22** | — |
+| 7 `seq::get` — twin, ported | 11 041 | 23 | 30 |
+
+`list::get` is indistinguishable from the ported `seq::get` — 22 GCs against 23,
+and within noise on time — where the unported `seq::get` read 30. `set::contains`
+sits with the ported `map::contains_key` at 12 against 13, where the unported one
+read 21. Both new ops are in the ported group and neither is near the unported
+baseline.
+
+That is weaker than a kill-switch A/B and it is recorded as such: it establishes
+that the port took effect, not an independent per-op ratio.
+
+**`getList` is the widest coercion of any accessor** — it accepts a `MezzeList`,
+a raw `Object[]`, AND a Cons/Nil `MezzeVariant` which it walks into a list, via a
+`@TruffleBoundary` helper. `NativeHelpers.asList` copies all three branches and
+the annotation. After the seq port cost twenty codec tests to a plain cast, the
+annotation was checked against the original rather than assumed.
+
+Also worth keeping: `__native_list_get` declares its index field as `index` while
+`__native_list_nth` declares `i`. A positional port that assumed one name for
+both would not crash — it would miss the all-params-present check in
+`TypedASTCompiler` and fall back to the record path **silently**, looking ported
+while being slow.
 
 ### Still above floor
 

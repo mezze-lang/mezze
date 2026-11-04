@@ -327,6 +327,64 @@ object NativeHelpers {
         )
     }
 
+    /**
+     * Bit-for-bit `NativeDispatch.getList`, minus the record lookup — the widest
+     * coercion of any collection accessor. It accepts a [MezzeList], a raw
+     * `Object[]`, AND a Cons/Nil `MezzeVariant`, which it walks.
+     */
+    fun asList(value: Any?, name: String): com.mezze.datastructures.list.MezzeList<*> {
+        if (value is com.mezze.datastructures.list.MezzeList<*>) return value
+        // Handle array literals (Object[]) - convert to MezzeList
+        if (value is Array<*>) {
+            @Suppress("UNCHECKED_CAST")
+            return com.mezze.datastructures.list.MezzeList.of(*(value as Array<Any?>))
+        }
+        // Handle Cons/Nil linked list variants
+        if (value is MezzeVariant) return consListToMezzeList(value)
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeList for field '" + name + "', got: " +
+                (if (value == null) "null" else value.javaClass.simpleName),
+        )
+    }
+
+    /** Bit-for-bit `NativeDispatch.convertLinkedListToMezzeList`. */
+    @TruffleBoundary
+    private fun consListToMezzeList(
+        variant: MezzeVariant,
+    ): com.mezze.datastructures.list.MezzeList<*> {
+        val elements = java.util.ArrayList<Any?>()
+        var current: Any? = variant
+        while (current is MezzeVariant) {
+            if (current.getTag() == MezzeVariant.NIL_TAG) {
+                break
+            } else if (current.getTag() == MezzeVariant.CONS_TAG) {
+                // Cons always has 2 fields (head, tail) -> always MezzeRecord.
+                val pv = current.getPayloadValue()
+                if (pv !is com.mezze.interpreter.values.MezzeRecord) break
+                elements.add(pv.getField("head"))
+                current = pv.getField("tail")
+            } else {
+                // Not a Cons/Nil list, return empty
+                break
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        return com.mezze.datastructures.list.MezzeList.of(
+            *(elements.toArray() as Array<Any?>),
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getSet`, minus the record lookup. Unlike
+     * `getSeq`/`getList` this one does NOT coerce — it casts or throws.
+     */
+    fun asSet(value: Any?, name: String): com.mezze.datastructures.set.MezzeSet<*> {
+        if (value is com.mezze.datastructures.set.MezzeSet<*>) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeSet for field '" + name + "'",
+        )
+    }
+
     /** Bit-for-bit `NativeDispatch.getMap`, minus the record lookup. */
     fun asMap(value: Any?, name: String): com.mezze.datastructures.map.MezzeMap<*, *> {
         if (value is com.mezze.datastructures.map.MezzeMap<*, *>) return value
