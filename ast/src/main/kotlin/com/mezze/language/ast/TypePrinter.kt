@@ -4,7 +4,7 @@ private fun printVariantType(
     type: MezzeType.VariantType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
-    typeVarMapping: Map<TypeVar, String>
+    typeVarMapping: MutableMap<TypeVar, String>
 ): String {
     if (BuiltinTypes.isBoolVariant(type)) return "Bool"
 
@@ -113,7 +113,7 @@ private fun printVariantType(
 }
 
 
-private fun prettyPrintEffectRow(effectRow: MezzeType.EffectRow, typeVarMapping: Map<TypeVar, String>): String {
+private fun prettyPrintEffectRow(effectRow: MezzeType.EffectRow, typeVarMapping: MutableMap<TypeVar, String>): String {
     val parts = mutableListOf<String>()
 
     val deduped = effectRow.effects.groupBy { effect ->
@@ -169,7 +169,7 @@ private fun printRecordType(
     type: MezzeType.RecordType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
-    typeVarMapping: Map<TypeVar, String>
+    typeVarMapping: MutableMap<TypeVar, String>
 ): String {
     val displayName = type.identity.displayNameOrNull()
     if (displayName != null && !showExpansion) return displayName
@@ -204,22 +204,48 @@ fun prettyPrintTypePair(first: MezzeType, second: MezzeType): Pair<String, Strin
         prettyPrintTypeWithMapping(second, shared)
 }
 
-private fun collectTypeVariables(type: MezzeType): Map<TypeVar, String> {
+/**
+ * The name a type variable prints under at [index]: 'a, 'b ... 'z, 'a1, 'b1 ...
+ *
+ * One rule for the whole printer, so a variable allocated ON DEMAND
+ * ([nameOf]) is indistinguishable from one seeded by [collectTypeVariables].
+ */
+private fun typeVarNameAt(index: Int): String {
+    val letter = ('a' + index % 26).toString()
+    val suffix = if (index >= 26) (index / 26).toString() else ""
+    return "'$letter$suffix"
+}
+
+/**
+ * This variable's printed name, allocating one if it has none yet.
+ *
+ * Every lookup goes through here. The printer used to fall back to
+ * `variable.name` for a variable the mapping did not hold, which put the
+ * SOLVER'S OWN counter in front of a reader -- `'f52` instead of `'a`. That
+ * happened whenever a mapping built from one type was used to print another
+ * (an effect row's variables, an alias expansion, a nested payload), and the
+ * fallback hid it: the message still rendered, just with an internal name in
+ * it. Allocating here cannot produce one.
+ *
+ * Allocation continues the same sequence, so a pair sharing a mapping still
+ * agrees and a variable seen on both sides reads the same on both.
+ */
+private fun nameOf(variable: TypeVar, typeVarMapping: MutableMap<TypeVar, String>): String =
+    typeVarMapping.getOrPut(variable) { typeVarNameAt(typeVarMapping.size) }
+
+private fun collectTypeVariables(type: MezzeType): MutableMap<TypeVar, String> {
     val orderedVars = collectTypeVarsInOrder(type).distinct()
 
     return orderedVars.mapIndexed { index, typeVar ->
-        val letterIndex = index % 26
-        val suffix = if (index >= 26) (index / 26).toString() else ""
-        val letter = ('a' + letterIndex).toString()
-        typeVar to "'$letter$suffix"
-    }.toMap()
+        typeVar to typeVarNameAt(index)
+    }.toMap(LinkedHashMap())
 }
 
-private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<TypeVar, String>): String {
+private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: MutableMap<TypeVar, String>): String {
     PrimitiveTypes.toName(type)?.let { return it }
 
     return when (type) {
-    is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
+    is MezzeType.VarType -> nameOf(type.variable, typeVarMapping)
     is MezzeType.RecordType -> printRecordType(type, emptyMap(), showExpansion = false, typeVarMapping)
     // One variant renderer for both printers: with no aliases printVariantType
     // still names Bool/Option/Result and declared variants (`Tree 'a`), and only
@@ -355,7 +381,7 @@ private fun prettyPrintWithAliasCheck(
     type: MezzeType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
-    typeVarMapping: Map<TypeVar, String>
+    typeVarMapping: MutableMap<TypeVar, String>
 ): String {
     if (type is MezzeType.VariantType) {
         if (type.identity.displayNameOrNull() != null) {
@@ -441,12 +467,12 @@ private fun prettyPrintTypeWithAliasesRecursive(
     type: MezzeType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
-    typeVarMapping: Map<TypeVar, String>
+    typeVarMapping: MutableMap<TypeVar, String>
 ): String {
     PrimitiveTypes.toName(type)?.let { return it }
 
     return when (type) {
-    is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
+    is MezzeType.VarType -> nameOf(type.variable, typeVarMapping)
     is MezzeType.RecordType -> printRecordType(type, typeAliases, showExpansion, typeVarMapping)
     is MezzeType.VariantType -> {
         printVariantType(type, typeAliases, showExpansion, typeVarMapping)

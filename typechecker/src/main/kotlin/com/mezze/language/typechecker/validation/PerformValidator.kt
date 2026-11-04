@@ -471,7 +471,7 @@ class PerformValidator(
                     // Payload-less constructors carry null, and must still appear.
                     def.constructors.associate { it.name to converted[it.name] }
                 },
-                rowVar = if (def.isOpen) RowVar.fresh() else null,
+                rowVar = if (def.isOpen) RowVar.userOpen() else null,
             )
             is ParsedRecordDef -> MezzeType.RecordType(
                 fields = TypeAnnotationConverter.convertSignature(

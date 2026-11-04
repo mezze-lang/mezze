@@ -974,7 +974,7 @@ class MatchValidator(
                         constructors = definition.constructors.associate { ctor ->
                             ctor.name to ctor.dataType?.let { TypeAnnotationConverter.convert(it, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } }) }
                         },
-                        rowVar = if (definition.isOpen) RowVar.fresh() else null
+                        rowVar = if (definition.isOpen) RowVar.userOpen() else null
                     )
                 }
             }

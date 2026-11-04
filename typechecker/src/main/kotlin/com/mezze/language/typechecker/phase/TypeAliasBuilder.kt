@@ -39,7 +39,9 @@ internal fun buildTypeAliasesFromParsedModule(
                 }
                 MezzeType.VariantType(
                     constructors = constructors,
-                    rowVar = if (def.isOpen) RowVar.fresh() else null,
+                    // A declared `...` is user-specified; only such a row escapes
+                    // closePatternBasedVariants. See VariantSolver's note.
+                    rowVar = if (def.isOpen) RowVar.userOpen() else null,
                     identity = TypeIdentity.declared(
                         typeDecl.name,
                         typeDecl.identity

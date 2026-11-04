@@ -214,7 +214,7 @@ class TypeValidator(
                             if (definition is ParsedVariantDef) {
                                 MezzeType.VariantType(
                                     constructors = definition.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt, resolveTypeHash = { name -> registry.lookupType(name)?.let { d -> d.identity } }) } },
-                                    rowVar = if (definition.isOpen) RowVar.fresh() else null
+                                    rowVar = if (definition.isOpen) RowVar.userOpen() else null
                                 )
                             } else null
                         }

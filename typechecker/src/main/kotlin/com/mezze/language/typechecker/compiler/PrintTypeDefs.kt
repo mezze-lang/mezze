@@ -80,13 +80,13 @@ data class PrintTypeDefs(
 
             is TypedRecordDef -> MezzeType.RecordType(
                 def.fields,
-                rowVar = if (def.isOpen) RowVar.fresh() else null,
+                rowVar = if (def.isOpen) RowVar.userOpen() else null,
                 identity = TypeIdentity.declared(decl.name, decl.hash),
             )
 
             is TypedVariantDef -> MezzeType.VariantType(
                 def.constructors,
-                rowVar = if (def.isOpen) RowVar.fresh() else null,
+                rowVar = if (def.isOpen) RowVar.userOpen() else null,
                 identity = TypeIdentity.declared(decl.name, decl.hash),
             )
 
