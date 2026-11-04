@@ -1568,10 +1568,57 @@ did not move are now the largest measured gaps here:
 
 Four of seven are now AT the control. What is left is three different things:
 
-**Kernel 5, 40x, and it may be a floor.** `{ ...st, i = … }` has no statically
-known field set at the call site, which is one of the three shapes the scalar
-ABI documents itself as refusing, so there is nothing to make positional. Worth
-checking whether the solved type knows the field set before accepting it.
+**Kernel 5 — DONE, ~40x.** It was not a floor. A spread update per iteration
+lowers to a `__spread__` field carrying the whole source record, which the
+builder merges with the explicit fields at run time.
+
+| | off | on | | young GCs |
+|---|---|---|---|---|
+| 1 positional (control) | 399 | 454 | — | 2 → 2 |
+| 2 record state | 3 752 | 326 | 11.5x | 21 → 2 |
+| **5 record SPREAD** | **13 955** | **278** | **50x** | **35 → 2** |
+
+MEASURED UNDER CONTENTION, and the control says so — 399 and 454 against its
+true ~230, differing between columns — so the absolutes are inflated and the
+ratios approximate. The GC counts carry the result: allocation does not care
+about CPU contention, and 35 → 2 is the per-iteration allocation gone. Against
+the 9 377 ps measured on a quiet machine, with kernel 2's post-fix 225 as the
+floor, the clean figure is ~40x.
+
+THE TYPE SYSTEM CANNOT AUTHORISE THIS, which is what makes it interesting. The
+parameter's row is OPEN:
+
+    [spread] explicit=[i, acc] pure=true type=RecordType closed=false fields=[i, acc]
+
+The type permits more fields than it names, so dropping the spread on its
+authority would be wrong — and annotating does not help, because the type then
+arrives as an unresolved `TypeApplication(St)`.
+
+[ParamScalarizer] can authorise it, because it already requires EVERY call site
+to pass a record whose explicit field set equals exactly the fields read. By
+induction over those sites the parameter only ever holds a record with exactly
+those fields: the outer call supplies them, and the self call supplies them plus
+a spread of a value that already satisfied the same property. **The
+whole-program check closes the row by PROOF, which is stronger than what the
+type says.** A spread with any field left over still refuses, and so does a
+spread of any record the pass knows nothing about.
+
+TRIED AND REVERTED FIRST: dropping a dead spread at record construction in the
+typechecker, keyed on the source type's field set. `MEZZE_TRACE_SPREAD` showed
+it fired on NOTHING — inferred cases are open-row, annotated ones are
+unresolved aliases, and every spread in the stdlib is PARTIAL (one field
+overridden out of six, or out of eighteen). It went out rather than staying as a
+plausible-looking no-op.
+
+**STILL OPEN, and now the measured-nothing caveat applies: the PARTIAL spread.**
+`{ ...req, chunks = x }` over a CLOSED eighteen-field type is the common stdlib
+shape, and expanding it into explicit field reads would replace a runtime merge
+with reads. What stops it is field ORDER: a record's field order is its Shape,
+so expanding at the spread's position reorders the remaining fields and a loop
+alternating two shapes is worse than the merge. Doing it properly means emitting
+in the source's declared order, which is only observationally safe when every
+explicit value is side-effect-free. No measured case needs it yet, which is
+exactly why it is written down rather than built.
 
 **Kernel 3, 2.3x.** A record built ONCE outside the loop with its fields read
 per iteration. Nothing allocates per iteration (4 collections), so this is the

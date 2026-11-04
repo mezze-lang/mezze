@@ -109,6 +109,60 @@ class ParamScalarizationTest {
     }
 
     @Test
+    fun `a parameter SPREAD with every field overridden is still expanded`() {
+        // A spread is a bare use of the whole record, so it would normally
+        // disqualify the parameter — and the type agrees: the row came back
+        // `closed=false fields=[i, acc]`, so the TYPE permits more fields and
+        // cannot authorise dropping it.
+        //
+        // The pass can, because it checks every call site and they all pass
+        // exactly `{ i, acc }`. By induction over them the parameter only ever
+        // holds a record with those two fields, so the spread carries nothing.
+        // The whole-program check closes the row by PROOF rather than by
+        // annotation — which matters, since annotating `st` does not even
+        // help: the type then arrives as an unresolved `TypeApplication(St)`.
+        val src = """
+            let main = { n } -> do
+              let go = { st } ->
+                if st.i <= 0 then st.acc
+                else go { st = { ...st, i = st.i - 1, acc = st.acc + st.i } }
+              go { st = { i = n, acc = 0 } }
+        """
+        val fns = loopFns(src)
+        assertTrue(fns.isNotEmpty(), "no loop body found")
+        assertTrue(
+            fns.all { it.paramNames == listOf("st__i", "st__acc") },
+            "the spread form was not expanded: " + fns.map { it.paramNames },
+        )
+        for (fn in fns) {
+            var spreads = 0
+            count(fn.body) { node ->
+                if (node is MakeRecordIR) {
+                    spreads += node.fields.count { it.name == "__spread__" }
+                }
+            }
+            assertTrue(spreads == 0, "a spread survived: $spreads")
+        }
+    }
+
+    @Test
+    fun `a parameter SPREAD with a field left over is refused`() {
+        // `acc` is not given beside the spread, so the spread is the only thing
+        // that could supply it. Expanding would lose it.
+        val src = """
+            let main = { n } -> do
+              let go = { st } ->
+                if st.i <= 0 then st.acc
+                else go { st = { ...st, i = st.i - 1 } }
+              go { st = { i = n, acc = 0 } }
+        """
+        val fns = loopFns(src)
+        assertTrue(fns.isNotEmpty(), "no loop body found")
+        assertTrue(fns.all { it.paramNames == listOf("st") },
+            "a live spread was expanded away: " + fns.map { it.paramNames })
+    }
+
+    @Test
     fun `a parameter used BARE is left alone`() {
         // The record is a value in its own right — returned here — so there is
         // nothing to expand it into.

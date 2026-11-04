@@ -87,10 +87,15 @@ object ParamScalarizer {
             val base = fn.captureSlots.size
             val slotOf = HashMap<String, Int>(plan.fields.size)
             for ((i, f) in plan.fields.withIndex()) slotOf[f] = base + i
+            // Its own self calls first, while the parameter slot is still
+            // known: that is the only place a spread of the parameter can
+            // appear, and it is dropped here so the caller phase never meets
+            // one.
+            val selfCallsDone = rewriteSelfCalls(fn.body, plan, base)
             out[plan.hash] = fn.copy(
                 paramSlots = plan.fields.map { SlotKind.OBJECT },
                 paramNames = plan.paramNames(),
-                body = expandParamReads(fn.body, base, slotOf),
+                body = expandParamReads(selfCallsDone, base, slotOf),
             )
         }
 
@@ -113,7 +118,8 @@ object ParamScalarizer {
         // measured case needs it, so it refuses instead.
         if (fn.localSlots.isNotEmpty()) return null
         val paramName = fn.paramNames.singleOrNull() ?: return null
-        val fields = fieldsReadOf(fn.body, fn.captureSlots.size) ?: return null
+        val use = paramUse(fn.body, fn.captureSlots.size) ?: return null
+        val fields = use.fields
         // One field is a record that exists to hold one value: still a win, but
         // two is where the measured case is and where the shape is unambiguous.
         if (fields.size < 2) return null
@@ -122,11 +128,33 @@ object ParamScalarizer {
     }
 
     /**
-     * The field names read off [slot], in order of first appearance, or null
-     * when the slot is used as anything other than the record of a field read.
+     * How the parameter at [slot] is used: the field names read off it, in
+     * order of first appearance, and the records that SPREAD it.
+     *
+     * A spread is a bare use — the whole record, not a field — so it would
+     * normally disqualify the parameter. It is collected instead, and allowed
+     * only when every field this parameter has is given explicitly beside it:
+     *
+     *     go { st = { ...st, i = st.i - 1, acc = st.acc + st.i } }
+     *
+     * WHY THAT IS SOUND EVEN THOUGH THE ROW IS OPEN. The parameter's type here
+     * is `{ i, acc, … }` — `closed=false`, so the TYPE permits more fields and
+     * dropping the spread on the type's authority would be wrong. But this pass
+     * requires every call site to pass a record whose explicit field set equals
+     * EXACTLY the fields read, and it checks every call site there is. So by
+     * induction over them, the parameter only ever holds a record with exactly
+     * those fields — the outer call supplies `{ i, acc }` and the self call
+     * supplies `{ i, acc }` plus this spread of a value that already satisfied
+     * the same property. The whole-program check closes the row by PROOF, which
+     * is stronger than what the type says.
+     *
+     * Null means refuse.
      */
-    private fun fieldsReadOf(body: NodeIR, slot: Int): List<String>? {
+    private class ParamUse(val fields: List<String>, val spreads: List<MakeRecordIR>)
+
+    private fun paramUse(body: NodeIR, slot: Int): ParamUse? {
         val found = LinkedHashSet<String>()
+        val spreads = mutableListOf<MakeRecordIR>()
         var ok = true
         fun walk(node: NodeIR) {
             if (!ok) return
@@ -137,13 +165,38 @@ object ParamScalarizer {
                     return
                 }
             }
+            if (node is MakeRecordIR) {
+                var spreadsParam = false
+                for (f in node.fields) {
+                    val v = f.value
+                    if (f.name == com.mezze.language.ast.MagicParams.SPREAD_FIELD &&
+                        v is ReadLocalIR && v.slot == slot
+                    ) {
+                        spreadsParam = true
+                    } else {
+                        walk(v)
+                    }
+                }
+                if (spreadsParam) spreads.add(node)
+                return
+            }
             if (node is ReadLocalIR && node.slot == slot) { ok = false; return }
             if (node is ReadArgIR && node.index == slot) { ok = false; return }
             if (node is MakeLambdaIR && node.captures.any { it.slot == slot }) { ok = false; return }
             node.transformChildren { child -> walk(child); child }
         }
         walk(body)
-        return if (ok && found.isNotEmpty()) found.toList() else null
+        if (!ok || found.isEmpty()) return null
+        // A spread is only dead if everything it could contribute is overridden
+        // beside it.
+        for (rec in spreads) {
+            val explicit = rec.fields
+                .filter { it.name != com.mezze.language.ast.MagicParams.SPREAD_FIELD }
+                .map { it.name }
+                .toSet()
+            if (!explicit.containsAll(found)) return null
+        }
+        return ParamUse(found.toList(), spreads)
     }
 
     // ── whole-program reference check ──────────────────────────────────────
@@ -154,9 +207,12 @@ object ParamScalarizer {
         functions: Map<Hash, FunctionIR>,
     ): Boolean {
         val callee = functions[h] ?: return false
-        for ((_, fn) in functions) {
+        val ownParamSlot = callee.captureSlots.size
+        for ((fh, fn) in functions) {
+            // Only the candidate's OWN body may carry a spread of its parameter.
+            val spreadOk = if (fh == h) ownParamSlot else null
             if (!noStrayMention(fn.body, h)) return false
-            if (!directCallsMatch(fn.body, h, fields)) return false
+            if (!directCallsMatch(fn.body, h, fields, spreadOk)) return false
             val slots = letBoundClosureSlots(fn.body, h) ?: return false
             for (slot in slots) if (!slotOnlyCalled(fn.body, slot, fields, h, callee)) return false
         }
@@ -248,11 +304,16 @@ object ParamScalarizer {
         return found
     }
 
-    private fun directCallsMatch(body: NodeIR, h: Hash, fields: List<String>): Boolean {
+    private fun directCallsMatch(
+        body: NodeIR,
+        h: Hash,
+        fields: List<String>,
+        spreadOfSlot: Int?,
+    ): Boolean {
         var ok = true
         forEachNode(body) { node ->
             if (node is CallDirectIR && node.targetHash == h &&
-                !recordMatches(node.args.singleOrNull(), fields)
+                !recordMatches(node.args.singleOrNull(), fields, spreadOfSlot)
             ) ok = false
         }
         return ok
@@ -283,6 +344,23 @@ object ParamScalarizer {
             }
         }
         return node.transformChildren { expandParamReads(it, paramSlot, slotOf) }
+    }
+
+    /** The candidate's own self calls: the record becomes positional
+     *  arguments, and a `__spread__` of the parameter is dropped — [paramUse]
+     *  established that it carries nothing. */
+    private fun rewriteSelfCalls(node: NodeIR, plan: Plan, paramSlot: Int): NodeIR {
+        val n = node.transformChildren { rewriteSelfCalls(it, plan, paramSlot) }
+        if (n is CallDirectIR && n.targetHash == plan.hash) {
+            val rec = n.args.singleOrNull() as? MakeRecordIR ?: return n
+            if (!recordMatches(rec, plan.fields, paramSlot)) return n
+            val byName = rec.fields
+                .filter { it.name != com.mezze.language.ast.MagicParams.SPREAD_FIELD }
+                .associate { it.name to it.value }
+            val ordered = plan.fields.map { byName[it] ?: return n }
+            return n.copy(args = ordered, isScalarABI = true)
+        }
+        return n
     }
 
     /** Slot → plan, for the closures this function binds.
@@ -359,12 +437,26 @@ object ParamScalarizer {
         else -> null
     }
 
-    private fun recordMatches(node: NodeIR?, fields: List<String>): Boolean {
+    /**
+     * The argument record supplies exactly [fields].
+     *
+     * [spreadOfSlot], when given, permits ONE `__spread__` of that slot — the
+     * self call in the candidate's own body, spreading the parameter it is
+     * about to expand. See [paramUse] for why that spread carries nothing. Any
+     * other spread refuses, because its source is a record this pass knows
+     * nothing about.
+     */
+    private fun recordMatches(node: NodeIR?, fields: List<String>, spreadOfSlot: Int? = null): Boolean {
         val rec = node as? MakeRecordIR ?: return false
         val names = rec.fields.map { it.name }
         if (names.size != names.toSet().size) return false
-        if (names.any { it == com.mezze.language.ast.MagicParams.SPREAD_FIELD }) return false
-        return names.toSet() == fields.toSet()
+        val spread = com.mezze.language.ast.MagicParams.SPREAD_FIELD
+        for (f in rec.fields) {
+            if (f.name != spread) continue
+            val v = f.value
+            if (spreadOfSlot == null || v !is ReadLocalIR || v.slot != spreadOfSlot) return false
+        }
+        return names.filter { it != spread }.toSet() == fields.toSet()
     }
 
     private fun forEachNode(node: NodeIR, f: (NodeIR) -> Unit) {
