@@ -603,6 +603,11 @@ private fun directionalVariantFieldCheck(value: MezzeType, demand: MezzeType): U
                     message = "Field `$fieldName`: ${it.message}",
                     type1 = value,
                     type2 = demand,
+                    // Carry the inner code up. Rebuilding the failure to add the
+                    // field name dropped it, so a V0704 from one level down
+                    // surfaced as a plain T0201 mismatch — the diagnostic was
+                    // right and its tag was lost in transit.
+                    code = it.code,
                 )
             }
         }
@@ -1300,10 +1305,22 @@ private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.Vari
                 var1.constructors.keys.containsAll(var2.constructors.keys) ||
                     var2.constructors.keys.containsAll(var1.constructors.keys)
             if (!armsRelated) {
+                // Neither group contains the other, so at least one tag on each
+                // side is not a member of the other — which is V0704, a tag that
+                // is not a member, rather than T0201. The message names the tags
+                // instead of the two groups: `handle { c = Blue }` should say
+                // Blue is not a member, not that two groups cannot unify, since
+                // Blue is the thing the author wrote.
+                val var1Only = (var1.constructors.keys - var2.constructors.keys).sorted()
+                val var2Only = (var2.constructors.keys - var1.constructors.keys).sorted()
+                val offending = (if (var1Only.isNotEmpty()) var1Only else var2Only)
+                    .joinToString(", ")
                 return UnificationResult.Failure(
-                    message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)}",
+                    message = "Constructor(s) '$offending' not found in " +
+                        "${describeVariant(if (var1Only.isNotEmpty()) var2 else var1)}",
                     type1 = var1,
-                    type2 = var2
+                    type2 = var2,
+                    code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
                 )
             }
         }
