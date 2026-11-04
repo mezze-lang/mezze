@@ -207,6 +207,30 @@ class MatchValidator(
         val uncoveredConstructors = allConstructors - coveredConstructors
 
         if (isOpenVariant) {
+            // An arm may not NAME a tag the open part does not hold (spec 5.8).
+            //
+            // The closed case already refuses this; the open branch only ever
+            // asked for a wildcard, so `| Red, Pink, ... |` accepted an arm for
+            // `Blue`. The tail is reached by `_`, not by name: naming Blue claims
+            // a membership the group does not state, and if Blue really is
+            // expected it belongs in the named part.
+            //
+            // Guarded arms count here. A guard decides whether an arm RUNS, not
+            // whether the tag it names is a member.
+            val namedArms = matchExpr.cases
+                .flatMap { it.patterns }
+                .filterIsInstance<ParsedConstructorPattern>()
+                .map { it.constructor }
+                .distinct()
+            val foreign = namedArms.filterNot { it in allConstructors }
+            if (foreign.isNotEmpty()) {
+                errors.add(ValidationError.ConstructorNotFound(
+                    variantType = expandedType,
+                    constructorName = foreign.sorted().first(),
+                    availableConstructors = allConstructors.sorted(),
+                    loc = matchExpr.loc,
+                ))
+            }
             if (!hasWildcard) {
                 errors.add(ValidationError.NonExhaustiveMatch(
                     coveredConstructors = coveredConstructors.toList(),
