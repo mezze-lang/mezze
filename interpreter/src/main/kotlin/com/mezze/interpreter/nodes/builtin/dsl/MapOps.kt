@@ -35,8 +35,12 @@ object MapOps {
     /** Forces class load when referenced; used by NativeBootstrap. */
     @JvmField val MARKER: Unit = Unit
 
-    /** The receiver, coerced exactly as the legacy `getMap` does. */
-    private fun map(a: NativeArgs, i: Int): MezzeMap<*, *> = NativeHelpers.asMap(a.obj(i), "m")
+    /**
+     * A map argument, coerced exactly as the legacy `getMap(r, name)` does.
+     * `name` is the declared field so a mismatch on `merge` names `m1` / `m2`.
+     */
+    private fun map(a: NativeArgs, i: Int, name: String = "m"): MezzeMap<*, *> =
+        NativeHelpers.asMap(a.obj(i), name)
 
     // ==================== Map -> Int / Bool ====================
     private val SIZE = NativeOp("__native_map_size",
@@ -57,4 +61,38 @@ object MapOps {
         listOf(Param("m", SlotKind.OBJECT), Param("k", SlotKind.OBJECT)),
         SlotKind.OBJECT, pure = true,
     ) { args -> MapNatives.get(map(args, 0), args.obj(1)) }
+
+    // ==================== Persistent update ====================
+    //
+    // `empty` is deliberately absent: `NativeHofNames.OP_EMPTY` is part of the
+    // fuser's vocabulary, so declaring `__native_map_empty` would make
+    // ChainCanonicalizer refuse it. SeqOpsFusionGuardTest enforces that, and
+    // caught this one while the list was being written.
+    private val INSERT = NativeOp("__native_map_insert",
+        listOf(Param("m", SlotKind.OBJECT), Param("k", SlotKind.OBJECT), Param("v", SlotKind.OBJECT)),
+        SlotKind.OBJECT, pure = true,
+    ) { a -> MapNatives.insert(map(a, 0), a.obj(1), a.obj(2)) }
+
+    private val REMOVE = NativeOp("__native_map_remove",
+        listOf(Param("m", SlotKind.OBJECT), Param("k", SlotKind.OBJECT)),
+        SlotKind.OBJECT, pure = true,
+    ) { a -> MapNatives.remove(map(a, 0), a.obj(1)) }
+
+    private val MERGE = NativeOp("__native_map_merge",
+        listOf(Param("m1", SlotKind.OBJECT), Param("m2", SlotKind.OBJECT)),
+        SlotKind.OBJECT, pure = true,
+    ) { a -> MapNatives.merge(map(a, 0, "m1"), map(a, 1, "m2")) }
+
+    // ==================== Views ====================
+    private val KEYS = NativeOp("__native_map_keys",
+        listOf(Param("m", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
+    ) { a -> MapNatives.keys(map(a, 0)) }
+
+    private val VALUES = NativeOp("__native_map_values",
+        listOf(Param("m", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
+    ) { a -> MapNatives.values(map(a, 0)) }
+
+    private val ENTRIES = NativeOp("__native_map_entries",
+        listOf(Param("m", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
+    ) { a -> MapNatives.entries(map(a, 0)) }
 }

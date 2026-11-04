@@ -82,7 +82,7 @@ a defect, not a conservative default.
 | a scalar-ABI MAP op vs the same shape on a string | 6x (3 762 vs 755 ps), 13 GCs vs 3 | EA is not removing `NativeDispatchScalarNode`'s `values` array and `PositionalArgs` wrapper for the map op though it does for the string one. `handler` is `@CompilationFinal`; candidate blocker is `MezzeMap.size()` -> `storage.size()` on the 9-impl sealed `MapStorage`. Next: dump the compiled graph rather than assume |
 | **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
 | a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
-| `map::insert`, new map per iteration | 38.8x (31 118 ps), 47 GCs | persistent map nodes plus the native-call cost above; floor unknown |
+| `map::insert`, new map per iteration | 20.4x its own control, 31 GCs (was 35.8x / 47) | persistent map nodes, which it must allocate; the argument record came off it with the scalar-ABI port. Floor unknown but no longer dominated by the ABI |
 | string interpolation | 1.8x the concat it desugars to (18 571 vs 10 084 ps) | the one row where a desugaring costs more than its target. Cause not isolated |
 | an `Option` returned by a native | +2.5 ns, +10 GCs over the `Bool`-returning lookup | `VariantMatchFolder` folds a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
 | record update, record outlives the expression | 18.1x (14 517 ps), 24 GCs | no record pass can erase a record that outlives its expression — but this is close to a bare native call, so the split is not yet made |
@@ -2360,7 +2360,7 @@ declaration publishes both the signature (compiler side) and the handler
 | `map::size` | 7 586 / 19 | 3 465 / 12 | **2.2x** |
 | `seq::get` | 15 432 / 30 | 7 231 / 23 | **2.1x** |
 | `map::get` | 15 889 / 31 | 8 078 / 23 | **2.0x** |
-| `map::insert` — NOT ported, control | 31 118 / 47 | 25 023 / 46 | held |
+| `map::insert` — control for the first round, ported in the second | 31 118 / 47 | 24 734 / 41 then **31 GC** | see below |
 | `str::size` — already scalar, control | 577 / 3 | 632 / 3 | held |
 | kernel 1 / kernel 10 controls | 229 / 611 | 217 / 691 | steady |
 
@@ -2412,6 +2412,31 @@ The failure is worth keeping because of WHERE it surfaced: not at the
 declaration, but deep inside the JSON decoder, in tests that have nothing to do
 with this change. A ported native is only equivalent if its argument handling is
 equivalent too.
+
+### Second round: `map::insert`, and measuring it on a loaded box
+
+`insert`, `remove`, `merge`, `keys`, `values` and `entries` followed. `empty` did
+NOT: `NativeHofNames.OP_EMPTY` is in the fuser's vocabulary, so declaring
+`__native_map_empty` would make `ChainCanonicalizer` refuse it —
+`SeqOpsFusionGuardTest` caught that while the list was being written, which is
+the test paying for itself on its first outing.
+
+The box was at load 24-25 for this round, and the control said so: kernel 10 read
+**1115 ps** against the 597-691 of the quiet runs, a 1.9x drift. By rule 4 that
+makes every absolute number in the table unreadable. So the comparison is each
+run normalised by ITS OWN control, plus the young-collection counts, which do not
+care about load:
+
+| | first round | second round |
+|---|---|---|
+| `map::insert`, young GCs | 41 | **31** |
+| `map::insert` / its own control | 24 734 / 691 = 35.8x | 22 716 / 1115 = **20.4x** |
+| `map::size`, young GCs | 12 | 13 — unchanged |
+| `seq::get`, young GCs | 23 | 22 — unchanged |
+
+So **1.75x on the ratio and a quarter of the allocation gone**, with the two
+already-ported ops flat as controls. A persistent map must allocate nodes, so
+`map::insert` will not reach the floor; what came off it was the argument record.
 
 ### Still above floor
 
