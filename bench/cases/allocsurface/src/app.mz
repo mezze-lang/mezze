@@ -110,25 +110,56 @@ let go_z = { i, acc, m } ->
   else go_z { i = i - 1, acc = acc + map::size { m = m }, m = m }
 let k_map_size = { n } -> go_z { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
 
-## 10. TIER CONTROL — and the most important kernel in this case.
+## 10. TIER CONTROL — the arity cliff, isolated.
 ##
 ## Kernel 1 is on the FUSED tail-loop tier: the whole loop runs as Java with no
 ## per-iteration bytecode. Every kernel from 2 onwards is off that tier, so
 ## "kernel N minus kernel 1" charges the tier gap to whatever N was testing. This
 ## kernel is off the tier too, for a reason that has nothing to do with anything
-## else here: it takes FOUR parameters, and the fused tier handles three. Its
-## body is pure arithmetic over its own parameters -- no call, no native, no
-## record, no string, nothing that can allocate.
+## else here: it takes FOUR parameters, and `BytecodeCompiler` dispatches the
+## fused tier only for paramCount 1, 2 and 3. Its body is pure arithmetic over
+## its own parameters — no call, no native, no record, no string, nothing that
+## can allocate — and `MEZZE_TRACE_SELFTAIL` confirms it compiles to exactly
+## FOUR params, so nothing else differs from kernel 1.
 ##
-## So if THIS reads near kernel 1, the tier is free and each kernel's excess is
-## its own. If it reads near kernels 8 and 9, the per-iteration allocation is the
-## off-tier loop itself and every other number here is mostly that.
+## MEASURED: 568 ps/iter against kernel 1's 216, and 3 young collections against
+## 2. So the arity cliff costs ~2.6x in TIME and nothing in allocation. An
+## off-fused-tier loop does NOT allocate per iteration.
 ##
 ## sum = n*(n+1)/2, the same as kernel 1.
 let go_4 = { i, acc, p, q } ->
-  if i <= 0 then acc + p + q
+  if i <= 0 then acc
   else go_4 { i = i - 1, acc = acc + i, p = p, q = q }
 let k_tier = { n } -> go_4 { i = n, acc = 0, p = 0, q = 0 }
+
+## 11. THE SAME LOOP, with TWO MORE ADDS IN THE BASE CASE. Nothing else changes:
+##     same four parameters, same condition, same per-iteration updates. The only
+##     edit is `then acc` becoming `then acc + p + q`, in the branch that runs
+##     ONCE, after the loop is over.
+##
+## MEASURED: 29 178 ps/iter and 33 young collections, against kernel 10's 568 ps
+## and 3. Fifty-two times slower and eleven times the allocation, decided by a
+## branch that executes once.
+##
+## WHY. `MEZZE_TRACE_SELFTAIL` reports `go_5 params=6` where the source declares
+## four. The two extra are `__dict_` parameters: the extra adds raise more
+## `NumAdd` constraints than monomorphisation discharges, the function stays
+## dictionary-passing, and a dictionary-passing loop allocates per iteration and
+## loses every tier. Kernel 10 with the single add compiles to params=4 and no
+## dictionaries.
+##
+## This pair is why the case has a kernel 10 at all. The first version of kernel
+## 10 WAS this kernel — the base case was written `acc + p + q` without a
+## thought — and its 33 collections were read as "the off-tier loop allocates
+## per iteration", which then explained every other row in the case. It was the
+## dictionaries. Both spellings are kept here so the difference is a measurement
+## rather than a memory.
+##
+## sum = n*(n+1)/2, the same as kernel 1, because p and q are 0.
+let go_5 = { i, acc, p, q } ->
+  if i <= 0 then acc + p + q
+  else go_5 { i = i - 1, acc = acc + i, p = p, q = q }
+let k_dict = { n } -> go_5 { i = n, acc = 0, p = 0, q = 0 }
 
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
@@ -177,4 +208,8 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_tier { n = n }
     report { name = "10 tier control", n = n, r = time_it { f = {} -> k_tier { n = n } } }
     report { name = "10 tier control", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+  else if k == 11 then do
+    k_dict { n = n }
+    report { name = "11 dict-passing", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+    report { name = "11 dict-passing", n = n, r = time_it { f = {} -> k_dict { n = n } } }
   else println { msg = "unknown kernel" }

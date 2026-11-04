@@ -74,29 +74,17 @@ a defect, not a conservative default.
 | effect operation, marginal | ~0.38 ns | — |
 | `seq::fold` / `sum` / `any` | 0.37 / 0.36 / 0.42 ns/elem | — |
 
-### MEASURED BUT NOT ATTRIBUTABLE — needs a same-arity control
-
-Allocation counts exist for these and are *at or below* the off-tier control, so
-none of them shows per-iteration allocation of its own. They are not AT FLOOR:
-the control they sit under is itself above floor. Settling each one needs an
-off-tier control of the **same parameter count**, because the counts track arity
-(2-3 params read 19-21, 4 params reads 33).
-
-| cell | count at N=2e7 | what is still unknown |
-|---|---|---|
-| record update, record outlives the expression | 27 (control 33) | whether the update allocates at all once the loop does not |
-| string concat | 20 | same |
-| string interpolation | 33 | whether interpolation costs more than the concat it desugars to |
-| `map::get` / `seq::get` — Option return | 32 / 31 | whether the `Option` survives; the variant fold only sees a syntactic `MakeVariantIR`, never a native's return |
-| `map::contains_key` — Bool return | 21 | — |
-| `map::size` — native call, no lookup | 19 | whether a native call allocates at all |
-| `map::insert`, new map per iteration | 50 | the only row above the control; a persistent map must allocate, floor unknown |
-
 ### ABOVE FLOOR — cause named
 
 | cell | gap | cause |
 |---|---|---|
-| **a loop off the fused tier — any body at all** | **33 GCs vs 2** for identical arithmetic | `TailCallDirectN` takes `@Variadic Object[]`, so an array is materialised and every `long` boxed per bounce; `TrampolineRootNode` stores it to a frame slot across the loop back-edge, defeating EA. No fixed-arity tail-call op exists (`CallDirect1/2/3` do) and `TailCallScalarException`, the typed-bucket path, is never thrown. See the allocation inventory |
+| **a loop made dictionary-passing by its base case** | **46x** time, **11x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` kernels 10 vs 11 |
+| a loop with 4+ parameters | 2.5x time (587 vs 237 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P emitter's own comment records the same cliff one arity down |
+| a native call in a loop | 19 GCs vs 2 | `map::size` returns an `Int` and performs no lookup, so most of this is the call itself, not the native's work. Cause not yet isolated |
+| an `Option` returned by a native | +11 GCs over the `Bool`-returning lookup (32 vs 21) | `VariantMatchFolder` matches a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
+| string interpolation | 33 GCs vs concat's 20 | a desugaring costing more than what it desugars to. Cause not yet isolated |
+| record update, record outlives the expression | 27 GCs vs 2 | no record pass can erase a record that outlives its expression |
+| `map::insert`, new map per iteration | 50 GCs vs 2 | persistent map nodes; floor unknown |
 | closure param, generic callee | **190x** (57 ns) | dict wrapper; 52 of 57 ns. MONO |
 | HOF-reached pipeline | **460x** | generic dict-passing copy executes. MONO |
 | `iter.fold` with a real closure | 30x (9 ns) | MONO |
@@ -110,7 +98,7 @@ off-tier control of the **same parameter count**, because the counts track arity
 | binding read twice | ~3.5x | copy propagation refuses two reads |
 | binding in a cold branch | ~2.9x | two tail calls → tier declines |
 | partial spread | unmeasured | runtime merge; blocked on field order = Shape |
-| general-path floor | ~237 ps/iter | paid by every tier-1-inexpressible loop — and it is not just time: that path allocates per iteration, see the row above |
+| general-path floor | ~237 ps/iter | paid by every tier-1-inexpressible loop. It does NOT allocate per iteration — `allocsurface` kernel 10 reads 3 young collections against the control's 2 |
 | general-loop tier | 7x | IS the SIMD width; needs a stage program in FLP |
 | uniformly-OBJECT local/param slots | boxes | `localSlots` discards each `StmtIR.Let`'s kind |
 | `Object[] args` callback ABI | boxes twice per element | `SeqNatives.map` boxes on read AND on write |
@@ -2192,88 +2180,103 @@ assumed fine.
 
 ---
 
-## The allocation inventory — and the tier control that invalidated half of it
+## The allocation inventory, and two controls that had to be built to read it
 
 `bench/cases/allocsurface`. Young-collection counts do not care about CPU
 contention, which makes them the one kind of evidence that survives a loaded
-machine. The box was at load 15-30 throughout, so this case asks only "does it
-allocate" and leaves the picoseconds for a quiet box.
+machine; the box was at load 15-30 throughout. Timings are interleaved min-of-5
+in one process per kernel, so the ratios hold under load even where absolute
+values would not.
 
-N = 2e7, `-Xlog:gc`, one kernel per process, every kernel's checksum verified
-first at N = 1000.
+N = 2e7, `-Xlog:gc`, one kernel per process, every checksum verified at N = 1000
+first.
 
-| kernel | young GCs |
-|---|---|
-| 1 control — 2-param arithmetic loop, **FUSED tier** | **2** |
-| 9 `map::size` — native call, Int return, no lookup | 19 |
-| 3 `str::concat` | 20 |
-| 8 `map::contains_key` — native lookup, Bool return | 21 |
-| 2 record update `{ ...r, a = i }`, record outlives the expression | 27 |
-| 7 `seq::get` — native lookup, Option return | 31 |
-| 5 `map::get` — native lookup, Option return | 32 |
-| 4 string interpolation | 33 |
-| 10 **tier control** — 4-param arithmetic, nothing allocatable | **33** |
-| 6 `map::insert`, new map per iteration | 50 |
+| kernel | young GCs | ps/iter |
+|---|---|---|
+| 1 control — 2-param arithmetic, **FUSED tier** | **2** | **237** |
+| 10 **arity control** — 4-param arithmetic, off fused tier | **3** | **587** |
+| 9 `map::size` — native call, Int return, no lookup | 19 | — |
+| 3 `str::concat` | 20 | — |
+| 8 `map::contains_key` — native lookup, Bool return | 21 | — |
+| 2 record update `{ ...r, a = i }`, record outlives the expression | 27 | — |
+| 7 `seq::get` — native lookup, Option return | 31 | — |
+| 5 `map::get` — native lookup, Option return | 32 | — |
+| 4 string interpolation | 33 | — |
+| 11 **dict control** — kernel 10 plus two adds in the base case | 33-43 | 26 825 |
+| 6 `map::insert`, new map per iteration | 50 | — |
 
-### Read the control row first
+### Three results, each needing its own control
 
-Kernel 10 takes four parameters and its body is pure arithmetic over them: no
-call, no native, no record, no string, nothing that can allocate. It collects
-**33** times — the joint highest in the case. Kernel 1 does the same arithmetic
-with two parameters and collects **2**.
+**1. The arity cliff costs 2.5x in time and nothing in allocation.** Kernel 10
+takes four parameters and its body is pure arithmetic over them.
+`BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2 and 3 —
+there is no `paramCount == 4` branch — so it compiles off the tier while being
+otherwise identical to kernel 1. 587 ps against 237, and 3 young collections
+against 2. So **an off-fused-tier loop does not allocate per iteration**, and the
+tier is worth ~2.5x in time, not an order of magnitude.
 
-So the per-iteration allocation is **the off-fused-tier loop itself**, and every
-other row here is at or below it. Only `map::insert` (50 vs 33) rises above the
-control, which is a persistent map allocating nodes, as it must.
+**2. A dictionary-passing loop costs 46x in time and 11x in allocation.** Kernel
+11 is kernel 10 with `then acc` written `then acc + p + q` — two extra adds in
+the branch that runs ONCE, after the loop is over. Nothing else differs: same
+four parameters, same condition, same per-iteration updates. It measures 26 825
+ps against 587, and 33-43 young collections against 3 — two runs of the identical
+binary gave 33 and 43, so these counts carry about 30 percent run-to-run spread
+and the Method notes calling them "nearly deterministic" overstates it at this N.
+`MEZZE_TRACE_SELFTAIL` reports `go_5 params=6` where the source declares four:
+the extra adds raise more `NumAdd` constraints than monomorphisation discharges,
+the function stays dictionary-passing, and the dictionaries allocate per
+iteration and cost every tier. This is the same subsystem as the `190x` and
+`460x` rows, reached from a new direction, and it is the largest well-controlled
+gap on the branch.
 
-**Three rows in this table were written down as findings before kernel 10
-existed** — "record update allocates per iteration", "string interpolation
-allocates more than the equivalent concat", "a read-only `map::get` allocates".
-All three were the loop. They return to UNKNOWN: measuring them needs a
-same-arity off-tier control, because the rows also track arity (2-3 params read
-19-21, 4 params reads 33) and a 3-param kernel compared against a 4-param
-control is the same error one size down.
+**3. Natives, strings, records and Options do allocate per iteration.** Against
+a true control of 2-3 collections, every row from 19 to 50 is real. `map::size`
+— a native call returning an `Int` that performs no lookup at all — already
+costs 19, so most of it is the native call itself rather than what the native
+does. The `Option` adds about a third on top of the `Bool`-returning lookup
+(32 against 21), which is the variant fold not reaching across a native's
+return: it matches a syntactic `MakeVariantIR` and a native's result is not one.
+Interpolation at 33 against concat's 20 is the one row where a desugaring costs
+more than what it desugars to. `map::insert` at 50 is a persistent map
+allocating nodes, as it must.
 
-This is the fifth distinct measurement-error shape in this effort and the second
-of exactly this kind — `effectsurface` has a kernel 2 for the same reason and
-says so in a comment. The lesson is not "add a control"; it is that **a control
-is part of the kernel, not a later refinement**, because findings get written
-down as soon as numbers exist.
+### How this was got wrong twice, in opposite directions
 
-### What the gap actually is
+The first version of kernel 10 was kernel 11 — the base case was written
+`acc + p + q` without a thought. It read 33 collections, which was taken as "the
+off-tier loop allocates per iteration", and that reading was then used to
+explain all eight rows above it as "mostly the loop", walking back three correct
+findings as unattributable. The mechanism even had a plausible story in the
+source: `TailCallDirectN` takes `@Variadic Object[]`, so an array is materialised
+per execution and every `long` boxed into it, and `TrampolineRootNode` stores it
+to a frame slot across the loop back-edge where escape analysis cannot reach it.
+That story is wrong as an account of these numbers — kernel 10 reads 3 — and
+it is a reminder that a mechanism found by reading code is a hypothesis, not a
+measurement.
 
-The live pipeline has **two** tail-call tiers, not three:
+So: first an under-controlled kernel produced a wrong finding, then the wrong
+finding was used to over-correct eight right ones. The second error is the worse
+of the two, because it discarded consistent evidence in favour of a single new
+reading. **A new control that contradicts eight consistent rows is more likely
+to be broken than the eight rows are** — check the control first.
 
-1. **FUSED** (`TailLoopContinue`) — a singleton sentinel; new parameter values
-   are written straight into frame slots. **Zero allocation.** Eligibility is
-   narrow: at most 3 parameters, every parameter update must be arithmetic over
-   parameters, refusal sites `line8520` / `line8599` / `3P:update-rhs`.
+Both spellings are kept in the case as kernels 10 and 11 so the difference is a
+measurement rather than a memory.
 
-2. **Everything else** (`TailCallException`) — `TailCallDirectN` takes
-   `@Variadic Object[] args`, so the Bytecode DSL materialises an array per
-   execution and boxes every `long` parameter into it. `TrampolineRootNode`
-   then does `frame.setObject(argsSlot, rawArgs)` and reads it back on the next
-   bounce, so the array crosses the loop back-edge and escape analysis cannot
-   remove it.
+### Still open from this case
 
-The middle tier is **missing**, and two pieces of evidence say it was intended:
-
-- `CallDirect1`, `CallDirect2`, `CallDirect3`, `CallIndirectScalar1`,
-  `CallIndirectScalar2` all exist for non-tail calls. For tail calls there is
-  only `TailCallDirectN`, `TailCallIndirect` and `TailCallByHash` — all
-  variadic. A tail call never gets fixed-arity treatment.
-- `TailCallScalarException` exists, documents typed `long[]` / `double[]` /
-  `Object[]` buckets "for fully-applied scalar self-recursive tail calls", and
-  **is never thrown**. `MezzeFunctionRootNode` catches it and has an unpacker
-  for it; no throw site exists anywhere in main. It is dead code on the legacy
-  AST root node, and the bytecode pipeline — the live one — has no equivalent.
-
-So a 4-parameter all-`Int` arithmetic loop, which is the ideal candidate for the
-typed path, falls all the way to array-plus-boxing.
-
-**This is the largest measured gap on the branch: 2 GCs against 33 for identical
-arithmetic, decided only by whether the loop fits the fused tier.** Every ledger
-row that reads "paid by every tier-1-inexpressible loop" is this.
+- `TailCallScalarException` documents typed `long[]` / `double[]` buckets "for
+  fully-applied scalar self-recursive tail calls", is caught and unpacked by
+  `MezzeFunctionRootNode`, and **is thrown from nowhere in main**. Dead code on
+  the legacy AST root node with no bytecode-pipeline equivalent. Whether the
+  live path wants it is now an open question rather than an assumed yes, since
+  the off-tier loop turns out not to allocate.
+- Every tail-call operation is variadic (`TailCallDirectN`, `TailCallIndirect`,
+  `TailCallByHash`) while non-tail calls have `CallDirect1/2/3` and
+  `CallIndirectScalar1/2`. Measured impact: unknown, and smaller than assumed.
+- `ir.getName()` is empty for mono-specialised clones, so `MEZZE_TRACE_SELFTAIL`
+  cannot attribute a tier to a function once mono has rewritten it. That is why
+  the arity of each kernel had to be inferred from a module-wide histogram.
 
 ---
 
