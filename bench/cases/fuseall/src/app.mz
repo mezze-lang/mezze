@@ -110,7 +110,33 @@ let k_map = { m } -> map::fold { m = m, init = 0, f = { acc, k, v } -> acc + v }
 ##        whether the shipped compiler is already paying that. A/B them with
 ##        MEZZE_CHAIN_CANONICALIZE=0, which turns the promotion off.
 let k_deque = { d } -> deque::fold { d = d, init = 0, f = { acc, x } -> acc + x }
+
+## ── 10/11. THE CALLBACK, PRICED. `deque::sum` and `set::sum` compute exactly
+##          what kernels 6 and 7 compute, over the same collection, with the
+##          same walk — and WITHOUT calling a guest folder per element. So
+##          kernel 6 minus kernel 10 is the callback for an array-backed
+##          collection, and kernel 7 minus kernel 11 the same for a hashed one.
+##
+##          Worth pricing before building anything: bytes paid 9 275 ps/elem for
+##          its callback and dropped to 257 once a primitive path recognised the
+##          folder instead of calling it. Kernel 6 reads 9 638 and kernel 3
+##          8 858, which is suspiciously the same number.
+let k_deque_sum = { d } -> deque::sum { d = d }
+let k_set_sum = { s } -> set::sum { s = s }
 let k_set = { s } -> set::fold { s = s, init = 0, f = { acc, x } -> acc + x }
+
+## ── 9. DECOMPOSING kernel 7. A set fold costs 18.4 ns/elem against a deque's
+##      9.6 with an identical loop shape — ScalarCall over an iterator — so the
+##      per-element cost splits between WALKING the set and CALLING the folder,
+##      and the split decides what is worth fixing.
+##
+##      This pays the walk ONCE into a seq (plus one allocation) and then folds
+##      with the FUSED seq path, which costs ~0.4 ns/elem. So this kernel is
+##      roughly `walk + alloc`, and kernel 7 minus this kernel is roughly the
+##      CALLBACK. Same checksum as kernel 7 by construction.
+let k_set_via_seq = { s } -> seq::fold {
+  xs = set::to_seq { s = s }, init = 0, f = { acc, x } -> acc + x,
+}
 
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
@@ -140,6 +166,21 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     k_bytes { b = built }
     report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
     report { name = "4 bytes unfused ", n = n, r = time_it { f = {} -> k_bytes { b = built } } }
+  else if k == 10 then do
+    let built = deque::from_seq { xs = src }
+    k_deque_sum { d = built }
+    report { name = "10 deque sum    ", n = n, r = time_it { f = {} -> k_deque_sum { d = built } } }
+    report { name = "10 deque sum    ", n = n, r = time_it { f = {} -> k_deque_sum { d = built } } }
+  else if k == 11 then do
+    let built = set::from_seq { xs = src }
+    k_set_sum { s = built }
+    report { name = "11 set sum      ", n = n, r = time_it { f = {} -> k_set_sum { s = built } } }
+    report { name = "11 set sum      ", n = n, r = time_it { f = {} -> k_set_sum { s = built } } }
+  else if k == 9 then do
+    let built = set::from_seq { xs = src }
+    k_set_via_seq { s = built }
+    report { name = "9 set->seq fold ", n = n, r = time_it { f = {} -> k_set_via_seq { s = built } } }
+    report { name = "9 set->seq fold ", n = n, r = time_it { f = {} -> k_set_via_seq { s = built } } }
   else if k == 8 then do
     let built = bytes::from_seq { arr = seq::map { xs = src, f = { x } -> x % 256 } }
     k_bytes_staged { b = built }

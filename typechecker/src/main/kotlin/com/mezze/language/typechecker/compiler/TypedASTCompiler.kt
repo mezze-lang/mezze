@@ -641,6 +641,13 @@ class TypedASTCompiler(
         for ((h, fn) in chainInlinedMap) {
             if (h in userHashes) userFunctions[h] = fn
         }
+        // Before the canonicalizer, so a rewritten `sum` takes its ordinary sum
+        // handling. See FoldToSumRewriter for the measurements and the guard.
+        for ((h, fn) in userFunctions.entries.toList()) {
+            val nb = com.mezze.language.truffleir.FoldToSumRewriter.rewrite(fn.body, chainInlinedMap)
+            if (nb !== fn.body) userFunctions[h] = fn.copy(body = nb)
+        }
+
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
             .canonicalize(userFunctions, chainInlinedMap)
         // Merge back: canonicalized user functions over the full inlined map.

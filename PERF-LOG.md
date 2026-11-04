@@ -3542,6 +3542,86 @@ at all.
 
 ---
 
+## 5.6x and 2.3x: price the callback before building anything for it
+
+The collection ledger after the bytes work, at n=2M, min of 3:
+
+| kernel | ps/elem | vs seq |
+|---|---|---|
+| bytes (primitive sum) | 257 | 0.66x |
+| seq fused | 391 | — |
+| list fused | 1 521 | 3.9x |
+| nel | 8 858 | 23x |
+| deque | 9 638 | 25x |
+| set | 18 445 | 47x |
+
+Set being worst, the obvious move was the bytes shape again: a `SourceIR`
+variant, a bytecode operation, emitter plumbing. **Pricing it first changed the
+plan and saved all of that.**
+
+Each collection's `sum` computes the same number over the same collection with
+the same walk, and WITHOUT calling a guest folder per element. So `fold` minus
+`sum` is the callback, and it needs no compiler change to measure — the natives
+already exist (`fuseall` kernels 10 and 11):
+
+| | fold | `sum` | the callback |
+|---|---|---|---|
+| deque | 9 638 | **1 664** | 7 974 — **83%** |
+| set | 17 376 | **7 270** | 10 106 — 58% |
+
+About 8 ns per element, which is the same ~9 ns `bytes::fold` was paying before
+`BuiltinSumBytes`. And because the destination is already in the stdlib, the fix
+is a PEEPHOLE, not a fusion: `coll::fold { init = 0, f = { acc, x } -> acc + x }`
+becomes `coll::sum { coll }`. No `SourceIR` variant, no bytecode operation, no
+emitter change — `FoldToSumRewriter`, ~100 lines in `ast/truffleir/`.
+
+| | before | after | the `sum` that predicted it |
+|---|---|---|---|
+| deque fold | 9 638 | **1 726** | 1 664 |
+| set fold | 17 376 | **7 521** | 7 270 |
+
+5.6x and 2.3x, each landing on its prediction — which is the evidence that the
+CALLBACK was the cost and not the walk. Controls: seq 391 → 406, list 1 521 →
+1 478, nel 8 858 untouched (it has no `sum` native to rewrite to). Checksums
+identical throughout.
+
+### The guard is the folder's SLOT KINDS, and it is a correctness guard
+
+`sum`'s boxed path reads `Long`/`Integer` and SILENTLY DROPS anything else, so a
+Float fold rewritten to `sum` returns 0 instead of the total — a wrong number,
+not a type error. The element type is not on the IR node, but each lambda
+parameter carries the slot kind of its solved type, so a folder over Ints has
+two LONG parameters and one over Floats does not. Same evidence
+`ListFoldElementKindFusionTest` uses to keep a Float fold off the long pipeline,
+and the same principle: a SOURCE says nothing about what is in it.
+
+Three of `FoldToSumLoweringTest`'s four cases are that trap and its siblings —
+Float elements, a non-zero init (a total `sum` cannot express), a compound
+folder `acc + x * x` (an element transform `sum` would ignore). The fourth is
+verified to fail with the pass unhooked.
+
+A LOWERING TEST IS HONEST HERE, where it was blind for chain fusion. That
+blindness was the stdlib: a typechecker test lowers it from source while
+`mez build` serves `PrecompiledStdlib`. This pass matches on the USER function's
+own body, so the lowered shape here is the shape that ships.
+
+### Two corrections to earlier readings in this log
+
+`set::sum` at 7 270 is FASTER than routing a set through `to_seq` into the fused
+seq fold (13 099, kernel 9). So "going through a seq is faster than folding the
+set directly" was true only against the callback-paying fold, not against the
+walk — the `to_seq` promotion is still a copy and still costs.
+
+And the set walk is 7 270 ps/elem, not the ~13 100 kernel 9 implied: that kernel
+pays a 2M-element seq allocation the direct walk does not, which is exactly the
+kind of contamination that makes a two-kernel ratio unreadable.
+
+`EmitFileSizeRatchetTest` caught the wiring at +12 lines. Trimmed to +7 by
+leaving the reasoning in the pass that owns it, then raised the bound with that
+reason — which is what the ratchet asks for.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
