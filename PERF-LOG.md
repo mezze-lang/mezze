@@ -3382,6 +3382,23 @@ language pays an object field read per element. The way to find out is a
 compiled-graph dump of a seq fold, not another timing run — a 15% on one native
 is within reach of noise, but the same 15% across every HOF is not.
 
+**TRIED AND IT IS NOT THAT.** `@CompilerDirectives.ValueType` on `ScalarCall` —
+the annotation that exists to tell the compiler an object is a value and help
+escape analysis — changed nothing: bytes 9 323 ps/elem with it against 9 275
+without, controls 387 and 366. So either EA already scalar-replaces `ctx` and
+the 15% is elsewhere, or the annotation does not reach this shape. Recorded so
+nobody spends the ten minutes again. `call2` is already small and its fields are
+already final, which leaves the branch on `scalar` and the call-site inlining
+decision — and those are graph questions, not source-reading ones.
+
+Where the remaining collection time actually is, for whoever picks this up:
+bytes is **23x** the FUSED seq fold (9 275 against ~400), and that gap is
+fusion coverage, not callback overhead. `bytes`, `nel` and `map` are not in the
+fuser's vocabulary, and adding them the naive way is a trap — `nel` went 22x
+SLOWER that way, because `promoteOpaqueSource` synthesises an O(n) `to_seq`
+copy per fold. The design that does not have that problem is a `SourceIR`
+variant per storage with a BDSL loop that walks it in place.
+
 ---
 
 ## Method notes
