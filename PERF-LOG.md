@@ -3270,6 +3270,79 @@ at that point), so the observable is the specialized body's own self-reference.
 
 ---
 
+## 5.1x: the bytes fold was not slow because it was unfused
+
+`fuseall` kernel 4 (a `bytes::fold`) cost 41 076 ps/elem against kernel 1's
+385 — a fused `seq::fold`. The obvious reading is that `bytes` is not in the
+fuser's vocabulary, so this is the cost of not fusing, and the fix is the
+own-source-walk work. **The obvious reading was wrong**, and the A/B that says
+so is one env var:
+
+| at n=500k, min of 2 | ps/elem |
+|---|---|
+| seq fold, fusion ON | 910 |
+| seq fold, `MEZZE_CHAIN_CANONICALIZE=0` | 3 704 |
+| bytes fold | 38 171 |
+
+Fusion is worth ~4x. The other **10x** was specific to the bytes path, and
+comparing the two natives shows it immediately:
+
+```java
+// SeqNatives.foldTwoArg — scalar-ABI bypass, ONE args array for the whole loop
+CallTarget innerTarget = ScalarBypass.tryResolve(folder);
+if (innerTarget != null) { … args[accSlot] = acc; args[elemSlot] = seq.get(i); … }
+
+// BytesNatives.fold — @TruffleBoundary, and per element:
+acc = callNode.call(folder.getCallTarget(),
+    prepareArgsTwo(folder, acc, (long)(bytes.get(i) & 0xFF)));
+```
+
+`prepareArgsTwo` allocated FOUR objects every iteration — two `Object[]`, the
+field-name `String[]`, and a `MezzeRecord` — and `@TruffleBoundary` on the whole
+method meant the loop never compiled and the callback was never inlined into it.
+A boundary on a HOF's loop is precisely backwards; `SeqNatives.fold` has never
+had one.
+
+`MezzeBytes.length()` and `get()` were suspects first and are innocent: both are
+plain field/array reads in both of the MezzeBytes classes.
+
+### Result
+
+| at n=2M, min of 3 | before | after |
+|---|---|---|
+| seq fused (CONTROL) | 385 | **383** |
+| bytes fold | 41 076 | **8 089** |
+
+**5.1x**, and the control came back within 0.5% of its pre-change value across
+two different builds — which is what makes the row readable. Note the earlier
+n=500k readings above are NOT comparable to these: at that size warmup
+dominates and the control swung 910→6 600 across reps. Same kernel, same size,
+enough reps, or the number is noise.
+
+Bytes remains **21x** the fused seq fold (8 089 against 383). That part IS the
+fusion-coverage gap, and the own-source-walk design still stands — but it was
+never the whole story, and 10 of the 107x belonged to a native that allocated
+four objects per byte.
+
+`bytes::map` had the same shape and got the same treatment, and the dead
+`prepareArgs`/`prepareArgsTwo` are deleted.
+
+### One real bug found by writing the test
+
+The two callbacks disagree: `std::collections::bytes` declares `fold`'s as
+`{ acc, byte }` and `map`'s as `{ x }`. The first version of this change wrote
+`byte` for both. The scalar bypass is POSITIONAL and cannot notice a wrong field
+name, so that would have been invisible on every bypass-eligible call and failed
+only elsewhere.
+
+Verified rather than assumed: putting `byte` back makes both `map` tests fail
+and leaves both `fold` tests passing — so `map` is not bypass-eligible here at
+all, not merely when its callback captures, and its field name is load-bearing
+today while the fold's is not yet. `BytesHofScalarBypassTest` covers each
+operation plain and capturing so that stays true if the bypass's reach changes.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
