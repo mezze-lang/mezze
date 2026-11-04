@@ -92,7 +92,7 @@ a defect, not a conservative default.
 | cell | gap | cause |
 |---|---|---|
 | ~~`bytes` fold~~ | **CLOSED — AT FLOOR at 257 ps/elem** | Two causes, neither of them fusion. (1) `BytesNatives.fold` was `@TruffleBoundary` and allocated FOUR objects per element → 41 076 → 9 275. (2) `BuiltinSumBytes` recognises a zero-init ADD folder instead of calling it → 257, below the fused seq fold. The predicted `byte[]` indexed walk WAS built and REVERTED: the generic fused loop is slower than the native fold, because a bare fold has nothing to eliminate |
-| `set` / `deque` bare fold | deque **CLOSED at 1 670**; set **ABOVE FLOOR at 7 447 for a NEW reason** | Two rounds. First: `promoteOpaqueSource` materialised the collection into a Seq to fuse it; refusing that copy when no stages pay for it gave deque 71 508 → 14 041, set 188 633 → 19 826. Then `FoldToSumRewriter` replaced the summing fold with the collection's own `sum` — deque 9 638 → 1 670 (5.6x), set 17 376 → 7 447 (2.3x). Set's remainder is the WALK, not a callback (`set::sum` measured 7 270 BEFORE any of this): ~7 ns to visit one element of a persistent hash set is scattered memory. The lever is primitive-specialised storage, a DATA-STRUCTURE change |
+| `set` / `deque` bare fold | deque **CLOSED at 1 670**; set **ABOVE FLOOR at 4 938 after three rounds** | Three rounds. First: `promoteOpaqueSource` materialised the collection into a Seq to fuse it; refusing that copy when no stages pay for it gave deque 71 508 → 14 041, set 188 633 → 19 826. Then `FoldToSumRewriter` replaced the summing fold with the collection's own `sum` — deque 9 638 → 1 670 (5.6x), set 17 376 → 7 447 (2.3x). Set's remainder is the WALK, not a callback (`set::sum` measured 7 270 BEFORE any of this). Third: that walk was BOXING. `LongHashSetStorage` already holds its elements in a `long[]`, but the iterator and `toArray()` both hand back `Object`, so the sum boxed 2M longs to add them — reading the array directly gives **7 447 → 4 938 (1.5x)**. What is LEFT is the table SCAN: ~2x capacity slack means the walk touches far more memory than the set holds, and 4 938 ps against a bandwidth estimate of ~1 600 says there is still ~3x in it. Floor unknown; the experiment is a scan over a dense array of the same element count |
 | ~~`nel` fold~~ | **CLOSED — 8 858 → 1 206 ps/elem (7.3x)** | Not a fusion gap either. It was the one element-based collection with no `sum`, so `FoldToSumRewriter` had nothing to rewrite its fold to. Added `nel::sum`; lands on the deque row, which is what two array-backed collections walking without a callback cost |
 | **`map` fold** | **33 593 → 15 142 ps/elem (2.2x)**; the remainder is the WALK | Three costs, one removed. `MezzeMap`'s iterator did `new Entry<>(keys[i], values[i])` PER ELEMENT and the three-argument callback read and boxed the keys even though a value sum never looks at them; `map::sum_values` walks the parallel arrays through `MapStorage.forEach` with neither. What is LEFT is ~15 ns to visit one entry of a HAMT with boxed values — about twice set's 7 270, which is what two scattered columns per element costs. Same conclusion as set: a LAYOUT problem, lever is primitive-specialised storage |
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
@@ -3792,6 +3792,53 @@ which is what two scattered columns per element costs. Both are now LAYOUT
 problems rather than dispatch ones, and both want the same thing:
 primitive-specialised storage, the way `LongSeqStorage` backs a seq. That is a
 data-structure change, and it is the largest remaining collection item.
+
+---
+
+## 1.5x on the set fold, and the branch I wrote, measured dead, and deleted
+
+After `FoldToSumRewriter` took the guest callback off the set fold, its
+remaining 7 447 ps/elem was the walk — and the walk was BOXING.
+`LongHashSetStorage` already holds its elements in a `long[]`; every way OUT of
+it hands back `Object`, so `set::sum` boxed two million longs in order to unbox
+them one line later and add them.
+
+Reading the array directly: **7 447 → 4 938 ps/elem**, min of 5, seq control
+steady at 393. Checksums identical.
+
+### The part worth keeping: I nearly claimed a win on a path that never ran
+
+There are TWO long-backed set storages. `LongSetStorage` is dense and sorted;
+`LongHashSetStorage` is a hash table with sentinel slots. I wrote the dense one
+first — it is the cheaper scan, no sentinels to skip — measured 1.5x, and
+assumed that was it.
+
+Then I checked, by making the fast path return a sentinel value and watching the
+kernel's checksum:
+
+- poison the DENSE path → checksum unchanged. **It never fires.**
+- poison the HASH path → checksum became the sentinel. **That is the live one.**
+
+So the dense branch was dead for everything `set::from_seq` builds, and the 1.5x
+belonged entirely to the hash path. The dense `sumLongs` and its branch are
+DELETED — code with no test that fails without it does not belong in the tree,
+and I could not write one because I could not construct a set that reaches that
+storage.
+
+**The technique generalises:** to find out whether a fast path runs, make it
+return a WRONG ANSWER and look at the checksum. A timing difference cannot tell
+you — 1.5x looked identical whether the path I thought I was measuring fired or
+not.
+
+### What is left in the set row
+
+4 938 ps/elem is now an unboxed scan of a hash table with roughly 2x capacity
+slack, so it touches far more memory than the set holds. A bandwidth estimate
+for the live elements alone is ~1 600 ps, so there is still ~3x in it. The
+experiment that would settle the floor is the same scan over a DENSE array of
+the same element count — which is also the argument for why a sorted/dense
+storage would be worth reaching for bulk-built sets, the thing
+`LongSetStorage` exists for and apparently never gets used for.
 
 ---
 

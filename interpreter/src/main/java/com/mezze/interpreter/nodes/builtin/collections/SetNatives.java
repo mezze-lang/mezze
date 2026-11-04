@@ -295,6 +295,14 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static long sum(MezzeSet set) {
+        // A set of Ints already stores them in a `long[]`; the iterator and
+        // `toArray()` both hand back `Object`, so the generic walk below boxes
+        // every element only to unbox it again one line later. MEASURED: that
+        // boxing IS the set fold's remaining cost once the guest callback is
+        // gone (7 447 ps/elem on `fuseall` kernel 7).
+        if (set.storage() instanceof com.mezze.datastructures.set.LongHashSetStorage ls) {
+            return ls.sumLongs();
+        }
         long total = 0;
         for (Object elem : set) {
             if (elem instanceof Long l) total += l;
