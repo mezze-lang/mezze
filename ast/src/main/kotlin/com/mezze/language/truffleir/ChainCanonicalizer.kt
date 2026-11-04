@@ -194,6 +194,18 @@ object ChainCanonicalizer {
             // not use. Give them back rather than growing the frame for a
             // fusion that did not happen.
             ext.rollback(mark)
+            // A CHAIN WHOSE SOURCE IS A CONDITIONAL distributes over the
+            // branches. `peelSource` has no case for an `IfIR`, so a helper
+            // that chooses between two pipelines left the source Opaque and
+            // the caller's whole chain ran element-at-a-time —
+            // `bench/cases/dotprobe` k4, 43 416 ps/elem against the fused
+            // 152, i.e. 286x. Distributing is sound because the branches are
+            // MUTUALLY EXCLUSIVE: putting the operation in both duplicates
+            // the IR and not the work, since exactly one branch runs. Each
+            // branch is then an ordinary chain, so the result goes back
+            // through this walk to be fused.
+            val distributed = tryDistributeOverIf(descended, allFunctions)
+            if (distributed != null) return rewrite(distributed, classifier, allFunctions, ext)
             return descended
         }
         // Preserve the original node as fallback. FusedChainIR replaces
@@ -206,6 +218,110 @@ object ChainCanonicalizer {
         // chain and must not be lifted out of a branch that may not be taken.
         val lets = ext.letsSince(mark)
         return if (lets.isEmpty()) fused else BlockIR(lets, fused, fused.src)
+    }
+
+    /**
+     * `op { src = if c then A else B, …rest }`
+     *   ->  `if c then op { src = A, …rest } else op { src = B, …rest }`
+     *
+     * Also accepts a source that is a CALL to a capture-free, local-free
+     * function whose body is that `if`, substituting the call's arguments into
+     * the condition and both branches — which is the shape a helper like
+     *
+     *     let stages = { xs, on } ->
+     *       if on then xs.map{…}.filter{…} else xs
+     *
+     * produces. That helper is not inlined, because `xs` is read in both
+     * branches and the inliner will not duplicate a non-cheap argument; and
+     * the cross-function peek refuses it because its body is not a single call.
+     * So it reached `peelSource` as an opaque call and nothing fused.
+     *
+     * WHAT MAY BE DUPLICATED. Every argument is substituted into the condition
+     * and into BOTH branches, so each must be something that costs nothing to
+     * evaluate more than once: a literal, a slot read, or a lazy chain stage
+     * such as `iter::range` / `iter::map`, which builds a descriptor and runs
+     * nothing. Anything else refuses — a source that performs, allocates
+     * eagerly or calls into unknown code must not be duplicated even across
+     * exclusive branches, because the condition may read it too.
+     *
+     * Returns null unless at least one branch is a chain expression: without
+     * that there is no fusion to win and this would only grow the IR.
+     */
+    private fun tryDistributeOverIf(
+        node: NodeIR,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): NodeIR? {
+        if (System.getenv("MEZZE_CHAIN_IF_DISTRIBUTE") == "0") return null
+        if (node !is CallNativeIR || node.isScalarABI) return null
+        val record = node.arg as? MakeRecordIR ?: return null
+        val srcField = NativeHofNames.srcFieldFor(node.name)
+        val srcIdx = record.fields.indexOfFirst { it.name == srcField }
+        if (srcIdx < 0) return null
+
+        val branching = asBranchingSource(record.fields[srcIdx].value, allFunctions) ?: return null
+        if (!isChainExpr(branching.thenBr) && !isChainExpr(branching.elseBr)) return null
+
+        fun withSource(branch: NodeIR): NodeIR {
+            val fields = record.fields.toMutableList()
+            fields[srcIdx] = fields[srcIdx].copy(value = branch)
+            return node.copy(arg = MakeRecordIR(fields, record.src))
+        }
+        return IfIR(branching.cond, withSource(branching.thenBr), withSource(branching.elseBr), node.src)
+    }
+
+    /** An `if` over two sources, written directly or reached through a call. */
+    private class BranchingSource(val cond: NodeIR, val thenBr: NodeIR, val elseBr: NodeIR)
+
+    private fun asBranchingSource(
+        src: NodeIR,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): BranchingSource? {
+        if (src is IfIR) return BranchingSource(src.cond, src.thenBr, src.elseBr)
+        if (src !is CallDirectIR) return null
+        val target = allFunctions[src.targetHash] ?: return null
+        if (target.captureSlots.isNotEmpty()) return null
+        val body = target.body as? IfIR ?: return null
+        val paramCount = target.paramSlots.size
+        if (readsNonParamSlot(body, paramCount)) return null
+        val args = argSlotValues(src, target, paramCount) ?: return null
+        // Each argument lands in the condition and in both branches.
+        if (args.values.any { !isSafeToDuplicateAcrossBranches(it) }) return null
+        return BranchingSource(
+            substituteSlots(body.cond, args),
+            substituteSlots(body.thenBr, args),
+            substituteSlots(body.elseBr, args),
+        )
+    }
+
+    /** Costs nothing to evaluate more than once. A lazy chain stage qualifies:
+     *  it builds a descriptor, and the elements are walked at the sink. */
+    private fun isSafeToDuplicateAcrossBranches(node: NodeIR): Boolean = when (node) {
+        is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR,
+        is UnitLitIR, is CharLitIR, is FracLitIR -> true
+        is ReadLocalIR, is ReadCaptureIR, is ReadArgIR -> true
+        is ReadFieldIR -> isSafeToDuplicateAcrossBranches(node.record)
+        is InlineBinaryOpIR ->
+            isSafeToDuplicateAcrossBranches(node.left) && isSafeToDuplicateAcrossBranches(node.right)
+        else -> isChainExpr(node)
+    }
+
+    /** A lazy source or stage the fuser itself consumes. */
+    private fun isChainExpr(node: NodeIR): Boolean {
+        if (node !is CallNativeIR) return false
+        return CHAIN_SHAPES.any { op -> NativeHofNames.isAnyElementCollection(node.name, op) }
+    }
+
+    private val CHAIN_SHAPES = setOf(
+        NativeHofNames.OP_MAP, NativeHofNames.OP_FILTER, NativeHofNames.OP_TAKE,
+        NativeHofNames.OP_DROP, NativeHofNames.OP_TAKE_WHILE, NativeHofNames.OP_DROP_WHILE,
+        NativeHofNames.OP_ENUMERATE, NativeHofNames.OP_RANGE,
+        NativeHofNames.OP_FROM_SEQ, NativeHofNames.OP_FROM_LIST,
+    )
+
+    /** Replace `ReadLocalIR(slot)` for every slot the map names. */
+    private fun substituteSlots(node: NodeIR, args: Map<Int, NodeIR>): NodeIR {
+        if (node is ReadLocalIR) args[node.slot]?.let { return it }
+        return node.transformChildren { substituteSlots(it, args) }
     }
 
     /**
