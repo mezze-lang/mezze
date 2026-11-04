@@ -1491,6 +1491,46 @@ DERIVED from `OperatorMapping.BINARY_OPERATORS`. Two copies would have drifted
 silently — a new operator would stop folding and the only symptom would be
 slower programs.
 
+### RANKED NEXT: the two record kernels nothing in this effort moved
+
+Every kernel on the committed build, same A/B, n=2e7, min of 3 — so the two that
+did not move are now the largest measured gaps here:
+
+| kernel | ps/iter | young GCs | vs control |
+|---|---|---|---|
+| 1 positional (control) | 233 | 2 | — |
+| 4 record from a helper | 232 | 2 | at the control |
+| 6 hand-inlined | 233 | 2 | at the control |
+| 7 helper at module level | 635 | 3 | 2.7x — native metadata, below |
+| **2 record as LOOP STATE** | **2 769** | **25** | **12x** |
+| **5 record SPREAD per iteration** | **9 345** | **42** | **40x** |
+
+Both are the record being a VALUE, which is the half this effort has not
+touched: kernels 4 and 6 were records that could be made to disappear, and they
+now cost nothing. These two cannot disappear by the same route.
+
+KERNEL 2 LOOKS TRACTABLE AND IS THE BIGGER PRIZE, because its shape is the
+ordinary functional loop:
+
+    let go = { st } ->
+      if st.i <= 0 then st.acc
+      else go { st = { i = st.i - 1, acc = st.acc + st.i } }
+
+The record is built, handed to the next iteration, and destructured there — by
+the SAME function, which is what makes it approachable without inter-procedural
+analysis in general. A self-recursive function whose parameter is only ever
+field-read can have that PARAMETER scalarized into one parameter per field, at
+which point this is kernel 1. 25 young collections against the control's 2 says
+what it would save. The pieces already exist: [RecordScalarizer] does this for a
+binding, and the devirtualisation work established that a self tail call's
+target is known.
+
+KERNEL 5 IS DIFFERENT and may be a floor. `{ ...st, i = … }` has no statically
+known field set at the call site, which is one of the three shapes the scalar
+ABI documents itself as refusing, so there is nothing to make positional. Worth
+measuring whether the spread's field set is in fact known from the solved type
+before accepting 40x as a floor.
+
 ### OPEN, and newly diagnosed: the native signature registry is EMPTY for user code
 
 Kernel 7 did not move, and it is not the pass. Its helper is top-level, so its
