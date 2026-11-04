@@ -602,7 +602,15 @@ class TypedASTCompiler(
         // returning a record looks like once that helper is inlined. It needs
         // boxing elimination on to pay, and an inlined producer to see anything
         // at all. Off with MEZZE_RECORD_SCALARIZE=0.
-        val scalarizedMap = com.mezze.language.truffleir.RecordScalarizer.scalarize(inlinedMap)
+        // A variant built as the scrutinee of the match that destructures it is
+        // not built: the match folds to the case carrying its tag and the
+        // payload's fields bind straight to that case's slots. BEFORE the
+        // record scalarizer, because the fold's result is ordinary `let`s that
+        // the passes below then handle — and in a loop branch that is exactly
+        // what LetCopyPropagation collapses, after which the tier fuses.
+        // Off with MEZZE_FOLD_VARIANT_MATCH=0.
+        val variantFoldedMap = com.mezze.language.truffleir.VariantMatchFolder.fold(inlinedMap)
+        val scalarizedMap = com.mezze.language.truffleir.RecordScalarizer.scalarize(variantFoldedMap)
         // A binding read once, holding a value that can be recomputed at the
         // read, is substituted and dropped. AFTER the scalarizer, whose
         // per-field locals are exactly that shape, and before canonicalization
