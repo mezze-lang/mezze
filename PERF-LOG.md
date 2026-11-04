@@ -1491,45 +1491,95 @@ DERIVED from `OperatorMapping.BINARY_OPERATORS`. Two copies would have drifted
 silently — a new operator would stop folding and the only symptom would be
 slower programs.
 
-### RANKED NEXT: the two record kernels nothing in this effort moved
+### FIXED: a record that is only a parameter's fields is not built — 12.3x
+
+The kernel ranked next below, done. A/B on one CLI with
+`MEZZE_PARAM_SCALARIZE=0` read by `mez build`, n=2e7, min of 5:
+
+| kernel | off | on | | young GCs |
+|---|---|---|---|---|
+| 1 positional (control) | 238 | 231 | — | 2 → 2 |
+| **2 record as LOOP STATE** | **2 766** | **225** | **12.29x** | **26 → 2** |
+
+AT THE CONTROL: 225 against 231, with two young collections against the
+control's two, so nothing is allocated per iteration. Kernels 3-7 unchanged
+within noise, checksums identical throughout.
+
+    let go = { st } ->
+      if st.i <= 0 then st.acc
+      else go { st = { i = st.i - 1, acc = st.acc + st.i } }
+
+One record per iteration, built by the caller and destructured by the callee —
+the same function. `RecordScalarizer` could not reach it: that pass replaces a
+`let` whose VALUE is a record, and here the record arrives as a PARAMETER. Same
+idea one level out: expand the parameter into one per field, rewrite every
+caller to pass them positionally. `MEZZE_TRACE_SELFTAIL` then goes
+`params=1 tier=not-fused` → `params=2 tier=FUSED`, because two parameters make
+the branch a self tail call over positional arithmetic, which is what
+`FusedLongTailLoop` matches on. The allocation is most of the 12x; the tier is
+the rest.
+
+CHANGING AN ARITY IS ONLY SOUND IF EVERY CALLER CHANGES WITH IT, so this pass
+takes the whole function map and refuses any candidate whose references it
+cannot classify: lambdas only (a top-level declaration may be invoked from
+outside the map — an entry point, a `pub` function called by name — where no
+rewrite can follow); every mention of the hash classified, with a global read
+or partial application refusing; a closure only ever `let`-bound to a slot
+whose every read is a call this pass rewrites; and an exact field set at every
+call site.
+
+### THE REFUSAL THAT HAD TO BE RELAXED, and why it is not a loophole
+
+Every recursive local lambda CAPTURES THE SLOT IT IS STORED IN:
+
+    Let(slot=1, MakeLambdaIR(go, captures=[CaptureIR(slot=1)]))
+
+so that it can call itself through its own value. A capture reads the slot, so
+"this slot is only ever called" refused EVERY recursive loop — the entire point
+of the pass. The first version of this pass therefore fired on nothing, and the
+dump is what said why.
+
+That capture is dead by construction whenever the self-calls are direct: the
+slot has not been written yet when the `MakeLambdaIR` is evaluated, which is
+exactly why a recursive let's self-call is emitted as a direct call in the first
+place. So the pass allows precisely that case — the candidate's OWN closure,
+whose body never reads the capture index it occupies — and still refuses a
+different lambda capturing the slot, or this one actually reading the capture.
+
+Worth keeping as a fact about the IR: **a recursive local lambda always carries
+a self-capture, and it is dead whenever its self-calls are direct.** Any
+analysis that treats "captured" as "escapes" will refuse every recursive loop
+in the language.
+
+### RANKED NEXT: the record kernel nothing in this effort moved
 
 Every kernel on the committed build, same A/B, n=2e7, min of 3 — so the two that
 did not move are now the largest measured gaps here:
 
 | kernel | ps/iter | young GCs | vs control |
 |---|---|---|---|
-| 1 positional (control) | 233 | 2 | — |
-| 4 record from a helper | 232 | 2 | at the control |
-| 6 hand-inlined | 233 | 2 | at the control |
-| 7 helper at module level | 635 | 3 | 2.7x — native metadata, below |
-| **2 record as LOOP STATE** | **2 769** | **25** | **12x** |
-| **5 record SPREAD per iteration** | **9 345** | **42** | **40x** |
+| 1 positional (control) | 231 | 2 | — |
+| 2 record as loop state | 225 | 2 | at the control |
+| 4 record from a helper | 221 | 2 | at the control |
+| 6 hand-inlined | 220 | 2 | at the control |
+| 3 record built once, fields read | 532 | 4 | 2.3x |
+| 7 helper at module level | 629 | 3 | 2.7x — native metadata, below |
+| **5 record SPREAD per iteration** | **9 377** | **44** | **40x** |
 
-Both are the record being a VALUE, which is the half this effort has not
-touched: kernels 4 and 6 were records that could be made to disappear, and they
-now cost nothing. These two cannot disappear by the same route.
+Four of seven are now AT the control. What is left is three different things:
 
-KERNEL 2 LOOKS TRACTABLE AND IS THE BIGGER PRIZE, because its shape is the
-ordinary functional loop:
-
-    let go = { st } ->
-      if st.i <= 0 then st.acc
-      else go { st = { i = st.i - 1, acc = st.acc + st.i } }
-
-The record is built, handed to the next iteration, and destructured there — by
-the SAME function, which is what makes it approachable without inter-procedural
-analysis in general. A self-recursive function whose parameter is only ever
-field-read can have that PARAMETER scalarized into one parameter per field, at
-which point this is kernel 1. 25 young collections against the control's 2 says
-what it would save. The pieces already exist: [RecordScalarizer] does this for a
-binding, and the devirtualisation work established that a self tail call's
-target is known.
-
-KERNEL 5 IS DIFFERENT and may be a floor. `{ ...st, i = … }` has no statically
+**Kernel 5, 40x, and it may be a floor.** `{ ...st, i = … }` has no statically
 known field set at the call site, which is one of the three shapes the scalar
 ABI documents itself as refusing, so there is nothing to make positional. Worth
-measuring whether the spread's field set is in fact known from the solved type
-before accepting 40x as a floor.
+checking whether the solved type knows the field set before accepting it.
+
+**Kernel 3, 2.3x.** A record built ONCE outside the loop with its fields read
+per iteration. Nothing allocates per iteration (4 collections), so this is the
+field-read path itself, not allocation — a different question from everything
+above, and the smallest of the three.
+
+**Kernel 7, 2.7x**, which is the native-metadata item below and not about
+records at all.
 
 ### OPEN, and newly diagnosed: the native signature registry is EMPTY for user code
 

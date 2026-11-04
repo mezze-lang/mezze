@@ -611,6 +611,14 @@ class TypedASTCompiler(
         // tail call, and a `do` block around it declined the whole tier — 3x on
         // a formatting choice. Off with MEZZE_LET_PROPAGATE=0.
         val propagatedMap = com.mezze.language.truffleir.LetCopyPropagation.propagate(scalarizedMap)
+        // A parameter only ever FIELD-READ becomes one parameter per field, and
+        // the record its callers built stops existing — the loop-state shape
+        // `go { st = { i = …, acc = … } }`, which allocates once per iteration
+        // and costs 12x. Changing a function's arity is sound only if every
+        // caller is rewritten with it, so this one takes the WHOLE map and
+        // refuses any candidate whose references it cannot classify. Off with
+        // MEZZE_PARAM_SCALARIZE=0.
+        val paramScalarizedMap = com.mezze.language.truffleir.ParamScalarizer.scalarize(propagatedMap)
 
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
@@ -622,13 +630,13 @@ class TypedASTCompiler(
         // runtime (list::sum → BuiltinSumLongSeq with List input).
         val userHashes = deduped.map { it.hash }.toHashSet()
         val userFunctions = HashMap<Hash, FunctionIR>(userHashes.size)
-        for ((h, fn) in propagatedMap) {
+        for ((h, fn) in paramScalarizedMap) {
             if (h in userHashes) userFunctions[h] = fn
         }
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
-            .canonicalize(userFunctions, propagatedMap)
+            .canonicalize(userFunctions, paramScalarizedMap)
         // Merge back: canonicalized user functions over the full inlined map.
-        val canonicalizedMap = HashMap(propagatedMap)
+        val canonicalizedMap = HashMap(paramScalarizedMap)
         canonicalizedMap.putAll(canonicalizedUser)
         // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
         // The pass exists but its purity check needs work — see
