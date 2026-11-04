@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.BuiltinTypes
+import com.mezze.language.ast.VariantAliases
 import com.mezze.language.ast.isTypeVarName
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -214,13 +215,40 @@ internal class UnknownTypeValidator(
         annotation: ParsedVariantType,
         errors: MutableList<ValidationError>,
     ) {
+        if (annotation.isOpen) return
+        val written = annotation.constructors.map { it.name }.toSet()
         for (ctor in annotation.constructors) {
             val owner = claimOwners[ctor.name] ?: continue
+            // Writing the group's FULL arm set is writing that group, which is
+            // fine — `| Red, Blue |` beside `type Color = | Red, Blue |` is
+            // Color, and `| Some { val: 'a }, None |` IS Option. Only a
+            // DIFFERENT set is a contradiction: `| Blue |` is Color with Red
+            // missing, and `| True |` is Bool with False missing.
+            //
+            // Comparing arms rather than names is what makes this checkable at
+            // all. Refusing any inline group that merely MENTIONED a claimed tag
+            // refused every `| Some { val: 'a }, None |` the stdlib and
+            // twenty-seven if-let tests legitimately write — 32 failures.
+            if (written == armsOf(owner)) return
             errors.add(ValidationError.ConflictingInlineGroup(
                 constructorName = ctor.name,
                 owningType = owner,
                 loc = annotation.loc,
             ))
+            return
+        }
+    }
+
+    /** The arm set of a group named [owner], builtin or declared. */
+    private fun armsOf(owner: String): Set<String> {
+        VariantAliases.byConstructorSet.entries
+            .firstOrNull { it.value == owner }
+            ?.let { return it.key.split(",").toSet() }
+        val decl = registry.lookupType(owner) ?: return emptySet()
+        return when (val def = decl.definition) {
+            is ParsedVariantDef -> def.constructors.map { it.name }.toSet()
+            is ParsedNewtypeDef -> setOf(def.constructor)
+            else -> emptySet()
         }
     }
 
@@ -245,6 +273,11 @@ internal class UnknownTypeValidator(
                 else -> {}
             }
         }
+        // Builtins are always in scope (spec 1.3), so they claim like any other
+        // named group. Safe to include now that writing a group's full arm set
+        // is allowed: `| Some { val: 'a }, None |` matches Option's arms and
+        // passes, while `| True |` is Bool missing False and does not.
+        putAll(BuiltinTypes.reservedConstructorOwner)
         for (decl in module.decls.filterIsInstance<ParsedTypeDecl>()) claimAll(decl.name, decl)
         for (decl in module.decls.filterIsInstance<ParsedUseDecl>()) {
             val path = decl.path

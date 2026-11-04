@@ -78,16 +78,17 @@ class VariantSpecClaimsTest : VariantSpecBase() {
     }
 
     @Test fun `two inline groups with different payloads for one tag`() {
-        rejects(
+        accepts(
             """
             pub let fp = { c: | Red { n: Int } | } -> 1
             pub let gp = { c: | Red { s: Str } | } -> 2
             $MAIN
             """,
-            "V0701",
-            "8.2: getting one name to carry two payloads in a module needs two groups " +
-                "claiming it, and the error should arrive at the second signature rather " +
-                "than as a payload mismatch somewhere later",
+            "Neither inline group CLAIMS Red, so there is no claim to contradict and " +
+                "nothing links the two signatures — the same reasoning that makes 8.1 " +
+                "legal, applied to payloads instead of membership. An earlier draft " +
+                "refused this, which would have made the claim rule depend on whether a " +
+                "group was named for membership and not for payloads.",
         )
     }
 
