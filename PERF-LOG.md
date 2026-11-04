@@ -1525,6 +1525,42 @@ This is the "`mez build` EMPTY native registry" note from the earlier
 `list_fold_routes` work, now with the mechanism and the three consequences
 named rather than just the symptom.
 
+AND IT IS NOT A ONE-LINE FIX, which is worth saying because the paragraph above
+reads like one. Calling the bootstrap from `mez`'s own `main` fails outright:
+
+    WARNING: NativeBootstrap not reachable:
+      com.mezze.interpreter.nodes.builtin.dsl.NativeBootstrap
+
+The interpreter is not on the CLI's classpath AT ALL. `:cli` keeps `:interpreter`
+off its compile classpath on purpose (#220), and at runtime the interpreter lives
+in a separate slim `mezze-runtime.jar` that `ComptimeHost` loads into a child
+`URLClassLoader` only when a macro is actually called — deliberately lazy. Worse,
+`mez dev` runs the program in a SUBPROCESS, so the JVM that lowers the code and
+the JVM that has the natives are never the same one; and `mez build` SERIALISES
+the lowered IR into the output jar, so whatever metadata was missing at lowering
+is missing permanently.
+
+So the metadata has to reach the compiling JVM without the interpreter. Three
+ways, and the choice is a design decision rather than a performance one:
+
+1. **Load the runtime jar into the CLI's JVM before compiling.** Smallest
+   change, and `ComptimeHost` already has the mechanism. It costs class-loading
+   a 28 MB jar on every compile, in the CLI's JVM, where nothing needed it
+   before — acceptable for `build`/`dev`, bad for `check`, which is the edit
+   loop.
+2. **Declare the metadata in `ast`** — where it is needed at compile time — and
+   have the interpreter's `NativeOp(...)` ASSERT at registration that its
+   handler matches the declared signature. One source of truth for the metadata
+   and a loud check that the handler agrees, which is what the current
+   same-site declaration was protecting. Mechanical across the six `*Ops.kt`
+   files and the DSL.
+3. **Generate the signatures as a resource** in `ast` at build time from the
+   interpreter declarations. Keeps one declaration site, adds a build step.
+
+(2) is the one that matches the registry's own stated design — "the signature
+registry lives in `ast` … only carries IR-shape info, no executable code" — and
+the only one with no per-compile cost.
+
 AND NOT DONE, deliberately: making `+`, `-` and `%` homogeneous again. The
 recorded design decision says "leave NumAdd/NumSub/NumMod homogeneous
 (heterogeneous + is usually a bug worth rejecting)" with heterogeneity intended
