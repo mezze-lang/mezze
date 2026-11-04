@@ -94,7 +94,7 @@ class EmitFileSizeRatchetTest {
             // measured flat and reverted twice before that order was known.
             // The pass itself lives in ast/truffleir; what is here is the
             // pipeline, which is this file's subject.
-            C + "TypedASTCompiler.kt" to 4546,   // was 5,580; +151 for devirtualising a local-helper call, inlining a generic body into a concrete caller, and running LetCopyPropagation + ParamScalarizer + VariantMatchFolder
+            C + "TypedASTCompiler.kt" to 4550,   // was 5,580; +151 for devirtualising a local-helper call, inlining a generic body into a concrete caller, and running LetCopyPropagation + ParamScalarizer + VariantMatchFolder; +4 to wire ChainLetInliner, whose own code is in ast/ChainLetInliner.kt
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

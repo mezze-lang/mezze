@@ -628,6 +628,10 @@ class TypedASTCompiler(
         // MEZZE_PARAM_SCALARIZE=0.
         val paramScalarizedMap = com.mezze.language.truffleir.ParamScalarizer.scalarize(propagatedMap)
 
+        // A pipeline step bound to a `let` is still a pipeline step. Must run
+        // BEFORE the canonicalizer; see ChainLetInliner. MEZZE_CHAIN_LET_INLINE=0.
+        val chainInlinedMap = com.mezze.language.truffleir.ChainLetInliner.inline(paramScalarizedMap)
+
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
         // go through; stdlib was already canonicalized at precompile time
@@ -638,13 +642,13 @@ class TypedASTCompiler(
         // runtime (list::sum → BuiltinSumLongSeq with List input).
         val userHashes = deduped.map { it.hash }.toHashSet()
         val userFunctions = HashMap<Hash, FunctionIR>(userHashes.size)
-        for ((h, fn) in paramScalarizedMap) {
+        for ((h, fn) in chainInlinedMap) {
             if (h in userHashes) userFunctions[h] = fn
         }
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
-            .canonicalize(userFunctions, paramScalarizedMap)
+            .canonicalize(userFunctions, chainInlinedMap)
         // Merge back: canonicalized user functions over the full inlined map.
-        val canonicalizedMap = HashMap(paramScalarizedMap)
+        val canonicalizedMap = HashMap(chainInlinedMap)
         canonicalizedMap.putAll(canonicalizedUser)
         // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
         // The pass exists but its purity check needs work — see

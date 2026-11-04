@@ -1,0 +1,155 @@
+## WHERE FUSION STOPS.
+##
+## `bench/cases/fusegaps` asks which pipeline SHAPES fuse — two maps, a take
+## after a filter, and so on — and every one of its kernels is a single dot-chain
+## inside a single function. This case asks a different question: fusion is the
+## core of Mezze's performance story, so where does it stop being applied at all?
+##
+## Each kernel computes the SAME checksum from the same elements, so a kernel
+## that got fast by dropping a stage reads as a different number. The kernels
+## differ only in how the pipeline is SPELLED.
+##
+## READ IT WITH THE IR, NOT ONLY THE CLOCK. `ChainCanonicalizer` refuses
+## silently — its own header says so — so the ground truth is whether a
+## `FusedChainIR` appears in the lowered body:
+##
+##   MEZZE_DUMP_FN='*' ./.build/fusecross <k> 100 2>&1 | grep -c FusedChainIR
+##
+## A kernel with zero is running element-at-a-time no matter what the clock says
+## on a loaded box.
+## A NOTE ON SPELLING, BECAUSE IT COST A COMPILE. The helpers below use the
+## free-function form `iter::map { it = xs, … }` rather than `xs.map { … }`. Not
+## a preference — the method form does not COMPILE here:
+##
+##   let stages_clean = { xs } -> xs.map { f = … }.filter { p = … }
+##   error[T0201]: No inherent method 'filter' for type 'Bytes'.
+##                 It exists for: Iter, Seq, Option, List, Map, Set, Deque, …
+##
+## `xs` is unconstrained apart from having `map` and `filter`, and inference
+## resolved it to `Bytes` — one arbitrary candidate out of nine — instead of
+## staying polymorphic or reporting an ambiguous receiver. Annotating `xs` fixes
+## it, which by the standing rule means inference is at fault, so the annotation
+## is NOT added here; the free-function form pins the type through the stdlib
+## signature instead. Kernel 1 keeps the dot form, where the receiver is a
+## concrete `iter::range` and inference has something to work with.
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── 1. THE BASELINE. One dot-chain, one function. This is the shape every
+##      fusegaps kernel uses and the shape that is known to fuse.
+let k_inline = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x > 2 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## ── 2. THE SAME PIPELINE WITH ITS STEPS NAMED. Identical stages, identical
+##      order, one function — the only change is that each intermediate gets a
+##      `let`. `peelSource` has peels for map, filter, take, drop, enumerate and
+##      from_seq, and a hop for a direct call, but NO case for `ReadLocalIR`, so
+##      the fold's source is a slot read rather than a chain and the walk should
+##      stop dead. If this does not fuse, then naming your steps costs the whole
+##      pipeline — and naming steps is how readable code is written.
+let k_let_bound = { n } -> do
+  let src = iter::range { start = 0, end = n }
+  let tripled = iter::map { it = src, f = { x } -> x * 3 }
+  let big = iter::filter { it = tripled, p = { x } -> x > 2 }
+  iter::fold { it = big, init = 0, f = { acc, x } -> acc + x }
+
+## ── 3. SPLIT ACROSS A FUNCTION, callee CLEAN. The stages live in a helper whose
+##      body is a single expression with no locals and no captures — exactly what
+##      `peekThroughMonoWrapper` is built to see through, within its 4 hops.
+let stages_clean = { xs } -> iter::filter {
+  it = iter::map { it = xs, f = { x } -> x * 3 },
+  p = { x } -> x > 2,
+}
+
+let k_split_clean = { n } -> iter::fold {
+  it = stages_clean { xs = iter::range { start = 0, end = n } },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
+## ── 4. SPLIT ACROSS A FUNCTION, callee HAS A LOCAL. The same helper, with one
+##      intermediate named. `peekThroughMonoWrapper` refuses outright on
+##      `target.localSlots.isNotEmpty()`, so this should lose fusion where
+##      kernel 3 keeps it — one `let` inside a helper, and the caller's whole
+##      pipeline falls off.
+let stages_local = { xs } -> do
+  let tripled = iter::map { it = xs, f = { x } -> x * 3 }
+  iter::filter { it = tripled, p = { x } -> x > 2 }
+
+let k_split_local = { n } -> iter::fold {
+  it = stages_local { xs = iter::range { start = 0, end = n } },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
+## ── 5. SPLIT WITH THE SINK IN THE CALLEE instead of the stages — the mirror of
+##      kernel 3. The caller builds the chain, the helper consumes it.
+let sink_fn = { xs } -> iter::fold { it = xs, init = 0, f = { acc, x } -> acc + x }
+
+let k_split_sink = { n } -> sink_fn {
+  xs = iter::filter {
+    it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x > 2,
+  },
+}
+
+## ── 6. TWO HOPS: the caller calls a helper that forwards to another helper.
+##      `MAX_PEEK_HOPS` is 4 and the comment says one hop covers a stdlib
+##      wrapper and two a user function forwarding to one, so this is the
+##      documented limit of the design.
+let stages_outer = { xs } -> stages_clean { xs = xs }
+
+let k_two_hops = { n } -> iter::fold {
+  it = stages_outer { xs = iter::range { start = 0, end = n } },
+  init = 0, f = { acc, x } -> acc + x,
+}
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 10000000 }
+  if k == 1 then do
+    k_inline { n = n }
+    report { name = "1 inline chain   ", n = n, r = time_it { f = {} -> k_inline { n = n } } }
+    report { name = "1 inline chain   ", n = n, r = time_it { f = {} -> k_inline { n = n } } }
+  else if k == 2 then do
+    k_let_bound { n = n }
+    report { name = "2 let-bound steps", n = n, r = time_it { f = {} -> k_let_bound { n = n } } }
+    report { name = "2 let-bound steps", n = n, r = time_it { f = {} -> k_let_bound { n = n } } }
+  else if k == 3 then do
+    k_split_clean { n = n }
+    report { name = "3 split, clean   ", n = n, r = time_it { f = {} -> k_split_clean { n = n } } }
+    report { name = "3 split, clean   ", n = n, r = time_it { f = {} -> k_split_clean { n = n } } }
+  else if k == 4 then do
+    k_split_local { n = n }
+    report { name = "4 split, local   ", n = n, r = time_it { f = {} -> k_split_local { n = n } } }
+    report { name = "4 split, local   ", n = n, r = time_it { f = {} -> k_split_local { n = n } } }
+  else if k == 5 then do
+    k_split_sink { n = n }
+    report { name = "5 split, sink    ", n = n, r = time_it { f = {} -> k_split_sink { n = n } } }
+    report { name = "5 split, sink    ", n = n, r = time_it { f = {} -> k_split_sink { n = n } } }
+  else if k == 6 then do
+    k_two_hops { n = n }
+    report { name = "6 two hops       ", n = n, r = time_it { f = {} -> k_two_hops { n = n } } }
+    report { name = "6 two hops       ", n = n, r = time_it { f = {} -> k_two_hops { n = n } } }
+  else println { msg = "unknown kernel" }

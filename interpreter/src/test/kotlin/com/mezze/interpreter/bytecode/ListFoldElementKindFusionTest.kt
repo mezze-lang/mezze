@@ -188,7 +188,21 @@ class ListFoldElementKindFusionTest {
         """)
         assertEquals(5.0, out)
         // It reaches the same decision and takes the generic loop: DOUBLE slots.
-        assertEquals(listOf("FusedLoop"), emitted)
+        //
+        // THE GUARD IS THE ABSENCE OF A LONG PIPELINE, not a marker count. This
+        // asserted the exact list `["FusedLoop"]` until `ChainLetInliner` made it
+        // three of them: `let l = list::from_seq { … }` is now substituted into
+        // the fold, so the chain FUSES where the binding used to stop the
+        // canonicalizer's walk dead, and the generic emit runs once per emitted
+        // loop. The answer is unchanged at 5.0 and every marker is the generic
+        // loop, so the count was incidental to what this test is for — a Float
+        // fold must never reach `FusedLongPipeline`, whose slots are LONG.
+        assertTrue(emitted.isNotEmpty(), "nothing was emitted at all: $emitted")
+        assertTrue(
+            emitted.none { it.startsWith("FusedLongPipeline") },
+            "a Float fold reached the long pipeline: $emitted",
+        )
+        assertTrue(emitted.all { it == "FusedLoop" }, "unexpected marker: $emitted")
     }
 
     @Test

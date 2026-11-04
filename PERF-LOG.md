@@ -78,6 +78,10 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
+| **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
+| a fusable chain through a CAPTURING helper | unmeasured | `peekThroughMonoWrapper` refuses on `captureSlots.isNotEmpty()`, which is any nested helper closing over a value. `fusecross` k7 |
+| a callee whose body is an `if` over two pipelines | unmeasured | the peek accepts a body that is a single call and nothing else. `fusecross` k8 |
+| a chain through more than 4 forwarding hops | unmeasured | `MAX_PEEK_HOPS = 4`, a budget rather than a semantic limit. `fusecross` k9 |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
 | **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
@@ -2536,6 +2540,103 @@ while being slow.
 - The HOF natives need `NativeOpWithNode` and an `IndirectCallNode`, and several
   are what the fuser consumes, so they are a separate piece of work with its own
   measurement.
+
+---
+
+## Fusion stopped at a `let`, and at one `let` inside a helper
+
+Fusion is the core of the performance story — `seq::map`+`size` is 1503x on the
+fused path, a dot chain 540x — so where it silently stops applying matters more
+than how fast the fused path is. `ChainCanonicalizer`'s own header says refusal
+is silent, and there is no refusal trace, so a gap is invisible until someone
+reads the lowered IR.
+
+`bench/cases/fusecross` is six spellings of ONE pipeline. Same stages, same
+order, same checksum (14850); the only difference is how it is written. The
+ground truth is whether a `FusedChainIR` appears in the lowered body, which is a
+property of the compiled program and so survives a loaded box:
+
+| spelling | before | after |
+|---|---|---|
+| 1 one dot chain | fused | fused |
+| **2 every step named with `let`** | **fused=0**, residual `map,filter,fold` | **fused** |
+| 3 split across a clean helper | fused | fused |
+| **4 split, helper holds one `let`** | **fused=0**, residual `map,filter` | **fused** |
+| 5 split, sink in the callee | fused | fused |
+| 6 two forwarding hops | fused | fused |
+
+**Naming the steps cost the entire pipeline.** And one named intermediate inside
+a helper took its CALLER's whole pipeline down with it.
+
+### One cause, two symptoms
+
+`ChainCanonicalizer.peelSource` recognises a chain by walking an EXPRESSION
+TREE. It has peels for map, filter, take, drop, enumerate and from_seq, and a
+hop through a direct call — and no case for a `ReadLocalIR`. So a named step
+makes the walk hit a slot read, classify the source as Opaque, and stop.
+
+One layer up, `peekThroughMonoWrapper` refused a callee outright when it had
+locals, so the same slot read inside a helper cost the caller its chain.
+
+`ChainLetInliner` substitutes single-use chain-valued bindings, which closes
+both: the pipeline becomes one expression again, and the helper's locals empty
+so the cross-function peek stops refusing. `stages_clean` and `stages_local`,
+which differ in source only by a `let`, now lower to IDENTICAL IR and
+deduplicate by content hash — the two spellings are indistinguishable to the
+compiler.
+
+### Why it is a separate pass from `LetCopyPropagation`
+
+That pass does the same shape of rewrite and deliberately refuses to move a
+CALL, for a stated reason: nothing in the IR says whether the impl behind one
+has effects, so moving it into a branch could change whether it runs at all. A
+chain stage IS a call, so it needs its own argument, and has one:
+
+- **the single read IS the consumer** — a binding read once moves to that one
+  read, so the stage is built at the same point in the data flow
+- **`iter` stages are lazy** — `iter::map` builds a descriptor and runs nothing
+- **effectful callbacks are refused elsewhere** — `isEffectSafe` already keeps a
+  performing lambda off the fused path
+- and it may not move past anything that is not itself inert, the same rule and
+  for the same reason as that pass
+
+### Two things found while fixing it
+
+**`peekThroughMonoWrapper` was testing the wrong property.** It refused on
+`target.localSlots.isNotEmpty()` — what the frame DECLARES — while its own
+comment states the requirement as "a slot index in the body is a parameter
+index". The substituted slot stays declared on purpose (reclaiming it would
+renumber every later slot), so the refusal still fired on a helper whose locals
+were already gone. It now tests what the body READS. The test caught this: the
+assertion was written as `localSlots.isEmpty()` and failed.
+
+**A stage appears as a native only in a MONOMORPHISED clone.** The generic body
+still calls `iter::map`; the clone has `__native_iter_map` inlined. Accepting
+only the native made the pass work on the clone and silently skip the original,
+so a helper mono declined to specialise would keep its binding and keep costing
+its caller the pipeline — which ties this to the open `typeParams`
+over-collection, since that is a reason mono declines. The predicate now sees
+through a direct call to a chain op within two hops.
+
+### Still above floor
+
+`peekThroughMonoWrapper` remains a special case rather than general inlining,
+and still refuses:
+
+- a callee with real CAPTURES (`captureSlots.isNotEmpty()`), which is any nested
+  helper closing over a value
+- a callee whose body is not a single call — an `if` choosing between two
+  pipelines refuses, and that is an ordinary thing to write
+- more than `MAX_PEEK_HOPS = 4` forwarding hops
+- a callee whose body is a SCALAR-ABI native. Currently unreachable because
+  `SeqOpsFusionGuardTest` forbids declaring a fuser op, but it is a latent
+  coupling between the two efforts
+
+The general form of the fix is to let `TrivialWrapperInliner` inline a
+chain-returning helper — it currently refuses any body containing a
+`MakeLambdaIR`, which is exactly what a staged pipeline has — rather than
+special-casing the peek. Unmeasured; the kernels above are the instrument for
+it.
 
 ---
 

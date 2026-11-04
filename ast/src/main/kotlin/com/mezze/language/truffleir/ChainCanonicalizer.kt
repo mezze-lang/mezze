@@ -536,8 +536,20 @@ object ChainCanonicalizer {
             val target = allFunctions[current.targetHash] ?: return null
             // Only handle simple wrappers: no captures, no locals, so a slot
             // index in the body is a parameter index.
-            if (target.captureSlots.isNotEmpty() || target.localSlots.isNotEmpty()) return null
+            //
+            // THE TEST IS ON WHAT THE BODY READS, not on what the frame
+            // DECLARES. It used to refuse on `localSlots.isNotEmpty()`, and that
+            // rejected a helper whose locals had already been substituted away:
+            // [ChainLetInliner] empties the `let` but leaves the slot declared
+            // on purpose — renumbering every later slot to reclaim one costs a
+            // rewrite of every read for nothing — so a helper written with one
+            // named intermediate still carried a declaration, still hit this
+            // refusal, and still took its caller's whole pipeline down with it.
+            // What substitution actually needs is that every slot the body reads
+            // IS a parameter, which an unused declaration does not affect.
+            if (target.captureSlots.isNotEmpty()) return null
             val paramCount = target.paramSlots.size
+            if (readsNonParamSlot(target.body, paramCount)) return null
             val slotValues = argSlotValues(current, target, paramCount) ?: return null
             when (val body = target.body) {
                 is CallNativeIR -> {
@@ -563,6 +575,24 @@ object ChainCanonicalizer {
             }
         }
         return null
+    }
+
+    /**
+     * True if [node] reads a frame slot that is not a parameter.
+     *
+     * With no captures the layout is `[params…, locals…]`, so a read at or past
+     * [paramCount] is a local — and a local has no value in the caller to
+     * substitute. A slot merely DECLARED and never read is harmless, which is
+     * the whole point of asking the body rather than the frame.
+     */
+    private fun readsNonParamSlot(node: NodeIR, paramCount: Int): Boolean {
+        if (node is ReadLocalIR && node.slot >= paramCount) return true
+        var found = false
+        node.transformChildren { child ->
+            if (!found && readsNonParamSlot(child, paramCount)) found = true
+            child
+        }
+        return found
     }
 
     /** One hop covers a stdlib wrapper, two a user function forwarding to one.
