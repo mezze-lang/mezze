@@ -19,10 +19,7 @@ import kotlin.test.assertEquals
 class WithTimeoutDistinguishesOutcomesTest {
 
     private val head = """
-        use std::effects::async::{ Async, LoomAsync, await, sleep, with_timeout,
-                                   cancel, promise_from,
-                                   AsyncError, AsyncFailed, AsyncCancelled, AsyncTimedOut,
-                                   CancelReason, UserRequested, Timeout }
+        use std::effects::async::{ Async, LoomAsync, await, sleep, with_timeout, cancel, promise_from, AsyncError, CancelReason }
         use std::effects::time::{ Time, SystemTime }
         use std::int
     """.trimIndent()

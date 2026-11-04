@@ -294,7 +294,7 @@ class IterableImplIntegrationTest {
         // for user-authored iteration logic (the path a user Iterable impl takes)
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -313,7 +313,7 @@ class IterableImplIntegrationTest {
     void userDefinedIterableFilterToSeq() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -336,7 +336,7 @@ class IterableImplIntegrationTest {
         // Verify that unfold → map → sum works (the sum+map NPE fix)
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {

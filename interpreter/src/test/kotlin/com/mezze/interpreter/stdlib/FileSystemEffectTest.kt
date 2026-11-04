@@ -33,7 +33,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem read_bytes and write_bytes roundtrip`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let payload = bytes::from_str { s = "hello world" }
@@ -50,7 +50,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem read_bytes on missing file returns NotFound`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             perform MemoryFileSystem in do
               match FileSystem.read_bytes { path = "/nope" } is
                 Ok { val } -> "ok"
@@ -66,7 +66,7 @@ class FileSystemEffectTest {
         // NotFound is a legal FileKind, not an FsError — enables fast
         // existence checks without exception-throwing on the hot path.
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             perform MemoryFileSystem in
               match FileSystem.stat { path = "/nope", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
@@ -82,7 +82,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem stat on file returns kind File and size`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let _ = FileSystem.write_bytes {
@@ -101,7 +101,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem create_directory then stat returns kind Directory`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileSystem.stat { path = "/d", follow_symlinks = True } is
@@ -116,7 +116,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem list returns child names`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             use std::collections::seq
             perform MemoryFileSystem in do
@@ -139,7 +139,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem list_with_stat bundles kind and size`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             use std::collections::seq
             perform MemoryFileSystem in do
@@ -158,7 +158,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem delete removes file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let _ = FileSystem.write_bytes {
@@ -178,7 +178,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem delete on non-empty directory returns NotEmpty`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -198,7 +198,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem create_directory on existing returns AlreadyExists`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileSystem.create_directory { path = "/d" } is
@@ -213,7 +213,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem copy_file duplicates bytes`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let _ = FileSystem.write_bytes {
@@ -233,7 +233,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem move_file renames and removes source`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let _ = FileSystem.write_bytes {
@@ -259,7 +259,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem streaming write then read via chunks`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let write_result = match FileStreaming.open { path = "/f", mode = Write } is
@@ -290,7 +290,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem streaming read at EOF returns empty bytes`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes {
@@ -313,7 +313,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem streaming append preserves existing content`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes {
@@ -340,7 +340,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem close is idempotent`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileStreaming.open { path = "/d/f", mode = Write } is
@@ -357,7 +357,7 @@ class FileSystemEffectTest {
     @Test
     fun `MemoryFileSystem read_chunk after close returns ClosedHandle`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes {
@@ -382,7 +382,7 @@ class FileSystemEffectTest {
     @Test
     fun `read_text and write_text roundtrip`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
             perform MemoryFileSystem in do
               let _ = write_text { path = "/f", text = "line one" }
               match read_text { path = "/f" } is
@@ -395,7 +395,7 @@ class FileSystemEffectTest {
     @Test
     fun `read_text_or returns default on missing`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text_or, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text_or, WriteMode }
             perform MemoryFileSystem in
               read_text_or { path = "/nope", def = "fallback" }
         """.trimIndent()
@@ -405,7 +405,7 @@ class FileSystemEffectTest {
     @Test
     fun `exists returns True for existing file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, write_text, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, write_text, WriteMode }
             perform MemoryFileSystem in do
               let _ = write_text { path = "/f", text = "x" }
               match exists { path = "/f" } is
@@ -418,7 +418,7 @@ class FileSystemEffectTest {
     @Test
     fun `exists returns False for missing`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, WriteMode }
             perform MemoryFileSystem in
               match exists { path = "/nope" } is
                 Ok { val } -> val
@@ -430,7 +430,7 @@ class FileSystemEffectTest {
     @Test
     fun `is_file distinguishes file from directory`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, is_file, write_text, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, is_file, write_text, WriteMode }
             perform MemoryFileSystem in do
               let _ = write_text { path = "/f", text = "x" }
               let _ = FileSystem.create_directory { path = "/d" }
@@ -446,7 +446,7 @@ class FileSystemEffectTest {
     @Test
     fun `is_directory distinguishes directory from file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, is_directory, write_text, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, is_directory, write_text, WriteMode }
             perform MemoryFileSystem in do
               let _ = write_text { path = "/f", text = "x" }
               let _ = FileSystem.create_directory { path = "/d" }
@@ -462,7 +462,7 @@ class FileSystemEffectTest {
     @Test
     fun `file_size returns byte length`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, file_size, write_text, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, file_size, write_text, WriteMode }
             perform MemoryFileSystem in do
               let _ = write_text { path = "/f", text = "12345" }
               match file_size { path = "/f" } is
@@ -475,7 +475,7 @@ class FileSystemEffectTest {
     @Test
     fun `append_text appends to existing file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, append_text, read_text, MemoryFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, append_text, read_text, MemoryFileStreaming, WriteMode }
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = write_text { path = "/f", text = "hello " }
               let _ = append_text { path = "/f", text = "world" }
@@ -489,7 +489,7 @@ class FileSystemEffectTest {
     @Test
     fun `create_directories creates missing ancestors`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, create_directories, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, create_directories, WriteMode }
             perform MemoryFileSystem in do
               match create_directories { path = "/a/b/c" } is
                 Ok { val } -> "ok"
@@ -501,7 +501,7 @@ class FileSystemEffectTest {
     @Test
     fun `ensure_directory creates if missing`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, ensure_directory, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, ensure_directory, WriteMode }
             perform MemoryFileSystem in do
               match ensure_directory { path = "/d" } is
                 Ok { val } -> "ok"
@@ -513,7 +513,7 @@ class FileSystemEffectTest {
     @Test
     fun `ensure_directory is idempotent if dir exists`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, ensure_directory, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, ensure_directory, WriteMode }
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/d" }
               match ensure_directory { path = "/d" } is
@@ -526,7 +526,7 @@ class FileSystemEffectTest {
     @Test
     fun `delete_recursive removes tree`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, delete_recursive, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, delete_recursive, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -545,7 +545,7 @@ class FileSystemEffectTest {
     @Test
     fun `with_read auto-closes handle after body`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, with_read, write_text, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, with_read, write_text, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = write_text { path = "/f", text = "abc" }
@@ -563,7 +563,7 @@ class FileSystemEffectTest {
     @Test
     fun `with_write auto-closes handle and content is flushed`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, with_write, read_text, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, with_write, read_text, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -586,7 +586,7 @@ class FileSystemEffectTest {
     fun `LocalFileSystem read and write bytes roundtrip`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, LocalFileSystem, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in do
               let _ = FileSystem.write_bytes {
@@ -606,7 +606,7 @@ class FileSystemEffectTest {
     fun `LocalFileSystem stat on missing returns NotFound FileKind`(@TempDir tmp: Path) {
         val path = tmp.resolve("nope").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, LocalFileSystem, WriteMode }
             perform LocalFileSystem in
               match FileSystem.stat { path = "$path", follow_symlinks = True } is
                 Ok { val = s } -> match s.kind is
@@ -622,7 +622,7 @@ class FileSystemEffectTest {
         val src = tmp.resolve("src").toString()
         val dst = tmp.resolve("dst").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, LocalFileSystem, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in do
               let _ = FileSystem.write_bytes {
@@ -643,7 +643,7 @@ class FileSystemEffectTest {
     fun `LocalFileSystem streaming read of a real file`(@TempDir tmp: Path) {
         val path = tmp.resolve("streamed").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalFileSystem, with_write, with_read, FileStreaming, MemoryFileStreaming, LocalFileStreaming, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, LocalFileSystem, with_write, with_read, FileStreaming, MemoryFileStreaming, LocalFileStreaming, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = with_write { path = "$path", mode = Write, f = { handle } ->
@@ -671,7 +671,7 @@ class FileSystemEffectTest {
         val f1 = tmp.resolve("f1").toString()
         val f2 = tmp.resolve("f2").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, LocalFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, LocalFileSystem, WriteMode }
             use std::collections::bytes
             use std::collections::seq
             perform LocalFileSystem in do

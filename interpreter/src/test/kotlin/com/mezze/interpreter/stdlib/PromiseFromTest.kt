@@ -180,7 +180,7 @@ class PromiseFromTest {
         // Register a hook that writes to an atom; verify the atom was
         // updated after Async.cancel fires.
         val code = """
-            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel, is_cancelled }
+            use std::effects::async::{ Async, LoomAsync, promise_from, cancel, is_cancelled, CancelReason }
             use std::effects::async::atom::{ atom, reset, deref }
 
             perform LoomAsync in do
@@ -245,7 +245,7 @@ class PromiseFromTest {
         // Verify the reason variant reaches the hook. Use LostRace as
         // the marker so we can distinguish it from other CancelReason cases.
         val code = """
-            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel }
+            use std::effects::async::{ Async, LoomAsync, promise_from, cancel, CancelReason }
             use std::effects::async::atom::{ atom, reset, deref }
 
             perform LoomAsync in do
@@ -269,7 +269,7 @@ class PromiseFromTest {
     @Test
     fun `on_cancel is optional — cancel still works without a hook`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel, is_cancelled }
+            use std::effects::async::{ Async, LoomAsync, promise_from, cancel, is_cancelled, CancelReason }
             perform LoomAsync in do
               let p = promise_from { setup = { complete, fail, on_cancel } -> {} }
               cancel { p = p, reason = LostRace }
@@ -281,7 +281,7 @@ class PromiseFromTest {
     @Test
     fun `on_cancel last-writer-wins if called multiple times`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel }
+            use std::effects::async::{ Async, LoomAsync, promise_from, cancel, CancelReason }
             use std::effects::async::atom::{ atom, reset, deref }
 
             perform LoomAsync in do

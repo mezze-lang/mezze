@@ -15,8 +15,7 @@ import kotlin.test.assertEquals
 class RowCodecTest {
 
     private val head = """
-        use std::effects::db::{ Db, MockDbWith, DbValue, DbInt, DbStr, DbBool, DbNull, DbFloat,
-                                Rows, RowC, row_c, sql, first_row, no_rows, value_at, col_index }
+        use std::effects::db::{ Db, MockDbWith, DbValue, Rows, RowC, row_c, sql, first_row, no_rows, value_at, col_index }
         use std::codec::core::{ Decode, DecodeError }
         use std::collections::seq
         use std::int

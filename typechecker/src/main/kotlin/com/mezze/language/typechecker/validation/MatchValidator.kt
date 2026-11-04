@@ -116,7 +116,23 @@ class MatchValidator(
 
     fun validateParsedExhaustiveness(
         matchExpr: ParsedMatch,
-        scrutineeType: MezzeType
+        scrutineeType: MezzeType,
+        /**
+         * May this run call a wildcard arm unreachable?
+         *
+         * False when [scrutineeType] was RECONSTRUCTED from the arms by
+         * [inferParsedScrutineeTypeFromPatterns]. Such a group is closed and
+         * fully covered by construction -- it was built out of these very arms --
+         * so "all constructors are already matched" is vacuous from that source
+         * and says nothing about the real group.
+         *
+         * Concretely: `LogLevel` is declared OPEN, so a match over all six of its
+         * tags still needs `_`. The decided type agreed and reported nothing; the
+         * reconstructed group then called that required `_` unreachable. Removing
+         * the arm produced the opposite error from the decided type, and the match
+         * could not be written either way.
+         */
+        canReportUnreachableWildcard: Boolean = true,
     ): ValidationResult {
         val errors = mutableListOf<ValidationError>()
 
@@ -253,7 +269,7 @@ class MatchValidator(
                 // payloads.
                 errors.addAll(nestedVariantExhaustivenessErrors(matchExpr, expandedType))
             }
-            if (hasWildcard && uncoveredConstructors.isEmpty()) {
+            if (hasWildcard && uncoveredConstructors.isEmpty() && canReportUnreachableWildcard) {
                 for (case in matchExpr.cases) {
                     for (pattern in case.patterns) {
                         if ((pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern) &&

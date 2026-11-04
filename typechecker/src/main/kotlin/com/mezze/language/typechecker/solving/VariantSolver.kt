@@ -405,9 +405,15 @@ internal class VariantSolver(
         if (isPatternContext) {
             when (val found = lookupConstructorDecl(constructorName, expectedPayloadType, isPatternContext)) {
                 is CtorLookup.Resolved ->
-                    return resolveConstructorAgainstDecl(found.typeDecl, constructorName, expectedPayloadType, variantType.variable)
+                    return resolveConstructorAgainstDecl(
+                        found.typeDecl, constructorName, expectedPayloadType, variantType.variable,
+                        openEvidence = !adoptableHere(found.typeDecl),
+                    )
                 is CtorLookup.NoneFit ->
-                    return resolveConstructorAgainstDecl(found.nearest, constructorName, expectedPayloadType, variantType.variable)
+                    return resolveConstructorAgainstDecl(
+                        found.nearest, constructorName, expectedPayloadType, variantType.variable,
+                        openEvidence = !adoptableHere(found.nearest),
+                    )
                 is CtorLookup.Ambiguous -> return ambiguousConstructor(constructorName, found)
                 CtorLookup.Undeclared -> {}
             }
@@ -777,6 +783,30 @@ internal class VariantSolver(
         data class Ambiguous(val typeNames: List<String>, val decidable: Boolean) : CtorLookup()
     }
 
+    /**
+     * May a pattern arm bind a still-unsolved scrutinee to [decl]'s WHOLE group?
+     *
+     * Only if the group is named here. Adoption (spec 1.1) is a bare tag taking
+     * the in-scope named group that claims it, and a group reachable only
+     * transitively claims nothing in this module.
+     *
+     * [lookupConstructorDecl] deliberately does not scope a pattern's candidates,
+     * on the grounds that a pattern already HAS the scrutinee's group and is only
+     * selecting within it -- true of `match lookup { … } is Some { val = NoneFound }`,
+     * where `OptErr` arrived through a signature. It is not true when the
+     * scrutinee is an unsolved var: an unannotated parameter has no group yet and
+     * its arms are the only evidence (spec 5.9), so the arm is DECIDING the group,
+     * which is the question construction asks and takes the same answer.
+     *
+     * Without this, `{ v } -> match v is NotFound -> … | Cancelled -> …` had its
+     * first arm pin `v` to the entire imported `HttpError`, and every arm from the
+     * other group was then an extra arm -- while the same program checked WITH its
+     * call site passed, because the call pinned `v` to the union first. One
+     * program, two answers, decided by solve order.
+     */
+    private fun adoptableHere(decl: ParsedTypeDecl): Boolean =
+        namedHereTypeNamesOrNull()?.contains(decl.name) != false
+
     private fun lookupConstructorDecl(
         constructorName: String,
         expectedPayloadType: MezzeType?,
@@ -887,7 +917,26 @@ internal class VariantSolver(
         typeDecl: ParsedTypeDecl,
         constructorName: String,
         expectedPayloadType: MezzeType?,
-        bindTo: TypeVar?
+        bindTo: TypeVar?,
+        /**
+         * Take the decl's arms as EVIDENCE rather than as a commitment.
+         *
+         * Set when the group is not named here (see [adoptableHere]). The arms
+         * and their payload shapes are still what the declaration says -- that
+         * is how `BadRequest { msg }` gets `msg: Str` and how a nested `val`
+         * learns its group -- but the result is OPEN and ANONYMOUS, so arms
+         * belonging to another group can extend it and the two groups can join.
+         *
+         * Adopting the group CLOSED was what made one program check two ways:
+         * `{ v } -> match v is NotFound -> … | Cancelled -> …` had its first arm
+         * commit `v` to the whole imported `HttpError`, leaving every arm of the
+         * other group extra -- while the same code checked alongside its call
+         * site passed, because the call pinned `v` to the union first.
+         *
+         * The row var is registered pattern-based, so `closePatternBasedVariants`
+         * closes it once every arm has been seen.
+         */
+        openEvidence: Boolean = false,
     ): ConstraintSolver.ConstraintResult {
         val variantDef = typeDecl.definition as ParsedVariantDef
 
@@ -900,13 +949,27 @@ internal class VariantSolver(
             ctor.name to payloadType
         }
 
+        val evidenceRowVar = if (openEvidence) RowVar.fresh().also { patternBasedRowVars.add(it) } else null
         val declaredVariant = MezzeType.VariantType(
             constructors = constructors,
-            rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+            // A `...` written in the DECLARATION is user-specified, exactly as it
+            // is for a record (`{ a: Int, ... }` already mints `userOpen`). Minting
+            // a plain row here let pattern-based closing reach it: the arms' own
+            // open variant unified with this one, the declaration's tail came back
+            // as the pattern's row, and `closePatternBasedVariants` closed it.
+            //
+            // A closed `LogLevel` is a different type from the declared one. It
+            // made the required `_` arm look unreachable, while removing that arm
+            // produced "wildcard required for open variant" from the open instance
+            // of the same type -- the match could not be written either way.
+            //
+            // evidenceRowVar still wins and still closes: that one is inferred
+            // from the arms (see [resolveConstructorAgainstDecl]'s openEvidence).
+            rowVar = evidenceRowVar ?: if (variantDef.isOpen) RowVar.userOpen() else null,
             typeArgs = typeParamMapping.values.toList(),
             // A declared variant always has a content hash (pure fn of the decl).
             // S3.1: via THE canonical factory.
-            identity = TypeIdentity.declared(
+            identity = if (openEvidence) TypeIdentity.Anonymous else TypeIdentity.declared(
                 typeDecl.name,
                 typeDecl.identity
             )

@@ -25,7 +25,7 @@ import kotlin.test.assertTrue
 class JsonSerializeLoudTest {
 
     private val head = """
-        use std::codec::json::{ to_str, Json, JInt, JObject, JString }
+        use std::codec::json::{ to_str, Json }
         use std::collections::seq
     """.trimIndent()
 

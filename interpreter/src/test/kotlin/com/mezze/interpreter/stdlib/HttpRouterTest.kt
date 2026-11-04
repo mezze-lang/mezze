@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 class HttpRouterTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, Get, Post }
+        use std::effects::http::{ Request, Response, Method }
         use std::effects::http_server::{ incoming, get_request }
         use std::effects::http_server::{ Matched, Routes, route, or_else, otherwise, match_path, segments }
         use std::collections::map

@@ -35,8 +35,8 @@ class CodebaseEffectTest {
     private val declarations = """
         ## The app under test.
         use std::comptime::{ Comptime, ComptimeEval }
-        use std::codebase::{ Codebase, ComptimeEvalCodebase, EvalCodebase, FixtureCodebase, DeclRef, Definition, RecordDef, TypeShape, ByName, query, empty_fixture }
-        use std::syntax::{ TFn, TInt, LetDecl, LetSyntax, LambdaExpr, MemberExpr, NamedParams }
+        use std::codebase::{ Codebase, ComptimeEvalCodebase, EvalCodebase, FixtureCodebase, DeclRef, Definition, TypeShape, query, empty_fixture, DeclOrder }
+        use std::syntax::{ TypeShape, DeclKind, Decl, Expr, LambdaParams }
         use std::collections::seq
         use std::effects::log::{ println, Log }
         use std::effects::noop::{ noop }
@@ -439,7 +439,7 @@ class CodebaseEffectTest {
                 BinaryExpr { op, ... } -> op == "=="
                 _ -> False } }
             count {}
-        """.trimIndent().let { "use std::syntax::{ all_exprs, BinaryExpr }\n$it" }))
+        """.trimIndent().let { "use std::syntax::{ all_exprs, Expr }\n$it" }))
         // `same`, `again`, and the `op == "=="` in the filter itself.
         assertEquals(3L, out)
     }

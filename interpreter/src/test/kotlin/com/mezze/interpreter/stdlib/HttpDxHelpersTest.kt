@@ -48,7 +48,7 @@ class HttpDxHelpersTest {
     @Test
     fun `mock_status builds an arbitrary-status rule and text_or reads its body`() {
         val result = eval("""
-            use std::effects::http::{ HttpClient, MockHttpClient, mock_status, request, Get }
+            use std::effects::http::{ HttpClient, MockHttpClient, mock_status, request, Method }
 
             perform MockHttpClient { rules = [ mock_status { url = "*", methods = [Get], code = 404, body = "missing" } ] } in
               request { url = "https://x" }.send {}.text_or { def = "?" }

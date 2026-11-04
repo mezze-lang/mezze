@@ -294,7 +294,7 @@ class HttpChainTest {
         // No `.send` — this is a pure builder check. Inspect the
         // Authorization header directly on the constructed request.
         val result = eval("""
-            use std::effects::http::{HttpClient, client, Bearer}
+            use std::effects::http::{ HttpClient, client, Auth }
             use std::collections::map
 
             let api = client { base_url = "https://api.acme.com" }

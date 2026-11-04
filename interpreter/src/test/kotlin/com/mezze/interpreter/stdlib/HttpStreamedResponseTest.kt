@@ -28,10 +28,10 @@ import kotlin.test.assertEquals
 class HttpStreamedResponseTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, Get, HttpClient, SimpleHttpClient, request, format_error, body_str, response_stream }
+        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, body_str, response_stream }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
         use std::effects::http_server::{ route, otherwise, Matched }
-        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text }
+        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
         use std::collections::{ bytes, iter, map, seq }
         use std::int
 

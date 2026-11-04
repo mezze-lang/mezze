@@ -20,7 +20,7 @@ import kotlin.test.assertTrue
 class HelidonHttpServerTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, Get, Post, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str }
+        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
         use std::effects::http_server::{ route, or_else, otherwise, Matched }
         use std::collections::map

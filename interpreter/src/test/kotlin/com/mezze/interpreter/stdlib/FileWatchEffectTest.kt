@@ -35,7 +35,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports a Created event for a new file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -56,7 +56,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports Modified when an existing file is rewritten`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -79,7 +79,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports Deleted`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -102,7 +102,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem a second poll returns nothing new`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -122,7 +122,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem non-recursive watch ignores a nested write`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -141,7 +141,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem recursive watch sees a nested write`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -160,7 +160,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem watching a missing directory reports NotFound`() {
         val code = """
-            use std::effects::filesystem::{ FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             perform MemoryFileSystem in perform MemoryFileWatch in
               match FileWatch.watch { path = "/nope", recursive = False } is
                 Ok { val = _ } -> "unexpectedly-ok"
@@ -173,7 +173,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem unwatch then poll reports the handle is gone`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
@@ -199,7 +199,7 @@ class FileWatchEffectTest {
     @Test
     fun `LocalFileSystem watch registers polls and unwatches`(@TempDir tmp: Path) {
         val code = """
-            use std::effects::filesystem::{ FileWatch, LocalFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch, WriteMode }
             perform LocalFileWatch in do
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Err { error = _ } -> "watch-failed"
@@ -216,7 +216,7 @@ class FileWatchEffectTest {
     fun `LocalFileSystem watching a file rather than a directory is an error`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, LocalFileSystem, LocalFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, LocalFileSystem, LocalFileWatch, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileWatch in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
@@ -231,7 +231,7 @@ class FileWatchEffectTest {
     @Test
     fun `LocalFileSystem poll after unwatch reports a closed handle`(@TempDir tmp: Path) {
         val code = """
-            use std::effects::filesystem::{ FileWatch, LocalFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch, WriteMode }
             perform LocalFileWatch in do
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Err { error = _ } -> "watch-failed"
@@ -267,7 +267,7 @@ class FileWatchEffectTest {
     fun `LocalFileSystem a watch leaked by one program is closed when its context goes`(@TempDir tmp: Path) {
         val baseline = watchThreads()
         val code = """
-            use std::effects::filesystem::{ FileWatch, LocalFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileWatch, LocalFileWatch, WriteMode }
             perform LocalFileWatch in
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Ok { val = _ } -> "watching"
@@ -312,7 +312,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem reports Overflow once the queue passes its cap`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -339,7 +339,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem an overflowed poll returns exactly one event`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -361,7 +361,7 @@ class FileWatchEffectTest {
     @Test
     fun `MemoryFileSystem recovers after an overflow`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }

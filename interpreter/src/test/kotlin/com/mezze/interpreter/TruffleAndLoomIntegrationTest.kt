@@ -297,7 +297,6 @@ $body
                 match v is
                     Red -> 1
                     Blue {val} -> val * 2
-                    _ -> 0
 
             let test = {} -> do
                 let p1 = spawn {f = {} -> processValue {v = Red}}

@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test
 class PropertyCheckTest {
 
     private val head = """
-        use std::property::{ check, check_from, Passed, Failed }
+        use std::property::{ check, check_from, Verdict }
         use std::effects::sample::{  }
         use std::abilities::arbitrary::{ Arbitrary }
 

@@ -57,7 +57,7 @@ class IterConcurrentTest {
     fun `for_each_concurrent visits every element once`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -105,7 +105,7 @@ class IterConcurrentTest {
     fun `for_each_concurrent never exceeds max_in_flight`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text, exists }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, exists, WriteMode }
             use std::collections::bytes
             use std::bool
             perform MemoryFileSystem in perform LoomAsync in perform SystemTime in do
@@ -155,7 +155,7 @@ class IterConcurrentTest {
     fun `for_each_concurrent bounded by take over an endless source`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -180,7 +180,7 @@ class IterConcurrentTest {
     fun `for_each_concurrent drains a source smaller than the window`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -202,7 +202,7 @@ class IterConcurrentTest {
     fun `for_each_concurrent on an empty source is a no-op`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -352,7 +352,7 @@ class IterConcurrentTest {
     fun `map_concurrent mapper can perform FileSystem`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, read_text, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
             use std::collections::bytes
             use std::str
             perform MemoryFileSystem in perform LoomAsync in do

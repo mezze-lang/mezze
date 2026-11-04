@@ -38,12 +38,7 @@ class HttpMockChainTest {
     }
 
     private val head = """
-        use std::effects::http::{
-          HttpClient, MockHttpClient, MockRule, Method, Get, Post, Put, Delete,
-          Response, request, with_method, format_error, body_str, text_or,
-          mock, mock_get, mock_post, mock_json, mock_status,
-          Timeout, ConnectionFailed, RequestFailed
-        }
+        use std::effects::http::{ HttpClient, MockHttpClient, MockRule, Method, Response, request, with_method, format_error, body_str, text_or, mock, mock_get, mock_post, mock_json, mock_status, HttpError }
         use std::codec::json
         use std::collections::{ bytes, map, seq }
         use std::int

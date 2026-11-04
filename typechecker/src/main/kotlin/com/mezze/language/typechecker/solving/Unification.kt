@@ -2021,7 +2021,8 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
 
     return MezzeType.VariantType(
         constructors = constructors,
-        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+        // A declared `...` is user-specified; see VariantSolver's note.
+        rowVar = if (variantDef.isOpen) RowVar.userOpen() else null,
         typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
         identity = TypeIdentity.declared(
             typeDecl.name,

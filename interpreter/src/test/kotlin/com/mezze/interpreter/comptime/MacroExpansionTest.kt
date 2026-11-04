@@ -29,7 +29,7 @@ class MacroExpansionTest {
 
     private val macros = """
         use std::macro::{ MacroInput, Expansion, parse_expr, parse_decls, expand_to, declare, reject, tokens }
-        use std::syntax::{ Expr, StrExpr, SyntaxDecl, Decl, TypeDefSyntax, DeclsCode }
+        use std::syntax::{ Expr, SyntaxDecl, Decl, TypeDefSyntax, Code }
         use std::collections::seq
 
         ## `double!(e)` is `e * 2`.

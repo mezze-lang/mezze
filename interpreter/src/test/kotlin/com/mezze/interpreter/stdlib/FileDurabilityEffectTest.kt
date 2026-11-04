@@ -39,7 +39,7 @@ class FileDurabilityEffectTest {
     @Test
     fun `MemoryFileSystem fsync on a write handle succeeds`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, FileStreaming, MemoryFileStreaming, LocalFileStreaming, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -65,7 +65,7 @@ class FileDurabilityEffectTest {
     @Test
     fun `MemoryFileSystem fsync publishes a buffered write before close`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, FileStreaming, MemoryFileStreaming, LocalFileStreaming, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in perform MemoryFileDurability in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -109,7 +109,7 @@ class FileDurabilityEffectTest {
     fun `LocalFileSystem fsync forces a written handle`(@TempDir tmp: Path) {
         val path = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, LocalFileSystem, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, LocalFileSystem, LocalFileDurability, FileStreaming, MemoryFileStreaming, LocalFileStreaming, OpenMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in perform LocalFileDurability in do
               match FileStreaming.open { path = "$path", mode = Write } is
@@ -131,7 +131,7 @@ class FileDurabilityEffectTest {
     fun `LocalFileSystem fsync on a closed handle reports ClosedHandle`(@TempDir tmp: Path) {
         val path = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileDurability, LocalFileSystem, LocalFileDurability, Write, FileStreaming, MemoryFileStreaming, LocalFileStreaming }
+            use std::effects::filesystem::{ FileSystem, FileDurability, LocalFileSystem, LocalFileDurability, FileStreaming, MemoryFileStreaming, LocalFileStreaming, OpenMode }
             perform LocalFileSystem in perform LocalFileStreaming in perform LocalFileDurability in do
               match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do

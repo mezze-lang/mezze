@@ -14,8 +14,7 @@
 ## `MODE=derived` / `MODE=hand` picks a half; with neither, it checks they agree
 ## and prints both. Run the BUILT JAR.
 use std::codec::core::{ Encode }
-use std::codec::json::{ Json, JNull, JBool, JInt, JFloat, JString, JArray, JObject,
-                        JsonC, json_default, to_str }
+use std::codec::json::{ Json, JsonC, json_default, to_str }
 use std::collections::seq
 use std::effects::log::{ println, Console }
 use std::str

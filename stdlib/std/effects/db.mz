@@ -33,7 +33,7 @@ use std::codec::core::{
   Format,
   DecodeScalar, DecodeRecord, DecodeSequence, DecodeOption,
   Decode,
-  CodecCtx, SharedConfig, FieldTransform, Identity, DecodeError
+  CodecCtx, SharedConfig, FieldTransform, DecodeError
 }
 use std::collections::seq
 use std::str

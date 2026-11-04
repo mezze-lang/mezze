@@ -735,8 +735,11 @@ class TypeValidator(
 
     fun validateParsedExhaustiveness(
         matchExpr: ParsedMatch,
-        scrutineeType: MezzeType
-    ): ValidationResult = matchValidator.validateParsedExhaustiveness(matchExpr, scrutineeType)
+        scrutineeType: MezzeType,
+        canReportUnreachableWildcard: Boolean = true,
+    ): ValidationResult = matchValidator.validateParsedExhaustiveness(
+        matchExpr, scrutineeType, canReportUnreachableWildcard,
+    )
 
     internal fun findSimilarNames(target: String, candidates: List<String>, maxDistance: Int = 3): List<String> =
         StringDistance.findSimilar(target, candidates, maxDistance, maxResults = 3)
@@ -804,12 +807,18 @@ class TypeValidator(
                 // sound in the direction that matters — it can only add errors,
                 // never hide one — and it is what lets a group be checked whether
                 // or not it carries a declared name.
+                // Pair each candidate with whether it may judge a wildcard arm
+                // unreachable: the reconstructed group is built OUT OF the arms,
+                // so it is always closed and always fully covered, and that
+                // verdict from it means nothing (see the parameter's comment).
                 val candidates = listOfNotNull(
-                    decidedScrutineeTypes[expr.loc],
-                    matchValidator.inferParsedScrutineeTypeFromPatterns(expr),
+                    decidedScrutineeTypes[expr.loc]?.let { it to true },
+                    matchValidator.inferParsedScrutineeTypeFromPatterns(expr)?.let { it to false },
                 )
-                for (scrutineeType in candidates) {
-                    val result = validateParsedExhaustiveness(expr, substitution.apply(scrutineeType))
+                for ((scrutineeType, mayJudgeWildcard) in candidates) {
+                    val result = validateParsedExhaustiveness(
+                        expr, substitution.apply(scrutineeType), mayJudgeWildcard,
+                    )
                     if (result is ValidationResult.Failure) { addAll(result.errors); break }
                 }
                 (matchValidator.validateParsedUnreachablePatterns(expr) as? ValidationResult.Failure)?.let { addAll(it.errors) }

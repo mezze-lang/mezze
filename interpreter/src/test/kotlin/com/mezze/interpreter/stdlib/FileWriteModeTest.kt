@@ -40,12 +40,12 @@ class FileWriteModeTest {
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
     private val memHead = """
-        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, CreateNew, CreateOrAppend, read_text, write_text, append_text, create_exclusive }
+        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, append_text, create_exclusive, WriteMode }
         use std::collections::bytes
     """.trimIndent()
 
     private val localHead = """
-        use std::effects::filesystem::{ FileSystem, LocalFileSystem, CreateOrTruncate, CreateNew, CreateOrAppend, read_text, write_text, append_text, create_exclusive }
+        use std::effects::filesystem::{ FileSystem, LocalFileSystem, read_text, write_text, append_text, create_exclusive, WriteMode }
         use std::collections::bytes
     """.trimIndent()
 
@@ -535,7 +535,7 @@ class FileWriteModeTest {
     @Test
     fun `MemoryFileSystem concurrent appends keep every record`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrAppend, write_text, read_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, read_text, WriteMode }
             use std::effects::async::{ Async, LoomAsync, await }
             use std::collections::{ bytes, iter, seq }
             use std::str
@@ -814,7 +814,7 @@ class FileWriteModeTest {
     @Test
     fun `MemoryFileSystem CreateOrAppend fires Modified and CreateNew fires Created`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateNew, CreateOrAppend, write_text }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, write_text, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }
@@ -841,7 +841,7 @@ class FileWriteModeTest {
     @Test
     fun `MemoryFileSystem a refused CreateNew fires no event`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, CreateNew, write_text }
+            use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, write_text, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
               let _ = FileSystem.create_directory { path = "/d" }

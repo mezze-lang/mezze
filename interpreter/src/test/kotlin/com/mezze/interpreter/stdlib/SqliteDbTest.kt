@@ -16,9 +16,7 @@ import kotlin.test.assertTrue
 class SqliteDbTest {
 
     private val head = """
-        use std::effects::db::{ Db, SqliteDb, DbValue, DbInt, DbStr, DbFloat, DbBool, DbNull, DbBytes,
-                                Query, Rows, DbError, Unavailable, Rejected, Conflict,
-                                sql, bind, bind_all, row_count, is_empty, col_index, value_at, no_rows }
+        use std::effects::db::{ Db, SqliteDb, DbValue, Query, Rows, DbError, sql, bind, bind_all, row_count, is_empty, col_index, value_at, no_rows }
         use std::collections::seq
         use std::int
         use std::str

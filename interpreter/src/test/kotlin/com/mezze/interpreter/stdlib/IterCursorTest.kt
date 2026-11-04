@@ -155,7 +155,7 @@ class IterCursorTest {
     fun `cursor stage can perform FileSystem`() {
         val code = """
             $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, read_text, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
             use std::collections::bytes
             use std::str
             perform MemoryFileSystem in do
@@ -321,7 +321,7 @@ class IterCursorTest {
         val code = """
             $head
             use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/seen" }
@@ -354,7 +354,7 @@ class IterCursorTest {
         val code = """
             $head
             use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, CreateOrTruncate, read_text, write_text }
+            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
             use std::collections::bytes
             use std::str
             perform MemoryFileSystem in perform LoomAsync in do

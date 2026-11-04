@@ -26,7 +26,7 @@ import kotlin.test.assertEquals
 class MockHttpServerSeamTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Get, Post, response_ok_text, not_found }
+        use std::effects::http::{ Request, Response, response_ok_text, not_found, Method }
         use std::effects::http_server::{ get_request, post_request, put_request, delete_request, patch_request }
         use std::effects::http_server::{ router, otherwise }
         use std::collections::bytes

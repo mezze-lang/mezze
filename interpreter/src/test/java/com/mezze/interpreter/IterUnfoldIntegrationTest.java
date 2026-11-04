@@ -24,7 +24,7 @@ class IterUnfoldIntegrationTest {
     void unfoldSquares() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -43,7 +43,7 @@ class IterUnfoldIntegrationTest {
     void unfoldCountdown() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -64,7 +64,7 @@ class IterUnfoldIntegrationTest {
     void unfoldFilterMap() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -87,7 +87,7 @@ class IterUnfoldIntegrationTest {
     void unfoldWithSkip() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Skip, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -341,7 +341,7 @@ class IterUnfoldIntegrationTest {
     void unfoldToSeq() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
             use std::collections::seq
 
             let main = {} -> do
@@ -363,7 +363,7 @@ class IterUnfoldIntegrationTest {
     void complexPipeline() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Skip, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -391,7 +391,7 @@ class IterUnfoldIntegrationTest {
     void unfoldEnumerateTake() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               iter::unfold {
@@ -413,7 +413,7 @@ class IterUnfoldIntegrationTest {
     void unfoldChainCount() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
 
             let main = {} -> do
               let a = iter::unfold {
@@ -464,7 +464,7 @@ class IterUnfoldIntegrationTest {
     void unfoldToList() {
         var result = eval("""
             use std::collections::iter
-            use std::collections::iter::{ Yield, Done }
+            use std::collections::iter::{ Step }
             use std::collections::list
 
             let main = {} -> do

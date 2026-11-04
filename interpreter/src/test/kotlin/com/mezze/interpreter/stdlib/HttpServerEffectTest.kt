@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 class HttpServerEffectTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Get, Method }
+        use std::effects::http::{ Request, Response, Method }
         use std::effects::http_server::{ HttpServer, MockHttpServer, ServerHandle, get_request, incoming }
         use std::collections::map
         use std::collections::bytes

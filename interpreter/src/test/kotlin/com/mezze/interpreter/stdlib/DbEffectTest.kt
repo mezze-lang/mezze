@@ -14,9 +14,7 @@ import kotlin.test.assertEquals
 class DbEffectTest {
 
     private val head = """
-        use std::effects::db::{ Db, MockDb, MockDbWith, FailingDb, DbValue, DbInt, DbStr, DbBool, DbNull,
-                                Query, Rows, DbError, Unavailable, Rejected,
-                                sql, bind, bind_all, row_count, is_empty, col_index, value_at, no_rows }
+        use std::effects::db::{ Db, MockDb, MockDbWith, FailingDb, DbValue, Query, Rows, DbError, sql, bind, bind_all, row_count, is_empty, col_index, value_at, no_rows }
         use std::collections::seq
         use std::int
     """.trimIndent()

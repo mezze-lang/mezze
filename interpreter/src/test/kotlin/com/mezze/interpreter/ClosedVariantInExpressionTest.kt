@@ -339,7 +339,6 @@ class ClosedVariantInExpressionTest {
             match handle {} is
                 Err {error} -> match error is
                     DivisionError {dividend} -> "Cannot divide $(dividend.to_dbg {}) by zero"
-                    _ -> "Unknown error"
                 Ok {val} -> "Result: $(val.to_dbg {})"
         """.trimIndent()
 

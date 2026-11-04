@@ -32,7 +32,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem exclusive lock then unlock`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> match FileLock.unlock { handle = h } is
@@ -47,7 +47,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem exclusive lock excludes a second acquire`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = _ } ->
@@ -64,7 +64,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem unlock lets the next acquire succeed`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> do
@@ -80,7 +80,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem shared locks stack and exclude an exclusive`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Shared, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
                 Ok { val = _ } ->
@@ -99,7 +99,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem one unlock does not release both shared holds`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Shared, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
                 Ok { val = h1 } ->
@@ -119,7 +119,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem blocking acquire on a held lock reports rather than hanging`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = _ } ->
@@ -135,7 +135,7 @@ class FileLockEffectTest {
     @Test
     fun `MemoryFileSystem unlock is idempotent`() {
         val code = """
-            use std::effects::filesystem::{ FileLock, MemoryFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> do
@@ -154,7 +154,7 @@ class FileLockEffectTest {
     fun `LocalFileSystem exclusive lock creates the lockfile and releases`(@TempDir tmp: Path) {
         val path = tmp.resolve("app.lock").toString()
         val code = """
-            use std::effects::filesystem::{ FileLock, LocalFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, LocalFileLock, LockKind }
             perform LocalFileLock in
               match FileLock.lock { path = "$path", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> match FileLock.unlock { handle = h } is
@@ -174,7 +174,7 @@ class FileLockEffectTest {
     fun `LocalFileSystem second acquire in one process is refused, not thrown`(@TempDir tmp: Path) {
         val path = tmp.resolve("app.lock").toString()
         val code = """
-            use std::effects::filesystem::{ FileLock, LocalFileLock, Exclusive }
+            use std::effects::filesystem::{ FileLock, LocalFileLock, LockKind }
             perform LocalFileLock in
               match FileLock.lock { path = "$path", kind = Exclusive, blocking = False } is
                 Ok { val = _ } ->

@@ -33,7 +33,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem read_at reads from an offset`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -56,7 +56,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem read_at leaves the sequential position alone`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -77,7 +77,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem read_at past the end returns empty`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
@@ -93,7 +93,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem write_at patches in place`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Write, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
@@ -119,7 +119,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem write_at past the end extends with a zero-filled gap`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Write, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "ab" }, mode = CreateOrTruncate }
@@ -138,7 +138,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem truncate cuts the file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Append, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -158,7 +158,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem truncate does not grow a short file`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Append, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
@@ -177,7 +177,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem seek moves the sequential position`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -197,7 +197,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem a negative offset is rejected`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
@@ -214,7 +214,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem read_at on a write handle is refused`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Write, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
@@ -233,7 +233,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem read_at reads from an offset`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -252,7 +252,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem read_at leaves the sequential position alone`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -274,7 +274,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem write_at patches in place`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, Write, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
@@ -299,7 +299,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem truncate cuts the file`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, Append, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -319,7 +319,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem seek moves the sequential position`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
@@ -340,7 +340,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem read_at on a closed handle reports ClosedHandle`(@TempDir tmp: Path) {
         val path = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, Read, CreateOrTruncate }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
@@ -374,7 +374,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem WriteSync is visible before close`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, read_text, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/wal", mode = WriteSync } is
@@ -392,7 +392,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem WriteSync is visible before close`(@TempDir tmp: Path) {
         val f = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, WriteSync, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, read_text, OpenMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in
               match FileStreaming.open { path = "$f", mode = WriteSync } is
@@ -415,7 +415,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem a plain Write is not visible before close`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, Write, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, read_text, OpenMode }
             use std::collections::bytes
             use std::str
             perform MemoryFileSystem in perform MemoryFileStreaming in
@@ -434,7 +434,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem successive WriteSync writes accumulate`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, read_text, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/wal", mode = WriteSync } is
@@ -455,7 +455,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem successive WriteSync writes accumulate`(@TempDir tmp: Path) {
         val f = tmp.resolve("wal").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, WriteSync, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, read_text, OpenMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in
               match FileStreaming.open { path = "$f", mode = WriteSync } is
@@ -476,7 +476,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem WriteSync truncates on open`() {
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync, write_text, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, write_text, read_text, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               let _ = write_text { path = "/f", text = "old-and-long" }
@@ -496,7 +496,7 @@ class FileStreamingEffectTest {
     fun `LocalFileSystem WriteSync truncates on open`(@TempDir tmp: Path) {
         val f = tmp.resolve("f").toString()
         val code = """
-            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, WriteSync, write_text, read_text }
+            use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, write_text, read_text, OpenMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
               let _ = write_text { path = "$f", text = "old-and-long" }
@@ -516,7 +516,7 @@ class FileStreamingEffectTest {
     @Test
     fun `MemoryFileSystem WriteSync refuses a read`() {
         val code = """
-            use std::effects::filesystem::{ FileStreaming, MemoryFileSystem, MemoryFileStreaming, WriteSync }
+            use std::effects::filesystem::{ FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode }
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/f", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"

@@ -27,7 +27,7 @@ class JoinOnFailureProbeTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     fun `OnFailure with single cancelled child NPEs`() {
         val source = """
-            use std::effects::async::{ Async, LoomAsync, OnFailure, UserRequested, cancel, scope_spawn, scoped_with, sleep }
+            use std::effects::async::{ Async, LoomAsync, cancel, scope_spawn, scoped_with, sleep, JoinPolicy, CancelReason }
             use std::effects::time::{ Time, SystemTime }
 
             let main = {} -> do

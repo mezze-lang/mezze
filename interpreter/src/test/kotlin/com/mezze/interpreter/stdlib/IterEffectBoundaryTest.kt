@@ -48,7 +48,7 @@ class IterEffectBoundaryTest {
     private fun eval(src: String): Any = MezzeTestHelper.run(src)
 
     private val head = """
-        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, CreateOrTruncate }
+        use std::effects::filesystem::{ FileSystem, MemoryFileSystem, exists, WriteMode }
         use std::collections::{ bytes, iter, seq }
         use std::int
     """.trimIndent()
@@ -297,7 +297,7 @@ class IterEffectBoundaryTest {
         val code = """
             use std::collections::iter
             use std::int
-            use std::effects::filesystem::{ MemoryFileSystem, CreateOrTruncate }
+            use std::effects::filesystem::{ MemoryFileSystem, WriteMode }
             use std::effects::exception::{ Exception, ExceptionToResult }
             perform MemoryFileSystem in do
               let r = perform ExceptionToResult in Ok { val = iter::sum {

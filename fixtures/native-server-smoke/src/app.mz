@@ -8,10 +8,7 @@
 # Run:  mez build --native && ./.build/server_smoke-native
 
 use std::effects::log::{ println, Console }
-use std::effects::http::{
-    HttpClient, SimpleHttpClient, Request, Response, Get,
-    request, format_error, body_str, with_query, ToQuery
-}
+use std::effects::http::{ HttpClient, SimpleHttpClient, Request, Response, request, format_error, body_str, with_query, ToQuery, Method }
 use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
 use std::effects::http_server::{ route, otherwise, Matched, FromQuery, BadInput }
 use std::collections::map

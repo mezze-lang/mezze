@@ -120,18 +120,33 @@ class ContextBuilder {
                 }
             }
         }
+        // The group each claiming name stands for, as its arm set. Two NAMES for
+        // ONE group are not a clash: macro hygiene hands a name over under a
+        // hidden spelling (`~std~syntax~Expr` beside `Expr`), and a renamed
+        // import does the same thing in user code. Comparing spellings reported
+        // `IntExpr` as claimed by both and broke every macro test.
+        val claimArms = mutableMapOf<String, Set<String>>()
+        fun armsOfDecl(decl: ParsedTypeDecl): Set<String> = when (val d = decl.definition) {
+            is ParsedVariantDef -> d.constructors.map { it.name }.toSet()
+            is ParsedNewtypeDef -> setOf(d.constructor)
+            else -> emptySet()
+        }
         val importedClaims: Map<String, String> = buildMap {
             for ((typeName, decl) in importedTypes) {
                 if (typeName !in importedByName) continue
+                claimArms[typeName] = armsOfDecl(decl)
                 fun claim(tag: String) {
                     val holder = this@buildMap[tag]
+                    val sameGroup = holder != null &&
+                        claimArms[holder] == claimArms[typeName] &&
+                        claimArms[typeName]?.isNotEmpty() == true
                     // Two IMPORTED groups claiming one tag is the same clash as two
                     // declared ones (8.3) -- the route a name arrived by does not
                     // change its claim. Refused at the import, not deferred to the
                     // first use of the tag: the clash exists whether or not the tag
                     // is ever written, and a module that imports both names has no
                     // answer for a bare one.
-                    if (holder != null && holder != typeName) {
+                    if (holder != null && holder != typeName && !sameGroup) {
                         throw com.mezze.language.typechecker.TypeCheckError(
                             "Constructor '" + tag + "' is claimed by both '" + holder +
                                 "' and '" + typeName + "', which are different groups. A tag " +

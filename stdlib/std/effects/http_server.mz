@@ -31,7 +31,7 @@
 ## Effects other than async always escape through `serve` to whoever installed
 ## the server.
 
-use std::effects::http::{ Method, Get, Post, Put, Delete, Patch, Head, Options, Request, Response, IntoResponse, IntoErrorResponse, not_found, response_status }
+use std::effects::http::{ Method, Request, Response, IntoResponse, IntoErrorResponse, not_found, response_status }
 use std::effects::exception::{ ExceptionToResult }
 use std::collections::map
 use std::collections::iter

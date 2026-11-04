@@ -26,7 +26,7 @@
 use std::effects::http::{ Request, Response }
 use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
 use std::effects::http_server::{ route, or_else, otherwise, Matched }
-use std::effects::http::{ Method, Get }
+use std::effects::http::{ Method }
 use std::codec::core::{ Encode }
 use std::codec::json::{ Json, JsonC, json_default, to_str }
 use std::collections::map

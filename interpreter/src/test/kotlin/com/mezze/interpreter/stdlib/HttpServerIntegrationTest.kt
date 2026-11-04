@@ -15,7 +15,7 @@ import kotlin.test.assertEquals
 class HttpServerIntegrationTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, Get, Post }
+        use std::effects::http::{ Request, Response, Method }
         use std::effects::http_server::{ HttpServer, MockHttpServer, incoming, get_request }
         use std::effects::http_server::{ route, or_else, otherwise, Matched }
         use std::collections::map

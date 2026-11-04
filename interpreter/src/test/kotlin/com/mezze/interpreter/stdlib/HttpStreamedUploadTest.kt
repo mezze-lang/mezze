@@ -31,7 +31,7 @@ import kotlin.test.assertTrue
 class HttpStreamedUploadTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, Get, Post, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str, body_bytes }
+        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str, body_bytes }
         use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig, incoming, incoming_streamed }
         use std::effects::http_server::{ route, otherwise, Matched }
         use std::collections::map
