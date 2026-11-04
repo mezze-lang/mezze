@@ -1,6 +1,9 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-10-30: NO open bugs.** BUG 34 is fixed in both halves — the
+**STATUS 2026-11-04: ONE open bug — BUG 35**, a recursive LOCAL lambda that
+calls a function handling its own effect. Everything else below is closed.
+
+**STATUS 2026-10-30: no open bugs at that date.** BUG 34 is fixed in both halves — the
 printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
 PRECISE (a vacuous row variable no longer survives inference). Everything else in
 this file is closed. BUG 28 is fixed, as is the
@@ -3663,3 +3666,74 @@ effectful callback.
 
 `mez check` on the program above reports a type that parses back unchanged.
 A round-trip property test covers inferred types generally.
+
+---
+
+## BUG 35 — OPEN 2026-11-04: a recursive LOCAL lambda cannot call a function that handles its own effect
+
+### Symptom
+
+```mezze
+effect E where { op: {} -> Int <E> }
+impl E for H {} where { op = {} -> 1 }
+
+let handled = {} -> perform H {} in E.op {}
+
+let local_loop = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - handled {}, acc = acc + i }   # rejected
+  go { i = n, acc = 0 }
+```
+
+```
+error[T0201]: Type mismatch for argument '{i, acc}' in call to 'go':
+  expected { i: Int, acc: 'a } with NumAdd Int 'a having 'out = 'c -> 'b <*>
+  but got  { i: 'd, acc: 'c } -> 'e
+```
+
+Nothing here performs an UNHANDLED effect. `handled` closes over its own
+`perform`, so `go` should be an ordinary pure recursive function.
+
+### The same loop at TOP LEVEL is accepted
+
+```mezze
+let go_top = { i, acc } ->
+  if i <= 0 then acc
+  else go_top { i = i - handled {}, acc = acc + i }
+```
+
+```
+handled : {} -> Int <*>
+go_top  : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = out -> 'a <*>
+```
+
+So this is specific to the recursive LOCAL lambda, not to calling a handled
+function. `handled`'s type carries the `<*>` "handled here" marker; the
+top-level function's own signature can carry it and its self-call matches, while
+the local lambda's self-REFERENCE is typed without the row its body acquires —
+which is what the two sides of the mismatch are.
+
+### Why it matters beyond the error
+
+`<*>` means "handled here" — it is a marker, not an obligation, so a function
+carrying it is pure to its callers. A local recursive loop calling any such
+function is an everyday shape: anything that wraps its own handler
+(`comptime`, `noop`, early-return, exception) and is then used inside a
+`let`-bound loop.
+
+The workaround is to lift the loop to top level, which is what
+`bench/cases/effectsurface` does and says so.
+
+### Where to look
+
+`<*>`-carrying callee + recursive-let self-reference. The self-reference is
+registered before the body is checked (the recursive-let path), so the row the
+body turns out to need is not reflected back into it. Related:
+`project_effect_row_binds_to_the_arrow`, `project_star_performed_marker`,
+`project_perform_on_uncalled_function`.
+
+### Found by
+
+Writing `bench/cases/effectsurface` to fill the effects rows of the PERF-LOG
+ledger — kernels that install a handler per iteration. Not by a test.
