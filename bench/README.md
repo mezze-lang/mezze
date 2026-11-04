@@ -6,7 +6,11 @@ Cross-language perf harness. Same benchmark in Mezze, C, Java, Node, Python.
 
 - `cases/` — one dir per benchmark; each holds a Mezze project (`Mezze.toml` + `src/app.mz`).
 - `reference/` — same benchmark in C / Java / JS / Python.
-- `scripts/run.sh` — runs everything, times user-cpu, writes a Markdown table.
+- `scripts/run.sh` — cross-language: whole-process user-cpu, Mezze vs C/Java/Node/Python.
+- `scripts/ab.sh` — in-process per-kernel ps/iter, and the A/B for a
+  compile-time change. One kernel per process, min-of-REPS, GC counts, and the
+  control's drift reported — every rule in its header is there because its
+  absence produced a wrong number. Read it before adding a case.
 - `results/` — timestamped Markdown tables. `latest.md` is the most recent.
 
 ## Cases
