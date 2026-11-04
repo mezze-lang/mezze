@@ -1,0 +1,12 @@
+[package]
+name = "effectsurface"
+version = "0.1.0"
+
+[[app]]
+name = "effectsurface"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
