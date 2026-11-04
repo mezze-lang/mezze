@@ -386,6 +386,52 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         )
     }
 
+    @Test fun `two module groups with disjoint tags merge structurally`() {
+        writeModule("hx", "pub type HttpErr = | NotFound, BadRequest |\n" +
+            "pub let mk_http : {} -> HttpErr = {} -> NotFound")
+        writeModule("ax", "pub type AsyncErr = | Cancelled, TimedOut |\n" +
+            "pub let mk_async : {} -> AsyncErr = {} -> Cancelled")
+        acceptsMain(
+            """
+            use hx::{ mk_http }
+            use ax::{ mk_async }
+            pub let pick = { use_http } ->
+              if use_http then mk_http {} else mk_async {}
+            pub let describe = { v } -> match v is
+              NotFound -> 1
+              BadRequest -> 2
+              Cancelled -> 3
+              TimedOut -> 4
+            $MAIN
+            """,
+            "The four tags are DISJOINT, so the union is unambiguous: every tag names " +
+                "exactly one of the two groups and a match over the merge can be " +
+                "exhaustive. Neither NAME is imported, so neither group claims anything " +
+                "here and there is no claim to contradict.",
+        )
+    }
+
+    @Test fun `two module groups sharing a tag may not merge`() {
+        writeModule("hy", "pub type HttpErr2 = | Timeout, BadRequest |\n" +
+            "pub let mk_http : {} -> HttpErr2 = {} -> BadRequest")
+        writeModule("ay", "pub type AsyncErr2 = | Timeout, Cancelled |\n" +
+            "pub let mk_async : {} -> AsyncErr2 = {} -> Cancelled")
+        rejectsMain(
+            """
+            use hy::{ mk_http }
+            use ay::{ mk_async }
+            pub let pick = { use_http } ->
+              if use_http then mk_http {} else mk_async {}
+            $MAIN
+            """,
+            "V0704",
+            "Both groups hold `Timeout`, so the merge has no answer for it: identity is " +
+                "the NAME (9.2), and one name cannot stand for two different groups' " +
+                "members at once. Contrast the disjoint case above, which merges freely — " +
+                "a shared tag is the only thing that makes a structural union ambiguous.",
+        )
+    }
+
     @Test fun `a three-module chain widens at each step`() {
         writeModule("c1", "pub let mk = {} -> Red")
         writeModule("c2", "pub let widen = { c: | Red, Pink | } -> c")

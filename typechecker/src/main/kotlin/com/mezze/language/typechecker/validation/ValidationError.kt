@@ -271,6 +271,27 @@ sealed interface ValidationError {
      * scope already claims. The named group decided what the tag means in this
      * module, and an inline group may not overrule that decision.
      */
+    /**
+     * One name, one shape (spec 9.2). `Red { n: Int }` and `Red { s: Str }` are
+     * the same tag written two ways, exactly as `False` and `False { val: Int }`
+     * are — identity is the name, so a payload does not buy a second tag.
+     */
+    data class ConflictingTagShape(
+        val constructorName: String,
+        val firstShape: String,
+        val secondShape: String,
+        val loc: Loc? = null,
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0701_DUPLICATE_DECLARATION
+
+        override fun message(): String =
+            "'$constructorName' is written with two different payloads in this module: " +
+                "$firstShape and $secondShape. A constructor's name is its identity, so " +
+                "it carries one payload — give the second one a different name."
+
+        override fun location(): Loc? = loc
+    }
+
     data class ConflictingInlineGroup(
         val constructorName: String,
         val owningType: String,

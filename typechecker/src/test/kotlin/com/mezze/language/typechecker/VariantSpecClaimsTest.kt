@@ -78,17 +78,23 @@ class VariantSpecClaimsTest : VariantSpecBase() {
     }
 
     @Test fun `two inline groups with different payloads for one tag`() {
-        accepts(
+        rejects(
             """
             pub let fp = { c: | Red { n: Int } | } -> 1
             pub let gp = { c: | Red { s: Str } | } -> 2
             $MAIN
             """,
-            "Neither inline group CLAIMS Red, so there is no claim to contradict and " +
-                "nothing links the two signatures — the same reasoning that makes 8.1 " +
-                "legal, applied to payloads instead of membership. An earlier draft " +
-                "refused this, which would have made the claim rule depend on whether a " +
-                "group was named for membership and not for payloads.",
+            "V0701",
+            "ONE NAME, ONE SHAPE. Identity is the name (9.2), so `Red { n: Int }` and " +
+                "`Red { s: Str }` are the same tag written with two shapes, not two " +
+                "tags — exactly as `False` and `False { val: Int }` are.\n\nThis is the " +
+                "rule that makes the merge rule work: two groups holding `Cancelled` " +
+                "cannot combine because one name cannot mean two things, and that is only " +
+                "coherent if one name cannot CARRY two things either. An earlier draft " +
+                "accepted this on the grounds that inline groups claim nothing — true for " +
+                "MEMBERSHIP, where two inline groups may share a tag freely (8.1), and " +
+                "not for shape, which is part of the tag's identity rather than of any " +
+                "group's contents.",
         )
     }
 

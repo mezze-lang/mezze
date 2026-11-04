@@ -42,9 +42,26 @@ internal class UnknownTypeValidator(
      */
     private var claimOwners: Map<String, String> = emptyMap()
 
+    /**
+     * The shape each tag has been written with, as the walk meets it.
+     *
+     * Identity is the NAME (spec 9.2), so one name carries one shape:
+     * `Red { n: Int }` and `Red { s: Str }` are the same tag written two ways,
+     * exactly as `False` and `False { val: Int }` are.
+     *
+     * This is what makes the merge rule coherent. Two groups holding `Cancelled`
+     * cannot combine because one name cannot MEAN two things; that only follows
+     * if one name cannot CARRY two things either. Membership is the other half
+     * and behaves differently — two inline groups may share a tag freely (8.1),
+     * because neither claims it.
+     */
+    private var tagShapes: MutableMap<String, String> = mutableMapOf()
+
     fun validate(module: ParsedModule): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
         claimOwners = buildClaimOwners(module)
+        // One name, one shape. Reset per run; filled as the walk meets groups.
+        tagShapes = mutableMapOf()
         for (decl in module.decls) {
             when (decl) {
                 is ParsedLetDecl -> {
@@ -215,6 +232,27 @@ internal class UnknownTypeValidator(
         annotation: ParsedVariantType,
         errors: MutableList<ValidationError>,
     ) {
+        for (ctor in annotation.constructors) {
+            // Only tags no declared group claims. A tag belonging to a declared
+            // GENERIC group has a payload that varies by instantiation --
+            // `Some { val: Int }` and `Some { val: Option Int }` are one tag at
+            // two instantiations, not two shapes -- and comparing the rendered
+            // forms across them refused nested `Option` outright. The group's
+            // own declaration is the authority on those; this check is for a tag
+            // that has no declaration to be checked against.
+            if (ctor.name in claimOwners) continue
+            val shape = ctor.dataType?.let { renderShape(it) } ?: "<no payload>"
+            val seen = tagShapes.putIfAbsent(ctor.name, shape)
+            if (seen != null && seen != shape) {
+                errors.add(ValidationError.ConflictingTagShape(
+                    constructorName = ctor.name,
+                    firstShape = seen,
+                    secondShape = shape,
+                    loc = annotation.loc,
+                ))
+                return
+            }
+        }
         if (annotation.isOpen) return
         val written = annotation.constructors.map { it.name }.toSet()
         for (ctor in annotation.constructors) {
@@ -237,6 +275,18 @@ internal class UnknownTypeValidator(
             ))
             return
         }
+    }
+
+    /** A tag's payload shape, as a string, for comparing two spellings. */
+    private fun renderShape(ann: ParsedTypeAnnotation): String = when (ann) {
+        is ParsedRecordType ->
+            ann.entries.sortedBy { it.name }
+                .joinToString(",", "{", if (ann.isOpen) ",...}" else "}") {
+                    it.name + ":" + renderShape(it.type)
+                }
+        is ParsedNamedType -> ann.name
+        is ParsedSeqType -> "[" + renderShape(ann.elementType) + "]"
+        else -> ann.toString()
     }
 
     /** The arm set of a group named [owner], builtin or declared. */

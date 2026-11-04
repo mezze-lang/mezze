@@ -1388,6 +1388,25 @@ private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.Vari
         }
     }
 
+    // The REFUSAL half of the disjointness rule. mergeVariantConstructors
+    // declining to merge only means no merge happened; the two types still
+    // unified here, so the program was accepted with one group silently kept.
+    // See that function for why disjoint combines and a shared tag does not.
+    val sharedCtors = constructors1 intersect constructors2
+    val nestedCtors = constructors1.containsAll(constructors2) ||
+        constructors2.containsAll(constructors1)
+    if (sharedCtors.isNotEmpty() && !nestedCtors) {
+        return UnificationResult.Failure(
+            message = "Constructor(s) '${sharedCtors.sorted().joinToString(", ")}' belong to " +
+                "both ${describeVariant(var1)} and ${describeVariant(var2)}, so these groups " +
+                "cannot combine: the shared name would have to mean both at once. Groups " +
+                "with no tag in common combine freely",
+            type1 = var1,
+            type2 = var2,
+            code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
+        )
+    }
+
     val allConstructors = (constructors1 + constructors2).toSet()
     // Same arity guard as the both-open branch, gated on shared constructors.
     return unifyMemberPayloads(

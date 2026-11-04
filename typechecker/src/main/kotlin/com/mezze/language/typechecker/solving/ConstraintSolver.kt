@@ -537,6 +537,23 @@ class ConstraintSolver(
 
         if (!isMatchContext && !(bothOpen && !eitherPatternBased)) return null
 
+        // Two groups combine when their tags are DISJOINT, and may not when they
+        // share one.
+        //
+        //   | NotFound, BadRequest | + | Cancelled, TimedOut |   combines: every
+        //       tag names exactly one side, the union is unambiguous, and a match
+        //       over it can be exhaustive. This is what lets two modules' error
+        //       types meet in an `if` without either name being imported.
+        //   | Timeout, BadRequest | + | Timeout, Cancelled |     does not:
+        //       identity is the NAME (9.2), so one name cannot stand for two
+        //       groups' members at once. Merging them silently kept the left.
+        //
+        // A SUBSET pair is not a combine and stays allowed — that is ordinary
+        // widening, where the shared tags ARE the same tags.
+        val sharedCtors = leftCtors intersect rightCtors
+        val nestedCtors = leftCtors.containsAll(rightCtors) || rightCtors.containsAll(leftCtors)
+        if (sharedCtors.isNotEmpty() && !nestedCtors) return null
+
         val mergedConstructors = leftType.constructors.toMutableMap()
         for ((name, dataType) in rightType.constructors) {
             if (name !in mergedConstructors) {

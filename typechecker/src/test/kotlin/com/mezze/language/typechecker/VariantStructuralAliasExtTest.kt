@@ -192,7 +192,7 @@ class VariantStructuralAliasExtTest {
     // Cancelled (no payload) once.
     // =====================================================================
     @Test
-    fun `same arm name across aliases unifies cleanly`() {
+    fun `same arm name across aliases does NOT unify`() {
         writeModule("http_err", """
             pub type HttpError = | NotFound, Cancelled |
             pub let make_http : {} -> HttpError = {} -> Cancelled
@@ -216,8 +216,15 @@ class VariantStructuralAliasExtTest {
             describe { v = pick { tag = 1 } }
         """
         val r = checkMain(main)
-        assertTrue(r.isSuccess) {
-            "Same-named arms across modules should unify; got: ${r.exceptionOrNull()?.message}"
+        assertTrue(r.isFailure) {
+            "HttpError and AsyncError both hold `Cancelled`, so combining them would make " +
+                "one name mean two groups' members at once. Identity is the NAME, so this " +
+                "must be refused.\n\nThis test formerly asserted the opposite. Both " +
+                "`Cancelled`s here are nullary, which is why the merge LOOKED safe: give " +
+                "one a payload and it has to pick, and the merge starts from the left " +
+                "group and only adds what the right has in addition, so the answer would " +
+                "depend on which branch of the `if` was written first. Groups with no tag " +
+                "in common still combine freely."
         }
     }
 
