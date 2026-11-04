@@ -2949,6 +2949,120 @@ hashes — not a different dev semantics.
 
 ---
 
+## A constraint about nothing: the phantom type parameter that un-monomorphises a concrete function
+
+Chasing the dict-passing gap from the mono side turned up a defect one level
+up. `MonoDriver`'s trace said:
+
+```
+byHash-fail callee=k_capturing typeParams=['s30] scheme=({n: Int} -> Int)
+```
+
+A function whose type is `{n: Int} -> Int` — not a variable in sight — carrying
+a type PARAMETER. Nothing at a call site can ever bind a variable the signature
+does not mention, so mono's all-concrete seed gate rejects it forever.
+
+The printer was hiding the reason: `detailed()` did not print a FunctionType's
+ability constraints. With them shown:
+
+```
+scheme=({n: Int} -> Int) with <NumMul Int ''n11#2080 having out=''u10#2061>
+```
+
+`TypedAstBuilder` builds a decl's `typeParams` from `collectTypeVarsInOrder`,
+which walks `abilityConstraints[].typeArgs` as well as the parameter and return
+types. So an obligation about variables the signature never names becomes a
+phantom type parameter, and a fully concrete function is classified as generic.
+
+### Where it comes from
+
+A do-block `let` re-solves its own statement (`solveDoBlockBindingLocally`).
+Generalizing that binding quantifies its variables, and the obligation recorded
+against them — recorded BEFORE generalization, in the enclosing collector —
+survives, now written in variables that are quantified in the local's scheme and
+therefore free at the enclosing level by construction. It rides out onto the
+enclosing function's signature.
+
+`let double = { a } -> a * 2` shows it in one line, because the obligation ends
+up recorded TWICE:
+
+```
+with <NumMul Int ''e8#1914 having out='out#1916,   <- phantom, the local's quantified vars
+      NumMul Int Int        having out=Int>        <- correct, the enclosing copy
+```
+
+A removal for exactly this existed and had a hole. It followed the local
+substitution and required the landing variable to be one of the scheme's
+`quantifiedVars`; but the local solve generally SOLVES the recorded variable
+(`'f8` → the scheme's own `'e8`/`out`), so `apply` returned a non-variable, the
+code bailed to "keep", and the phantom escaped. The scheme carrying the same
+ability on the same variable IS the safety property — the obligation travels in
+the scheme and every use re-demands it — so the match now runs on the variable
+the obligation was recorded against.
+
+### THE ANNOTATION IS THE TELL
+
+The same program with `xs: Iter Int` written down had no phantom. Mezze's rule
+is that no annotation should ever be needed and performance must never depend on
+having written one, so a defect an annotation can substitute for is a defect in
+inference. `DoBlockLetPhantomConstraintTest` keeps the annotated spelling as a
+control beside the inferred one, plus an arithmetic-free control proving the
+defect is about the OBLIGATION and not about do-block `let` in general.
+
+### What it is worth — and what it is NOT
+
+| | before | after |
+|---|---|---|
+| seeds (dotprobe) | 170 | **188** |
+| byHash seeded / failed | 168 / 9 | **186 / 6** |
+| concrete decls | 539 | **541** |
+| `k_capturing` | generic, never seeded | **concrete** |
+
+Gates: `:typechecker:test` 4804 passed 0 failed.
+
+**It does NOT fix the 324x, and I expected it to.** `dotprobe` k3 measured
+63 456 ps/elem against the dot form's 136 both before and after — no change.
+Reported because a fix that moves the thing it was aimed at by nothing is the
+most useful kind of result to write down.
+
+The reason is in the same trace: the inner `map` is STILL typed over a free
+`'s30`. Removing the phantom made `k_capturing` concrete, but its local `scaled`
+remains a GENERALIZED local lambda — and that, not the phantom, is the 324x.
+
+### The actual 324x, now located exactly
+
+```
+let scaled = { xs } -> iter::map { it = xs, f = { x } -> x * factor }
+```
+
+`scaled` generalizes. Generalization is suppressed only for a NON-GROUND capture
+(#15), and `factor : Int` is ground, so capturing it does not suppress — the
+capture is not the trigger, and a non-capturing local step behaves identically.
+What results is a local POLYMORPHIC function: its body is compiled once,
+generically, with a dictionary; its single call site instantiates it at `Int`
+without ever specialising the body. Mono cannot help, because a local binding is
+not a decl and has no hash to key a `SpecRequest` on.
+
+So the stage lambda stays dictionary-passing, the emitter cannot classify it,
+the chain does not fuse, and the pipeline runs element-at-a-time.
+
+Two ways to close it:
+
+1. **Do not generalize a local lambda used at one type.** Keeps #76 (multi-type
+   uses still generalize) and #15 (ground captures). The obstacle is ordering: at
+   the `let`, the later statements that use it have not been generated yet.
+2. **Specialise local polymorphic bindings in mono, in place.** When a local
+   binding's value is a `TypedLambda` with type params and every use instantiates
+   it at the same concrete args, substitute into its body and resolve its
+   obligations — the same `TypeSubstitution` and `resolveAbilityConstraints` the
+   decl path already uses. No lambda lifting, no closure conversion, captures
+   untouched.
+
+(2) reuses machinery that exists and does not fight the generation order, so it
+is the one to build.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup

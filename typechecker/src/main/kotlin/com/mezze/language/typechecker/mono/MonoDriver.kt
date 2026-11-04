@@ -759,7 +759,24 @@ object MonoDriver {
         if (t == null) return "null"
         return when (t) {
             is MezzeType.VarType -> "'${t.variable.name}#${t.variable.id}"
-            is MezzeType.FunctionType -> "(${detailed(t.paramType)} -> ${detailed(t.returnType)})"
+            // Print the ability constraints. They are part of what the seed gate
+            // reads: `collectTypeVarsInOrder` walks `abilityConstraints[].typeArgs`,
+            // so a constraint on a variable the signature never mentions still
+            // becomes a decl typeParam. Omitting them here printed
+            // `typeParams=['n11] scheme=({n: Int} -> Int)` — a phantom parameter
+            // beside a type with nowhere to put it, which reads as a printer bug
+            // rather than the leak it is.
+            is MezzeType.FunctionType -> buildString {
+                append("(${detailed(t.paramType)} -> ${detailed(t.returnType)})")
+                if (t.abilityConstraints.isNotEmpty()) {
+                    append(t.abilityConstraints.joinToString(", ", prefix = " with <", postfix = ">") { c ->
+                        c.abilityName + c.typeArgs.joinToString("") { " ${detailed(it)}" } +
+                            c.associatedTypeBindings.entries.joinToString("") {
+                                " having ${it.key}=${detailed(it.value)}"
+                            }
+                    })
+                }
+            }
             is MezzeType.RecordType -> t.fields.entries.joinToString(prefix = "{", postfix = "}") { "${it.key}: ${detailed(it.value)}" }
             is MezzeType.VariantType -> t.constructors.entries.joinToString(prefix = "V<${t.identity.displayNameOrNull() ?: "?"}: ", postfix = ">") { "${it.key}(${detailed(it.value ?: MezzeType.RecordType(emptyMap()))})" }
             is MezzeType.NewtypeType -> "New(${t.name})[${detailed(t.wrappedType)}]"
