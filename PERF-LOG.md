@@ -1902,6 +1902,69 @@ testing. Three of this log's earlier claims were measurement errors of their own
 kinds; this is the fourth shape — a control that is not comparable. Any kernel
 added here that leaves tier 1 needs a tier control beside it.
 
+## FIXED: `size` was not a chain sink — 1503x on `map`, 36x on `filter`
+
+A/B on one CLI with `MEZZE_SIZE_SINK=0`, `bench/cases/ds_matrix` at N=1e6,
+min of 10, total ns:
+
+| op | off | on | |
+|---|---|---|---|
+| `seq::fold` (control) | 382 453 | 351 125 | unchanged |
+| **`seq::map` + size** | **9 247 376** | **6 151** | **1503x** |
+| **`seq::filter` + size** | **7 567 659** | **208 724** | **36x** |
+| `list::map` + size | 11 103 978 | 1 461 606 | 7.6x |
+| `list::filter` + size | 9 194 919 | 1 722 776 | 5.3x |
+| `list::count` (control) | 1 609 338 | 1 662 606 | unchanged |
+
+`size` was not in the sink table, so a chain ending in it could not fuse and the
+stage MATERIALISED a whole new collection to answer how MANY. Per element:
+a box on read, a box written into an `Object[]`, then
+`SeqStorageFactory.fromArray` scanning everything with three `instanceof` checks
+each before unboxing into a typed array. Two allocations and two extra
+traversals, discarded immediately.
+
+A `Count` sink already existed — "increment per element" IS `size` for a chain —
+so this is one name added to the recognition, not a new sink. With it the mapped
+element is never used and partial evaluation reduces the map chain to the length
+outright, which is where three orders of magnitude come from; `filter` cannot do
+that (the predicate must run) and lands at 0.21 ns/elem.
+
+THE REFUSAL IS THE CORRECTNESS OF IT. `size` on a materialised collection is
+O(1); routing that through a counting sink would make it O(n) — a regression
+dressed as an optimisation, which no value test would catch. The pass refuses
+when the peeled chain has no stages, and `SizeChainSinkLoweringTest` pins it.
+
+TWO TESTS, FOR TWO DIFFERENT RISKS. `ds_matrix` prints times and not values, so
+a 1503x win there is equally consistent with returning nonsense:
+`SizeChainSinkTest` checks nine shapes by value — size-preserving, filtering,
+truncating, composed both ways, empty source, zero survivors, bare, and List.
+Those pass with the sink DISABLED too, which is the rule for every perf change
+here, so the discriminating test is the lowering one.
+
+HOW IT WAS FOUND, because the route matters more than the number. Chasing a 2.2x
+kernel led to `ds_matrix`, whose N was hardcoded at 10 000 with a note to raise
+it "once List chunked backing lands" — and at 10 000 the medians run 2-10x the
+mins, which is what an under-warmed measurement looks like. Parameterising N and
+running at 1e6 made the outliers legible. The win was sitting in an existing
+bench that nobody had run at a realistic size.
+
+### Measured along the way, at N=1e6
+
+| op | ns/elem |
+|---|---|
+| `range.fold` direct | 0.06-0.16 |
+| `seq::sum` (native) | 0.36 |
+| `seq::fold` | 0.37 |
+| `seq::any` (miss) | 0.42 |
+| `seq::count` | 0.10-0.74 (a 7.6x variance band — this harness is noisy for cheap ops) |
+| `list::fold_left` | 1.32 |
+| `list::count` | 1.6-3.7 |
+
+Fold, sum and any are sub-nanosecond. The List equivalents run 3-5x their Seq
+counterparts, which is storage and is its own ledger row. And the header's
+recorded claim that `list::map`/`filter` were "100-644x slower than seq" is
+STALE — they are comparable now.
+
 ## Surface still to cover
 
 Not yet measured on this branch. Listed so the gaps are visible rather than

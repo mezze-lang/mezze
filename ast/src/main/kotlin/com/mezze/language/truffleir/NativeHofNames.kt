@@ -106,6 +106,7 @@ object NativeHofNames {
     const val OP_ZIP = "zip"
     const val OP_FLAT_MAP = "flat_map"
     const val OP_COUNT_ALL = "count_all"
+    const val OP_SIZE = "size"
 
     // ── Native name builder ─────────────────────────────────────────────
 

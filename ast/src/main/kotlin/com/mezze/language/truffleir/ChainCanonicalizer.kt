@@ -1032,6 +1032,37 @@ object ChainCanonicalizer {
     ): FusedChainIR? {
         val mr = node.arg as? MakeRecordIR ?: return null
         val candidate: FusedChainIR? = when {
+            // ── Size over a CHAIN: count what reaches the sink ──
+            //
+            // `xs.map(f).size()` measured ~9 500 ps/elem against ~490 for
+            // `xs.map(f).fold(+)` at N=1e6 — twenty times, for asking how many
+            // instead of what the sum is. `size` was not a sink, so the chain
+            // could not fuse and the map MATERIALISED a whole new collection:
+            // a box per element read, a box per element written into an
+            // `Object[]`, then `SeqStorageFactory.fromArray` scanning all of it
+            // with three `instanceof` checks each before unboxing into a typed
+            // array. Two allocations and two extra traversals per element.
+            //
+            // For a chain, `size` is exactly what the Count sink already does —
+            // increment per element that survives the stages — so there is no
+            // new sink to emit, only a name to recognise.
+            //
+            // AND IT REFUSES WITHOUT A STAGE, which is the whole correctness of
+            // it: `size` of a materialised collection is O(1), and routing that
+            // through a counting sink would make it O(n). A chain with no stages
+            // is exactly that case, so it is left as the native it was.
+            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_SIZE) &&
+                System.getenv("MEZZE_SIZE_SINK") != "0" -> {
+                val srcField = NativeHofNames.srcFieldFor(node.name)
+                var src: NodeIR? = null
+                for (fld in mr.fields) if (fld.name == srcField) src = fld.value
+                val srcInner = src ?: return null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
+                if (stages.isEmpty()) return null
+                val effectiveSource = promoteOpaqueSource(source, node.name) ?: return null
+                val candidate0 = FusedChainIR(effectiveSource, stages, SinkIR.Count, node.src)
+                if (isEffectSafe(candidate0, allFunctions)) candidate0 else null
+            }
             // ── Count (predicate → filter + count) ──
             NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_COUNT) -> {
                 val srcField = NativeHofNames.srcFieldFor(node.name)

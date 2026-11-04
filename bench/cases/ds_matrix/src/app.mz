@@ -15,6 +15,8 @@ use std::effects::time::{Time, SystemTime, monotonic}
 use std::datetime::{duration_to_nanos, sub_duration}
 use std::collections::seq
 use std::collections::list
+use std::effects::args::{ SystemArgs, argv }
+use std::int
 
 # --- builders ---
 
@@ -50,8 +52,20 @@ let report = {label, thunk} -> perform Console in perform SystemTime in do
 
 # --- main ---
 
-let main = {} -> perform Console in perform SystemTime in do
-    let n = 10000
+# N from the command line, defaulting to the original 10 000 so an existing
+# invocation reads the same. The header kept it small because list::map and
+# list::filter were 100-644x slower than their seq counterparts and a larger N
+# hung; list is now comparable, so the per-element cost is worth seeing at a
+# size where per-call overhead and warmup do not dominate. At 10 000 the median
+# runs 2-10x the min, which is what an under-warmed measurement looks like.
+let arg_n = { args, def } -> match seq::get { xs = args, i = 0 } is
+    Some { val } -> match int::from_str { s = val } is
+        Some { val = v } -> v
+        None -> def
+    None -> def
+
+let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+    let n = arg_n { args = argv {}, def = 10000 }
     println { msg = "Phase G0 baseline (N=$(n.to_str{})): 3 warmup + 10 measured runs, min/med ns" }
     let seq_ns = seq::range {start = 0, end = n}
     let list_ns = build_list {n = n, acc = list::empty {}}
