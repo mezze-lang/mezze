@@ -78,6 +78,20 @@ class Monomorphizer(
      * constraints.
      */
     private val resolveEvidence: ((TypedLetDecl, List<MezzeType>) -> List<AbilityImplRef>)? = null,
+    /**
+     * Completes a PARTIAL type-arg list by resolving the callee's `having 'out`
+     * bindings against its ability impls — [MonoDriver.fillHavingOutTypeArgs],
+     * which the seed path already uses.
+     *
+     * The transitive path needs the same thing and did not have it. A `having
+     * 'out` var is not reachable from the callee's parameter type: it only
+     * becomes concrete once the impl is resolved for the (now concrete) receiver
+     * and class args. `buildArgsFromBindings` therefore returned null for it, and
+     * a null transitive derivation is dropped silently — which is how a
+     * SPECIALIZED recursive function kept recursing into its GENERIC self.
+     * Null in unit tests that do not exercise constraints.
+     */
+    private val fillHavingOut: ((TypedLetDecl, List<MezzeType>) -> List<MezzeType>)? = null,
     /** Worklist depth limit. Default matches the spec's recommendation. */
     private val maxDepth: Int = 16,
 ) {
@@ -732,12 +746,52 @@ class Monomorphizer(
             }
         }
 
+        // LAST ATTEMPT: a typeParam that is a `having 'out` is not reachable from
+        // the parameter type at all, so both unifications above leave it unbound
+        // and every one of them returned null.
+        //
+        //     let go = { i, acc, p, q } ->
+        //       if i <= 0 then acc + p + q
+        //       else go { i = i - 1, acc = acc + i, p = p, q = q }
+        //
+        // typeParams are ['acc, 'p, 'q, 'ret, 'mid]: `'mid` is the type of
+        // `acc + p` before `+ q`, and `'ret` the result. Unifying the parameter
+        // type pins the first three to Int and says nothing about the last two —
+        // so the SELF-CALL got no transitive request, kept the generic hash, and
+        // a specialized recursive function recursed into its GENERIC self. Every
+        // iteration after the first then ran the dictionary-passing version:
+        // `bench/cases/allocsurface` kernel 11 at 30 675 ps/iter against kernel
+        // 10's 595, the two differing by one line of source.
+        //
+        // The seed path has resolved these all along, with the same filler. Take
+        // the partial list and complete it, then hold to the same all-concrete
+        // bar as every other route — a `having 'out` that cannot be resolved
+        // still declines.
+        val fill = fillHavingOut ?: return null
+        for (bindings in buildList {
+            if (siteType != null) {
+                val b = HashMap<String, MezzeType>()
+                if (unify(callee.scheme.type, siteType, b)) add(b)
+            }
+            val fnType = callee.scheme.type as? MezzeType.FunctionType
+            if (enclosingCall != null && fnType != null) {
+                val b = HashMap<String, MezzeType>()
+                if (unify(fnType.paramType, enclosingCall.arg.type, b)) add(b)
+            }
+        }) {
+            val partial = buildArgsFromBindings(typeParams, bindings, allowPartial = true) ?: continue
+            if (partial.all { isConcreteEnough(it) }) return partial
+            val filled = fill(callee, partial)
+            if (filled.size == typeParams.size && filled.all { isConcreteEnough(it) }) return filled
+        }
+
         return null
     }
 
     private fun buildArgsFromBindings(
         typeParams: List<TypeParam>,
         bindings: Map<String, MezzeType>,
+        allowPartial: Boolean = false,
     ): List<MezzeType>? {
         val args = ArrayList<MezzeType>(typeParams.size)
         for (tp in typeParams) {
@@ -746,6 +800,11 @@ class Monomorphizer(
                 args.add(b)
             } else if (isEffectVarNameLocal(tp.name)) {
                 args.add(MezzeType.EffectRow.simple(emptySet()))
+            } else if (allowPartial) {
+                // Leave it unresolved, carrying its param name, so
+                // [fillHavingOut] can complete it from the ability's `having`
+                // bindings. Mirrors `MonoDriver.deriveTypeArgs(allowPartial)`.
+                args.add(MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(tp.name)))
             } else {
                 return null
             }

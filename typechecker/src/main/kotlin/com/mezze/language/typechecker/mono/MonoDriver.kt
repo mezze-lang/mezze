@@ -254,6 +254,10 @@ object MonoDriver {
             resolveEvidence = { decl, args ->
                 resolveAbilityConstraints(decl, args, abilityImpls, recordShapeByHash)
             },
+            // The same `having 'out` filler the seed path uses, so the TRANSITIVE
+            // path resolves an out-var it cannot reach from the parameter type.
+            // One rule for completing type args, not two.
+            fillHavingOut = { decl, args -> fillHavingOutTypeArgs(decl, args, abilityImpls) },
         )
 
         // Monomorphise POLYMORPHIC LOCAL LAMBDAS before seeding.

@@ -3171,6 +3171,105 @@ was originally aimed at.
 
 ---
 
+## 45x: a specialized recursive function that recursed into its generic self
+
+`allocsurface` kernel 11 cost 30 675 ps/iter against kernel 10's 595. The two
+differ by **one line of source**:
+
+```mezze
+let go_4 = { i, acc, p, q } ->          let go_5 = { i, acc, p, q } ->
+  if i <= 0 then acc                      if i <= 0 then acc + p + q
+  else go_4 { i = i - 1, … }              else go_5 { i = i - 1, … }
+let k_tier = { n } -> go_4 { i = n, acc = 0, p = 0, q = 0 }
+                                        let k_dict = { n } -> go_5 { i = n, acc = 0, p = 0, q = 0 }
+```
+
+The call site passes `n : Int` and three `Int` literals, so it should pin
+everything and flow outward. It does — that was the surprise. Every stage
+worked:
+
+| stage | result |
+|---|---|
+| `fillHavingOutTypeArgs` closes the `having out` chain | `fromArg=[Int,Int,Int,'d45,'j43]` → `filled=[Int,Int,Int,Int,Int]` |
+| seed created | `typeArgs=[Int,Int,Int,Int,Int]`, `impls=3` |
+| specialization produced | `specs_for_go_5=1`, `fallbacks=0` |
+| the compiler's rewrite gate fires | `rewrite=692510b7`, `nonLambdaUserLet=false` |
+
+And the emitted program still contained `go_5` with
+`params=[i, acc, p, q, __dict_add@j43, __dict_add@z44]`, 3 `DictMethodCallIR`,
+self-recursing on its own generic hash. The spec hash appeared **0 times**.
+
+### The self-call, not the entry call
+
+Probing every call to `go_5` by CALLEE HASH rather than by loc gave it away:
+
+```
+app.mz:164:8   rewrite=NONE        <- the SELF-call, dictMethods=2
+app.mz:165:23  rewrite=692510b7    <- the entry call
+```
+
+The entry call specialises; the self-call never does. So the specialized clone
+calls the GENERIC `go_5`, and every iteration after the first runs on the
+dictionary path. For a 20M-iteration loop that is the whole measurement.
+
+`go_4` is the control that proves the mechanism — inside ITS specialized body
+the self-call's callee is already its own spec hash:
+
+```
+135:8  callee=409717f4 dictMethods=-1   <- inside go_4's SPEC: already the spec
+135:8  callee=6884262a dictMethods=1    <- inside go_4's generic
+164:8  callee=c269962f dictMethods=2    <- go_5: STILL the generic, both times
+```
+
+### Root cause
+
+`Monomorphizer.deriveTransitiveTypeArgs` → `buildArgsFromBindings` requires
+EVERY typeParam to come out concrete, and `deriveTransitiveTypeArgs(...) ?: continue`
+drops a null silently. `go_5`'s typeParams are five: the three parameter vars,
+the result `'j619`, and `'p617` — the type of `acc + p` before `+ q`. **Neither
+the result nor `'p617` occurs in the parameter type**, so unifying against the
+call site cannot bind them, and the derivation returned null.
+
+A `having 'out` var is like that by nature: it becomes concrete only once the
+impl is resolved for the now-concrete receiver and class args. The SEED path has
+completed these all along with `fillHavingOutTypeArgs`. **The transitive path had
+no equivalent.** That asymmetry is the entire bug.
+
+`go_4` escapes it because `then acc` makes the result var the accumulator var
+itself and leaves no intermediate — all three of its typeParams are reachable
+from the parameter type. One line of source decided whether five variables or
+three needed resolving.
+
+### Fix and result
+
+Give the transitive path the same filler, supplied by `MonoDriver` as a callback
+beside `resolveEvidence`, with the same all-concrete bar afterwards — so a
+`having 'out` that genuinely cannot be resolved still declines and a polymorphic
+recursion is left generic rather than specialized at a guess.
+
+| | before | after |
+|---|---|---|
+| kernel 11 `acc + p + q` | **30 675 ps/iter** | **682** |
+| kernel 10 `acc` (control) | 595 | 651-730 |
+| kernel 1 (control) | 238 | 220-235 |
+| `DictMethodCallIR` in the program | 3 | **0** |
+| `__dict_add` reads | 2 | **0** |
+
+**45x**, and kernel 11 lands exactly on kernel 10 — which is where it belongs,
+since the extra adds run once. The generic `go_5` is gone from the emitted
+program entirely. Identical checksums throughout.
+
+### A note on choosing the observable
+
+The first version of the test asserted `bySiteLoc` gained an entry for the
+self-call line. It failed WITH the fix, because `bySiteLoc` is built from the
+SEED list only — a transitive request never appears in it. The redirect happens
+while the Monomorphizer CLONES the body (`done[key]` already holds the spec hash
+at that point), so the observable is the specialized body's own self-reference.
+`RecursiveSpecSelfCallTest` asserts that, and fails without the fix.
+
+---
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
