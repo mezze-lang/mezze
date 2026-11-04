@@ -986,15 +986,47 @@ private fun isWalledVariant(
 
 private val inScopeAliasNamesOverride: ThreadLocal<Set<String>?> = ThreadLocal.withInitial { null }
 
-fun <T> withInScopeAliasNames(names: Set<String>, block: () -> T): T {
-    val prev = inScopeAliasNamesOverride.get()
+/**
+ * Bind both scope sets for [block].
+ *
+ * [names] is every type LOADED anywhere; [namedHere] is what this module NAMES —
+ * declared here, imported by name, or builtin. They are separate because their
+ * readers want opposite things, and one set could not serve both:
+ *
+ *  - deciding whether a group's IDENTITY is trustworthy wants LOADED. A group
+ *    arriving through an imported function's signature is not named here, and
+ *    treating it as unnamed loses its identity and switches coverage off.
+ *
+ *  - choosing which group CLAIMS a bare tag wants NAMED-HERE. With the loaded
+ *    set, a module importing only `db`'s and `http`'s functions still had both
+ *    their error groups in scope, so `Timeout` resolved against both and could
+ *    not be written at all — `db` and `http` could not be used together, and
+ *    four stdlib tags are in that position.
+ *
+ * [namedHere] defaults to [names] so a caller that does not distinguish them
+ * keeps the previous behaviour.
+ */
+fun <T> withInScopeAliasNames(
+    names: Set<String>,
+    namedHere: Set<String> = names,
+    block: () -> T,
+): T {
+    val prevIn = inScopeAliasNamesOverride.get()
+    val prevNamed = namedHereOverride.get()
     inScopeAliasNamesOverride.set(names)
+    namedHereOverride.set(namedHere)
     try {
         return block()
     } finally {
-        inScopeAliasNamesOverride.set(prev)
+        inScopeAliasNamesOverride.set(prevIn)
+        namedHereOverride.set(prevNamed)
     }
 }
+
+private val namedHereOverride: ThreadLocal<Set<String>?> = ThreadLocal.withInitial { null }
+
+/** See [withInScopeAliasNames]. Null when scope is not known at this point. */
+fun namedHereTypeNamesOrNull(): Set<String>? = namedHereOverride.get()
 
 fun inScopeAliasNamesForSolverOrNull(): Set<String>? = inScopeAliasNamesOverride.get()
 

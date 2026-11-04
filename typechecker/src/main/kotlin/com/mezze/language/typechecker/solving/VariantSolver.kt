@@ -390,7 +390,7 @@ internal class VariantSolver(
         }
 
         if (constructorName in BuiltinTypes.OPTION_RESULT_CONSTRUCTORS) {
-            val declared = lookupConstructorDecl(constructorName, expectedPayloadType) as? CtorLookup.Resolved
+            val declared = lookupConstructorDecl(constructorName, expectedPayloadType, isPatternContext) as? CtorLookup.Resolved
             if (declared != null && !isBuiltinOptionOrResultDecl(declared.typeDecl)) {
                 return if (isPatternContext) {
                     resolveConstructorAgainstDecl(declared.typeDecl, constructorName, expectedPayloadType, variantType.variable)
@@ -403,7 +403,7 @@ internal class VariantSolver(
         }
 
         if (isPatternContext) {
-            when (val found = lookupConstructorDecl(constructorName, expectedPayloadType)) {
+            when (val found = lookupConstructorDecl(constructorName, expectedPayloadType, isPatternContext)) {
                 is CtorLookup.Resolved ->
                     return resolveConstructorAgainstDecl(found.typeDecl, constructorName, expectedPayloadType, variantType.variable)
                 is CtorLookup.NoneFit ->
@@ -418,7 +418,7 @@ internal class VariantSolver(
                 // A DECLARED `Cons`/`Nil` wins over the builtin list when one is in
                 // scope; when the name is ambiguous or undeclared the builtin is the
                 // answer, not a deferral, so this branch never asks to wait.
-                val declaringTypeExpr = lookupConstructorDecl(constructorName, expectedPayloadType) as? CtorLookup.Resolved
+                val declaringTypeExpr = lookupConstructorDecl(constructorName, expectedPayloadType, isPatternContext) as? CtorLookup.Resolved
                 if (declaringTypeExpr != null) {
                     return resolveConstructorAgainstDecl(declaringTypeExpr.typeDecl, constructorName, expectedPayloadType, variantType.variable)
                 }
@@ -428,7 +428,7 @@ internal class VariantSolver(
         }
 
         if (!isPatternContext) {
-            when (val found = lookupConstructorDecl(constructorName, expectedPayloadType)) {
+            when (val found = lookupConstructorDecl(constructorName, expectedPayloadType, isPatternContext)) {
                 is CtorLookup.Resolved ->
                     return solveConstructorFromDecl(found.typeDecl, constructorName, expectedPayloadType, variantType.variable)
                 is CtorLookup.NoneFit ->
@@ -732,8 +732,29 @@ internal class VariantSolver(
     private fun lookupConstructorDecl(
         constructorName: String,
         expectedPayloadType: MezzeType?,
+        isPatternContext: Boolean,
     ): CtorLookup {
-        val candidates = constructorIndex[constructorName].orEmpty()
+        // CONSTRUCTING a bare tag asks which group claims it, and only a group
+        // NAMED here can. `constructorIndex` is global — every group loaded
+        // anywhere — so without this filter `Timeout` resolved against both
+        // `DbErr` and `HtErr` in a module that imported neither name, and could
+        // not be written at all.
+        //
+        // A PATTERN is the opposite case and must not be scoped: it already has
+        // the scrutinee's group. `match lookup { … } is Some { val = NoneFound }`
+        // is selecting within `Option OptErr` that arrived through `lookup`'s
+        // signature — `OptErr` is not named here and does not need to be.
+        // Scoping both paths together refused that.
+        //
+        // An empty result is Undeclared, not a global fallback: an unclaimed tag
+        // is its own one-element group (spec 1.2).
+        val allCandidates = constructorIndex[constructorName].orEmpty()
+        val namedHere = namedHereTypeNamesOrNull()
+        val candidates = if (isPatternContext || namedHere == null) {
+            allCandidates
+        } else {
+            allCandidates.filter { it.first.name in namedHere }
+        }
         if (candidates.isEmpty()) return CtorLookup.Undeclared
         if (candidates.size == 1) return CtorLookup.Resolved(candidates.first().first)
 

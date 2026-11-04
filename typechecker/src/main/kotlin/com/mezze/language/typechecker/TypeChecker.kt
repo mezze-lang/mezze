@@ -544,7 +544,15 @@ class TypeChecker(
         val inScopeAliasNames = buildResult.registry.typeNames +
             (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
             BuiltinTypes.allBuiltinTypeNames
-        val programConstraintResult = PhaseTiming.phase(currentModulePath, "constraints") { withInScopeAliasNames(inScopeAliasNames) {
+        // What this module NAMES, as against what is merely loaded. See
+        // withInScopeAliasNames for why both are needed.
+        val namedHereTypeNames = parsedModule.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
+            .map { it.name }
+            .toSet() +
+            (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
+            BuiltinTypes.allBuiltinTypeNames
+        val programConstraintResult = PhaseTiming.phase(currentModulePath, "constraints") { withInScopeAliasNames(inScopeAliasNames, namedHereTypeNames) {
             constraintGenerator.generateProgram(parsedModule, context)
         } }
         val constraintResults = programConstraintResult.constraintResults
@@ -615,7 +623,7 @@ class TypeChecker(
         }
 
         val solver = ConstraintSolver(solveContext, registry, sharedGeneratedCodecImpls = sharedGeneratedCodecImpls)
-        val solveResult = PhaseTiming.phase(currentModulePath, "solve") { withInScopeAliasNames(inScopeAliasNames) {
+        val solveResult = PhaseTiming.phase(currentModulePath, "solve") { withInScopeAliasNames(inScopeAliasNames, namedHereTypeNames) {
             solver.solve(allConstraints)
         } }
 
@@ -670,7 +678,7 @@ class TypeChecker(
                     .saturate()
                 InvariantChecker.checkSubstitution(substitution, "post-solve")
                 collectedErrors.addAll(
-                    withInScopeAliasNames(inScopeAliasNames) {
+                    withInScopeAliasNames(inScopeAliasNames, namedHereTypeNames) {
                         checkConstructorPayloads(constraintResults, substitution, registry)
                     }
                 )
