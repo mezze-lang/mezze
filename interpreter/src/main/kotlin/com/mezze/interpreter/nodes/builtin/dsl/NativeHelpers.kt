@@ -276,4 +276,62 @@ object NativeHelpers {
         if (a == 0L || b == 0L) return 0L
         return Math.abs(a / intGcd(a, b) * b)
     }
+
+    // ==================== Receiver coercion ====================
+    //
+    // WHY THESE EXIST RATHER THAN A CAST AT EACH CALL SITE. The legacy
+    // `NativeDispatch.getSeq(r, name)` / `getMap(r, name)` accessors do not
+    // merely read a field and cast — `getSeq` also ACCEPTS an `Object[]` and
+    // wraps it with `MezzeSeq.fromArray`. A scalar-ABI port that writes
+    // `args.obj(0) as MezzeSeq<*>` therefore changes behaviour, and it fails
+    // far from the declaration: twenty codec and decode tests failed with
+    //
+    //   ClassCastException: [Ljava.lang.Object; cannot be cast to MezzeSeq
+    //     at SeqOps.seq(SeqOps.kt:45) … at <mezze>.find_field_value
+    //
+    // because `find_field_value` reaches `seq::get` with a raw array. So the
+    // coercion is part of the native's contract, and every `*Ops.kt` takes its
+    // receiver through these.
+
+    /** Bit-for-bit `NativeDispatch.getSeq`, minus the record lookup. */
+    fun asSeq(value: Any?, name: String): MezzeSeq<*> {
+        if (value is MezzeSeq<*>) return value
+        // Also handle Object[] - convert to MezzeSeq
+        if (value is Array<*>) {
+            @Suppress("UNCHECKED_CAST")
+            return MezzeSeq.fromArray(value as Array<Any?>)
+        }
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeSeq for field '" + name + "', got: " +
+                (if (value == null) "null" else value.javaClass.simpleName),
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getLong`, minus the record lookup — it accepts
+     * a `Double` that is an exact integer, which the original comment explains
+     * as handling "cases where float operations produce values used as integer
+     * args". `NativeArgs.long(i)` is a hard cast and would throw there.
+     *
+     * The `is Long` test is one instanceof on a stable profile, so partial
+     * evaluation folds it; being faithful here is free.
+     */
+    fun asLong(value: Any?, name: String): Long {
+        if (value is Long) return value
+        if (value is Double && value == Math.floor(value) && !value.isInfinite()) {
+            return value.toLong()
+        }
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected Long for field '" + name + "', got: " +
+                (if (value == null) "null" else value.javaClass.name + "=" + value),
+        )
+    }
+
+    /** Bit-for-bit `NativeDispatch.getMap`, minus the record lookup. */
+    fun asMap(value: Any?, name: String): com.mezze.datastructures.map.MezzeMap<*, *> {
+        if (value is com.mezze.datastructures.map.MezzeMap<*, *>) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeMap for field '" + name + "'",
+        )
+    }
 }

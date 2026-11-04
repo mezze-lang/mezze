@@ -78,7 +78,8 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
-| **any stdlib native call in a loop** | **9.8x** the loop it sits in (7 818 vs 801 ps), +16 GCs | `map::size` performs no lookup and returns an `Int`, so this is the CALL, not the native. Largest unexplained cost in the inventory; paid by every stdlib call in every loop. Cause not isolated |
+| **a native on the LEGACY RECORD ABI** | **13x** a scalar-ABI call (7 586 vs 577 ps), +16 GCs | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. A native on the SCALAR ABI is at floor — 577 ps against a 611 ps control. 128 ops were declared against 1298 legacy handlers; map and seq accessors now ported, 2-3x each. list/set/sorted/deque/mut remain |
+| a scalar-ABI MAP op vs the same shape on a string | 6x (3 762 vs 755 ps), 13 GCs vs 3 | EA is not removing `NativeDispatchScalarNode`'s `values` array and `PositionalArgs` wrapper for the map op though it does for the string one. `handler` is `@CompilationFinal`; candidate blocker is `MezzeMap.size()` -> `storage.size()` on the 9-impl sealed `MapStorage`. Next: dump the compiled graph rather than assume |
 | **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
 | a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
 | `map::insert`, new map per iteration | 38.8x (31 118 ps), 47 GCs | persistent map nodes plus the native-call cost above; floor unknown |
@@ -2309,6 +2310,128 @@ histogram instead.
 - Every tail-call operation is variadic (`TailCallDirectN`, `TailCallIndirect`,
   `TailCallByHash`) while non-tail calls have `CallDirect1/2/3` and
   `CallIndirectScalar1/2`. Measured impact: unknown, and smaller than assumed.
+
+---
+
+## The scalar native ABI, and the 91% of the stdlib that was not on it
+
+### The experiment
+
+`allocsurface` kernels 9 and 12 do the same semantic work: a native call
+returning an `Int`, against a structure built once outside the loop, allocating
+nothing. `str::size` and `map::size`. The only difference is which ABI the call
+uses, and `MEZZE_DUMP_FN` shows it directly:
+
+    CallNativeIR(name=__native_string_size, arg=UnitLitIR,       args=[s], …)
+    CallNativeIR(name=__native_map_size,    arg=MakeRecordIR(…), args=[],  …)
+
+| kernel | ps/iter | young GCs |
+|---|---|---|
+| 10 off-tier control | 611 | 3 |
+| 12 `str::size` — scalar ABI | 577 | 3 |
+| 9 `map::size` — record ABI | 7 586 | 19 |
+
+A native call on the scalar ABI is **indistinguishable from the loop around
+it**. The same call on the legacy record path costs **13x** that, because
+`TypedASTCompiler` hands it a `MezzeRecord` built per call and the handler then
+looks each argument up by field name (`getMap(r, "m")`).
+
+So the earlier reading of this case — "any stdlib native call in a loop costs
+9.8x" — named the wrong thing. A native call is free; the record ABI is not.
+
+### The scope
+
+The signature table held **128** ops: float 39, int 27, string 24, nat 17,
+char 14, bool 7. `NativeDispatch` held **1298** legacy handlers. Every map, seq,
+list, set, sorted-map, sorted-set and deque operation was on the slow side of
+that 13x — about 91% of the stdlib's natives, including every collection
+accessor any program uses in a loop.
+
+### What was ported, and what it bought
+
+`MapOps.kt` and `SeqOps.kt`: the accessors and persistent-update ops whose
+handler is a straight call on evaluated arguments. One `NativeOp(...)`
+declaration publishes both the signature (compiler side) and the handler
+(interpreter side), so each port is a line over the existing implementation.
+
+| op | record ABI | scalar ABI | |
+|---|---|---|---|
+| `map::contains_key` | 13 359 ps / 21 GC | 4 079 / 14 | **3.3x** |
+| `map::size` | 7 586 / 19 | 3 465 / 12 | **2.2x** |
+| `seq::get` | 15 432 / 30 | 7 231 / 23 | **2.1x** |
+| `map::get` | 15 889 / 31 | 8 078 / 23 | **2.0x** |
+| `map::insert` — NOT ported, control | 31 118 / 47 | 25 023 / 46 | held |
+| `str::size` — already scalar, control | 577 / 3 | 632 / 3 | held |
+| kernel 1 / kernel 10 controls | 229 / 611 | 217 / 691 | steady |
+
+Both controls steady, both unported ops steady, four ported ops at 2.0-3.1x.
+
+### Two things that make this land correctly rather than look like it did
+
+**`:cli:compileStdlib` has to run first, and `installDist` does not run it.**
+The declaration changes what `TypedASTCompiler` emits for `map::size`, whose
+body lives in the stdlib and is inlined from the precompiled snapshot. The
+build file says why `processResources` cannot depend on `compileStdlib` (it
+would be circular), so after adding a declaration the snapshot must be
+regenerated explicitly or the lowering silently stays on the record path — which
+it did, on the first attempt, with the signature correctly present in the table
+and `arg=MakeRecordIR` still in the dump.
+
+**An op that is also a fusion sink must NOT be declared.**
+`ChainCanonicalizer` recognises a fusable chain by matching `CallNativeIR` and
+reading the source and lambda out of the argument record by field name, and
+every one of those sites is guarded `&& !node.isScalarABI`. So declaring such an
+op does not merely fail to help — the fuser refuses the call and the fusion is
+lost with no diagnostic. `seq::map` + `size` is 1503x on that path.
+
+The rule is mechanical: an op may be declared only if its bare name is absent
+from `NativeHofNames`. That excludes `size`, `take`, `drop`, `first`, `last` and
+every HOF. `SeqOpsFusionGuardTest` enforces it by walking
+`NativeSignatures.knownNames()` against `NativeHofNames`' `OP_*` constants, and
+it was verified to fail — naming `__native_seq_size (bare op \\`size\\`)` — with
+that one declaration added back.
+
+**The legacy accessors COERCE, and a port that only casts is wrong.**
+`NativeDispatch.getSeq(r, name)` does not merely read a field and cast — it also
+accepts a raw `Object[]` and wraps it with `MezzeSeq.fromArray`. `getLong`
+accepts a `Double` that is an exact integer. Writing `args.obj(0) as MezzeSeq<*>`
+in the port looked equivalent and was not: twenty codec and decode tests failed
+with
+
+    ClassCastException: [Ljava.lang.Object; cannot be cast to MezzeSeq
+      at SeqOps.seq(SeqOps.kt:45) … at <mezze>.find_field_value
+
+because `find_field_value` reaches `seq::get` with a raw array. The coercion is
+part of the native's contract, so `NativeHelpers` now carries `asSeq`, `asMap`
+and `asLong` as bit-for-bit copies of the originals and every `*Ops.kt` takes
+its arguments through them — which is what that file's header already said it
+was for. The `is Long` / `is MezzeSeq` test is one instanceof on a stable
+profile, so partial evaluation folds it and fidelity is free.
+
+The failure is worth keeping because of WHERE it surfaced: not at the
+declaration, but deep inside the JSON decoder, in tests that have nothing to do
+with this change. A ported native is only equivalent if its argument handling is
+equivalent too.
+
+### Still above floor
+
+- **A scalar-ABI map op still costs 6x a scalar-ABI string op** (`map::size`
+  3 465 ps against `str::size` 632) and still shows 12 young collections against
+  3. `NativeDispatchScalarNode` allocates a `values` array and a
+  `PositionalArgs` wrapper per call and relies on escape analysis to remove
+  them; for the string op it evidently does and for the map op it evidently does
+  not. `handler` is `@CompilationFinal` so the lambda should inline; the
+  candidate blocker is `MezzeMap.size()` → `storage.size()` on the `MapStorage`
+  INTERFACE, which cannot be devirtualised. Next experiment: check whether that
+  site is polymorphic in the compiled graph before assuming it.
+- **`map::insert` at 25 023 ps / 46 GCs** is the largest remaining row and is
+  not a fuser op, so it can be declared. Same for `remove`, `empty`, `keys`,
+  `values`, `entries`, `merge`.
+- **list, set, sorted-map, sorted-set, deque** have had no module written at
+  all.
+- The HOF natives need `NativeOpWithNode` and an `IndirectCallNode`, and several
+  are what the fuser consumes, so they are a separate piece of work with its own
+  measurement.
 
 ---
 

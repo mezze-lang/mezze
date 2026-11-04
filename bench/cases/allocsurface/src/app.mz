@@ -161,6 +161,30 @@ let go_5 = { i, acc, p, q } ->
   else go_5 { i = i - 1, acc = acc + i, p = p, q = q }
 let k_dict = { n } -> go_5 { i = n, acc = 0, p = 0, q = 0 }
 
+## 12. THE SAME SHAPE AS KERNEL 9, ON THE SCALAR NATIVE ABI. `str::size` of a
+##     string carried as a loop parameter: a native call returning an Int that
+##     allocates nothing, exactly like `map::size` in kernel 9. The ONLY
+##     difference is which ABI the call uses.
+##
+## `__native_string_size` is declared in the NativeOp DSL, so
+## `NativeSignatures.signatureOf` returns a signature and `TypedASTCompiler`
+## emits `CallNativeIR(arg=UnitLitIR, args=[s], argKinds=[OBJECT])` — positional,
+## typed, no record. `__native_map_size` is NOT declared (the table holds 128
+## signatures: float, int, string, nat, char, bool, and nothing for map, seq,
+## list or set), so kernel 9 emits
+## `CallNativeIR(arg=MakeRecordIR(...), args=[], argKinds=[])` — a MezzeRecord
+## allocated per call and looked up by field name.
+##
+## Kernel 9 minus kernel 12 is therefore the cost of the argument record, with
+## everything else held equal. Both are semantically allocation-free, so kernel
+## 12 should sit near the off-tier control at 3 collections.
+##
+## sum = n, the same as kernel 9, because the string is one character.
+let go_y = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_y { i = i - 1, acc = acc + str::size { s = s }, s = s }
+let k_str_size = { n } -> go_y { i = n, acc = 0, s = "a" }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -212,4 +236,8 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_dict { n = n }
     report { name = "11 dict-passing", n = n, r = time_it { f = {} -> k_dict { n = n } } }
     report { name = "11 dict-passing", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+  else if k == 12 then do
+    k_str_size { n = n }
+    report { name = "12 str size    ", n = n, r = time_it { f = {} -> k_str_size { n = n } } }
+    report { name = "12 str size    ", n = n, r = time_it { f = {} -> k_str_size { n = n } } }
   else println { msg = "unknown kernel" }

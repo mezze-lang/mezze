@@ -35,6 +35,8 @@ object NativeBootstrap {
             NatOps.MARKER
             CharOps.MARKER
             StringOps.MARKER
+            MapOps.MARKER
+            SeqOps.MARKER
         }
     }
 }
