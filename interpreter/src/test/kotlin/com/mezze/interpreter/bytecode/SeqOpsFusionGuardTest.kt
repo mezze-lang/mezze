@@ -29,7 +29,16 @@ import org.junit.jupiter.api.Test
  */
 class SeqOpsFusionGuardTest {
 
-    /** Collection prefixes whose ops `ChainCanonicalizer` fuses. */
+    /**
+     * Collection prefixes whose ops `ChainCanonicalizer` fuses — exactly the set
+     * `NativeHofNames.isAnyElementCollection` covers.
+     *
+     * NOT map and NOT bytes, deliberately. `ChainCanonicalizer` contains no
+     * reference to `__native_map_` or `__native_bytes_`, so a declaration there
+     * can never cost a fusion and must not be forbidden by this test. Widening
+     * this list would reject safe declarations; narrowing it would let a real
+     * regression through. It tracks the fuser, nothing else.
+     */
     private val fusedPrefixes = listOf(
         "__native_seq_", "__native_iter_", "__native_list_",
         "__native_set_", "__native_sorted_set_", "__native_deque_",

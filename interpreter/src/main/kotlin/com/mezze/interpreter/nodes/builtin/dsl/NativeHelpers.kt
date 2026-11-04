@@ -375,6 +375,20 @@ object NativeHelpers {
     }
 
     /**
+     * Bit-for-bit `NativeDispatch.getBytes`, minus the record lookup. Like
+     * `getSet`, this one does NOT coerce — it casts or throws.
+     */
+    fun asBytes(
+        value: Any?,
+        name: String,
+    ): com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes {
+        if (value is com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeBytes for field '" + name + "'",
+        )
+    }
+
+    /**
      * Bit-for-bit `NativeDispatch.getSet`, minus the record lookup. Unlike
      * `getSeq`/`getList` this one does NOT coerce — it casts or throws.
      */

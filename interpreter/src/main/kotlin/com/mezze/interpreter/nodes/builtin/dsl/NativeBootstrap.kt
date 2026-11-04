@@ -39,6 +39,7 @@ object NativeBootstrap {
             SeqOps.MARKER
             ListOps.MARKER
             SetOps.MARKER
+            BytesOps.MARKER
         }
     }
 }

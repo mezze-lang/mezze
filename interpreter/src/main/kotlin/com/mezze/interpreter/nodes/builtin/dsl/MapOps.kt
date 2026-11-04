@@ -72,10 +72,15 @@ object MapOps {
 
     // ==================== Persistent update ====================
     //
-    // `empty` is deliberately absent: `NativeHofNames.OP_EMPTY` is part of the
-    // fuser's vocabulary, so declaring `__native_map_empty` would make
-    // ChainCanonicalizer refuse it. SeqOpsFusionGuardTest enforces that, and
-    // caught this one while the list was being written.
+    // `empty` is absent because `map::empty {}` is called once to build a map,
+    // never per iteration, so there is nothing to win.
+    //
+    // NOT for the fusion reason an earlier version of this comment gave. The
+    // fuser's `isAnyElementCollection` covers seq, iter, list, set, sorted_set
+    // and deque — NOT map — and `ChainCanonicalizer` contains no reference to
+    // `__native_map_` at all, so declaring a map op can never cost a fusion and
+    // `SeqOpsFusionGuardTest` does not examine map names. Declaring
+    // `__native_map_empty` would have been safe; it is simply pointless.
     private val INSERT = NativeOp("__native_map_insert",
         listOf(Param("m", SlotKind.OBJECT), Param("k", SlotKind.OBJECT), Param("v", SlotKind.OBJECT)),
         SlotKind.OBJECT, pure = true,

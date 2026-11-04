@@ -18,6 +18,7 @@
 ## interchangeable. Each kernel's expected value is stated beside it.
 use std::collections::seq
 use std::collections::map
+use std::collections::bytes
 use std::collections::list
 use std::collections::set
 use std::effects::log::{ println, Console }
@@ -223,6 +224,21 @@ let go_st = { i, acc, s } ->
   else go_st { i = i - 1, acc = acc + (if set::contains { s = s, x = 1 } then 1 else 0), s = s }
 let k_set_has = { n } -> go_st { i = n, acc = 0, s = set::from_seq { xs = seq::range { start = 1, end = 2 } } }
 
+## 15. BYTES GET per iteration against a Bytes built ONCE — the same shape as
+##     kernels 5/7/8 (a native lookup returning an Option), for the bytes
+##     accessors ported to the scalar ABI. `bytes::get` is declared;
+##     `bytes::from_seq` is not, so the constructor stays on the record path and
+##     only the per-iteration lookup is measured.
+let go_b = { i, acc, b } ->
+  if i <= 0 then acc
+  else go_b { i = i - 1, acc = acc + (match bytes::get { b = b, i = 0 } is
+                                        Some { val } -> val
+                                        None -> 0), b = b }
+let k_bytes_get = { n } -> go_b {
+  i = n, acc = 0,
+  b = bytes::from_seq { arr = seq::range { start = 1, end = 3 } },
+}
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -286,4 +302,8 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_set_has { n = n }
     report { name = "14 set has     ", n = n, r = time_it { f = {} -> k_set_has { n = n } } }
     report { name = "14 set has     ", n = n, r = time_it { f = {} -> k_set_has { n = n } } }
+  else if k == 15 then do
+    k_bytes_get { n = n }
+    report { name = "15 bytes get   ", n = n, r = time_it { f = {} -> k_bytes_get { n = n } } }
+    report { name = "15 bytes get   ", n = n, r = time_it { f = {} -> k_bytes_get { n = n } } }
   else println { msg = "unknown kernel" }
