@@ -82,6 +82,25 @@ let k_variant = { n } -> do
       C { n = _ } -> acc
   go { i = n, acc = 0 }
 
+## 5. TIER CONTROL — and this kernel is why the others can be read at all.
+##    The same loop, kept OFF the fused tail-loop tier for a reason that has
+##    nothing to do with effects or variants: the decrement comes from a helper
+##    too big to inline, so the tier's "every update is arithmetic over params"
+##    test fails exactly as it does for a `perform`. `heavy_one` returns 1, so
+##    the checksum is unchanged.
+##
+##    Without this, kernel 2's number is uninterpretable: it mixes the cost of
+##    an effect operation with the cost of the loop leaving tier 1, and the
+##    trace says it does leave ("tier-1 declined"). k5 - k1 is the tier; k2 - k5
+##    is the effect operation.
+let heavy_one = { i } -> i * 0 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0
+
+let k_tier = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - heavy_one { i = i }, acc = acc + i }
+  go { i = n, acc = 0 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -117,4 +136,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "4 variant match", n = n, r = time_it { f = {} -> k_variant { n = n } } }
     report { name = "4 variant match", n = n, r = time_it { f = {} -> k_variant { n = n } } }
     report { name = "4 variant match", n = n, r = time_it { f = {} -> k_variant { n = n } } }
+  else if k == 5 then do
+    k_tier { n = n }
+    k_tier { n = n }
+    k_tier { n = n }
+    report { name = "5 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+    report { name = "5 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+    report { name = "5 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
   else println { msg = "unknown kernel" }

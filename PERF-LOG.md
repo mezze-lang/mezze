@@ -1819,16 +1819,18 @@ computing the SAME checksum as the control:
 | kernel | ps/iter | young GCs | vs control |
 |---|---|---|---|
 | 1 positional control | 222 | 2 | — |
-| 2 ONE EFFECT OPERATION per iteration | 1 119 | 5 | 5.0x |
+| 2 ONE EFFECT OPERATION per iteration | 1 119 | 5 | 5.0x — see the correction |
 | 3 Option constructed + matched | 1 892 | **17** | 8.5x |
 | 4 three-constructor variant matched | 1 940 | **17** | 8.7x |
 
 **EFFECTS ARE NOT STRUCTURALLY EXPENSIVE, and that was the question worth
-answering.** 5x, with five young collections against the control's two — so
-reaching a handler and returning costs about 1.1 ns and allocates almost
-nothing. If effect operations had needed a real continuation capture each, this
-is where it would have shown, and no peephole would have fixed it. They are
-cliff-shaped like everything else.
+answering.** If an effect operation had needed a real continuation capture each
+time, this is where it would have shown and no peephole would have fixed it.
+
+**BUT "5.0x" WAS THE WRONG NUMBER, and the correction is below** — it mixed the
+cost of an effect operation with the cost of the loop leaving the fused tier.
+Kernel 5 was added to separate them, and the honest figure for an effect
+operation is ~0.38 ns, not 1.1.
 
 VERIFIED NOT FOLDED, because the checksum cannot tell: the operation returns 1
 and is used as the loop's decrement, so a constant-folded `one` would compute
@@ -1859,6 +1861,46 @@ pattern's `fieldSlots` — which already exist — to the construction's field
 values. That turns the loop branch into `BlockIR([Let(slot, value)], <tail
 call>)`, which is precisely the shape [LetCopyPropagation] substitutes and
 collapses, after which the tier fuses. The expected landing is the control.
+
+### CORRECTION: "an effect operation costs 5x" mixed two costs — it is ~0.38 ns
+
+The control above is on `FusedLongTailLoop`; the effect kernel is NOT.
+`MEZZE_TRACE_SELFTAIL` says so — `tier-1 declined at line8599`, the check that
+every parameter update is arithmetic over parameters. A `PerformOpIR` is not,
+so the loop drops to the general path, and the 5x was the tier gap plus the
+effect operation measured against a tier-1 control.
+
+KERNEL 5 SEPARATES THEM: the same loop taken off tier 1 for a reason that has
+nothing to do with effects — a decrement from a helper too big to inline, which
+fails the same check — and returning 1, so the checksum is unchanged. n=2e7,
+min of 3:
+
+| kernel | ps/iter | young GCs | |
+|---|---|---|---|
+| 1 control, on tier 1 | 242 | 2 | — |
+| 5 tier control, off tier 1 | 479 | 3 | **leaving tier 1: ~237 ps** |
+| 2 effect operation, off tier 1 | 857 | 7 | **the operation: ~378 ps** |
+| 3 Option match, folded back onto tier 1 | 235 | 2 | the variant fix holds |
+
+So an effect operation costs **~0.38 ns** marginal, which matches the
+implementation: `PerformD` caches the handler, the op's field index, its call
+target and its closure values as compilation constants under a
+handler-chain-stable assumption and calls through an inlined `DirectCallNode`.
+There is no chain walk and no name lookup per call. The four extra young
+collections across 2e7 iterations are the operation's argument record.
+
+AND THE TIER GAP IS THE REAL FINDING: **~237 ps, about 2x, for any loop tier 1
+cannot express.** That is not a cliff to fix in the way the others were — tier 1
+runs the whole loop in Java with no per-iteration bytecode, so it can never call
+a guest effect handler, and a `perform` in a loop simply cannot be on it. What
+is worth attacking is the FLOOR of the general path, which every such loop pays:
+effects, a call too big to inline, more than one tail call, a multi-way branch.
+
+WHY THIS CORRECTION MATTERS MORE THAN THE NUMBER: a kernel measured against a
+control on a DIFFERENT tier attributes the tier to whatever the kernel was
+testing. Three of this log's earlier claims were measurement errors of their own
+kinds; this is the fourth shape — a control that is not comparable. Any kernel
+added here that leaves tier 1 needs a tier control beside it.
 
 ## Surface still to cover
 
