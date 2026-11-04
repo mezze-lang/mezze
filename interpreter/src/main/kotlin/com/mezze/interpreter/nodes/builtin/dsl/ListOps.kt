@@ -7,10 +7,10 @@ import com.mezze.language.truffleir.SlotKind
 /**
  * List natives in DSL form.
  *
- * See [MapOps] for the measurement: a native on the scalar ABI is
- * indistinguishable from the loop around it, the same call on the legacy record
- * path costs 13x, and the whole difference is that `TypedASTCompiler` hands it a
- * `MezzeRecord` built per call which the handler then reads by field name.
+ * See [MapOps] for the measurement: the record ABI costs 2-3.3x the scalar ABI
+ * for the same op, measured on one kernel before and after the port, because
+ * `TypedASTCompiler` hands it a `MezzeRecord` built per call which the handler
+ * then reads by field name.
  *
  * ── THE COERCION HERE IS THE WIDEST OF ANY COLLECTION ──────────────────────
  *

@@ -7,22 +7,30 @@ import com.mezze.language.truffleir.SlotKind
 /**
  * Map natives in DSL form — the first collection module on the scalar ABI.
  *
- * WHY THIS FILE EXISTS, MEASURED. `bench/cases/allocsurface` compares two
- * kernels that do the same semantic work: a native call returning an `Int` that
- * allocates nothing, against a structure built once outside the loop.
+ * WHY THIS FILE EXISTS, MEASURED. On the legacy record path `TypedASTCompiler`
+ * emits `CallNativeIR(arg=MakeRecordIR(...), args=[])`, so a `MezzeRecord` is
+ * built per call and the handler looks each argument up by field name
+ * (`getMap(r, "m")`). Declaring an op here makes it positional and typed.
  *
- *   kernel 12  `str::size`  scalar ABI    577 ps/iter    3 young GCs
- *   kernel  9  `map::size`  record ABI  7 586 ps/iter   19 young GCs
+ * Measured per op in `bench/cases/allocsurface`, on ONE kernel before and after
+ * its declaration — no cross-kernel inference:
  *
- * and the off-tier control those sit against is 611 ps / 3 GCs. So a native on
- * the scalar ABI is free — indistinguishable from the loop around it — and the
- * same call on the legacy record ABI costs **13x** that, because
- * `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...), args=[])` and
- * the handler then looks each argument up by field name (`getMap(r, "m")`).
+ *   map::contains_key   13 359 ps / 21 GC  ->  4 079 / 14   3.3x
+ *   map::size            7 586     / 19    ->  3 465 / 12   2.2x
+ *   seq::get            15 432     / 30    ->  7 231 / 23   2.1x
+ *   map::get            15 889     / 31    ->  8 078 / 23   2.0x
+ *
+ * with the unported ops and the two loop controls flat beside them.
+ *
+ * NOT 13x. An earlier header here claimed that, from comparing `map::size`
+ * against `str::size` across two kernels. Two probes disproved it: with a
+ * handler that touches nothing at all, `map::size` still allocates 13
+ * collections where `str::size` allocates 3, and the two loops' lowered IR is
+ * the same shape. The residual is real but is not the ABI — see PERF-LOG.
  *
  * At the time of writing the signature table held 128 ops — float, int, string,
- * nat, char, bool — and `NativeDispatch` held 1298 legacy handlers. Every map,
- * seq, list and set operation was on the slow side of that 13x.
+ * nat, char, bool — and `NativeDispatch` held 1298 legacy handlers, so about
+ * 91% of the stdlib's natives were on the record path.
  *
  * WHAT IS SAFE TO DECLARE HERE. Only the PLAIN forms. The compiler emits the
  * `*_with_evidence` variants instead whenever the key type has a hand-written

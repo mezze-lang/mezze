@@ -185,7 +185,23 @@ let k_dict = { n } -> go_5 { i = n, acc = 0, p = 0, q = 0 }
 let go_y = { i, acc, s } ->
   if i <= 0 then acc
   else go_y { i = i - 1, acc = acc + str::size { s = s }, s = s }
-let k_str_size = { n } -> go_y { i = n, acc = 0, s = "a" }
+## THE STRING MUST NOT BE A LITERAL, and this is the whole point of the kernel.
+##
+## The first version passed `s = "a"`. A literal is a compile-time constant and
+## `__native_string_size` is declared `pure`, so the entire call folded to 1 and
+## the kernel stopped measuring a native call at all: it read 577 ps and 3 young
+## collections, sitting exactly on the off-tier control, and that reading was
+## written up as "a native call on the scalar ABI is free" — and a 13x record-ABI
+## penalty derived from it. A no-op probe handler proved the error: with a handler
+## that touched nothing, `map::size` still read 13 collections while this kernel
+## read 3, which cannot be true of the shared machinery.
+##
+## `n` arrives from argv, so `int::to_str { n = n }` is opaque to the compiler;
+## taking one character keeps the size 1 and the checksum n, as kernel 9.
+let k_str_size = { n } -> go_y {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
 
 ## 13. LIST GET per iteration against a list built ONCE. Same shape as kernel 7
 ##     (`seq::get`): a lookup returning an `Option`, nothing it must allocate.

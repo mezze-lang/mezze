@@ -78,8 +78,8 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
-| **a native on the LEGACY RECORD ABI** | **13x** a scalar-ABI call (7 586 vs 577 ps), +16 GCs | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. A native on the SCALAR ABI is at floor — 577 ps against a 611 ps control. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared), 2-3x each. sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain |
-| a scalar-ABI MAP op vs the same shape on a string | 6x (3 762 vs 755 ps), 13 GCs vs 3 | EA is not removing `NativeDispatchScalarNode`'s `values` array and `PositionalArgs` wrapper for the map op though it does for the string one. `handler` is `@CompilationFinal`; candidate blocker is `MezzeMap.size()` -> `storage.size()` on the 9-impl sealed `MapStorage`. Next: dump the compiled graph rather than assume |
+| **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
+| **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
 | **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
 | a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
 | `map::insert`, new map per iteration | 20.4x its own control, 31 GCs (was 35.8x / 47) | persistent map nodes, which it must allocate; the argument record came off it with the scalar-ABI port. Floor unknown but no longer dominated by the ABI |
@@ -2315,15 +2315,10 @@ histogram instead.
 
 ## The scalar native ABI, and the 91% of the stdlib that was not on it
 
-### The experiment
+### The experiment, and the claim it produced — WITHDRAWN
 
-`allocsurface` kernels 9 and 12 do the same semantic work: a native call
-returning an `Int`, against a structure built once outside the loop, allocating
-nothing. `str::size` and `map::size`. The only difference is which ABI the call
-uses, and `MEZZE_DUMP_FN` shows it directly:
-
-    CallNativeIR(name=__native_string_size, arg=UnitLitIR,       args=[s], …)
-    CallNativeIR(name=__native_map_size,    arg=MakeRecordIR(…), args=[],  …)
+The original reading compared two kernels that call a native returning an `Int`
+against a structure built once outside the loop:
 
 | kernel | ps/iter | young GCs |
 |---|---|---|
@@ -2331,21 +2326,52 @@ uses, and `MEZZE_DUMP_FN` shows it directly:
 | 12 `str::size` — scalar ABI | 577 | 3 |
 | 9 `map::size` — record ABI | 7 586 | 19 |
 
-A native call on the scalar ABI is **indistinguishable from the loop around
-it**. The same call on the legacy record path costs **13x** that, because
-`TypedASTCompiler` hands it a `MezzeRecord` built per call and the handler then
-looks each argument up by field name (`getMap(r, "m")`).
+and concluded "a native call on the scalar ABI is indistinguishable from the loop
+around it; the record ABI costs **13x** that."
 
-So the earlier reading of this case — "any stdlib native call in a loop costs
-9.8x" — named the wrong thing. A native call is free; the record ABI is not.
+**That conclusion does not hold, and the 13x figure is withdrawn.** Two probes
+killed it:
+
+1. Replacing `map::size`'s handler with one that reads the receiver but calls
+   nothing: **13 collections**, unchanged. Replacing it with `{ _ -> 1L }`,
+   which touches nothing at all: **13 collections**, unchanged. So kernel 9's
+   allocation is not in the native — not its body, not its receiver read, not
+   the ABI machinery, which kernel 12 shares.
+2. Kernel 12 originally passed `s = "a"`. Rebuilt to take a string derived from
+   `argv` so nothing can be constant-folded, it reads **870 ps / 3 GC** — still
+   beside the control.
+
+So after porting `map::size` to the SAME ABI, the two kernels still differ:
+
+| kernel | ps/iter | young GCs |
+|---|---|---|
+| 1 control | 226 | 2 |
+| 10 tier control | 585 | 3 |
+| 12 `str::size`, scalar ABI, opaque receiver | 870 | 3 |
+| 9 `map::size`, scalar ABI | 3 796 | 13 |
+
+**4.4x and 3-against-13 on the same ABI**, which is not something the ABI can
+explain. And their lowered IR is the same shape — `MEZZE_DUMP_FN` prints 1908
+characters for one and 1909 for the other, the same node sequence, one
+`CallDirectIR` and one `CallNativeIR(isScalarABI=true)` each.
+
+That is now a ledger row of its own: **two loops with identical lowered IR, both
+on the scalar ABI, differ 4.4x and allocate 13 collections against 3, and the
+gap survives replacing the native's body with a no-op.** The cause is below the
+IR; settling it needs a compiled-graph dump on a quiet box, not more reading.
+
+WHAT SURVIVES, and why it is the right claim. The per-op numbers below were taken
+on the SAME kernel before and after its op was declared — no cross-kernel
+inference — so they are unaffected:
 
 ### The scope
 
 The signature table held **128** ops: float 39, int 27, string 24, nat 17,
 char 14, bool 7. `NativeDispatch` held **1298** legacy handlers. Every map, seq,
-list, set, sorted-map, sorted-set and deque operation was on the slow side of
-that 13x — about 91% of the stdlib's natives, including every collection
-accessor any program uses in a loop.
+list, set, sorted-map, sorted-set and deque operation was on the record path —
+about 91% of the stdlib's natives, including every collection accessor any
+program uses in a loop. What that costs is the 2-3.3x measured per op below, not
+the withdrawn 13x.
 
 ### What was ported, and what it bought
 

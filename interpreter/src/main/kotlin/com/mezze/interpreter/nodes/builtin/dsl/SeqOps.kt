@@ -8,10 +8,12 @@ import com.mezze.language.truffleir.SlotKind
  * Seq natives in DSL form — the accessors and the persistent-update ops.
  *
  * See [MapOps] for the measurement that motivates every collection module
- * moving to the scalar ABI: a native on the scalar path is indistinguishable
- * from the loop around it, while the same call on the legacy record path costs
- * 13x, because `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))`
- * and the handler then looks each argument up by field name.
+ * moving to the scalar ABI: the record path costs 2-3.3x the scalar path for the
+ * same op, measured on one kernel before and after the port, because
+ * `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler
+ * then looks each argument up by field name. `seq::get` is one of those
+ * measurements: 15 432 ps / 30 GC on the record path, 7 231 / 23 on the scalar
+ * one.
  *
  * ── WHAT MUST NOT BE DECLARED HERE, AND WHY ────────────────────────────────
  *
