@@ -94,7 +94,7 @@ a defect, not a conservative default.
 | ~~`bytes` fold~~ | **CLOSED — AT FLOOR at 257 ps/elem** | Two causes, neither of them fusion. (1) `BytesNatives.fold` was `@TruffleBoundary` and allocated FOUR objects per element → 41 076 → 9 275. (2) `BuiltinSumBytes` recognises a zero-init ADD folder instead of calling it → 257, below the fused seq fold. The predicted `byte[]` indexed walk WAS built and REVERTED: the generic fused loop is slower than the native fold, because a bare fold has nothing to eliminate |
 | `set` / `deque` bare fold | deque **CLOSED at 1 670**; set **ABOVE FLOOR at 7 447 for a NEW reason** | Two rounds. First: `promoteOpaqueSource` materialised the collection into a Seq to fuse it; refusing that copy when no stages pay for it gave deque 71 508 → 14 041, set 188 633 → 19 826. Then `FoldToSumRewriter` replaced the summing fold with the collection's own `sum` — deque 9 638 → 1 670 (5.6x), set 17 376 → 7 447 (2.3x). Set's remainder is the WALK, not a callback (`set::sum` measured 7 270 BEFORE any of this): ~7 ns to visit one element of a persistent hash set is scattered memory. The lever is primitive-specialised storage, a DATA-STRUCTURE change |
 | ~~`nel` fold~~ | **CLOSED — 8 858 → 1 206 ps/elem (7.3x)** | Not a fusion gap either. It was the one element-based collection with no `sum`, so `FoldToSumRewriter` had nothing to rewrite its fold to. Added `nel::sum`; lands on the deque row, which is what two array-backed collections walking without a callback cost |
-| **`map` fold** | **~160x seq — the LARGEST collection gap, still open** | Cause now named exactly, and it is THREE costs where every other collection paid one: `MezzeMap`'s iterator does `new Entry<>(keys[i], values[i])` PER ELEMENT, the folder takes three arguments, and the keys are read and boxed even when the folder ignores them. None is necessary — keys and values are PARALLEL ARRAYS and `MapStorage.forEach` walks them without intermediate arrays. Fix prepared: `map::sum_values` (named so, because a map has two things to sum) plus a rewrite requiring the KEY parameter unused |
+| **`map` fold** | **33 593 → 15 142 ps/elem (2.2x)**; the remainder is the WALK | Three costs, one removed. `MezzeMap`'s iterator did `new Entry<>(keys[i], values[i])` PER ELEMENT and the three-argument callback read and boxed the keys even though a value sum never looks at them; `map::sum_values` walks the parallel arrays through `MapStorage.forEach` with neither. What is LEFT is ~15 ns to visit one entry of a HAMT with boxed values — about twice set's 7 270, which is what two scattered columns per element costs. Same conclusion as set: a LAYOUT problem, lever is primitive-specialised storage |
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
 | ~~a stage from a CAPTURING local helper~~ | **CLOSED — 64 672 → 206 ps/elem (314x)** | And the capture was NEVER the trigger. A do-block `let` bound to a lambda GENERALIZES (#76), suppressed only for a non-ground capture (#15), so a named step is a local POLYMORPHIC function whose body compiles once with a dictionary. `Monomorphizer` cannot reach it — a local binding is not a decl. `LocalLambdaSpecializer` pins it in place, BEFORE the seed walk so the inner `map` gets seeded too |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
@@ -3730,6 +3730,68 @@ thing that distinguishes those two outcomes is which one you do first.
 The rule the ledger now carries: **a stale row is worse than a missing one.** A
 missing row reads as unknown, which is true. A stale row reads as measured,
 which is false, and it sorts into the queue ahead of things that are real.
+
+---
+
+## 2.2x on the map fold, and the measurement was harder than the fix
+
+The map fold was the largest collection gap and it paid THREE costs where every
+other collection paid one:
+
+- `MezzeMap`'s iterator does `new Entry<>(keys[index], values[index])` **per
+  element** — an allocation inside the timed loop;
+- the callback takes three arguments rather than two;
+- the KEYS are read and boxed into that Entry even though a value sum never
+  looks at them.
+
+None is necessary: the map stores keys and values in PARALLEL ARRAYS, and
+`MapStorage.forEach` is documented as walking them "without creating
+intermediate arrays". So `map::sum_values` is a walk with no Entry and no guest
+call.
+
+**Named `sum_values`, not `sum`.** A map has two things to sum and that
+ambiguity would be the whole bug — a `sum` that silently meant values would
+answer a key sum with the wrong column. The rewriter enforces the same
+distinction structurally: it redirects only a folder that reads the VALUE and
+never the key, so `acc + k` and `acc + k + v` both stay folds. Three of the
+lowering cases are that, and a fourth checks it BY VALUE, because getting it
+wrong returns 6 instead of 60 rather than failing.
+
+| at n=500k, min of 8 reps, two builds | ps/elem |
+|---|---|
+| `map::fold` — Entry + 3-arg callback | **33 593** |
+| `map::sum_values` | **15 142** |
+
+**2.2x**, identical checksums (124 999 750 000).
+
+### Why this took four attempts to measure
+
+Everything below n=2M was unreadable and n=2M never finished:
+
+- **n=2M never completed** in 25 minutes. Not the fold — BUILDING a 2M-entry
+  persistent map through a cons list dominates, superlinearly.
+- **n=200k**: the seq control swung 1 386 → 6 849. Its timed region there is
+  sub-millisecond, so the control measures startup, not the kernel.
+- **n=500k, 3 reps**: the SAME build gave 49 404 and 118 529 — 2.4x. A map fold's
+  wall time is GC, not work: a 500k-entry map is a lot of live heap and the old
+  path allocated an Entry per element inside the timed region.
+- **GC counts**, the load-independent evidence, barely moved: 10 → 8. Because
+  the map CONSTRUCTION dominates total allocation, so the fold's contribution is
+  2 of 10 and the signal is swamped.
+
+What worked was **min of 8 reps on two builds** — the min is the
+least-GC-interrupted run, and 8 reps is enough to find one. Note what that
+means: my earlier 3-rep readings of 49 404 and 65 546 were both ~2x above the
+true cost, so the "1.33x" I first computed from them was an artefact of too few
+samples on a GC-dominated kernel.
+
+### What is left, and it is the same answer as set
+
+15 142 ps/elem is the WALK. A HAMT with boxed values, about twice set's 7 270,
+which is what two scattered columns per element costs. Both are now LAYOUT
+problems rather than dispatch ones, and both want the same thing:
+primitive-specialised storage, the way `LongSeqStorage` backs a seq. That is a
+data-structure change, and it is the largest remaining collection item.
 
 ---
 

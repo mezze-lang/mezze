@@ -111,6 +111,72 @@ class FoldToSumLoweringTest {
     }
 
     /**
+     * A map folds ENTRIES, so its folder takes three parameters and its sum has
+     * to say WHICH of the two it sums — hence `sum_values`, not `sum`.
+     *
+     * The map fold is the most expensive walk in the collection ledger and it
+     * pays three costs where the others pay one: `MezzeMap`'s iterator does
+     * `new Entry<>(keys[i], values[i])` PER ELEMENT, the callback takes three
+     * arguments, and the keys are read and boxed even though a value sum never
+     * looks at them. None is necessary — keys and values are parallel arrays
+     * and `MapStorage.forEach` walks them without intermediate arrays.
+     */
+    @Test
+    fun `a zero-init add over the VALUE becomes sum_values`() {
+        val src = """
+            use std::collections::map
+            use std::collections::seq
+            pub let total = { m: Map Int Int } -> map::fold {
+              m = m, init = 0, f = { acc, k, v } -> acc + v
+            }
+        """
+        val found = natives(src)
+        assertTrue(
+            "__native_map_sum_values" in found,
+            "the value sum was not rewritten; natives: $found",
+        )
+        assertTrue("__native_map_fold" !in found, "the `fold` survived; natives: $found")
+    }
+
+    /**
+     * CONTROL, AND THE ONE THAT MATTERS MOST FOR A MAP: summing the KEY must
+     * not become `sum_values`, which would answer with the other column
+     * entirely. A wrong number, not a type error.
+     */
+    @Test
+    fun `summing the key does not become sum_values`() {
+        val src = """
+            use std::collections::map
+            use std::collections::seq
+            pub let total = { m: Map Int Int } -> map::fold {
+              m = m, init = 0, f = { acc, k, v } -> acc + k
+            }
+        """
+        val found = natives(src)
+        assertTrue(
+            "__native_map_sum_values" !in found,
+            "a KEY sum was rewritten to sum_values, which sums the values; natives: $found",
+        )
+    }
+
+    /** CONTROL: reading BOTH columns is neither sum. */
+    @Test
+    fun `summing key and value does not become sum_values`() {
+        val src = """
+            use std::collections::map
+            use std::collections::seq
+            pub let total = { m: Map Int Int } -> map::fold {
+              m = m, init = 0, f = { acc, k, v } -> acc + k + v
+            }
+        """
+        val found = natives(src)
+        assertTrue(
+            "__native_map_sum_values" !in found,
+            "`acc + k + v` was rewritten to sum_values; natives: $found",
+        )
+    }
+
+    /**
      * CONTROL, AND A CORRECTNESS CASE. A fold over FLOATS must keep its folder.
      *
      * `sum`'s boxed path reads Long/Integer and drops everything else, so

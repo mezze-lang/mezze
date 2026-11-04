@@ -57,6 +57,15 @@ object FoldToSumRewriter {
             to NativeHofNames.native(NativeHofNames.NEL, NativeHofNames.OP_SUM),
     )
 
+    /**
+     * A map folds ENTRIES, so its folder takes three parameters and its sum has
+     * to say which of the two it sums.
+     */
+    private val MAP_FOLD =
+        NativeHofNames.native(NativeHofNames.MAP, NativeHofNames.OP_FOLD)
+    private val MAP_SUM_VALUES =
+        NativeHofNames.native(NativeHofNames.MAP, NativeHofNames.OP_SUM_VALUES)
+
     fun rewrite(node: NodeIR, allFunctions: Map<Hash, FunctionIR>): NodeIR {
         val descended = node.transformChildren { child -> rewrite(child, allFunctions) }
         return tryRewrite(descended, allFunctions) ?: descended
@@ -64,6 +73,7 @@ object FoldToSumRewriter {
 
     private fun tryRewrite(node: NodeIR, allFunctions: Map<Hash, FunctionIR>): NodeIR? {
         if (node !is CallNativeIR || node.isScalarABI) return null
+        if (node.name == MAP_FOLD) return tryRewriteMapValueSum(node, allFunctions)
         val sumName = FOLD_TO_SUM[node.name] ?: return null
         val mr = node.arg as? MakeRecordIR ?: return null
 
@@ -113,5 +123,54 @@ object FoldToSumRewriter {
         val r = body.right as? ReadLocalIR ?: return false
         // Both parameters, each exactly once — `acc + acc` is not a sum.
         return setOf(l.slot, r.slot) == setOf(0, 1)
+    }
+
+    /**
+     * `map::fold { init = 0, f = { acc, k, v } -> acc + v }` → `map::sum_values`.
+     *
+     * The key parameter must be UNUSED. `acc + k` is a key sum, which
+     * `sum_values` would answer wrongly, and `acc + k + v` is neither.
+     */
+    private fun tryRewriteMapValueSum(
+        node: CallNativeIR,
+        allFunctions: Map<Hash, FunctionIR>,
+    ): NodeIR? {
+        val mr = node.arg as? MakeRecordIR ?: return null
+        var src: NodeIR? = null
+        var init: NodeIR? = null
+        var f: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            NativeHofNames.M -> src = fld.value
+            "init" -> init = fld.value
+            "f" -> f = fld.value
+            else -> return null
+        }
+        val srcExpr = src ?: return null
+        val initLit = init as? LongLitIR ?: return null
+        if (initLit.value != 0L) return null
+
+        val lambda = f as? MakeLambdaIR ?: return null
+        if (lambda.captures.isNotEmpty()) return null
+        val fn = allFunctions[lambda.functionHash] ?: return null
+        if (fn.captureSlots.isNotEmpty() || fn.localSlots.isNotEmpty()) return null
+        // Slots are (acc, k, v) in that order.
+        if (fn.paramSlots.size != 3) return null
+        // The accumulator and the VALUE must be longs; the key's kind is
+        // irrelevant because the body must not read it.
+        if (fn.paramSlots[0] != SlotKind.LONG || fn.paramSlots[2] != SlotKind.LONG) return null
+
+        val body = fn.body as? InlineBinaryOpIR ?: return null
+        if (body.op != InlineOp.ADD) return null
+        val l = body.left as? ReadLocalIR ?: return null
+        val r = body.right as? ReadLocalIR ?: return null
+        // Exactly the accumulator and the value, each once. Slot 1 is the key
+        // and reading it means this is not a value sum.
+        if (setOf(l.slot, r.slot) != setOf(0, 2)) return null
+
+        return CallNativeIR(
+            name = MAP_SUM_VALUES,
+            arg = MakeRecordIR(listOf(FieldIR(NativeHofNames.M, srcExpr)), mr.src),
+            src = node.src,
+        )
     }
 }

@@ -1528,6 +1528,8 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.filter(getMap(r, "m"), getFunction(r, "p"), c));
         HANDLERS.put("__native_map_map_values", (r, c) ->
             MapNatives.mapValues(getMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_sum_values", (r, c) ->
+            MapNatives.sumValues(getMap(r, "m")));
         HANDLERS.put("__native_map_fold", (r, c) ->
             MapNatives.fold(getMap(r, "m"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_merge_with", (r, c) ->

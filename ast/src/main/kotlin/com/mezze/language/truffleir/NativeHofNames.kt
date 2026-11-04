@@ -65,6 +65,10 @@ object NativeHofNames {
     const val NEL = "nel"
     const val SORTED_SET = "sorted_set"
     const val DEQUE = "deque"
+    /** Map and sorted_map are ENTRY-based: their callbacks take a key and a
+     *  value, so they are absent from every element-based predicate here. */
+    const val MAP = "map"
+    const val SORTED_MAP = "sorted_map"
 
     // ── Operation names ─────────────────────────────────────────────────
     // These mirror the function names in stdlib. Used both for building
@@ -76,6 +80,8 @@ object NativeHofNames {
     const val OP_FILTER = "filter"
     const val OP_FOR_EACH = "for_each"
     const val OP_SUM = "sum"
+    /** A map has two things to sum, so its value sum says which. */
+    const val OP_SUM_VALUES = "sum_values"
     const val OP_COUNT = "count"
     const val OP_ANY = "any"
     const val OP_ALL = "all"

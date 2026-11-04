@@ -208,6 +208,42 @@ public final class MapNatives {
         return result;
     }
 
+    /**
+     * Sum the integer VALUES, without a guest callback and without an Entry.
+     *
+     * A map fold is the most expensive walk in the collection ledger, and it
+     * pays THREE costs where the others pay one. `MezzeMap`'s iterator does
+     * `new Entry<>(keys[index], values[index])` per step, so there is an
+     * allocation per element on top of the three-argument guest callback — and
+     * the keys are read and boxed into it even when the folder ignores them, as
+     * a value sum does.
+     *
+     * None of that is necessary: the map stores keys and values in PARALLEL
+     * ARRAYS, so a value sum is a counted loop over one of them.
+     *
+     * Named `sum_values` and not `sum` because a map has two things to sum and
+     * the ambiguity would be the whole bug. Reads Long/Integer and ignores
+     * anything else, matching the sibling sums; the stdlib signature is
+     * `{ m: Map 'k Int } -> Int`, and `FoldToSumRewriter` additionally requires
+     * the folder's value parameter to be a LONG slot before redirecting here.
+     *
+     * One `@TruffleBoundary` for the whole loop, not one per element.
+     */
+    @TruffleBoundary
+    public static long sumValues(MezzeMap map) {
+        // `MapStorage.forEach` is the storage's own walk and its contract is
+        // "without creating intermediate arrays" — so no `values()` copy and no
+        // Entry. The accumulator is boxed in a one-element array because a
+        // BiConsumer cannot assign a local; that is ONE allocation per fold,
+        // against the Entry-per-element this replaces.
+        long[] total = { 0L };
+        map.storage().forEach((k, v) -> {
+            if (v instanceof Long l) total[0] += l;
+            else if (v instanceof Integer n) total[0] += n;
+        });
+        return total[0];
+    }
+
     public static Object fold(MezzeMap map, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare3(folder, "acc", "k", "v");
