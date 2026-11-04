@@ -110,6 +110,21 @@ class TypeValidator(
                     }
                     errors.addAll(validatePatternsInExpression(decl.expression, substitution, decidedScrutineeTypes))
                 }
+                is ParsedImplAbilityDecl -> {
+                    // An impl operation's body is a body like any other, and was
+                    // not walked at all — so a `match` inside one was never
+                    // checked for coverage. `it` has exactly the impl's target
+                    // group, so section 5 applies with nothing added: a closed
+                    // target needs every arm, and a missing one reached the
+                    // interpreter as `no variant tag matched`.
+                    for (op in decl.operations) {
+                        errors.addAll(
+                            validatePatternsInExpression(
+                                op.implementation, substitution, decidedScrutineeTypes,
+                            ),
+                        )
+                    }
+                }
                 is ParsedEffectDecl -> errors.addAll(effectValidator.validateEffectDeclaration(decl))
                 is ParsedPerformerDecl -> {
                     val effectDecl = effectDeclarations[decl.effect.localName]
