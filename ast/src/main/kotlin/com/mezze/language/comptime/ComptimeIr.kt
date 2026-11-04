@@ -313,6 +313,7 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
                     sr.copy(start = f(sr.start), end = f(sr.end), step = f(sr.step))
                 is SourceIR.RawSeq -> sr.copy(xs = f(sr.xs))
                 is SourceIR.RawList -> sr.copy(xs = f(sr.xs))
+                is SourceIR.RawBytes -> sr.copy(xs = f(sr.xs))
                 is SourceIR.Opaque -> sr.copy(expr = f(sr.expr))
             },
             stages = node.stages.map { st ->

@@ -447,6 +447,17 @@ sealed interface SourceIR {
      *  emit path converts to Object[] via list.toArray() then iterates
      *  by index — same indexed loop as RawSeq but with a toArray() step. */
     @Serializable data class RawList(val xs: NodeIR) : SourceIR
+    /**
+     * Any expression evaluating to a `Bytes` at runtime.
+     *
+     * Reaches exactly ONE destination: the `BuiltinSumBytes` primitive sum. It
+     * is deliberately NOT routed into the generic fused loop — measured, that
+     * was SLOWER than `BytesNatives.fold`, because a bare fold has nothing to
+     * eliminate and the generic loop pays a boxed accumulator and a
+     * bounds-checked read for the privilege. Bytes earns fusion only where
+     * fusion can delete the guest callback entirely.
+     */
+    @Serializable data class RawBytes(val xs: NodeIR) : SourceIR
     /** Fall-through — canonicalizer refuses to fuse (unknown expression,
      *  descriptor we couldn't peel through). Peel MUST reject on Opaque
      *  and let ability-dispatch handle it. */

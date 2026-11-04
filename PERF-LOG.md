@@ -3284,8 +3284,13 @@ so is one env var:
 | seq fold, `MEZZE_CHAIN_CANONICALIZE=0` | 3 704 |
 | bytes fold | 38 171 |
 
-Fusion is worth ~4x. The other **10x** was specific to the bytes path, and
-comparing the two natives shows it immediately:
+**THAT MIDDLE ROW IS WITHDRAWN — see the correction at the end of this log.**
+The canonicalizer is a LOWERING pass, so its env gate acts when lowering runs,
+which under `mez build` is BUILD time; set at run time it changed nothing and
+both rows were the same code. At n=500k the control alone swung 910 to 6 600, so
+the "4x" was noise.
+
+What survives is the comparison of the two natives, which needs no switch:
 
 ```java
 // SeqNatives.foldTwoArg — scalar-ABI bypass, ONE args array for the whole loop
@@ -3438,17 +3443,27 @@ drop happened or was ignored. Dropping three makes it 124 713 against 124 716.
 
 ### The measurement, and why it ends here
 
-Same binary, same kernel, fusion's own switch (`MEZZE_CHAIN_CANONICALIZE=0`),
-min of 5 at n=2M:
+Same binary, same kernel, what I believed was fusion's own switch, min of 5 at
+n=2M:
 
-| | fusion ON | fusion OFF |
+| | "fusion ON" | "fusion OFF" |
 |---|---|---|
 | kernel 4, bare fold | 8 229 | 13 183 |
 | kernel 8, `drop` + fold | **13 492** | **11 256** |
 
-The bare-fold row looks like a win and is not readable: across runs that same
-configuration gave 6 633, 8 229, 9 679, 11 191, 12 662 and 39 899 ps/elem on one
-binary. The staged row is the one that decides, and it goes the wrong way.
+**THIS WHOLE TABLE IS WITHDRAWN.** `MEZZE_CHAIN_CANONICALIZE=0` set at RUN time
+does nothing: the canonicalizer is a lowering pass and `mez build` bakes the
+lowered IR, so both columns executed identical code and every difference above
+is noise — which the spread already said, that one configuration having given
+6 633, 8 229, 9 679, 11 191, 12 662 and 39 899 on a single binary.
+
+Rebuilt with the gate set at BUILD time, the generic-loop build's best (6 633)
+was if anything slightly BETTER than the native fold's (9 275), not worse. So
+the stated reason for reverting was wrong.
+
+The CONCLUSION stands, for a better reason, and the entry after this one has it:
+the generic loop was never the destination worth having. A primitive path that
+deletes the callback is, and it measures 257.
 
 The emitter said why before the stopwatch did — `emitted fused loop (Accumulate,
 0 stages)`. For a BARE fold there is nothing to eliminate, so fusing only
@@ -3472,6 +3487,58 @@ closing it means attacking the callback, not the chain. `ScalarCall`'s 15%
 
 Reverted: all 14 compiler files. Kept: kernel 8, which is the instrument that
 measured it, and this entry.
+
+---
+
+## 37x: delete the callback, do not fuse the chain
+
+The entry above reverted bytes chain fusion and said the remaining 23x against
+the fused seq fold was "a boxed per-element guest callback against a SIMD-able
+primitive loop, and closing it means attacking the callback". This is that,
+and the precedent was already in the tree: the fused seq fold is fast because
+`BuiltinSumLongSeq` does not CALL the folder, it RECOGNISES it.
+
+`BuiltinSumBytes` is its byte-array twin — a counted loop over `byte[]`
+accumulating `data[i] & 0xFF` into a primitive long, no guest call, no boxing,
+no record. Same guards as its seq peer: a zero long init, no stages, and a plain
+ADD folder with no element transform.
+
+A bytes source now reaches **that path or nothing**. The generic fused loop is
+explicitly refused, which drops the chain to its fallback — the native fold.
+That is the lesson of the previous entry kept, with the destination corrected.
+
+| at n=2M, min of 5 | ps/elem |
+|---|---|
+| bytes fold, canonicalizer off AT BUILD | 9 590 |
+| bytes fold, on | **257** |
+| bytes `drop` + fold | 329 |
+| seq fused (CONTROL) | 395 (was 383 — 3%) |
+
+**37x**, identical checksums, control readable. Bytes now folds FASTER than the
+fused seq fold, which is what a `byte[]` being 8x denser than a `long[]` buys.
+
+### THE SWITCH ACTS AT BUILD TIME, AND I HAD BEEN SETTING IT AT RUN TIME
+
+The whole reason the previous entry reasoned from a broken table.
+`ChainCanonicalizer` is a LOWERING pass; `mez build` bakes the lowered IR, so
+`MEZZE_CHAIN_CANONICALIZE=0` on the built binary changes NOTHING and both
+columns execute the same code. The tell was in the data and I read it as load:
+one configuration giving 6 633, 8 229, 9 679, 11 191, 12 662 and 39 899 ps/elem
+is not a noisy machine, it is a switch that is not connected.
+
+Two published numbers are withdrawn above: the seq fold's "fusion is worth ~4x"
+and the staged bytes "13 492 ON against 11 256 OFF". Rebuilt properly, the
+generic-loop build was if anything slightly FASTER than the native fold — so the
+stated reason for reverting it was wrong, even though reverting it was right.
+
+**The rule this leaves:** a switch that gates a COMPILE-TIME pass has to be set
+on the BUILD, and the A/B is two builds. Setting it on the run gives a table
+that reads like noise, which is exactly what it is.
+
+Kernel 4 going 41 076 → 9 275 → 257 across this session is also a reminder that
+"it is unfused" was never the diagnosis: 10x of it was a native allocating four
+objects per element, and 37x more was a callback that did not need to be called
+at all.
 
 ---
 

@@ -929,6 +929,7 @@ object StorePopulator {
                         collectEdgesFromNode(s.step, report)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectEdgesFromNode(s.xs, report)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectEdgesFromNode(s.expr, report)
                 }

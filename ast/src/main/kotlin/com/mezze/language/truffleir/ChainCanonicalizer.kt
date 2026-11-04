@@ -565,7 +565,12 @@ object ChainCanonicalizer {
             && (node.name == "__native_iter_fold" || node.name == "__native_seq_fold"
                 || node.name == "__native_list_fold_left"
                 || node.name == "__native_set_fold" || node.name == "__native_sorted_set_fold"
-                || node.name == "__native_deque_fold")
+                || node.name == "__native_deque_fold"
+                // Bytes reaches the fuser HERE and through the twin list in
+                // tryCanonicalizeNativeFoldSumForEach, which sees calls peeked
+                // through a mono wrapper. A name added to one and not the other
+                // fuses in some spellings and not others.
+                || node.name == "__native_bytes_fold")
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             val srcField = NativeHofNames.srcFieldFor(node.name)
@@ -1054,6 +1059,7 @@ object ChainCanonicalizer {
         val sourceExpr = when (newSource) {
             is SourceIR.RawSeq -> newSource.xs
             is SourceIR.RawList -> newSource.xs
+            is SourceIR.RawBytes -> newSource.xs
             is SourceIR.RangeSeq -> null  // already terminal
             is SourceIR.RangeStepSeq -> null  // already terminal
             is SourceIR.Opaque -> newSource.expr
@@ -1091,6 +1097,7 @@ object ChainCanonicalizer {
     ): SourceIR = when (source) {
         is SourceIR.RawSeq -> SourceIR.RawSeq(substituteSlots(source.xs, slotValues, paramCount))
         is SourceIR.RawList -> SourceIR.RawList(substituteSlots(source.xs, slotValues, paramCount))
+        is SourceIR.RawBytes -> SourceIR.RawBytes(substituteSlots(source.xs, slotValues, paramCount))
         is SourceIR.RangeSeq -> SourceIR.RangeSeq(
             substituteSlots(source.start, slotValues, paramCount),
             substituteSlots(source.end, slotValues, paramCount),
@@ -1316,7 +1323,8 @@ object ChainCanonicalizer {
         if (node.name == "__native_iter_fold" || node.name == "__native_seq_fold"
             || node.name == "__native_list_fold_left"
             || node.name == "__native_set_fold" || node.name == "__native_sorted_set_fold"
-            || node.name == "__native_deque_fold") {
+            || node.name == "__native_deque_fold"
+            || node.name == "__native_bytes_fold") {
             val mr = node.arg as? MakeRecordIR ?: return null
             val srcField = NativeHofNames.srcFieldFor(node.name)
             var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
@@ -1650,6 +1658,14 @@ object ChainCanonicalizer {
         source !is SourceIR.Opaque -> source
         NativeHofNames.isSeqNative(nativeName) -> SourceIR.RawSeq(source.expr)
         NativeHofNames.isListNative(nativeName) -> SourceIR.RawList(source.expr)
+        // Above the guard, and unlike the three below this synthesises no
+        // `to_seq` copy — a byte array is already indexable. The guard asks
+        // "is there anything to fuse"; for bytes the answer is yes even with
+        // no stages, because the destination is `BuiltinSumBytes`, which
+        // deletes the guest callback rather than fusing stages into it. The
+        // emitter refuses any OTHER bytes shape, so a chain that cannot reach
+        // that path falls back to the native fold instead of the generic loop.
+        NativeHofNames.isBytesNative(nativeName) -> SourceIR.RawBytes(source.expr)
         !hasStages -> null  // a copy with nothing to fuse is pure loss
         NativeHofNames.isSetNative(nativeName) ->
             wrapAsSeqSource(source.expr, "__native_set_to_seq", NativeHofNames.S)
@@ -2540,6 +2556,7 @@ object ChainCanonicalizer {
                     }
                     is SourceIR.RawSeq -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawSeq(nXs) else s }
                     is SourceIR.RawList -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawList(nXs) else s }
+                    is SourceIR.RawBytes -> { val nXs = f(s.xs); if (nXs !== s.xs) SourceIR.RawBytes(nXs) else s }
                     is SourceIR.Opaque -> { val nE = f(s.expr); if (nE !== s.expr) SourceIR.Opaque(nE) else s }
                 }
                 var stagesChanged = false

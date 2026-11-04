@@ -232,6 +232,7 @@ class MezzeExecutor(
                         collectDirectCallTargets(s.step, ownHashes, visited, resolves, out)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectDirectCallTargets(s.expr, ownHashes, visited, resolves, out)
                 }
@@ -429,6 +430,7 @@ class MezzeExecutor(
                         collectReferencedHashes(s.step, queue)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectReferencedHashes(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectReferencedHashes(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectReferencedHashes(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectReferencedHashes(s.expr, queue)
                 }

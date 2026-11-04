@@ -301,9 +301,15 @@ public final class BytesNatives {
      * `MezzeRecord`.
      *
      * MEASURED, `bench/cases/fuseall` kernel 4 against kernel 1 at n=2M:
-     * 41 076 ps/elem to 8 089, with the control steady at 385 to 383. Fusion
-     * accounts for ~4x of the original gap (`MEZZE_CHAIN_CANONICALIZE=0` on the
-     * seq fold costs 910 to 3 704); this path accounted for the other 10x.
+     * 41 076 ps/elem to 8 089, with the control steady at 385 to 383.
+     *
+     * (An earlier version of this note split that gap into "~4x fusion, 10x
+     * this path" on the strength of running the seq fold with
+     * `MEZZE_CHAIN_CANONICALIZE=0`. That split is WITHDRAWN: the canonicalizer
+     * is a LOWERING pass, so the variable acts when lowering runs — build time
+     * under `mez build` — and setting it at run time changed nothing. Both
+     * columns were the same code and the difference was noise at n=500k, a size
+     * where the control itself swung 910 to 6 600.)
      *
      * The field names are `acc` and `byte`, per `std::collections::bytes` — and
      * see {@link #map}, whose callback is named differently.

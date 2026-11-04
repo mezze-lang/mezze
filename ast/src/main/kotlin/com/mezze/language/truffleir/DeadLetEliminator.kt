@@ -449,6 +449,10 @@ object DeadLetEliminator {
                         val nXs = f(s.xs)
                         if (nXs !== s.xs) SourceIR.RawList(nXs) else s
                     }
+                    is SourceIR.RawBytes -> {
+                        val nXs = f(s.xs)
+                        if (nXs !== s.xs) SourceIR.RawBytes(nXs) else s
+                    }
                     is SourceIR.Opaque -> {
                         val nE = f(s.expr)
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s

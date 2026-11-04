@@ -39,6 +39,8 @@ object NativeHofNames {
     const val D = "d"
     /** Map / SortedMap source field. */
     const val M = "m"
+    /** `bytes::fold { b, init, f }` — the receiver field for bytes. */
+    const val B = "b"
 
     /** All names that mean "the collection source position". */
     val SRC_FIELDS: Set<String> = setOf(XS, SRC, IT, S, D, M)
@@ -58,6 +60,7 @@ object NativeHofNames {
     const val ITER = "iter"
     const val LIST = "list"
     const val SET = "set"
+    const val BYTES = "bytes"
     const val SORTED_SET = "sorted_set"
     const val DEQUE = "deque"
 
@@ -166,6 +169,20 @@ object NativeHofNames {
     /** True if [name] starts with `__native_deque_`. */
     fun isDequeNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${DEQUE}_")
 
+    /**
+     * True if [name] starts with `__native_bytes_`.
+     *
+     * BYTES IS DELIBERATELY ABSENT from [isAnyElementCollection] and from
+     * [ELEMENT_COLLECTION_PREFIXES], which between them decide what may be
+     * peeled as a STAGE. Two bytes operations TRUNCATE to 8 bits —
+     * `bytes::map`'s callback result and `bytes::from_seq`'s elements both go
+     * through `byteValue()` — so peeling either as an ordinary element stage
+     * would drop the truncation and make a fused chain compute a DIFFERENT
+     * answer: `bytes::map { f = { x } -> x * 2 }` over a byte of 200 is 144,
+     * not 400. Bytes participates only as a SOURCE under a `fold` sink.
+     */
+    fun isBytesNative(name: String): Boolean = name.startsWith("${MagicParams.NATIVE_PREFIX}${BYTES}_")
+
     /** All collection prefixes used for element-based fusion (body inspection). */
     val ELEMENT_COLLECTION_PREFIXES: List<String> = listOf(SEQ, ITER, LIST, SET, SORTED_SET, DEQUE)
 
@@ -177,6 +194,7 @@ object NativeHofNames {
         isIterNative(nativeName) -> IT
         isSetNative(nativeName) || isSortedSetNative(nativeName) -> S
         isDequeNative(nativeName) -> D
+        isBytesNative(nativeName) -> B
         else -> XS // seq, list
     }
 }

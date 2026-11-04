@@ -226,6 +226,7 @@ object FunctionIRReachability {
                         collectHashesFromNode(s.step, queue)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectHashesFromNode(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectHashesFromNode(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectHashesFromNode(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectHashesFromNode(s.expr, queue)
                 }

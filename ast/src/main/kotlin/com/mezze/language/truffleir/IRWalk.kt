@@ -71,6 +71,7 @@ fun NodeIR.transformChildren(f: (NodeIR) -> NodeIR): NodeIR = when (this) {
             is SourceIR.RangeStepSeq -> SourceIR.RangeStepSeq(f(s.start), f(s.end), f(s.step))
             is SourceIR.RawSeq -> SourceIR.RawSeq(f(s.xs))
             is SourceIR.RawList -> SourceIR.RawList(f(s.xs))
+            is SourceIR.RawBytes -> SourceIR.RawBytes(f(s.xs))
             is SourceIR.Opaque -> SourceIR.Opaque(f(s.expr))
         },
         stages = stages.map { st ->

@@ -2601,6 +2601,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * Sum a `Bytes` into a primitive long — no guest callback, no boxing, no
+     * per-element record.
+     *
+     * The peer of {@code BuiltinSumLongSeq} for a byte array, and the whole
+     * reason a bytes chain is worth routing through the fuser at all. Fusing a
+     * bytes fold into the GENERIC loop was measured SLOWER than
+     * `BytesNatives.fold` — a boxed accumulator and a bounds-checked `SeqGet`
+     * against a tight loop on the scalar-ABI bypass. This path is different in
+     * kind: it does not call the folder, it recognises it.
+     *
+     * `& 0xFF` because `std::collections::bytes` types the element as the `Int`
+     * in 0-255 while a Java byte is signed.
+     *
+     * No overflow check, matching {@code SeqSumLongScalarNode}: the largest
+     * reachable total is 255 per element, so a `long` cannot overflow before
+     * the array does (it would need ~3.6e16 bytes).
+     */
+    @Operation
+    public static final class BuiltinSumBytes {
+        @Specialization
+        public static long doBytes(
+                com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bytes,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            byte[] data = bytes.getData();
+            int n = data.length;
+            long acc = 0;
+            loopProfile.profileCounted(node, n);
+            for (int i = 0; loopProfile.inject(node, i < n); i++) {
+                acc += (data[i] & 0xFF);
+            }
+            return acc;
+        }
+    }
+
     /** Get seq size as a long. Used by #407 fold-fusion inlined loops.
      *  Extended for Object[] to support list chain fusion (list.toArray()
      *  produces Object[], then the fused loop iterates by index). */

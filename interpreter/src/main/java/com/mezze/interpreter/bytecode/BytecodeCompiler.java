@@ -686,6 +686,7 @@ public final class BytecodeCompiler {
             }
             if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
             if (src instanceof SourceIR.RawList rl && !supportsNode(rl.getXs(), argCount)) return false;
+            if (src instanceof SourceIR.RawBytes rb && !supportsNode(rb.getXs(), argCount)) return false;
             if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
             // Walk fallback so its MakeLambdaIR hashes get pre-compiled.
             // Without this, emitNode falling back to chain.getFallback()
@@ -4858,6 +4859,14 @@ public final class BytecodeCompiler {
         NodeIR rangeStart = null, rangeEnd = null, rangeStep = null;
         NodeIR rawXsExpr = null;
         NodeIR rawListExpr = null;
+        // Held apart from rawXsExpr deliberately. A bytes source has exactly
+        // ONE legal destination here — BuiltinSumBytes — and must reach
+        // neither the Builtin*Seq / FusedLongPipeline fast paths (which need a
+        // real MezzeSeq and crash on anything else) nor the generic fused
+        // loop, which was MEASURED slower than BytesNatives.fold. Those all
+        // key on rawXsExpr / rawListExpr, so keeping bytes out of those two
+        // names is what keeps it out of those paths.
+        NodeIR rawBytesExpr = null;
         boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
                 && !a.ignoreElement() && a.op() == InlineOp.ADD
                 && a.elemOp() == null  // exclude compound folds (e.g. acc + x*x)
@@ -4873,6 +4882,8 @@ public final class BytecodeCompiler {
             rawXsExpr = rawSrc.getXs();
         } else if (chain.getSource() instanceof SourceIR.RawList rawListSrc) {
             rawListExpr = rawListSrc.getXs();
+        } else if (chain.getSource() instanceof SourceIR.RawBytes rawBytesSrc) {
+            rawBytesExpr = rawBytesSrc.getXs();
         } else {
             // Opaque source — the runtime value could be Seq, List, Deque, etc.
             // BuiltinSumLongSeq only handles MezzeSeq; passing other types
@@ -4919,6 +4930,18 @@ public final class BytecodeCompiler {
                   emitNode(rawXsExpr, b, argCount, localMap);
                 b.endBuiltinSumLongSeq();
                 if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
+                return true;
+            }
+            // The bytes twin, and the ONLY shape a bytes source may fuse into.
+            // Same guards as its seq peer: a zero long init, no stages, and a
+            // plain ADD folder with no element transform — i.e. exactly the
+            // fold whose callback BuiltinSumBytes can delete rather than call.
+            if (rawBytesExpr != null && isSumSink && !hasStages && longZeroInit) {
+                b.beginBuiltinSumBytes();
+                  emitNode(rawBytesExpr, b, argCount, localMap);
+                b.endBuiltinSumBytes();
+                recordFusedEmit("BuiltinSumBytes");
+                if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumBytes (RawBytes+Sum)");
                 return true;
             }
             // No RawList twin of the branch above: BuiltinSumLongSeq takes a Seq,
@@ -5064,6 +5087,18 @@ public final class BytecodeCompiler {
                 if (dbg) System.err.println("[chain-canon-emit] emitted IsLongBacked ? FusedLongPipeline : fused loop");
                 return true;
             }
+        }
+
+        // A bytes source that did not reach BuiltinSumBytes above must NOT
+        // continue into the generic loop. MEASURED: fusing a bytes fold into
+        // it costs more than `BytesNatives.fold`, which is already a tight
+        // loop on the scalar-ABI bypass — 13 492 ps/elem against 11 256 on
+        // `fuseall` kernel 8, and the emitter's own "(Accumulate, 0 stages)"
+        // says why. Refusing here drops the chain to its fallback, which is
+        // the native call.
+        if (rawBytesExpr != null) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: bytes source outside BuiltinSumBytes");
+            return false;
         }
 
         // ── Phase 4d: emit the generic fused loop (fallback) ──
