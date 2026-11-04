@@ -249,7 +249,11 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
             pub let h = { c: Open } -> f { c = c }
             $MAIN
             """,
-            "V0704",
+            // T0201, not V0704: no particular tag is named here. The fault is
+            // that an unbounded group cannot stand where a bounded one is
+            // expected — a type mismatch. V0704 is for a tag that is not a
+            // member, which needs a tag to point at.
+            "T0201",
             "h accepts any tag and f handles two, so h could hand f a Blue. Open is " +
                 "permissive as a TARGET and maximally restrictive as a SOURCE",
         )

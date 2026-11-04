@@ -539,7 +539,29 @@ private fun directionalParamFieldCheck(value: MezzeType, demand: MezzeType): Uni
 private fun directionalParamVariantCheck(value: MezzeType, demand: MezzeType): UnificationResult.Failure? {
     if (demand !is MezzeType.VariantType || value !is MezzeType.VariantType) return null
     if (demand.rowVar != null) return null
-    if (value.rowVar != null) return null
+    // A WRITTEN open group may not flow into a closed one (spec 9.5). It admits
+    // any tag while the position handles a fixed few, so it could hand over one
+    // the position has no arm for — open is permissive as a TARGET and maximally
+    // restrictive as a SOURCE.
+    //
+    // `isUserSpecified` is what makes this safe to check: a `userOpen_` row comes
+    // from an author-written `...`, while a plain fresh row is inference still in
+    // progress and must be left to the solver. Refusing both would reject every
+    // half-inferred group.
+    value.rowVar?.let { row ->
+        return if (row.isUserSpecified()) {
+            UnificationResult.Failure(
+                message = "An open variant group cannot be passed where " +
+                    "${describeVariant(demand)} is expected: it admits tags that position " +
+                    "has no arm for. Name the tags it can actually carry, or widen the " +
+                    "position to an open group too",
+                type1 = value,
+                type2 = demand,
+            )
+        } else {
+            null
+        }
+    }
     val extra = value.constructors.keys - demand.constructors.keys
     if (extra.isNotEmpty()) {
         return UnificationResult.Failure(
