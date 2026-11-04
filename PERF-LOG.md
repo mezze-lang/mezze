@@ -1543,11 +1543,13 @@ is missing permanently.
 So the metadata has to reach the compiling JVM without the interpreter. Three
 ways, and the choice is a design decision rather than a performance one:
 
-1. **Load the runtime jar into the CLI's JVM before compiling.** Smallest
-   change, and `ComptimeHost` already has the mechanism. It costs class-loading
-   a 28 MB jar on every compile, in the CLI's JVM, where nothing needed it
-   before — acceptable for `build`/`dev`, bad for `check`, which is the edit
-   loop.
+1. **Load the runtime jar into the CLI's JVM before compiling.** RULED OUT, and
+   not on a guess about the cost: `ComptimeHost`'s own header states the rule —
+   "`:interpreter` is deliberately off the CLI's compile class path … keeping
+   Truffle out of its own process is what keeps `mez` starting quickly". The
+   mechanism exists there and is deliberately LAZY, reached only when a macro is
+   actually called. Doing it on every compile is exactly what that design
+   forbids.
 2. **Declare the metadata in `ast`** — where it is needed at compile time — and
    have the interpreter's `NativeOp(...)` ASSERT at registration that its
    handler matches the declared signature. One source of truth for the metadata
@@ -1559,7 +1561,9 @@ ways, and the choice is a design decision rather than a performance one:
 
 (2) is the one that matches the registry's own stated design — "the signature
 registry lives in `ast` … only carries IR-shape info, no executable code" — and
-the only one with no per-compile cost.
+with (1) ruled out it is also the only one that respects the CLI's rule about
+never loading Truffle into its own process. (3) respects it too, at the cost of
+a build step.
 
 AND NOT DONE, deliberately: making `+`, `-` and `%` homogeneous again. The
 recorded design decision says "leave NumAdd/NumSub/NumMod homogeneous
