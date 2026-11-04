@@ -1193,7 +1193,28 @@ private fun unifyVariantBodies(var1: MezzeType.VariantType, var2: MezzeType.Vari
     // hoisting it here covers the both-open and one-open branches too. Anonymous
     // open variants return UNDETERMINED (not DISTINCT), so genuine row polymorphism
     // is untouched.
-    if (identityVerdict(var1.identity, var2.identity) == IdentityVerdict.DISTINCT) {
+    // Two DISTINCT declared groups normally may not unify -- the #12 veto, which
+    // stops an ErrB value quietly satisfying an ErrA parameter.
+    //
+    // A UNION is not that. With DISJOINT tags and neither name in scope, the
+    // groups claim nothing here and their union is unambiguous: every tag names
+    // exactly one side, so a match over it can be exhaustive. That is what lets
+    // two modules' error types meet in an `if`.
+    //
+    // It has to be allowed HERE. mergeVariantConstructors, which records the
+    // union, runs only after a constraint SUCCEEDS -- a probe showed it never
+    // saw these two groups at all, only the `if` condition's Bool pair, because
+    // this veto refused them first and a post-success refinement cannot rescue a
+    // failed constraint.
+    val n1 = var1.identity.displayNameOrNull()
+    val n2 = var2.identity.displayNameOrNull()
+    val namedHere = namedHereTypeNamesOrNull()
+    val disjointUnion = namedHere != null &&
+        (n1 == null || n1 !in namedHere) && (n2 == null || n2 !in namedHere) &&
+        (var1.constructors.keys intersect var2.constructors.keys).isEmpty()
+    if (identityVerdict(var1.identity, var2.identity) == IdentityVerdict.DISTINCT &&
+        !disjointUnion
+    ) {
         return UnificationResult.Failure(
             message = "Cannot unify ${describeVariant(var1)} with ${describeVariant(var2)} (distinct declarations — content hash differs)",
             type1 = var1,

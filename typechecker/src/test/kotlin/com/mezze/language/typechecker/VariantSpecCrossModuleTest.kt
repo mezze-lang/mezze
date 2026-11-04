@@ -95,7 +95,7 @@ class VariantSpecCrossModuleTest : VariantSpecBase() {
         )
         rejectsMain(
             "use tb::{ handle }\npub let u = {} -> handle { c = Blue }\n$MAIN",
-            "V0704",
+            "T0201",
             "handle has no arm for Blue. This is the stuck call: accepted today, and it " +
                 "reaches the interpreter as `no variant tag matched`",
         )

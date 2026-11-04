@@ -564,11 +564,46 @@ internal class VariantSolver(
                 }
             }
 
+            // MATCHING never widens. Widening happens where a value flows OUT:
+            // an `if`/`match` unions its ARMS' RESULTS, and an unannotated
+            // PARAMETER takes its group from its arms through
+            // solveConstructorOnVar, whose scrutinee is still a type variable.
+            //
+            // So an arm naming a tag a RESOLVED CLOSED group does not hold is an
+            // extra arm:
+            //
+            //   let v = Red
+            //   match v is
+            //     Red -> 1
+            //     Pink -> 2      # v is | Red |; extra arm, not a widening
+            //
+            // DEFER rather than fail, because the group may still widen. A
+            // scrutinee can be pinned by its call site before the `if` that
+            // produced it has merged its branches, and the arm is then checked
+            // against the FIRST branch's group alone -- measured: `v` came out as
+            // | NotFound, BadRequest | while the merge later produced all four
+            // tags. Deferring lets the worklist reach its fixpoint and ask again;
+            // a deferral that never resolves still ends as an error.
+            //
+            // This replaces an extend-and-anonymize escape hatch that admitted
+            // the extra arm outright AND destroyed the identity coverage depends
+            // on. With it, `describe`'s arms were extending the first branch's
+            // group one tag at a time and the real merge never ran.
             val inScope = inScopeAliasNamesForSolverOrNull()
-            val name = variantType.identity.displayNameOrNull()
+            val declName = variantType.identity.displayNameOrNull()
             val nameInScope = variantType.ascriptionWall ||
-                (name != null && (inScope == null || name in inScope))
-            if (!nameInScope) {
+                (declName != null && (inScope == null || declName in inScope))
+            if (!nameInScope && originalConstraint?.isPatternContext != true) {
+                // CONSTRUCTION into a group nothing claims. This is a value
+                // flowing OUT -- two branches of an `if`, two elements of a
+                // list -- and alternatives reaching one place join (spec 5.9),
+                // so the group grows to hold both. Anonymous, because the
+                // union is nobody's declared group.
+                //
+                // This is the only direction that may widen. It is also what
+                // makes the real merge reachable: `mergeVariantConstructors`
+                // runs only on constraint SUCCESS, so a Failure or a Deferred
+                // here means the union never gets a chance to form.
                 val extendedVariant = MezzeType.VariantType(
                     constructors = variantType.constructors + (constructorName to expectedPayloadType),
                     rowVar = null, identity = TypeIdentity.Anonymous
@@ -580,7 +615,20 @@ internal class VariantSolver(
                     ConstraintSolver.ConstraintResult.Success(Substitution.empty)
                 }
             }
-
+            if (!nameInScope) {
+                // PATTERN against a group nothing claims. MATCHING NEVER WIDENS
+                // (spec 5.9): the arms READ a value whose group is already
+                // fixed, so a tag the group does not hold is an extra arm.
+                //
+                // Extending here was the bug: it let `describe`'s arms grow the
+                // first branch's group one tag at a time, which both admitted
+                // the extra arm AND pre-empted the merge that should have
+                // formed the union.
+                return ConstraintSolver.ConstraintResult.Deferred(
+                    "'$constructorName' is not in this group (${variantType.constructors.keys.sorted().joinToString(", ")}); " +
+                        "waiting in case the group widens"
+                )
+            }
             val availableConstructors = variantType.constructors.keys.toList()
             val suggestion = StringDistance.suggestOrList(constructorName, availableConstructors, "constructors")
             return ConstraintSolver.ConstraintResult.Failure(

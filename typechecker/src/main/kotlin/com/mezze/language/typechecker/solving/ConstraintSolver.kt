@@ -758,6 +758,27 @@ class ConstraintSolver(
             } else if (result is ConstraintResult.Deferred &&
                        constraint is Constraint.InherentMethodResolve) {
                 deferredInherentLeftovers.add(constraint)
+            } else if (result is ConstraintResult.Deferred &&
+                       constraint is Constraint.HasConstructor &&
+                       !isCascade(constraint)) {
+                // A constructor constraint that is STILL deferred at the terminal
+                // sweep had its whole chance: nothing is going to widen the group
+                // now. It defers rather than failing in the worklist because a
+                // scrutinee can be pinned by its call site before the `if` that
+                // produced it has merged its branches, and the arm would then be
+                // judged against the first branch's group alone. Reaching here
+                // means no merge arrived, so the tag genuinely is not a member.
+                //
+                // Without this, a deferral that never resolved was dropped in
+                // silence and the arm was accepted — the same silent acceptance
+                // the escape hatch used to give, by a different route.
+                errors.add(ConstraintError(
+                    message = result.reason,
+                    constraint = appliedConstraint,
+                    code = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR,
+                    context = appliedConstraint.context,
+                ))
+                poison(constraint)
             }
         }
 
