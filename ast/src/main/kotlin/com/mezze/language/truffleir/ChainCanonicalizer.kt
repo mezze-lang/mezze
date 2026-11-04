@@ -1368,7 +1368,7 @@ object ChainCanonicalizer {
             // through a counting sink would make it O(n). A chain with no stages
             // is exactly that case, so it is left as the native it was.
             NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_SIZE) &&
-                System.getenv("MEZZE_SIZE_SINK") != "0" -> {
+                true -> {
                 val srcField = NativeHofNames.srcFieldFor(node.name)
                 var src: NodeIR? = null
                 for (fld in mr.fields) if (fld.name == srcField) src = fld.value

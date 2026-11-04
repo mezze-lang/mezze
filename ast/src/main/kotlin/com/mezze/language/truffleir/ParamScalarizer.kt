@@ -55,8 +55,6 @@ import com.mezze.language.typedast.Hash
  */
 object ParamScalarizer {
 
-    private val ENABLED: Boolean = System.getenv("MEZZE_PARAM_SCALARIZE") != "0"
-
     /** The name the compiler gives every extracted lambda. */
     private const val LAMBDA = "lambda"
 
@@ -69,7 +67,6 @@ object ParamScalarizer {
     }
 
     fun scalarize(functions: Map<Hash, FunctionIR>): Map<Hash, FunctionIR> {
-        if (!ENABLED) return functions
 
         val plans = HashMap<Hash, Plan>()
         for ((h, fn) in functions) {

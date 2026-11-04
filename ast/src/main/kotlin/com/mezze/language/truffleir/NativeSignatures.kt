@@ -182,7 +182,6 @@ object NativeSignatures {
     private fun loadFromResource() {
         // Kill switch, so the difference this makes can be A/B'd on one build
         // the way every other compile-time pass here can.
-        if (System.getenv("MEZZE_NATIVE_SIGS") == "0") return
         val stream = NativeSignatures::class.java.getResourceAsStream(RESOURCE) ?: return
         stream.bufferedReader().useLines { lines ->
             for (line in lines) {

@@ -51,10 +51,7 @@ import com.mezze.language.typedast.Hash
  */
 object VariantMatchFolder {
 
-    private val ENABLED: Boolean = System.getenv("MEZZE_FOLD_VARIANT_MATCH") != "0"
-
     fun fold(functions: Map<Hash, FunctionIR>): Map<Hash, FunctionIR> {
-        if (!ENABLED) return functions
         var changed = false
         val out = HashMap<Hash, FunctionIR>(functions.size)
         for ((h, fn) in functions) {

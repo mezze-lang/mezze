@@ -67,13 +67,10 @@ import com.mezze.language.typedast.Hash
  */
 object LetCopyPropagation {
 
-    private val ENABLED: Boolean = System.getenv("MEZZE_LET_PROPAGATE") != "0"
-
     /** The synthetic function holding a module's top-level statements. */
     private const val ENTRY_FUNCTION = "__entry__"
 
     fun propagate(functions: Map<Hash, FunctionIR>): Map<Hash, FunctionIR> {
-        if (!ENABLED) return functions
         var anyChanged = false
         val out = HashMap<Hash, FunctionIR>(functions.size)
         for ((hash, fn) in functions) {

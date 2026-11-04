@@ -289,7 +289,6 @@ class TypedASTCompiler(
      *  [tryInlineDirectCall] for inlining. An A/B of a compile-time pass is two
      *  BUILDS otherwise, and measuring one build while believing it is the other
      *  is how two wrong numbers reached PERF-LOG. */
-    private val devirtDisabled = System.getenv("MEZZE_DISABLE_DEVIRT") == "true"
 
     private data class RecursiveLetInfo(
         val hash: Hash,
@@ -601,14 +600,12 @@ class TypedASTCompiler(
         // `let p = { … }` with every use a field read — is what a helper
         // returning a record looks like once that helper is inlined. It needs
         // boxing elimination on to pay, and an inlined producer to see anything
-        // at all. Off with MEZZE_RECORD_SCALARIZE=0.
         // A variant built as the scrutinee of the match that destructures it is
         // not built: the match folds to the case carrying its tag and the
         // payload's fields bind straight to that case's slots. BEFORE the
         // record scalarizer, because the fold's result is ordinary `let`s that
         // the passes below then handle — and in a loop branch that is exactly
         // what LetCopyPropagation collapses, after which the tier fuses.
-        // Off with MEZZE_FOLD_VARIANT_MATCH=0.
         val variantFoldedMap = com.mezze.language.truffleir.VariantMatchFolder.fold(inlinedMap)
         val scalarizedMap = com.mezze.language.truffleir.RecordScalarizer.scalarize(variantFoldedMap)
         // A binding read once, holding a value that can be recomputed at the
@@ -624,12 +621,11 @@ class TypedASTCompiler(
         // `go { st = { i = …, acc = … } }`, which allocates once per iteration
         // and costs 12x. Changing a function's arity is sound only if every
         // caller is rewritten with it, so this one takes the WHOLE map and
-        // refuses any candidate whose references it cannot classify. Off with
-        // MEZZE_PARAM_SCALARIZE=0.
+        // refuses any candidate whose references it cannot classify.
         val paramScalarizedMap = com.mezze.language.truffleir.ParamScalarizer.scalarize(propagatedMap)
 
         // A pipeline step bound to a `let` is still a pipeline step. Must run
-        // BEFORE the canonicalizer; see ChainLetInliner. MEZZE_CHAIN_LET_INLINE=0.
+        // BEFORE the canonicalizer; see ChainLetInliner.
         val chainInlinedMap = com.mezze.language.truffleir.ChainLetInliner.inline(paramScalarizedMap)
 
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
@@ -2130,7 +2126,7 @@ class TypedASTCompiler(
                         // space, so a name-keyed or depth-blind lookup could answer
                         // for an unrelated slot. A site the monomorphiser rewrote
                         // is left exactly as it was.
-                        val devirtTarget = if (binding.depth == 0 && !devirtDisabled)
+                        val devirtTarget = if (binding.depth == 0)
                             plainLocalLambdaBySlot[resolvedSlot] else null
                         if (devirtTarget != null && monoCallSiteRewrites[expr.loc] == null) {
                             census.byHashPlain++
@@ -2161,7 +2157,7 @@ class TypedASTCompiler(
                         // unrelated declaration that shares the name, which is
                         // the bug the comment below this records.
                         val capturedFn = fnIR
-                        if (capturedFn is ReadCaptureIR && !devirtDisabled &&
+                        if (capturedFn is ReadCaptureIR &&
                             monoCallSiteRewrites[expr.loc] == null) {
                             currentCaptureLambdaHashes[capturedFn.index]?.let { ownHash ->
                                 census.byHashPlain++

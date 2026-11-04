@@ -66,11 +66,9 @@ import com.mezze.language.typedast.Hash
  * kill switch below is the escape hatch if a debug build ever wants the
  * intermediates back.
  *
- * Kill switch: `MEZZE_CHAIN_LET_INLINE=0`.
+ * No kill switch — see the note on flags below.
  */
 object ChainLetInliner {
-
-    private val ENABLED: Boolean = System.getenv("MEZZE_CHAIN_LET_INLINE") != "0"
 
     /** The synthetic function holding a module's top-level statements. */
     private const val ENTRY_FUNCTION = "__entry__"
@@ -95,7 +93,6 @@ object ChainLetInliner {
     )
 
     fun inline(functions: Map<Hash, FunctionIR>): Map<Hash, FunctionIR> {
-        if (!ENABLED) return functions
         var anyChanged = false
         val out = HashMap<Hash, FunctionIR>(functions.size)
         for ((hash, fn) in functions) {
