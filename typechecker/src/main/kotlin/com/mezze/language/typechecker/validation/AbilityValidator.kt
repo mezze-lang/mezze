@@ -104,12 +104,40 @@ object AbilityValidator {
      * `DerivedImplGenerator` synthesizes `impl Eq for { f1: T1, … }` for an
      * anonymous shape holding a newtype, and that path builds the decl directly.
      */
-    private fun validateTargetIsNamed(impl: ParsedImplAbilityDecl, loc: Loc) {
+    private fun validateTargetIsNamed(
+        impl: ParsedImplAbilityDecl,
+        loc: Loc,
+        registry: DeclarationRegistry,
+    ) {
         if (impl.isInherent) return
         for (target in impl.targetTypes) {
             val what = when (target) {
                 is ParsedVariantType -> "an inline variant group"
                 is ParsedRecordType -> "an inline record shape"
+                is ParsedNamedType -> {
+                    // A bare TAG parses as a named type, so the inline-shape
+                    // check above never saw it. A tag is a MEMBER of a group,
+                    // not a type of its own: `impl Describe for Red` says
+                    // nothing `impl Describe for Color` does not say better, and
+                    // there is no type for the ability to attach to.
+                    //
+                    // A type VARIABLE is a blanket impl and stays legal; a
+                    // builtin name and anything the registry knows as a type are
+                    // names (spec 10.1). Everything else is either a tag or a
+                    // typo, and both want the same answer.
+                    //
+                    // Effect performers are unaffected: `impl Log for Console`
+                    // is a ParsedPerformerDecl and never reaches here.
+                    val n = target.name
+                    if (n.isTypeVarName() ||
+                        BuiltinTypes.isBuiltinTypeName(n) ||
+                        registry.lookupType(n) != null ||
+                        registry.typeHashFor(n) != null
+                    ) {
+                        continue
+                    }
+                    "'$n', which is not a declared type — a tag is a member of a group"
+                }
                 else -> continue
             }
             throw TypeCheckError(
@@ -132,7 +160,7 @@ object AbilityValidator {
         val typeDeclarations = registry.typeDeclarations
         val sourceLocation = impl.loc
 
-        validateTargetIsNamed(impl, sourceLocation)
+        validateTargetIsNamed(impl, sourceLocation, registry)
         validateNoFieldMethodConflict(impl, typeDeclarations, sourceLocation)
         if (impl.isInherent) {
             validateInherentImplTargetType(impl, typeDeclarations, sourceLocation)

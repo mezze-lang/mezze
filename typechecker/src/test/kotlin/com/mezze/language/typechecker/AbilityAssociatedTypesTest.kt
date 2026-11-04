@@ -368,7 +368,7 @@ class AbilityAssociatedTypesTest {
                 tryConvert: {it: 'from} -> (Result 'to 'error),
             }
 
-            impl Convert for String having 'to = Int, 'error = Str where {
+            impl Convert for Str having 'to = Int, 'error = Str where {
                 convert = {it} -> 42,
                 tryConvert = {it} -> Ok { val = 42 },
             }
@@ -413,7 +413,7 @@ class AbilityAssociatedTypesTest {
                 getError: {it: 'from} -> 'error,
             }
 
-            impl Convert for String having 'to = Int, 'error = Bool where {
+            impl Convert for Str having 'to = Int, 'error = Bool where {
                 convert = {it} -> 42,
                 getError = {it} -> True,
             }
@@ -433,7 +433,7 @@ class AbilityAssociatedTypesTest {
                 convert: {it: 'from} -> 'to,
             }
 
-            impl Convert for String having 'to = Int where {
+            impl Convert for Str having 'to = Int where {
                 convert = {it} -> 42,
             }
         """.trimIndent()
@@ -483,7 +483,7 @@ class AbilityAssociatedTypesTest {
                 convert: {it: 'from} -> 'to,
             }
 
-            impl Convert for String having 'to = Int, 'wrong = Str where {
+            impl Convert for Str having 'to = Int, 'wrong = Str where {
                 convert = {it} -> 42,
             }
         """.trimIndent()
@@ -534,11 +534,11 @@ class AbilityAssociatedTypesTest {
                 getState: {it: 'input} -> 'state,
             }
 
-            impl Convert for String having 'to = Int, 'error = Str where {
+            impl Convert for Str having 'to = Int, 'error = Str where {
                 convert = {it} -> 42,
             }
 
-            impl Parser for String having 'output = Bool, 'state = Float where {
+            impl Parser for Str having 'output = Bool, 'state = Float where {
                 parse = {it} -> True,
                 getState = {it} -> 3.14,
             }
@@ -584,7 +584,7 @@ class AbilityAssociatedTypesTest {
                 convert: {it: 'from} -> 'to,
             }
 
-            impl Convert for String having 'to = Int, 'error = Str where {
+            impl Convert for Str having 'to = Int, 'error = Str where {
                 convert = {it} -> 42,
             }
 
