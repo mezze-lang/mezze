@@ -78,13 +78,13 @@ a defect, not a conservative default.
 
 | cell | gap | cause |
 |---|---|---|
-| **a loop made dictionary-passing by its base case** | **46x** time, **11x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` kernels 10 vs 11 |
-| a loop with 4+ parameters | 2.5x time (587 vs 237 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P emitter's own comment records the same cliff one arity down |
-| a native call in a loop | 19 GCs vs 2 | `map::size` returns an `Int` and performs no lookup, so most of this is the call itself, not the native's work. Cause not yet isolated |
-| an `Option` returned by a native | +11 GCs over the `Bool`-returning lookup (32 vs 21) | `VariantMatchFolder` matches a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
-| string interpolation | 33 GCs vs concat's 20 | a desugaring costing more than what it desugars to. Cause not yet isolated |
-| record update, record outlives the expression | 27 GCs vs 2 | no record pass can erase a record that outlives its expression |
-| `map::insert`, new map per iteration | 50 GCs vs 2 | persistent map nodes; floor unknown |
+| **any stdlib native call in a loop** | **9.8x** the loop it sits in (7 818 vs 801 ps), +16 GCs | `map::size` performs no lookup and returns an `Int`, so this is the CALL, not the native. Largest unexplained cost in the inventory; paid by every stdlib call in every loop. Cause not isolated |
+| **a loop made dictionary-passing by its base case** | **33x** time (26 836 vs 801 ps), **14x** allocation | two extra adds in a branch that runs ONCE raise more `NumAdd` constraints than mono discharges; `go_5 params=6` where four are declared. Same subsystem as the 190x/460x rows. MONO. Pinned by `allocsurface` 10 vs 11 |
+| a loop with 4+ parameters | 3.5x time (801 vs 229 ps), no allocation | `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2, 3 — there is no 4-param branch. The 3P analysis is already arity-generic; only its config packing and operand emission are fixed |
+| `map::insert`, new map per iteration | 38.8x (31 118 ps), 47 GCs | persistent map nodes plus the native-call cost above; floor unknown |
+| string interpolation | 1.8x the concat it desugars to (18 571 vs 10 084 ps) | the one row where a desugaring costs more than its target. Cause not isolated |
+| an `Option` returned by a native | +2.5 ns, +10 GCs over the `Bool`-returning lookup | `VariantMatchFolder` folds a syntactic `MakeVariantIR`; a native's return is not one, so the immediately-destructuring match cannot see through it |
+| record update, record outlives the expression | 18.1x (14 517 ps), 24 GCs | no record pass can erase a record that outlives its expression — but this is close to a bare native call, so the split is not yet made |
 | closure param, generic callee | **190x** (57 ns) | dict wrapper; 52 of 57 ns. MONO |
 | HOF-reached pipeline | **460x** | generic dict-passing copy executes. MONO |
 | `iter.fold` with a real closure | 30x (9 ns) | MONO |
@@ -2180,103 +2180,135 @@ assumed fine.
 
 ---
 
-## The allocation inventory, and two controls that had to be built to read it
+## The cost inventory: what a loop body actually costs
 
-`bench/cases/allocsurface`. Young-collection counts do not care about CPU
-contention, which makes them the one kind of evidence that survives a loaded
-machine; the box was at load 15-30 throughout. Timings are interleaved min-of-5
-in one process per kernel, so the ratios hold under load even where absolute
-values would not.
+`bench/cases/allocsurface`, eleven kernels, N = 2e7, min of several runs with
+one process per kernel, young collections from `-Xlog:gc`. Every checksum
+verified at N = 1000 first; kernels 3-9 compute different checksums from each
+other because the operations are not interchangeable, and each one's expected
+value is stated beside it in the case.
 
-N = 2e7, `-Xlog:gc`, one kernel per process, every checksum verified at N = 1000
-first.
+**Built with the dev CLI** (`cli/build/install/mez/bin/mez`), which matters — see
+the last subsection.
 
-| kernel | young GCs | ps/iter |
-|---|---|---|
-| 1 control — 2-param arithmetic, **FUSED tier** | **2** | **237** |
-| 10 **arity control** — 4-param arithmetic, off fused tier | **3** | **587** |
-| 9 `map::size` — native call, Int return, no lookup | 19 | — |
-| 3 `str::concat` | 20 | — |
-| 8 `map::contains_key` — native lookup, Bool return | 21 | — |
-| 2 record update `{ ...r, a = i }`, record outlives the expression | 27 | — |
-| 7 `seq::get` — native lookup, Option return | 31 | — |
-| 5 `map::get` — native lookup, Option return | 32 | — |
-| 4 string interpolation | 33 | — |
-| 11 **dict control** — kernel 10 plus two adds in the base case | 33-43 | 26 825 |
-| 6 `map::insert`, new map per iteration | 50 | — |
+| kernel | young GCs | ps/iter | x off-tier control |
+|---|---|---|---|
+| 1 control — 2-param arithmetic, **FUSED tier** | **2** | **229** | 0.29x |
+| 10 **arity control** — 4-param arithmetic, off that tier | **3** | **801** | 1.0 |
+| 9 `map::size` — native call, Int return, no lookup | 19 | 7 818 | 9.8x |
+| 3 `str::concat` | 19 | 10 084 | 12.6x |
+| 8 `map::contains_key` — native lookup, Bool return | 21 | 13 359 | 16.7x |
+| 2 record update `{ ...r, a = i }`, record outlives it | 24 | 14 517 | 18.1x |
+| 7 `seq::get` — native lookup, Option return | 30 | 15 432 | 19.3x |
+| 5 `map::get` — native lookup, Option return | 31 | 15 889 | 19.8x |
+| 4 string interpolation | 34 | 18 571 | 23.2x |
+| 11 **dict control** — kernel 10 plus two adds in the base case | 43 | 26 836 | 33.5x |
+| 6 `map::insert`, new map per iteration | 47 | 31 118 | 38.8x |
 
-### Three results, each needing its own control
+### The one that reframes the rest: a native call costs ~7.6 ns
 
-**1. The arity cliff costs 2.5x in time and nothing in allocation.** Kernel 10
-takes four parameters and its body is pure arithmetic over them.
+`map::size` takes a map built once outside the loop, performs no lookup, and
+returns an `Int`. It costs 7 818 ps and 19 young collections against the off-tier
+control's 801 and 3. **So calling any stdlib native in a loop costs about ten
+times the entire loop it sits in**, before the native does anything.
+
+That is the common factor under every row from 9 to 6, and it means those rows
+are not mostly about maps, strings or records. Subtracting it:
+
+- the `Option` costs ~2.5 ns and ~10 collections (`map::get` 15 889 against
+  `contains_key` 13 359) — `VariantMatchFolder` folds a syntactic
+  `MakeVariantIR`, and a native's return is not one, so the match that
+  immediately destructures it cannot see through
+- interpolation costs ~8.5 ns MORE than the concat it desugars to (18 571
+  against 10 084), the one row where a desugaring is dearer than its target
+- `map::insert` at 31 118 is a persistent map allocating nodes, as it must
+- record update at 14 517 is close to a bare native call, so most of it may be
+  the call rather than the record; not yet separated
+
+### The arity cliff: 3.5x, and no allocation
+
+Kernel 10 is four parameters of pure arithmetic over themselves.
 `BytecodeCompiler` dispatches the fused tier only for `paramCount` 1, 2 and 3 —
-there is no `paramCount == 4` branch — so it compiles off the tier while being
-otherwise identical to kernel 1. 587 ps against 237, and 3 young collections
-against 2. So **an off-fused-tier loop does not allocate per iteration**, and the
-tier is worth ~2.5x in time, not an order of magnitude.
+there is no 4-param branch — so it compiles off the tier while differing from
+kernel 1 in nothing else, which `MEZZE_TRACE_SELFTAIL` confirms at `params=4`.
+801 ps against 229, and 3 young collections against 2.
 
-**2. A dictionary-passing loop costs 46x in time and 11x in allocation.** Kernel
-11 is kernel 10 with `then acc` written `then acc + p + q` — two extra adds in
-the branch that runs ONCE, after the loop is over. Nothing else differs: same
-four parameters, same condition, same per-iteration updates. It measures 26 825
-ps against 587, and 33-43 young collections against 3 — two runs of the identical
-binary gave 33 and 43, so these counts carry about 30 percent run-to-run spread
-and the Method notes calling them "nearly deterministic" overstates it at this N.
+So **an off-fused-tier loop does not allocate per iteration.** The mechanism that
+looked obvious in the source — `TailCallDirectN` takes `@Variadic Object[]`, so
+an array is materialised per execution and every `long` boxed into it, and
+`TrampolineRootNode` stores it to a frame slot across the loop back-edge where
+escape analysis cannot reach it — does not account for these numbers. A
+mechanism found by reading code is a hypothesis.
+
+The 3P emitter's own comment records the same cliff one arity down: a 3-param
+loop cost 34 ns against 0.45 for the 2-param version, before the 3P tier existed.
+Generalising past three is tractable — the 3P emitter's analysis is already
+arity-generic, looping over `paramCount` and filling `updateOp[]` / `updateRhs[]`
+/ `rhsSrc[]`; only the config packing and operand emission are fixed. Its stated
+reason for not generalising (`@Variadic Object[]` allocates per execution and
+re-boxes the longs) holds for a per-CALL operation but not for a per-LOOP one,
+where one execution is the whole loop and an entry-time array is O(1) amortised.
+
+### The dict control: 33x, from a branch that runs once
+
+Kernel 11 is kernel 10 with `then acc` written `then acc + p + q` — two extra
+adds in the base case, after the loop is over. Same four parameters, same
+condition, same per-iteration updates. 26 836 ps against 801, and 43 collections
+against 3.
+
 `MEZZE_TRACE_SELFTAIL` reports `go_5 params=6` where the source declares four:
 the extra adds raise more `NumAdd` constraints than monomorphisation discharges,
-the function stays dictionary-passing, and the dictionaries allocate per
-iteration and cost every tier. This is the same subsystem as the `190x` and
-`460x` rows, reached from a new direction, and it is the largest well-controlled
-gap on the branch.
+so the function stays dictionary-passing. Confirmed still present on this
+branch's CLI — the `fillHavingOutTypeArgs` rewrite earlier in this effort does
+not reach it. Same subsystem as the 190x and 460x rows, reached from a new
+direction.
 
-**3. Natives, strings, records and Options do allocate per iteration.** Against
-a true control of 2-3 collections, every row from 19 to 50 is real. `map::size`
-— a native call returning an `Int` that performs no lookup at all — already
-costs 19, so most of it is the native call itself rather than what the native
-does. The `Option` adds about a third on top of the `Bool`-returning lookup
-(32 against 21), which is the variant fold not reaching across a native's
-return: it matches a syntactic `MakeVariantIR` and a native's result is not one.
-Interpolation at 33 against concat's 20 is the one row where a desugaring costs
-more than what it desugars to. `map::insert` at 50 is a persistent map
-allocating nodes, as it must.
+### Three ways this case was got wrong before it was got right
 
-### How this was got wrong twice, in opposite directions
+Worth keeping because each one produced a number that looked publishable.
 
-The first version of kernel 10 was kernel 11 — the base case was written
-`acc + p + q` without a thought. It read 33 collections, which was taken as "the
-off-tier loop allocates per iteration", and that reading was then used to
-explain all eight rows above it as "mostly the loop", walking back three correct
-findings as unattributable. The mechanism even had a plausible story in the
-source: `TailCallDirectN` takes `@Variadic Object[]`, so an array is materialised
-per execution and every `long` boxed into it, and `TrampolineRootNode` stores it
-to a frame slot across the loop back-edge where escape analysis cannot reach it.
-That story is wrong as an account of these numbers — kernel 10 reads 3 — and
-it is a reminder that a mechanism found by reading code is a hypothesis, not a
-measurement.
+1. **An under-controlled kernel.** The first kernel 10 WAS kernel 11 — its base
+   case was written `acc + p + q` without a thought — so the arity control was
+   secretly a dict control. Its 33 collections were read as "the off-tier loop
+   allocates per iteration".
 
-So: first an under-controlled kernel produced a wrong finding, then the wrong
-finding was used to over-correct eight right ones. The second error is the worse
-of the two, because it discarded consistent evidence in favour of a single new
-reading. **A new control that contradicts eight consistent rows is more likely
-to be broken than the eight rows are** — check the control first.
+2. **Over-correcting from it.** That reading was then used to reclassify all
+   eight rows above it as "mostly the loop", walking back three correct findings
+   as unattributable. This is the worse error: it discarded eight consistent
+   readings in favour of one new one. **A new control that contradicts many
+   consistent rows is likelier to be broken than the rows are** — check the
+   control first.
 
-Both spellings are kept in the case as kernels 10 and 11 so the difference is a
-measurement rather than a memory.
+3. **Measuring a stale compiler.** Every number in the first two attempts was
+   produced by typing `mez build` in the case directory, which runs
+   `~/.mezze/bin/mez` — a native image three days old, without any of the passes
+   this effort added. `recordcost` kernel 2 reads 3 378 ps built that way and
+   449 ps built with the dev CLI, a 7x difference that is simply this session's
+   `ParamScalarizer` missing. `bench/scripts/ab.sh` already forced the dev CLI
+   and documented the hazard as its rule 3; the harness was right and was
+   bypassed. It now stamps every build it makes and REFUSES to report on a
+   `.build` it did not make, with `ab.sh build1 <case>` to make one in place.
+
+Also recorded: GC counts at this N carry ~30 percent run-to-run spread (33 and
+43 from the same binary), which the Method notes' "nearly deterministic"
+overstates; and `ir.getName()` is empty for mono-specialised clones, so
+`MEZZE_TRACE_SELFTAIL` cannot attribute a tier to a function once mono has
+rewritten it — the arity of each kernel had to be read off a module-wide
+histogram instead.
 
 ### Still open from this case
 
+- Why a bare native call costs ~7.6 ns and 16 extra collections. This is now the
+  largest unexplained cost in the inventory and it is paid by every stdlib call
+  in every loop.
 - `TailCallScalarException` documents typed `long[]` / `double[]` buckets "for
   fully-applied scalar self-recursive tail calls", is caught and unpacked by
   `MezzeFunctionRootNode`, and **is thrown from nowhere in main**. Dead code on
-  the legacy AST root node with no bytecode-pipeline equivalent. Whether the
-  live path wants it is now an open question rather than an assumed yes, since
-  the off-tier loop turns out not to allocate.
+  the legacy AST root node. Whether the live path wants it is open rather than
+  an assumed yes, now that the off-tier loop turns out not to allocate.
 - Every tail-call operation is variadic (`TailCallDirectN`, `TailCallIndirect`,
   `TailCallByHash`) while non-tail calls have `CallDirect1/2/3` and
   `CallIndirectScalar1/2`. Measured impact: unknown, and smaller than assumed.
-- `ir.getName()` is empty for mono-specialised clones, so `MEZZE_TRACE_SELFTAIL`
-  cannot attribute a tier to a function once mono has rewritten it. That is why
-  the arity of each kernel had to be inferred from a module-wide histogram.
 
 ---
 
