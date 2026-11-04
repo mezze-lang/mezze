@@ -80,7 +80,7 @@ a defect, not a conservative default.
 |---|---|---|
 | **`bytes` fold — no fusion at all** | **19x** a storage-matched baseline (35 173 vs 1 815 ps/elem) | `bytes` is absent from `NativeHofNames.isAnyElementCollection`. Adding the prefix is the WRONG fix: `promoteOpaqueSource`'s `to_seq` route would copy a packed byte array into a seq of boxed `Int`s. Wants a source that walks the array in place |
 | **`nel` fold — no fusion at all** | **5.0x** (9 058 vs 1 815) | also absent from the vocabulary, but element-shaped and cons-like, and `__native_nel_to_seq` already exists — the cheapest of these |
-| `map` / `sorted_map` HOFs — no fusion at all | unmeasured | 19 HOFs between them, all absent. `map::fold`'s folder takes THREE arguments, `{ acc, k, v }`, where every sink the fuser has takes two: a design extension, not a prefix |
+| **`map` fold — no fusion at all** | **40.7x** a storage-matched baseline (73 873 vs 1 815 ps/elem), 130x seq — the LARGEST collection gap | 19 HOFs across map and sorted_map, all absent from the vocabulary. `map::fold`'s folder takes THREE arguments, `{ acc, k, v }`, where every sink the fuser has takes two: a design extension, not a prefix |
 | **a pipeline whose steps are NAMED** | was **no fusion at all** | FIXED: `peelSource` walks an expression tree and had no case for a slot read, so a `let` turned the source Opaque. `ChainLetInliner` substitutes single-use chain bindings. `fusecross` k2, and k4 for the same thing inside a helper |
 | **a stage from a CAPTURING local helper** | **324x** (49 280 vs 152 ps/elem) | `MEZZE_TRACE_FUSION` names it exactly: `native=__native_iter_fold source=CallIndirectScalarIR:through-a-slot`. `peelSource` cannot follow a call through a frame slot. The node IS present when the canonicalizer runs — an earlier note here said otherwise, from a pass whose own trace had untraced early-outs. `dotprobe` k3 |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
@@ -2746,6 +2746,7 @@ kernel's own checksum because they cannot all be equal — a `Bytes` element is
 | 2 list, fused, walks cells | 1 815 | 3.2x | — |
 | 3 nel, UNFUSED | 9 058 | 16x | **5.0x** |
 | 4 bytes, UNFUSED | 35 173 | 62x | **19x** |
+| 5 map, UNFUSED, folds ENTRIES | 73 873 | 130x | **41x** |
 
 ### Read these against the right baseline, and time only the fold
 
