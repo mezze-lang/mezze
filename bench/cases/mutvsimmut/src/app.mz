@@ -111,7 +111,12 @@ let report = { name, n, r } ->
 pub let main = {} -> perform Console in perform SystemArgs in do
   let args = argv {}
   let k = arg_at { args = args, i = 0, def = 1 }
-  let n = arg_at { args = args, i = 1, def = 2000000 }
+  ## n=2e7, not 2e6. At 2e6 and ~800 ps/iter a run is 1.6 ms, which is warmup
+  ## and not steady state — and it reads as a RESULT. That default produced
+  ## "direct-while is 1.34x slower" from a change that is 1.39x faster once the
+  ## loop is actually compiled. Keep this large enough that the number stops
+  ## moving when you raise it; at 2e7 and 1e8 these agree within 5%.
+  let n = arg_at { args = args, i = 1, def = 20000000 }
   let xs = [10, 20, 30, 40, 50, 60, 70, 80]
   let m0 = map::empty {}
   if k == 1 then do

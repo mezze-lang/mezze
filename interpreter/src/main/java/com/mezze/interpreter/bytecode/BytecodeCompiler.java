@@ -1581,6 +1581,9 @@ public final class BytecodeCompiler {
                     CallDirectIR tailCall = null;
                     NodeIR baseExpr = null;
                     boolean tailInElse = false;
+                    // Statements that run each iteration BEFORE the param
+                    // update, when the recursing branch is a block.
+                    java.util.List<com.mezze.language.truffleir.StmtIR> loopStmts = null;
 
                     if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
                             && ec.getTargetHash().equals(ir.getHash())
@@ -1594,6 +1597,41 @@ public final class BytecodeCompiler {
                         tailCall = tc;
                         baseExpr = elseBr;
                         tailInElse = false;
+                    } else {
+                        // A BLOCK ending in the self tail call — which is how an
+                        // imperative loop reads, and the shape EVERY mut loop
+                        // has, because the op is a statement:
+                        //
+                        //   go = { i } -> if i <= 0 then 0
+                        //                 else do incr { n = c, delta = 1 }
+                        //                         go { i = i - 1 }
+                        //
+                        // Requiring a bare `CallDirectIR` here sent that to the
+                        // flag-based fallback, ~16 extra BDSL ops per iteration.
+                        // MEASURED on `bench/cases/mutvsimmut`: the immutable
+                        // counter, whose update IS an expression and so fuses,
+                        // ran 355 ps/iter against the mut counter's 833 — mut
+                        // 2.3x SLOWER for the same work, where the mut op itself
+                        // accounts for about 100 ps of it.
+                        //
+                        // A statement containing a self call REFUSES: hoisting
+                        // it into the loop body would turn a tail call into a
+                        // non-tail one.
+                        var blockTail = stlBlockTailCall(elseBr, ir, paramCount);
+                        if (blockTail != null) {
+                            tailCall = blockTail;
+                            baseExpr = thenBr;
+                            tailInElse = true;
+                            loopStmts = ((com.mezze.language.truffleir.BlockIR) elseBr).getStmts();
+                        } else {
+                            blockTail = stlBlockTailCall(thenBr, ir, paramCount);
+                            if (blockTail != null) {
+                                tailCall = blockTail;
+                                baseExpr = elseBr;
+                                tailInElse = false;
+                                loopStmts = ((com.mezze.language.truffleir.BlockIR) thenBr).getStmts();
+                            }
+                        }
                     }
 
                     if (tailCall != null && stlIsSimpleExpr(baseExpr)) {
@@ -1613,9 +1651,64 @@ public final class BytecodeCompiler {
                             emitNode(cond, b, argCount, localMap);
                         }
 
-                        // Body: update params from tail-call args.
-                        stlEmitParamUpdate(tailCall.getArgs(), stlParams,
-                                b, argCount, localMap);
+                        // Body: the block's statements, if any, then the
+                        // param update. The statements are emitted as a
+                        // synthesized BlockIR so they go through the ordinary
+                        // block emitter — which is the one that gets the
+                        // debugger's statement tags and the let-slot
+                        // bookkeeping right. Its value is discarded: a BDSL
+                        // Block yields its LAST child, which here is the param
+                        // update.
+                        if (loopStmts != null && !loopStmts.isEmpty()) {
+                            // Recorded so a test can assert the PATH, not just
+                            // the values. Both paths compute the same answer —
+                            // the flag fallback produces identical results —
+                            // so a value test cannot tell them apart and
+                            // losing this tier would be silent. Verified by
+                            // disabling the recognition: the four value tests
+                            // still passed.
+                            recordFusedEmit("block-while:" + ir.getName());
+                            b.beginBlock();
+                            // Each statement is a bare native call — the guard
+                            // in stlBlockTailCall admits nothing else — so it
+                            // emits directly, with no synthesized BlockIR and
+                            // no dummy result. An earlier version wrapped them
+                            // in `BlockIR(stmts, UnitLit)` to reuse the
+                            // ordinary block emitter, and the extra nested
+                            // Block plus discarded value cost measurably more
+                            // than the loop body did. A BDSL Block already
+                            // drops every child's value but the last.
+                            //
+                            // THE SUSPEND CHECK IS NOT OPTIONAL (#361). A BDSL
+                            // block discards a bare statement's value, so a
+                            // statement that returns a `MezzeSuspend` has to be
+                            // intercepted before the drop or the suspension is
+                            // silently swallowed. The ordinary block emitter
+                            // wraps such a statement in `CheckSuspendedThrow`;
+                            // emitting the call bare here instead left a plain
+                            // `pop` in its place, which is visible in
+                            // `MEZZE_DUMP_BC` output and is how this was
+                            // caught — by reading the listing, not by a test,
+                            // because no test in the suite performs an effect
+                            // from a statement inside a tail loop.
+                            for (com.mezze.language.truffleir.StmtIR st : loopStmts) {
+                                NodeIR stNode =
+                                    ((com.mezze.language.truffleir.StmtIR.Expr) st).getNode();
+                                if (canYieldSuspended(stNode)) {
+                                    b.beginCheckSuspendedThrow();
+                                    emitNode(stNode, b, argCount, localMap);
+                                    b.endCheckSuspendedThrow();
+                                } else {
+                                    emitNode(stNode, b, argCount, localMap);
+                                }
+                            }
+                            stlEmitParamUpdate(tailCall.getArgs(), stlParams,
+                                    b, argCount, localMap);
+                            b.endBlock();
+                        } else {
+                            stlEmitParamUpdate(tailCall.getArgs(), stlParams,
+                                    b, argCount, localMap);
+                        }
 
                         b.endWhile();
 
@@ -1685,6 +1778,22 @@ public final class BytecodeCompiler {
             }
         });
         RootNode inner = nodes.getNode(0);
+        // PROBE: MEZZE_DUMP_BC=<substring> prints the emitted bytecode for any
+        // function whose name contains the substring. The three self-tail tiers
+        // choose between a fused Java loop, a direct while, and a flag-based
+        // fallback, and which one wins is NOT predictable from the op count on
+        // paper — the fallback beats direct-while on a trivial body. Reading
+        // the listing is the only way to see why.
+        {
+            String want = System.getenv("MEZZE_DUMP_BC");
+            if (want != null && ir.getName() != null && ir.getName().contains(want)) {
+                System.err.println("=== BC " + ir.getName()
+                        + " params=" + ir.getParamNames() + " ===");
+                System.err.println(
+                    ((com.oracle.truffle.api.bytecode.BytecodeRootNode) inner)
+                        .getBytecodeNode().dump());
+            }
+        }
         if (trampoline != null) {
             // For self-tail-loop, the loop is inside the BDSL root —
             // tell the trampoline there are no tail calls so it uses
@@ -9644,6 +9753,38 @@ public final class BytecodeCompiler {
      * multiple params change, evaluation goes through temp locals to
      * preserve order-of-evaluation.
      */
+    /**
+     * The self tail call at the end of a BLOCK branch, or null when this
+     * branch is not that shape.
+     *
+     * NARROW ON PURPOSE: every statement must be a bare native call, which is
+     * exactly what a mut op lowers to (`incr { n = c, delta = 1 }` is a
+     * `CallNativeIR` in statement position) and is the shape this was measured
+     * on. A native is not a user function, so a statement cannot itself be the
+     * self call, and the rewrite is then plainly order-preserving — the
+     * statements run, then the parameters update, exactly as before.
+     *
+     * Widening this to arbitrary statements is a separate question: a `let` in
+     * the branch writes a slot whose lifetime would become the loop body, and
+     * a nested self call would need checking against the tail-call flag the
+     * trampoline relies on. Neither is needed for the measured case, so
+     * neither is assumed.
+     */
+    private com.mezze.language.truffleir.CallDirectIR stlBlockTailCall(
+            NodeIR branch, com.mezze.language.truffleir.FunctionIR ir, int paramCount) {
+        if (!(branch instanceof com.mezze.language.truffleir.BlockIR blk)) return null;
+        if (!(blk.getResult() instanceof CallDirectIR call)) return null;
+        if (!call.isTailCall()) return null;
+        if (!call.getTargetHash().equals(ir.getHash())) return null;
+        if (call.getArgs().size() != paramCount) return null;
+        if (blk.getStmts().isEmpty()) return null;
+        for (com.mezze.language.truffleir.StmtIR st : blk.getStmts()) {
+            if (!(st instanceof com.mezze.language.truffleir.StmtIR.Expr ex)) return null;
+            if (!(ex.getNode() instanceof com.mezze.language.truffleir.CallNativeIR)) return null;
+        }
+        return call;
+    }
+
     private void stlEmitParamUpdate(java.util.List<NodeIR> args,
                                     BytecodeLocal[] stlParams,
                                     MezzeBytecodeRootNodeGen.Builder b,

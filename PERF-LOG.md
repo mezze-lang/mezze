@@ -99,7 +99,7 @@ a defect, not a conservative default.
 | ~~a stage from a CAPTURING local helper~~ | **CLOSED — 64 672 → 206 ps/elem (314x)** | And the capture was NEVER the trigger. A do-block `let` bound to a lambda GENERALIZES (#76), suppressed only for a non-ground capture (#15), so a named step is a local POLYMORPHIC function whose body compiles once with a dictionary. `Monomorphizer` cannot reach it — a local binding is not a decl. `LocalLambdaSpecializer` pins it in place, BEFORE the seed walk so the inner `map` gets seeded too |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
-| **a mut loop against the same loop written immutably** | counter **2.9x SLOWER** (294 vs 842 ps); seq element write **2.5x FASTER** (21 141 vs 8 324, 13 GCs vs 8) | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while was built and measured: 1.48x better on seq, 1.34x WORSE on the counter, reverted |
+| **a mut loop against the same loop written immutably** | counter **2.6x SLOWER** (224 vs 572 ps); seq element write **2.7x FASTER** (15 488 vs 5 818, 41 GCs vs 18) | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while LANDED at 1.14-1.37x once measured at a size that reaches steady state — the first reading, at n=2e6, was a 1.6 ms run and said 1.34x WORSE |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. And a declared op is still not a FAST op: `CallNativeScalar` puts a `@TruffleBoundary` over a `@Variadic Object[]` on every one of them, which is a further 6.2x where it can be removed — one op so far, see the two entries on it. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. CANDIDATE, not yet a conclusion (2026-11-05): the `13 GCs vs 3` is the exact signature of the per-op floor entry below — a native call behind `CallNativeScalar`'s `@TruffleBoundary` allocates ~60 bytes/iter while a call that avoids it allocates nothing. Neither op is registered in `TypedNativeHandlers` (there is no object-receiver shape), so that does not by itself separate these two; the thing to check first is whether one loop FUSES and the other does not, which is the regime confound that cost two withdrawn columns in this log. Then the graph dump |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
@@ -4434,38 +4434,70 @@ immutable side. Mut still loses because `map_put` is one of the hashing ops
 deliberately left on the boundary, and `MutableMap` wraps `java.util.Map` behind
 a boundary that cannot be removed.
 
-### The obvious fix was built, measured, and reverted
+### The fix: a block-bodied recursing branch, 1.14-1.37x — after a wrong reading
 
-Widening the direct-while path to accept a block-bodied recursing branch — the
-statements emitted into the while body ahead of the parameter update, guarded to
-bare native-call statements so the rewrite is plainly order-preserving — is a
-~40-line change and it does NOT pay:
+Widening the direct-while path to accept a recursing branch that is a BLOCK
+ending in the self tail call, with the statements emitted into the while body
+ahead of the parameter update. MEASURED at n=2e7, min of 5:
 
-| | fallback | block-while | |
+| | flag fallback | direct-while | |
 |---|---|---|---|
-| counter MUT | 842 | 1 128 | **1.34x WORSE** |
-| seq set MUT | 8 324 | 5 618 | 1.48x better |
-| map put MUT | 13 355 | 11 803 | 1.13x better |
+| mut counter | 784 | **572** | **1.37x** |
+| mut seq write | 6 612 | **5 818** | 1.14x |
+| mut map put | 13 355 | **11 700** | 1.14x |
 
-Two of three better, and the one that regresses is the simplest and most common
-shape. (A first version reusing the ordinary block emitter via a synthesized
-`BlockIR(stmts, UnitLit)` was worse still — 1 687 ps, 2x — because the nested
-Block and its discarded value cost more than the loop body did. Emitting the
-native calls directly recovered most of that, which is itself the measurement
-that the per-iteration op count is what matters here.)
+Confirmed in the listing (`MEZZE_DUMP_BC`, new): the loop body goes from 27
+instructions per iteration to 14. The fallback spends its extra ops on two
+`_stl_cont` flag writes, a `_stl_res` store, a `dup` and a `merge.conditional`
+— and it is a proper loop header either way, so this is op count, not OSR.
 
-So direct-while is not uniformly better than the flag fallback: it wins when the
-loop body does real work and loses when the body is one cheap op. Shipping a
-mixed result to win 1.48x on one shape and lose 1.34x on another is not worth
-it, and the gate that would separate them is not known — "how expensive is the
-statement" is not something the emitter can see. Reverted; the bench stays,
-because the next attempt needs these six numbers to beat.
+**THE FIRST READING SAID 1.34x SLOWER, AND IT WAS THE BENCHMARK'S FAULT.**
+`mutvsimmut` defaulted to n=2e6, which at ~800 ps/iter is a **1.6 ms** run —
+warmup, not steady state. At 2e7 and 1e8 the numbers agree within 5% and the
+sign is the other way. I had already written the entry, the commit and the
+"reverted as a mixed result" conclusion before dumping the bytecode; the dump
+showed 20 instructions against 38, which is what made the measurement
+impossible to believe. The default is now 2e7, with a comment saying why.
 
-NEXT for this, and it wants a bytecode dump rather than another guess: why the
-flag fallback beats direct-while on a trivial body at all. The fallback writes a
-flag and stores the whole body's value through a local every iteration, which
-ought to be strictly more work. Until that is understood, widening the tier is
-guessing.
+The lesson is not new, which is the annoying part: this log already says to
+measure the SLOPE and to check a number stops moving when you raise n. A
+default that is too small is a *result* that looks like a result.
+
+### And a correctness bug the dump caught that no test did
+
+A BDSL block discards a bare statement's value, so a statement returning a
+`MezzeSuspend` must be intercepted by `CheckSuspendedThrow` before the drop or
+the suspension is silently swallowed (#361). The first version emitted the
+statement bare, leaving a plain `pop` where that check had been — visible as
+instruction 9 in the dump, and caught by reading it. Nothing in the 7 463-test
+suite failed. The emission now mirrors the ordinary block emitter.
+
+I could not write a failing case for it either: the guard admits only native
+calls, the suspending natives are the async ones, and **`Mut` is hermetic** —
+the typechecker refuses `Mut` in scope with `Async` outright, so a mut loop
+cannot contain a suspending statement by construction. The check earns its place
+for the non-mut loops the path also admits. `BlockBodiedTailLoopTest` pins the
+hermeticity instead, since that is what makes the mut case safe.
+
+### Where mut stands against immutable now
+
+| workload | immutable | mut | |
+|---|---|---|---|
+| counter | 224 ps, 2 GCs | 572 ps, 3 GCs | mut 2.6x slower |
+| seq element write | 15 488 ps, 41 GCs | **5 818 ps, 18 GCs** | mut **2.7x faster** |
+| map put, same key | 8 941 ps, 25 GCs | 11 700 ps, 21 GCs | mut 1.3x slower |
+
+The counter gap closed from 2.9x to 2.6x and will not close further this way:
+the immutable version compiles to a SINGLE `c.FusedLongTailLoop` instruction —
+the whole loop in Java — while the mut version is a 14-instruction bytecode
+loop. Reaching parity means a fused tier that can carry a side effect per
+iteration, which is a different and larger piece of work than widening
+direct-while was.
+
+`MEZZE_DUMP_BC=<substring>` is kept. It is the same class of tool as
+`MEZZE_TRACE_SELFTAIL`, whose own comment explains that an invisible refusal is
+how a 48x regression hid in plain sight; this one found a wrong number and a
+dropped suspension in one sitting.
 
 ---
 
