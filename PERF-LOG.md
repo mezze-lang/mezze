@@ -101,6 +101,7 @@ a defect, not a conservative default.
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **in-place quicksort against functional quicksort** | **3.2x FASTER** (32 ms vs 104 ms at N=1e5); also 2x faster than `seq::sort`'s 65 ms | `bench/cases/qsort_{mut,pure,native}`. THE ANSWER to "is mut faster": in real algorithmic code, yes, clearly. The counter row below is a micro-benchmark where the functional form needs NO CALL and so fuses; it is call-vs-no-call, not mut-vs-immutable |
 | **a mut loop against the same loop written immutably** | seq element write **2.7x FASTER** (15 811 vs 5 924 ps, 42 GCs vs 18); counter 2.6x slower (219 vs 566) — but see below | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while LANDED at 1.14-1.37x once measured at a size that reaches steady state — the first reading, at n=2e6, was a 1.6 ms run and said 1.34x WORSE |
+| **unresolved `having out` dictionaries, on the cross-language mandelbrot kernel** | **47.5x** (2 833 vs 59.7 ns/px, slope at side 600→1200, identical checksum) | VERIFIES the hypothesis `mezze-benchmark/RESULTS.md` marked Unverified. Takes Mezze from **122x off Scala to ~2.6x** — the gap is not the JIT or Truffle, and the annotation proves the information is present and unused. Same root cause as the row below. `bench/cases/mandelannot` |
 | **a polymorphic fn passed as a VALUE to a HOF** | **57x** (1 429 vs 80 873 ps/iter) against the same callback with its type written down; the indirect call alone is 1.9x | `x * 2 + 1` on an inferred parameter is `NumMul`/`NumAdd`, so the callback carries `__dict_mul`/`__dict_add`. Called DIRECTLY it is free (763 ps) because mono specialises the site and the dicts vanish; passed as a VALUE mono cannot reach it — a function argument is not a type argument — so a `dict_wrapper` builds an `Object[]` and a three-field record PER CALL, and `hasDictParams` excludes it from the bypass. Biggest single measured gap on this branch. Lever: specialise the HOF on the FUNCTION argument, which `LocalLambdaSpecializer` already does one level in for 314x |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. And a declared op is still not a FAST op: `CallNativeScalar` puts a `@TruffleBoundary` over a `@Variadic Object[]` on every one of them, which is a further 6.2x where it can be removed — one op so far, see the two entries on it. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. CANDIDATE, not yet a conclusion (2026-11-05): the `13 GCs vs 3` is the exact signature of the per-op floor entry below — a native call behind `CallNativeScalar`'s `@TruffleBoundary` allocates ~60 bytes/iter while a call that avoids it allocates nothing. Neither op is registered in `TypedNativeHandlers` (there is no object-receiver shape), so that does not by itself separate these two; the thing to check first is whether one loop FUSES and the other does not, which is the regime confound that cost two withdrawn columns in this log. Then the graph dump |
@@ -4756,6 +4757,85 @@ Two equivalent mut-counter kernels disagree, so even the 1.18x is not solid.
 The reason it is free: an exception handler that never fires is not per-call
 work, and `CheckSuspendedThrow` is one cheap instruction. The invariant is real
 and exploitable; what it would buy does not pay for the analysis. Not built.
+
+---
+
+## The 122x mandelbrot gap against Scala and Kotlin is DICTIONARY PASSING — 47.5x of it, verified
+
+`mezze-benchmark/RESULTS.md` measures mandelbrot at 2 212.5 ns/px where eight of
+ten languages land within 1.8x of each other, and states a hypothesis it marks
+**Unverified**, with a note that the test "lives in the mezze repo, not here":
+
+> the escape loop carries unresolved `NumMul 'd 'd having 'out = 'f`, and a
+> `NumSub Float 'a having 'out = Float` leaks all the way out to `main`'s
+> signature. If `Float * Float` is not monomorphising to a native float
+> multiply, every operation stays a generic ability call and no amount of JIT
+> fixes it.
+
+`bench/cases/mandelannot` is that test. Two kernels, the same escape loop byte
+for byte and the same `iter::range().fold()` grid walk the benchmark uses, with
+one difference: kernel 2's parameters carry their types, so `zr * zr` is a
+Float multiply instead of `NumMul 'a 'a having 'out = 'b`.
+
+**The static half is confirmed verbatim** — `mez check` prints the leak the
+hypothesis predicted, out to `main`:
+
+```
+grid_poly : { side: 'a, span: 'b } with NumMul 'a 'a having 'out = Int,
+            NumDiv 'b Float having 'out = 'c, NumSub Float 'c having 'out = 'e, …
+grid_mono : { side: Int, span: Float } -> Int
+pub main  : {} with NumSub Float 'a having 'out = Float, … -> {}
+```
+
+**And the runtime half.** Slope method, `(t(2N)−t(N))/(Δpx)` at side 600→1200,
+min of 3 — the in-run averages were still falling at side 600, which is the
+symptom that calls for a slope:
+
+| | slope ns/px | identical checksum |
+|---|---|---|
+| POLY, as the benchmark has it | **2 833** | 1970674 |
+| MONO, same loop annotated | **59.7** | 1970674 |
+| | **47.5x** | |
+
+My POLY reading of 2 833 against that file's 2 212 on its own machine is a
+calibration of ~1.28x, so the MONO kernel would read ~47 ns/px there. Placed in
+its table:
+
+| impl | ns/px | rel to scala |
+|---|---|---|
+| scala | 18.1 | 1.0x |
+| kotlin | 22.2 | 1.2x |
+| c | 22.9 | 1.3x |
+| java | 22.9 | 1.3x |
+| go | 23.9 | 1.3x |
+| rust | 26.3 | 1.5x |
+| node | 30.6 | 1.7x |
+| roc | 33.4 | 1.8x |
+| **mezze, dictionaries resolved** | **~47** | **~2.6x** |
+| python | 1 436 | 79x |
+| **mezze, as benchmarked** | **2 212** | **122x** |
+
+So the answer to "how far off Kotlin and Scala are we" is two different
+answers: **122x as shipped, ~2.6x once the dictionaries resolve.** The gap is
+not the JIT, not Truffle, and not the language — the annotation proves the
+information is present and simply not used. Which also explains that file's
+other observation, that JIT-on against JIT-off is only 1.7x where a
+well-specialising Truffle language gets 10-50x: there is nothing to specialise
+when every float multiply is a dictionary call.
+
+**THIS IS NOT A RECOMMENDATION TO ANNOTATE.** An annotation that changes
+performance by 47x means inference is leaving 47x on the table; the annotation
+is the instrument, not the fix. The fix is the one the entry above diagnoses —
+`MonoDriver`'s all-concrete gate refusing a call site whose `having out` chain
+is solvable but unsolved — and `bench/cases/defunc` already puts the same cause
+at 57x for a callback passed as a value. Two benches, two kernels, one root
+cause, 47-57x each.
+
+One loose end found on the way: a plain tail-loop grid walk over the
+un-annotated `pixel` would not compile at all — `[BDSL] compile failed for
+lambda reason=unsupported (node=CallDirectIR:target-not-compiled)`. A shape that
+type-checks and does not compile is its own bug; the bench uses the benchmark's
+`iter` shape instead, and that is recorded rather than chased.
 
 ---
 
