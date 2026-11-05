@@ -1132,11 +1132,25 @@ object MonoDriver {
             for ((ci, c) in typeConstraints.withIndex()) {
                 if (ci in settled) continue
                 val abilityHash = c.abilityHash ?: continue
-                if (c.associatedTypeBindings.isEmpty()) continue
                 val concreteArgs = c.typeArgs.map { ta ->
                     if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
                 }
-                if (concreteArgs.isEmpty() || concreteArgs.any { !isConcrete(it) }) continue
+                if (concreteArgs.isEmpty()) continue
+                if (concreteArgs.any { !isConcrete(it) }) {
+                    // BACKWARD, and only here in mono, where every caller is known.
+                    if (fillOperandsFromEvidence(
+                            c, concreteArgs, abilityHash, abilityImpls, callee,
+                            nameToConcrete, indexOfParam, filled)) {
+                        progress = true
+                    }
+                    continue
+                }
+                // The FORWARD direction reads the impl's `having out`, so it needs
+                // one. The backward direction above does not — and must be tried
+                // first, because an obligation inherited from a callee whose own out
+                // was already discharged arrives with an EMPTY binding map, which is
+                // exactly the one type param this was left unable to fill.
+                if (c.associatedTypeBindings.isEmpty()) continue
                 val candidates = abilityImpls.filter {
                     it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
                 }
@@ -1162,6 +1176,155 @@ object MonoDriver {
             }
         }
         return filled
+    }
+
+    /**
+     * Determine a type param from the OTHER side of a constraint — the output, or a
+     * concrete co-operand — for the params a call site can never supply.
+     *
+     * THIS IS THE MONO-ONLY HALF OF THE RULE, and the distinction matters. The
+     * typechecker does the same thing but refuses to default on a concrete OPERAND,
+     * because `nested = {a,b} -> do { let inner = do { let temp = a + b; temp * 2 };
+     * inner + 10 }` is structurally identical to the chain this unlocks and its `a`
+     * and `b` belong to a caller that has not arrived yet. HERE every caller HAS
+     * arrived: this runs against one specialization request, for a type param that
+     * appears nowhere in the callee's surface type, so there is no call site that
+     * could ever say what it is and no other instantiation to be wrong about. The
+     * only thing left to be consistent with is the specialization's own body, and
+     * the answer is self-consistent by construction — choosing Float for the
+     * operands also chooses Float's impls for the operations that PRODUCE them,
+     * which produce Floats.
+     *
+     * Restricted to non-surface params for the same reason the typechecker
+     * restricts it: a surface param is the call site's to supply, and if the site
+     * did not supply it the gate should refuse the site rather than invent one.
+     *
+     * MEASURED, `bench/cases/mandelannot` kernel 1: `grid_poly` reaches the gate
+     * with `span` concrete and two intermediates open; filling them lets it
+     * specialize, which makes the `pixel_poly` call inside it concrete, which makes
+     * the `escape_poly` call inside THAT concrete — the root unblocks the leaves,
+     * and the leaves are where the loop is.
+     *
+     * Returns true when it bound something.
+     */
+    private fun fillOperandsFromEvidence(
+        c: MezzeType.FunctionAbilityConstraint,
+        concreteArgs: List<MezzeType>,
+        abilityHash: Hash,
+        abilityImpls: List<TypedAbilityImpl>,
+        callee: TypedLetDecl,
+        nameToConcrete: MutableMap<String, MezzeType>,
+        indexOfParam: Map<String, Int>,
+        filled: MutableList<MezzeType>,
+    ): Boolean {
+        val open = concreteArgs.indices.filter { !isConcrete(concreteArgs[it]) }
+        if (open.isEmpty()) return false
+        // Every open position must name a type param of this callee that the
+        // surface type does not mention. One that does is the site's to supply.
+        val surface = surfaceTypeParamNames(callee)
+        val openParams = ArrayList<Pair<Int, Int>>(open.size)   // (position, param index)
+        for (i in open) {
+            val v = c.typeArgs.getOrNull(i) as? MezzeType.VarType ?: return false
+            val idx = indexOfParam[v.variable.name] ?: return false
+            if (v.variable.name in surface) return false
+            openParams.add(i to idx)
+        }
+        // EVIDENCE: a concrete co-operand or a known output. With neither, the impl
+        // table is the only input and that is not resolution.
+        val knownOuts = HashMap<String, MezzeType>(c.associatedTypeBindings.size)
+        for ((assocName, boundTo) in c.associatedTypeBindings) {
+            val resolved = if (boundTo is MezzeType.VarType)
+                nameToConcrete[boundTo.variable.name] ?: boundTo else boundTo
+            if (isConcrete(resolved)) knownOuts[assocName] = resolved
+        }
+        if (open.size == concreteArgs.size && knownOuts.isEmpty()) return false
+
+        val answers = ArrayList<List<MezzeType>>(2)
+        for (impl in abilityImpls) {
+            if (impl.abilityHash != abilityHash) continue
+            if (impl.targetTypes.size != concreteArgs.size) continue
+            var ok = true
+            for (i in concreteArgs.indices) {
+                if (i in open) continue
+                if (!typeMatchesTarget(concreteArgs[i], impl.targetTypes[i],
+                        MonoDriver::variantDeclHasConstructors)) {
+                    ok = false
+                    break
+                }
+            }
+            if (!ok) continue
+            for ((assocName, want) in knownOuts) {
+                val implOut = implAssociatedBinding(impl, assocName)
+                if (implOut == null || !isConcrete(implOut) || implOut != want) {
+                    ok = false
+                    break
+                }
+            }
+            if (!ok) continue
+            // ONE answer per variable: `zr * zr` is `NumMul 's 's`, so an impl whose
+            // two targets differ cannot serve it at all.
+            val perVar = HashMap<String, MezzeType>(open.size)
+            val determined = ArrayList<MezzeType>(concreteArgs.size)
+            for (i in concreteArgs.indices) {
+                if (i !in open) {
+                    determined.add(concreteArgs[i])
+                    continue
+                }
+                val t = impl.targetTypes[i]
+                if (!isConcrete(t)) {
+                    ok = false
+                    break
+                }
+                val name = (c.typeArgs[i] as MezzeType.VarType).variable.name
+                val prior = perVar.put(name, t)
+                if (prior != null && prior != t) {
+                    ok = false
+                    break
+                }
+                determined.add(t)
+            }
+            if (!ok) continue
+            if (answers.none { it == determined }) answers.add(determined)
+        }
+        val answer = answers.singleOrNull()
+            // Several impls fit. Prefer the HOMOGENEOUS one — `Float + Float` over
+            // the mixed-mode adds that are written down precisely because they are
+            // the exception. Same default the typechecker applies; see
+            // AbilityChecker.chooseDeterminedTuple.
+            ?: answers.filter { d -> d.all { it == d[0] } }.singleOrNull()
+            ?: return false
+
+        var bound = false
+        for ((pos, idx) in openParams) {
+            if (isConcrete(filled[idx])) continue
+            filled[idx] = answer[pos]
+            nameToConcrete[(c.typeArgs[pos] as MezzeType.VarType).variable.name] = answer[pos]
+            bound = true
+        }
+        return bound
+    }
+
+    /** One associated binding off an impl, under the spellings the two sides use. */
+    private fun implAssociatedBinding(impl: TypedAbilityImpl, assocName: String): MezzeType? =
+        impl.associatedTypeBindings[assocName]
+            ?: impl.associatedTypeBindings["'" + assocName.removePrefix("'")]
+            ?: impl.associatedTypeBindings[assocName.removePrefix("'")]
+
+    /**
+     * The callee's type params that its PARAMETER and RETURN types mention — the
+     * ones a call site can supply.
+     *
+     * Its own `abilityConstraints` are deliberately not walked: a param that occurs
+     * only there is exactly the kind no caller can reach, which is the whole
+     * distinction [fillOperandsFromEvidence] turns on.
+     */
+    private fun surfaceTypeParamNames(callee: TypedLetDecl): Set<String> {
+        val ft = callee.scheme.type as? MezzeType.FunctionType
+            ?: return callee.typeParams.map { it.name }.toSet()
+        val names = HashSet<String>(callee.typeParams.size)
+        for (tv in com.mezze.language.ast.collectTypeVarsInOrder(ft.paramType, sortFields = false)) names.add(tv.name)
+        for (tv in com.mezze.language.ast.collectTypeVarsInOrder(ft.returnType, sortFields = false)) names.add(tv.name)
+        return names
     }
 
     /**

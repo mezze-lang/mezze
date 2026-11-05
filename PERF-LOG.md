@@ -5056,6 +5056,61 @@ whole-program and does know every call site.
 hypothesis Unverified. It is verified: the un-annotated loop was paying for
 evidence it could never receive.
 
+### The other 12x, in mono, where every caller is known: 2 833 -> 58 ns/px
+
+What inference had to leave open, monomorphisation can close, because by then
+there are no more callers to be wrong about. `grid` reaches the gate like this:
+
+```
+grid  { side, span } -> Int            params ['span,'u,'v,'w,'x]
+  NumDiv ['span, Float] out='u         px * 3.0 / span, inherited from pixel
+  NumSub [Float, 'u]    out='w
+  NumSub [Float, 'v]    out='w         ← 'v only ever an OPERAND
+  NumAdd ['x, Float]    out={}         ← inherited, its out already discharged
+```
+
+`main` pins `span`, and the forward filler resolves `'u` and `'w` off the impls'
+`having out`. TWO of five it could not, for two different reasons: `'v` needs the
+chain read BACKWARDS — which operand makes this impl produce Float — and `'x`
+arrives with an EMPTY binding map, because the callee it came from had already
+discharged its own output, so the forward filler `continue`d past it before
+looking at the operands at all. Two params, and the whole site was refused.
+
+Both fixed in `fillHavingOutTypeArgs`, in the same fixpoint loop, with the
+backward attempt placed BEFORE the `associatedTypeBindings.isEmpty()` guard that
+the forward direction needs and the backward one does not.
+
+MEASURED, `bench/cases/mandelannot` kernel 1, slope over side 1200 -> 1800:
+
+```
+                             before      inference fix      + mono fix
+  un-annotated (kernel 1)   2 833            704              58.0 ns/px
+  annotated    (kernel 2)      —              —               64.2 ns/px
+```
+
+**48.8x, and the annotation gap is CLOSED** — the un-annotated loop is now
+marginally faster than the same loop with its types written down, on identical
+checksums (17 720 249 and 39 866 172). Against the benchmark repo's recorded
+2 212.5 ns/px for mezze it is 38x, and against Scala's 18.1 it is 3.2x — which
+is now a code-generation question, not an evidence-passing one, and the SAME
+3.2x the annotated kernel has always had.
+
+The licence for defaulting here is not the typechecker's. There the callers have
+not arrived, and `nested` is indistinguishable from this chain. Here the request
+IS the instantiation, the param appears nowhere in the callee's surface type, so
+no site could ever name it — and the choice is self-consistent by construction,
+because picking Float for the operands also picks Float's impls for the
+operations that produce them, which produce Floats. Restricted to non-surface
+params for the same reason as before: a surface param is the site's to supply,
+and if the site did not supply it the gate should refuse the site rather than
+invent one. `MonoInheritedResidueTest` carries both halves; with the fill
+reverted the cascade assertion fails.
+
+NOT the same cause, measured on the way past: `bench/cases/defunc` kernel 3 is
+83 968 ps/iter against kernel 2's 794, unchanged by either fix. That 106x is a
+user-written HOF reached through a function VALUE, which no type argument
+determines — the next gap, and its own mechanism.
+
 ---
 
 ## Method notes
