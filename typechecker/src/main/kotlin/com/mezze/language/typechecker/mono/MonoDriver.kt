@@ -471,6 +471,8 @@ object MonoDriver {
                         ))
                         outLocs.add(expr.loc)
                         counters.byHashSeeded++
+                        seedFunctionValuedArgs(
+                            callee, args, expr, declIndex, allImpls, recordShapes, out, outLocs)
                     } else {
                         counters.byHashUnifyFail++
                         DebugLogger.debug(DebugLogger.Category.Monomorphization) {
@@ -721,6 +723,85 @@ object MonoDriver {
         } else {
             counters.methodUnifyFail++
         }
+    }
+
+    /**
+     * A generic function PASSED AS AN ARGUMENT is needed at the type the callee
+     * declares for that parameter, so seed it there.
+     *
+     * Nothing else will. A seed comes from a CALL, and a function handed over as a
+     * value is not called at the site that hands it over — so `apply_fold { n = n,
+     * f = step }` seeded `apply_fold` and left `step` generic. The compiler then
+     * cannot reference an instantiation that does not exist and builds
+     * `dict_wrapper_step` instead: a closure capturing the resolved operations,
+     * forwarding to the generic function, indirect on every call of the callback.
+     *
+     * The type to seed at is not a guess — the callee's own signature states it.
+     * `apply_fold`'s parameter record declares `f: {x: Int} -> 'd`, and `'d` is
+     * among the type args just derived for this site, so substituting them in gives
+     * `{x: Int} -> Int` and `step`'s arguments follow by ordinary derivation. A
+     * declared field that is still open after substitution is skipped: then the site
+     * genuinely does not say what the function is needed at.
+     *
+     * MEASURED, `bench/cases/defunc` kernel 3 at n=2e7, min of 3: 82 873 -> 12 537
+     * ps/iter with the reference pointed at the specialization, level with kernel 7
+     * (the same HOF with the callback's type written down). Before this seeding,
+     * that only happened when some OTHER call site had already caused the
+     * specialization to exist — in the bench, `k_named` calling `step` directly —
+     * so the win was incidental. A program that only ever passes the function got
+     * nothing.
+     */
+    private fun seedFunctionValuedArgs(
+        callee: TypedLetDecl,
+        calleeArgs: List<MezzeType>,
+        call: TypedCall,
+        declIndex: Map<Hash, TypedLetDecl>,
+        allImpls: List<TypedAbilityImpl>,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
+        out: MutableList<Monomorphizer.SpecRequest>,
+        outLocs: MutableList<Loc>,
+    ) {
+        val argRec = call.arg as? com.mezze.language.typedast.TypedRecord ?: return
+        val paramRec = (callee.scheme.type as? MezzeType.FunctionType)?.paramType
+            as? MezzeType.RecordType ?: return
+        val nameToArg = HashMap<String, MezzeType>(callee.typeParams.size)
+        for (i in callee.typeParams.indices) {
+            calleeArgs.getOrNull(i)?.let { nameToArg[callee.typeParams[i].name] = it }
+        }
+        for (entry in argRec.entries) {
+            if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
+            val v = entry.value as? com.mezze.language.typedast.TypedVar ?: continue
+            val b = v.binding as? BindingRef.ByHash ?: continue
+            val target = declIndex[b.hash] ?: continue
+            if (target.typeParams.isEmpty()) continue
+            val declared = paramRec.fields[entry.name] ?: continue
+            val wanted = substituteByName(declared, nameToArg)
+            if (!isConcrete(wanted)) continue
+            val targs = deriveTypeArgs(target.scheme.type, target.typeParams, wanted)
+                ?.let { fillHavingOutTypeArgs(target, it, allImpls) } ?: continue
+            if (!targs.all { isConcrete(it) }) continue
+            out.add(Monomorphizer.SpecRequest(
+                b.hash,
+                targs,
+                resolveAbilityConstraints(target, targs, allImpls, recordShapes),
+                emptyMap(),
+                emptyMap(),
+            ))
+            outLocs.add(v.loc)
+        }
+    }
+
+    /** Substitute by type-param NAME, the convention mono uses throughout: the
+     *  solver hands out a fresh id per binding site, so the same parameter appears
+     *  as several [TypeVar] instances sharing one name. */
+    private fun substituteByName(t: MezzeType, nameToArg: Map<String, MezzeType>): MezzeType {
+        if (nameToArg.isEmpty()) return t
+        val map = HashMap<TypeVar, MezzeType>()
+        for (tv in com.mezze.language.ast.collectTypeVarsInOrder(t, sortFields = false)) {
+            nameToArg[tv.name]?.let { map[tv] = it }
+        }
+        if (map.isEmpty()) return t
+        return TypeSubstitution.applyType(t, map)
     }
 
     /** TypedAstBuilder wraps method-call args as a record with the

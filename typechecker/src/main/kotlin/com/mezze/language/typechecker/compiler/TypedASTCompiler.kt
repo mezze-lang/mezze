@@ -428,6 +428,7 @@ class TypedASTCompiler(
                 hashToParamNames[spec.specializedHash] = body.params.map { it.name }
             }
         }
+        specsByGeneric = monoSpecializations.groupBy { it.genericHash }
 
         val functions = mutableListOf<FunctionIR>()
         val compiledHashes = mutableSetOf<Hash>()
@@ -2859,6 +2860,61 @@ class TypedASTCompiler(
         return MakeLambdaIR(wrapperHash, emptyList(), src)
     }
 
+    /** Mono specializations by the generic they came from; see
+     *  [resolvedSpecializationRef]. */
+    private var specsByGeneric:
+        Map<Hash, List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization>> = emptyMap()
+
+    /**
+     * The specialization of [genericHash] that discharges exactly the impls
+     * [resolvedDicts] names, if there is exactly one.
+     *
+     * The match is on OP HASHES, not on types: `resolvedDicts` holds the very
+     * operations this reference would have carried in its dictionary, and a
+     * specialization records the impls it was cut against, so the two are directly
+     * comparable and no type has to be re-derived or guessed. Anything less than a
+     * unique match returns null and the caller builds its wrapper as before — two
+     * specializations whose impl sets both cover these operations are not evidence
+     * for either.
+     *
+     * A dict entry resolved by FORWARDING a caller's own dictionary slot (a
+     * `ReadLocalIR`) carries no impl identity at all, so one of those disqualifies
+     * the reference outright: the types are not known here, which is exactly the
+     * case a wrapper exists for.
+     */
+    private fun resolvedSpecializationRef(
+        genericHash: Hash,
+        resolvedDicts: List<Pair<String, NodeIR>>,
+        src: SourceInfo,
+    ): NodeIR? {
+        val candidates = specsByGeneric[genericHash] ?: return null
+        if (candidates.isEmpty()) return null
+        val wanted = HashSet<Hash>(resolvedDicts.size)
+        for ((_, node) in resolvedDicts) {
+            val ref = node as? ReadGlobalFnByHashIR ?: return null
+            wanted.add(ref.hash)
+        }
+        if (wanted.isEmpty()) return null
+        val matches = candidates.filter { spec ->
+            val specOps = HashSet<Hash>()
+            for (ref in spec.abilityImpls) {
+                val impl = abilityImpls.firstOrNull { it.hash == ref.implHash } ?: continue
+                for (opName in impl.operations.keys) {
+                    specOps.add(computeOpHash(impl.hash, opName))
+                }
+            }
+            wanted.all { it in specOps }
+        }
+        val only = matches.singleOrNull() ?: return null
+        // The copy must take the same parameters as the reference it replaces; a
+        // spec whose dead closure params were stripped does not.
+        val params = hashToParamNames[only.specializedHash] ?: return null
+        val genericParams = (declIndex?.values?.firstOrNull { it.hash == genericHash }
+            ?.value as? TypedLambda)?.params?.map { it.name } ?: return null
+        if (params != genericParams) return null
+        return ReadGlobalFnByHashIR(only.specializedHash, src)
+    }
+
     private fun tryWrapDictFunction(
         expr: TypedExpr,
         contextConcreteTypes: List<MezzeType>,
@@ -2908,6 +2964,19 @@ class TypedASTCompiler(
                 }
             }
         }
+
+        // THE SPECIALIZATION IS THE SAME FUNCTION, already built.
+        //
+        // Everything above has just decided which impls discharge this reference's
+        // obligations. If mono cut a copy of the function against exactly those
+        // impls, that copy IS this reference — with the operations compiled in
+        // rather than reached through a dictionary — and it takes the same
+        // parameters, so it drops straight in. Wrapping instead costs a closure
+        // allocation and an indirect call per invocation that nothing can
+        // devirtualise: on `bench/cases/defunc` kernel 3, `apply_fold { f = step }`
+        // runs at 82 873 ps/iter against 2 241 for the same HOF reached with a
+        // lambda literal, which is specialized in place.
+        resolvedSpecializationRef(binding.hash, resolvedDicts, src)?.let { return it }
 
         // Find the original function's regular param names (excluding dict params)
         val originalDecl = declIndex?.values?.find { it.hash == binding.hash }

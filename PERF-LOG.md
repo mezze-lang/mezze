@@ -5111,6 +5111,63 @@ NOT the same cause, measured on the way past: `bench/cases/defunc` kernel 3 is
 user-written HOF reached through a function VALUE, which no type argument
 determines — the next gap, and its own mechanism.
 
+### 8.2x of that next gap: a function reference IS its specialisation
+
+`let step = { x } -> x * 2 + 1` is un-annotated, so it is polymorphic over the
+numeric type and carries `__dict_mul` and `__dict_add`. Passing it as a VALUE
+cannot pass dictionaries alongside it, so the compiler built a closure —
+`dict_wrapper_step` — capturing the two resolved operations and forwarding to the
+generic function. Every call of the callback went through that closure.
+
+But resolving a reference's dictionaries IS choosing an instantiation, and a
+specialisation against those impls is the same function with the operations
+compiled in, taking the same parameters. So the wrapper's last resort became:
+reference the copy instead. The match is on OP HASHES — the specialisation
+records the impls it was cut against, the wrapper holds the operations it would
+have carried — so no type is re-derived and nothing is guessed, and it insists on
+a unique match.
+
+Half of it was missing and the measurement said so. A seed comes from a CALL, and
+a function handed over as a value is not called at the site that hands it over, so
+`step` had no specialisation to reference — in the bench it had one only because
+kernel 2 calls `step` directly. A probe put it plainly: `SPECREF reached
+generic=7eb612bd candidates=-1`, in a program whose only use of `step` is as an
+argument. Mono now seeds a function-valued argument at the type the callee's own
+signature declares for that parameter (`f: {x: Int} -> 'd`, with `'d` among the
+args just derived), so the win no longer depends on an unrelated call site.
+
+MEASURED, `bench/cases/defunc` at n=2e7, min of 3:
+
+```
+                        before     after
+  2 named fn               794       779    (control: a direct call)
+  3 own HOF             82 873    10 131    8.2x
+  4 own HOF, 2 fns      99 764    49 299    2.0x
+  7 own HOF, no dict    12 998    10 343    (control: callback annotated)
+```
+
+Kernel 3 lands on kernel 7 — the same HOF with the callback's type written down,
+which the bench put there as the control for exactly this. So dictionary passing
+through a function value is gone, and what is left is the indirection itself:
+10 131 against 779 for calling the same function directly. That 13x is an
+unspecialised HOF, a different mechanism, and the next gap.
+
+Kernel 6 (`seq::fold`, the path that was already fused) read 4 715 before and
+between 1 335 and 5 225 after, across runs — noise, and claimed as nothing.
+`bench/cases/mandelannot` is unchanged at a 57.6 ns/px slope.
+
+ATTEMPTED AND DELETED on the way: completing a derivation from the obligations the
+CALL SITE's types carry. `apply_fold`'s one open param is its callback's result,
+with `NumAdd 'd Int having out = Int`, and the argument's own `with <NumMul Int 'p
+having out='g, NumAdd Int 'g having out='r>` resolves it forward with no guesswork
+— `'p` is Int because the callee declares it, so `'g` is Int, so `'r` is Int, so
+`'d` is Int. It works, it is pure resolution, and it is worth nothing: kernel 3
+measured 12 008 with it and 12 523 without, mandelbrot 62 either way. Deleted
+rather than kept on the grounds that it looks right.
+
+`:typechecker:test` 4 823/0, `:interpreter:test` 7 467/0 (11 skipped),
+`:cli:nativeCompile`, `just native-test`.
+
 ---
 
 ## Method notes
