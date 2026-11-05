@@ -100,7 +100,7 @@ a defect, not a conservative default.
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a mut loop against the same loop written immutably** | counter **2.6x SLOWER** (224 vs 572 ps); seq element write **2.7x FASTER** (15 488 vs 5 818, 41 GCs vs 18) | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while LANDED at 1.14-1.37x once measured at a size that reaches steady state — the first reading, at n=2e6, was a 1.6 ms run and said 1.34x WORSE |
-| **your own HOF, against the same work inlined** | **111x** (776 vs 86 000 ps/iter), 3 GCs vs 114 — ~950 bytes allocated PER CALL | Calling a named fn directly is free (799 ps). Passing it to a HOF you wrote is 111x, and 25x slower than `seq::fold` doing the same thing, because fusion keys off the STDLIB NAMES. The loop is fine — `MEZZE_DUMP_BC` shows the same direct-while shape, 30 instructions against 32 — and the whole difference is one `c.CallIndirectScalar1`. `CallIndirectScalar1` HAS allocation-free identity-guarded specializations, gated on the callee having a `TrampolineRootNode`; a function with no tail calls is compiled WITHOUT one, so being simpler is what makes it slower. Biggest single measured gap on this branch |
+| **a polymorphic fn passed as a VALUE to a HOF** | **57x** (1 429 vs 80 873 ps/iter) against the same callback with its type written down; the indirect call alone is 1.9x | `x * 2 + 1` on an inferred parameter is `NumMul`/`NumAdd`, so the callback carries `__dict_mul`/`__dict_add`. Called DIRECTLY it is free (763 ps) because mono specialises the site and the dicts vanish; passed as a VALUE mono cannot reach it — a function argument is not a type argument — so a `dict_wrapper` builds an `Object[]` and a three-field record PER CALL, and `hasDictParams` excludes it from the bypass. Biggest single measured gap on this branch. Lever: specialise the HOF on the FUNCTION argument, which `LocalLambdaSpecializer` already does one level in for 314x |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. And a declared op is still not a FAST op: `CallNativeScalar` puts a `@TruffleBoundary` over a `@Variadic Object[]` on every one of them, which is a further 6.2x where it can be removed — one op so far, see the two entries on it. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. CANDIDATE, not yet a conclusion (2026-11-05): the `13 GCs vs 3` is the exact signature of the per-op floor entry below — a native call behind `CallNativeScalar`'s `@TruffleBoundary` allocates ~60 bytes/iter while a call that avoids it allocates nothing. Neither op is registered in `TypedNativeHandlers` (there is no object-receiver shape), so that does not by itself separate these two; the thing to check first is whether one loop FUSES and the other does not, which is the regime confound that cost two withdrawn columns in this log. Then the graph dump |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
@@ -4594,6 +4594,111 @@ bypass). Admitting a raw BDSL root means knowing its calling convention for
 certain and knowing which of those two jobs nobody is then doing. Getting that
 wrong is an `UnsupportedSpecializationException` at best and a silently wrong
 argument at worst, so it wants its own measurement and its own gate run.
+
+---
+
+## The 111x splits: an indirect call is 1.9x, carrying DICTIONARIES through a function value is 57x
+
+The entry above measured a user-written HOF at 111x and named the indirect call.
+That was half right. Two causes, and separating them took one more kernel.
+
+`bench/cases/defunc` gained kernel 7: the same HOF with a callback whose type is
+written down, so `x * 2 + 1` is concrete `Int` arithmetic instead of `NumMul` and
+`NumAdd` on an inferred parameter. Identical loop, identical indirection,
+identical arithmetic — the only difference is that this callback carries no
+dictionaries. (An annotation used as an EXPERIMENT to separate two causes, not
+as a fix. If one were needed to go fast, inference would be the bug.)
+
+n=2e7, min of 5:
+
+| | ps/iter | GCs | |
+|---|---|---|---|
+| 1 inline | 758 | 3 | |
+| 7 own HOF, **dict-free** callback | **1 429** | 14 | the indirect call: **1.9x** |
+| 3 own HOF, polymorphic callback | **80 873** | 96 | dictionaries: **57x on top** |
+| 5 closure over a local `Int` | 2 071 | 5 | |
+| 6 `seq::fold` | 1 366 | 3 | |
+
+Checksums identical on all of them. **So an indirect call is 1.9x and dictionary
+passing through a function value is 57x** — essentially the whole 111x.
+
+### What the dictionaries cost, in instructions
+
+`MEZZE_DUMP_BC=step` shows the callback is not reached directly at all. There is
+a wrapper:
+
+```
+=== BC dict_wrapper_step params=[x] ===
+  0  load.argument index(2)                      <- x
+  1  load.argument index(0)                      <- __dict_add
+  2  load.argument index(1)                      <- __dict_mul
+  3  create.variadic count(3)                    <- an Object[]
+  4  c.MakeRecord [x, __dict_add, __dict_mul]    <- a MezzeRecord
+  5  c.CallDirect1 target(LazyStub[callee]) canBypass(Boolean false)
+```
+
+An `Object[]` and a three-field record per call, and `canBypass(false)` because
+`hasDictParams` is an explicit guard on the bypass — a dict-carrying function is
+deliberately excluded from the allocation-free path.
+
+Called DIRECTLY the same function is free (763 ps, kernel 2): monomorphisation
+specialises the call site and the dictionaries disappear. Passed as a VALUE,
+mono cannot reach it — a function argument is not a type argument — so the
+wrapper survives and every call pays for it.
+
+This is what "defunctionalise" means here concretely, and it is the same gap the
+`perf_obsession` note already pointed at ("static dict resolution, dict_wrapper,
+needs mono"), now with a 57x A/B against an otherwise identical callback.
+
+NEXT: specialise the HOF on the FUNCTION ARGUMENT, not just on type arguments.
+`apply_fold`'s loop is already compiled three times, once per call site, so the
+per-site copies exist — what is missing is binding `f` in the copy, which makes
+the dictionaries concrete and the call direct in one step. `LocalLambdaSpecializer`
+does exactly this shape for a local lambda and was worth 314x; the HOF case is
+the same idea one level out.
+
+### And a real fix landed on the way: the bypass was refusing a LAZY STUB
+
+Independent of dictionaries, `CallIndirectScalar1`'s allocation-free
+specializations were gated on the callee's root being a bypassable
+`TrampolineRootNode`. On the FIRST call to a top-level function the root is a
+`LazyStubRootNode` — the function is not compiled yet — and the decision is a
+`@Cached` initialiser, so it is taken exactly then and the negative sticks for
+the life of the call site. The function is compiled moments later and the call
+site never notices.
+
+Both gates now look through the stub to the target it will forward to, refusing
+when that function carries closures (the stub prepends them per call and a
+bypassing caller would not). Worth, at n=2e7 min of 5:
+
+| | before | after | |
+|---|---|---|---|
+| closure callback | 18 886, 39 GCs | **2 208, 5 GCs** | **8.6x** |
+| `seq::fold` | 3 428 | **1 285** | **2.7x** |
+
+The `seq::fold` row is the one that matters: the most-used path in the language,
+2.7x, from a fix with nothing fold-specific in it. A local closure was never a
+stub — it is built eagerly — which is why a closure had been 4.6x FASTER than a
+top-level function for the same work. Being simpler was what made it slower.
+
+### Priced and not built: the per-function suspension wrapper
+
+`Mut` is hermetic — the typechecker refuses it alongside `Async` — so a mut op
+provably cannot suspend, and the `TryCatch(SuspendedInBlockException)` every
+function carries plus the `CheckSuspendedThrow` after each native statement are
+dead for mut code. Removing them properly needs a per-function "can suspend"
+summary over the call graph, because `canYieldSuspended` is conservative for any
+call. So the CEILING was measured first, by omitting the wrapper outright:
+
+| | wrapped | unwrapped | |
+|---|---|---|---|
+| mut counter (`mutvsimmut`) | 652 | 553 | 1.18x |
+| `read_int`, `incr`, `seq::size`, `string_len`, baseline (`mutabi`) | — | — | **1.00x** each |
+
+Two equivalent mut-counter kernels disagree, so even the 1.18x is not solid.
+The reason it is free: an exception handler that never fires is not per-call
+work, and `CheckSuspendedThrow` is one cheap instruction. The invariant is real
+and exploitable; what it would buy does not pay for the analysis. Not built.
 
 ---
 

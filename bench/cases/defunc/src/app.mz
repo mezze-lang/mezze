@@ -46,6 +46,16 @@ let time_it = { f } -> perform SystemTime in do
 let step = { x } -> x * 2 + 1
 let step_alt = { x } -> x * 2 + 1
 
+## The SAME body with its type written down. Not a fix and not a style
+## recommendation — an EXPERIMENT to separate two causes that kernel 3 mixes.
+## `x * 2 + 1` on an un-annotated parameter is `NumMul` and `NumAdd`, so `step`
+## is polymorphic over the numeric type and carries `__dict_mul`/`__dict_add`.
+## Annotating it to Int makes those concrete, so this callback needs no
+## dictionaries while being identical in every other way. Kernel 7 against
+## kernel 3 is therefore dictionary passing on its own, with the indirection
+## held constant.
+let step_mono: { x: Int } -> Int = { x } -> x * 2 + 1
+
 ## A HOF the compiler knows nothing about: `f` is a parameter, so the call
 ## inside is indirect and there is no name for the fuser to match.
 let apply_fold = { n, f } -> do
@@ -83,6 +93,11 @@ let k_hof2 = { n } ->
 let k_closure = { n } -> do
   let k = 2
   apply_fold { n = n, f = { x } -> x * k + 1 }
+
+## ── 7. THE SAME HOF with a DICTIONARY-FREE callback. Kernel 7 against kernel
+##      3 is the cost of dictionary passing through a function value, with the
+##      indirection identical.
+let k_hof_mono = { n } -> apply_fold { n = n, f = step_mono }
 
 ## ── 6. THE SPECIALISED PATH, for scale: a stdlib fold the fuser recognises.
 let k_stdlib = { n } ->
@@ -122,7 +137,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_closure { n = n }
     report { name = "5 closure       ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
     report { name = "5 closure       ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
-  else do
+  else if k == 6 then do
     k_stdlib { n = n }
     report { name = "6 stdlib fold   ", n = n, r = time_it { f = {} -> k_stdlib { n = n } } }
     report { name = "6 stdlib fold   ", n = n, r = time_it { f = {} -> k_stdlib { n = n } } }
+  else do
+    k_hof_mono { n = n }
+    report { name = "7 own HOF no dict", n = n, r = time_it { f = {} -> k_hof_mono { n = n } } }
+    report { name = "7 own HOF no dict", n = n, r = time_it { f = {} -> k_hof_mono { n = n } } }

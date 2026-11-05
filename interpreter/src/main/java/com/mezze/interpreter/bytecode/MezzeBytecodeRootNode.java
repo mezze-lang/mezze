@@ -1807,12 +1807,41 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         && tramp.getInnerTarget() != null) {
                     return true;
                 }
+                // A LazyStubRootNode is what a top-level function's root IS
+                // until the function is compiled, which is on its first call —
+                // the same moment this decision is taken and CACHED. Refusing
+                // here costs the call site the allocation-free path for good:
+                // MEASURED at 111x on `bench/cases/defunc`, with a local
+                // closure (never a stub, because it is built eagerly) 4.6x
+                // FASTER than a top-level function for the same work. So look
+                // through to the target the stub will forward to and judge
+                // THAT. `peekForwardTargetNoClosures` returns null when the
+                // function carries closures, because the stub prepends them per
+                // call and a bypassing caller would not.
+                if (root instanceof LazyStubRootNode stub) {
+                    CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                    if (forwarded != null && forwarded != target) {
+                        return canBypassTarget(forwarded);
+                    }
+                }
             }
             return false;
         }
 
         @CompilerDirectives.TruffleBoundary
         static CallTarget resolveInner(CallTarget target) {
+            // Follows the same path `canBypassTarget` approved, stub included —
+            // if the gate looked through a LazyStubRootNode then so must this,
+            // or the fast specialization would call the STUB with flat
+            // positional arguments while the stub expects to be entered as an
+            // AST callee.
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct0
+                    && rct0.getRootNode() instanceof LazyStubRootNode stub) {
+                CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                if (forwarded != null && forwarded != target) {
+                    return resolveInner(forwarded);
+                }
+            }
             if (target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
                     && tramp.getInnerTarget() != null) {
@@ -2073,12 +2102,36 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         && tramp.getInnerTarget() != null) {
                     return true;
                 }
+                // Same stub look-through as CIS1, and for the same reason: the
+                // decision is a `@Cached` initialiser taken on the first call,
+                // which is exactly when a top-level function's root is still a
+                // LazyStubRootNode. Two arguments is the arity a fold callback
+                // has, so leaving this out would make the fix arity-specific
+                // while the bug is not.
+                if (root instanceof LazyStubRootNode stub) {
+                    CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                    if (forwarded != null && forwarded != target) {
+                        return canBypassTarget(forwarded);
+                    }
+                }
             }
             return false;
         }
 
         @CompilerDirectives.TruffleBoundary
         static CallTarget resolveInner(CallTarget target) {
+            // Follows the same path `canBypassTarget` approved, stub included —
+            // if the gate looked through a LazyStubRootNode then so must this,
+            // or the fast specialization would call the STUB with flat
+            // positional arguments while the stub expects to be entered as an
+            // AST callee.
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct0
+                    && rct0.getRootNode() instanceof LazyStubRootNode stub) {
+                CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                if (forwarded != null && forwarded != target) {
+                    return resolveInner(forwarded);
+                }
+            }
             if (target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
                     && tramp.getInnerTarget() != null) {
