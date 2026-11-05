@@ -23,6 +23,53 @@ public final class TypedNativeHandlers {
 
     private TypedNativeHandlers() {}
 
+    /**
+     * (Object) -> long. The first OBJECT-RECEIVER shape.
+     *
+     * WHY A SHAPE AND NOT A FLAG. Every other shape here is
+     * primitive-to-primitive, so an op taking an object receiver — which is
+     * every collection op and every mut op — had nothing to match and fell to
+     * `CallNativeScalar`: `@TruffleBoundary` over a `@Variadic Object[]`. That
+     * boundary is the per-op floor, because behind it the array BDSL packs per
+     * call cannot be scalar-replaced.
+     *
+     * The boundary cannot simply be dropped from `CallNativeScalar`, and that
+     * was MEASURED: a per-op `peSafe` flag, marking even 18 plain field-access
+     * cell ops, fails the native-image build with "Blocklisted methods are
+     * reachable for runtime compilation". The operand there is the SHARED
+     * `NativeHandler` with 300 implementations, so making it runtime-compilable
+     * makes all 300 bodies reachable — including error paths like
+     * `NativeHelpers.asLong`'s, which formats `value.javaClass.name` and pulls
+     * SVM's reflection machinery in behind it. A narrow interface bounds that
+     * to the bodies registered into it, which is why `CallNativeLL` has been
+     * boundary-free all along with its five primitive-math implementations.
+     *
+     * MEASURED on `bench/cases/mutabi` at n=2e7, min of 3, against kernel 2 —
+     * the same loop calling an ordinary Mezze function, which is the baseline
+     * in the SAME loop regime (kernel 1 fuses and is not):
+     *
+     * <pre>
+     *   2 ordinary call     658 ps/iter    3 young GCs
+     *   3 read_int boundary 4196 ps/iter   14 young GCs
+     *   3 read_int shape     659 ps/iter    7 young GCs   = 6.4x
+     * </pre>
+     *
+     * A native call ends up costing what a Mezze call costs. `nativeCompile`
+     * builds and `just native-test` passes with it.
+     *
+     * HOW FAR THIS GOES TODAY: only `MutableInt`. Of the receiver classes,
+     * `MutableInt` carries 0 `@TruffleBoundary` annotations and
+     * `MutableSeq`/`MutableString`/`MutableSet`/`MutableMap`/`MutableDeque`/
+     * `MutableBytes` carry 12-18 each, so for those the outer boundary is not
+     * the cost — moving it inside a compiled operation measured 13-22x WORSE
+     * (`seq::size` 3 926 → 51 492 ps, `seq::get` 7 204 → 157 109). Widening
+     * this is a data-structure job first, not a dispatch one.
+     */
+    @FunctionalInterface
+    public interface OL {
+        long invoke(Object a);
+    }
+
     /** (long, long) -> long. */
     @FunctionalInterface
     public interface LLL {
@@ -89,6 +136,7 @@ public final class TypedNativeHandlers {
         boolean invoke(boolean a, boolean b);
     }
 
+    private static final HashMap<String, OL> ol = new HashMap<>();
     private static final HashMap<String, LLL> lll = new HashMap<>();
     private static final HashMap<String, LL> ll = new HashMap<>();
     private static final HashMap<String, LLB> llb = new HashMap<>();
@@ -101,6 +149,7 @@ public final class TypedNativeHandlers {
     private static final HashMap<String, BB> bb = new HashMap<>();
     private static final HashMap<String, BBB> bbb = new HashMap<>();
 
+    public static void registerOL(String name, OL fn) { ol.put(name, fn); }
     public static void registerLLL(String name, LLL fn) { lll.put(name, fn); }
     public static void registerLL(String name, LL fn) { ll.put(name, fn); }
     public static void registerLLB(String name, LLB fn) { llb.put(name, fn); }
@@ -113,6 +162,7 @@ public final class TypedNativeHandlers {
     public static void registerBB(String name, BB fn) { bb.put(name, fn); }
     public static void registerBBB(String name, BBB fn) { bbb.put(name, fn); }
 
+    public static OL lookupOL(String name) { return ol.get(name); }
     public static LLL lookupLLL(String name) { return lll.get(name); }
     public static LL lookupLL(String name) { return ll.get(name); }
     public static LLB lookupLLB(String name) { return llb.get(name); }

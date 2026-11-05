@@ -2396,6 +2396,26 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * Typed fast path for (Object) -> long natives. NO `@TruffleBoundary`, so
+     * the handler inlines into the compiled loop and nothing is packed into an
+     * array on the way in. See {@link TypedNativeHandlers.OL} for the
+     * measurement, for why this has to be a narrow interface rather than a
+     * flag on the shared one, and for how far it generalises.
+     *
+     * No `@ForceQuickening`: the operand is already `Object`, so a quickened
+     * variant carries the same derived instruction name as the base and BDSL
+     * refuses it ("Multiple instructions declared with name ...").
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OL.class)
+    public static final class CallNativeOL {
+        @Specialization
+        public static long doInvoke(TypedNativeHandlers.OL handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
     /** Typed fast path for (long) -> long natives: int abs/neg/sign. */
     @Operation
     @ConstantOperand(type = TypedNativeHandlers.LL.class)

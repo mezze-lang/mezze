@@ -3770,6 +3770,15 @@ public final class BytecodeCompiler {
                     return;
                 }
             } else if (arity == 1) {
+                // Object receiver first: the shape every collection and mut
+                // accessor has, whose only alternative is the boundary.
+                var typedOL = TypedNativeHandlers.lookupOL(name);
+                if (typedOL != null) {
+                    b.beginCallNativeOL(typedOL);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOL();
+                    return;
+                }
                 var typedLL = TypedNativeHandlers.lookupLL(name);
                 if (typedLL != null) {
                     b.beginCallNativeLL(typedLL);

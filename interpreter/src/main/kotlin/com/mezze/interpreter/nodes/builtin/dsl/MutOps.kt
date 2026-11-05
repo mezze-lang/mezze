@@ -15,6 +15,7 @@ import com.mezze.interpreter.values.MutableSeq
 import com.mezze.interpreter.values.MutableSet
 import com.mezze.interpreter.values.MutableString
 import com.mezze.language.truffleir.SlotKind
+import com.oracle.truffle.api.CompilerDirectives
 
 /**
  * Mut natives in DSL form.
@@ -77,6 +78,17 @@ object MutOps {
 
     private val UNIT: Any get() = MezzeRecord.empty()
 
+    /**
+     * `@TruffleBoundary` because this builds a String, and an op reached
+     * through a typed shape is partially evaluated — so
+     * `StringConcatHelper.simpleConcat` becomes reachable for runtime
+     * compilation and native-image's blocklist fails the whole build. It cost
+     * one native build to find, and it is the same failure
+     * `MezzeGuestException.dividingByZero` had for the same reason: ANY string
+     * building on an error path inside a PE'd native op needs a boundary.
+     * Nothing is lost — it is the path that is about to throw.
+     */
+    @CompilerDirectives.TruffleBoundary
     private fun mismatch(op: String, type: String): Nothing =
         throw NativeTypeMismatchException("$op expects $type")
 
@@ -120,9 +132,33 @@ object MutOps {
     // declaration must spell the stdlib's name exactly or the transposition
     // finds no field.
 
+    /**
+     * ONE BODY, BOTH REGISTRIES. `NativeOp` publishes the record/boundary path
+     * that the interpreter and every un-ported caller use;
+     * `TypedNativeHandlers.registerOL` publishes the same function into the
+     * `(Object) -> long` shape, which `BytecodeCompiler` emits as
+     * `CallNativeOL` — no boundary, nothing packed into an array. 4 196 → 659
+     * ps/iter, against 658 for the same loop calling an ordinary Mezze
+     * function; see [TypedNativeHandlers.OL].
+     *
+     * Named rather than written twice on purpose: the existing typed
+     * registrations in `NatOps` pass a second lambda for the typed side, which
+     * is two bodies to keep in agreement for one op.
+     *
+     * `MutableInt` is the ONLY receiver class this works for today — it is the
+     * only one with no `@TruffleBoundary` on its methods. See
+     * [TypedNativeHandlers.OL] for what happened to the others.
+     */
+    private fun intRead(o: Any): Long =
+        (o as? MutableInt ?: mismatch("__native_mut_int_read", "MutableInt")).get()
+
     private val INT_READ = NativeOp("__native_mut_int_read",
         listOf(Param("n", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutInt(a, "__native_mut_int_read").get() }
+    ) { a -> intRead(a.obj(0)) }
+
+    init {
+        TypedNativeHandlers.registerOL("__native_mut_int_read", ::intRead)
+    }
 
     private val INT_WRITE = NativeOp("__native_mut_int_write",
         listOf(Param("n", SlotKind.OBJECT), Param("v", SlotKind.LONG)), SlotKind.OBJECT,
