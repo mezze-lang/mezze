@@ -27,8 +27,12 @@ use std::collections::seq
 use std::effects::mutation::{
   LocalMut, int_to_mut, read_int, incr,
   seq_to_mut, get, size,
-  string_to_mut, string_len, string_char_at
+  string_to_mut, string_len, string_char_at,
+  deque_to_mut, deque_peek_front,
+  bytes_to_mut, bytes_get
 }
+use std::collections::deque
+use std::collections::bytes
 use std::effects::log::{ println, Console }
 use std::effects::time::{ SystemTime, monotonic }
 use std::datetime::{ duration_to_nanos, sub_duration }
@@ -158,6 +162,37 @@ let k_slen = { n } -> perform LocalMut in do
     else go { i = i - 1, acc = acc + string_len { s = s } }
   go { i = n, acc = 0 }
 
+## ── 9. deque::peek_front — the `(Object) -> Object` shape, and a read that
+##      allocates an Option, so this is the shape with real work behind it.
+let k_peek = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 0 }
+  let d = deque_to_mut { deque = deque::from_seq { xs = [1, 2, 3, 4] } }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go {
+      i = i - 1,
+      acc = match deque_peek_front { deque = d } is
+        Some { val } -> acc + val
+        None -> acc,
+    }
+  let r = go { i = n, acc = 0 }
+  r + read_int { n = c }
+
+## ── 10. bytes::get — the `(Object, long) -> Object` shape over a byte[].
+let k_bget = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 0 }
+  let b = bytes_to_mut { bytes = bytes::from_seq { arr = [7, 8, 9] } }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go {
+      i = i - 1,
+      acc = match bytes_get { bytes = b, i = 1 } is
+        Some { val } -> acc + val
+        None -> acc,
+    }
+  let r = go { i = n, acc = 0 }
+  r + read_int { n = c }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -193,7 +228,15 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_char { n = n }
     report { name = "7 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
     report { name = "7 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
-  else do
+  else if k == 8 then do
     k_slen { n = n }
     report { name = "8 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
     report { name = "8 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
+  else if k == 9 then do
+    k_peek { n = n }
+    report { name = "9 deque peek     ", n = n, r = time_it { f = {} -> k_peek { n = n } } }
+    report { name = "9 deque peek     ", n = n, r = time_it { f = {} -> k_peek { n = n } } }
+  else do
+    k_bget { n = n }
+    report { name = "10 bytes get     ", n = n, r = time_it { f = {} -> k_bget { n = n } } }
+    report { name = "10 bytes get     ", n = n, r = time_it { f = {} -> k_bget { n = n } } }

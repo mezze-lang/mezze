@@ -4327,6 +4327,60 @@ on no shape and does not move.
 
 28 ops across 8 shapes: `OL`, `OB`, `OD`, `OO`, `OLO`, `ODO`, `OBO`, `OOB`.
 
+### Where the shape stops paying: the callee has to be PE-transparent too
+
+A second batch of 20 structural ops — `seq_pop`/`clear`/`reverse`/`push`/`fill`,
+the four `deque` ends, `deque`/`bytes`/`set`/`map` `clear`, `bytes_get`,
+`seq_remove` — was built, measured, and NOT landed. `bench/cases/mutabi` gained
+kernels 9 and 10 for it, which stay as the evidence:
+
+| | boundary | shape | ratio | GCs |
+|---|---|---|---|---|
+| 9 `deque::peek_front` | 6 787 | 5 866 | **1.14x** | 22 → 20 |
+| 10 `bytes::get` | 7 252 | 5 438 | **1.32x** | 23 → 19 |
+
+Against 2.0-6.6x for the first batch, and the reason is one grep: of those 20
+callees only `MutableSeq.pop` and `MutableBytes.getSafe` are PE-reachable. The
+other 18 carry `@TruffleBoundary` themselves, so the typed shape removes the
+OUTER boundary and immediately hits an inner one. **The shape only pays where
+the callee is PE-transparent**, which is why the int cell ops — `MutableInt` has
+no boundaries at all — are the 6.6x and these are the 1.2x.
+
+It also failed `nativeCompile`, and the obvious suspects all check out:
+`MutableMap.clear`/`MutableSet.clear` are bounded, `MutableSeq.pop` and both
+unbounded `MutableLongSeq` overrides are trivial array access. Bisecting it
+costs ~2.5 minutes a build to buy 1.2x, so it is not worth finding yet. The
+interpreter suite passed on the batch, so it is correct — just native-hostile
+and nearly worthless.
+
+AND THE OBVIOUS NEXT LEVER IS NOT AVAILABLE — checked before claiming it, and
+the first version of this entry claimed it anyway. "Unbound the inner accessor,
+then give it a shape" only works if the accessor can lose its boundary. It
+cannot for most of these, because of what the classes WRAP:
+
+| | backing field |
+|---|---|
+| `MutableSeq` | `Object[]` — a plain array |
+| `MutableInt` / `MutableFloat` / `MutableBool` | a primitive field |
+| `MutableDeque` | `java.util.Deque<Object>` |
+| `MutableSet` | `java.util.Set<Object>` |
+| `MutableMap` | `java.util.Map<Object, Object>` |
+
+Three of them wrap a JDK collection INTERFACE, so `peekFront()` is
+`data.peekFirst()`. Those boundaries are load bearing: without them
+`ArrayDeque`/`HashMap`/`HashSet` internals become runtime-compilable, which is
+precisely the surface the blocklist exists to stop — and is the likeliest
+explanation for this batch failing `nativeCompile` at all. They stay.
+
+Which leaves the mut family close to its floor for this technique, and says
+where the remaining money is: the cell ops are AT the cost of a Mezze call and
+done; `MutableSeq` is already open where it matters; and the `get`-family's
+1.1-1.3x is bounded by the `MezzeVariant` it allocates per call, not by the ABI
+— 19-23 young GCs per 2e7 is that `Option`. Removing THAT allocation is a
+different piece of work (a raw-or-null return with the match fused against it,
+which `tryEmitFusedMutGetMatch` already does for the dead `KnownMutOps` layer)
+and it is the one worth doing next for these ops.
+
 A smaller loose end: `CallNativeOL` carries no `@ForceQuickening`, because the
 operand is already `Object` and a quickened variant collides with the base
 ("Multiple instructions declared with name
