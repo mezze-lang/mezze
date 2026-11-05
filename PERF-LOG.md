@@ -99,7 +99,8 @@ a defect, not a conservative default.
 | ~~a stage from a CAPTURING local helper~~ | **CLOSED — 64 672 → 206 ps/elem (314x)** | And the capture was NEVER the trigger. A do-block `let` bound to a lambda GENERALIZES (#76), suppressed only for a non-ground capture (#15), so a named step is a local POLYMORPHIC function whose body compiles once with a dictionary. `Monomorphizer` cannot reach it — a local binding is not a decl. `LocalLambdaSpecializer` pins it in place, BEFORE the seed walk so the inner `map` gets seeded too |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
-| **a mut loop against the same loop written immutably** | counter **2.6x SLOWER** (224 vs 572 ps); seq element write **2.7x FASTER** (15 488 vs 5 818, 41 GCs vs 18) | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while LANDED at 1.14-1.37x once measured at a size that reaches steady state — the first reading, at n=2e6, was a 1.6 ms run and said 1.34x WORSE |
+| **in-place quicksort against functional quicksort** | **3.2x FASTER** (32 ms vs 104 ms at N=1e5); also 2x faster than `seq::sort`'s 65 ms | `bench/cases/qsort_{mut,pure,native}`. THE ANSWER to "is mut faster": in real algorithmic code, yes, clearly. The counter row below is a micro-benchmark where the functional form needs NO CALL and so fuses; it is call-vs-no-call, not mut-vs-immutable |
+| **a mut loop against the same loop written immutably** | seq element write **2.7x FASTER** (15 811 vs 5 924 ps, 42 GCs vs 18); counter 2.6x slower (219 vs 566) — but see below | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while LANDED at 1.14-1.37x once measured at a size that reaches steady state — the first reading, at n=2e6, was a 1.6 ms run and said 1.34x WORSE |
 | **a polymorphic fn passed as a VALUE to a HOF** | **57x** (1 429 vs 80 873 ps/iter) against the same callback with its type written down; the indirect call alone is 1.9x | `x * 2 + 1` on an inferred parameter is `NumMul`/`NumAdd`, so the callback carries `__dict_mul`/`__dict_add`. Called DIRECTLY it is free (763 ps) because mono specialises the site and the dicts vanish; passed as a VALUE mono cannot reach it — a function argument is not a type argument — so a `dict_wrapper` builds an `Object[]` and a three-field record PER CALL, and `hasDictParams` excludes it from the bypass. Biggest single measured gap on this branch. Lever: specialise the HOF on the FUNCTION argument, which `LocalLambdaSpecializer` already does one level in for 314x |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. And a declared op is still not a FAST op: `CallNativeScalar` puts a `@TruffleBoundary` over a `@Variadic Object[]` on every one of them, which is a further 6.2x where it can be removed — one op so far, see the two entries on it. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. CANDIDATE, not yet a conclusion (2026-11-05): the `13 GCs vs 3` is the exact signature of the per-op floor entry below — a native call behind `CallNativeScalar`'s `@TruffleBoundary` allocates ~60 bytes/iter while a call that avoids it allocates nothing. Neither op is registered in `TypedNativeHandlers` (there is no object-receiver shape), so that does not by itself separate these two; the thing to check first is whether one loop FUSES and the other does not, which is the regime confound that cost two withdrawn columns in this log. Then the graph dump |
@@ -4488,12 +4489,20 @@ hermeticity instead, since that is what makes the mut case safe.
 | seq element write | 15 488 ps, 41 GCs | **5 818 ps, 18 GCs** | mut **2.7x faster** |
 | map put, same key | 8 941 ps, 25 GCs | 11 700 ps, 21 GCs | mut 1.3x slower |
 
-The counter gap closed from 2.9x to 2.6x and will not close further this way:
-the immutable version compiles to a SINGLE `c.FusedLongTailLoop` instruction —
-the whole loop in Java — while the mut version is a 14-instruction bytecode
-loop. Reaching parity means a fused tier that can carry a side effect per
-iteration, which is a different and larger piece of work than widening
-direct-while was.
+The counter gap closed from 2.9x to 2.6x, and reading it as "mut is slower" is
+wrong. THE MUT OP IS ALREADY FREE: on `bench/cases/mutabi` a loop calling `incr`
+is 577 ps against 653 for the same loop calling an ordinary Mezze function, and
+`read_int` is 661 — i.e. a mut loop is AT the floor for a loop that contains a
+call. The immutable counter is 219 ps because `acc = acc + 1` needs NO CALL, so
+`FusedLongTailLoop` collapses the whole loop into one Java `while` with
+primitives in registers. The comparison is call against no-call.
+
+So closing it means INLINING the mut op into the loop body — `MutableInt.add` is
+a field update and inlinable in principle — leaving no call for the fused tier to
+refuse. Worth doing, and worth keeping in proportion: it only shows up when the
+entire loop body is one cell bump. With real work in the body, in-place is
+already 3.2x ahead (`qsort_mut` 32 ms against `qsort_pure` 104 ms at N=1e5, and
+2x faster than `seq::sort`'s 65 ms).
 
 `MEZZE_DUMP_BC=<substring>` is kept. It is the same class of tool as
 `MEZZE_TRACE_SELFTAIL`, whose own comment explains that an invisible refusal is
