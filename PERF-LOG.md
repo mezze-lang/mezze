@@ -4837,6 +4837,65 @@ lambda reason=unsupported (node=CallDirectIR:target-not-compiled)`. A shape that
 type-checks and does not compile is its own bug; the bench uses the benchmark's
 `iter` shape instead, and that is recorded rather than chased.
 
+### What the fix is, located to the line
+
+The whole chain hangs off one gate: `MonoDriver.collectSeedsFromExpr` admits a
+call site only if EVERY derived type arg satisfies `isConcrete`. A probe printing
+the derived args at that gate says, for this kernel:
+
+```
+GATE grid_poly: 'a45=Int 'b45=Float 'f45=Float 'c45=Float
+                'g45=VAR  'd45=VAR  'e45=VAR(EffectRow())
+GATE pixel_poly:  … all none
+GATE escape_poly: … all none
+```
+
+`grid_poly` is the ROOT: four of its seven params are already concrete at
+`main`'s call site, three are not, and nothing downstream can specialise until
+it does — `pixel_poly` and `escape_poly` show `none`, i.e. no derived args at
+all, because their sites live inside the unspecialised `grid_poly`. Fixing the
+root cascades; fixing the leaves cannot.
+
+Three distinct blockers, and they want three different things:
+
+**1. An EFFECT ROW among the type params.** `'e45` is a row, `isConcrete`
+answers false for a row, so the gate refuses. A row is never a value and never
+needs a dictionary, so it should not block specialising the value params — but
+the obvious fix is wrong, and `MonoTypeOps.isConcrete` carries the scar: someone
+already made `EffectRow -> true` and a row reached `buildSubstitution` and was
+substituted into a VALUE slot, surfacing as *"PrintType: cannot render a value
+of non-concrete type EffectRow()"*. So it has to be a PARTIAL substitution —
+specialise the value params, leave the row param generic — not a flip. There is
+precedent in the same file: `buildArgsFromBindings` already takes an
+`allowPartial` and inserts a fresh var for what it cannot fill.
+
+**2. A `having out` chain needing BACKWARD resolution.** `'d45` appears as
+`NumSub Float 'd having 'out = 'e` with `'e` already Float. Forward propagation
+cannot help; it needs "which operand makes this impl produce Float", which is
+only answerable when exactly ONE candidate impl matches — a single-candidate
+search, guarded on uniqueness.
+
+**3. A bare constraint with no `having out`.** `'g45` appears as `NumAdd 'f 'g`
+with no output binding — the `acc + pixel {…}` inside the fold. Its type comes
+from the fold's `init = 0` and the callback's return, i.e. from unification with
+the context rather than from the constraint. Nothing in the filler looks there.
+
+TRIED AND IT WAS NOT ENOUGH: feeding the filler the CALL SITE's constraints
+instead of only the callee scheme's. The site's are strictly more instantiated —
+at the `escape_poly` site the scheme says `NumMul ''s17 ''s17 having out=''k15`
+while the site says `NumMul Float Float having out=''k15`, which resolves in one
+impl lookup. Built it, measured it: 2 879 ns/px against 2 833, i.e. nothing,
+because `grid_poly` upstream still fails on the three blockers above and the
+cascade never starts. Reverted; recorded because it is the obvious first move
+and it does not work on its own.
+
+So "beat Scala" is a bounded piece of work with a known shape: partial
+substitution past a row param, single-candidate backward resolution, and
+context-derived binding for a bare constraint — in `MonoDriver`'s seeding path,
+which 4 818 typechecker tests ride on. The payoff is 47.5x on this kernel and
+57x on `bench/cases/defunc`, which would put mandelbrot at ~2.6x Scala rather
+than 122x. It wants its own session; this one located it.
+
 ---
 
 ## Method notes
