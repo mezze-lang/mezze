@@ -82,7 +82,11 @@ class AbilityChecker internal constructor(
      * re-validated and re-resolved the obligations of every binding before it —
      * checking a module was quadratic in its bindings.
      */
-    fun beginSolve() {
+    fun beginSolve(callerDeterminable: Set<TypeVar> = emptySet(), bindingKnown: Boolean = false) {
+        determinableVars = callerDeterminable
+        this.bindingKnown = bindingKnown
+        improvementPhase = false
+
         typeVarAbilityConstraints.clear()
         deferredInference.clear()
         associatedTypeResolutionConstraints.clear()
@@ -267,12 +271,337 @@ class AbilityChecker internal constructor(
         }
     }
 
+    /**
+     * IMPROVEMENT BY UNIQUENESS: a known associated OUTPUT determines the operands,
+     * when exactly one impl can produce it.
+     *
+     * This is the opposite direction to the rest of this function, which reads an
+     * impl's `having 'out` off a resolved operand tuple. Here the tuple is open and
+     * the OUTPUT is already pinned — by a literal, a comparison, or whatever the
+     * result flowed into — and the question is which operands could have produced
+     * it. When exactly one impl of the ability answers that, the operand types are
+     * not a guess: no other impl could have yielded this output from these known
+     * positions, so any program that type-checks at all has those operands.
+     *
+     * WHY IT MATTERS, measured. `escape_poly` in `bench/cases/mandelannot` is the
+     * mandelbrot escape loop written without annotations:
+     *
+     *     let zr2 = zr * zr                   NumMul 's 's   having out = 'k
+     *     let zi2 = zi * zi                   NumMul 'v 'v   having out = 'l
+     *     if zr2 + zi2 > 4.0 then i           NumAdd 'l 'k   having out = Float
+     *
+     * The third line's output is Float — the comparison against `4.0` pins it — and
+     * exactly one `NumAdd` impl produces Float, so `'l` and `'k` are Float, so the
+     * two multiplies are Float, so every operand of the loop is Float. Without this
+     * the function generalises over NINE type parameters that no caller can ever
+     * determine (they appear nowhere in its surface type `{cr,ci,zr,zi,i} -> Int`),
+     * every arithmetic operation takes a dictionary, and the same loop runs 2 833
+     * ns/px against Scala's 18.1 — 122x, on a function whose types are forced.
+     *
+     * It is NOT the mirror of the B1 hazard below. That one froze an `out` off a
+     * HALF-known tuple, picking `NumAdd Int for Int` for `{x} -> x + 0` and baking
+     * `out := Int` into a scheme that `f {x = 5.0}` then violated. The guard here is
+     * uniqueness over the WHOLE candidate set: a second candidate, or one whose
+     * target at an open position is itself a type variable, or an output the impl
+     * declares as a variable (it can produce anything, so it rules nothing out) all
+     * return null and leave the constraint exactly as it was.
+     *
+     * Returns the bindings for the open positions, or null when the output is not
+     * yet known, nothing is open, or the answer is not unique.
+     */
+    /**
+     * Pick one answer out of the candidates [improveClassArgsFromKnownOutput]
+     * found, or none.
+     *
+     * One candidate is not a choice at all — nothing else could have produced that
+     * output, so the operands are determined.
+     *
+     * SEVERAL is where a decision has to be made, and arithmetic is why. Five
+     * `NumAdd` impls yield `Float`: `Float for Float`, `Int for Float`, `Nat for
+     * Float`, `Float for Int` and `Float for Nat`. So `zr2 + zi2`, known only to
+     * produce a Float, could be any of five operand pairs, and `zr2`/`zi2` are
+     * genuinely ambiguous type variables — not determined here, and NOT
+     * determinable by a caller either, because they are the types of two `let`
+     * bindings inside the function body and appear nowhere in its signature. Today
+     * they are GENERALISED: `escape_poly` ends up with nine type parameters, five of
+     * which no call site can ever instantiate, and every operation in the loop takes
+     * a dictionary for evidence that is never going to arrive. That is the 122x.
+     *
+     * The default is HOMOGENEOUS: among several candidates, prefer the one whose
+     * operands are all the same type. It is what the five impls are there for — a
+     * mixed-mode add is the exception you write down, `Float + Float` is the one you
+     * don't — and it is the rule every other language on the mandelbrot benchmark
+     * applies to the same expression.
+     *
+     * A WRONG default is a diagnostic, not a miscompile, and that is what makes
+     * defaulting safe to do here rather than at the end. All this returns is a
+     * binding for a type variable; every other occurrence of that variable is still
+     * checked by ordinary unification. If the program really did mean `Int + Float`,
+     * the Int side fails to unify with Float at the place that says so, and the
+     * author gets a type error naming it. Nothing reaches codegen on a guess.
+     *
+     * Still nothing when the homogeneous answer is not unique either — two
+     * all-equal candidates mean the output does not even pin the width.
+     */
+    private fun chooseDeterminedTuple(
+        candidates: List<Pair<List<MezzeType>, Map<TypeVar, MezzeType>>>,
+        openVars: List<TypeVar>,
+        currentSubst: Substitution,
+        anchored: Boolean,
+    ): Pair<List<MezzeType>, Map<TypeVar, MezzeType>>? {
+        candidates.singleOrNull()?.let { return it }
+        if (candidates.isEmpty()) return null
+        // Several candidates. Whether a DEFAULT may break the tie depends on who
+        // owns the variable, which is the whole of the rule: a variable the caller
+        // can still choose is not ours to pick.
+        if (!anchored) return null
+        val determinable = callerDeterminableVars()
+        if (openVars.any { it in determinable }) return null
+        // THE SAME QUESTION, THROUGH THE SUBSTITUTION. An ability constraint names
+        // the operation's own freshly instantiated variables, and those are unified
+        // with the caller's — but which one ends up as the class REPRESENTATIVE is
+        // whichever way the unifier happened to orient the binding. So `x + 10` in
+        // `add_ten = { x } -> x + 10` can reach here as the op's variable with `'x`
+        // mapped onto it, and an identity test then says "not a parameter" about
+        // the parameter itself. That froze `add_ten` to `{ x: Int } -> Int` and made
+        // `f { x = 5.0 }` a type error in `HavingOutGeneralizationSoundnessTest`.
+        // Asking in both directions tests the CLASS, which is what the rule is about.
+        if (determinable.any { d ->
+                val r = currentSubst.apply(MezzeType.VarType(d))
+                r is MezzeType.VarType && r.variable in openVars
+            }) return null
+        // Homogeneity is a property of the OPERANDS; what an impl then calls its
+        // output is its own business.
+        return candidates.filter { (tuple, _) -> tuple.all { it == tuple[0] } }.singleOrNull()
+    }
+
+    /**
+     * The type variables SOMEBODY ELSE gets to choose: those in a parameter or
+     * result position of some function in this solve.
+     *
+     * This is the line between improvement and overreach, and these are the tests
+     * that drew it:
+     *
+     *     let tf = { xs } -> list::fold_left { xs = xs, init = 10, f = {a,x} -> a + x }
+     *     let scaled = { xs } -> iter::map { it = xs, f = { x } -> x * factor }
+     *     pub let sc2 = { x, y } -> x.scale { by = y }
+     *
+     * In each the open variable is a function's PARAMETER — `tf`'s element type,
+     * the inner lambda's `x`, `sc2`'s two arguments. A caller picks it, and the
+     * impls that make a different choice work are real: `NumAdd Nat for Int` is why
+     * `ListFoldElementKindFusionTest` folds a Nat list through `tf`, and a `Cents`
+     * list through it as well. Defaulting there is not inference filling a hole, it
+     * is inference taking a choice away. Note `scaled`: it is a LOCAL let, so
+     * "parameter" cannot mean the enclosing declaration's parameters — asking only
+     * about the top-level signature narrowed all three of these.
+     *
+     * The mandelbrot variables are the opposite case. `let zr2 = zr * zr` inside
+     * `escape_poly` names an intermediate value: it is nobody's parameter and
+     * nobody's result, it appears NOWHERE in `{cr,ci,zr,zi,i} -> Int`, and so no
+     * call site can ever say what it is. Generalising it hands out a type parameter
+     * that cannot be instantiated and an obligation whose dictionary cannot arrive.
+     * Those are the ones a default belongs to.
+     */
+    private fun callerDeterminableVars(): Set<TypeVar> = determinableVars
+
+    /**
+     * Every type variable that sits in some function's PARAMETER or RESULT position
+     * anywhere in this solve — handed in by [beginSolve], computed by
+     * [ConstraintSolver.functionPositionVars].
+     */
+    private var determinableVars: Set<TypeVar> = emptySet()
+
+    /**
+     * True once every ordinary equality has been solved, which is the only point
+     * where [callerDeterminableVars] can answer.
+     *
+     * `solveAbilityConstraints` runs BEFORE `solveMainWorklist`, so during the first
+     * pass a binding's surface type is still as written — `tf`'s is `{ xs: 'xs } ->
+     * 'ret` and the element variable is nowhere in it, because the equation that
+     * makes `'xs` a `List 'x` has not been solved yet. Improving then reads every
+     * variable as un-determinable and narrows functions that are genuinely
+     * polymorphic: it made `tf` an Int fold, and `ListFoldElementKindFusionTest`'s
+     * `Cents` list then reached the long pipeline and threw on the first cell.
+     *
+     * The deferred re-passes in `finalizeDeferredAbilities` are the right place, and
+     * they already revisit exactly these constraints — a tuple that stayed open is
+     * queued on its open variables. So improvement is a LATE rule by construction:
+     * everything that could be determined without it already has been.
+     */
+    private var improvementPhase = false
+
+    /**
+     * True when this solve is for ONE binding, which is the only situation where a
+     * parameter can be told from an intermediate.
+     *
+     * The module-wide solve gets every binding's constraints merged, and a top-level
+     * `let add_ten = { x } -> x + 10` contributes no function type of its own to them
+     * — the lambda's type is the generator's RESULT, not a constraint. So there `'x`
+     * is indistinguishable from the type of a `let` inside a body, and improving it
+     * froze `add_ten` to `{ x: Int } -> Int`, which is the exact unsoundness
+     * `HavingOutGeneralizationSoundnessTest` exists to catch (`f { x = 5.0 }` must
+     * type-check). It loses nothing: the per-binding solves run first and have both
+     * halves of the question, so whatever can be improved already has been.
+     */
+    private var bindingKnown = false
+
+    /** Called by the solver once the main worklist is done; see [improvementPhase]. */
+    internal fun beginImprovementPhase() {
+        improvementPhase = true
+    }
+
+    private fun improveClassArgsFromKnownOutput(
+        constraint: Constraint.AssociatedTypeResolution,
+        currentSubst: Substitution,
+    ): Map<TypeVar, MezzeType>? {
+        if (!improvementPhase || !bindingKnown) return null
+        val tupleVars = constraint.classArgTypeVars
+        // A single-param ability has no operand to determine: its one class arg IS
+        // the receiver, and a receiver is what the CALLER chooses.
+        if (tupleVars.size < 2) return null
+        val resolved = tupleVars.map { currentSubst.apply(MezzeType.VarType(it)) }
+        val open = resolved.indices.filter { resolved[it] is MezzeType.VarType }
+        if (open.isEmpty()) return null
+
+        // A CONCRETE output narrows the impl set. An OPEN one is one more thing to
+        // determine — and the reason this is not restricted to known outputs is that
+        // the mandelbrot chain is all outputs:
+        //
+        //     NumDiv ['span, Float] having out = 'a        a = px * 3.0 / span
+        //     NumSub [Float, 'a]    having out = 'r        r = that - 2.0
+        //
+        // `'a` and `'r` are the types of two intermediate values in `pixel_poly`, so
+        // neither is in its signature and neither output is known from anywhere. Ask
+        // only for a known output and the chain stays open forever; the function
+        // generalises over both, every caller is handed type parameters it cannot
+        // instantiate, and the arithmetic keeps its dictionaries. The group is
+        // ambiguous AS A GROUP, and that is the licence to default it.
+        val requiredOuts = HashMap<String, MezzeType>(constraint.associatedTypeVars.size)
+        val openOuts = HashMap<String, TypeVar>(constraint.associatedTypeVars.size)
+        for ((assocName, outVar) in constraint.associatedTypeVars) {
+            val out = currentSubst.apply(MezzeType.VarType(outVar))
+            if (out is MezzeType.VarType) openOuts[assocName] = out.variable
+            else requiredOuts[assocName] = out
+        }
+
+        // SOMETHING in this constraint has to be known. With every operand and every
+        // output still open there is no evidence in the program at all, and the only
+        // thing left to go on would be the impl table — so `sc2 = { x, y } ->
+        // x.scale { by = y }`, against a lone `impl Scale Int for Int`, would come
+        // out as `{ x: Int, y: Int } -> Int` on the grounds that nothing else is
+        // implemented YET. `AbilityAssociatedTypeTest` names that case: "multi-param
+        // ability constraint is kept when nothing pins the args". Resolution follows
+        // evidence; it does not supply it.
+        if (open.size == resolved.size && requiredOuts.isEmpty()) return null
+
+        val candidates = ArrayList<Pair<List<MezzeType>, Map<TypeVar, MezzeType>>>(2)
+        for (impl in abilityImpls(abilityName = constraint.abilityName)) {
+            val annotations = impl.targetTypeAnnotations ?: continue
+            if (annotations.size != resolved.size) continue
+            val bindings = mutableMapOf<String, MezzeType>()
+            var ok = true
+            // The positions we already know must match …
+            for (i in resolved.indices) {
+                if (i in open) continue
+                if (!TypeAnnotationMatcher.typeMatchesAnnotation(
+                        resolved[i], annotations[i], registry.typeDeclarations, impl.typeVars, bindings)) {
+                    ok = false
+                    break
+                }
+            }
+            if (!ok) continue
+            // … and the impl must produce exactly the outputs already pinned.
+            for ((assocName, want) in requiredOuts) {
+                val ann = implAssociatedAnnotation(impl, assocName)
+                if (ann == null) {
+                    ok = false
+                    break
+                }
+                if (!TypeAnnotationMatcher.typeMatchesAnnotation(
+                        want, ann, registry.typeDeclarations, impl.typeVars, bindings)) {
+                    ok = false
+                    break
+                }
+            }
+            if (!ok) continue
+            // Each open position must be CONCRETE in this impl's target list. An
+            // impl generic at that position determines nothing.
+            val determined = ArrayList<MezzeType>(resolved.size)
+            // ONE answer per variable. `zr * zr` is `NumMul 's 's` — the SAME
+            // variable in both positions — so `NumMul Float for Int` would have to
+            // make `'s` Float and Int at once and is not a candidate at all. Without
+            // this check it was counted as one, and a repeated operand looked
+            // ambiguous when it is the most determined shape there is.
+            val perVar = HashMap<TypeVar, MezzeType>(open.size)
+            for (i in resolved.indices) {
+                if (i !in open) {
+                    determined.add(resolved[i])
+                    continue
+                }
+                val t = typeAnnotationToMezzeType(annotations[i])
+                if (t is MezzeType.VarType) {
+                    ok = false
+                    break
+                }
+                val v = (resolved[i] as MezzeType.VarType).variable
+                val prior = perVar.put(v, t)
+                if (prior != null && prior != t) {
+                    ok = false
+                    break
+                }
+                determined.add(t)
+            }
+            if (!ok) continue
+            // What this impl would pin the still-open outputs to. A declared output
+            // that is itself a variable pins nothing and is simply left alone.
+            val outBindings = HashMap<TypeVar, MezzeType>(openOuts.size)
+            for ((assocName, outVar) in openOuts) {
+                val ann = implAssociatedAnnotation(impl, assocName) ?: continue
+                val t = typeAnnotationToMezzeType(ann)
+                if (t !is MezzeType.VarType) outBindings[outVar] = t
+            }
+            val answer = determined to (outBindings as Map<TypeVar, MezzeType>)
+            if (candidates.none { it == answer }) candidates.add(answer)
+        }
+        val openVars = open.map { (resolved[it] as MezzeType.VarType).variable } + openOuts.values
+        val (answerTuple, answerOuts) =
+            chooseDeterminedTuple(candidates, openVars, currentSubst, anchored = requiredOuts.isNotEmpty())
+                ?: return null
+        val out = HashMap<TypeVar, MezzeType>(open.size + answerOuts.size)
+        for (i in open) out[(resolved[i] as MezzeType.VarType).variable] = answerTuple[i]
+        out.putAll(answerOuts)
+        return if (out.isEmpty()) null else out
+    }
+
+    /** The impl's annotation for one associated name, under the three spellings the
+     *  two sides use (`out`, `'out`). */
+    private fun implAssociatedAnnotation(
+        impl: TypingContext.AbilityImplInfo,
+        assocName: String,
+    ): ParsedTypeAnnotation? =
+        impl.associatedTypeBindings[assocName]
+            ?: impl.associatedTypeBindings["'" + assocName.removePrefix("'")]
+            ?: impl.associatedTypeBindings[assocName.removePrefix("'")]
+
     internal fun solveAssociatedTypeResolution(
         constraint: Constraint.AssociatedTypeResolution,
         currentSubst: Substitution
     ): ConstraintSolver.ConstraintResult {
         val abilityName = constraint.abilityName
         val primaryType = currentSubst.apply(MezzeType.VarType(constraint.primaryTypeVar))
+        // Operands determined by an already-known output, before anything below
+        // gets to defer on them. Re-enters with the improved substitution rather
+        // than short-circuiting, so the normal resolution still runs and records
+        // what it records; `open` is empty on the way back in, so this is one level
+        // deep.
+        improveClassArgsFromKnownOutput(constraint, currentSubst)?.let { improvement ->
+            val improvedSubst = Substitution(improvement).compose(currentSubst)
+            val rest = solveAssociatedTypeResolution(constraint, improvedSubst)
+            return if (rest is ConstraintSolver.ConstraintResult.Success) {
+                ConstraintSolver.ConstraintResult.Success(
+                    rest.substitution.compose(Substitution(improvement)), rest.warnings)
+            } else rest
+        }
 
         DebugLogger.debug(Category.ConstraintSolver) {
             "solveAssociatedTypeResolution: ability=$abilityName, primaryTypeVar=${constraint.primaryTypeVar}, resolved=$primaryType"

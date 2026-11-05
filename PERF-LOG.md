@@ -4946,6 +4946,116 @@ which 4 818 typechecker tests ride on. The payoff is 47.5x on this kernel and
 57x on `bench/cases/defunc`, which would put mandelbrot at ~2.6x Scala rather
 than 122x. It wants its own session; this one located it.
 
+### 4x of it, landed: a known output determines the operands
+
+**The three blockers above are a description of the SYMPTOM at the mono gate.
+The defect is upstream of mono, in inference, and it is one rule.**
+
+`escape_poly` has NINE type parameters. Five of them appear nowhere in its
+surface type `{cr,ci,zr,zi,i} -> Int`, so no call site can ever instantiate
+them and no dictionary for their obligations can ever arrive — they are the
+types of `let zr2 = zr * zr` and its siblings. Printing its scheme says why they
+survive generalisation:
+
+```
+escape_poly  params=['o15,'y17,'s17,'v17,'l15,'k15,'n15,'u17,'x17]  ret=Int
+  NumMul ['s17,'s17] out='k15        zr * zr
+  NumMul ['v17,'v17] out='l15        zi * zi
+  NumAdd ['l15,'k15] out=Float       zr2 + zi2 > 4.0   ← the only concrete anchor
+  NumSub ['l15,'k15] out='n15
+  NumAdd ['o15,'n15] out='s17
+  …
+```
+
+The comparison against `4.0` pins the third output to **Float**. The solver reads
+an impl's `having 'out` off a resolved operand tuple and never the other way, so
+a known output determined nothing. Read it backwards and the whole loop falls
+out: one `NumAdd` impl takes two Floats and yields one, so `'l15` and `'k15` are
+Float; the multiplies then have a known output AND a REPEATED operand variable,
+where exactly one impl can agree with itself, so `'s17` and `'v17` are Float too.
+NINE type parameters become TWO — `cr` and `ci`, which a caller really does
+choose, because `zr2 - zi2 + cr` accepts an Int `cr` through `NumAdd Int for
+Float`.
+
+MEASURED, `bench/cases/mandelannot` kernel 1, slope over side 600 → 1200:
+**2 833 → 704 ns/px, 4.0x**, same checksum. The annotated kernel beside it is
+48.6, so the annotation gap went from 48x to 14.5x.
+
+`:typechecker:test` 4 821/0, `:interpreter:test` 7 463/0 (11 skipped),
+`:cli:nativeCompile`, `just native-test`.
+
+#### What it took to make it sound, which is most of the work
+
+The rule has two halves and the second one is where five separate tests drew the
+line. Improvement by UNIQUENESS — one candidate impl, so the operands are not a
+guess — is safe anywhere. Arithmetic is rarely unique: FIVE `NumAdd` impls yield
+Float (`Float for Float`, `Int for Float`, `Nat for Float`, `Float for Int`,
+`Float for Nat`), so the anchor above is ambiguous and needs a DEFAULT. The
+default is homogeneous — prefer the candidate whose operands are all one type —
+and the four conditions on it each come from a test that failed without them:
+
+1. **The variable must not be a parameter or a result**, anybody's, at any depth.
+   `tf = { xs } -> list::fold_left { xs = xs, init = 10, f = {a,x} -> a + x }`
+   has `NumAdd 'x for Int having out = Int` with `'x` the ELEMENT type: three
+   impls answer, and `ListFoldElementKindFusionTest` folds a Nat list and a
+   record list through it precisely because `NumAdd Nat for Int` is real.
+   Defaulting there is not inference filling a hole, it is inference taking a
+   choice away. `scaled` in `LocalLambdaSpecializerTest` is a LOCAL let, so
+   "parameter" cannot mean the enclosing declaration's parameters — asking only
+   about the top-level signature narrowed `tf`, `scaled` and `sc2` all three.
+2. **Asked through the SUBSTITUTION, in both directions.** A constraint names the
+   operation's own freshly instantiated variables, unified with the caller's, and
+   which one ends up as the class representative is however the unifier oriented
+   the binding. An identity test said "not a parameter" about the parameter
+   itself, froze `add_ten = { x } -> x + 10` to `{ x: Int } -> Int`, and made
+   `f { x = 5.0 }` a type error — the exact unsoundness
+   `HavingOutGeneralizationSoundnessTest` exists to catch.
+3. **Only in the LATE phase.** `solveAbilityConstraints` runs BEFORE
+   `solveMainWorklist`, so during the first pass `tf`'s surface is still
+   `{ xs: 'xs } -> 'ret` and the element variable is nowhere in it. The deferred
+   re-passes in `finalizeDeferredAbilities` already revisit exactly these
+   constraints, so improvement is a late rule by construction: everything
+   determinable without it already is.
+4. **Only in a PER-BINDING solve.** The module-wide solve gets every binding's
+   constraints merged, and a top-level `let` contributes no function type of its
+   own to them — the lambda's type is the generator's RESULT, not a constraint.
+   There a parameter is indistinguishable from an intermediate.
+
+**And the evidence has to be an OUTPUT, not an operand.** This is the condition
+that cost the other 10x, and it is worth writing down why it is not negotiable.
+Letting a concrete OPERAND anchor the default takes the kernel to **68 ns/px** —
+`grid_poly` down to a single type parameter, the un-annotated kernel level with
+the annotated one — because it also collapses
+
+```
+NumDiv ['span, Float] out='a        a = px * 3.0 / span
+NumSub [Float, 'a]    out='r        r = that - 2.0
+```
+
+where both `'a` and `'r` are intermediates. But `DoExpressionConstraintTest` has
+
+```
+let nested = {a, b} -> do
+  let inner = do
+    let temp = a + b
+    temp * 2
+  inner + 10
+```
+
+and `NumMul [Int, 'temp] out='inner` is **structurally identical** to the
+`NumSub` above: one concrete operand, an intermediate receiver, an intermediate
+output. Defaulting it decides `a` and `b` are Ints, and `nested { a = 1.0,
+b = 2.0 }` — which runs as Float through `NumMul Int for Float` — becomes a type
+error. There is no local difference between the two. The only difference is that
+the mandelbrot program also CALLS these functions with concrete arguments, and
+that is not a question a typechecker is asked. So 68 ns/px is not available from
+inference, and the remaining 14.5x belongs to MONOMORPHISATION, which is
+whole-program and does know every call site.
+
+`bench/cases/mandelannot`'s own header asked for exactly this test and marked the
+hypothesis Unverified. It is verified: the un-annotated loop was paying for
+evidence it could never receive.
+
 ---
 
 ## Method notes

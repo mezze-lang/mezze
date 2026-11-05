@@ -264,7 +264,7 @@ class ConstraintGenerator(
                     } else emptyList()
 
                     val allBindingConstraints = result.constraints + result.abilityConstraints + result.associatedTypeConstraints + patternResult.constraints + selfReference
-                    val solveResult = solver.solve(allBindingConstraints)
+                    val solveResult = solver.solve(allBindingConstraints, surfaceType = result.type)
                     when (solveResult) {
                         is ConstraintSolver.SolveResult.Failure -> {
                             perBindingSolveErrors.addAll(solveResult.errors)
