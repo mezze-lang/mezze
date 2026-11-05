@@ -4650,12 +4650,60 @@ This is what "defunctionalise" means here concretely, and it is the same gap the
 `perf_obsession` note already pointed at ("static dict resolution, dict_wrapper,
 needs mono"), now with a 57x A/B against an otherwise identical callback.
 
-NEXT: specialise the HOF on the FUNCTION ARGUMENT, not just on type arguments.
-`apply_fold`'s loop is already compiled three times, once per call site, so the
-per-site copies exist — what is missing is binding `f` in the copy, which makes
-the dictionaries concrete and the call direct in one step. `LocalLambdaSpecializer`
-does exactly this shape for a local lambda and was worth 314x; the HOF case is
-the same idea one level out.
+### The mechanism already exists; the CALL SITE is what fails
+
+Worth stating precisely, because "specialise the HOF on its function argument"
+is already implemented and the next person would otherwise build it twice.
+`Monomorphizer.closureArgsAt` handles a named function reference, with a comment
+naming this exact symptom: *"without this the HOF is not specialised on its
+callback … lowering falls back to `dict_wrapper_<name>`. Measured, that wrapper
+is 52 of the 57 ns a generic closure call costs."*
+
+`MEZZE_TYPECHECK_DEBUG_CATEGORIES=Monomorphization` on the bench shows it firing:
+
+```
+emit spec name=step       typeArgs=[Int, Int, Int]  closureArgs=[]
+emit spec name=apply_fold typeArgs=[Int]            closureArgs=[f]   (x2)
+byHash-fail callee=apply_fold typeParams=['d17]
+  scheme=({n: Int, f: ({x: Int} -> ''d17)} -> Int) with <NumAdd ''d17 Int having out=Int>
+  arg.type={n: Int, f: ({x: ''d11} -> 'out)
+            with <NumMul Int ''d11 having out=''g11, NumAdd Int ''g11 having out='out>}
+```
+
+So `step` IS monomorphised to Int, `apply_fold` IS specialised on `f` — and the
+CALL SITES still fail. `apply_fold`'s single type param `'d17` is the callback's
+return; at the site it binds to `'out`, which is not concrete, so the
+all-concrete gate in `MonoDriver` refuses and the site keeps the generic callee.
+Two specialised copies are emitted that nothing calls.
+
+`'out` IS determined, though. The callee's scheme says `f: ({x: Int} -> …)`, so
+unifying the argument against it gives `''d11 := Int`; then
+`NumMul Int Int having out=''g11` gives `Int`, and `NumAdd Int Int having
+out='out` gives `Int`. The chain is solvable — it is just not solved at the
+point the gate is applied.
+
+`fillHavingOutTypeArgs` cannot do it as written: it solves the callee's OWN
+constraints FORWARD, concrete args to `out`. Here the callee's constraint is
+`NumAdd 'd17 Int having out=Int`, which would have to be solved BACKWARD from
+`out` to the operand — and an impl's `out` does not determine its inputs in
+general, so that is not the route.
+
+TWO CANDIDATE ROUTES, neither attempted here:
+
+1. **Unify first, then solve forward.** Before the all-concrete gate, unify
+   `expr.arg.type` against the callee's parameter type to bind the ARGUMENT's
+   own vars from the callee's concrete expectations, then solve the ARGUMENT's
+   constraint chain forward and derive `'d17` from it. This is the same shape as
+   the transitive-self-call fix earlier on this branch (45x), one level out.
+2. **Point the reference at the specialisation that already exists.** `step`'s
+   concrete spec is emitted BEFORE `apply_fold` is seeded (the trace order
+   above), so a reference whose target has a concrete specialisation could be
+   rewritten to it, making the argument type concrete and the gate pass without
+   touching the solver.
+
+Both land in `MonoDriver`'s seeding path, which 4 818 typechecker tests ride on,
+so each wants its own session and its own gate run rather than a guess at the
+end of one.
 
 ### And a real fix landed on the way: the bypass was refusing a LAZY STUB
 
