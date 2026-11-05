@@ -2416,6 +2416,111 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * Typed fast path, (Object) -> boolean. Emptiness tests and bool-cell reads. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OB.class)
+    public static final class CallNativeOB {
+        @Specialization
+        public static boolean doInvoke(TypedNativeHandlers.OB handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object) -> double. Float-cell reads. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OD.class)
+    public static final class CallNativeOD {
+        @Specialization
+        public static double doInvoke(TypedNativeHandlers.OD handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object) -> Object. One-argument ops returning a value or Unit. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OO.class)
+    public static final class CallNativeOO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.OO handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, long) -> Object. Indexed reads and int-cell updates. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OLO.class)
+    public static final class CallNativeOLO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.OLO handler, Object a, long b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, double) -> Object. Float-cell updates. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.ODO.class)
+    public static final class CallNativeODO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.ODO handler, Object a, double b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, boolean) -> Object. Bool-cell writes. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OBO.class)
+    public static final class CallNativeOBO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.OBO handler, Object a, boolean b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, Object) -> boolean. Membership tests. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OOB.class)
+    public static final class CallNativeOOB {
+        @Specialization
+        public static boolean doInvoke(TypedNativeHandlers.OOB handler, Object a, Object b) {
+            return handler.invoke(a, b);
+        }
+    }
+
     /** Typed fast path for (long) -> long natives: int abs/neg/sign. */
     @Operation
     @ConstantOperand(type = TypedNativeHandlers.LL.class)

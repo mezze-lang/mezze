@@ -3734,6 +3734,36 @@ public final class BytecodeCompiler {
             // one we registered typed via TypedNativeHandlers. Ordered
             // by argument count so we short-circuit early.
             if (arity == 2) {
+                // Object receiver first — the shape every collection
+                // and mut op has, whose only alternative is the boundary.
+                var typedOLO = TypedNativeHandlers.lookupOLO(name);
+                if (typedOLO != null) {
+                    b.beginCallNativeOLO(typedOLO);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeOLO();
+                    return;
+                }
+                var typedODO = TypedNativeHandlers.lookupODO(name);
+                if (typedODO != null) {
+                    b.beginCallNativeODO(typedODO);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeODO();
+                    return;
+                }
+                var typedOBO = TypedNativeHandlers.lookupOBO(name);
+                if (typedOBO != null) {
+                    b.beginCallNativeOBO(typedOBO);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeOBO();
+                    return;
+                }
+                var typedOOB = TypedNativeHandlers.lookupOOB(name);
+                if (typedOOB != null) {
+                    b.beginCallNativeOOB(typedOOB);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeOOB();
+                    return;
+                }
                 var typedLLL = TypedNativeHandlers.lookupLLL(name);
                 if (typedLLL != null) {
                     b.beginCallNativeLLL(typedLLL);
@@ -3777,6 +3807,27 @@ public final class BytecodeCompiler {
                     b.beginCallNativeOL(typedOL);
                     emitNode(cn.getArgs().get(0), b, argCount, localMap);
                     b.endCallNativeOL();
+                    return;
+                }
+                var typedOB = TypedNativeHandlers.lookupOB(name);
+                if (typedOB != null) {
+                    b.beginCallNativeOB(typedOB);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOB();
+                    return;
+                }
+                var typedOD = TypedNativeHandlers.lookupOD(name);
+                if (typedOD != null) {
+                    b.beginCallNativeOD(typedOD);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOD();
+                    return;
+                }
+                var typedOO = TypedNativeHandlers.lookupOO(name);
+                if (typedOO != null) {
+                    b.beginCallNativeOO(typedOO);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOO();
                     return;
                 }
                 var typedLL = TypedNativeHandlers.lookupLL(name);

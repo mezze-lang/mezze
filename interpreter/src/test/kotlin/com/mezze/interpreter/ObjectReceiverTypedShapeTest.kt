@@ -20,12 +20,18 @@ import kotlin.test.assertNull
  *
  * | | ps/iter | young GCs |
  * |---|---|---|
- * | 2 ordinary Mezze call | 650 | 3 |
- * | 3 `read_int` via the boundary | 4 196 | 14 |
- * | 3 `read_int` via `CallNativeOL` | **672** | **3** |
+ * | kernel | boundary | typed shape | GCs |
+ * |---|---|---|---|
+ * | 2 ordinary Mezze call | 658 | 642 | 3 |
+ * | 3 `read_int` | 4 196 | **640** | 14 → 3 |
+ * | 4 `incr` | 4 710 | **774** | 13 → 3 |
+ * | 5 `seq::size` | 4 209 | **1 774** | → 3 |
+ * | 6 `seq::get` | 7 850 | **5 921** | 19 — it allocates an Option |
+ * | 7 `char_at` NOT ported | 9 692 | 8 906 | the negative control |
+ * | 8 `string_len` | 3 962 | **1 953** | 13 → 3 |
  *
- * 6.2x, and a native call now costs what a Mezze call costs. `nativeCompile`
- * builds with it.
+ * `read_int` and `incr` land AT the ordinary-call baseline, 6.6x and 6.1x, with
+ * the allocation gone. `nativeCompile` builds and `just native-test` passes.
  *
  * WHY BOTH A VALUE TEST AND A WIRING TEST. The two paths return the SAME
  * value, so a value test cannot tell them apart — it guards correctness and
@@ -60,14 +66,17 @@ class ObjectReceiverTypedShapeTest {
     }
 
     /**
-     * Only `MutableInt` qualifies today, and this pins the reason rather than
-     * the list: it is the one receiver class with no `@TruffleBoundary` on its
-     * methods. Moving the boundary inside a compiled operation for the others
-     * measured 13-22x WORSE (`seq::size` 3 926 → 51 492 ps, `seq::get`
-     * 7 204 → 157 109), so widening this is a data-structure job first.
+     * The size and length family, all on `OL`. 2.0-2.4x each.
+     *
+     * An earlier version of this test asserted these were deliberately ABSENT,
+     * on the theory that their receiver classes carry `@TruffleBoundary` on
+     * their methods. That was WRONG: `MutableSeq.size()`, `getSafe` and
+     * `setSafe` are plain field and array access, and the boundaries in those
+     * files sit on other methods. What had actually gone wrong was the
+     * registration — see the init block in `MutOps`.
      */
     @Test
-    fun `the boundary-carrying receivers are deliberately absent`() {
+    fun `the size and length family is on the OL shape`() {
         for (name in listOf(
             "__native_mut_seq_len",
             "__native_mut_string_len",
@@ -76,12 +85,46 @@ class ObjectReceiverTypedShapeTest {
             "__native_mut_deque_size",
             "__native_mut_bytes_len",
         )) {
-            assertNull(
-                TypedNativeHandlers.lookupOL(name),
-                "$name's receiver class carries @TruffleBoundary on its " +
-                    "methods, so the typed shape measured SLOWER, not faster",
-            )
+            assertNotNull(TypedNativeHandlers.lookupOL(name), "$name lost its shape")
         }
+    }
+
+    /** The int and float cell updates, on the two-operand shapes. 6.1x. */
+    @Test
+    fun `the cell updates are on their two-operand shapes`() {
+        for (name in listOf(
+            "__native_mut_int_write", "__native_mut_int_incr",
+            "__native_mut_int_decr", "__native_mut_int_mul",
+            "__native_mut_int_div", "__native_mut_int_mod",
+            "__native_mut_seq_get",
+        )) {
+            assertNotNull(TypedNativeHandlers.lookupOLO(name), "$name lost its shape")
+        }
+        for (name in listOf(
+            "__native_mut_float_write", "__native_mut_float_add",
+            "__native_mut_float_sub", "__native_mut_float_mul",
+            "__native_mut_float_div",
+        )) {
+            assertNotNull(TypedNativeHandlers.lookupODO(name), "$name lost its shape")
+        }
+        assertNotNull(TypedNativeHandlers.lookupOD("__native_mut_float_read"))
+        assertNotNull(TypedNativeHandlers.lookupOB("__native_mut_bool_read"))
+        assertNotNull(TypedNativeHandlers.lookupOBO("__native_mut_bool_write"))
+        assertNotNull(TypedNativeHandlers.lookupOO("__native_mut_bool_toggle"))
+        assertNotNull(TypedNativeHandlers.lookupOOB("__native_mut_set_contains"))
+    }
+
+    /**
+     * The NEGATIVE CONTROL for the whole change. `string_char_at` allocates a
+     * variant and a String per call, is on no shape, and does not move:
+     * 9 692 ps through the boundary against 8 906 with every other op ported.
+     * If it ever moved, the measurement would be reading something other than
+     * the shape.
+     */
+    @Test
+    fun `an unported op stays on no shape`() {
+        assertNull(TypedNativeHandlers.lookupOLO("__native_mut_string_char_at"))
+        assertNull(TypedNativeHandlers.lookupOL("__native_mut_string_read"))
     }
 
     /** The value, through the path the bytecode compiler actually emits. */

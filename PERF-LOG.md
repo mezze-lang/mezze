@@ -4210,34 +4210,25 @@ object-receiver ones: `OL` (`read_int`, `*_size`, `*_len`), `OB` (`is_empty`),
 `OD` (`read_float`), `OO`, `OLO` (`incr`, `seq::get`, `char_at`), `OOB`
 (`contains`).
 
-DONE for one op and BLOCKED for the rest — see the entry below. `OL`
-(`(Object) -> long`) now carries `__native_mut_int_read` at 6.2x, and extending
-the same mechanism to 30 ops was a 13-22x REGRESSION, because `MutableInt` is
-the only receiver class whose methods are not themselves `@TruffleBoundary`.
-A per-op `peSafe` flag on the SHARED `NativeHandler` was tried first and fails
-the native-image build outright.
+DONE for 28 ops — see the entry below. Eight object-receiver shapes now carry
+the mut cell and accessor family at 2.0-6.6x, with `read_int` and `incr` landing
+at the cost of an ordinary Mezze call. A per-op `peSafe` flag on the SHARED
+`NativeHandler` was tried first and fails the native-image build outright; the
+shapes have to be narrow, and the bodies have to be registered by METHOD
+REFERENCE rather than through a Kotlin function type, which boxes.
 
 ---
 
-## Past the boundary: the first object-receiver typed shape, 6.2x — and why it stops there
+## Past the boundary: eight object-receiver typed shapes, 2.0-6.6x
 
 The entry above named the per-op floor: `CallNativeScalar` is
 `@TruffleBoundary` over a `@Variadic Object[]`, the boundary stops the handler
 inlining, and behind it the array cannot be scalar-replaced, so every native
-call allocates. This is the fix, and the three ways of getting it wrong.
+call allocates. This is the fix — 28 mut ops at 2.0-6.6x, the narrowest of them
+landing at the cost of an ordinary Mezze call — and the FOUR ways of getting it
+wrong, three of which measured well before failing.
 
-`bench/cases/mutabi`, n=2e7, min of 7. Kernel 2 is the baseline — the same loop
-calling an ORDINARY Mezze function, so it is declined by the fused tail tier
-for exactly the reason the op kernels are:
-
-| | ps/iter | young GCs |
-|---|---|---|
-| 2 ordinary Mezze call | 650 | 3 |
-| 3 `read_int` via the boundary | 4 196 | 14 |
-| 3 `read_int` via `CallNativeOL` | **672** | **3** |
-
-**6.2x, and a native call now costs what a Mezze call costs** — 672 against
-650, with the allocation gone entirely. `nativeCompile` builds.
+The table is below, under the one that nearly stuck.
 
 ### The mechanism was already in the repo
 
@@ -4245,10 +4236,10 @@ for exactly the reason the op kernels are:
 the rest — emitted as `CallNativeLL` and friends, which have no boundary and
 allocate nothing. Every one of them is primitive-to-primitive, so an op with an
 OBJECT argument had no shape to match and fell to the boundary. That is every
-collection op and every mut op: most of the 300. `OL` is `(Object) -> long`,
-the first object-receiver shape, and `__native_mut_int_read` is on it.
+collection op and every mut op: most of the 300. The eight shapes added here are
+the object-receiver ones — `OL`, `OB`, `OD`, `OO`, `OLO`, `ODO`, `OBO`, `OOB`.
 
-### Three wrong turns, each measured
+### Four wrong turns, each measured
 
 **1. Fixed-field carriers in `NativeDispatchScalarNode`.** That node is built
 for this — `@CompilationFinal` handler, `@ExplodeLoop` over the args, typed
@@ -4282,34 +4273,59 @@ that is about to throw. **Any string building on an error path inside a PE'd
 native op needs a boundary**, and that now applies to a second site, so it is a
 rule rather than an anecdote.
 
-### Why it stops at `MutableInt`
+### The regression was my own helper, not the receivers
 
-Extending the same mechanism to 30 ops across 8 shapes was a REGRESSION of
-13-22x, and the cause is one grep:
+Extending the same mechanism to 30 ops was first a REGRESSION of 13-22x, and
+the cause was a convenience wrapper I had written for it. `nativeOL(name, p)
+{ ... }` took the body as a Kotlin function type, and `(Any) -> Long` is
+`Function1<Object, java.lang.Long>` — it BOXES on every call. Registering the
+identical body as a METHOD REFERENCE adapts straight to the SAM with a
+primitive return:
 
-| receiver class | `@TruffleBoundary` count |
+| `seq::size` | ps/iter |
 |---|---|
-| `MutableInt` | **0** |
-| `MutableSeq` | 14 |
-| `MutableString` | 18 |
-| `MutableSet` | 14 |
-| `MutableMap` | 15 |
-| `MutableDeque` | 16 |
-| `MutableBytes` | 12 |
+| via the boundary | 3 926 |
+| via the Kotlin-function-type helper | 51 492 |
+| via a method reference | **1 774** |
 
-`MutableInt` is the only receiver whose methods are PE-transparent. For the
-others the outer boundary was never the cost — removing it just moves the
-transition INSIDE a compiled operation, which is strictly worse: `seq::size`
-3 926 → 51 492 ps, `seq::get` 7 204 → 157 109, `string_len` 3 846 → 53 424,
-`incr` 4 117 → 85 656. Checksums stayed correct throughout; it is purely
-slower. Not a deopt storm either — kernel 4 traces 0 deoptimizations.
+**I PUBLISHED THE WRONG CAUSE FIRST, and it is worth recording what the wrong
+one looked like**, because it looked good. The receiver classes do differ
+exactly as a cause would: `MutableInt` carries 0 `@TruffleBoundary`
+annotations while `MutableSeq`/`MutableString`/`MutableSet`/`MutableMap`/
+`MutableDeque`/`MutableBytes` carry 12-18 each, and `MutableInt` was the one
+op that stayed fast. A grep produced a clean table and a tidy story — "the
+outer boundary was never the cost for these, moving it inside is worse" — and
+the next step it implied was a data-structure job. All of it wrong:
+`MutableSeq.size()`, `getSafe` and `setSafe` are plain field and array access,
+and those boundaries sit on OTHER methods in the same files. The one op that
+stayed fast was the one op I had registered by hand, with `::intRead`, before
+writing the helper.
 
-So the remaining mut and collection ops are a DATA-STRUCTURE job before they
-are a dispatch one: the simple accessors on `MutableSeq` and friends have to
-stop being `@TruffleBoundary` before a typed shape can help them. That is the
-next lever, and it is a bigger and more careful change than this one —
-those boundaries are presumably load bearing for the same SVM reasons, which
-is exactly what has to be checked per method rather than assumed.
+So: a correlation across six classes, a plausible mechanism, and the single
+counter-example sitting in the diff. The tell was there — `intRead` was
+registered differently from the other 30 — and the table was more persuasive
+than the diff.
+
+So with the ops registered properly, `bench/cases/mutabi` at n=2e7, min of 5:
+
+| kernel | boundary | typed shape | ratio | GCs |
+|---|---|---|---|---|
+| 1 control (fused) | 225 | 243 | — | 2 |
+| 2 ordinary Mezze call | 658 | 642 | — | 3 |
+| 3 `read_int` | 4 196 | **640** | **6.6x** | 14 → 3 |
+| 4 `incr` | 4 710 | **774** | **6.1x** | 13 → 3 |
+| 5 `seq::size` | 4 209 | **1 774** | **2.4x** | → 3 |
+| 6 `seq::get` | 7 850 | **5 921** | 1.3x | 19 |
+| 7 `char_at` NOT ported | 9 692 | 8 906 | 1.09x | 26 |
+| 8 `string_len` | 3 962 | **1 953** | **2.0x** | 13 → 3 |
+
+`read_int` and `incr` land AT the ordinary-call baseline — a native call costs
+what a Mezze call costs — with the allocation gone. `seq::get` gains least
+because it allocates an `Option` per call, which is real work and not ABI; its
+19 GCs are that variant. Kernel 7 is the negative control: `string_char_at` is
+on no shape and does not move.
+
+28 ops across 8 shapes: `OL`, `OB`, `OD`, `OO`, `OLO`, `ODO`, `OBO`, `OOB`.
 
 A smaller loose end: `CallNativeOL` carries no `@ForceQuickening`, because the
 operand is already `Object` and a quickened variant collides with the base

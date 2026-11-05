@@ -92,6 +92,40 @@ object MutOps {
     private fun mismatch(op: String, type: String): Nothing =
         throw NativeTypeMismatchException("$op expects $type")
 
+    /**
+     * Object-form accessors, for the bodies that go through a typed shape.
+     *
+     * The `as?` is one instanceof on a stable type profile, so partial
+     * evaluation folds it; the throw is bounded in [mismatch], which is what
+     * keeps `StringConcatHelper` out of the runtime-compiled graph.
+     */
+    private fun mi(o: Any, op: String): MutableInt =
+        o as? MutableInt ?: mismatch(op, "MutableInt")
+
+    private fun mf(o: Any, op: String): MutableFloat =
+        o as? MutableFloat ?: mismatch(op, "MutableFloat")
+
+    private fun mb(o: Any, op: String): MutableBool =
+        o as? MutableBool ?: mismatch(op, "MutableBool")
+
+    private fun ms(o: Any, op: String): MutableSeq =
+        o as? MutableSeq ?: mismatch(op, "MutableSeq")
+
+    private fun mstr(o: Any, op: String): MutableString =
+        o as? MutableString ?: mismatch(op, "MutableString")
+
+    private fun mset(o: Any, op: String): MutableSet =
+        o as? MutableSet ?: mismatch(op, "MutableSet")
+
+    private fun mmap(o: Any, op: String): MutableMap =
+        o as? MutableMap ?: mismatch(op, "MutableMap")
+
+    private fun mdq(o: Any, op: String): MutableDeque =
+        o as? MutableDeque ?: mismatch(op, "MutableDeque")
+
+    private fun mby(o: Any, op: String): MutableBytes =
+        o as? MutableBytes ?: mismatch(op, "MutableBytes")
+
     private fun mutInt(a: NativeArgs, op: String): MutableInt =
         a.obj(0) as? MutableInt ?: mismatch(op, "MutableInt")
 
@@ -156,34 +190,73 @@ object MutOps {
         listOf(Param("n", SlotKind.OBJECT)), SlotKind.LONG,
     ) { a -> intRead(a.obj(0)) }
 
+    /**
+     * The typed registrations, by METHOD REFERENCE.
+     *
+     * A method reference adapts straight to the SAM with primitive parameters
+     * and return. A Kotlin function type does not: `(Any) -> Long` is
+     * `Function1<Object, java.lang.Long>`, which boxes on every call. Routing
+     * these through a `nativeOL(name, p) { ... }` helper that took one measured
+     * 13-22x WORSE than the boundary it was removing — `seq::size` 3 926 ->
+     * 51 492 ps, `seq::get` 7 204 -> 157 109 — and the same op by method
+     * reference is 1 772 ps. So the convenience wrapper is the one thing not
+     * to build here.
+     */
     init {
         TypedNativeHandlers.registerOL("__native_mut_int_read", ::intRead)
+        TypedNativeHandlers.registerOL("__native_mut_seq_len", ::seqLen)
+        TypedNativeHandlers.registerOB("__native_mut_bool_read", ::boolRead)
+        TypedNativeHandlers.registerOO("__native_mut_bool_set_false", ::boolSetFalse)
+        TypedNativeHandlers.registerOO("__native_mut_bool_set_true", ::boolSetTrue)
+        TypedNativeHandlers.registerOO("__native_mut_bool_toggle", ::boolToggle)
+        TypedNativeHandlers.registerOBO("__native_mut_bool_write", ::boolWrite)
+        TypedNativeHandlers.registerOL("__native_mut_bytes_len", ::bytesLen)
+        TypedNativeHandlers.registerOB("__native_mut_deque_is_empty", ::dequeIsEmpty)
+        TypedNativeHandlers.registerOL("__native_mut_deque_size", ::dequeSize)
+        TypedNativeHandlers.registerODO("__native_mut_float_add", ::floatAdd)
+        TypedNativeHandlers.registerODO("__native_mut_float_div", ::floatDiv)
+        TypedNativeHandlers.registerODO("__native_mut_float_mul", ::floatMul)
+        TypedNativeHandlers.registerOD("__native_mut_float_read", ::floatRead)
+        TypedNativeHandlers.registerODO("__native_mut_float_sub", ::floatSub)
+        TypedNativeHandlers.registerODO("__native_mut_float_write", ::floatWrite)
+        TypedNativeHandlers.registerOLO("__native_mut_int_decr", ::intDecr)
+        TypedNativeHandlers.registerOLO("__native_mut_int_div", ::intDiv)
+        TypedNativeHandlers.registerOLO("__native_mut_int_incr", ::intIncr)
+        TypedNativeHandlers.registerOLO("__native_mut_int_mod", ::intMod)
+        TypedNativeHandlers.registerOLO("__native_mut_int_mul", ::intMul)
+        TypedNativeHandlers.registerOLO("__native_mut_int_write", ::intWrite)
+        TypedNativeHandlers.registerOOB("__native_mut_map_contains", ::mapContains)
+        TypedNativeHandlers.registerOL("__native_mut_map_size", ::mapSize)
+        TypedNativeHandlers.registerOLO("__native_mut_seq_get", ::seqGet)
+        TypedNativeHandlers.registerOOB("__native_mut_set_contains", ::setContains)
+        TypedNativeHandlers.registerOL("__native_mut_set_size", ::setSize)
+        TypedNativeHandlers.registerOL("__native_mut_string_len", ::stringLen)
     }
 
+    private fun intWrite(o: Any, v: Long): Any { mi(o, "__native_mut_int_write").set(v); return UNIT }
     private val INT_WRITE = NativeOp("__native_mut_int_write",
         listOf(Param("n", SlotKind.OBJECT), Param("v", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> mutInt(a, "__native_mut_int_write").set(a.long(1)); UNIT }
-
+    ) { a -> intWrite(a.obj(0), a.long(1)) }
+    private fun intIncr(o: Any, v: Long): Any { mi(o, "__native_mut_int_incr").add(v); return UNIT }
     private val INT_INCR = NativeOp("__native_mut_int_incr",
         listOf(Param("n", SlotKind.OBJECT), Param("delta", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> mutInt(a, "__native_mut_int_incr").add(a.long(1)); UNIT }
-
+    ) { a -> intIncr(a.obj(0), a.long(1)) }
+    private fun intDecr(o: Any, v: Long): Any { mi(o, "__native_mut_int_decr").subtract(v); return UNIT }
     private val INT_DECR = NativeOp("__native_mut_int_decr",
         listOf(Param("n", SlotKind.OBJECT), Param("delta", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> mutInt(a, "__native_mut_int_decr").subtract(a.long(1)); UNIT }
-
+    ) { a -> intDecr(a.obj(0), a.long(1)) }
+    private fun intMul(o: Any, v: Long): Any { mi(o, "__native_mut_int_mul").multiply(v); return UNIT }
     private val INT_MUL = NativeOp("__native_mut_int_mul",
         listOf(Param("n", SlotKind.OBJECT), Param("factor", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> mutInt(a, "__native_mut_int_mul").multiply(a.long(1)); UNIT }
-
+    ) { a -> intMul(a.obj(0), a.long(1)) }
+    private fun intDiv(o: Any, v: Long): Any { mi(o, "__native_mut_int_div").divide(v); return UNIT }
     private val INT_DIV = NativeOp("__native_mut_int_div",
         listOf(Param("n", SlotKind.OBJECT), Param("divisor", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> mutInt(a, "__native_mut_int_div").divide(a.long(1)); UNIT }
-
+    ) { a -> intDiv(a.obj(0), a.long(1)) }
+    private fun intMod(o: Any, v: Long): Any { mi(o, "__native_mut_int_mod").mod(v); return UNIT }
     private val INT_MOD = NativeOp("__native_mut_int_mod",
         listOf(Param("n", SlotKind.OBJECT), Param("divisor", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> mutInt(a, "__native_mut_int_mod").mod(a.long(1)); UNIT }
-
+    ) { a -> intMod(a.obj(0), a.long(1)) }
     /** `expected` BEFORE `new_val` — reversing them swaps the test with the
      *  value written, which still type-checks and still returns a Bool. */
     private val INT_CAS = NativeOp("__native_mut_int_cas",
@@ -195,52 +268,52 @@ object MutOps {
     ) { a -> mutInt(a, "__native_mut_int_cas").compareAndSwap(a.long(1), a.long(2)) }
 
     // ==================== MutFloat ====================
+    private fun floatRead(o: Any): Double { return mf(o, "__native_mut_float_read").get() }
     private val FLOAT_READ = NativeOp("__native_mut_float_read",
         listOf(Param("n", SlotKind.OBJECT)), SlotKind.DOUBLE,
-    ) { a -> mutFloat(a, "__native_mut_float_read").get() }
-
+    ) { a -> floatRead(a.obj(0)) }
+    private fun floatWrite(o: Any, v: Double): Any { mf(o, "__native_mut_float_write").set(v); return UNIT }
     private val FLOAT_WRITE = NativeOp("__native_mut_float_write",
         listOf(Param("n", SlotKind.OBJECT), Param("v", SlotKind.DOUBLE)), SlotKind.OBJECT,
-    ) { a -> mutFloat(a, "__native_mut_float_write").set(a.double(1)); UNIT }
-
+    ) { a -> floatWrite(a.obj(0), a.double(1)) }
+    private fun floatAdd(o: Any, v: Double): Any { mf(o, "__native_mut_float_add").add(v); return UNIT }
     private val FLOAT_ADD = NativeOp("__native_mut_float_add",
         listOf(Param("n", SlotKind.OBJECT), Param("delta", SlotKind.DOUBLE)), SlotKind.OBJECT,
-    ) { a -> mutFloat(a, "__native_mut_float_add").add(a.double(1)); UNIT }
-
+    ) { a -> floatAdd(a.obj(0), a.double(1)) }
+    private fun floatSub(o: Any, v: Double): Any { mf(o, "__native_mut_float_sub").subtract(v); return UNIT }
     private val FLOAT_SUB = NativeOp("__native_mut_float_sub",
         listOf(Param("n", SlotKind.OBJECT), Param("delta", SlotKind.DOUBLE)), SlotKind.OBJECT,
-    ) { a -> mutFloat(a, "__native_mut_float_sub").subtract(a.double(1)); UNIT }
-
+    ) { a -> floatSub(a.obj(0), a.double(1)) }
+    private fun floatMul(o: Any, v: Double): Any { mf(o, "__native_mut_float_mul").multiply(v); return UNIT }
     private val FLOAT_MUL = NativeOp("__native_mut_float_mul",
         listOf(Param("n", SlotKind.OBJECT), Param("factor", SlotKind.DOUBLE)), SlotKind.OBJECT,
-    ) { a -> mutFloat(a, "__native_mut_float_mul").multiply(a.double(1)); UNIT }
-
+    ) { a -> floatMul(a.obj(0), a.double(1)) }
+    private fun floatDiv(o: Any, v: Double): Any { mf(o, "__native_mut_float_div").divide(v); return UNIT }
     private val FLOAT_DIV = NativeOp("__native_mut_float_div",
         listOf(Param("n", SlotKind.OBJECT), Param("divisor", SlotKind.DOUBLE)), SlotKind.OBJECT,
-    ) { a -> mutFloat(a, "__native_mut_float_div").divide(a.double(1)); UNIT }
-
+    ) { a -> floatDiv(a.obj(0), a.double(1)) }
     // ==================== MutBool ====================
     // The cell's field is `b` here, not `n`.
+    private fun boolRead(o: Any): Boolean { return mb(o, "__native_mut_bool_read").get() }
     private val BOOL_READ = NativeOp("__native_mut_bool_read",
         listOf(Param("b", SlotKind.OBJECT)), SlotKind.BOOLEAN,
-    ) { a -> mutBool(a, "__native_mut_bool_read").get() }
-
+    ) { a -> boolRead(a.obj(0)) }
+    private fun boolWrite(o: Any, v: Boolean): Any { mb(o, "__native_mut_bool_write").set(v); return UNIT }
     private val BOOL_WRITE = NativeOp("__native_mut_bool_write",
         listOf(Param("b", SlotKind.OBJECT), Param("v", SlotKind.BOOLEAN)), SlotKind.OBJECT,
-    ) { a -> mutBool(a, "__native_mut_bool_write").set(a.bool(1)); UNIT }
-
+    ) { a -> boolWrite(a.obj(0), a.bool(1)) }
+    private fun boolToggle(o: Any): Any { mb(o, "__native_mut_bool_toggle").toggle(); return UNIT }
     private val BOOL_TOGGLE = NativeOp("__native_mut_bool_toggle",
         listOf(Param("b", SlotKind.OBJECT)), SlotKind.OBJECT,
-    ) { a -> mutBool(a, "__native_mut_bool_toggle").toggle(); UNIT }
-
+    ) { a -> boolToggle(a.obj(0)) }
+    private fun boolSetTrue(o: Any): Any { mb(o, "__native_mut_bool_set_true").set(true); return UNIT }
     private val BOOL_SET_TRUE = NativeOp("__native_mut_bool_set_true",
         listOf(Param("b", SlotKind.OBJECT)), SlotKind.OBJECT,
-    ) { a -> mutBool(a, "__native_mut_bool_set_true").set(true); UNIT }
-
+    ) { a -> boolSetTrue(a.obj(0)) }
+    private fun boolSetFalse(o: Any): Any { mb(o, "__native_mut_bool_set_false").set(false); return UNIT }
     private val BOOL_SET_FALSE = NativeOp("__native_mut_bool_set_false",
         listOf(Param("b", SlotKind.OBJECT)), SlotKind.OBJECT,
-    ) { a -> mutBool(a, "__native_mut_bool_set_false").set(false); UNIT }
-
+    ) { a -> boolSetFalse(a.obj(0)) }
     // ==================== MutChar ====================
     // A `Char` VALUE is a one-character String at runtime, so `read` hands back
     // a String and `write` takes one.
@@ -286,10 +359,10 @@ object MutOps {
         listOf(Param("s", SlotKind.OBJECT), Param("v", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutStr(a, "__native_mut_string_write").set(a.string(1)); UNIT }
 
+    private fun stringLen(o: Any): Long { return mstr(o, "__native_mut_string_len").length().toLong() }
     private val STRING_LEN = NativeOp("__native_mut_string_len",
         listOf(Param("s", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutStr(a, "__native_mut_string_len").length().toLong() }
-
+    ) { a -> stringLen(a.obj(0)) }
     private val STRING_IS_EMPTY = NativeOp("__native_mut_string_is_empty",
         listOf(Param("s", SlotKind.OBJECT)), SlotKind.BOOLEAN,
     ) { a -> mutStr(a, "__native_mut_string_is_empty").isEmpty }
@@ -366,10 +439,10 @@ object MutOps {
         listOf(Param("seq", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> option(mutSeq(a, "__native_mut_seq_pop").pop()) }
 
+    private fun seqGet(o: Any, v: Long): Any { return option(ms(o, "__native_mut_seq_get").getSafe(v.toInt())) }
     private val SEQ_GET = NativeOp("__native_mut_seq_get",
         listOf(Param("seq", SlotKind.OBJECT), Param("i", SlotKind.LONG)), SlotKind.OBJECT,
-    ) { a -> option(mutSeq(a, "__native_mut_seq_get").getSafe(a.long(1).toInt())) }
-
+    ) { a -> seqGet(a.obj(0), a.long(1)) }
     /** `i` BEFORE `v` — swapped, this would index by the value. */
     private val SEQ_SET = NativeOp("__native_mut_seq_set",
         listOf(
@@ -379,9 +452,12 @@ object MutOps {
         ), SlotKind.BOOLEAN,
     ) { a -> mutSeq(a, "__native_mut_seq_set").setSafe(a.long(1).toInt(), a.obj(2)) }
 
+    private fun seqLen(o: Any): Long =
+        (o as? MutableSeq ?: mismatch("__native_mut_seq_len", "MutableSeq")).size().toLong()
+
     private val SEQ_LEN = NativeOp("__native_mut_seq_len",
         listOf(Param("seq", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutSeq(a, "__native_mut_seq_len").size().toLong() }
+    ) { a -> seqLen(a.obj(0)) }
 
     private val SEQ_CLEAR = NativeOp("__native_mut_seq_clear",
         listOf(Param("seq", SlotKind.OBJECT)), SlotKind.OBJECT,
@@ -457,14 +533,14 @@ object MutOps {
         listOf(Param("set", SlotKind.OBJECT), Param("elem", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutSet(a, "__native_mut_set_remove").remove(a.obj(1)); UNIT }
 
+    private fun setContains(o: Any, v: Any): Boolean { return mset(o, "__native_mut_set_contains").contains(v) }
     private val SET_CONTAINS = NativeOp("__native_mut_set_contains",
         listOf(Param("set", SlotKind.OBJECT), Param("elem", SlotKind.OBJECT)), SlotKind.BOOLEAN,
-    ) { a -> mutSet(a, "__native_mut_set_contains").contains(a.obj(1)) }
-
+    ) { a -> setContains(a.obj(0), a.obj(1)) }
+    private fun setSize(o: Any): Long { return mset(o, "__native_mut_set_size").size().toLong() }
     private val SET_SIZE = NativeOp("__native_mut_set_size",
         listOf(Param("set", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutSet(a, "__native_mut_set_size").size().toLong() }
-
+    ) { a -> setSize(a.obj(0)) }
     private val SET_CLEAR = NativeOp("__native_mut_set_clear",
         listOf(Param("set", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutSet(a, "__native_mut_set_clear").clear(); UNIT }
@@ -499,14 +575,14 @@ object MutOps {
         listOf(Param("map", SlotKind.OBJECT), Param("key", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutMap(a, "__native_mut_map_remove").remove(a.obj(1)); UNIT }
 
+    private fun mapContains(o: Any, v: Any): Boolean { return mmap(o, "__native_mut_map_contains").containsKey(v) }
     private val MAP_CONTAINS = NativeOp("__native_mut_map_contains",
         listOf(Param("map", SlotKind.OBJECT), Param("key", SlotKind.OBJECT)), SlotKind.BOOLEAN,
-    ) { a -> mutMap(a, "__native_mut_map_contains").containsKey(a.obj(1)) }
-
+    ) { a -> mapContains(a.obj(0), a.obj(1)) }
+    private fun mapSize(o: Any): Long { return mmap(o, "__native_mut_map_size").size().toLong() }
     private val MAP_SIZE = NativeOp("__native_mut_map_size",
         listOf(Param("map", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutMap(a, "__native_mut_map_size").size().toLong() }
-
+    ) { a -> mapSize(a.obj(0)) }
     private val MAP_CLEAR = NativeOp("__native_mut_map_clear",
         listOf(Param("map", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutMap(a, "__native_mut_map_clear").clear(); UNIT }
@@ -553,14 +629,14 @@ object MutOps {
         listOf(Param("deque", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> option(mutDeque(a, "__native_mut_deque_peek_back").peekBack()) }
 
+    private fun dequeSize(o: Any): Long { return mdq(o, "__native_mut_deque_size").size().toLong() }
     private val DEQUE_SIZE = NativeOp("__native_mut_deque_size",
         listOf(Param("deque", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutDeque(a, "__native_mut_deque_size").size().toLong() }
-
+    ) { a -> dequeSize(a.obj(0)) }
+    private fun dequeIsEmpty(o: Any): Boolean { return mdq(o, "__native_mut_deque_is_empty").isEmpty }
     private val DEQUE_IS_EMPTY = NativeOp("__native_mut_deque_is_empty",
         listOf(Param("deque", SlotKind.OBJECT)), SlotKind.BOOLEAN,
-    ) { a -> mutDeque(a, "__native_mut_deque_is_empty").isEmpty }
-
+    ) { a -> dequeIsEmpty(a.obj(0)) }
     private val DEQUE_CLEAR = NativeOp("__native_mut_deque_clear",
         listOf(Param("deque", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutDeque(a, "__native_mut_deque_clear").clear(); UNIT }
@@ -598,10 +674,10 @@ object MutOps {
             .setSafe(a.long(1).toInt(), a.long(2).toInt())
     }
 
+    private fun bytesLen(o: Any): Long { return mby(o, "__native_mut_bytes_len").length().toLong() }
     private val BYTES_LEN = NativeOp("__native_mut_bytes_len",
         listOf(Param("bytes", SlotKind.OBJECT)), SlotKind.LONG,
-    ) { a -> mutBytes(a, "__native_mut_bytes_len").length().toLong() }
-
+    ) { a -> bytesLen(a.obj(0)) }
     private val BYTES_CLEAR = NativeOp("__native_mut_bytes_clear",
         listOf(Param("bytes", SlotKind.OBJECT)), SlotKind.OBJECT,
     ) { a -> mutBytes(a, "__native_mut_bytes_clear").clear(); UNIT }
