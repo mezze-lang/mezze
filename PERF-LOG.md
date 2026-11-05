@@ -100,6 +100,7 @@ a defect, not a conservative default.
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a mut loop against the same loop written immutably** | counter **2.6x SLOWER** (224 vs 572 ps); seq element write **2.7x FASTER** (15 488 vs 5 818, 41 GCs vs 18) | The `Mut` effect IS erased and in-place IS cheaper — confirmed where allocation dominates. The counter loses to the LOOP TIER, not to the op: `acc + 1` is an expression so `FusedLongTailLoop` takes the loop into Java, while a mut op is a STATEMENT so the branch is a `BlockIR` and both the fused tiers and direct-while require a bare `CallDirectIR`. Widening direct-while LANDED at 1.14-1.37x once measured at a size that reaches steady state — the first reading, at n=2e6, was a 1.6 ms run and said 1.34x WORSE |
+| **your own HOF, against the same work inlined** | **111x** (776 vs 86 000 ps/iter), 3 GCs vs 114 — ~950 bytes allocated PER CALL | Calling a named fn directly is free (799 ps). Passing it to a HOF you wrote is 111x, and 25x slower than `seq::fold` doing the same thing, because fusion keys off the STDLIB NAMES. The loop is fine — `MEZZE_DUMP_BC` shows the same direct-while shape, 30 instructions against 32 — and the whole difference is one `c.CallIndirectScalar1`. `CallIndirectScalar1` HAS allocation-free identity-guarded specializations, gated on the callee having a `TrampolineRootNode`; a function with no tail calls is compiled WITHOUT one, so being simpler is what makes it slower. Biggest single measured gap on this branch |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. And a declared op is still not a FAST op: `CallNativeScalar` puts a `@TruffleBoundary` over a `@Variadic Object[]` on every one of them, which is a further 6.2x where it can be removed — one op so far, see the two entries on it. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. CANDIDATE, not yet a conclusion (2026-11-05): the `13 GCs vs 3` is the exact signature of the per-op floor entry below — a native call behind `CallNativeScalar`'s `@TruffleBoundary` allocates ~60 bytes/iter while a call that avoids it allocates nothing. Neither op is registered in `TypedNativeHandlers` (there is no object-receiver shape), so that does not by itself separate these two; the thing to check first is whether one loop FUSES and the other does not, which is the regime confound that cost two withdrawn columns in this log. Then the graph dump |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
@@ -4498,6 +4499,101 @@ direct-while was.
 `MEZZE_TRACE_SELFTAIL`, whose own comment explains that an invisible refusal is
 how a 48x regression hid in plain sight; this one found a wrong number and a
 dropped suspension in one sitting.
+
+---
+
+## Your own HOF costs 111x: an indirect call allocates ~950 bytes
+
+The biggest wins in this log are all defunctionalisation of one kind or another
+— chain fusion inlines a pipeline's stages instead of calling them (540x on a
+dot chain), `LocalLambdaSpecializer` pins a polymorphic local lambda (314x),
+`ScalarBypass` devirtualises a native HOF's callback. Every one of them keys off
+the STDLIB vocabulary: `ChainCanonicalizer` matches `__native_seq_map`,
+`__native_set_fold` and the rest BY NAME. A HOF the user writes has no name the
+compiler knows.
+
+`bench/cases/defunc` is new. Every kernel computes the same arithmetic,
+`acc + (x * 2 + 1)`, reached a different way, so the rows are a ladder of
+indirection. n=2e7, min of 5:
+
+| | ps/iter | young GCs | vs inline |
+|---|---|---|---|
+| 1 inline | 776 | 3 | 1x |
+| 2 named fn, called directly | 799 | 3 | **1.03x — free** |
+| 3 own HOF, fn as a PARAMETER | **86 000** | **114** | **111x** |
+| 4 own HOF, two callbacks | 95 963 | 95 | 124x |
+| 5 closure capturing a variable | 18 886 | 39 | 24x |
+| 6 `seq::fold` — the specialised path | 3 428 | 3 | 4.4x |
+
+Checksums agree on 1, 2, 3, 5 and 6; kernel 4 halves n per callback by
+construction and says so.
+
+**Calling a named function directly is FREE.** Passing that same function to a
+HOF you wrote is 111x, and writing your own `fold` is 25x slower than
+`seq::fold` doing identical work. A closure is 4.6x FASTER than a top-level
+function reference, which is the inversion that points at the cause.
+
+### The bytecode says the loop is fine
+
+`MEZZE_DUMP_BC` shows `apply_fold`'s loop compiled THREE times — once per call
+site, so something is already specialising per site — and each copy is the same
+direct-while loop as the inline kernel, 30 instructions against 32. The entire
+difference is three of them:
+
+```
+13  load.argument index(1)      <- f, the function value
+14  load.local i
+15  c.CallIndirectScalar1       <- indirect call through it
+```
+
+So the loop is not the problem. One indirect call is.
+
+### ~950 bytes per call, in four places
+
+JFR over the run, ~19 GB of allocation for 2e7 iterations:
+
+| | site |
+|---|---|
+| 9 119 MB | `TrampolineRootNode.unpackRecord` ← `normalizeArgs` ← `execute` |
+| 4 252 MB | a `MezzeRecord` under `CallIndirect_Node.execute` |
+| 3 141 MB | a `MezzeRecord` in `CallIndirectScalar1.doDirectRecord` |
+| 2 936 MB | an `Object[]`, same frame |
+
+(JFR names `MezzeFunction.hasPartialArgs()` on two of those. That method is
+`partialArgs != null && !partialArgs.isEmpty()` and allocates nothing — it is
+the nearest frame the compiler could attribute an inlined allocation to. Worth
+saying, because taking it literally would send the next reader to the wrong
+method.)
+
+The name that matters is `doDirectRecord`: the SCALAR indirect call falls back
+to building a record.
+
+### The suspicious gate
+
+`CallIndirectScalar1` has identity-guarded specializations —
+`doStableNoClosure`, `doStable1Closure`, `doStable2Closures` — which call
+`callNode.call(arg)` with flat positional arguments and allocate NOTHING. They
+are guarded on `canBypass`, i.e. `canBypassTarget(cachedTarget)`, which requires
+the callee's root to be a `TrampolineRootNode`.
+
+And `BytecodeCompiler` says, of a function with no tail calls: *"No tail calls
+in body — return raw BDSL root, skip trampoline overhead."*
+
+So `step = { x } -> x * 2 + 1` has no trampoline, and that is exactly why
+`canBypassTarget` refuses it and the call lands on `doDirectRecord`. **The
+function being simpler is what makes calling it slower** — which also fits the
+closure beating the top-level reference by 4.6x.
+
+NEXT: that reads like a one-line gate fix, and it is not, which is why it is
+written down rather than done in the same sitting. The fast specializations pass
+FLAT positional arguments; the trampoline exists precisely to turn a record-form
+call into flat args, and it also handles partial application and the dict
+fallback (`parameterCount >= 2 && rawArgs[closureCount] instanceof MezzeRecord`
+→ `checkPartialApplication`, and `hasDictParams` is already a guard on the
+bypass). Admitting a raw BDSL root means knowing its calling convention for
+certain and knowing which of those two jobs nobody is then doing. Getting that
+wrong is an `UnsupportedSpecializationException` at best and a silently wrong
+argument at worst, so it wants its own measurement and its own gate run.
 
 ---
 

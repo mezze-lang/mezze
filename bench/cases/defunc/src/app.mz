@@ -1,0 +1,128 @@
+## What an UNSPECIALISED higher-order call costs, and therefore what
+## defunctionalising user code is worth.
+##
+## The big wins on this branch are all defunctionalisation of one kind or
+## another: chain fusion inlines a pipeline's stages instead of calling them
+## (540x on a dot chain), `LocalLambdaSpecializer` pins a polymorphic local
+## lambda at its use type (314x), `ScalarBypass` devirtualises a native HOF's
+## callback. But every one of those keys off the STDLIB vocabulary —
+## `ChainCanonicalizer` matches `__native_seq_map`, `__native_set_fold` and the
+## rest by name. A HOF the user writes has no name the compiler knows, so
+## nothing specialises it.
+##
+## Each kernel does the SAME arithmetic — `acc + (x * 2 + 1)` — reached a
+## different way, so the rows are directly comparable and the ladder measures
+## exactly the indirection:
+##
+##   1  inline          the expression written in the loop. The floor.
+##   2  named fn        a top-level function, called directly. Monomorphic.
+##   3  own HOF         a top-level HOF taking the function as a PARAMETER.
+##   4  own HOF, 2 fns  the same HOF reached with TWO different callbacks, so
+##                      the call site is bimorphic and an inline cache cannot
+##                      settle on one.
+##   5  closure         a local lambda CAPTURING a variable, passed to the HOF.
+##   6  stdlib fold     seq::fold over a range — the path that IS specialised,
+##                      for scale.
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## The work, three ways to reach it.
+let step = { x } -> x * 2 + 1
+let step_alt = { x } -> x * 2 + 1
+
+## A HOF the compiler knows nothing about: `f` is a parameter, so the call
+## inside is indirect and there is no name for the fuser to match.
+let apply_fold = { n, f } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + f { x = i } }
+  go { i = n, acc = 0 }
+
+## ── 1. INLINE. The expression in the loop body; nothing to specialise.
+let k_inline = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + (i * 2 + 1) }
+  go { i = n, acc = 0 }
+
+## ── 2. A NAMED FUNCTION, called directly. One known callee.
+let k_named = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + step { x = i } }
+  go { i = n, acc = 0 }
+
+## ── 3. THE USER'S OWN HOF, one callback. Monomorphic at the call site, so an
+##      inline cache can settle — but nothing INLINES the callback.
+let k_hof = { n } -> apply_fold { n = n, f = step }
+
+## ── 4. THE SAME HOF, TWO callbacks. The indirect call inside `apply_fold` now
+##      sees two targets, so the cache is bimorphic. Half the work each so the
+##      per-iteration figure stays comparable.
+let k_hof2 = { n } ->
+  apply_fold { n = n / 2, f = step } + apply_fold { n = n / 2, f = step_alt }
+
+## ── 5. A CLOSURE. The callback captures `k`, so it is a fresh closure value
+##      rather than a top-level function reference.
+let k_closure = { n } -> do
+  let k = 2
+  apply_fold { n = n, f = { x } -> x * k + 1 }
+
+## ── 6. THE SPECIALISED PATH, for scale: a stdlib fold the fuser recognises.
+let k_stdlib = { n } ->
+  seq::fold {
+    xs = seq::range { start = 1, end = n + 1 },
+    init = 0,
+    f = { acc, x } -> acc + (x * 2 + 1),
+  }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  ## n=2e7. A smaller run measures warmup and reads as a result — at 2e6 a
+  ## ~800 ps/iter loop finishes in 1.6 ms, which once produced a 1.34x figure
+  ## with the wrong SIGN. Raise it until the number stops moving.
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_inline { n = n }
+    report { name = "1 inline        ", n = n, r = time_it { f = {} -> k_inline { n = n } } }
+    report { name = "1 inline        ", n = n, r = time_it { f = {} -> k_inline { n = n } } }
+  else if k == 2 then do
+    k_named { n = n }
+    report { name = "2 named fn      ", n = n, r = time_it { f = {} -> k_named { n = n } } }
+    report { name = "2 named fn      ", n = n, r = time_it { f = {} -> k_named { n = n } } }
+  else if k == 3 then do
+    k_hof { n = n }
+    report { name = "3 own HOF       ", n = n, r = time_it { f = {} -> k_hof { n = n } } }
+    report { name = "3 own HOF       ", n = n, r = time_it { f = {} -> k_hof { n = n } } }
+  else if k == 4 then do
+    k_hof2 { n = n }
+    report { name = "4 own HOF 2 fns ", n = n, r = time_it { f = {} -> k_hof2 { n = n } } }
+    report { name = "4 own HOF 2 fns ", n = n, r = time_it { f = {} -> k_hof2 { n = n } } }
+  else if k == 5 then do
+    k_closure { n = n }
+    report { name = "5 closure       ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
+    report { name = "5 closure       ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
+  else do
+    k_stdlib { n = n }
+    report { name = "6 stdlib fold   ", n = n, r = time_it { f = {} -> k_stdlib { n = n } } }
+    report { name = "6 stdlib fold   ", n = n, r = time_it { f = {} -> k_stdlib { n = n } } }
