@@ -1,0 +1,140 @@
+## Is `mut` faster than the immutable path? It SHOULD be, and the argument is
+## sound: the `Mut` effect is erased — `MutEraser` β-reduces
+## `Mut.mutate { act = λ }` to the lambda's body at stdlib precompile time, so
+## nothing of the effect survives to runtime; it is a type-level fence that
+## stops mutable state mixing with anything else. And an in-place update should
+## beat allocating a new structure. So mut ought to compile to inline updating
+## code and win on both time and memory.
+##
+## This bench tests that claim in the two places it lands differently: a scalar
+## counter, where the immutable version is a register update the compiler can
+## fuse, and a COLLECTION, where the immutable version has to allocate.
+##
+## Pairs, so each row is read against the row above it:
+##   1 / 2   counter: immutable accumulator against a MutInt
+##   3 / 4   seq element write: `seq::set` (new seq each time) against `set`
+##   5 / 6   map insert: `map::insert` (persistent) against `map_put`
+use std::collections::seq
+use std::collections::map
+use std::effects::mutation::{
+  LocalMut, int_to_mut, read_int, incr,
+  seq_to_mut, set, get,
+  map_to_mut, map_put, map_size
+}
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── 1. IMMUTABLE counter. Every parameter update is `param OP constant`, so
+##      `FusedLongTailLoop` takes it and the whole loop runs in Java.
+let k_imm_count = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + 1 }
+  go { i = n, acc = 0 }
+
+## ── 2. MUT counter. The same work through a MutInt cell. The op is a
+##      STATEMENT, so the else-branch is a block rather than a bare tail call
+##      and the fused tier declines the function — which is the thing to look
+##      at, not the op.
+let k_mut_count = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 0 }
+  let go = { i } ->
+    if i <= 0 then 0
+    else do
+      incr { n = c, delta = 1 }
+      go { i = i - 1 }
+  go { i = n }
+  read_int { n = c }
+
+## ── 3. IMMUTABLE seq write. `seq::set` returns a NEW seq, so this allocates
+##      one per iteration — the case the in-place argument is about.
+let k_imm_seq = { n, xs } -> do
+  let go = { i, s } ->
+    if i <= 0 then s
+    else go {
+      i = i - 1,
+      s = match seq::set { xs = s, i = 3, x = i } is
+        Some { val } -> val
+        None -> s,
+    }
+  seq::size { xs = go { i = n, s = xs } }
+
+## ── 4. MUT seq write, in place. No allocation at all.
+let k_mut_seq = { n, xs } -> perform LocalMut in do
+  let m = seq_to_mut { seq = xs }
+  let go = { i } ->
+    if i <= 0 then 0
+    else do
+      set { seq = m, i = 3, v = i }
+      go { i = i - 1 }
+  go { i = n }
+  match get { seq = m, i = 3 } is
+    Some { val } -> val
+    None -> 0 - 1
+
+## ── 5. IMMUTABLE map insert. A persistent map allocates nodes per insert.
+let k_imm_map = { n, m0 } -> do
+  let go = { i, m } ->
+    if i <= 0 then m
+    else go { i = i - 1, m = map::insert { m = m, k = 7, v = i } }
+  map::size { m = go { i = n, m = m0 } }
+
+## ── 6. MUT map put, in place.
+let k_mut_map = { n, m0 } -> perform LocalMut in do
+  let m = map_to_mut { map = m0 }
+  let go = { i } ->
+    if i <= 0 then 0
+    else do
+      map_put { map = m, key = 7, value = i }
+      go { i = i - 1 }
+  go { i = n }
+  map_size { map = m }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 2000000 }
+  let xs = [10, 20, 30, 40, 50, 60, 70, 80]
+  let m0 = map::empty {}
+  if k == 1 then do
+    k_imm_count { n = n }
+    report { name = "1 counter  IMMUT", n = n, r = time_it { f = {} -> k_imm_count { n = n } } }
+    report { name = "1 counter  IMMUT", n = n, r = time_it { f = {} -> k_imm_count { n = n } } }
+  else if k == 2 then do
+    k_mut_count { n = n }
+    report { name = "2 counter  MUT  ", n = n, r = time_it { f = {} -> k_mut_count { n = n } } }
+    report { name = "2 counter  MUT  ", n = n, r = time_it { f = {} -> k_mut_count { n = n } } }
+  else if k == 3 then do
+    k_imm_seq { n = n, xs = xs }
+    report { name = "3 seq set  IMMUT", n = n, r = time_it { f = {} -> k_imm_seq { n = n, xs = xs } } }
+    report { name = "3 seq set  IMMUT", n = n, r = time_it { f = {} -> k_imm_seq { n = n, xs = xs } } }
+  else if k == 4 then do
+    k_mut_seq { n = n, xs = xs }
+    report { name = "4 seq set  MUT  ", n = n, r = time_it { f = {} -> k_mut_seq { n = n, xs = xs } } }
+    report { name = "4 seq set  MUT  ", n = n, r = time_it { f = {} -> k_mut_seq { n = n, xs = xs } } }
+  else if k == 5 then do
+    k_imm_map { n = n, m0 = m0 }
+    report { name = "5 map put  IMMUT", n = n, r = time_it { f = {} -> k_imm_map { n = n, m0 = m0 } } }
+    report { name = "5 map put  IMMUT", n = n, r = time_it { f = {} -> k_imm_map { n = n, m0 = m0 } } }
+  else do
+    k_mut_map { n = n, m0 = m0 }
+    report { name = "6 map put  MUT  ", n = n, r = time_it { f = {} -> k_mut_map { n = n, m0 = m0 } } }
+    report { name = "6 map put  MUT  ", n = n, r = time_it { f = {} -> k_mut_map { n = n, m0 = m0 } } }
