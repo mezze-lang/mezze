@@ -4856,7 +4856,57 @@ it does — `pixel_poly` and `escape_poly` show `none`, i.e. no derived args at
 all, because their sites live inside the unspecialised `grid_poly`. Fixing the
 root cascades; fixing the leaves cannot.
 
-Three distinct blockers, and they want three different things:
+**AND THE THREE-BLOCKER READING BELOW IS THE SYMPTOM, NOT THE SHAPE.** Probing
+further — printing `grid_poly`'s constraints with their ability NAMES and its
+surface type — gives this:
+
+```
+grid_poly surface = FunctionType(pure)
+  CONS NumMul args=['a45, 'a45]   out={out=Int}
+  CONS NumDiv args=['b45, Float]  out={out='f45}
+  CONS NumSub args=[Float, 'f45]  out={out='c45}
+  CONS NumSub args=[Float, 'g45]  out={out='c45}
+  CONS NumMod args=['a45, Int]    out={}
+  CONS NumDiv args=['a45, Int]    out={}
+  CONS NumAdd args=['c45, Float]  out={}
+  CONS NumAdd args=['d45, 'e45]   out={}
+  PARAMS 'a45=Int 'b45=Float 'f45=Float 'g45=VAR 'c45=Float 'd45=VAR 'e45=ROW
+```
+
+`grid_poly` is **pure** — no effect row in its type — and its surface type is
+`{ side, span } -> Int`. It has SEVEN type params. Two are `side` and `span`;
+the other five appear NOWHERE in the surface type. They are `pixel_poly`'s and
+`escape_poly`'s unresolved constraint residue, leaked outward because those
+functions are themselves unspecialised.
+
+That is the actual shape: **the gate demands concreteness for params that are
+not reachable from the surface type at all.** `deriveTypeArgs` can only see the
+surface type, so it cannot fill them; only the `having out` chain can, and when
+the chain does not close (two of the five here) the site is refused — along with
+everything downstream of it. A row is simply what an unfilled param reads as,
+which is why `'e45` shows up as a ROW while also being a `NumAdd` operand on a
+pure function. Reading that as "a row blocks the gate" is reading the
+placeholder as the problem.
+
+ATTEMPTED AND REVERTED: admitting a row-valued arg at the gate while omitting it
+from `buildSubstitution`, so it could never reach a value slot. It is safe and
+it does work — a probe confirms `'e45=ROW-ok` and the row stops blocking — and
+it buys NOTHING: mandelbrot 2 918 against 2 833 ns/px, `defunc` kernel 3 81 284
+against 80 873, both noise, because `'g45` and `'d45` still refuse the site.
+`:typechecker:test` stayed 4 818/0. Reverted, because what it really amounts to
+is partial specialisation arrived at by accident — admitting ONE kind of
+unfilled param without deciding what to do about unfilled params in general.
+
+So the question the next attempt has to answer first is not "how do we resolve
+these two vars" but **"should a constraint-only param block specialisation at
+all?"** If the answer is no, the gate becomes "every param reachable from the
+surface type is concrete" and the specialised copy keeps a dictionary for
+whichever ops stay unresolved while every determined op gets a concrete impl —
+partial specialisation, decided deliberately. `buildArgsFromBindings` already
+takes an `allowPartial` for exactly this shape, from the transitive-self-call
+work earlier on this branch, so the precedent and the machinery exist.
+
+The two residual vars, for whoever does it:
 
 **1. An EFFECT ROW among the type params.** `'e45` is a row, `isConcrete`
 answers false for a row, so the gate refuses. A row is never a value and never
