@@ -99,7 +99,7 @@ a defect, not a conservative default.
 | ~~a stage from a CAPTURING local helper~~ | **CLOSED — 64 672 → 206 ps/elem (314x)** | And the capture was NEVER the trigger. A do-block `let` bound to a lambda GENERALIZES (#76), suppressed only for a non-ground capture (#15), so a named step is a local POLYMORPHIC function whose body compiles once with a dictionary. `Monomorphizer` cannot reach it — a local binding is not a decl. `LocalLambdaSpecializer` pins it in place, BEFORE the seed walk so the inner `map` gets seeded too |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
-| **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes and now DEQUE ported (205 declared). sorted-map, sorted-set, mut, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. An earlier 13x figure here was withdrawn — see the experiment section |
+| **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
 | a loop with 4+ parameters | **2.4x** (584 vs 239 ps), no allocation — **CAUSE NOW UNKNOWN** | The old cause said "there is no 4-param branch". **BUILT IT AND IT WAS 1.46x SLOWER** (855 against 584), so the missing tier was never the cause: a 4-param loop already falls to the direct-while path, which emits straight-line bytecode and beats a fused operation that has to decode a 36-bit config per call. Reverted. And the EXISTING 3P tier measures ~neutral on `via_3p` — 12 ms against 13 with it switched off, the OFF readings tighter — so the fused tail tiers above 2 params may be redundant rather than load-bearing. What the remaining 2.4x IS, is now unknown |
@@ -3963,6 +3963,130 @@ push_back, rotate_left against rotate_right, `concat`'s two operands,
 `slice`'s start before its end, `get`'s index. Writing them turned up that
 `pop_front` returns `{ head, tail }` while `pop_back` returns `{ init, last }`,
 which no amount of reading the declaration would have shown.
+
+---
+
+## Mut onto the scalar native ABI: 93 ops, 1.9-2.7x — and three wrong answers on the way
+
+The mut family cost 8 000-17 000 ps/op where the loop around it cost 250.
+`bench/cases/mutabi` is new and built like `dequeabi`: seven tail loops with ONE
+mut op per iteration inside the `perform LocalMut`, kernel 1 the same loop with
+no op in its body, so every other kernel minus kernel 1 is the op.
+
+n=2e7, min of 3, TWO builds with `MutOps.MARKER` present and withheld (the
+declaration table is read while code is COMPILED):
+
+| | record | scalar | the op alone |
+|---|---|---|---|
+| 1 control | 225 | 255 | — |
+| `read_int` | 8 204 | **3 628** | 7 979 → 3 373 = **2.37x** |
+| `incr` | 12 373 | **4 575** | 12 148 → 4 320 = **2.81x** |
+| `seq::size` | 7 951 | **3 994** | 7 726 → 3 739 = 2.07x |
+| `seq::get` | 15 358 | **7 110** | 15 133 → 6 855 = 2.21x |
+| `string_char_at` | 17 246 | **9 109** | 17 021 → 8 854 = 1.92x |
+| `string_len` | 8 170 | **3 791** | 7 945 → 3 536 = 2.25x |
+
+Every checksum identical on both sides. Declared ops: 207 → 300, counted as lines of `native-signatures.tsv` (no header). `sort_by` is
+the one mut op that cannot be declared — it takes a guest comparator and needs
+the `IndirectCallNode` the scalar path does not pass. Everything here is
+`pure = false`: `pure` licenses the compiler to DUPLICATE or ELIDE a call, which
+is wrong for a mutable cell in both directions — a write obviously, but a read
+too, since duplicating one across a write changes the answer.
+
+### Wrong answer 1: mut already had a faster path than this, and it is dead
+
+73 of mut's 94 natives have their own `@Operation` in `MezzeBytecodeRootNode` —
+the `MutOp` / `NATIVE_NAME_TO_OP` table in `BytecodeCompiler`, returning unboxed
+`long`/`double`/`boolean`. That is strictly PAST the scalar ABI, so the first
+conclusion was that mut was the wrong target and porting it would be the
+"never declare a fuser name" mistake in a new costume.
+
+It is dead code, and was when written. Every tier is gated on
+`CallDirectIR.isScalarABI()`, which `ParamScalarizer` sets for EXTRACTED LAMBDAS
+only — by design, since changing a function's arity is sound only if every
+caller is rewritten with it, and a top-level `pub` declaration may be called
+from outside the map. A mut wrapper is exactly such a declaration.
+
+Proved by killing the whole layer: all seven kernels moved under 4% with
+identical checksums, `mut_loop` 119 → 122 ms, `qsort_mut` 85.0 → 86.2 ms.
+Poisoning the tiers individually agrees — `MutReadInt` (tier 1, unboxed) and
+`InlineMutOp1` (tier 2) both left the checksum untouched, while poisoning the
+record handler changed it, so the call reaches the handler and nothing above it.
+
+Widening the gate to accept a record-ABI call site does not help either, and
+that was wrong answer 2: by the time the bytecode compiler runs there is no call
+to the wrapper left to match. The dump shows a bare
+`CallNativeIR(name = "__native_mut_int_read", arg = MakeRecordIR([n = …]))`
+carrying the CALLER's source line — the wrapper is inlined, so the layer's input
+shape is destroyed before it ever looks.
+
+### Wrong answer 3: the win was credited to a CLI change that measures 1.00x
+
+Declaring the 93 ops changed NOTHING at first — 8 065 ps, and the dump still
+showed `arg=MakeRecordIR`. `:cli` keeps `:interpreter` off its compile classpath,
+so the obvious reading was the one already written in
+`TrivialWrapperInliner`: the `NativeSignatures` registry is empty under
+`mez build`. Loading the bootstrap reflectively in `Main.kt` then made the dump
+scalar and the bench 2.1x faster, which looked conclusive.
+
+It was a coincidence. `mez` already reads the declarations back from
+`META-INF/mezze/native-signatures.tsv`, which is exactly what that file is for.
+A/B'd on one snapshot with two CLIs, the `Main.kt` change measures **1.00x** on
+`mutabi`, **1.00x** on `recordcost` and identical on `tailonly` — and costs
+**13 ms of startup on every invocation** (117 against 104 ms for `--version`),
+which `mez check` pays in the edit loop. Reverted.
+
+What actually moved between those two measurements was the build, which is the
+real finding.
+
+### The jar was always one build behind, and silently
+
+`processResources` copies `generated/resources` into `build/resources/main`, and
+it must run BEFORE `compileStdlib` — that task's classpath is
+`sourceSets.main.runtimeClasspath`, which contains `processResources`'s output,
+so Gradle orders it that way. The copy `jar` then packages is the one made
+before `compileStdlib` wrote anything: the PREVIOUS build's.
+
+That is not cosmetic, because `mez` reads the native declarations out of that
+TSV. A stale one lowers every newly declared native on the record ABI, with
+nothing failing.
+
+MEASURED, with one `installDist` each way:
+
+| | jar's TSV | tree implies |
+|---|---|---|
+| withhold `MutOps.MARKER` | 300 | 207 |
+| restore `MutOps.MARKER` | 207 | 300 |
+
+Exactly one build behind, in both directions. `compileStdlib` now overwrites the
+four files it invalidates (`stdlib.sqlite`, the snapshot, its fingerprint, the
+TSV) in a `doLast` — the same remedy the `test` task in that file already applies
+to the snapshot, and it needs no reordering, because `jar` depends on
+`compileStdlib`. After the fix the table reads 207/207 and 300/300.
+
+This generalises the deque entry's trap #2. There it was "the A/B is two
+`compileStdlib` runs, not two `installDist` runs", and it failed LOUDLY with
+`no-handler:__native_deque_is_empty`. Here the same cause failed SILENTLY and
+produced a wrong attribution instead. **After changing native declarations, check
+the TSV inside the jar, not the line the build prints** — the build printed
+"300 natives" while shipping 207.
+
+### Why the tests are value tests, again
+
+`MutScalarAbiTest` pairs every op against its opposite: write against read, incr
+against decr, mul/div/mod applied in order, `compare_and_swap`'s `expected`
+against its `new_val`, append against prepend, insert against delete, char_at
+against set_char_at, push against pop, get against set, the two seq indices of
+`swap`, set add against remove, map key against value, the two deque ends,
+`bytes_fill` (value SECOND) against `bytes_fill_range` (value LAST), and
+`bytes_copy`'s five parameters, where the buffers go dest-before-src while the
+offsets go src-before-dest.
+
+Verified by breaking it: three deliberate parameter swaps, two were caught
+immediately and the third was NOT — `bytes_copy` was being called with
+`src_offset = 1, dest_offset = 1`, the same value, so exchanging them was
+invisible. With distinct offsets all three fail. A paired test still needs its
+two arguments to DIFFER.
 
 ---
 

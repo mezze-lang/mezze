@@ -41,6 +41,7 @@ object NativeBootstrap {
             SetOps.MARKER
             BytesOps.MARKER
             DequeOps.MARKER
+            MutOps.MARKER
         }
     }
 }

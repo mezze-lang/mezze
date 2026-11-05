@@ -1,0 +1,161 @@
+## What the record ABI costs on mut, and why mut looked like it had no ABI
+## problem at all.
+##
+## 73 of mut's 94 natives have their OWN `@Operation` in
+## `MezzeBytecodeRootNode` — the `MutOp` / `NATIVE_NAME_TO_OP` table in
+## `BytecodeCompiler` — returning unboxed `long`/`double`/`boolean`, which is
+## strictly past the scalar ABI rather than short of it. That whole layer is
+## DEAD. Every tier of it is gated on `CallDirectIR.isScalarABI()`, which
+## `ParamScalarizer` sets for EXTRACTED LAMBDAS only, and a mut wrapper is a
+## top-level `pub let`. Killing it outright moved nothing: all seven kernels
+## here within 4% with identical checksums, `mut_loop` 119 → 122 ms,
+## `qsort_mut` 85.0 → 86.2 ms. Widening the gate does not help either, because
+## by then the wrapper is inlined and no call to it survives to match.
+##
+## So the fix was the ordinary scalar native ABI after all — plus the reason it
+## did not work the first time. Declaring the 93 ops changed NOTHING, because
+## the scalar shape is chosen while code is COMPILED by reading
+## `NativeSignatures`, and on the `mez build` path that registry was EMPTY
+## (`:cli` keeps `:interpreter` off its compile classpath). `Main.kt` now loads
+## the bootstrap reflectively off the runtime classpath, which is what
+## `StdlibPrecompiler` had always done on its own side.
+##
+## Every kernel is a tail loop with ONE mut op per iteration inside the
+## `perform LocalMut`, so kernel 1 holds the loop constant and every other
+## kernel minus kernel 1 is the op.
+use std::collections::seq
+use std::effects::mutation::{
+  LocalMut, int_to_mut, read_int, incr,
+  seq_to_mut, get, size,
+  string_to_mut, string_len, string_char_at
+}
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── 1. CONTROL. The same loop with no mut op in its BODY. It still performs
+##      one, after the loop, because `perform LocalMut` over a body that
+##      performs nothing is a V0510 — and because the handler then costs the
+##      same here as everywhere else. One op against 20M iterations is nothing.
+let k_ctrl = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 0 }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + 1 }
+  let r = go { i = n, acc = 0 }
+  r + read_int { n = c }
+
+## ── 2. read_int — MUT_READ_INT, one argument, the narrowest shape there is.
+let k_read = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 7 }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + read_int { n = c } }
+  go { i = n, acc = 0 }
+
+## ── 3. incr — MUT_INCR, two arguments, and the one that WRITES.
+let k_incr = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 0 }
+  let go = { i } ->
+    if i <= 0 then 0
+    else do
+      incr { n = c, delta = 1 }
+      go { i = i - 1 }
+  go { i = n }
+  read_int { n = c }
+
+## ── 4. size on a MutSeq — MUT_SIZE, one argument, through a structure.
+let k_size = { n } -> perform LocalMut in do
+  let s = seq_to_mut { seq = [1, 2, 3, 4, 5, 6, 7, 8] }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + size { seq = s } }
+  go { i = n, acc = 0 }
+
+## ── 5. get on a MutSeq. Two arguments, returns an Option.
+##      The widest read here.
+let k_get = { n } -> perform LocalMut in do
+  let s = seq_to_mut { seq = [1, 2, 3, 4, 5, 6, 7, 8] }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go {
+      i = i - 1,
+      acc = match get { seq = s, i = 3 } is
+        Some { val } -> acc + val
+        None -> acc,
+    }
+  go { i = n, acc = 0 }
+
+## ── 6. string_char_at. Same shape as kernel 5 — two arguments, an Option,
+##      a mut structure indexed — on a different structure, so the pair
+##      separates the ABI from the container.
+let k_char = { n } -> perform LocalMut in do
+  let s = string_to_mut { s = "abcdefgh" }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go {
+      i = i - 1,
+      acc = match string_char_at { s = s, i = 3 } is
+        Some { val = _ } -> acc + 1
+        None -> acc,
+    }
+  go { i = n, acc = 0 }
+
+## ── 7. string_len — the narrowest read of the SAME structure kernel 6
+##      reads, so 6 minus 7 is what the index and the Option cost.
+let k_slen = { n } -> perform LocalMut in do
+  let s = string_to_mut { s = "abcdefgh" }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + string_len { s = s } }
+  go { i = n, acc = 0 }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_ctrl { n = n }
+    report { name = "1 control        ", n = n, r = time_it { f = {} -> k_ctrl { n = n } } }
+    report { name = "1 control        ", n = n, r = time_it { f = {} -> k_ctrl { n = n } } }
+  else if k == 2 then do
+    k_read { n = n }
+    report { name = "2 read_int       ", n = n, r = time_it { f = {} -> k_read { n = n } } }
+    report { name = "2 read_int       ", n = n, r = time_it { f = {} -> k_read { n = n } } }
+  else if k == 3 then do
+    k_incr { n = n }
+    report { name = "3 incr           ", n = n, r = time_it { f = {} -> k_incr { n = n } } }
+    report { name = "3 incr           ", n = n, r = time_it { f = {} -> k_incr { n = n } } }
+  else if k == 4 then do
+    k_size { n = n }
+    report { name = "4 seq size       ", n = n, r = time_it { f = {} -> k_size { n = n } } }
+    report { name = "4 seq size       ", n = n, r = time_it { f = {} -> k_size { n = n } } }
+  else if k == 5 then do
+    k_get { n = n }
+    report { name = "5 seq get        ", n = n, r = time_it { f = {} -> k_get { n = n } } }
+    report { name = "5 seq get        ", n = n, r = time_it { f = {} -> k_get { n = n } } }
+  else if k == 6 then do
+    k_char { n = n }
+    report { name = "6 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
+    report { name = "6 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
+  else do
+    k_slen { n = n }
+    report { name = "7 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
+    report { name = "7 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
