@@ -100,7 +100,7 @@ a defect, not a conservative default.
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
 | **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes, deque and now the whole MUT family ported (300 declared, counted from `native-signatures.tsv`; the 205 this row said before was two short of that file's 207). sorted-map, sorted-set, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. An earlier 13x figure here was withdrawn — see the experiment section |
-| **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
+| **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. CANDIDATE, not yet a conclusion (2026-11-05): the `13 GCs vs 3` is the exact signature of the per-op floor entry below — a native call behind `CallNativeScalar`'s `@TruffleBoundary` allocates ~60 bytes/iter while a call that avoids it allocates nothing. Neither op is registered in `TypedNativeHandlers` (there is no object-receiver shape), so that does not by itself separate these two; the thing to check first is whether one loop FUSES and the other does not, which is the regime confound that cost two withdrawn columns in this log. Then the graph dump |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
 | a loop with 4+ parameters | **2.4x** (584 vs 239 ps), no allocation — **CAUSE NOW UNKNOWN** | The old cause said "there is no 4-param branch". **BUILT IT AND IT WAS 1.46x SLOWER** (855 against 584), so the missing tier was never the cause: a 4-param loop already falls to the direct-while path, which emits straight-line bytecode and beats a fused operation that has to decode a 36-bit config per call. Reverted. And the EXISTING 3P tier measures ~neutral on `via_3p` — 12 ms against 13 with it switched off, the OFF readings tighter — so the fused tail tiers above 2 params may be redundant rather than load-bearing. What the remaining 2.4x IS, is now unknown |
 | `map::insert`, new map per iteration | 20.4x its own control, 31 GCs (was 35.8x / 47) | persistent map nodes, which it must allocate; the argument record came off it with the scalar-ABI port. Floor unknown but no longer dominated by the ABI |
@@ -3910,18 +3910,31 @@ The 2.4x gap is real and now has NO named cause, which is the honest state.
 
 Mechanical, and the kind of row that stays open because nothing about it is
 interesting until it is measured. `bench/cases/dequeabi` is new: five tail loops
-calling ONE deque op per iteration, with kernel 1 the same loop and no call, so
-every other kernel minus kernel 1 is the op.
+calling ONE deque op per iteration, with kernel 1 the same loop and no call.
 
 n=5e6, min of 3, TWO builds:
 
-| | record | scalar | the op alone |
+| | record | scalar | ratio |
 |---|---|---|---|
-| 1 control | 244 | 253 | — (1.04x, so readable) |
-| `is_empty` | 8 648 | **4 336** | 8 404 → 4 083 = **2.06x** |
-| `peek_front` | 12 861 | **8 778** | 12 617 → 8 525 = 1.48x |
-| `push_back` | 52 241 | **30 990** | 51 997 → 30 737 = 1.69x |
+| 1 control | 244 | 253 | 1.04x, so readable |
+| `is_empty` | 8 648 | **4 336** | **1.99x** |
+| `peek_front` | 12 861 | **8 778** | 1.47x |
+| `push_back` | 52 241 | **30 990** | 1.69x |
 | `rotate_left` | 56 506 | **48 787** | 1.16x |
+
+**CORRECTED 2026-11-05: the "op alone" column is withdrawn.** It read each row
+as `kernel − control` and called the difference the op. Kernel 1 qualifies for
+`FusedLongTailLoop` — every parameter update is `param OP constant` — and every
+op kernel does NOT, because a call sits on the right of its update and
+`fltlExtractOp` finds no inline op there (`MEZZE_TRACE_SELFTAIL` confirms:
+control `tier=FUSED`, the rest `tier=not-fused`). So the subtraction charged
+each op for a LOOP REGIME change as well. The ratios above are untouched and
+remain sound — each is one kernel against itself with only the ABI changed,
+which is the same-kernel before/after this log asks for. On `mutabi`, where a
+same-regime baseline was added to measure it, the regime is worth 433 ps
+(225 fused against 658 un-fused), so the withdrawn column overstated each op by
+about that much — around 5% at these magnitudes, and the conclusions do not
+move.
 
 The spread is widest for the NARROWEST op, which is the shape of the thing:
 `rotate_left` allocates a whole new deque, so the argument record is a small
@@ -3976,15 +3989,38 @@ no op in its body, so every other kernel minus kernel 1 is the op.
 n=2e7, min of 3, TWO builds with `MutOps.MARKER` present and withheld (the
 declaration table is read while code is COMPILED):
 
-| | record | scalar | the op alone |
+| | record | scalar | ratio |
 |---|---|---|---|
-| 1 control | 225 | 255 | — |
-| `read_int` | 8 204 | **3 628** | 7 979 → 3 373 = **2.37x** |
-| `incr` | 12 373 | **4 575** | 12 148 → 4 320 = **2.81x** |
-| `seq::size` | 7 951 | **3 994** | 7 726 → 3 739 = 2.07x |
-| `seq::get` | 15 358 | **7 110** | 15 133 → 6 855 = 2.21x |
-| `string_char_at` | 17 246 | **9 109** | 17 021 → 8 854 = 1.92x |
-| `string_len` | 8 170 | **3 791** | 7 945 → 3 536 = 2.25x |
+| 1 control (fused) | 225 | 255 | — |
+| `read_int` | 8 204 | **3 628** | **2.26x** |
+| `incr` | 12 373 | **4 575** | **2.70x** |
+| `seq::size` | 7 951 | **3 994** | 1.99x |
+| `seq::get` | 15 358 | **7 110** | 2.16x |
+| `string_char_at` | 17 246 | **9 109** | 1.89x |
+| `string_len` | 8 170 | **3 791** | 2.16x |
+
+**CORRECTED 2026-11-05: the "op alone" column is withdrawn**, for the reason
+the deque entry above now records — kernel 1 is fused and the op kernels are
+not, so subtracting it charged each op for the loop regime too. `mutabi` kernel
+2 is new and is the baseline that was missing: the same loop with an ORDINARY
+Mezze call on the right of its `acc` update, so it is declined by the fused
+tier for exactly the reason the op kernels are and differs from them only in
+what the call does.
+
+| | ps/iter | GCs over 2e7 |
+|---|---|---|
+| 1 fused control | 225 | 2 |
+| 2 same-regime baseline (ordinary call) | 658 | 3 |
+| 3 `read_int` | 4 196 | 14 |
+| 4 `incr` | 4 710 | 13 |
+| 5 `seq::size` | 4 209 | — |
+| 6 `seq::get` | 7 850 | — |
+| 7 `string_char_at` | 9 692 | — |
+| 8 `string_len` | 3 962 | 13 |
+
+So the loop regime is 433 ps of it and the op is the other 3 300-9 000. The
+ratios above stand; what changes is that the op is now measured against
+something in its own regime.
 
 Every checksum identical on both sides. Declared ops: 207 → 300, counted as lines of `native-signatures.tsv` (no header). `sort_by` is
 the one mut op that cannot be declared — it takes a guest comparator and needs
@@ -4087,6 +4123,98 @@ immediately and the third was NOT — `bytes_copy` was being called with
 `src_offset = 1, dest_offset = 1`, the same value, so exchanging them was
 invisible. With distinct offsets all three fail. A paired test still needs its
 two arguments to DIFFER.
+
+---
+
+## The per-op floor is a `@TruffleBoundary` on every scalar native call
+
+A scalar-ABI native costs ~3 500 ps for work that is one field load, against
+658 ps for the same loop calling an ordinary Mezze function. That is the floor
+under all 300 declared ops, and it now has a cause.
+
+`bench/cases/mutabi`, n=2e7, min of 3, young GCs over the run:
+
+| | ps/iter | GCs | what the update calls |
+|---|---|---|---|
+| 1 control | 225 | 2 | nothing — `acc + 1`, so the loop FUSES |
+| 2 baseline | 658 | 3 | an ordinary Mezze function |
+| 3 `read_int` | 4 196 | 14 | a native |
+| 4 `incr` | 4 710 | 13 | a native |
+| 8 `string_len` | 3 962 | 13 | a native |
+
+An ordinary call allocates nothing measurable (3 GCs against the control's 2).
+A native call allocates ~60 bytes per iteration. JFR names it: **1.2 GB of
+`java.lang.Object[]`** attributed to
+`MezzeBytecodeRootNodeGen$CachedBytecodeNode.continueAt` — 742 MB on the OSR
+path and 460 MB on the regular one — with everything else in the profile being
+class loading and CBOR snapshot decode at startup.
+
+### The site
+
+`MezzeBytecodeRootNode.CallNativeScalar`:
+
+```java
+@Specialization
+@TruffleBoundary
+public static Object doInvoke(NativeHandler handler, @Variadic Object[] args) {
+    return handler.invoke(new PositionalArgs(args, null, null));
+}
+```
+
+Three costs per call, and the first causes the others:
+
+1. **`@TruffleBoundary`.** The handler is not inlined into the compiled loop,
+   so nothing downstream of it can be escape-analysed.
+2. **`@Variadic Object[]`.** BDSL packs the operands into an array per call.
+   Behind a boundary it cannot be scalar-replaced.
+3. **`new PositionalArgs(...)`** on top of that, plus a boxed return.
+
+The boundary's justification is in its own comment: the handler lambda is
+opaque to PE, and SVM's `TruffleFeature` blocklist follows reachability from it
+into arbitrary JDK code, so native-image build bails. That part is real. What
+is not is the next sentence — "Those are inherently allocating / heavier so the
+boundary has no measurable impact". `mut_int_read` is `MutableInt.get()`, a
+single field load, and it pays 3 500 ps and 60 bytes.
+
+### What this invalidates
+
+`NativeDispatchScalarNode` is a careful piece of work — `@CompilationFinal`
+handler, `@ExplodeLoop` over the args, typed `executeLong`/`executeDouble` so
+the primitive never boxes on the way in, and a comment reasoning about exactly
+the scalar replacement that is wanted. **The BDSL path does not use it.** It
+goes through `CallNativeScalar` instead. Replacing that node's `Object[]` with
+fixed-field `Args1`/`Args2`/`Args3` carriers measured NOTHING — 14/13/23 GCs
+before, 14/13/23 after, 3 674 ps against 3 628 — because the hot path never
+touched the code being changed. Reverted. Optimising a node and never checking
+that the hot path reaches it is the same error as A/B-ing the wrong build.
+
+### The fix already exists, for primitives only
+
+`TypedNativeHandlers` holds signature-specific shapes — `LL`, `DD`, `DB`, `LD`,
+`DL`, `BB`, `LLL`, `DDD`, `DDB`, `BBB` — emitted as `CallNativeLL` and friends,
+which have NO boundary, carry `@ForceQuickening`, take and return primitives,
+and allocate nothing:
+
+```java
+@Specialization
+@ForceQuickening
+public static long doInvoke(TypedNativeHandlers.LL handler, long a) {
+    return handler.invoke(a);
+}
+```
+
+Every shape there is primitive-to-primitive. An op with an OBJECT argument has
+no shape to match, so it falls to the boundary — and that is every collection op
+and every mut op, which is most of the 300. The missing shapes are the
+object-receiver ones: `OL` (`read_int`, `*_size`, `*_len`), `OB` (`is_empty`),
+`OD` (`read_float`), `OO`, `OLO` (`incr`, `seq::get`, `char_at`), `OOB`
+(`contains`).
+
+NEXT, and it needs care rather than volume: those shapes have to come with a
+judgement about which handler bodies are PE-safe, because the boundary is load
+bearing for `mez build --native`. A field load on a `Mutable*` is safe;
+`string_replace` reaching `Pattern.quote` is what the blocklist is for. So this
+is a declared property per op, verified by `just native`, not a blanket removal.
 
 ---
 

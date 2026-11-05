@@ -47,9 +47,23 @@ let time_it = { f } -> perform SystemTime in do
   let t1 = monotonic {}
   { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
 
-## ── 1. CONTROL. The same loop with no mut op in its BODY. It still performs
-##      one, after the loop, because `perform LocalMut` over a body that
-##      performs nothing is a V0510 — and because the handler then costs the
+## ── 1. FUSED CONTROL, and it is NOT the baseline for the op kernels.
+##
+##      This loop qualifies for `FusedLongTailLoop` — the tier that runs the
+##      whole loop in Java with no per-iteration bytecode dispatch — because
+##      every parameter update is `param OP constant`. Every kernel below has a
+##      CALL on the right of its update instead, which the tier declines
+##      (`fltlExtractOp` finds no inline op, `MEZZE_TRACE_SELFTAIL` says
+##      `tier-1 declined at line8582`/`line8599`). So kernel 1 runs in Java and
+##      kernels 3..9 run in ordinary bytecode, where longs box on the stack.
+##
+##      Subtracting kernel 1 from an op kernel therefore charges the op for the
+##      LOOP REGIME as well. Kernel 2 exists to be subtracted instead. Kernel 1
+##      is kept because it bounds the whole loop (~230 ps) and makes the
+##      regime difference visible rather than silent.
+##
+##      It performs one mut op after the loop because `perform LocalMut` over a
+##      body that performs nothing is a V0510, and so the handler costs the
 ##      same here as everywhere else. One op against 20M iterations is nothing.
 let k_ctrl = { n } -> perform LocalMut in do
   let c = int_to_mut { n = 0 }
@@ -59,7 +73,27 @@ let k_ctrl = { n } -> perform LocalMut in do
   let r = go { i = n, acc = 0 }
   r + read_int { n = c }
 
-## ── 2. read_int — MUT_READ_INT, one argument, the narrowest shape there is.
+## ── 2. SAME-REGIME CONTROL. The baseline every op kernel is measured against.
+##
+##      Identical loop shape, and a CALL on the right of the `acc` update just
+##      like the op kernels — but the callee is an ordinary Mezze function, not
+##      a native. So this kernel is declined by the fused tier for the same
+##      reason they are, pays the same un-fused bytecode loop and the same
+##      boxing, and differs from them only by what the call does.
+##
+##      `step` is deliberately not a trivial wrapper: a body of `1` would be
+##      inlined to a literal and the loop would fuse again, turning this back
+##      into kernel 1.
+let step = { x } -> if x > 0 then 1 else 0
+let k_call = { n } -> perform LocalMut in do
+  let c = int_to_mut { n = 0 }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + step { x = i } }
+  let r = go { i = n, acc = 0 }
+  r + read_int { n = c }
+
+## ── 3. read_int — MUT_READ_INT, one argument, the narrowest shape there is.
 let k_read = { n } -> perform LocalMut in do
   let c = int_to_mut { n = 7 }
   let go = { i, acc } ->
@@ -67,7 +101,7 @@ let k_read = { n } -> perform LocalMut in do
     else go { i = i - 1, acc = acc + read_int { n = c } }
   go { i = n, acc = 0 }
 
-## ── 3. incr — MUT_INCR, two arguments, and the one that WRITES.
+## ── 4. incr — MUT_INCR, two arguments, and the one that WRITES.
 let k_incr = { n } -> perform LocalMut in do
   let c = int_to_mut { n = 0 }
   let go = { i } ->
@@ -78,7 +112,7 @@ let k_incr = { n } -> perform LocalMut in do
   go { i = n }
   read_int { n = c }
 
-## ── 4. size on a MutSeq — MUT_SIZE, one argument, through a structure.
+## ── 5. size on a MutSeq — MUT_SIZE, one argument, through a structure.
 let k_size = { n } -> perform LocalMut in do
   let s = seq_to_mut { seq = [1, 2, 3, 4, 5, 6, 7, 8] }
   let go = { i, acc } ->
@@ -86,7 +120,7 @@ let k_size = { n } -> perform LocalMut in do
     else go { i = i - 1, acc = acc + size { seq = s } }
   go { i = n, acc = 0 }
 
-## ── 5. get on a MutSeq. Two arguments, returns an Option.
+## ── 6. get on a MutSeq. Two arguments, returns an Option.
 ##      The widest read here.
 let k_get = { n } -> perform LocalMut in do
   let s = seq_to_mut { seq = [1, 2, 3, 4, 5, 6, 7, 8] }
@@ -100,7 +134,7 @@ let k_get = { n } -> perform LocalMut in do
     }
   go { i = n, acc = 0 }
 
-## ── 6. string_char_at. Same shape as kernel 5 — two arguments, an Option,
+## ── 7. string_char_at. Same shape as kernel 5 — two arguments, an Option,
 ##      a mut structure indexed — on a different structure, so the pair
 ##      separates the ABI from the container.
 let k_char = { n } -> perform LocalMut in do
@@ -115,7 +149,7 @@ let k_char = { n } -> perform LocalMut in do
     }
   go { i = n, acc = 0 }
 
-## ── 7. string_len — the narrowest read of the SAME structure kernel 6
+## ── 8. string_len — the narrowest read of the SAME structure kernel 6
 ##      reads, so 6 minus 7 is what the index and the Option cost.
 let k_slen = { n } -> perform LocalMut in do
   let s = string_to_mut { s = "abcdefgh" }
@@ -136,26 +170,30 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     report { name = "1 control        ", n = n, r = time_it { f = {} -> k_ctrl { n = n } } }
     report { name = "1 control        ", n = n, r = time_it { f = {} -> k_ctrl { n = n } } }
   else if k == 2 then do
-    k_read { n = n }
-    report { name = "2 read_int       ", n = n, r = time_it { f = {} -> k_read { n = n } } }
-    report { name = "2 read_int       ", n = n, r = time_it { f = {} -> k_read { n = n } } }
+    k_call { n = n }
+    report { name = "2 call baseline  ", n = n, r = time_it { f = {} -> k_call { n = n } } }
+    report { name = "2 call baseline  ", n = n, r = time_it { f = {} -> k_call { n = n } } }
   else if k == 3 then do
-    k_incr { n = n }
-    report { name = "3 incr           ", n = n, r = time_it { f = {} -> k_incr { n = n } } }
-    report { name = "3 incr           ", n = n, r = time_it { f = {} -> k_incr { n = n } } }
+    k_read { n = n }
+    report { name = "3 read_int       ", n = n, r = time_it { f = {} -> k_read { n = n } } }
+    report { name = "3 read_int       ", n = n, r = time_it { f = {} -> k_read { n = n } } }
   else if k == 4 then do
-    k_size { n = n }
-    report { name = "4 seq size       ", n = n, r = time_it { f = {} -> k_size { n = n } } }
-    report { name = "4 seq size       ", n = n, r = time_it { f = {} -> k_size { n = n } } }
+    k_incr { n = n }
+    report { name = "4 incr           ", n = n, r = time_it { f = {} -> k_incr { n = n } } }
+    report { name = "4 incr           ", n = n, r = time_it { f = {} -> k_incr { n = n } } }
   else if k == 5 then do
-    k_get { n = n }
-    report { name = "5 seq get        ", n = n, r = time_it { f = {} -> k_get { n = n } } }
-    report { name = "5 seq get        ", n = n, r = time_it { f = {} -> k_get { n = n } } }
+    k_size { n = n }
+    report { name = "5 seq size       ", n = n, r = time_it { f = {} -> k_size { n = n } } }
+    report { name = "5 seq size       ", n = n, r = time_it { f = {} -> k_size { n = n } } }
   else if k == 6 then do
+    k_get { n = n }
+    report { name = "6 seq get        ", n = n, r = time_it { f = {} -> k_get { n = n } } }
+    report { name = "6 seq get        ", n = n, r = time_it { f = {} -> k_get { n = n } } }
+  else if k == 7 then do
     k_char { n = n }
-    report { name = "6 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
-    report { name = "6 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
+    report { name = "7 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
+    report { name = "7 char_at        ", n = n, r = time_it { f = {} -> k_char { n = n } } }
   else do
     k_slen { n = n }
-    report { name = "7 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
-    report { name = "7 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
+    report { name = "8 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
+    report { name = "8 string_len     ", n = n, r = time_it { f = {} -> k_slen { n = n } } }
