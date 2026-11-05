@@ -399,6 +399,18 @@ object NativeHelpers {
         )
     }
 
+    /**
+     * Bit-for-bit `NativeDispatch.getDeque`, minus the record lookup. Like
+     * `getSet` and unlike `getSeq`/`getList`, this one does NOT coerce — it
+     * casts or throws.
+     */
+    fun asDeque(value: Any?, name: String): com.mezze.datastructures.deque.MezzeDeque<*> {
+        if (value is com.mezze.datastructures.deque.MezzeDeque<*>) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeDeque for field '" + name + "'",
+        )
+    }
+
     /** Bit-for-bit `NativeDispatch.getMap`, minus the record lookup. */
     fun asMap(value: Any?, name: String): com.mezze.datastructures.map.MezzeMap<*, *> {
         if (value is com.mezze.datastructures.map.MezzeMap<*, *>) return value

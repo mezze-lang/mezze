@@ -99,7 +99,7 @@ a defect, not a conservative default.
 | ~~a stage from a CAPTURING local helper~~ | **CLOSED — 64 672 → 206 ps/elem (314x)** | And the capture was NEVER the trigger. A do-block `let` bound to a lambda GENERALIZES (#76), suppressed only for a non-ground capture (#15), so a named step is a local POLYMORPHIC function whose body compiles once with a dictionary. `Monomorphizer` cannot reach it — a local binding is not a decl. `LocalLambdaSpecializer` pins it in place, BEFORE the seed walk so the inner `map` gets seeded too |
 | a callee whose body is an `if` over two pipelines | FIXED: **214x** (43 416 -> 203 ps/elem) | `ChainCanonicalizer.tryDistributeOverIf` pushes the operation into both branches, sound because they are MUTUALLY EXCLUSIVE — the IR duplicates, the work does not. `stages_cond` disappears from the compiled output entirely |
 | a chain through 5 forwarding hops | NOT a gap | measured at the floor — the wrapper inliner collapses the forwarding chain before `MAX_PEEK_HOPS` binds |
-| **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list and set accessors now ported (174 declared). sorted-map, sorted-set, deque, mut, nel, bytes and every HOF remain. An earlier 13x figure here was withdrawn — see the experiment section |
+| **a native on the LEGACY RECORD ABI** | **2.0-3.3x** a scalar-ABI call, measured per op on one kernel before and after | `TypedASTCompiler` emits `CallNativeIR(arg=MakeRecordIR(...))` and the handler looks each argument up by field name. 128 ops were declared against 1298 legacy handlers; map, seq, list, set, bytes and now DEQUE ported (205 declared). sorted-map, sorted-set, mut, nel and every HOF remain — a HOF cannot be declared at all, because the scalar path does not hand the handler the `IndirectCallNode` it needs to call back into guest code. An earlier 13x figure here was withdrawn — see the experiment section |
 | **two IR-identical loops on the SAME ABI** | **4.4x** (3 796 vs 870 ps), 13 GCs vs 3 | `map::size` against `str::size`: same lowered IR (1908 vs 1909 chars, same node sequence), same scalar ABI, and the gap SURVIVES replacing the native's body with `{ _ -> 1L }`. So it is neither the ABI nor the native. Cause is below the IR. Next: compiled-graph dump on a quiet box |
 | ~~a loop made dictionary-passing by its base case~~ | **CLOSED — 30 675 → 682 ps/iter (45x)**, `DictMethodCallIR` 3 → 0 | The entry call specialised all along; the SELF-CALL did not, so the specialized clone recursed into its GENERIC self and every iteration after the first was dict-passing. `deriveTransitiveTypeArgs` needs every typeParam concrete and a `having 'out` var is unreachable from the parameter type — the SEED path had filled those forever, the TRANSITIVE path never did |
 | a loop with 4+ parameters | **2.4x** (584 vs 239 ps), no allocation — **CAUSE NOW UNKNOWN** | The old cause said "there is no 4-param branch". **BUILT IT AND IT WAS 1.46x SLOWER** (855 against 584), so the missing tier was never the cause: a 4-param loop already falls to the direct-while path, which emits straight-line bytecode and beats a fused operation that has to decode a 36-bit config per call. Reverted. And the EXISTING 3P tier measures ~neutral on `via_3p` — 12 ms against 13 with it switched off, the OFF readings tighter — so the fused tail tiers above 2 params may be redundant rather than load-bearing. What the remaining 2.4x IS, is now unknown |
@@ -3903,6 +3903,66 @@ checked which path ran for `set::sum` by poisoning it; I did not check it here
 before building, and that is the whole cost of this detour.
 
 The 2.4x gap is real and now has NO named cause, which is the honest state.
+
+---
+
+## Deque onto the scalar native ABI: 22 ops, 1.16-2.06x each
+
+Mechanical, and the kind of row that stays open because nothing about it is
+interesting until it is measured. `bench/cases/dequeabi` is new: five tail loops
+calling ONE deque op per iteration, with kernel 1 the same loop and no call, so
+every other kernel minus kernel 1 is the op.
+
+n=5e6, min of 3, TWO builds:
+
+| | record | scalar | the op alone |
+|---|---|---|---|
+| 1 control | 244 | 253 | — (1.04x, so readable) |
+| `is_empty` | 8 648 | **4 336** | 8 404 → 4 083 = **2.06x** |
+| `peek_front` | 12 861 | **8 778** | 12 617 → 8 525 = 1.48x |
+| `push_back` | 52 241 | **30 990** | 51 997 → 30 737 = 1.69x |
+| `rotate_left` | 56 506 | **48 787** | 1.16x |
+
+The spread is widest for the NARROWEST op, which is the shape of the thing:
+`rotate_left` allocates a whole new deque, so the argument record is a small
+share of it; `is_empty` does almost nothing else, so the record is most of it.
+That also bounds what the remaining ~1 100 legacy ops are worth — the 2.0-3.3x
+this log quotes is the accessor case, not the average.
+
+### Three traps, and the second one bit
+
+**1. Never declare a fuser name.** `size`, `first`, `last`, `to_seq`, `to_list`,
+`empty`, `take`, `drop`, `from_seq`, `from_list` and every sink are names
+`ChainCanonicalizer` matches on; declaring one makes it refuse the call and
+costs the fusion, which is worth far more than the ABI. `SeqOpsFusionGuardTest`
+passed on all 22, and a dump confirms the split: `push_back`, `rotate_left`,
+`reverse`, `is_empty`, `peek_front` SCALAR, `from_seq` and `size` still record.
+
+**2. The declaration table is read at COMPILE time.** I disabled the
+declarations, rebuilt only the CLI, and got
+`no-handler:__native_deque_is_empty` — the stdlib snapshot still emitted the
+scalar form while the runtime registry no longer had it. The A/B is two
+`compileStdlib` runs, not two `installDist` runs. Same class of mistake as
+setting `MEZZE_CHAIN_CANONICALIZE` on the run instead of the build, except this
+one failed LOUDLY, which is the difference between losing a minute and
+publishing a wrong number.
+
+**3. The accessors coerce — except these.** `getSeq`/`getList` accept an
+`Object[]`; `getDeque`, like `getSet`, casts or throws. `NativeHelpers.asDeque`
+is a faithful copy of the strict one. Tightening a coercing accessor by accident
+broke 20 codec tests earlier in this effort.
+
+### Why the tests are value tests
+
+The failure mode of a declaration is a wrong `Param` ORDER or `SlotKind`. The
+ABI is positional, so swapping two arguments type-checks, compiles, runs and
+returns a plausible wrong answer — nothing in the lowered shape looks different.
+So `DequeScalarAbiTest` pairs every op against its opposite and checks a number
+only the correct order produces: front against back, push_front against
+push_back, rotate_left against rotate_right, `concat`'s two operands,
+`slice`'s start before its end, `get`'s index. Writing them turned up that
+`pop_front` returns `{ head, tail }` while `pop_back` returns `{ init, last }`,
+which no amount of reading the declaration would have shown.
 
 ---
 

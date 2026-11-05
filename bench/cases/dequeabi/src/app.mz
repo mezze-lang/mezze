@@ -1,0 +1,105 @@
+## What a LEGACY RECORD ABI native costs against a scalar one, on deque.
+##
+## `TypedASTCompiler` emits a record-ABI native as
+## `CallNativeIR(arg=MakeRecordIR(...), args=[])` — a `MezzeRecord` built per
+## call that the handler then reads back BY FIELD NAME. A declared op gets
+## `CallNativeIR(arg=UnitLitIR, args=[...], argKinds=[...])`: positional, typed,
+## nothing allocated.
+##
+## Every kernel here is a tail loop calling ONE deque op per iteration, so the
+## per-iteration figure is that op plus the loop, and the loop is held constant
+## by kernel 1. The A/B is the DequeOps declarations present against absent —
+## two builds, because the declaration table is read at compile time.
+##
+## Which ops are here is not arbitrary: these are exactly the deque ops that CAN
+## be declared. `size`, `first`, `to_seq`, `take`, `drop`, `from_seq` and the
+## sinks are names `ChainCanonicalizer` matches on, and declaring one costs the
+## fusion instead — worth far more than the ABI. Every HOF needs an
+## `IndirectCallNode` the scalar path does not pass.
+use std::collections::seq
+use std::collections::deque
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── 1. CONTROL. The same loop with no deque call in it, so every other kernel
+##      minus this one is the op.
+let go_ctrl = { i, acc } ->
+  if i <= 0 then acc
+  else go_ctrl { i = i - 1, acc = acc + 1 }
+let k_ctrl = { n } -> go_ctrl { i = n, acc = 0 }
+
+## ── 2. is_empty — Deque -> Bool, the narrowest shape there is.
+let go_empty = { i, acc, d } ->
+  if i <= 0 then acc
+  else go_empty { i = i - 1, acc = if deque::is_empty { d = d } then acc else acc + 1, d = d }
+let k_empty = { n, d } -> go_empty { i = n, acc = 0, d = d }
+
+## ── 3. peek_front — returns an Option, so this also pays the variant.
+let go_peek = { i, acc, d } ->
+  if i <= 0 then acc
+  else go_peek {
+    i = i - 1,
+    acc = match deque::peek_front { d = d } is
+      Some { val } -> acc + val
+      None -> acc,
+    d = d,
+  }
+let k_peek = { n, d } -> go_peek { i = n, acc = 0, d = d }
+
+## ── 4. push_back — two arguments, one of them the element.
+let go_push = { i, acc, d } ->
+  if i <= 0 then acc
+  else go_push { i = i - 1, acc = acc + 1, d = deque::push_back { d = d, x = i } }
+let k_push = { n, d } -> go_push { i = n, acc = 0, d = d }
+
+## ── 5. rotate_left — Deque + Int, and the result is a deque, so this is the
+##      shape where the argument record carried a long as a boxed field.
+let go_rot = { i, acc, d } ->
+  if i <= 0 then acc
+  else go_rot { i = i - 1, acc = acc + 1, d = deque::rotate_left { d = d, n = 1 } }
+let k_rot = { n, d } -> go_rot { i = n, acc = 0, d = d }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+## `time_it` performs SystemTime itself, so main handling it too would warn.
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  let d = deque::from_seq { xs = [1, 2, 3, 4, 5, 6, 7, 8] }
+  if k == 1 then do
+    k_ctrl { n = n }
+    report { name = "1 control       ", n = n, r = time_it { f = {} -> k_ctrl { n = n } } }
+    report { name = "1 control       ", n = n, r = time_it { f = {} -> k_ctrl { n = n } } }
+  else if k == 2 then do
+    k_empty { n = n, d = d }
+    report { name = "2 is_empty      ", n = n, r = time_it { f = {} -> k_empty { n = n, d = d } } }
+    report { name = "2 is_empty      ", n = n, r = time_it { f = {} -> k_empty { n = n, d = d } } }
+  else if k == 3 then do
+    k_peek { n = n, d = d }
+    report { name = "3 peek_front    ", n = n, r = time_it { f = {} -> k_peek { n = n, d = d } } }
+    report { name = "3 peek_front    ", n = n, r = time_it { f = {} -> k_peek { n = n, d = d } } }
+  else if k == 4 then do
+    k_push { n = n, d = d }
+    report { name = "4 push_back     ", n = n, r = time_it { f = {} -> k_push { n = n, d = d } } }
+    report { name = "4 push_back     ", n = n, r = time_it { f = {} -> k_push { n = n, d = d } } }
+  else do
+    k_rot { n = n, d = d }
+    report { name = "5 rotate_left   ", n = n, r = time_it { f = {} -> k_rot { n = n, d = d } } }
+    report { name = "5 rotate_left   ", n = n, r = time_it { f = {} -> k_rot { n = n, d = d } } }
