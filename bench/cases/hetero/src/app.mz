@@ -20,17 +20,29 @@
 ##
 ## `HeterogeneousNumericDispatchTest` is the regression test.
 ##
-## STILL OPEN, and this file does not cover it: the same choice is made a
-## SECOND time during lowering, to pick the dictionary. `resolveDictOp` →
-## `resolveOpHashFromConcreteTypes` matches ONE type at a time, so a
-## heterogeneous add reached through a dictionary (a polymorphic HOF, see
-## `bench/cases/hofcapture`) still gets Float's HOMOGENEOUS `add` handed a
-## Long, and dies with
+## STILL OPEN, and this file does not cover it: a heterogeneous add reached
+## through a DICTIONARY — a polymorphic HOF — still dies with
 ##
 ##   UnsupportedSpecializationException … CallNativeDDD [FloatOps$$Lambda, 0.5, 21]
 ##
-## `resolveOpFromObligation` is the tuple-aware resolver that already exists
-## there.
+## It is NOT enough to make the dictionary lookup tuple-aware. Tried, measured,
+## reverted: `resolveOpFromObligation` already matches a tuple position by
+## position, and feeding it the callee's constraint tuple changes nothing here,
+## because the tuple is not CONCRETE at that point. Probing the two sites of one
+## HOF (`apply` at an Int accumulator and at a Float one) prints
+##
+##   typeArgs=[VarType(out, id=1983), Float]   bindings=[]
+##   typeArgs=[VarType(out, id=1983), Int]     bindings=[]
+##
+## The operand position is the CALLBACK'S RESULT TYPE, and it is the SAME VAR
+## `id=1983` at both sites. One variable cannot be Int at one call and Float at
+## another, so it can never resolve — the callee's ability-constraint var was
+## not freshened per call site. Lowering is then left with the receiver alone
+## and necessarily picks the homogeneous impl.
+##
+## The same unresolved var is why mono cannot specialise the HOF and
+## `apply_fold` keeps `__dict_add` (see `bench/cases/defunc` kernel 3 vs 7).
+## One cause, a correctness bug and the headline perf gap.
 use std::effects::log::{ println, Console }
 use std::float
 

@@ -5931,3 +5931,45 @@ A grep over this dump must tolerate the hash field.
 runs for a rejected function — exactly the case where the body is what you
 need, since the rejection names a node type and, for a dangling callee, a
 hash, and finding which call that is takes the tree.
+
+## The HOF's callback-result var is ONE var for EVERY call site
+
+This is the cause of the two remaining dictionary carriers AND of a crash, and
+it is a missing INSTANTIATION rather than a missing improvement rule.
+
+Probing dictionary resolution at the two call sites of one un-annotated HOF —
+`apply { n, f, zero }` used once with an Int accumulator and once with a Float
+one — prints the callee's `NumAdd` constraint as
+
+```
+  typeArgs=[VarType(out, id=1983), Float]   bindings=[]
+  typeArgs=[VarType(out, id=1983), Int]     bindings=[]
+```
+
+Position 0 is the operand, which here is the CALLBACK'S RESULT TYPE, and it is
+`id=1983` at BOTH sites. One variable cannot be Int at one call and Float at
+another, so nothing can ever bind it. `harvestVarBindings` is not at fault and
+does descend into function-typed record fields — there is simply nothing to
+bind, because the argument's callback-result type IS that same var.
+
+What that costs, both halves of it:
+
+  - **Lowering** sees only the receiver, so it picks the impl by receiver alone.
+    For a homogeneous add that is right by luck; for `Float + Int` it hands
+    Float's `impl NumAdd Float for Float` a Long and dies with
+    `CallNativeDDD [FloatOps$$Lambda, 0.5, 21]`.
+  - **Mono** cannot derive the HOF's type args, so `apply_fold` compiles as
+    `[n, f, __dict_add]`. Kernel 3 and kernel 7 of `bench/cases/defunc` differ
+    ONLY in whether the callback carries an annotation, and only the annotated
+    one monomorphises.
+
+MEASURED AND REVERTED: making the dictionary lookup tuple-aware. The module
+already has `resolveOpFromObligation`, which matches a tuple position by
+position and whose own doc makes exactly the right critique of receiver-only
+lookup. Feeding it the callee's constraint tuple fires at some sites and
+changes NOTHING at this one, because the tuple is not concrete. Shipping an
+inert path that no test can fail without is worse than not shipping it.
+
+So the next move is upstream of both: give a callee's ability-constraint
+variables a fresh instance per call site, the way its type variables already
+get one. `bench/cases/hetero` records the measurement.
