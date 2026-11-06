@@ -6474,3 +6474,136 @@ Worth saying plainly: removing an O(n) allocation is the kind of change that
 looks unarguable on paper, and it was the second today whose sign measurement
 reversed. An algorithmic improvement is still a hypothesis until a control says
 otherwise.
+
+### LEDGER UPDATE 2026-11-06 (later still) — the two UNKNOWN rows, measured: strings and pattern matching
+
+These were the rows this ledger says hide wins — "UNKNOWN — never measured. A
+row, not an absence." Before today the string row was ONE operation
+(`str::size`) and pattern matching had no bench at all, so neither could be
+ranked against anything. `bench/cases/surface` fills both, and
+`scripts/surface.sh` runs it one row per process at two sizes each.
+
+**Every number below converged.** Each row was measured at its own n and again
+at 4x n, and the pairs agree within 5%; no row flagged `UNDER-WARMED`. The n is
+per-row on purpose — these rows span 416 ps to 310 000 ps per operation, a 750x
+spread, and what decides whether a reading is warm is the WORK PER PASS, n x
+cost. At n=200 000 `str::size` reads 1 749 ps/op against 416 converged, 4.2x of
+pure warmup, while `str::split` at that same n reads 314 391 against 312 909 —
+already converged, because one op does 750x more work. No single n suits both.
+The control keeps its own n (4e8) for every row; both sides are per-op costs, so
+they need no common n.
+
+Control = a counted loop plus an add, in the same process, ~214 ps/op.
+
+#### Strings — a 64-char Latin1 string, 12 space-separated words
+
+| row | ps/op | x control |
+|---|---|---|
+| `str::size` | 416 | 2.0x |
+| `str::contains` (miss, so a full scan) | 5 060 | 24x |
+| `str` equality (differ in the LAST char) | 5 700 | 27x |
+| `int::to_str` | 8 150 | 39x |
+| `str::concat` (65 chars out) | 10 065 | 48x |
+| `int::to_str` + `concat` | 16 805 | 80x |
+| **`str::to_upper`** | **54 940** | **262x** |
+| **`str::split`** (12 parts) | **310 260** | **1 480x** |
+
+`int::to_str + concat` lands within 4% of the sum of its two parts, which is the
+internal consistency check on the harness.
+
+**`str::split` compiles a regular expression on every call, and the cause is a
+correctness fix.** `NativeDispatch.java:540`:
+
+```java
+String[] parts = s.split(java.util.regex.Pattern.quote(delimiter));
+```
+
+`Pattern.quote` is there so a delimiter like `.` or `|` splits literally, which
+is right. But `Pattern.quote(" ")` is `\Q \E` — five characters — and
+`String.split`'s fast path only fires for a single non-meta character (or a
+two-char escape). So the quoting defeats the fast path and every call falls
+through to `Pattern.compile`. 310 ns to cut a 64-char string into 12 pieces is
+26 ns per piece, against 10 ns to allocate a 65-char string. The fix keeps the
+literal semantics and drops the regex entirely: split on `indexOf`, which is
+correct for every delimiter including the metacharacters `Pattern.quote` was
+added for.
+
+**`str::to_upper` is `String.toUpperCase()` with the default locale**
+(`MezzeBytecodeRootNode.java:463`, `PrimitiveNatives.java:363`) — a char-at-a-
+time conversion, 858 ps/char. `str::concat` allocates and copies the same 64
+bytes at 154 ps/char. So upper-casing costs 5.6x what copying the same bytes
+costs, for a transformation that on Latin1 ASCII is a byte-range compare and a
+constant subtract.
+
+#### Pattern matching — four rows that differ by ONE thing each
+
+`Shape = | Circle { r: Int }, Square { side: Int }, Tri { b: Int, h: Int }, |`.
+All four rows run the same inline 3-way selector, so a subtraction between any
+two of them is the one thing that differs.
+
+| row | ps/op | the difference it names |
+|---|---|---|
+| 3-way selector + accumulate (BASELINE) | 1 152 | — |
+| record alloc, 1 field | 4 158 | **record allocation = 3 006** |
+| variant alloc, never matched | 4 753 | **variant allocation = 3 601** |
+| variant match, never allocated | 3 446 | **match = 2 294** |
+| variant build + match | 8 480 | the sum of the parts would be 7 047 |
+| build + match with a guard on arm 1 | 9 358 | **guard = 878** |
+| `if let` on `Option` (half the iterations are `None`) | 4 612 | — |
+
+**The first version of these rows was wrong and the correction is the method.**
+The baseline did ONE `% 3` while the match row did TWO, and some rows called a
+`mk {}` helper while others inlined the construction. So the "match cost" I
+subtracted carried a whole extra integer modulo plus a call: it read 2 677 ps
+and it is 2 294. The selector is now written out inline in all four rows rather
+than factored into a helper, because a shared helper is what let them drift.
+
+**The variant REPRESENTATION is not the cost, and I expected it to be.**
+`MezzeVariant` carries ten instance fields whatever its shape — `registry`,
+`tag`, `payloadType`, `payload` (`Object[]`), `longValue`, `doubleValue`,
+`singleValue`, `payloadLength`, `fusedFieldName`, and a volatile
+`materializedRecord` — so `Circle { r = 5 }` allocates about 64 bytes to carry
+12, and the obvious lever is shape-specific subclasses. The record control says
+no: a 1-field record costs 3 006 ps against the variant's 3 601. Twice the
+object for 20% more time, so the cost is PER-ALLOCATION, not per-byte, and
+halving the object would buy ~0.6 ns of 3.6. The match side is equally not at
+fault — the lowered IR is already a tag switch with an unboxed binding,
+`Variant(tag=701133322, tagName=Circle, fieldNames=[r], fieldSlots=[7])` with
+`BindingIR(slot=7, kind=LONG)`, so there is no name comparison and no boxing to
+remove.
+
+**ABOVE FLOOR, and here is the named cause: a variant that CANNOT escape still
+pays for its allocation.** In the build+match row `v` is constructed, matched,
+and dead before the next iteration — it never leaves the loop body, which is
+exactly the shape partial escape analysis exists to eliminate. If it were
+eliminated, build+match would cost about what match-alone costs, 3 446. It costs
+8 480, which is alloc (3 601) plus match (2 294) plus the baseline plus 20%.
+The allocation is paid in full.
+
+That is the single most load-bearing number here, because it is not about
+variants. `Option` and `Result` ARE variants, every fallible call in the
+language returns one, and essentially all of them are matched immediately and
+discarded. A 3.6 ns tax on a value whose lifetime is three instructions is paid
+on every one.
+
+#### What this reshuffles
+
+| row | was | now |
+|---|---|---|
+| strings | **UNKNOWN** — one operation measured | **ABOVE FLOOR, two causes named.** `str::split` at 1 480x control compiles a regex per call because `Pattern.quote` defeats `String.split`'s fast path; `str::to_upper` at 262x converts char-at-a-time, 5.6x the cost of copying the same bytes |
+| pattern matching | **UNKNOWN** — no bench existed | **ABOVE FLOOR, cause named.** Not the representation and not the match: allocation is not eliminated for a variant that cannot escape. match 2.3 ns, allocate 3.6 ns, and the 3.6 is paid even when the value is dead on the next line |
+| the variant layout | not a row | **CLOSED as a target.** 64 bytes for 12 of payload is real, and worth ~0.6 ns of 3.6 — a 1-field record costs 3.0. Reached by a different route than predicted: the cost is per-allocation |
+
+#### The next target, derived
+
+`str::split`. It is the largest ratio on the board at 1 480x the control, the
+cause is identified rather than guessed, and the fix removes a regex compile
+from a function whose contract is a literal delimiter — so it is faster AND more
+honest about what it does. `indexOf`-based splitting is correct for every
+delimiter, including the metacharacters `Pattern.quote` was introduced to
+protect.
+
+Then the escape-analysis row, which is bigger in aggregate and much harder: it
+needs to be established WHY a non-escaping `MezzeVariant` is not scalar-replaced
+(the volatile `materializedRecord` field and any match-side read that could
+materialize a record are the first two things to rule out).

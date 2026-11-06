@@ -1,0 +1,248 @@
+## FIRST MEASUREMENT of two UNKNOWN rows: strings and pattern matching.
+##
+## The ledger's rule is "take the largest measured gap", and its own note on why
+## that rule needs this bench: applied to a partial set it means "largest among
+## the handful I happen to have". Before this, the string row was one op
+## (`str::size`, in `bench/cases/str_bench`) and pattern matching had no bench at
+## all — so neither could be ranked against anything.
+##
+## METHOD, identical to bench/cases/ds_matrix because one method beats two:
+##   - every row is a RATIO to a control timed in this same process, a counted
+##     loop over the same arithmetic. Absolute nanoseconds do not survive
+##     between two builds on a machine that drifts; ratios do.
+##   - a median past twice its own minimum prints UNDER-WARMED, and an unstable
+##     CONTROL prints a louder line, because a measurement short of steady state
+##     reads exactly like a real regression.
+##   - run ONE ROW PER PROCESS (`surface <n> <row>`); see scripts/ds-matrix.sh
+##     for why — input building in the same process GCs while the timer runs.
+##
+## Rows are per-OPERATION, not per element: n is the number of ops.
+##
+## MATCHING AND ALLOCATION ARE MEASURED AS DIFFERENCES, against a baseline row
+## that does only the arithmetic choosing which constructor to use:
+##   allocate  = "variant alloc, no match" - "choose-ctor arith only"
+##   match     = "variant match, no alloc" - "choose-ctor arith only"
+## and "variant build+match" should come out near their sum, which is the
+## cross-check. The first version of this bench had only the build+match row
+## against the arithmetic baseline, so it could say the pair cost 7.8 ns and
+## could not say WHICH — the two rows below exist to split it.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::str
+use std::int
+
+type Shape = |
+  Circle { r: Int },
+  Square { side: Int },
+  Tri { b: Int, h: Int },
+|
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+
+let time_k_go = { thunk, k, acc } -> if k == 0
+  then acc
+  else time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = time_one { thunk = thunk } } }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let _w = time_k_go { thunk = thunk, k = warm, acc = [] }
+  let sorted = seq::sort { xs = time_k_go { thunk = thunk, k = k, acc = [] } }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 }, med = nth_or_zero { xs = sorted, i = half } }
+
+## THE FLOOR: one loop iteration and one add, nothing else.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio_x100 = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)" else ""
+    # `int::to_str { n = x }`, not `x.to_str{}`, and that is BUG 36 not a style
+    # choice: a value that is BOTH stringified and used in arithmetic is refined
+    # structurally by the method call (`{ to_str: {} -> Str, ... }`) and the
+    # arithmetic is then refused — here, V0402 on `ps_per_op * 100`. The stdlib
+    # function resolves by its own signature, which pins the value to Int.
+    let ps_s = int::to_str { n = ps_per_op }
+    let ratio_s = int::to_str { n = ratio_x100 }
+    println { msg = "  $(label): $(ps_s) ps/op  x$(ratio_s)/100 floor$(warn)" }
+
+## ── string rows ──────────────────────────────────────────────────────────────
+let l_size = { i, acc, s } -> if i <= 0 then acc
+  else l_size { i = i - 1, acc = acc + str::size { s = s }, s = s }
+
+let l_concat = { i, acc, s } -> if i <= 0 then acc
+  else l_concat { i = i - 1, acc = acc + str::size { s = str::concat { l = s, r = "x" } }, s = s }
+
+let l_contains = { i, acc, s } -> if i <= 0 then acc
+  else l_contains { i = i - 1, acc = acc + (if str::contains { s = s, substring = "zz" } then 1 else 0), s = s }
+
+let l_upper = { i, acc, s } -> if i <= 0 then acc
+  else l_upper { i = i - 1, acc = acc + str::size { s = str::to_upper { s = s } }, s = s }
+
+let l_split = { i, acc, s } -> if i <= 0 then acc
+  else l_split { i = i - 1, acc = acc + seq::size { xs = str::split { s = s, delimiter = " " } }, s = s }
+
+let l_interp = { i, acc, s } -> if i <= 0 then acc
+  else l_interp { i = i - 1, acc = acc + str::size { s = str::concat { l = int::to_str { n = i }, r = s } }, s = s }
+
+let l_int_to_str = { i, acc } -> if i <= 0 then acc
+  else l_int_to_str { i = i - 1, acc = acc + str::size { s = int::to_str { n = i } } }
+
+let l_eq = { i, acc, s, t } -> if i <= 0 then acc
+  else l_eq { i = i - 1, acc = acc + (if s == t then 1 else 0), s = s, t = t }
+
+## ── pattern-matching rows: four rows that differ by ONE thing each ──────────
+##
+## EVERY ROW BELOW RUNS THE SAME SELECTOR, written out inline: a 3-way
+## `if i % 3 == 0 ... else if i % 3 == 1 ... else ...`. That is not repetition
+## for its own sake. The first version of these rows had a baseline doing ONE
+## `% 3` and a match row doing TWO, so the "match cost" I subtracted out of them
+## included a whole extra integer modulo — and `mk { i = i }` added a third plus
+## a call. A subtraction is only worth the arithmetic if the two rows differ by
+## exactly the thing being measured.
+## BASELINE: the selector and the accumulate. No variant anywhere.
+let l_choose = { i, acc } -> if i <= 0 then acc
+  else do
+    let x = if i % 3 == 0 then 1 else if i % 3 == 1 then 2 else 3
+    l_choose { i = i - 1, acc = acc + x }
+
+## ALLOCATE, NEVER MATCH. The selector picks a CONSTRUCTOR instead of a number;
+## the fresh variant is threaded through the recursive call as `last` so it is
+## live and cannot be folded away, and nothing ever reads it.
+##   allocate = this row - l_choose
+let l_hold = { i, acc, last } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then Circle { r = i } else if i % 3 == 1 then Square { side = i } else Tri { b = i, h = i }
+    l_hold { i = i - 1, acc = acc + 1, last = v }
+
+## MATCH, NEVER ALLOCATE. The selector picks one of three variants built ONCE,
+## so the tag the match sees still changes every iteration and nothing can be
+## hoisted, but no allocation happens in the loop.
+##   match = this row - l_choose
+let l_match_only = { i, acc, a, b, c } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then a else if i % 3 == 1 then b else c
+    let x = match v is
+      Circle { r } -> r
+      Square { side } -> side
+      Tri { b = bb, h } -> bb + h
+    l_match_only { i = i - 1, acc = acc + x, a = a, b = b, c = c }
+
+## BOTH, as the CROSS-CHECK: this row should land near
+## l_choose + (l_hold - l_choose) + (l_match_only - l_choose).
+let l_match = { i, acc } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then Circle { r = i } else if i % 3 == 1 then Square { side = i } else Tri { b = i, h = i }
+    let x = match v is
+      Circle { r } -> r
+      Square { side } -> side
+      Tri { b = bb, h } -> bb + h
+    l_match { i = i - 1, acc = acc + x }
+
+## The same again with a GUARD on the first arm, so the guard costs the gap
+## against l_match and nothing else differs.
+let l_match_guard = { i, acc } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then Circle { r = i } else if i % 3 == 1 then Square { side = i } else Tri { b = i, h = i }
+    let x = match v is
+      Circle { r } if r > 100 -> 1
+      Circle { r } -> r
+      Square { side } -> side
+      Tri { b = bb, h } -> bb + h
+    l_match_guard { i = i - 1, acc = acc + x }
+
+## THE ALLOCATION CONTROL. Is 3.6 ns the cost of THIS representation, or just
+## what an allocation costs here? A 1-field record carries the same 8 bytes of
+## payload and nothing else, threaded the same way so it cannot be eliminated.
+##   record allocation = this row - l_choose
+let l_rec1 = { i, acc, last } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then { r = i } else if i % 3 == 1 then { r = i + 1 } else { r = i + 2 }
+    l_rec1 { i = i - 1, acc = acc + 1, last = v }
+
+## `if let` is a match GUARD here, not a standalone expression — the arm binds
+## the scrutinee and the guard destructures something else.
+let l_if_let = { i, acc } -> if i <= 0 then acc
+  else do
+    let o = if i % 2 == 0 then Some { val = i } else None
+    let a = match i is
+      j if let Some { val } = o -> val
+      j -> 0
+    l_if_let { i = i - 1, acc = acc + a }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 200000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let warm = 5
+  let k = 12
+  let s = "the quick brown fox jumps over the lazy dog and keeps on running"
+  let t = "the quick brown fox jumps over the lazy dog and keeps on runninX"
+  # THE CONTROL HAS ITS OWN n, and that is not a detail. Rows here span 400 ps
+  # to 300 000 ps per op: an n that leaves `str::size` warm makes `str::split`
+  # take 20s a pass, and an n that suits `split` leaves the control short of
+  # steady state and flagged. Both sides produce a PER-OP cost, so they do not
+  # need the same n for the ratio to mean something.
+  let floor_n = arg_at { args = args, i = 2, def = 4000000 }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  let n_s = int::to_str { n = n }
+  let warm_s = int::to_str { n = warm }
+  let k_s = int::to_str { n = k }
+  let floor_s = int::to_str { n = floor_ps }
+  println { msg = "surface (n=$(n_s) ops): $(warm_s) warmup + $(k_s) measured, MIN per row" }
+  println { msg = "control: a counted loop + add = $(floor_s) ps/op. Rows below are xNNN/100 of it." }
+  if floor.med > (floor.min * 2) then
+    println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise n" }
+  else
+    println { msg = "" }
+
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str::size            ", thunk = {} -> l_size { i = n, acc = 0, s = s } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str::concat   (alloc)", thunk = {} -> l_concat { i = n, acc = 0, s = s } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str::contains (scan) ", thunk = {} -> l_contains { i = n, acc = 0, s = s } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str::to_upper (alloc)", thunk = {} -> l_upper { i = n, acc = 0, s = s } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str::split    (alloc)", thunk = {} -> l_split { i = n, acc = 0, s = s } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "int::to_str+concat  ", thunk = {} -> l_interp { i = n, acc = 0, s = s } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "int::to_str   (alloc)", thunk = {} -> l_int_to_str { i = n, acc = 0 } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str equality         ", thunk = {} -> l_eq { i = n, acc = 0, s = s, t = t } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "choose-ctor arith only", thunk = {} -> l_choose { i = n, acc = 0 } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "variant build+match  ", thunk = {} -> l_match { i = n, acc = 0 } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "build+match w/ guard ", thunk = {} -> l_match_guard { i = n, acc = 0 } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "if-let on Option     ", thunk = {} -> l_if_let { i = n, acc = 0 } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "variant alloc, no match", thunk = {} -> l_hold { i = n, acc = 0, last = Circle { r = 0 } } }
+  report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "variant match, no alloc", thunk = {} ->
+             l_match_only { i = n, acc = 0, a = Circle { r = 1 }, b = Square { side = 2 }, c = Tri { b = 3, h = 4 } } }
+  report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "record alloc, 1 field ", thunk = {} -> l_rec1 { i = n, acc = 0, last = { r = 0 } } }

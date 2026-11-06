@@ -3737,3 +3737,102 @@ body turns out to need is not reflected back into it. Related:
 
 Writing `bench/cases/effectsurface` to fill the effects rows of the PERF-LOG
 ledger — kernels that install a handler per iteration. Not by a test.
+
+## BUG 36 — OPEN 2026-11-06: an inherent method on a value whose type the CALLER pins cannot be resolved, and the structural fallback it falls back to is unsatisfiable
+
+### Symptom
+
+Three spellings of one gap. All three are rejected; none should be.
+
+    let report = { n, d } -> do
+      let q = n / d
+      let ratio = q * 100
+      println { msg = "$(ratio.to_str{})" }
+
+    pub let main = {} -> perform Console in report { n = 7000, d = 13 }
+
+    error[V0408]: No implementation of ability 'NumMul' produces the required
+    result type '{ to_str: {} -> Str, ... }'. The result was forced to that type
+    externally ...
+
+Bind the same receiver from a CALL instead of an operator and the error moves
+but does not go away:
+
+    let mul = { a, b } -> a * b
+    ...  let ratio = mul { a = q, b = 100 }
+
+    error[T0206]: Cannot resolve inherent method 'to_str': the receiver's type
+    could not be determined. Annotate the receiver or call the method on a value
+    of a known type.
+
+And the root cause on its own, with no arithmetic anywhere near it:
+
+    let show = { x } -> x.to_str {}
+    pub let main = {} -> perform Console in println { msg = show { x = 5 } }
+
+    error[T0201]: Type mismatch for argument 'x' in call to 'show':
+    expected { x: { to_str: {} -> 'a } } -> 'a but got { x: Int } -> 'b
+
+### Cause
+
+`.to_str {}` on a receiver whose static type is a type variable takes one of two
+paths, chosen by `receiverHasSolvableType` in `ExprMethodConstraints.kt`:
+
+  - RECEIVER IS "SOLVABLE" (a call, a parenthesised expression, a macro call, or
+    an identifier bound to one of those) — defer the impl pick to emit. At emit
+    the receiver is still a variable, because what pins it is the CALL SITE of
+    the enclosing function and dispatch is resolved once per definition. T0206.
+
+  - OTHERWISE — refine the receiver structurally to `{ to_str: {} -> 'a, ... }`.
+    That is the third spelling above, and T0201 is the whole problem: a
+    structural member requirement is NEVER satisfied by a nominal type. `Int`
+    has `to_str`, and `Int` does not unify with `{ to_str: … }`.
+
+So the structural fallback is not a conservative approximation of the right
+answer. It is unsatisfiable for every nominal receiver, which is every receiver
+anyone writes. The first spelling is that same dead end reached one step later:
+the refinement lands on an ability's `having out` variable, and `NumMul` is then
+asked for an impl that produces a RECORD.
+
+`ParsedBinaryOp` being absent from the solvable set is why spelling 1 and
+spelling 2 differ, but adding it only converts V0408 into T0206 — it does not
+fix anything, because both paths are blocked.
+
+### What would fix it
+
+Either half is a real change, not a patch:
+
+  - make inherent-method dispatch a per-SPECIALIZATION decision, so the receiver
+    is pinned by the caller before the impl is picked (full mono already
+    specializes per call site; dispatch is resolved before it runs), or
+  - let a nominal type satisfy a structural member requirement — `Int` unifies
+    with `{ to_str: {} -> Str, ... }` when `Int` has that inherent method.
+
+The second is the smaller change and the one that matches what a reader of the
+error expects. It is adjacent to the record-adoption work in
+`project_bare_record_needs_adoption_at_resolution`.
+
+### Not a regression
+
+Identical output from the installed (stale) `mez` and from the dev build in
+`feat/perf-obsession`, so this predates the mono and call-site-arrow work.
+
+### The workaround, and why it is visible in the benches
+
+Call the stdlib function instead of the method: `int::to_str { n = ratio }`
+resolves by the function's own signature, which also pins `ratio` to `Int`.
+`bench/cases/surface` uses that form in its interpolation rows for exactly this
+reason, and `bench/cases/ds_matrix` does too.
+
+### Why it matters
+
+It is the "no annotation should ever be needed" rule failing in the ordinary
+case: a helper that takes two unannotated numbers, divides them, scales the
+result and prints it. Nothing about that program is polymorphic in a way the
+user asked for.
+
+### Found by
+
+Writing the string/pattern-matching rows of `bench/cases/surface` — adding a
+second, arithmetic use of a binding that was already being stringified. Not by a
+test.
