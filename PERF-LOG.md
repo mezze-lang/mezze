@@ -6429,3 +6429,48 @@ while explicitly complaining about stale numbers.
 
 So the next target is List's per-element cost, and the instrument that picks it
 is now the one being committed rather than the one that produced 500x phantoms.
+
+## List's 4-6x is the cons cell, and the obvious fix is not a fix
+
+Two attempts on the List rows, both reverted, and together they say where the
+cost actually lives.
+
+**1. `list::fold_left` does not pay for the copy it looks like it pays for.**
+`ListNatives.foldTwoArg` opens with `Object[] elements = list.toArray()` — an
+O(n) allocation that walks every cell before the fold begins — and the stdlib
+doc advertises it ("delegates to native O(n) toArray() loop"). The fused
+pipeline's own `doList` records measuring that copy at ~12ms against ~6ms for
+walking the cells on 1M elements. So: walk the cells, keep the array only for
+`fold_right` and a non-zero `startIndex`, which are the shapes that need random
+access.
+
+Measured on the matrix: `list::fold_left` 1511 -> 1512 ps/elem. NOTHING. Because
+an Int list's fold FUSES, and the native is only the chain's fallback — so the
+hot path never reaches the code I changed.
+
+**2. On the path that does reach it, the copy WINS.** The fallback runs when the
+long pipeline's guard fails, so a FLOAT list (MezzeDoubleCons cells) routes to
+the native for real. Interleaved in one binary, four pairs:
+
+```
+  walk  2336  2485  2293  2522   min 2293 ps/elem
+  copy  2680  2058  2182  2439   min 2058
+```
+
+The copy is not slower. In hindsight it is obvious: `toArray()` pays ONE
+pointer-chasing pass and the fold then scans contiguous memory, while walking
+cells chases pointers throughout the fold — and with an indirect call per
+element dominating, the allocation is noise. The original code was right and its
+comment ("avoids recursive dispatch overhead") was describing a real effect.
+
+**So the 3.9x is the cons cell itself.** `list::fold_left` 1512 against
+`seq::fold` 387 is pointer-chasing against a contiguous `long[]` scan, and it
+shows up equally in the FUSED walk and the native. No amount of tidying either
+one closes it. The lever is the storage: chunked backing (#483), which makes the
+walk mostly sequential. That is the Phase G ticket this matrix was built to
+gate, and it is now measured rather than assumed.
+
+Worth saying plainly: removing an O(n) allocation is the kind of change that
+looks unarguable on paper, and it was the second today whose sign measurement
+reversed. An algorithmic improvement is still a hypothesis until a control says
+otherwise.
