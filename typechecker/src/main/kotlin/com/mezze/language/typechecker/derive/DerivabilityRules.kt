@@ -2,6 +2,8 @@ package com.mezze.language.typechecker.derive
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.ParsedNewtypeDef
+import com.mezze.language.parsedast.ParsedRecordDef
+import com.mezze.language.parsedast.ParsedVariantDef
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
@@ -115,10 +117,28 @@ internal fun canDeriveAbilityStructurally(
                 unwrappedType is MezzeType.CharType ||
                 unwrappedType is MezzeType.BytesType ||
                 unwrappedType is MezzeType.FracType ||
+                // CLOSED only, and [isOpenShape] is the whole point.
+                //
+                // An OPEN record admits fields its type does not list, so two
+                // values can be indistinguishable at that type -- only the
+                // declared fields are reachable -- while `==` compares the whole
+                // record and answers False. Equality would then depend on
+                // information the type does not expose, which is the laundering
+                // the record rules exist to prevent: openness is CARRIED, never
+                // closed over. An open variant is the same hole one level up,
+                // admitting constructors the type does not list.
+                //
+                // This also makes the rule agree with the GENERATOR:
+                // DerivedImplGenerator.eqImpl returns null for an open record or
+                // variant, so without this the constraint was satisfied with no
+                // impl to satisfy it -- which surfaces much later, as a missing
+                // dictionary rather than as this rule.
                 (unwrappedType is MezzeType.RecordType &&
+                    !isOpenShape(unwrappedType, registry) &&
                     (unwrappedType as MezzeType.RecordType).fields.values
                         .all { componentSatisfies(abilityName, it, abilityHash, seen) }) ||
                 (unwrappedType is MezzeType.VariantType &&
+                    !isOpenShape(unwrappedType, registry) &&
                     (unwrappedType as MezzeType.VariantType).constructors.values
                         .all { it == null || componentSatisfies(abilityName, it, abilityHash, seen) }) ||
                 // BOTH container representations, via the single source in
@@ -236,6 +256,50 @@ internal fun canDeriveAbilityStructurally(
             resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ->
             BuiltInAbilities.isBoolVariant(unwrappedType)
 
+        else -> false
+    }
+}
+
+/**
+ * Is this record or variant OPEN -- does it admit fields (or constructors) its
+ * type does not list?
+ *
+ * TWO sources, and both are needed.
+ *
+ * The row is the direct answer and the only one an ANONYMOUS shape has. But by
+ * the time derivability is asked, a NAMED shape's row has already been closed:
+ * `type Loose = { x: Int, ... }` reaches here as `Loose({x: Int})` with
+ * `rowVar == null`, even though field resolution rejected `r.y` moments earlier
+ * ("Field 'y' not found in open record"). So the row alone silently answered
+ * "closed" for exactly the declared types this rule is about.
+ *
+ * The DECLARATION is authoritative for a named shape, and it is the same source
+ * the impl generator consults (`ParsedRecordDef.isOpen`), which is what makes
+ * the two agree by construction rather than by coincidence.
+ *
+ * Deliberately NOT a fix for the row being closed. That is a separate defect --
+ * information lost between field resolution and ability solving -- and anything
+ * else reading `rowVar` late is still reading a closed row. This only stops that
+ * loss from deciding equality.
+ */
+private fun isOpenShape(type: MezzeType, registry: DeclarationRegistry): Boolean {
+    val row = when (type) {
+        is MezzeType.RecordType -> type.rowVar
+        is MezzeType.VariantType -> type.rowVar
+        else -> null
+    }
+    if (row != null) return true
+
+    val name = when (type) {
+        is MezzeType.RecordType -> type.identity.displayNameOrNull()
+        is MezzeType.VariantType -> type.identity.displayNameOrNull()
+        else -> null
+    } ?: return false
+
+    val decl = registry.lookupType(name) ?: ModuleResolver.lookupTypeDeclaration(name) ?: return false
+    return when (val def = decl.definition) {
+        is ParsedRecordDef -> def.isOpen
+        is ParsedVariantDef -> def.isOpen
         else -> false
     }
 }
