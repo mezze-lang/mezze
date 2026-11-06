@@ -5168,6 +5168,44 @@ rather than kept on the grounds that it looks right.
 `:typechecker:test` 4 823/0, `:interpreter:test` 7 467/0 (11 skipped),
 `:cli:nativeCompile`, `just native-test`.
 
+### Verified where it counts: the benchmark repo's own harness
+
+The numbers above are this repo's benches. `mezze-benchmark` is the published
+comparison, and it runs the same mandelbrot against nine other languages with a
+checksum contract. Rebuilt with this compiler and run through its own harness
+(`just bench-one mandelbrot`, reps=3, N=400 → 800):
+
+```
+  impl            ns/unit      rel   startup       t@N   kind
+  kotlin           17.977     1.0x     63.9ms     73.8ms  loop
+  c                24.302     1.4x      0.6ms      4.6ms  loop
+  java             25.393     1.4x     48.1ms     55.1ms  lazy
+  rust             27.143     1.5x      0.5ms      5.0ms  lazy
+  roc              32.245     1.8x      0.4ms      6.5ms  eager-grid
+  mezze           124.449     6.9x    791.4ms    993.3ms  lazy-grid
+  python         1312.570    73.0x     11.6ms    222.8ms  loop
+```
+
+All ten agree on `mandelbrot(200) = 492855` and `mandelbrot(1000) = 12306668`.
+
+**2 212.5 → 124.4 ns/unit: 17.8x on the published figure, and 123x off the leader
+becomes 6.9x.**
+
+AND THE HARNESS'S NUMBER IS NOT THE STEADY STATE. This file's `mandelannot`
+measures the same loop at 58 ns/px over side 1200 → 1800. The harness slopes
+400 → 800, which removes STARTUP but not WARMUP, and mezze's 791 ms startup
+against kotlin's 64 ms says how much of its window is still the JIT coming up.
+So the gap splits in two, and they are different problems:
+
+- **steady-state codegen, ~3.2x** (58 against ~18). Not the self-tail-loop tier:
+  `bench/cases/mandelannot` kernel 3 is the same loop folded to a single exit —
+  the shape the direct-while tier accepts — and measures 62 ns/px, identical to
+  the two that do not. `tier=not-fused` in `MEZZE_TRACE_SELFTAIL` is not evidence
+  of a slow loop; the diagnostic prints before the direct-while attempt and
+  reports only on the three fused-LONG tiers.
+- **startup and warmup, ~12x** (791 ms against 64 ms), which in a one-second
+  measurement window moves every mezze row in the table, not just this one.
+
 ---
 
 ## Method notes
