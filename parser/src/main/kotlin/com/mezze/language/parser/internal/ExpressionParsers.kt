@@ -1491,9 +1491,43 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
         when (firstPattern) {
             is ParseResult.Success -> {
                 val patterns = mutableListOf(firstPattern.value)
+                // One slot per alternative, filled as each `if` is consumed below.
+                val altGuards = mutableListOf<ParsedExpr?>(null)
                 var currentStream = skipNewlines(firstPattern.remaining)
 
-                // Keep parsing | pattern
+                /**
+                 * A guard belonging to the alternative just parsed.
+                 *
+                 * `|` SCOPES a guard: `Red { n } if n > 0 | Pink { n } if n < 5`
+                 * is two alternatives with two guards and two separate `n`s, so
+                 * the `if` is consumed here, next to its own pattern, rather than
+                 * once for the whole arm.
+                 *
+                 * `if let` is NOT taken: it binds for the arm's body, not for one
+                 * alternative, and the caller below owns it.
+                 *
+                 * The guard expression needs no terminator of its own. `expression`
+                 * stops at `|` and at `->` because neither is an expression
+                 * operator, which is why `Red if g | Pink` used to fail at the
+                 * ARROW rather than swallowing the second alternative.
+                 */
+                fun takeAltGuard(from: TokenStream): Pair<ParsedExpr, TokenStream>? {
+                    val ifTok = keyword("if", TokenType.IF)(from)
+                    if (ifTok !is ParseResult.Success) return null
+                    val afterIf = skipNewlines(ifTok.remaining)
+                    if (tok(TokenType.LET)(afterIf) is ParseResult.Success) return null
+                    val saved = inMatchGuard
+                    inMatchGuard = true
+                    val g = try { expression(afterIf) } finally { inMatchGuard = saved }
+                    return if (g is ParseResult.Success) Pair(g.value, skipNewlines(g.remaining)) else null
+                }
+
+                takeAltGuard(currentStream)?.let { (g, rest) ->
+                    altGuards[0] = g
+                    currentStream = rest
+                }
+
+                // Keep parsing | pattern [if guard]
                 while (currentStream.current()?.type == TokenType.PIPE) {
                     val afterPipe = skipNewlines(currentStream.advance())
                     val nextPattern = patternParser(afterPipe)
@@ -1501,7 +1535,12 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
                     when (nextPattern) {
                         is ParseResult.Success -> {
                             patterns.add(nextPattern.value)
+                            altGuards.add(null)
                             currentStream = skipNewlines(nextPattern.remaining)
+                            takeAltGuard(currentStream)?.let { (g, rest) ->
+                                altGuards[altGuards.size - 1] = g
+                                currentStream = rest
+                            }
                         }
                         is ParseResult.Failure -> {
                             // Stop parsing patterns, break out
@@ -1511,6 +1550,14 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
                 }
 
                 val stream2 = currentStream
+
+                // ONE alternative puts its guard in `guard`, the representation
+                // every existing reader already handles; several alternatives use
+                // `altGuards`. So nothing changes for the ordinary `x if x > 0`.
+                val singleGuard = if (patterns.size == 1) altGuards[0] else null
+                val perAltGuards =
+                    if (patterns.size > 1 && altGuards.any { it != null }) altGuards.toList()
+                    else emptyList()
 
                 val ifToken = keyword("if", TokenType.IF)(stream2)
 
@@ -1557,7 +1604,8 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
                                                                 guardExp.value,  // Guard expression
                                                                 emptyList(),  // No if-let bindings
                                                                 expr.value,
-                                                                caseLoc
+                                                                caseLoc,
+                                                                altGuards = perAltGuards,
                                                             ),
                                                             expr.remaining
                                                         )
@@ -1589,10 +1637,14 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
                                         ParseResult.Success(
                                             ParsedMatchCase(
                                                 patterns,
-                                                null,  // No guard
+                                                // Already consumed per alternative above:
+                                                // one alternative reports through `guard`,
+                                                // several through `altGuards`.
+                                                singleGuard,
                                                 emptyList(),  // No if-let bindings
                                                 expr.value,
-                                                caseLoc
+                                                caseLoc,
+                                                altGuards = perAltGuards,
                                             ),
                                             expr.remaining
                                         )

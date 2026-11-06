@@ -228,6 +228,18 @@ data class ParsedMatch(
  * A single match case.
  *
  * Supports or-patterns (`Some x | None -> ...`) and guards (`x if x > 0 -> ...`).
+ *
+ * A guard is scoped to its own ALTERNATIVE, not to the arm: `|` separates
+ * alternatives and limits what a guard reaches, so
+ *
+ *     Red { n } if n > 0 | Pink { n } if n < 5 -> …
+ *
+ * is two alternatives with two guards and two separate `n` bindings. Each
+ * alternative's bindings are visible only to its own guard.
+ *
+ * ONE alternative keeps using [guard], so an ordinary `x if x > 0` arm is
+ * represented exactly as before and every existing reader stays correct.
+ * [altGuards] carries the multi-alternative case and is empty otherwise.
  */
 @Serializable
 data class ParsedMatchCase(
@@ -242,7 +254,55 @@ data class ParsedMatchCase(
     val trailingComment: ParsedComment? = null,
     val docComment: String? = null,
     val metadata: ParsedMetadata? = null,
+    /**
+     * A guard per entry in [patterns], or EMPTY when no alternative carries one.
+     *
+     * Non-empty only when there are SEVERAL alternatives and at least one has a
+     * guard; then it is the same length as [patterns], holding `null` for an
+     * unguarded alternative. A single alternative's guard stays in [guard],
+     * which is what lets this land without migrating every reader.
+     *
+     * An unguarded alternative still COVERS its pattern while a guarded one
+     * covers nothing -- the guard can fail -- so `Red | Pink if n > 0` covers
+     * `Red` alone. That is 5.10 applied per alternative instead of per arm.
+     *
+     * LAST in the parameter list on purpose, however oddly it reads beside
+     * [guard]: the existing constructions are POSITIONAL, so a parameter added
+     * in the middle would silently shift `ifLetBindings` and `body` along.
+     */
+    val altGuards: List<ParsedExpr?> = emptyList(),
 )
+
+/**
+ * Does the alternative at [index] contribute to COVERAGE?
+ *
+ * A guard can fail, so a guarded thing covers nothing (5.10). With `|` scoping
+ * guards per alternative, that question is per alternative too:
+ * `Red | Pink if n > 0` covers `Red` and not `Pink`.
+ *
+ * Being precise here matters rather than being merely safe. Treating the whole
+ * arm as guarded would report `Red` missing from
+ *
+ *     Red | Pink if n > 0 -> 1
+ *     Pink -> 2
+ *
+ * which is exhaustive: the first alternative is unguarded and the second arm
+ * takes `Pink`.
+ */
+fun ParsedMatchCase.altCovers(index: Int): Boolean =
+    guard == null && ifLetBindings.isEmpty() && altGuards.getOrNull(index) == null
+
+/**
+ * Is this arm unguarded THROUGHOUT — no arm guard, no `if let`, and no
+ * alternative carrying one of its own?
+ *
+ * For the coverage axes that judge an arm as a whole. An arm with a guard on
+ * only some alternatives is counted as guarded there, which under-counts rather
+ * than over-counts: it can ask for a wildcard that was not strictly needed, and
+ * never calls a match exhaustive when it is not.
+ */
+val ParsedMatchCase.fullyUnguarded: Boolean
+    get() = guard == null && ifLetBindings.isEmpty() && altGuards.all { it == null }
 
 /**
  * If-let guard in a match case: `if let Some {val = x} = expr`

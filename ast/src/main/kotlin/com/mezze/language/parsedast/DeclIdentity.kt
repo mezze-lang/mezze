@@ -645,6 +645,19 @@ private class Walker(
                     b.appendInt(c.patterns.size)
                     c.patterns.forEach { pattern(it) }
                     optional(c.guard) { expr(it, caseBound) }
+                    // PER-ALTERNATIVE guards are part of the identity: they decide
+                    // when an alternative matches, so two arms differing only here
+                    // are different code and must not share a hash.
+                    b.appendInt(c.altGuards.size)
+                    c.altGuards.forEachIndexed { i, g ->
+                        // Each guard sees ONLY its own alternative's bindings —
+                        // `Red { n } if n > 0 | Pink { n } if n < 5` has two
+                        // separate `n`s, so hashing both against the merged set
+                        // would make those two guards look interchangeable.
+                        val altBound = bound +
+                            (c.patterns.getOrNull(i)?.extractBindings() ?: emptyList())
+                        optional(g) { expr(it, altBound) }
+                    }
                     b.appendInt(c.ifLetBindings.size)
                     for (ilb in c.ifLetBindings) { pattern(ilb.pattern); expr(ilb.expr, caseBound) }
                     expr(c.body, caseBound)

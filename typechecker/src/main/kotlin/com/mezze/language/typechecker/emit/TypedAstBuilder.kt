@@ -1463,9 +1463,7 @@ class TypedAstBuilder(
                     TypedIf(scrutinee, thenBranch, elseBranch, thenBranch.type, loc)
                 } else {
                     val scrutineeShapeType = substitution.apply(scrutinee.type)
-                    val cases = expr.cases.map { c ->
-                        buildMatchCase(c, file, contextType, scrutineeShapeType)
-                    }
+                    val cases = buildMatchCases(expr.cases, file, contextType, scrutineeShapeType)
                     val resultType = cases.firstOrNull()?.body?.type
                         ?: contextType?.let { substitution.apply(it) }
                         ?: unreachedPosition("match with no cases and no context")

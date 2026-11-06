@@ -94,7 +94,7 @@ class MatchExhaustivenessTest {
             type Weather = | Sunny { temp: Int }, Rainy { temp: Int }, Cloudy |
             
             let test: {weather: Weather} -> Str = {weather} -> match weather is
-              Sunny { temp } | Rainy { temp } if temp > 25 -> "warm weather"
+              Sunny { temp } if temp > 25 | Rainy { temp } if temp > 25 -> "warm weather"
               Sunny { temp } | Rainy { temp } -> "cool weather"
               Cloudy -> "cloudy"
         """.trimIndent()
@@ -181,7 +181,7 @@ class MatchExhaustivenessTest {
             type Weather = | Sunny { temp: Int }, Rainy { temp: Int }, Cloudy |
 
             let test: {weather: Weather} -> Str = {weather} -> match weather is
-              Sunny { temp } | Rainy { temp } if temp > 25 -> "warm weather"
+              Sunny { temp } if temp > 25 | Rainy { temp } if temp > 25 -> "warm weather"
               Cloudy -> "cloudy"
         """.trimIndent()
 
@@ -254,8 +254,8 @@ class MatchExhaustivenessTest {
             type Event = | Click { x: Int }, Hover { x: Int }, Scroll |
             
             let test: {event: Event} -> Str = {event} -> match event is
-              Click { x } | Hover { x } if x > 100 -> "right side"
-              Click { x } | Hover { x } if x < 50 -> "left side"
+              Click { x } if x > 100 | Hover { x } if x > 100 -> "right side"
+              Click { x } if x < 50 | Hover { x } if x < 50 -> "left side"
               Click { x } | Hover { x } -> "center"
               Scroll -> "scroll"
         """.trimIndent()

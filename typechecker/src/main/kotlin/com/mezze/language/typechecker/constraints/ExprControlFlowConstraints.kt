@@ -83,9 +83,15 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         patternWarnings.addAll(patternResult.warnings)
 
         val firstPatternBindings = patternResult.bindings.keys
+        // Each alternative's OWN bindings, kept so a per-alternative guard can be
+        // checked against the pattern it sits next to rather than against the
+        // merged set: `Red { n } if n > 0 | Pink { n } if n < 5` has two separate
+        // `n`s, and each guard must read its own.
+        val altBindings = mutableListOf(patternResult.bindings)
         for (pattern in matchCase.patterns.drop(1)) {
             rejectDuplicateBinders(pattern, expr.loc)
             val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.loc)
+            altBindings.add(orPatternResult.bindings)
             collector.constraints.addAll(orPatternResult.constraints)
             patternWarnings.addAll(orPatternResult.warnings)
 
@@ -169,6 +175,36 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         // guard/body identifier context.
         matchCaseBindings[matchCase.loc] = patternResult.bindings
 
+        // PER-ALTERNATIVE guards, each in the scope of its own alternative.
+        //
+        // `|` scopes a guard, so these are NOT checked against `caseContext`
+        // (which carries the first alternative's bindings for the body). The
+        // alternatives agree on binding NAMES and TYPES already -- V0605 and the
+        // equalities above -- so what differs is which pattern's variable the
+        // guard reads, and that is exactly what must be kept apart.
+        var altGuardUsedVariables: Set<String> = emptySet()
+        matchCase.altGuards.forEachIndexed { i, altGuard ->
+            if (altGuard == null) return@forEachIndexed
+            var altContext = context
+            for ((varName, varType) in altBindings.getOrElse(i) { emptyMap() }) {
+                altContext = altContext.extend(varName, varType)
+            }
+            val altGuardResult = generate(altGuard, altContext.notInTailPosition())
+            collector.merge(altGuardResult)
+            altGuardUsedVariables = altGuardUsedVariables + altGuardResult.usedVariables
+            collector.constraints.add(
+                Constraint.Equality(
+                    left = altGuardResult.type,
+                    right = MezzeType.VariantType(
+                        constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null),
+                        rowVar = null
+                    ),
+                    context = "Match guard must be Bool",
+                    loc = altGuard.loc,
+                )
+            )
+        }
+
         val guard = matchCase.guard
         var guardUsedVariables: Set<String> = emptySet()
         if (guard != null) {
@@ -219,7 +255,7 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         collector.merge(caseBodyResult)
         matchCaseBindings.putAll(caseBodyResult.matchCaseBindings)
 
-        val usedVarsInBody = caseBodyResult.usedVariables + guardUsedVariables
+        val usedVarsInBody = caseBodyResult.usedVariables + guardUsedVariables + altGuardUsedVariables
         for ((varName, _) in patternResult.bindings) {
             if (!varName.startsWith("_") && varName !in usedVarsInBody) {
                 val patternLocation = patternResult.bindingLocations[varName]

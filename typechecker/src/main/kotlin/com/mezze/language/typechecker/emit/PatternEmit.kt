@@ -37,6 +37,51 @@ import com.mezze.language.ast.solving.closeGeneratedRowVars
  * A pure move: no body was edited, only the indentation and the receiver.
  */
 
+/**
+ * Build the typed cases for a match, EXPANDING any arm whose alternatives carry
+ * their own guards into one case per alternative.
+ *
+ * A guard is scoped to its alternative (`|` limits it), so
+ *
+ *     Red { n } if n > 0 | Pink { n } if n < 5 -> body
+ *
+ * becomes two typed cases, each with one pattern, its own guard and its own
+ * bindings. Trying each in order and falling through when a guard fails is
+ * exactly what a list of guarded cases already means, so the typed AST, the IR
+ * and the interpreter need no new concept.
+ *
+ * Expanding HERE rather than at parse time keeps the parsed AST faithful to the
+ * source: the formatter still prints the `|` the author wrote and hover still
+ * points at one arm.
+ *
+ * The body is emitted once per alternative, which is the cost of the expansion
+ * and the reason an ordinary or-pattern is left alone -- it carries no guards,
+ * stays a single case, and keeps sharing one body.
+ */
+internal fun TypedAstBuilder.buildMatchCases(
+    cases: List<ParsedMatchCase>,
+    file: String,
+    contextType: MezzeType?,
+    scrutineeType: MezzeType? = null,
+): List<TypedCase> = cases.flatMap { c ->
+    if (c.altGuards.isEmpty()) {
+        listOf(buildMatchCase(c, file, contextType, scrutineeType))
+    } else {
+        c.patterns.mapIndexed { i, pat ->
+            buildMatchCase(
+                c.copy(
+                    patterns = listOf(pat),
+                    guard = c.altGuards.getOrNull(i),
+                    altGuards = emptyList(),
+                ),
+                file,
+                contextType,
+                scrutineeType,
+            )
+        }
+    }
+}
+
 internal fun TypedAstBuilder.buildMatchCase(
     case: ParsedMatchCase,
     file: String,

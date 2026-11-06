@@ -253,6 +253,10 @@ class SyntaxEncoder(private val facts: (Loc) -> HostValue) {
         is ParsedMatch -> node(e, "scrutinee" to expr(e.scrutinee), "arms" to Seq(e.cases.map { c -> record(
             "patterns" to Seq(c.patterns.map(::pattern)),
             "guard" to Opt(c.guard?.let(::expr)),
+            // One per alternative, parallel to `patterns`, or empty. A macro
+            // reading a match arm would otherwise see the alternatives and
+            // silently lose what gates each one.
+            "alt_guards" to Seq(c.altGuards.map { g -> Opt(g?.let(::expr)) }),
             "if_lets" to Seq(c.ifLetBindings.map { b ->
                 record("pattern" to pattern(b.pattern), "value" to expr(b.expr), "span" to span(b.loc))
             }),

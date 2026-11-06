@@ -7,24 +7,25 @@ import org.junit.jupiter.api.Test
 /**
  * Variant specification, §5.18: how `|` in a pattern interacts with a guard.
  *
- * `|` makes ONE arm with several alternatives, and a guard belongs to the ARM,
- * not to an alternative. So there is exactly one guard and it applies to every
- * alternative:
+ * `|` makes ONE arm with several alternatives, and a guard is SCOPED to the
+ * alternative it is written beside:
  *
- *     Red | Pink if n > 0 -> 1        # one guard, covering BOTH
- *     Red if n > 0 | Pink if n < 0    # not expressible
+ *     Red | Pink if n > 0 -> 1        # gates Pink ONLY; Red is unconditional
+ *     Red if n > 0 | Pink if n < 0    # two alternatives, two guards
  *
- * That is the only coherent reading, and the or-pattern BINDING rule is why. An
- * or-pattern's alternatives must bind the same variables (V0605, pinned in
- * OrPatternBindingTest), so a guard reading `n` finds the same `n` whichever
- * alternative matched. A per-alternative guard would need per-alternative
- * bindings to be worth having, and those are forbidden — two arms express it.
+ * SUPERSEDED READING, recorded because this file used to pin it: the guard
+ * belonged to the ARM and gated every alternative. That was a footgun — `if`
+ * sits next to `Pink` and proximity argues for the narrow scope, so a reader
+ * takes `Red` for unconditional. It now is.
  *
- * Coverage then follows 5.10 unchanged: the guard can fail, so a guarded
- * or-pattern covers NONE of its alternatives, not some of them.
+ * What survives unchanged is that the alternatives must bind the same variables
+ * (V0605, pinned in OrPatternBindingTest, 13 cases): the BODY is shared, so it
+ * must see one environment whichever alternative matched. `|` scopes the
+ * GUARDS, not the body's bindings.
  *
- * Bindings themselves are OrPatternBindingTest's subject (13 cases) and are not
- * re-pinned here.
+ * Coverage is per alternative, by 5.10: a guarded alternative covers nothing
+ * while an unguarded one still covers its pattern. The per-alternative rules
+ * live in VariantSpecAltGuardTest; what stays here is the shape of `|` itself.
  */
 class VariantSpecOrPatternGuardTest : VariantSpecBase() {
 
@@ -74,8 +75,8 @@ class VariantSpecOrPatternGuardTest : VariantSpecBase() {
 
     // ===================================== 5.18 one guard, over the whole arm
 
-    /** 5.18 — ONE guard covers EVERY alternative. */
-    @Test fun `a guard applies to the whole or-pattern`() {
+    /** 5.18 — a guard attaches to ITS OWN alternative. */
+    @Test fun `a guard attaches to its own alternative`() {
         accepts(
             """
             use std::int
@@ -84,20 +85,23 @@ class VariantSpecOrPatternGuardTest : VariantSpecBase() {
               _ -> 0
             $MAIN
             """,
-            "The guard attaches to the arm, so it runs whichever alternative matched. " +
-                "The wildcard is what makes this exhaustive — see the coverage test below.",
+            "REVERSED from what this asserted before. The guard gates `Pink` alone; " +
+                "`Red` is unconditional, which is what the layout already suggested. " +
+                "The runtime half is AltGuardRuntimeTest.",
         )
     }
 
     /**
-     * 5.18 — a guard PER ALTERNATIVE is not expressible, and deliberately.
+     * 5.18 — a guard PER ALTERNATIVE is now expressible.
      *
-     * It would only be useful alongside per-alternative BINDINGS, which V0605
-     * forbids: the alternatives must bind the same variables. Two arms say it
-     * already, with each guard next to the pattern it tests.
+     * This test asserted a PARSE ERROR (`Expected '->' but got '|'`), on the
+     * reasoning that a per-alternative guard would only be useful alongside
+     * per-alternative BINDINGS, which V0605 forbids. That was wrong about the
+     * usefulness: the bindings agree by name, and what differs is which
+     * alternative's value the guard tests.
      */
-    @Test fun `an alternative may not carry its own guard`() {
-        rejectsAtParse(
+    @Test fun `each alternative may carry its own guard`() {
+        accepts(
             """
             use std::int
             pub let f = { c: | Red, Pink |, n: Int } -> match c is
@@ -105,10 +109,8 @@ class VariantSpecOrPatternGuardTest : VariantSpecBase() {
               _ -> 0
             $MAIN
             """,
-            "'->'",
-            "The grammar takes the guard as the end of the arm, so the second `|` has " +
-                "nowhere to attach. Refused at the arrow rather than silently reading the " +
-                "first guard as covering both.",
+            "Two alternatives, two guards. Previously the only way to say this was " +
+                "two arms with a duplicated body.",
         )
     }
 
@@ -132,13 +134,15 @@ class VariantSpecOrPatternGuardTest : VariantSpecBase() {
     // ===================================== 5.18 coverage, by 5.10
 
     /**
-     * 5.18 — a guarded or-pattern covers NOTHING, not some of its alternatives.
+     * 5.18 — coverage is PER ALTERNATIVE, so a guarded one covers nothing while
+     * its unguarded sibling still covers its pattern.
      *
-     * 5.10 applied to every alternative at once. The diagnostic names them all,
-     * which is the right report: the guard can fail, so after this arm both tags
-     * are still unhandled.
+     * 5.10 asked of each alternative instead of the arm. This used to report
+     * BOTH tags missing, because the arm counted as guarded throughout; now
+     * `Red` is covered and only `Pink` is not — a sharper answer, and the one
+     * that makes a following `Pink -> …` arm reachable rather than redundant.
      */
-    @Test fun `a guarded or-pattern contributes no coverage`() {
+    @Test fun `a guarded alternative contributes no coverage`() {
         rejects(
             """
             use std::int
@@ -147,9 +151,8 @@ class VariantSpecOrPatternGuardTest : VariantSpecBase() {
             $MAIN
             """,
             "V0601",
-            "With `n = 0` the guard fails and no arm matches. Partial credit would be " +
-                "worse than none — covering 'some' of an or-pattern's alternatives has no " +
-                "meaning, since the guard does not know which one matched.",
+            "With `n = 0` Pink's guard fails and nothing handles it. `Red` IS handled, " +
+                "by the unguarded alternative.",
         )
     }
 
@@ -163,9 +166,9 @@ class VariantSpecOrPatternGuardTest : VariantSpecBase() {
               Red | Pink -> 0
             $MAIN
             """,
-            "The same shape 5.12 licenses for a single pattern: a guarded arm followed " +
-                "by an unguarded one for the same tags. So the coverage rule never makes " +
-                "a program unwritable, only more explicit.",
+            "The same shape 5.12 licenses for a single pattern: a guarded alternative " +
+                "followed by an unguarded arm for the same tags. So the coverage rule " +
+                "never makes a program unwritable, only more explicit.",
         )
     }
 }

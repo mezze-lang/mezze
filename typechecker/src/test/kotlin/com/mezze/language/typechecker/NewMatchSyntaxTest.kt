@@ -110,7 +110,7 @@ class NewMatchSyntaxTest {
             type Temp = | Hot { degrees: Int }, Cold { degrees: Int }, Mild |
             
             let classify = {temp} -> match temp is
-              Hot { degrees } | Cold { degrees } if degrees > 100 -> "extreme"
+              Hot { degrees } if degrees > 100 | Cold { degrees } if degrees > 100 -> "extreme"
               Hot { degrees } -> "hot"
               Cold { degrees } -> "cold"
               Mild -> "mild"
@@ -244,7 +244,7 @@ class NewMatchSyntaxTest {
             type Temp = | Hot { degrees: Int }, Cold { degrees: Int } |
 
             let isExtreme = {temp} -> match temp is
-              Hot { degrees } | Cold { degrees } if degrees > 50 || degrees < -20 -> True
+              Hot { degrees } if degrees > 50 || degrees < -20 | Cold { degrees } if degrees > 50 || degrees < -20 -> True
               _ -> False
         """.trimIndent()
 

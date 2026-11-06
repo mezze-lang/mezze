@@ -188,10 +188,12 @@ class MatchValidator(
         var hasWildcard = false
 
         for (case in matchExpr.cases) {
-            for (pattern in case.patterns) {
+            // INDEXED, because a guard is scoped to its own alternative: ask
+            // `altCovers(i)` rather than whether the arm has a guard anywhere.
+            for ((altIndex, pattern) in case.patterns.withIndex()) {
                 when (pattern) {
                     is ParsedConstructorPattern -> {
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) coveredConstructors.add(pattern.constructor)
+                        if (case.altCovers(altIndex)) coveredConstructors.add(pattern.constructor)
                         if (expandedType.constructors[pattern.constructor] == null && pattern.payload != null) {
                             errors.add(ValidationError.UnitVariantPayloadMismatch(
                                 constructorName = pattern.constructor, variantType = expandedType, loc = case.body.loc
@@ -204,13 +206,13 @@ class MatchValidator(
                         // covers that lone constructor (whose synthetic name is the
                         // newtype's `constructor` field == typeName). Match on typeName
                         // — that's what the expander stores as the variant ctor.
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) coveredConstructors.add(pattern.typeName)
+                        if (case.altCovers(altIndex)) coveredConstructors.add(pattern.typeName)
                     }
                     is ParsedWildcardPattern, is ParsedVariablePattern -> {
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) hasWildcard = true
+                        if (case.altCovers(altIndex)) hasWildcard = true
                     }
                     is ParsedLiteralPattern -> {
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
+                        if (case.altCovers(altIndex)) {
                             val lit = pattern.value
                             if (lit is ParsedLiteralValue.BoolValue) coveredConstructors.add(if (lit.value) BuiltinTypes.TRUE else BuiltinTypes.FALSE)
                         }
@@ -334,7 +336,7 @@ class MatchValidator(
         var minOpenConsWidth = Int.MAX_VALUE
 
         for (case in matchExpr.cases) {
-            val unguarded = case.guard == null && case.ifLetBindings.isEmpty()
+            val unguarded = case.fullyUnguarded
             if (!unguarded) continue
             for (pattern in case.patterns) {
                 when (pattern) {
@@ -425,7 +427,7 @@ class MatchValidator(
 
         val heads = mutableListOf<ParsedPattern?>()
         for (case in matchExpr.cases) {
-            if (case.guard != null || case.ifLetBindings.isNotEmpty()) continue
+            if (!case.fullyUnguarded) continue
             for (pattern in case.patterns) {
                 if (pattern !is ParsedSeqPattern) continue
                 if (pattern.restPattern == null) continue        // fixed length — cannot match a long seq
@@ -473,7 +475,7 @@ class MatchValidator(
         matchExpr: ParsedMatch,
         record: MezzeType.RecordType,
     ): ValidationResult {
-        fun unguarded(case: ParsedMatchCase) = case.guard == null && case.ifLetBindings.isEmpty()
+        fun unguarded(case: ParsedMatchCase) = case.fullyUnguarded
 
         // (C) A catch-all makes the match total regardless of field coverage.
         for (case in matchExpr.cases) {
@@ -922,9 +924,20 @@ class MatchValidator(
                         removableArmLoc = case.loc
                     ))
                 }
-                // Record every alternative's key as covered for later arms, and
+                // Record each alternative's key as covered for later arms, and
                 // note exhaustion if any alternative is a catch-all.
-                for (pattern in case.patterns) {
+                //
+                // Only an alternative that actually COVERS counts, because `|`
+                // scopes guards: in `Red | Pink if n > 0` the guard can fail, so
+                // `Pink` is NOT taken by this arm and a later `Pink -> …` is live.
+                // Recording both keys made that later arm look unreachable.
+                //
+                // The duplicate test above still reads EVERY alternative's key,
+                // and that stays right: if an earlier unguarded arm already took
+                // `Pink`, then a guarded `Pink if g` here can never run either --
+                // the earlier arm gets there first whatever the guard says.
+                for ((altIndex, pattern) in case.patterns.withIndex()) {
+                    if (!case.altCovers(altIndex)) continue
                     duplicableKey(pattern)?.let { coveredKeys.add(it) }
                     if (pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern) {
                         isExhausted = true
