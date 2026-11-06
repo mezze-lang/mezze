@@ -153,8 +153,8 @@ session opened at 122x off kotlin because of dictionary passing — is one of th
 
 | function | cause | defect? |
 |---|---|---|
-| `apply_fold [n, f, __dict_add]` | the GENERIC original, kept beside its specialisation. `k_hof` emits `CallDirectIR` to the spec; this copy is present and uncalled | **no** — another module could call it at a different type |
-| `step_alt [x, __dict_add, __dict_mul]` | same: the generic beside its spec. Kernel 4 improved 99 764 → 49 299 (2.0x) when the spec reference landed, so the spec IS being used; the residual 5x against kernel 3 is a BIMORPHIC indirect call, which is the dispatch row, not a mono row | **no** |
+| ~~`apply_fold [n, f, __dict_add]`~~ | **GONE** (full mono, 4c5edeb33). It was never "present and uncalled": `main` and `k_hof2` both emitted `CallDirectIR` to it, which the hash probe showed and this row got wrong | was **yes** |
+| `step_alt [x, __dict_add, __dict_mul]` | the only carrier left. Never called DIRECTLY anywhere — only passed as a value — so no call site exists to specialise it from, and the dict goes to a wrapper instead | **no**, and this one is sound: a spec needs a site |
 | `add2 [a, b, __dict_add]` | generic original in `dispatch_probe` | **no** |
 | ~~`go_a` `go_d` `go_n` `go_o` `go_r`~~ | **CLOSED** — see below | fixed |
 
@@ -216,7 +216,7 @@ and it is the annotation rule failing:
 |---|---|
 | inline lambda (`k_closure`) | yes, dict-free (`3f76640a`) |
 | **annotated** top-level fn (`step_mono`) | yes, dict-free (`6865275d`) |
-| un-annotated top-level fn (`step`, `step_alt`) | **no — generic + `__dict_add`** |
+| ~~un-annotated top-level fn~~ | **yes since 4c5edeb33** — four dict-free `[n, f]` specialisations. The row below is what the gap WAS |
 
 Kernels 3 and 7 differ ONLY by an annotation and only the annotated one
 monomorphises. `step` escaped a dictionary by luck: `k_named` calls it
@@ -6290,3 +6290,62 @@ Both dedicated A/B benches now say an annotation buys nothing or costs a little.
 `bench/cases/mandelannot`, min of 6 interleaved: un-annotated 309 ns/px against
 annotated 343, identical checksums. `bench/cases/defunc` after full mono:
 kernel 3 (inferred) 913 ps/iter against kernel 7 (annotated) 1 434.
+
+### LEDGER UPDATE 2026-11-06 (later) — mono closes, and one row is the instrument itself
+
+| row | was | now |
+|---|---|---|
+| a polymorphic fn passed as a VALUE to a HOF | ABOVE FLOOR, 13x | **AT FLOOR, 1.16x.** 913 ps/iter against the inline floor's 785, and it now BEATS the ANNOTATED version (1 434). Interleaved, min across 12 samples per cell, with kernel 1 as a control that moved 1.6% |
+| HOF call-site seeding | PARTIAL — only an argument whose type the signature declares | **CLOSED.** `MonoDriver` reads the per-site arrows, so the callback's RESULT type no longer blocks derivation. defunc's dictionary carriers 2 → 1 |
+| the last dictionary carrier | 2 functions, verdict "neither is a defect" | **1 function, and the old verdict was wrong.** `apply_fold` WAS called by `main` and twice by `k_hof2`; `step_alt` is the sound one — never called directly, so no site exists to specialise from |
+| heterogeneous `+` reached through a dictionary | not a row | **CORRECT, was WRONG ANSWER territory.** Lowering picked the impl by RECEIVER alone, so `Float + Int` ran Float's homogeneous `add` on a Long and died in `CallNativeDDD`. Right by luck whenever the operands agreed |
+| a recursive local lambda capturing a dictionary | not a row | **FIXED.** Its hash was predicted one way and emitted another, so it called itself at a target that resolved nowhere — a well-typed program that would not run |
+| **the seq fused pipeline** (`map`/`filter`/`fold`/`count`/`sum`) | implicitly a target, "61-151 ns/elem" | **ABOVE FLOOR, 2-6x — and NOT the 10-20x I picked.** `count` 16 ps/elem and `map+size` 32 fold to O(1) (`map` preserves length). The rest, swept over array sizes so cache cannot explain it — 390KB / 1.5MB / 7.8MB / 31MB:<br>`fold` 491 / 249 / 393 / 325 · `sum` 397 / 360 / 374 / 337 · `filter+size` 194 / 186 / 193 / 436.<br>**FLAT in N**, so it is compute, not bandwidth (16MB at 327 ps/elem would have been ~24 GB/s and looked bandwidth-bound; the 390KB case settles it). Against the declared ~85 ps/elem floor that is 2-6x. **The ordering names the cause**: `filter+size` is CHEAPER than `sum` and `fold` while doing more work, because the SIMD gate admits SUM/COUNT/REDUCE — a count sink vectorises, `seq::sum` is routed to `BuiltinSumLongSeq` OUTSIDE the FLP, and a `+`-folder fold is an `Accumulate` sink the gate excludes. A sum IS `fold(+, 0)`, so that exclusion is artificial |
+| **the per-element instrument** | not a row | **ABOVE FLOOR, cause named.** `ds_matrix` at its default N=10 000 measures JIT WARMUP: its figures are ~500x the steady-state cost. At N=200 000 the medians are still 2-3x the minima, and it then disagrees with a 2e6 harness by **560x on the same operation** (`seq::count` 8.94 ns/elem against 0.016). A candidate is the double-indirect `thunk {}` through `report` → `time_k_go`. This row BLOCKS the ranking: "largest measured gap" is unanswerable for the collection surface until one harness is trusted |
+| an annotation buying anything | the open question behind three benches | **CLOSED, no gain anywhere measurable.** `mandelannot` 309 ns/px inferred against 343 annotated, min of 6 interleaved, identical checksums; `defunc` 913 against 1 434. Inference leaves nothing on the table |
+
+**The symmetry worth keeping.** This ledger exists because "the 1503x `size` win
+was sitting in an EXISTING bench that nobody had run at a realistic N". Today I
+ran an existing bench at an UNREALISTIC N and picked a 10-20x target that did
+not exist. The same instrument blindness in both directions, and in both cases
+the bench's own numbers said so — a median 2-10x its own minimum is the tell,
+and ds_matrix's header spells it out.
+
+### The next target, derived this time instead of guessed
+
+`seq::sum` and `seq::fold(+, 0)` over a long-backed seq **never reach the
+vectorised pipeline at all.** Probing the SIMD gate directly:
+
+```
+  k=4 filter+size  ->  [simd] gate fromArray=true avail=true n=200000 thr=32 sink=1
+                       [simd] TAKEN                                   ~190 ps/elem
+  k=1 fold         ->  (the gate is never reached)                    ~250-490
+  k=6 sum          ->  (the gate is never reached)                    ~340-400
+```
+
+`BytecodeCompiler` routes `rawXsExpr != null && isSumSink && !hasStages &&
+longZeroInit` to `BuiltinSumLongSeq`, i.e. `SeqSumLongScalarNode` — the name is
+accurate, it is a scalar counted loop — so the sum bypasses
+`FusedLongPipeline` and with it `FlpSimd`. The COUNT sink, which does reach the
+pipeline, vectorises and comes out ~2x faster **while doing strictly more work**
+(it carries a filter).
+
+So an optimisation has become a pessimisation, and the node says why it was
+written that way: "the scalar loop wins on SVM/AOT because native-image has no
+LongVector intrinsic". That reason is still valid for AOT and NOT for the JVM,
+which is where these numbers were taken — and `FlpSimd.AVAILABLE` already gates
+itself off on SVM, so the two-path shape is established.
+
+A vectorised peer already exists and is not on this path:
+`SeqReduceLongSIMDNode`, specialised by size with a `LongVector` body at n >= 64.
+
+**The work**: route sum / `fold(+)` over long storage to the vector path when it
+is available, keep the scalar loop on SVM, and hold both with the AOT parity
+script as well as the two suites — a change that is fast on the JVM and slower
+on native would be a regression this ledger's own floors would not catch,
+because they are measured on the jar.
+
+Expected: ~340-400 to roughly the ~190 the count path already demonstrates, on
+the two most common collection operations. NOT claimed until measured: the
+count path vectorises a compare-and-increment, and a sum carries an accumulate
+dependency, so it may land short of 190.
