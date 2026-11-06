@@ -6233,3 +6233,60 @@ specs are NOT dict-carrying.
 - Block-wise cost runs gave a 1.7x "difference" on `mez check`, which the mono
   consumer cannot affect at all. Interleave, and keep a quantity in the
   measurement that the change provably cannot touch.
+
+## I picked a target off a warmup measurement, and the retraction is the finding
+
+Asked for the next big item I surveyed `bench/cases/ds_matrix`, the Phase G0
+baseline, and picked seq's `map`/`filter`: 61-151 ns/elem against a 5-6 ns/elem
+fold floor, with List doing the same staged job 2.6-5.5x faster — a same-regime
+comparison, which is what the rules ask for.
+
+**All of it was JIT warmup.** The same operations, measured at n=2e6 with the
+minimum of 12 timed passes, in PICOseconds per element:
+
+```
+  seq count         16 ps/elem        seq filter+size   269
+  seq map+size      32                seq sum           327
+  seq map+fold     253                seq fold          328
+```
+
+0.25-0.33 ns/elem is roughly a `long[]` read plus an add on this machine, and
+`count`/`map+size` are faster still because length is invariant under `map`, so
+they fold to O(1). There is no 10-20x gap in the seq pipeline. The ds_matrix
+figures were inflated about 500x.
+
+What makes this worse than a wrong guess: **ds_matrix's own header says the
+default is under-warmed** — "At 10 000 the median runs 2-10x the min, which is
+what an under-warmed measurement looks like" — and I ran the default anyway. The
+medians in my own first reading were 4x the minima, which is the same signal.
+
+### The instrument is the blocker, not any one operation
+
+Raising ds_matrix to N=200 000 does NOT fix it: medians stay 2-3x the minima, so
+it is still short of steady state, and it then disagrees with the 2e6 harness by
+**560x on the same operation** (`seq::count` at 8.94 ns/elem against 0.016). At
+least one of the two is measuring something other than the operation — a
+candidate is the double-indirect `thunk {}` through `report` -> `time_k_go`,
+against one level in the other harness.
+
+So there is currently NO trustworthy per-element instrument for the collection
+surface, and "the largest measured gap" cannot be answered from one that reports
+500x off. That instrument is the next piece of work: one harness, big N, min of
+many passes, reporting ps/elem so sub-nanosecond costs are visible at all, and
+agreeing with a second implementation before any target is picked off it.
+
+Three stale numbers this corrected along the way, all from memory rather than
+measurement:
+  - `list::map`/`filter` "100-644x slower than seq" — they are 2.6-5.5x FASTER
+    at N=10k and both are sub-nanosecond in steady state.
+  - "20M Int tail loop ~21 ns/iter" — defunc kernel 1 is a tail loop at 785
+    ps/iter.
+  - seq being the fast fused structure and List the slow one — at N=10k List
+    wins map/filter, and in steady state the distinction vanishes.
+
+### Annotations, separately: nothing left to gain
+
+Both dedicated A/B benches now say an annotation buys nothing or costs a little.
+`bench/cases/mandelannot`, min of 6 interleaved: un-annotated 309 ns/px against
+annotated 343, identical checksums. `bench/cases/defunc` after full mono:
+kernel 3 (inferred) 913 ps/iter against kernel 7 (annotated) 1 434.
