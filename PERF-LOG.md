@@ -7007,3 +7007,87 @@ say otherwise, because a pause count IS bytes.
    through accessors that already switch on the shape's storage kind.
 3. Arity 3+ records, which still take the variadic boxed path. Worth doing after
    (1), because (1) changes what the fixed-arity operations should construct.
+
+### LEDGER UPDATE 2026-11-06 — `MezzeVariant` 64 bytes -> 48, and row 13 stops being the disappointment
+
+The previous entry named this target: *"the `MezzeVariant` layout, now that row
+13 shows it dominating its own chain"*. Taken, and the two fields that went are
+the ones no variant could ever use at the same time.
+
+```
+  long longValue;      \__ a variant is exactly ONE payload type, and
+  double doubleValue;  /   payloadType says which — so the second
+                           eight-byte slot was unusable by construction.
+
+  int payloadLength;       every construction route set this to exactly what
+                           payloadType implies: 0 for NONE, 1 for a single
+                           payload, payload.length for MULTI. Four bytes of
+                           restatement, now derived.
+```
+
+12 bytes off a 60-byte field set, so the object drops a padding step:
+**64 bytes -> 48, 25% of every variant the language allocates.**
+`payloadType` is `@CompilationFinal`, so the derived `getPayloadLength()`
+switch folds away under partial evaluation and costs nothing compiled.
+
+#### Measured, young-GC pauses, n=1e7, two runs each
+
+```
+  row                                           before   after    change
+  17  variant alloc, all ctors single-field         34   28, 27    -19%
+  13  variant alloc, one ctor has 2 fields          38   34, 34    -11%
+  10  variant build + match (Shape)                 58   53, 54     -8%
+  16  variant build + match (Shape1)                39   36, 37     -7%
+  ---- controls: rows that allocate NO variant ----
+  15  record alloc, 1 field                         31   30, 29   unchanged
+  18  record alloc, 2 fields                        33   32, 33   unchanged
+```
+
+Row 17 is the clean signal: one fused single-field variant per iteration, so
+the variant is the only object allocated. Against the ~3-pause harness floor
+that is 31 -> 24.5 of variant-attributable pauses, 21%, against 25% predicted
+from the object size. The two record rows are the controls and they do not
+move — they allocate no variants at all.
+
+**Row 17's 19% is the number that matters most**, because `Option` and `Result`
+ARE single-field variants and nearly every fallible call in the language
+returns one.
+
+#### The risk this took, and the test that covers it
+
+A `Float` payload now lives as raw bits in the shared slot.
+`Double.doubleToRawLongBits` is the correct conversion and
+`Double.doubleToLongBits` is NOT — the latter canonicalizes every NaN to one
+bit pattern, so a signalling NaN would not survive a round-trip. Negative zero
+is the other trap: `-0.0 == 0.0` is true, so an equality assertion would pass
+even with the sign bit dropped.
+
+`MezzeVariantPayloadSlotTest`, 9 tests, compares BITS for both cases. It
+discriminates: switching the two call sites to `doubleToLongBits` fails
+`aNonCanonicalNaNSurvivesTheRoundTrip` and nothing else, which is exactly the
+test earning its place.
+
+#### Where the three allocation steps have got to
+
+```
+                                    objects   bytes
+  `{ r = i }`        before            3        ~72      box + Object[1] + record
+                     now               2         56      long[1] + record
+  `{ a = i, b = i }` before            4         96      2 boxes + Object[2] + record
+                     now               2         72      long[2] + record
+  `Circle { r = i }` before            1         64      the variant alone
+                     now               1         48
+  `Tri { b, h }`     before            5        ~160
+                     now               3        ~120
+```
+
+**NEXT, and it is the same lever a third time: the ARRAY is now the overhead.**
+`{ r = i }` is a 32-byte record plus a `long[1]` that spends a 16-byte header
+on 8 bytes of payload. Inline fields on a small-arity record would make it one
+~32-byte object — roughly another halving on rows 15 and 18, and the same
+saving again inside every multi-field variant payload. `MezzeRecord` is `final`
+with only 9 external construction sites and every reader goes through an
+accessor that already switches on the shape's storage kind, so the surface is
+tractable; `MezzeVariant` has 876 external references but they are nearly all
+to the TYPE, and this entry's change proves the layout is private enough to
+move underneath them.
