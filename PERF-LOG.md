@@ -5607,6 +5607,56 @@ and portability rather than for performance. Worth noting: `--native` defaults t
 `-O1` for build time, so the 4x-better-startup artifact is the one users do not
 get unless they ask. That is a product call, not a perf finding.
 
+## Parallelising startup: the target is located, the box was not quiet enough
+
+~168 ms of the jar's boot is **class initialisation that depends on nothing**, and
+it sits on the critical path behind work it shares nothing with. Measured on a
+quiet box, standalone, with no Engine and no app present:
+
+```
+  141 ms   Class.forName("…bytecode.MezzeBytecodeRootNodeGen")
+   27 ms   Class.forName("…bytecode.BytecodeCompiler")
+    2 ms   Class.forName("…store.StoreSerialization")
+```
+
+Both initialise cleanly with nothing else running, which is the structural point:
+they need no Engine, no Context and no decoded app. Yet boot pays them inside the
+first `eagerCompileReachable`, AFTER a 104 ms CBOR decode and a 213 ms
+`Engine.build()` that neither depends on. On 16 cores they should disappear into
+that 317 ms.
+
+The change is ~15 lines: a daemon thread from `MezzeAppMain.main` that does those
+two `Class.forName` calls. It is safe by construction — JVM class initialisation
+is mutually exclusive per class, so a main thread arriving mid-init blocks and
+then proceeds; there is no partially-initialised window. A throwing static
+initialiser leaves its class erroneous either way, so the only difference is
+`NoClassDefFoundError` instead of `ExceptionInInitializerError`.
+
+**NOT LANDED, because the machine stopped being measurable.** The sequence, which
+is the useful part:
+
+1. Blocked measurement said 1 664 ms with the prewarm against 820 without —
+   a catastrophic regression. **That was drift**: reverting gave 1 261-1 434 ms,
+   so the baseline itself had moved 1.6x.
+2. Gated it behind `MEZZE_PREWARM` and interleaved on ONE binary: off/on pairs of
+   1558/1436, 1450/1472, 1597/1522, 1592/1424, 1724/1783 — three of five favour
+   the prewarm, means 1 584 against 1 527, a 3.6% win. Too weak to land.
+3. `/proc/loadavg` said **30.3 on 16 cores**, with several foreign JVMs at
+   200-530%. Stopping our own Gradle daemons took it to 23 and it then climbed
+   to 33.5. The phase marks confirmed it: the same `eager BDSL emitted` step read
+   215 ms, 1 088 ms and 975 ms across three runs with the prewarm OFF.
+
+Startup is almost entirely class loading, which is the measurement most sensitive
+to a loaded box — more so than any throughput kernel here, because it is I/O and
+metaspace rather than a hot loop. **This needs an idle machine, and then it is a
+15-minute job**: apply the thread, interleave `MEZZE_PREWARM` on one binary, and
+expect the `Engine built` mark to stay put while `eager BDSL emitted` shrinks.
+
+It also explains why the whole shape is what it is, and why the native image wins
+so completely: 6 089 classes load on the jar path, AppCDS saves 260 ms by
+pre-parsing them, and `--native -O2` skips the entire phase (19 ms total, every
+boot mark reading 0-1 ms).
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
