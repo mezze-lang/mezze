@@ -55,6 +55,15 @@ class ParserErrorQualityTest {
         Bad("let 3 = x", expectCode = ErrorCode.P0128_INVALID_LET_BINDING_TARGET, mustMention = "binds a name"),
         // ── lambdas ─────────────────────────────────────────────────────
         Bad("let f = { -> a", mustMention = "identifier"),
+        // ── patterns ────────────────────────────────────────────────────
+        // `|` separates the alternatives of an ARM, so it goes between whole
+        // patterns. The verdict was always right; before P0138 the message was
+        // `Expected '}' but got '|'`, which names a token and teaches nothing.
+        Bad(
+            "let f = { v } -> match v is\n  Some { val = Red | Pink } -> 1",
+            expectCode = ErrorCode.P0138_OR_PATTERN_NESTED,
+            mustMention = "alternatives of a match ARM",
+        ),
         // ── types / records ─────────────────────────────────────────────
         Bad("type Foo =", mustMention = "{"),
         Bad("type = Int", mustMention = "identifier"),

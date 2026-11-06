@@ -70,6 +70,7 @@ enum class ErrorCode {
     P0135_DO_BLOCK_INCONSISTENT_INDENT, // statements in a `do` block must all start at the same column; this one is indented differently
     P0137_EFFECT_ROW_MARKER_ORDER, // `<*, ...>` — the `*` marker comes LAST in a row, after the names and after `...`, so the canonical spelling is `<..., *>`. Both markers may co-occur; only the order is fixed, and it is the order the printer emits
     P0136_MALFORMED_QUOTE, // a quote `( … ) or a splice ~x / ~( … ) that is not well formed, or `~` outside a quote
+    P0138_OR_PATTERN_NESTED, // `Some { val = Red | Pink }` — `|` separates whole ARM alternatives, so write `Some { val = Red } | Some { val = Pink }`
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

@@ -298,7 +298,8 @@ internal val MezzeParser.standaloneRecordPattern: Parser<ParsedPattern>
                             afterComma
                         }
 
-                        val rbrace = tok(TokenType.RBRACE)(stream3)
+                        val nestedOr = nestedOrPatternError(stream3)
+                        val rbrace = nestedOr ?: tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
                             is ParseResult.Success -> {
@@ -548,6 +549,43 @@ internal val MezzeParser.constructorPattern: Parser<ParsedPattern>
         }
     }
 
+/**
+ * `|` where a record pattern wants `}` — an or-pattern written INSIDE a payload.
+ *
+ *     Some { val = Red | Pink }          # refused here
+ *     Some { val = Red } | Some { val = Pink }   # the form that means it
+ *
+ * `|` separates the alternatives of an ARM, so it belongs between whole
+ * patterns. That is not a restriction to apologise for: each alternative is a
+ * pattern in its own right, which is what lets it carry its own guard and bind
+ * its own variables (`Some { val = Red } if n > 0 | …`). A `|` nested inside a
+ * payload could do neither, and would read as part of the field's value rather
+ * than as a choice of arm.
+ *
+ * Without this the parser said `Expected '}' but got '|'`, which is true and
+ * tells the author nothing about what to write instead.
+ */
+private fun MezzeParser.nestedOrPatternError(stream: TokenStream): ParseResult.Failure? {
+    if (stream.current()?.type != TokenType.PIPE) return null
+    return ParseResult.Failure(
+        "`|` cannot appear inside a pattern's payload. It separates the " +
+            "alternatives of a match ARM, so it goes between whole patterns.",
+        stream.getSourcePosition(),
+        stream.getSourceLine(),
+        stream.getSourceColumn(),
+        // FATAL: the pattern has been consumed and this names the real problem,
+        // so `oneOf` must not hide it behind a competing alternative's shallower
+        // "Expected '}' but got '|'".
+        isFatal = true,
+        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0138_OR_PATTERN_NESTED,
+        hints = listOf(
+            "write the alternatives as whole patterns: " +
+                "`Some { val = Red } | Some { val = Pink } -> …`",
+            "each alternative can then carry its own guard and its own bindings",
+        ),
+    )
+}
+
 internal val MezzeParser.recordPatternParser: Parser<ParsedRecordPattern>
     get() = { stream ->
         val lbrace = tok(TokenType.LBRACE)(stream)
@@ -578,7 +616,8 @@ internal val MezzeParser.recordPatternParser: Parser<ParsedRecordPattern>
                             afterComma
                         }
 
-                        val rbrace = tok(TokenType.RBRACE)(stream3)
+                        val nestedOr = nestedOrPatternError(stream3)
+                        val rbrace = nestedOr ?: tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
                             is ParseResult.Success -> {

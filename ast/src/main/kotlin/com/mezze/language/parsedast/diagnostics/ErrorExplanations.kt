@@ -135,6 +135,22 @@ fun ErrorCode.explain(): String = when (this) {
         "and `~( … )` the value of an expression; `...~xs` splices a list into a sequence or " +
         "a record. `~` means nothing outside a quote, and quotes do not nest."
 
+    ErrorCode.P0138_OR_PATTERN_NESTED ->
+
+        "`|` separates the ALTERNATIVES OF AN ARM, so it belongs between whole " +
+
+            "patterns and not inside one. `Some { val = Red | Pink }` is written " +
+
+            "`Some { val = Red } | Some { val = Pink }`.\n\n" +
+
+            "Each alternative is a pattern in its own right, which is what lets it " +
+
+            "carry its own guard (`Some { val = Red } if n > 0 | …`) and bind its own " +
+
+            "variables. A `|` nested inside a payload could do neither, and would " +
+
+            "read as part of the field's value rather than as a choice of arm."
+
     ErrorCode.V1001_MACRO_NOT_FOUND ->
         "`name!( … )` calls the macro `name`, which must be imported from another module " +
         "(`use lib::{ name }`, or written `lib::name!( … )`). A macro cannot be declared in the " +
