@@ -63,12 +63,6 @@ object NativeHelpers {
     }
 
     @TruffleBoundary
-    fun stringSplit(s: String, delimiter: String): MezzeSeq<Any> {
-        val parts = s.split(java.util.regex.Pattern.quote(delimiter).toRegex())
-        return MezzeSeq.fromArray(parts.toTypedArray())
-    }
-
-    @TruffleBoundary
     fun stringJoin(strings: MezzeSeq<*>, separator: String): String {
         val sb = StringBuilder()
         val n = strings.size()

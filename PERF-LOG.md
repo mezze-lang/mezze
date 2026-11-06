@@ -6607,3 +6607,118 @@ Then the escape-analysis row, which is bigger in aggregate and much harder: it
 needs to be established WHY a non-escaping `MezzeVariant` is not scalar-replaced
 (the volatile `materializedRecord` field and any match-side read that could
 materialize a record are the first two things to rule out).
+
+### LEDGER UPDATE 2026-11-06 — `str::split` lands 1.88x, and the board now says one word
+
+The target the previous entry derived, taken and measured. `str::split` on a
+64-char string with 12 parts: **313 154 -> 166 789 ps/op, 1.88x**, and as a
+ratio to the in-process control **1 480x -> 798x**.
+
+**The fourteen untouched rows are the proof it is real.** Same script, same
+machine, every row at its own converged n, run before and after. Ratios to the
+in-process control:
+
+```
+  row                        before    after    moved
+  str::size                     195      199    +2.0%
+  str::concat                 4 833    4 819    -0.3%
+  str::contains               2 385    2 394    +0.4%
+  str::to_upper              26 068   26 144    +0.3%
+  int::to_str + concat        8 000    7 834    -2.0%
+  int::to_str                 3 759    3 823    +1.7%
+  str equality                2 743    2 717    -1.0%
+  choose-ctor arith only        545      558    +2.4%
+  variant build+match         4 088    4 088     0.0%
+  build+match w/ guard        4 454    4 474    +0.4%
+  if-let on Option            2 210    2 316    +4.8%
+  variant alloc, no match     2 247    2 315    +3.0%
+  variant match, no alloc     1 663    1 637    -1.6%
+  record alloc, 1 field       1 969    1 943    -1.3%
+  ---------------------------------------------------
+  str::split                150 554   79 803    1.89x
+```
+
+Fourteen rows inside ±5%, one row at 1.89x. This is the shape of evidence the
+SIMD attempt did not have, where the control moved 16% in the wrong direction
+and swamped a claimed 1.09-1.13x.
+
+**The change.** `s.split(Pattern.quote(delimiter))` became a literal `indexOf`
+walk. The quoting was correct and had to stay correct — `std::fs` splits paths
+on `"."`, which as a regex matches every character — but `Pattern.quote(" ")` is
+`\Q \E`, five characters, and `String.split`'s fast path only fires for a single
+non-meta character or a two-char escape. So the quoting defeated the fast path
+and every call compiled a `Pattern`. `indexOf` is literal without escaping, so
+the fix is faster AND a more direct statement of the contract.
+
+Observable behaviour is unchanged, and three parts of it are not obvious:
+trailing empty parts are dropped (`",,"` is ZERO parts), a leading one is kept,
+and an empty input is one empty part rather than none. All thirteen cases are
+pinned by `StringSplitSemanticsTest`, whose expectations were read off the OLD
+implementation before it was touched rather than from the documentation.
+
+**That test passes before AND after, deliberately, and that is the right shape
+here.** The standing rule is that a test must fail without its fix; this change
+is a performance change whose whole point is that nothing observable moves, so a
+test that failed beforehand would mean the change broke something. What was
+verified instead is that the test is not vacuous — the implementation was broken
+two ways and the suite caught each:
+
+```
+  trailing-empty removal disabled -> 2 FAILED  (the ",," and "a,b," cases)
+  delimiter no longer literal     -> 1 FAILED  (the "." case)
+```
+
+**A second implementation was deleted, not kept.** `NativeHelpers.stringSplit`
+(Kotlin) had no callers and did not even agree with the live one: Kotlin's
+`split` KEEPS trailing empty strings, so the two natives behind one stdlib
+function answered differently. Gone.
+
+Gate: `:interpreter:test` 7 493 tests, 0 failures (re-executed, 9m55s);
+`:typechecker:test` 4 826, 0 failures (UP-TO-DATE — no typechecker input
+changed).
+
+#### Where the remaining 167 ns goes, and why I am not chasing it next
+
+Splitting 64 chars into 12 parts now costs 14 ns a part. Accounting for it:
+12 `substring` calls allocate **24 objects** — a `String` plus its `byte[]`
+each — and the measured cost of a small allocation on this board is ~3 ns, so
+the allocations alone are ~70 ns. Add the `ArrayList` growth and the copy into
+the final `Object[]` and ~167 ns is roughly the allocation floor for returning
+twelve separate strings. Removing the `ArrayList` double-copy is maybe 9% of
+one row, estimated not measured, and is recorded here rather than done.
+
+#### The board, read as a whole, now says one word
+
+| row | ps/op | what dominates it |
+|---|---|---|
+| `str::split` (12 parts) | 166 789 | 24 allocations |
+| `str::to_upper` | 55 165 | char-at-a-time, then 2 allocations |
+| `int::to_str` + `concat` | 16 688 | 4 allocations |
+| `str::concat` | 10 072 | 2 allocations (String + byte[]) + copy |
+| `variant build + match` | 8 544 | **1 allocation**, not eliminated |
+| `int::to_str` | 7 992 | 2 allocations |
+| `variant alloc, no match` | 4 793 | 1 allocation |
+| `record alloc, 1 field` | 4 081 | 1 allocation |
+| `variant match, no alloc` | 3 471 | no allocation |
+| `choose-ctor arith only` | 1 168 | no allocation |
+| `str::size` | 418 | no allocation |
+
+Sorted by cost, this table sorts by ALLOCATION COUNT. The three rows that
+allocate nothing are the three cheapest; every expensive row is expensive in
+proportion to how many objects it makes. A small allocation costs ~3 ns here
+whether it is 32 bytes or 64 — twice the object for 20% more time — so the cost
+is per-allocation, not per-byte, and it is not something a better layout fixes.
+
+**NEXT TARGET, and it is the same one from two independent directions:
+allocation.** The sharpest statement of it is still the pattern-matching row,
+because there the allocation is provably unnecessary — a variant constructed,
+matched, and dead before the next iteration is exactly what partial escape
+analysis exists to remove, and it is not removed: build+match costs 8 544
+against match-alone's 3 471. `Option` and `Result` ARE variants and nearly
+every one of them is built, matched and discarded, so this is a ~3.6 ns tax on
+every fallible call in the language.
+
+First two things to rule out, in order: the volatile `materializedRecord` field
+on `MezzeVariant` (a volatile member is a known obstruction to scalar
+replacement), and any match-side read that can call `getPayloadValue()`, which
+materializes a `MezzeRecord` and would make the variant escape by itself.

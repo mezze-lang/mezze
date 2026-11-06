@@ -535,11 +535,68 @@ public final class NativeDispatch extends MezzeNode {
         return idx >= 0 ? MezzeVariant.some((long) idx) : MezzeVariant.none();
     }
 
+    /**
+     * Literal split on {@code indexOf}. No regular expression is involved.
+     *
+     * <p>This was {@code s.split(Pattern.quote(delimiter))}. The quoting was
+     * right — {@code str::split} takes a LITERAL delimiter, and {@code std::fs}
+     * splits paths on {@code "."}, which as a regex matches everything — but
+     * {@code Pattern.quote(" ")} is {@code \Q \E}, five characters, and
+     * {@code String.split}'s fast path only fires for a single non-meta
+     * character or a two-character escape. So the quoting DEFEATED the fast
+     * path and every call compiled a {@code Pattern}: measured at 310 ns to cut
+     * a 64-char string into 12 pieces, 26 ns a piece against ~10 ns to allocate
+     * a 65-char string. See PERF-LOG and {@code bench/cases/surface} row 5.
+     *
+     * <p>{@code indexOf} needs no escaping to be literal, so this is both
+     * faster and a more direct statement of the contract.
+     *
+     * <p>THE OBSERVABLE BEHAVIOUR IS UNCHANGED, and it is the behaviour of
+     * {@code String.split(regex, 0)}, which is not obvious in three places —
+     * all three are pinned by {@code StringSplitSemanticsTest}:
+     * <ul>
+     *   <li>TRAILING empty parts are dropped, so {@code "a,b,"} is 2 parts and
+     *       {@code ",,"} is ZERO;
+     *   <li>a LEADING empty part is kept, so {@code ",a"} is 2 parts;
+     *   <li>an empty INPUT is one empty part, not zero parts, and that holds
+     *       for an empty delimiter too.
+     * </ul>
+     */
     @TruffleBoundary
     private static MezzeSeq stringSplit(String s, String delimiter) {
-        String[] parts = s.split(java.util.regex.Pattern.quote(delimiter));
-        Object[] result = new Object[parts.length];
-        System.arraycopy(parts, 0, result, 0, parts.length);
+        // An empty input is one empty part. Pattern.split reaches this by its
+        // "no match found" branch, which returns the input whole and so never
+        // applies the trailing-empty removal below.
+        if (s.isEmpty()) return MezzeSeq.fromArray(new Object[] { "" });
+
+        // An empty delimiter matches between every character, so every
+        // character becomes a part: "abc" -> [a, b, c].
+        if (delimiter.isEmpty()) {
+            int len = s.length();
+            Object[] chars = new Object[len];
+            for (int i = 0; i < len; i++) chars[i] = String.valueOf(s.charAt(i));
+            return MezzeSeq.fromArray(chars);
+        }
+
+        int hit = s.indexOf(delimiter);
+        // No occurrence: the whole string, and no trailing-empty removal.
+        if (hit < 0) return MezzeSeq.fromArray(new Object[] { s });
+
+        java.util.ArrayList<String> parts = new java.util.ArrayList<>();
+        int from = 0;
+        int dlen = delimiter.length();
+        while (hit >= 0) {
+            parts.add(s.substring(from, hit));
+            from = hit + dlen;
+            hit = s.indexOf(delimiter, from);
+        }
+        parts.add(s.substring(from));
+
+        // Trailing empty parts are dropped, which can empty the array entirely.
+        int end = parts.size();
+        while (end > 0 && parts.get(end - 1).isEmpty()) end--;
+        Object[] result = new Object[end];
+        for (int i = 0; i < end; i++) result[i] = parts.get(i);
         return MezzeSeq.fromArray(result);
     }
 
