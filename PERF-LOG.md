@@ -5947,10 +5947,37 @@ one — prints the callee's `NumAdd` constraint as
 ```
 
 Position 0 is the operand, which here is the CALLBACK'S RESULT TYPE, and it is
-`id=1983` at BOTH sites. One variable cannot be Int at one call and Float at
-another, so nothing can ever bind it. `harvestVarBindings` is not at fault and
-does descend into function-typed record fields — there is simply nothing to
-bind, because the argument's callback-result type IS that same var.
+`id=1983` at BOTH sites.
+
+**CORRECTION, same session.** I read that as "the callee's constraint vars are
+not freshened per call site" and wrote it into a commit. Wrong twice over. The
+operand is the callback's RESULT, which is Int at BOTH sites — only the
+accumulator differs — so one var serving both is no contradiction. And the
+SOLVER does hold per-site vars and does resolve them; tracing the two sites:
+
+```
+  solveAssociatedTypeResolution: NumAdd primaryTypeVar='j13#2069 resolved=Int
+    matchingImpl: NumAdd {'out = Float}   <- float.mz:10, NumAdd Int for Float
+```
+
+the RIGHT heterogeneous impl, chosen correctly, once the tuple fix above is in.
+
+The gap is that LOWERING never sees that answer: the solver resolved var 2069,
+lowering reads var 1983. `resolveIdentifierType` builds an emitted node's type
+from `constraintResults[name].type` — the declaration's SCHEME — so the operand
+is the scheme's own var, shared by every site, and `substitution.apply` has
+nothing to say about it. The per-site types the solver worked out are never
+carried into the emitted AST. `harvestVarBindings` is not at fault and does
+descend into function-typed record fields; there is nothing to bind because the
+ARGUMENT's recorded type is `step`'s scheme too.
+
+So the next move is NOT a solver instantiation fix. Either emit carries the
+solver's per-site types, or the operand is re-derived where it is needed by
+forward-solving the ARGUMENT's own chain against the callee's parameter
+(`f: {x: Int} -> 'a` pins `x := Int`, then `NumMul Int Int -> Int` and
+`NumAdd Int Int -> Int` give the result). A homogeneous DEFAULT is NOT an
+option: it answers Float at the Float-accumulator site where the true operand
+is Int, which miscompiles silently.
 
 What that costs, both halves of it:
 
@@ -5970,6 +5997,4 @@ lookup. Feeding it the callee's constraint tuple fires at some sites and
 changes NOTHING at this one, because the tuple is not concrete. Shipping an
 inert path that no test can fail without is worse than not shipping it.
 
-So the next move is upstream of both: give a callee's ability-constraint
-variables a fresh instance per call site, the way its type variables already
-get one. `bench/cases/hetero` records the measurement.
+`bench/cases/hetero` records the measurement.

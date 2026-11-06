@@ -28,19 +28,43 @@
 ## It is NOT enough to make the dictionary lookup tuple-aware. Tried, measured,
 ## reverted: `resolveOpFromObligation` already matches a tuple position by
 ## position, and feeding it the callee's constraint tuple changes nothing here,
-## because the tuple is not CONCRETE at that point. Probing the two sites of one
-## HOF (`apply` at an Int accumulator and at a Float one) prints
+## because the tuple is not CONCRETE at that point.
 ##
-##   typeArgs=[VarType(out, id=1983), Float]   bindings=[]
-##   typeArgs=[VarType(out, id=1983), Int]     bindings=[]
+## AND THE REASON IS NOT WHAT I FIRST WROTE HERE. I claimed the callee's
+## ability-constraint vars were "not freshened per call site", from seeing one
+## var id at both sites. Two things were wrong with that. The operand is the
+## CALLBACK'S RESULT, which is Int at BOTH sites — only the accumulator differs —
+## so one var serving both is no contradiction at all. And the SOLVER does have
+## per-site vars and does resolve them: tracing the two sites shows
 ##
-## The operand position is the CALLBACK'S RESULT TYPE, and it is the SAME VAR
-## `id=1983` at both sites. One variable cannot be Int at one call and Float at
-## another, so it can never resolve — the callee's ability-constraint var was
-## not freshened per call site. Lowering is then left with the receiver alone
-## and necessarily picks the homogeneous impl.
+##   solveAssociatedTypeResolution: NumAdd primaryTypeVar='j13#2069 resolved=Int
+##     matchingImpl: NumAdd {'out = Float}   <- float.mz:10, NumAdd Int for Float
 ##
-## The same unresolved var is why mono cannot specialise the HOF and
+## which is the RIGHT heterogeneous impl, chosen correctly.
+##
+## The real gap is that LOWERING never sees that answer. The solver resolved
+## var 2069; lowering reads var 1983, which nothing bound:
+##
+##   [TUP] typeArgs=[VarType(out, id=1983), Float]  bindings=[]
+##   [TUP] typeArgs=[VarType(out, id=1983), Int]    bindings=[]
+##
+## `resolveIdentifierType` builds an emitted node's type from
+## `constraintResults[name].type` — the declaration's SCHEME — so the operand
+## position is the scheme's own var, shared by every site, and
+## `substitution.apply` has nothing to say about it. The per-site types the
+## solver worked out are not carried into the emitted AST. `harvestVarBindings`
+## is fine and does descend into function-typed record fields; there is nothing
+## to bind because the ARGUMENT's recorded type is `step`'s scheme too.
+##
+## So the fix is not an instantiation fix in the solver. Either emit carries the
+## solver's per-site types, or the operand is re-derived where it is needed by
+## forward-solving the ARGUMENT's own chain against the callee's parameter
+## (`f: {x: Int} -> 'a` pins `x := Int`, then `NumMul Int Int -> Int` and
+## `NumAdd Int Int -> Int` give the result). The second is sound and local; a
+## homogeneous DEFAULT is not — it would answer Float at the Float-accumulator
+## site, where the true operand is Int, and miscompile silently.
+##
+## The same missing answer is why mono cannot specialise the HOF and
 ## `apply_fold` keeps `__dict_add` (see `bench/cases/defunc` kernel 3 vs 7).
 ## One cause, a correctness bug and the headline perf gap.
 use std::effects::log::{ println, Console }
