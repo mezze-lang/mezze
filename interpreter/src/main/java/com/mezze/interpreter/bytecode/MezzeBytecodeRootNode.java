@@ -1781,6 +1781,79 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // This eliminates the 30×+ overhead measured in closure-heavy
         // hot loops vs manually-inlined equivalents.
 
+        /**
+         * {@code resume { val = X }} IS {@code X}. Return the argument; make
+         * no call at all.
+         *
+         * <p>WHY THIS IS A SPECIAL CASE AND NOT A MISSING BYPASS. The
+         * fall-through resume function is a singleton built in
+         * {@link YieldDispatch}, and its entire body is
+         * {@code rec.getField("val")} over a {@code MezzeRecord} argument. Its
+         * root is a plain {@code MezzeRootNode}, which {@code canBypassTarget}
+         * refuses — correctly, since the bypass is for trampoline-wrapped BDSL
+         * roots. So this call site took the path described in this class's own
+         * doc: <i>"falls back to wrapping the arg in a single-field record so
+         * the callee's existing normalizeArgs path works correctly"</i>. A
+         * scalar call site therefore allocated a record to hand to a callee
+         * whose only job was to take the field back out, and then made an
+         * un-inlined indirect call to do it.
+         *
+         * <p>MEASURED, {@code bench/cases/effectsurface}, minima of nine
+         * readings at n=2e7:
+         *
+         * <pre>
+         *   kernel 3  handler is a bare value `1`              840 ps/iter
+         *   kernel 8  handler is a DIRECT call returning arg   894      (+54, free)
+         *   kernel 4  handler is `resume { val = 1 }`        4 091    (+3 251)
+         * </pre>
+         *
+         * Kernel 8 is what rules out "calling a function is expensive": a
+         * direct call of the same shape costs 54 ps because Graal inlines it.
+         * The 3 251 ps is this callee specifically — the record it forces plus
+         * the indirect call it cannot inline.
+         *
+         * <p>CORRECTNESS. The guard is IDENTITY against that singleton, whose
+         * behaviour is fixed at construction, so no handler-chain assumption is
+         * needed — unlike {@code EffectBinding.doCachedResumeAbort}, which has
+         * to guard {@code handlerStable} because it is choosing WHICH function
+         * {@code resume} names. By the time a function instance is in hand the
+         * choice is already made: if the chain were unstable,
+         * {@code EffectBinding} would have handed over the dispatch fiber's
+         * resume instead and this guard would simply not match. The field-name
+         * guard holds the other half — {@code arg} is the {@code val} field's
+         * value only because the call site says {@code argFieldNames=[val]},
+         * and both guards are over {@code @ConstantOperand}/cached values, so
+         * they fold away.
+         */
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "isFallThroughResume",
+            "isValField"
+        }, limit = "1", excludeForUncached = true)
+        public static Object doFallThroughResume(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("isFallThroughResumeFn(fn)") boolean isFallThroughResume,
+                @Cached("isValFieldName(fieldName)") boolean isValField) {
+            return arg;
+        }
+
+        /**
+         * Identity test against the fall-through resume singleton, evaluated
+         * ONCE at specialization time so the result is a compilation constant.
+         * Doing it in the guard itself would read a volatile field per call.
+         */
+        static boolean isFallThroughResumeFn(MezzeFunction fn) {
+            return fn == YieldDispatch.fallThroughResumeFnPublic();
+        }
+
+        /** The scalar call site's field name must be the one resume reads. */
+        static boolean isValFieldName(String fieldName) {
+            return "val".equals(fieldName);
+        }
+
         @Specialization(guards = {
             "fn == cachedFn",
             "!cachedFn.hasPartialArgs()",

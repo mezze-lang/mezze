@@ -7411,3 +7411,85 @@ readings reached 7x on kernel 3. The minima are stable across processes and are
 what is quoted, but the bench should take a min-of-k internally the way
 `bench/cases/surface` and `ds_matrix` now do. Recorded rather than silently
 relied upon.
+
+#### `resume` FIXED, 3.7x — and the record claim in the entry above was wrong
+
+The entry above named explicit `resume` as the finding and guessed the cost as
+"~3 ns for the record plus ~1 ns for the call". **Dumping the IR corrected the
+first half before anything was built**, and the correction is worth more than
+the guess was:
+
+```
+  body = CallIndirectScalarIR(
+           function = EffectBindingIR(name=resume),
+           args = [LongLitIR(1)],
+           argFieldNames = [val],
+           isTailCall = false)
+```
+
+Scalar ABI, `argFieldNames=[val]` — **there is no `MakeRecord` in the IR at
+all.** So allocation could not be the explanation as stated.
+
+What it actually is, with a kernel added to prove it rather than argue it.
+Kernel 8 gives the handler a body that is a DIRECT call to a top-level function
+returning its argument — same shape as resume, different call kind:
+
+```
+  kernel 3  handler is a bare value `1`               840 ps/iter
+  kernel 8  handler is a DIRECT call returning arg    894      (+54 — free)
+  kernel 4  handler is `resume { val = 1 }`         4 091    (+3 251)
+```
+
+Kernel 8 is what rules out "calling a function is expensive": Graal inlines a
+direct call of that shape for 54 ps. The 3 251 ps belongs to this callee
+specifically, and `CallIndirectScalar1`'s own class doc says why:
+
+> *"When the callee is NOT a BDSL function (AST function, effect handler, etc.),
+> falls back to wrapping the arg in a single-field record so the callee's
+> existing normalizeArgs path works correctly."*
+
+The fall-through resume singleton (`YieldDispatch`) is a plain `MezzeRootNode`
+whose body is `rec.getField("val")` over a **record** argument.
+`canBypassTarget` refuses it — correctly, that bypass is for trampoline-wrapped
+BDSL roots. So a scalar call site allocated a record to hand to a callee whose
+only job was to take the field straight back out, then made an un-inlined
+indirect call to do it. The record is real; it is just produced by the call
+glue, not by an IR node. Both halves of the original guess were present, and the
+reasoning behind them was not.
+
+**The fix.** `CallIndirectScalar1.doFallThroughResume` returns the argument and
+makes no call. The guard is IDENTITY against the singleton, whose behaviour is
+fixed at construction, so no handler-chain assumption is needed — unlike
+`EffectBinding.doCachedResumeAbort`, which must guard `handlerStable` because it
+is choosing WHICH function `resume` names. Once a function instance is in hand
+that choice is already made: an unstable chain would have handed over the
+dispatch fiber's resume and this guard would simply not match. A second guard
+pins `fieldName == "val"`, since `arg` is the `val` field's value only because
+the call site says so. Both guards are over constant/cached values and fold away.
+
+```
+  kernel                              before      after      controls
+  4  explicit `resume { val = 1 }`     4 091      1 115       3.7x
+  3  implicit bare value                 840        789       unchanged
+  8  direct call returning arg           894        802       unchanged
+```
+
+Against the tier control, `resume` went from 3 639 ps over to 663 — from
+**eleven times** the implicit form to under two. All eight kernels still return
+the identical checksum 200 000 010 000 000.
+
+**The test lesson is the part to keep.** `ResumeFallThroughSemanticsTest`
+started as ten single-shot cases, all passing. Breaking the fast path to return
+a wrong constant failed **one of the ten** — the nine others never reached the
+specialization at all, because a handler that runs once takes the uncached path.
+Nine tests passing because the code under test never executed. Five WARM
+variants were added, each running its case in a loop so the specialization is
+engaged; the same break now fails six of fifteen, including both record-payload
+cases. The nesting trap (`resume { val = { val = 42 } }`, where returning
+`arg.val` instead of `arg` unwraps one level too far) is only actually tested on
+the warm path.
+
+**Still open in this family**, unchanged: the 90 ns per-iteration handler
+install, whose floor is unknown because it invalidates the chain-stable
+assumption on every push and pop; the 334 ns abort; real continuation capture;
+effects once a second thread invalidates `singleThreaded`; and all of Loom.

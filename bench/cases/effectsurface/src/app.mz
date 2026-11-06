@@ -163,6 +163,27 @@ let go_a = { i, acc } ->
 
 let k_abort = { n } -> go_a { i = n, acc = 0 }
 
+## 8. IS IT THE CALL, OR IS IT `resume`? Kernel 4's body lowers to
+##    CallIndirectScalarIR(EffectBindingIR(resume), args=[1], argFieldNames=[val])
+##    — scalar ABI, so NO argument record is built, which rules out allocation
+##    as the explanation. What is left is the INDIRECT call to the singleton
+##    resume function, whose whole body is `return arg.val`.
+##
+##    This kernel replaces that indirect call with a DIRECT one to a top-level
+##    function of the same shape. If it costs what kernel 3 costs, the entire
+##    gap in kernel 4 is the indirect call and nothing about `resume` itself.
+let ident_one = { val } -> val
+
+impl Unit1 for OnesDirect {} where {
+  one = {} -> ident_one { val = 1 }
+}
+
+let go_i = { i, acc } ->
+  if i <= 0 then acc
+  else go_i { i = i - Unit1.one {}, acc = acc + i }
+
+let k_ident = { n } -> perform OnesDirect {} in go_i { i = n, acc = 0 }
+
 ## 7. A CHAIN of four handlers, performing the one furthest away. If reaching a
 ##    handler is a walk, depth shows here; if it is a cached constant, this
 ##    costs what kernel 3 costs.
@@ -228,4 +249,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     report { name = "7 chain depth 4", n = n, r = time_it { f = {} -> k_depth { n = n } } }
     report { name = "7 chain depth 4", n = n, r = time_it { f = {} -> k_depth { n = n } } }
     report { name = "7 chain depth 4", n = n, r = time_it { f = {} -> k_depth { n = n } } }
+  else if k == 8 then do
+    k_ident { n = n }
+    k_ident { n = n }
+    k_ident { n = n }
+    report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
+    report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
+    report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
   else println { msg = "unknown kernel" }
