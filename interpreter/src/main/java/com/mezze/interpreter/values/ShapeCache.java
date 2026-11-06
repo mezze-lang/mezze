@@ -74,6 +74,19 @@ public final class ShapeCache {
     }
 
     /**
+     * Get or create a Shape where the single field uses DOUBLE storage.
+     * The peer of {@link #getOrCreateSingleLong} — same reason, same caller.
+     */
+    @TruffleBoundary
+    public static Shape getOrCreateSingleDouble(String[] fieldNames) {
+        assert fieldNames.length == 1 : "getOrCreateSingleDouble requires exactly one field";
+        FieldLocation[] locations = new FieldLocation[]{
+            new FieldLocation(FieldLocation.StorageType.DOUBLE, 0)
+        };
+        return getOrCreate(fieldNames, locations);
+    }
+
+    /**
      * Key for shape lookup - based on field names and storage types.
      */
     private static final class ShapeKey {

@@ -954,6 +954,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     private static final long[] EMPTY_LONGS = new long[0];
     private static final double[] EMPTY_DOUBLES = new double[0];
+    private static final Object[] EMPTY_OBJECTS = new Object[0];
 
     static final int STORAGE_OBJECT = 0;
     static final int STORAGE_LONG = 1;
@@ -971,7 +972,46 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String[].class)
     public static final class MakeSingleFieldRecord {
+        /**
+         * UNBOXED. The operand is declared `long`, so the Bytecode DSL hands
+         * the value over as a primitive and no `Long` is ever created — the
+         * record stores it in the shape's `long[]`.
+         *
+         * <p>This is why {@link com.mezze.interpreter.values.ShapeCache}
+         * has `getOrCreateSingleLong`, and until now nothing called it: the
+         * only specialization was the `Object` one below, so every `Int` field
+         * of every record in the language was a boxed `Long`. `{ r = i }` cost
+         * three allocations (the box, the `Object[1]`, the record) where two
+         * suffice, and a two-field variant payload cost five.
+         *
+         * <p>A FIXED-ARITY operation can do this and {@link MakeRecord} cannot:
+         * its `@Variadic Object[]` is already populated with boxed values by
+         * the time the operation body runs.
+         */
         @Specialization
+        public static MezzeRecord doLong(String[] fieldNames, long value,
+                @Cached(value = "resolveLongShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, new long[]{value}, EMPTY_DOUBLES, EMPTY_OBJECTS);
+        }
+
+        /** The `Float` peer of {@link #doLong}. */
+        @Specialization
+        public static MezzeRecord doDouble(String[] fieldNames, double value,
+                @Cached(value = "resolveDoubleShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, new double[]{value}, EMPTY_OBJECTS);
+        }
+
+        /**
+         * Everything else, and the replacement for a site that has seen more
+         * than one of these — a field holding a `Long` at one execution and a
+         * `Str` at the next must not thrash between two shapes, so the site
+         * settles on the object layout. Readers cope either way:
+         * `MezzeRecord.getField` and `ReadFieldOrMethod.doRecordCached` both
+         * switch on the shape's storage kind.
+         */
+        @Specialization(replaces = {"doLong", "doDouble"})
         public static MezzeRecord doObject(String[] fieldNames, Object value,
                 @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
                     com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
@@ -981,6 +1021,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
             return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveLongShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateSingleLong(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveDoubleShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateSingleDouble(fieldNames);
         }
     }
 
