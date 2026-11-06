@@ -159,6 +159,22 @@ let grid_mono = { side, span } ->
   iter::range { start = 0, end = side * side }
     .fold { init = 0, f = { acc, x } -> acc + pixel_mono { p = x, side = side, span = span } }
 
+## ── 4. THE SAME PIXEL WORK, GRID WALKED BY A TAIL LOOP instead of
+##      `iter::range().fold()`. Kernels 1-3 all walk the grid lazily through the
+##      iter machinery, which is one `fold` callback dispatch, one `pixel` call and
+##      one `escape` trampoline entry PER PIXEL.
+##
+## The arithmetic is not the suspect any more. `bench/cases/floatloop` kernel 2 is
+## a two-parameter float tail loop at 811 ps/iter against the same loop written in
+## Java at 806 — parity. At ~12 escape iterations a pixel that puts the loop at
+## ~18 ns of mandelbrot's 69, so ~50 ns a pixel is being spent somewhere that is
+## not arithmetic. This kernel removes the iter/fold half of it.
+let grid_loop = { side, span } -> do
+  let go: { p: Int, acc: Int } -> Int = { p, acc } ->
+    if p >= side * side then acc
+    else go { p = p + 1, acc = acc + pixel_mono { p = p, side = side, span = span } }
+  go { p = 0, acc = 0 }
+
 let report = { name, px, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns / px }) ns/px  sum=$(int::to_str { n = r.result })" }
 
@@ -176,7 +192,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     grid_mono { side = 40, span = float::from_int { n = 40 } }
     report { name = "2 escape MONO (annot)   ", px = px, r = time_it { f = {} -> grid_mono { side = side, span = span } } }
     report { name = "2 escape MONO (annot)   ", px = px, r = time_it { f = {} -> grid_mono { side = side, span = span } } }
-  else do
+  else if k == 3 then do
     grid_one { side = 40, span = float::from_int { n = 40 } }
     report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
     report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
+  else do
+    grid_loop { side = 40, span = float::from_int { n = 40 } }
+    report { name = "4 grid TAIL LOOP (annot)", px = px, r = time_it { f = {} -> grid_loop { side = side, span = span } } }
+    report { name = "4 grid TAIL LOOP (annot)", px = px, r = time_it { f = {} -> grid_loop { side = side, span = span } } }

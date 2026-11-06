@@ -5231,6 +5231,80 @@ What is left, in size order, is no longer arithmetic: the collection pipeline at
 
 ---
 
+## Where the last 3.1x on mandelbrot is — and it is not arithmetic
+
+`mezze-benchmark`'s mandelbrot is 69.1 ns/px against kotlin 22.3, c 22.4, java
+23.6 and rust 26.9, measured in the same regime (N=1200 → 2400, every
+implementation warm, checksums agreeing). 3.1x against the whole field, so not a
+quirk of one comparison. Four hypotheses, three of them wrong, and the order they
+fell in is the useful part.
+
+**WRONG 1 — the self-tail-loop tier.** `MEZZE_TRACE_SELFTAIL` says `params=5
+tier=not-fused`, and the three FUSED tiers are `FusedLongTailLoop{,1P,3P}` —
+long only, nothing above three parameters. `bench/cases/mandelannot` kernel 3 is
+the same loop folded to a single exit, which IS the shape the direct-while tier
+accepts, at the cost of computing the squares twice: 62 ns/px, identical to the
+two that get no tier. The diagnostic also prints BEFORE the direct-while attempt,
+so `tier=not-fused` never meant what it looks like.
+
+**WRONG 2 — boxing.** `project_boxing_elimination_blocked` says
+`boxingEliminationTypes = {}` with a compile→deopt storm. That memory is two
+months stale: the annotation reads `{long.class, double.class, boolean.class}`
+today. And the loop allocates nothing — 2 young GCs for the Int loop against 3
+for the Float loop over 2e7 iterations.
+
+**WRONG 3 — the double specializations are not force-quickened.** Every
+`Direct*Node` has `@ForceQuickening` on its long specialization and none on its
+double one, which looks exactly like a missing unboxed instruction. Added it to
+all ten; `bench/cases/floatloop` kernel 2 measured 831 ps/iter against 830
+before. Reverted — correct-looking and worth nothing.
+
+**WRONG 4, and this one was mine — the Int/Float gap is not a defect at all.**
+`bench/cases/floatloop` holds shape and work constant and varies only the type:
+
+```
+  mezze   INT   acc + i     231 ps/iter      java  INT     50 ps/iter
+  mezze   FLOAT acc + x     799 ps/iter      java  FLOAT  806 ps/iter
+```
+
+**The float loop is AT PARITY with Java — 799 against 806.** The 3.5x Int/Float
+spread is the CPU: a double add is 3-4 cycle latency against an integer add's 1,
+and a loop-carried accumulator is latency-bound. Java shows the same spread for
+the same reason. (Java's 50 ps Int row is a folded closed form, not a loop — this
+file's own method notes warn about exactly that, and I read the row anyway before
+checking.)
+
+### So the arithmetic is DONE, and here is the actual budget
+
+Kernel 4 walks the identical pixel work with a tail loop instead of
+`iter::range().fold()`:
+
+```
+  2  iter/fold grid      61 ns/px
+  4  tail-loop grid      35 ns/px      ← same pixels, same escape loop
+```
+
+At ~12 escape iterations a pixel and the loop at Java parity, mandelbrot's 69
+ns/px decomposes as:
+
+| | ns/px | what it is |
+|---|---|---|
+| the escape loop | ~18 | at Java parity — nothing to win |
+| `iter::range().fold()` | **26** | the lazy pipeline, per pixel |
+| the rest | ~25 | `pixel` call, `escape` trampoline entry, two `float::from_int`, building a 5-field arg record |
+
+Kotlin's 22.3 is about 18 ns of the same loop plus ~4 ns of overhead. **Every bit
+of the remaining gap is call and iteration overhead, and none of it is
+arithmetic.** The tail-loop grid at 35 ns/px is already 1.57x off kotlin rather
+than 3.1x.
+
+That also says the 26 ns is the same defect as `bench/cases/defunc`'s remaining
+13x (10 131 ps/iter for a HOF call against 779 for a direct one) and the same one
+behind `map_filter_sum` at 6.3x: **a callback reached through a higher-order
+function.** Three kernels, three sizes, one mechanism — and `defunc` kernel 6
+shows a TINY callback costs almost nothing, so what fails is a callback whose
+body is too big to inline at the call site.
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup

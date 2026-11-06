@@ -1,0 +1,94 @@
+## IS A FLOAT TAIL LOOP SLOWER THAN AN INT ONE, AND BY HOW MUCH?
+##
+## `mezze-benchmark`'s mandelbrot is 69.1 ns/px against kotlin's 22.3, c's 22.4
+## and java's 23.6 — 3.1x against the whole field, measured in the same regime
+## (N=1200 → 2400, both warm, checksums agreeing). The loop is five parameters of
+## float arithmetic, so the first structural suspect is that the three FUSED
+## self-tail-loop tiers are `FusedLongTailLoop`, `FusedLongTailLoop1P` and
+## `FusedLongTailLoop3P` — **long only**. There is no double tier, and nothing
+## above three parameters.
+##
+## Each kernel is the same shape — a two-parameter self-tail loop accumulating n
+## terms — reached with different element types, so the rows isolate exactly one
+## thing:
+##
+##   1  INT    acc + i          two LONG params: the fused tier's own shape.
+##   2  FLOAT  acc + x          two DOUBLE params: same arithmetic, no tier.
+##   3  MIXED  Int counter, Float accumulator: what mandelbrot's loop looks like,
+##             and what a `for i in 0..n { sum += f(i) }` looks like anywhere.
+##
+## Kernel 1 against kernel 2 is the type, with the shape and the work held
+## constant. If they are level, the missing double tier is not the gap and the
+## 3.1x is somewhere else; if 2 is several times 1, the tier is worth building.
+##
+## A note on the checksums: they CANNOT be equal across kernels (one sums
+## integers, one sums doubles), so each kernel prints its own and the contract is
+## that the printed value is stable across runs and across changes to the
+## compiler. The Float sums are exact — every term is an integer value held in a
+## double, well inside 2^53.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::float
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── 1. TWO LONG PARAMS. The shape `FusedLongTailLoop` exists for.
+let k_int: { n: Int } -> Int = { n } -> do
+  let go: { i: Int, acc: Int } -> Int = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + i }
+  go { i = n, acc = 0 }
+
+## ── 2. TWO DOUBLE PARAMS. The same arithmetic, the same shape, no fused tier.
+let k_float: { n: Int } -> Float = { n } -> do
+  let go: { x: Float, acc: Float } -> Float = { x, acc } ->
+    if x <= 0.0 then acc
+    else go { x = x - 1.0, acc = acc + x }
+  go { x = float::from_int { n = n }, acc = 0.0 }
+
+## ── 3. INT COUNTER, FLOAT ACCUMULATOR. Mandelbrot's actual mix, and the shape
+##      of every `sum += f(i)` loop over an index.
+let k_mixed: { n: Int } -> Float = { n } -> do
+  let go: { i: Int, acc: Float } -> Float = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + float::from_int { n = i } }
+  go { i = n, acc = 0.0 }
+
+let report_int = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+let report_float = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(float::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  ## n=2e7. Smaller measures warmup and reads as a result — at 2e6 an ~800 ps
+  ## loop finishes in 1.6 ms. Raise it until the number stops moving.
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_int { n = n }
+    report_int { name = "1 INT   acc + i  ", n = n, r = time_it { f = {} -> k_int { n = n } } }
+    report_int { name = "1 INT   acc + i  ", n = n, r = time_it { f = {} -> k_int { n = n } } }
+  else if k == 2 then do
+    k_float { n = n }
+    report_float { name = "2 FLOAT acc + x  ", n = n, r = time_it { f = {} -> k_float { n = n } } }
+    report_float { name = "2 FLOAT acc + x  ", n = n, r = time_it { f = {} -> k_float { n = n } } }
+  else do
+    k_mixed { n = n }
+    report_float { name = "3 MIXED Int/Float", n = n, r = time_it { f = {} -> k_mixed { n = n } } }
+    report_float { name = "3 MIXED Int/Float", n = n, r = time_it { f = {} -> k_mixed { n = n } } }
