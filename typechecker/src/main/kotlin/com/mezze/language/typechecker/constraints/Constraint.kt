@@ -416,6 +416,8 @@ data class ConstraintResult(
     val referencedBindings: Set<DefinitionRef.ByName> = emptySet(),
     val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),
     val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    /** Per-call-site instantiated callee arrow — see the collector's field. */
+    val callFunctionTypes: Map<Loc, MezzeType> = emptyMap(),
     val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
     // #195 mono-fix #1: per-match-case pattern bindings, keyed by the case's
     // Loc. The values are the constraint generator's fresh TyVars from
@@ -658,6 +660,7 @@ data class ConstraintResult(
             referencedBindings = union(subs) { it.referencedBindings },
             methodCallResolutions = overlay(subs) { it.methodCallResolutions },
             callReturnTypes = overlay(subs) { it.callReturnTypes },
+            callFunctionTypes = overlay(subs) { it.callFunctionTypes },
             expectedTypeAt = overlay(subs) { it.expectedTypeAt },
             matchCaseBindings = overlay(subs) { it.matchCaseBindings },
             matchScrutineeTypes = overlay(subs) { it.matchScrutineeTypes },

@@ -184,7 +184,10 @@ internal fun emitTypedModuleAndLower(
             .processImportedCalls(importedForDecode, derivedDecodeImpls)
         val mergedDecodeOpBySite = if (importedDecodeOps.isEmpty()) decodeResult.decodeOpBySite
             else decodeResult.decodeOpBySite + importedDecodeOps
-        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution, mergedDecodeOpBySite)
+        val compileResult = compileModule(
+            emittedTypedModule!!, loadedModules, substitution, mergedDecodeOpBySite,
+            solved.callFunctionTypes,
+        )
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
     } catch (e: com.mezze.language.typechecker.TypeCheckError) {
@@ -293,6 +296,8 @@ private fun compileModule(
     loadedModules: Map<ModulePath, TypedModuleResult>,
     substitution: Substitution,
     decodeOpBySite: Map<com.mezze.language.parsedast.Loc, com.mezze.language.typedast.Hash> = emptyMap(),
+    /** Per-call-site instantiated callee arrows — see `TypedASTCompiler.callSiteArrows`. */
+    callSiteArrows: Map<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType> = emptyMap(),
 ): CompileResult {
     val wrapped = EntryFunctionBuilder.wrapTopLevel(typedModule)
 
@@ -412,6 +417,7 @@ private fun compileModule(
         preloweredFunctions = stdlibFns,
         preloweredDictMethods = stdlibDictMethods,
         substitution = substitution,
+        callSiteArrows = callSiteArrows,
         decodeOpBySite = decodeOpBySite,
         abilityOpNames = abilityOpNames,
     )

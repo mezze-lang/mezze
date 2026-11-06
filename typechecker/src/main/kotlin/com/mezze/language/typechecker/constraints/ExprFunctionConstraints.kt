@@ -1422,6 +1422,14 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
 
     collector.callReturnTypes[expr.loc] = returnType
+    // The callee's arrow AS INSTANTIATED HERE. Emit otherwise re-derives the
+    // function node's type from the declaration's scheme, and the per-site
+    // vars the solver resolved — including a `with` constraint's operand — are
+    // lost. Only a function type is worth recording; anything else is not an
+    // arrow emit could stamp.
+    (functionResult.type as? MezzeType.FunctionType)?.let {
+        collector.callFunctionTypes[expr.loc] = it
+    }
     return collector.toResult(returnType)
 }
 

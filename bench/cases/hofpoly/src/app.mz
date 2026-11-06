@@ -1,0 +1,65 @@
+## ONE un-annotated callback, ONE un-annotated HOF, TWO accumulator types.
+##
+## A reference to a polymorphic function was emitted carrying the
+## DECLARATION'S SCHEME — `resolveIdentifierType` reads
+## `constraintResults[name].type` — so every call site of `apply` showed the
+## same scheme variables, and the final substitution had nothing to say about
+## them. The solver HAD instantiated and resolved them per site; tracing the
+## two sites below prints
+##
+##   solveAssociatedTypeResolution: NumAdd primaryTypeVar='j13#2069 resolved=Int
+##     matchingImpl: NumAdd {'out = Float}      <- impl NumAdd Int for Float
+##
+## the right heterogeneous impl. That answer was simply never carried into the
+## emitted AST, so lowering read a var nothing had bound and picked the
+## dictionary from the only thing it could see: the RECEIVER. For the Float
+## accumulator that is `impl NumAdd Float for Float`, handed the callback's
+## Long:
+##
+##   UnsupportedSpecializationException … CallNativeDDD [FloatOps$$Lambda, 0.5, 21]
+##
+## `callFunctionTypes` keeps the per-site arrow and `CallEmit` stamps it on the
+## function node. `scripts/hof-dict-e2e.sh` is the guard — neither gated suite
+## can see this, because the interpreter path runs these programs correctly
+## either way and the typechecker's lowered IR is not the build's lowering.
+##
+## NO PERF CLAIM ATTACHED. Measured A/B on `bench/cases/defunc` kernel 3, min
+## of 6 interleaved: 1 391 ps/iter with the stamp against 1 483 without, while
+## the inline floor moved 760 to 805 and kernel 7 moved the OTHER way (1 413 to
+## 1 337). That is harness noise. What the stamp does change is the IR: defunc's
+## dictionary-carrying functions go 2 to 1 and `apply_fold` loses its
+## `__dict_add`, because the hot path had already been routed to a dict-free
+## specialization by the earlier call-site-specialization fix. The win here is a
+## crash and a dead generic, not nanoseconds.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::int
+use std::float
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let step = { x } -> x * 2 + 1
+
+let apply = { n, f, zero } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + f { x = i } }
+  go { i = n, acc = zero }
+
+let at_int = { n } -> apply { n = n, f = step, zero = 0 }
+
+## The Float accumulator against the callback's Int makes the inner `+` a
+## HETEROGENEOUS add — `impl NumAdd Int for Float`.
+let at_float = { n } -> apply { n = n, f = step, zero = 0.5 }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 10 }
+  ## n=10: the sum of 2i+1 over i = 1..10 is 120, and 120.5 seeded at 0.5.
+  println { msg = int::to_str { n = at_int { n = n } } }
+  println { msg = float::to_str { n = at_float { n = n } } }

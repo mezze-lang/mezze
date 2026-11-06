@@ -45,6 +45,30 @@ class TypedASTCompiler(
      * keep the existing dict-passing path. Empty by default → mono is off.
      */
     private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
+    /**
+     * callLoc -> the callee's arrow AS INSTANTIATED AT THAT SITE.
+     *
+     * Read ONLY when resolving dictionaries. `fn.type` on the emitted node is
+     * the callee's DECLARATION SCHEME — `resolveIdentifierType` builds it from
+     * `constraintResults[name].type` — so every call site of one polymorphic
+     * function shows the same scheme vars and the final substitution says
+     * nothing about them. The solver did instantiate and resolve them per site;
+     * this is where that answer is kept.
+     *
+     * Without it a callee's `with` constraint operand arrives here unresolved
+     * and the dictionary is picked from the only thing visible, the RECEIVER —
+     * right by luck for a homogeneous add, and for `Float + Int` it hands
+     * Float's `impl NumAdd Float for Float` the callback's Long:
+     * `CallNativeDDD [FloatOps$$Lambda, 0.5, 21]`.
+     *
+     * DELIBERATELY NOT stamped over `fn.type` in emit, which was tried and
+     * reverted: that type is read by much more than dictionary resolution, and
+     * replacing a scheme with a concrete arrow changed who was judged to need a
+     * dictionary at all. Seven interpreter tests failed with "no dictionary was
+     * supplied for ability operation `default`", the receiver-less family. A
+     * per-site side table changes one decision instead of everyone's view.
+     */
+    private val callSiteArrows: Map<com.mezze.language.parsedast.Loc, MezzeType> = emptyMap(),
     /** callLoc -> `decode` op hash of the derived codec impl matching that
      *  `from_json` call's USAGE-inferred target (DecodeTargetResolver). Wires the
      *  right decoder per call site where the target is a bare var in the type. */
@@ -305,6 +329,18 @@ class TypedASTCompiler(
      * to ability methods that require static resolution via dictionary passing.
      */
     fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
+
+    /** The callee's per-site arrow for the call at [loc], already substituted,
+     *  or null when the solver recorded none or it is still open. Only a FULLY
+     *  resolved arrow is offered: `holdsTypeVar` walks a FunctionType's ability
+     *  constraints too, so one whose constraint operand is still a var is no
+     *  improvement on the scheme and is withheld. */
+    internal fun callSiteArrow(loc: com.mezze.language.parsedast.Loc): MezzeType.FunctionType? {
+        val raw = callSiteArrows[loc] ?: return null
+        val applied = substitution.apply(raw)
+        if (applied !is MezzeType.FunctionType || applied.holdsTypeVar()) return null
+        return applied
+    }
 
     fun getDeclaredDictMethodsForHash(): Map<Hash, Set<String>> = declaredDictMethodsForHash.toMap()
 
@@ -2422,6 +2458,9 @@ class TypedASTCompiler(
         // unified against the actuals); serves the per-var dict slots.
         varBindings: Map<String, MezzeType> = emptyMap(),
         methodOwnType: Map<String, Pair<MezzeType, Hash?>> = emptyMap(),  // ownTypePerMethod
+        // The same question answered with the WHOLE ordered tuple, which is
+        // what separates two impls sharing a receiver — see `ownTuplePerMethod`.
+        methodOwnTuple: Map<String, Pair<List<MezzeType>, Hash?>> = emptyMap(),
     ): NodeIR {
         // Collect concrete types from the argument record as fallback. Refresh
         // each field's type against the final substitution and, for a nullary
@@ -2534,7 +2573,8 @@ class TypedASTCompiler(
 
             // 2. From concrete types; see `resolveDictOp` for the order.
             val opHash = resolveDictOp(
-                dictMethod, methodOwnType, keyAbilityHash, constraintTypes, concreteTypes)
+                dictMethod, methodOwnType, keyAbilityHash, constraintTypes, concreteTypes,
+                methodOwnTuple)
             if (opHash != null) {
                 // refToDictedOp wraps the resolved op when IT needs its own dicts —
                 // e.g. `sort { xs = [[P]] }`: sort's Ord dict is the seq Ord op

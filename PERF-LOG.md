@@ -5998,3 +5998,84 @@ changes NOTHING at this one, because the tuple is not concrete. Shipping an
 inert path that no test can fail without is worse than not shipping it.
 
 `bench/cases/hetero` records the measurement.
+
+## The call site's own solved types reach dictionary resolution
+
+`resolveIdentifierType` builds an emitted node's type from
+`constraintResults[name].type`, the DECLARATION'S SCHEME. So a reference to a
+polymorphic function shows the same scheme variables at EVERY call site and the
+final substitution says nothing about them, while the solver did instantiate and
+resolve them per site:
+
+```
+  solveAssociatedTypeResolution: NumAdd primaryTypeVar='j13#2069 resolved=Int
+    matchingImpl: NumAdd {'out = Float}      <- impl NumAdd Int for Float
+```
+
+the right heterogeneous impl. That answer never reached lowering, which resolved
+the dictionary from the only position it could see, the RECEIVER — right by luck
+for a homogeneous add, and for a Float accumulator `impl NumAdd Float for Float`
+handed the callback's Long: `CallNativeDDD [FloatOps$$Lambda, 0.5, 21]`.
+
+`callFunctionTypes` records the per-site arrow and reaches `TypedASTCompiler` as
+`callSiteArrows`, beside the `monoCallSiteRewrites` and `decodeOpBySite` maps
+that already work that way. The arrows carry no ability constraints — those live
+in the collector's list — so what they are worth is their RESOLVED PARAMETER
+TYPES:
+
+```
+  scheme    { n: Int, f: { x: Int } -> 'a, zero: 'b }
+  per-site  { n: Int, f: { x: Int } -> Int, zero: Float }
+  harvested 'a = Int, 'b = Float        -> the tuple [Int, Float] is whole
+```
+
+and with a whole tuple `resolveOpFromObligation` — already in that file, already
+documenting why receiver-only lookup is wrong — picks the right impl.
+
+### Where I put it first, and what that cost
+
+Stamping the arrow over `fn.type` in `CallEmit` ALSO eliminated the dictionary
+parameter, and the IR numbers were real: defunc's carriers went 2 to 1,
+`apply_fold`'s `__dict_add` disappeared and it gained two more dict-free
+specializations. It cost seven interpreter tests, every one of them the
+receiver-less dictionary family:
+
+```
+  no dictionary was supplied for ability operation `default` … for a
+  receiver-less operation that means resolving it from the type the call PRODUCES
+```
+
+because that type is read by far more than dictionary resolution, and replacing
+a scheme with a concrete arrow changes who is judged to need a dictionary at
+all. So the shipped change is a side table that alters one decision instead of
+everyone's view — and the dictionary PARAMETER therefore stays. What is in it is
+now the right operation. Removing it is mono's job, and mono reads that same
+node type, so it waits until mono can be handed the answer another way.
+
+### Three claims I made here and had to withdraw
+
+1. "The constraint vars are not freshened per call site." They are. The solver
+   holds per-site vars and resolves them; EMIT does not carry them.
+2. "Kernel 3 went 10 131 to 1 488 ps/iter — 6.8x, the annotation gap is closed."
+   A fresh min-of-8 against a figure measured under other conditions. The real
+   A/B for the stamped version, min of 6 interleaved: 1 391 against 1 483, with
+   the floor moving the same 6% and kernel 7 moving 6% the OTHER way. Noise. The
+   annotation gap was already closed by the earlier call-site-specialization fix.
+   The SHIPPED version does not touch the hot path at all.
+3. "defunc carriers 2 to 1." True of the stamp, which did not ship.
+
+### Neither gated suite can see this
+
+- `:interpreter:test` goes through `MezzeTestHelper`, the INTERPRETER path, which
+  ran every one of these programs correctly WITH THE BUG IN. Two runtime-value
+  tests were written — one with literal inputs, one seeding from an effect to
+  defeat comptime folding — and neither moved.
+- `:typechecker:test` can reach `loweredFunctions`, but that is not the BUILD's
+  lowering: mono is seeded differently there and `apply` keeps its `__dict_add`
+  with the fix in place. A test written against it failed in BOTH directions and
+  was deleted rather than weakened.
+
+So the guard is `scripts/hof-dict-e2e.sh`, in the style of
+`scripts/aot-parity-e2e.sh` and for the same reason. It asserts the values and
+says in its own text what it does not assert. Measured to discriminate: without
+the fix `hofpoly` dies with the exception above.
