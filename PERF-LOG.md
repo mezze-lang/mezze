@@ -5305,6 +5305,79 @@ function.** Three kernels, three sizes, one mechanism — and `defunc` kernel 6
 shows a TINY callback costs almost nothing, so what fails is a callback whose
 body is too big to inline at the call site.
 
+### And it was not the callback's size — it was a declined chain
+
+**FIRST, A CORRECTION TO THE NUMBERS ABOVE.** They were taken with
+`java -jar .build/*.jar`, which is NOT the program `mez build` produces. The
+generated launcher adds `--add-modules=jdk.incubator.vector,jdk.internal.vm.ci`,
+Serial GC, `NewRatio=1` and AppCDS; without the vector module a fused fold over a
+flat arithmetic body dies outright with `NoClassDefFoundError:
+jdk/incubator/vector/Vector`, and the grid-walk kernel read 21 ns/px through
+`java -jar` against 10 through the launcher. Everything below is the launcher.
+(The mandelbrot headline is unaffected — `mezze-benchmark`'s harness has always
+run the launcher — and so is the float-parity result: 803 ps/iter through the
+launcher against 799 through `java -jar`.)
+
+`MEZZE_CHAIN_CANON_EMIT_DEBUG=1` on a built binary says it in one line:
+
+```
+  2 [chain-canon-emit] emitted FusedLongRangePipeline (Accumulate, 0 stages)
+  6 [chain-canon-emit] reject: unclassifiable folder body
+```
+
+The chain DOES fuse — `FusedChainIR(source=RangeSeq(0, side*side), stages=[],
+sink=Fold(0, MakeLambdaIR))` — and then the EMITTER declines it. Both of its Fold
+modes put the folder's arithmetic into the loop: `Accumulate` wants `acc OP x`
+with at most one element transform, `AccumulateTree` wants a pure arithmetic tree
+over the two parameters with no captures and no locals. A folder that CALLS
+anything satisfies neither, so the whole chain fell back to the native fold and
+its element-at-a-time iterator protocol.
+
+The fix is a third mode, `AccumulateCall`: build the closure ONCE in the loop
+prologue, call it per element, thread the result. It accepts captures precisely
+because the closure is built once — and a folder captures the moment its body
+mentions anything from the enclosing scope, which mandelbrot's does (`side`,
+`span`). `CallEach` had already settled this trade for the ForEach sink, and its
+own note puts it plainly: the win is "going from not fused at all to fused with
+one alloc per iter", with escape analysis often folding the record away. The loop
+becomes a counted range walk with no iterator state and no Option per step.
+
+MEASURED, `bench/cases/mandelannot` side 1800, min of 3, launcher:
+
+```
+  2  iter/fold grid       67 -> 45 ns/px      1.49x, checksum 39 866 172 both
+  4  tail-loop grid       38 -> 36 ns/px      control
+```
+
+The gap between walking the grid lazily and walking it by hand fell from 29 ns a
+pixel to **9** — and 9 ns is what the same walk costs with a folder the emitter
+CAN inline, so what remains is the protocol floor rather than this defect.
+
+And in `mezze-benchmark`'s own harness, same regime (N=1200 → 2400, every
+implementation warm), **min of three independent runs at reps=5**:
+
+```
+  kotlin   21.225        c   21.713        mezze   27.692 ns/unit
+```
+
+**69.126 → 27.692, a 2.50x gain, and the gap to the fastest implementation goes
+from 3.10x to 1.30x.** All ten implementations still agree on
+`mandelbrot(200) = 492855` and `mandelbrot(1000) = 12306668`.
+
+THE MIN OF THREE MATTERS AND I ALMOST SKIPPED IT. One earlier run of the same
+binary read **17.591** — ahead of kotlin and c — and I wrote that down as a
+result before re-running. Three runs put mezze at 27.7, 28.8 and 31.9 against
+kotlin's 21.2-22.0, whose spread is 4-6%. Mandelbrot on this harness varies by
+1.9x run to run for mezze; a single sample cannot tell 1.3x from 1.0x. Third time
+this session (see the 381 ps tail-loop "regression", and the 74 ns/px mandelbrot
+"regression" that was 60 on a re-run).
+
+NEUTRAL ELSEWHERE, by the fix's own switch at `--scale 3`: `map_filter_sum`'s two
+rows came out iter 12.739 / seq 10.931 with it on against 11.598 / 11.704 off,
+and on a second pair 11.324 / 12.143 on against 11.858 / 11.109 off — **the signs
+flip between pairs**, so no effect. `sum_range` reports UNMEASURABLE at this
+scale either way.
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup

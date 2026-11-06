@@ -5336,6 +5336,8 @@ public final class BytecodeCompiler {
     private FLPSpec tryBuildFusedLongPipeline(
             java.util.List<ClassifiedStage> stages, FusedSinkMode mode) {
         if (mode instanceof FusedSinkMode.CallEach) return null;
+        // The folder is a call, so there is no inline long op sequence to build.
+        if (mode instanceof FusedSinkMode.AccumulateCall) return null;
 
         int mapOp = -1; long mapLit = 0; NodeIR mapNode = null;
         boolean selfMap = false; boolean filterFirst = false;
@@ -6095,6 +6097,39 @@ public final class BytecodeCompiler {
          */
         record AccumulateTree(NodeIR body, int accParamSlot, int elemParamSlot,
                               NodeIR initExpr) implements FusedSinkMode {}
+        /**
+         * A fold whose folder is NOT an arithmetic expression: build the closure
+         * once before the loop, CALL it per element, thread the result.
+         *
+         * The two modes above both emit the folder's arithmetic INTO the loop, and
+         * between them they want `acc OP x` with at most one element transform, or
+         * a pure arithmetic tree over the two parameters with no captures and no
+         * locals. A folder that calls anything satisfies neither, and the whole
+         * chain was declined — so a fold whose body does real work fell all the way
+         * back to the native fold and its element-at-a-time iterator protocol.
+         *
+         * MEASURED on `bench/cases/mandelannot`, grid walk only, through the
+         * generated launcher (`java -jar` is NOT the same program — it omits
+         * `--add-modules=jdk.incubator.vector` and the GC flags, and read 21 ns/px
+         * where the launcher reads 10):
+         *
+         *   iter::range().fold(), folder `acc + x % 7`      10 ns/px   (fuses)
+         *   the same walk as a tail loop                     1 ns/px
+         *   iter::range().fold(), folder calls `pixel`       29 ns/px   (declined)
+         *
+         * `mezze-benchmark`'s mandelbrot walks its grid exactly this way, on
+         * purpose — the grid is a traversal nobody needs materialised — and that
+         * 29 ns is 29 of its 69 ns/px against kotlin's 22.3 ns/px total.
+         *
+         * One call and one closure-arg record per element is not free; it is what
+         * `CallEach` already settled for on the ForEach sink, whose own note puts
+         * it plainly — the win is "going from not fused at all to fused with one
+         * alloc per iter", and Truffle's escape analysis often folds the record
+         * away. The loop itself becomes a counted range walk with no iterator
+         * state and no Option per step, which is the part that was costing 20 ns.
+         */
+        record AccumulateCall(NodeIR lambdaExpr, NodeIR initExpr,
+                              String[] argFieldNames) implements FusedSinkMode {}
 
         enum ShortCircuitKind { ANY, ALL, FIND, NONE, FIND_INDEX }
         enum MaterializeTarget { SEQ, LIST }
@@ -6118,7 +6153,9 @@ public final class BytecodeCompiler {
             // written, so try that before declining the whole chain.
             var tree = classifyFolderTree(foldSink, dbg);
             if (tree != null) return tree;
-            return null;
+            // And a folder that is not an expression at all still does not have to
+            // cost the whole chain — call it per element inside the fused loop.
+            return classifyFolderCall(foldSink, dbg);
         }
         if (chain.getSink() instanceof SinkIR.Sum) {
             return new FusedSinkMode.Accumulate(InlineOp.ADD,
@@ -6328,6 +6365,35 @@ public final class BytecodeCompiler {
         }
         if (dbg) System.err.println("[chain-canon-emit] folder body emitted as a tree");
         return new FusedSinkMode.AccumulateTree(ir.getBody(), accAt, elemAt, foldSink.getInit());
+    }
+
+    /**
+     * The Fold sink's last resort: keep the fused loop and call the folder.
+     *
+     * Unlike {@link #classifyFolderTree} this accepts CAPTURES, because the
+     * closure is built once in the loop's prologue rather than reconstructed per
+     * element — and a folder that captures is the common case the moment the
+     * callback mentions anything from its enclosing scope (mandelbrot's captures
+     * `side` and `span`). All it needs is a two-parameter function whose
+     * parameters have names, so the call can be made on the scalar ABI.
+     */
+    private FusedSinkMode classifyFolderCall(SinkIR.Fold foldSink, boolean dbg) {
+        if (language == null) return null;
+        var lambda = foldSink.getF();
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 2) {
+            if (dbg) System.err.println(
+                "[chain-canon-emit] reject: folder not a two-parameter function");
+            return null;
+        }
+        var names = ir.getParamNames();
+        if (names == null || names.size() != 2) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: folder params unnamed");
+            return null;
+        }
+        if (dbg) System.err.println("[chain-canon-emit] folder called per element");
+        return new FusedSinkMode.AccumulateCall(lambda, foldSink.getInit(),
+                new String[] { names.get(0), names.get(1) });
     }
 
     /** Begin the BDSL operation for an arithmetic [op]; the caller emits both
@@ -6601,6 +6667,7 @@ public final class BytecodeCompiler {
         com.oracle.truffle.api.bytecode.BytecodeLocal resultSlot  = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal hasAccSlot  = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal builderSlot = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal folderSlot  = null;
 
         switch (mode) {
             case FusedSinkMode.Accumulate a -> {
@@ -6614,6 +6681,18 @@ public final class BytecodeCompiler {
                 accSlot = b.createLocal();
                 b.beginStoreLocal(accSlot);
                   emitNode(t.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+            }
+            // Same accumulator again, plus the closure — built ONCE here, which is
+            // what lets this mode accept a folder that captures.
+            case FusedSinkMode.AccumulateCall ac -> {
+                accSlot = b.createLocal();
+                b.beginStoreLocal(accSlot);
+                  emitNode(ac.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+                folderSlot = b.createLocal();
+                b.beginStoreLocal(folderSlot);
+                  emitNode(ac.lambdaExpr(), b, argCount, localMap);
                 b.endStoreLocal();
             }
             case FusedSinkMode.CallEach ignored -> { /* no extra state */ }
@@ -7175,6 +7254,18 @@ public final class BytecodeCompiler {
                                accSlot, xSlot, b);
                 b.endStoreLocal();
             }
+            case FusedSinkMode.AccumulateCall ac -> {
+                // acc = folder(acc, x). Reading `accSlot` inside its own store is
+                // the same shape AccumulateTree uses: the loads are emitted before
+                // the store takes effect.
+                b.beginStoreLocal(accSlot);
+                  b.beginCallIndirectScalar2(ac.argFieldNames());
+                    b.emitLoadLocal(folderSlot);
+                    b.emitLoadLocal(accSlot);
+                    b.emitLoadLocal(xSlot);
+                  b.endCallIndirectScalar2();
+                b.endStoreLocal();
+            }
             case FusedSinkMode.CallEach ce -> {
                 var argCopy = b.createLocal();
                 b.beginStoreLocal(argCopy);
@@ -7470,6 +7561,8 @@ public final class BytecodeCompiler {
             case FusedSinkMode.Accumulate ignored ->
                 b.emitLoadLocal(accSlot);
             case FusedSinkMode.AccumulateTree ignored ->
+                b.emitLoadLocal(accSlot);
+            case FusedSinkMode.AccumulateCall ignored ->
                 b.emitLoadLocal(accSlot);
             case FusedSinkMode.CallEach ignored ->
                 b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeRecord.empty());

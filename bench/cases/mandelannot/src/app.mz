@@ -175,6 +175,57 @@ let grid_loop = { side, span } -> do
     else go { p = p + 1, acc = acc + pixel_mono { p = p, side = side, span = span } }
   go { p = 0, acc = 0 }
 
+## ── 5 and 6. THE SAME TWO GRID WALKS WITH THE PIXEL WORK REMOVED.
+##
+## Kernel 2 against kernel 4 says `iter::range().fold()` costs 26 ns a pixel over
+## a tail loop. That could be the iter protocol itself — a step per element, an
+## Option per step — or it could be that the callback's body is too big to inline
+## at the fold's call site, since the callback calls `pixel_mono` which calls
+## `escape_mono`. These two isolate it: same walk, same shapes, a callback small
+## enough that nothing could refuse to inline it.
+##
+## (5 - 6) is the iter/fold overhead for a SMALL callback. If that is a couple of
+## nanoseconds while kernel 2 - kernel 4 is 26, then the protocol is not the cost
+## and the callback's SIZE is.
+##
+## Their checksums are sums of `p % 7`, so they agree with each other and with
+## nothing else; what matters is that each is stable across runs. The `% 7` is
+## there because a plain `acc + p` HAS A CLOSED FORM and both kernels measured
+## 0-1 ns/px — the JVM folded the loop away, which this file's own method notes
+## warn about and which I walked into anyway.
+let grid_trivial_iter = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> do
+      let m = x % 7
+      acc + m
+    }
+
+let grid_trivial_loop = { side, span } -> do
+  let go: { p: Int, acc: Int } -> Int = { p, acc } ->
+    if p >= side * side then acc
+    else do
+      let m = p % 7
+      go { p = p + 1, acc = acc + m }
+  go { p = 0, acc = 0 }
+
+## ── 7. THE SAME TRIVIAL FOLD WITH NO `let` IN THE CALLBACK.
+##
+## The chain DOES fuse — the lowered IR is
+## `FusedChainIR(source=RangeSeq(0, side*side), stages=[], sink=Fold(0, MakeLambdaIR))`
+## for kernels 1, 2 and 5 alike — so the 20 ns an element is not a refusal to
+## fuse. It is how the SINK is emitted. `BytecodeCompiler` carries a gate that
+## accepts "a fold body that is a pure arithmetic tree over the folder's two
+## parameters and integer literals" and inlines it into the loop; anything else
+## gets a call per element.
+##
+## Kernel 5's callback is `do { let m = x % 7; acc + m }` — a block with a
+## binding, so not a tree. This one is `acc + (x % 7)`: same arithmetic, same
+## checksum, no binding. If it drops from 21 ns/px to ~1, the gate is the cause
+## and widening it is the fix.
+let grid_tree_iter = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> acc + (x % 7) }
+
 let report = { name, px, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns / px }) ns/px  sum=$(int::to_str { n = r.result })" }
 
@@ -196,7 +247,19 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     grid_one { side = 40, span = float::from_int { n = 40 } }
     report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
     report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
-  else do
+  else if k == 4 then do
     grid_loop { side = 40, span = float::from_int { n = 40 } }
     report { name = "4 grid TAIL LOOP (annot)", px = px, r = time_it { f = {} -> grid_loop { side = side, span = span } } }
     report { name = "4 grid TAIL LOOP (annot)", px = px, r = time_it { f = {} -> grid_loop { side = side, span = span } } }
+  else if k == 5 then do
+    grid_trivial_iter { side = 40, span = float::from_int { n = 40 } }
+    report { name = "5 iter/fold, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_iter { side = side, span = span } } }
+    report { name = "5 iter/fold, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_iter { side = side, span = span } } }
+  else if k == 6 then do
+    grid_trivial_loop { side = 40, span = float::from_int { n = 40 } }
+    report { name = "6 tail loop, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_loop { side = side, span = span } } }
+    report { name = "6 tail loop, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_loop { side = side, span = span } } }
+  else do
+    grid_tree_iter { side = 40, span = float::from_int { n = 40 } }
+    report { name = "7 iter/fold, flat body  ", px = px, r = time_it { f = {} -> grid_tree_iter { side = side, span = span } } }
+    report { name = "7 iter/fold, flat body  ", px = px, r = time_it { f = {} -> grid_tree_iter { side = side, span = span } } }
