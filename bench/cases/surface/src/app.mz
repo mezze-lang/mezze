@@ -40,6 +40,18 @@ type Shape = |
   Tri { b: Int, h: Int },
 |
 
+## Same arity of choice as Shape but NO multi-field constructor. Shape's `Tri`
+## carries two fields, so its payload cannot use the fused single-value slot —
+## and build+match over Shape allocates ~1.4x what build-only does while
+## constructing the same count, which points at the multi-field payload being
+## read back through a materialized wrapper record. This type isolates that:
+## everything else about the row is identical.
+type Shape1 = |
+  One { a: Int },
+  Two { b: Int },
+  Three { c: Int },
+|
+
 let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
   Some { val } -> match int::from_str { s = val } is
     Some { val = v } -> v
@@ -178,6 +190,24 @@ let l_rec1 = { i, acc, last } -> if i <= 0 then acc
     let v = if i % 3 == 0 then { r = i } else if i % 3 == 1 then { r = i + 1 } else { r = i + 2 }
     l_rec1 { i = i - 1, acc = acc + 1, last = v }
 
+## BUILD + MATCH over the all-single-field type, to be read against
+## "variant build+match" and against "variant alloc, no match".
+let l_match1 = { i, acc } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then One { a = i } else if i % 3 == 1 then Two { b = i } else Three { c = i }
+    let x = match v is
+      One { a } -> a
+      Two { b } -> b
+      Three { c } -> c
+    l_match1 { i = i - 1, acc = acc + x }
+
+## ALLOCATE the all-single-field variant, never match it — the build-only
+## counterpart of the row above.
+let l_hold1 = { i, acc, last } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then One { a = i } else if i % 3 == 1 then Two { b = i } else Three { c = i }
+    l_hold1 { i = i - 1, acc = acc + 1, last = v }
+
 ## `if let` is a match GUARD here, not a standalone expression — the arm binds
 ## the scrutinee and the guard destructures something else.
 let l_if_let = { i, acc } -> if i <= 0 then acc
@@ -246,3 +276,7 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
              l_match_only { i = n, acc = 0, a = Circle { r = 1 }, b = Square { side = 2 }, c = Tri { b = 3, h = 4 } } }
   report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "record alloc, 1 field ", thunk = {} -> l_rec1 { i = n, acc = 0, last = { r = 0 } } }
+  report { idx = 16, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "1-field only: build+match", thunk = {} -> l_match1 { i = n, acc = 0 } }
+  report { idx = 17, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "1-field only: alloc only ", thunk = {} -> l_hold1 { i = n, acc = 0, last = One { a = 0 } } }

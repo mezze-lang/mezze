@@ -6722,3 +6722,146 @@ First two things to rule out, in order: the volatile `materializedRecord` field
 on `MezzeVariant` (a volatile member is a known obstruction to scalar
 replacement), and any match-side read that can call `getPayloadValue()`, which
 materializes a `MezzeRecord` and would make the variant escape by itself.
+
+### LEDGER UPDATE 2026-11-06 — the allocation row has a cause, and it is that EVERY record field is boxed
+
+The previous entry said the next target was allocation, and named two things to
+rule out: the volatile `materializedRecord` field, and a match-side read that
+could materialize a record. Both are ruled out. The cause is elsewhere and it is
+much more specific.
+
+#### What the instrument actually says: count the allocations, not the nanoseconds
+
+Young-GC pauses, Serial GC, same heap config, n=1e7, reproducible across runs
+(two runs each, ±3):
+
+```
+  row                                        GC pauses
+  choose-ctor arith only (no allocation)             3
+  variant match, no alloc (pre-built)                3
+  variant alloc, no match      (Shape)              38
+  variant build + match        (Shape)              55
+  1-field-only alloc, no match (Shape1)             33
+  1-field-only build + match   (Shape1)             39
+```
+
+`Shape` has a two-field constructor (`Tri { b: Int, h: Int }`); `Shape1` is the
+same three-way choice with every constructor single-field. The rows are
+otherwise identical, so the comparison is the multi-field payload and nothing
+else: **matching a freshly built two-field variant costs 11 extra young GCs and
+2.4 ns an iteration** against the single-field type.
+
+A pre-built variant matched in a loop allocates NOTHING (3 pauses, the harness
+floor) — which is why the earlier "match 2.3 ns" row looked clean. It is clean;
+the allocation is on the CONSTRUCTION side.
+
+#### Why: a two-field variant constructor allocates FIVE objects
+
+`Tri { b = i, h = i }` lowers to a `MakeRecord` for the payload followed by
+`MakeVariant`, and `MakeRecord` is this (`MezzeBytecodeRootNode.java:941`):
+
+```java
+return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, values);
+```
+
+with `cachedShape` from `ShapeCache.getOrCreateAllObjects(fieldNames)`. So:
+
+```
+  MezzeVariant                                     1
+  MezzeRecord (the payload wrapper)                2
+  Object[2] (the @Variadic framework array)        3
+  Long box for `b`                                 4
+  Long box for `h`                                 5
+```
+
+against `Circle { r = i }`, which is ONE object — the fused single-field
+factory stores the raw long in the variant's typed slot.
+
+**`MezzeRecord` has had unboxed `long[]` / `double[]` storage all along, and the
+bytecode compiler never populates it.** The comment above `MakeRecord` says so
+in as many words: *"Phase 2 keeps the AST-side all-object storage strategy. A
+later phase can specialize on shape stability for unboxed long/double
+storage."* That later phase did not happen, so every `Int` field of every
+record in the language is a boxed `Long`.
+
+This is the ledger's own floor rule coming due: *"A cell is AT FLOOR only if it
+is also BOX-FREE. Unboxed is a column, not a nice-to-have: a pass that emits
+`SlotKind.OBJECT` without looking up the type is a defect, not a conservative
+default."*
+
+#### And it corrects the previous entry's headline
+
+The previous entry concluded "the cost is per-allocation, not per-byte, and it
+is not something a better layout fixes". The first half holds; the conclusion
+does not. Divide the measured costs by the allocation COUNT:
+
+```
+  record { r = i }      2 968 ps / 3 allocations   = ~1.0 ns each
+  variant (2/3 fused, 1/3 five-object)
+                        3 601 ps / 2.33 average    = ~1.5 ns each
+```
+
+~1-1.5 ns per small allocation is an ordinary TLAB bump. **Allocation is not
+anomalously slow here — there are simply far more allocations than the source
+asks for.** So the lever is not making allocation cheaper, it is allocating
+one object where the language currently allocates five. That is a layout
+question after all, and the previous entry's "CLOSED as a target" on the variant
+layout row was reached from the wrong arithmetic.
+
+#### A read-side fix was written, measured, and REVERTED — because it was dead
+
+`ReadVariantField` gained typed `doRecordLong` / `doRecordDouble`
+specializations reading the payload record's `long[]` slot directly behind a
+shape-identity guard, in the same shape as `SpreadRecord.doCachedShape`. It
+compiles, and it never fires: the guard asks for a field in LONG storage, and no
+record ever has one, because construction always builds an all-object shape.
+GC pauses were unchanged on the row it targeted (55 -> 54). Reverted rather
+than committed — a specialization whose guard can never pass is dead code with a
+per-read guard cost.
+
+The same trap already has a note in this tree, one layer down:
+`ReadFieldOrMethod.doRecordCached` reads `objectFields` no more, and its comment
+records that reading it unconditionally *"meant no record could use the unboxed
+LONG layout the Shape machinery has always supported ... That is why
+`ShapeCache.getOrCreateSingleLong` was dead code."* That read-side fix landed.
+`getOrCreateSingleLong` is STILL dead — now because of the write side.
+
+**And the measurements across that build pair are not usable.** Row 17, which
+the change cannot touch, moved +43% in ratio-to-control between the two builds.
+That is the cross-build trap this ledger has now been caught by three times; the
+GC counts above are what the conclusions rest on, because a count of pauses is
+not a timing.
+
+#### NEXT: populate typed storage at construction. The risk surface, mapped
+
+The enabling slice is `MakeSingleFieldRecord`, because the Bytecode DSL **can**
+specialize on a primitive operand there — it takes one operand, not a
+`@Variadic Object[]`, so a `long value` specialization receives the value
+unboxed. `MakeRecord`'s variadic array is already `Object[]` by the time the
+operation runs, so the multi-field case needs per-signature operations and is a
+second step.
+
+Checked before touching anything:
+
+- **No single-field reader uses the direct path.** 29 direct `getObjectField(…)`
+  calls exist outside `MezzeRecord`, across three files, and NONE is
+  `getObjectField(0)`.
+- **Equality and hashing are storage-agnostic** — both iterate field NAMES
+  through `getField(i)`, so `{r=1}` in LONG storage equals `{r=1}` in OBJECT
+  storage.
+- **Every derived shape is all-object.** Both `computeResultShape` overloads
+  (spread at :1058, update at :1151) call `getOrCreateAllObjects`, and spread
+  reads its source through `getField`, so a typed source cannot produce a record
+  that claims typed storage over an empty array.
+- **The consumers are already guarded for it.** `BuiltinUnaryNodes.negateLong`
+  reads `getLongField(N_INDEX)` behind `isLongRecord(args)`
+  (`getLongFieldCount() >= 1`) — written for typed storage and currently never
+  firing. Typed construction turns those guards live.
+- **One hazard, and it needs a test.** `MezzeRecord.withField` on LONG storage
+  does an unchecked `newLongs[loc.index] = (long) value`. A field whose type
+  changes would be a ClassCastException rather than a type error. Every path
+  that could do it goes through spread/update, which produce all-object results
+  — so it looks unreachable, and "looks unreachable" is what a test is for.
+
+Expected on the measured rows: `{ r = i }` goes from 3 allocations to 2, and
+`Tri { b = i, h = i }` from 5 to 3 once the multi-field step follows.

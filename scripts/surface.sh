@@ -32,6 +32,12 @@
 #   guard               = "build+match w/ guard"     - "variant build+match"
 #   and "variant build+match" should land near the sum, which is the cross-check.
 #
+# Rows 16/17 repeat 10/13 over a variant with NO multi-field constructor. That
+# pair is what showed the cost is construction, not matching: a two-field
+# payload lowers to five allocations (variant + wrapper record + Object[2] +
+# two Long boxes) against one for a fused single-field constructor. Read them
+# with -Xlog:gc and count pauses, not nanoseconds — see PERF-LOG.
+#
 # The first version of these rows had a baseline doing ONE `% 3` against a match
 # row doing TWO, plus a `mk {}` call in some rows and not others, so the "match
 # cost" subtracted out of them carried a whole extra integer modulo. That is why
@@ -57,7 +63,7 @@ fi
 # row:n — n sized so one pass is >= ~20ms at that row's measured cost
 ROWS="1:80000000 2:10000000 3:20000000 4:2000000 5:400000 6:5000000 \
 7:10000000 8:10000000 9:40000000 10:10000000 11:10000000 12:10000000 \
-13:10000000 14:10000000 15:10000000"
+13:10000000 14:10000000 15:10000000 16:10000000 17:10000000"
 
 cd "$DIR" || exit 1
 echo "surface: one row per process, two sizes each, control n=$FLOOR_N"
