@@ -5206,6 +5206,29 @@ So the gap splits in two, and they are different problems:
 - **startup and warmup, ~12x** (791 ms against 64 ms), which in a one-second
   measurement window moves every mezze row in the table, not just this one.
 
+### And the whole suite, not just the kernel that was being worked on
+
+`just bench --reps 3`, every mezze app rebuilt with this compiler, against the
+figures `mezze-benchmark/RESULTS.md` publishes:
+
+| kernel | mezze published | mezze now | gain | kotlin now | gap |
+|---|---|---|---|---|---|
+| `map_filter_sum` seq | 64.869 | **10.753** | **6.0x** | 2.181 | 4.9x |
+| `map_filter_sum` iter | 31.693 | **13.774** | **2.3x** | 2.181 | 6.3x |
+| `mandelbrot` | 2 212.542 | **106.839** | **20.7x** | 33.630 | 3.2x |
+| `sum_range` | — | 0.810 | — | 0.386 | 2.1x |
+
+Relative to the fastest implementation of each kernel, mandelbrot goes from
+**122.0x to 4.7x**. Checksums hold throughout — all ten implementations agree.
+
+Two of these were never the target. `map_filter_sum` improved because the
+collection pipeline hands a user callback to a stdlib HOF, which is the same
+dictionary-through-a-function-value defect `defunc` kernel 3 isolates; the seq
+form, which was the WORSE of the two at 64.869, is now the better at 10.753.
+
+What is left, in size order, is no longer arithmetic: the collection pipeline at
+4.9x, startup at ~12x, and steady-state float codegen at ~3.2x.
+
 ---
 
 ## Method notes
