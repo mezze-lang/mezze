@@ -518,6 +518,50 @@ class ConstraintSolver(
         rightType: MezzeType.VariantType,
         substitution: Substitution
     ): Substitution? {
+        val isMatchContext = originalConstraint.isMatchCaseContext ||
+            originalConstraint.isAlternativesJoin
+        val bothOpen = leftType.rowVar != null && rightType.rowVar != null
+        val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||
+                                 (rightType.rowVar != null && patternBasedRowVars.contains(rightType.rowVar))
+
+        if (!isMatchContext && !(bothOpen && !eitherPatternBased)) return null
+
+        return mergeVariantPair(
+            leftType,
+            rightType,
+            substitution,
+            attachTo = listOf(originalConstraint.left, originalConstraint.right),
+        )
+    }
+
+    /**
+     * Union two variant groups, and point every variable that named either one
+     * at the result.
+     *
+     * The POLICY half of [mergeVariantConstructors], split out so a NESTED
+     * payload gets the same answer as a top-level scrutinee. Arms union at the
+     * top because the solver's `Equality` path reaches the caller; a payload is
+     * reconciled by `solveHasField`, which unifies the field types directly, so
+     * before this was shared `Some { val = Red }` and `Some { val = Pink }` met
+     * as a plain mismatch and 5.9 stopped one level down.
+     *
+     * Every refusal here is shared too, which is the point of sharing rather
+     * than duplicating: the identity veto that stops a foreign module's variant
+     * being laundered into another's row, and the disjointness rule, now guard
+     * the nested path as well.
+     *
+     * [attachTo] are the types whose variables should receive the union --
+     * usually the two sides of whatever constraint brought the groups together.
+     * Variables already bound to either group are also found by scanning the
+     * substitution, which is how the union reaches a group that arrived through
+     * a field type rather than directly.
+     */
+    private fun mergeVariantPair(
+        leftType: MezzeType.VariantType,
+        rightType: MezzeType.VariantType,
+        substitution: Substitution,
+        attachTo: List<MezzeType>,
+    ): Substitution? {
         val leftCtors = leftType.constructors.keys
         val rightCtors = rightType.constructors.keys
         if (leftCtors == rightCtors) return null
@@ -528,14 +572,6 @@ class ConstraintSolver(
         // into another's row var and launder a foreign constructor. Anonymous /
         // UNDETERMINED identities (genuine row-poly) still merge below.
         if (identityVerdict(leftType.identity, rightType.identity) == IdentityVerdict.DISTINCT) return null
-
-        val isMatchContext = originalConstraint.isMatchCaseContext ||
-            originalConstraint.isAlternativesJoin
-        val bothOpen = leftType.rowVar != null && rightType.rowVar != null
-        val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||
-                                 (rightType.rowVar != null && patternBasedRowVars.contains(rightType.rowVar))
-
-        if (!isMatchContext && !(bothOpen && !eitherPatternBased)) return null
 
         // Two groups combine when their tags are DISJOINT, and may not when they
         // share one.
@@ -564,15 +600,26 @@ class ConstraintSolver(
         val mergedVariant = MezzeType.VariantType(
             constructors = mergedConstructors,
             rowVar = leftType.rowVar ?: rightType.rowVar,
-            identity = if (leftType.identity != TypeIdentity.Anonymous) leftType.identity else rightType.identity
+            identity = if (leftType.identity != TypeIdentity.Anonymous) leftType.identity else rightType.identity,
+            // CARRIED, and a positional rebuild dropped it. `ascriptionWall` is the
+            // only surviving mark that an anonymous group was INVENTED BY A PATTERN
+            // once its row has been pinned closed, so a merge that loses it breaks
+            // the chain: arms one and two union, the union no longer looks
+            // arm-invented, and a THIRD arm cannot join what it should extend
+            // (measured: "Constructor(s) 'Pink, Red' not found in | Blue |").
+            //
+            // A wall is also the restrictive setting, so preserving it when either
+            // side had it cannot make a later unification more permissive than it
+            // was. Same lesson as the `copy`-not-rebuild note below: a type that
+            // gains a channel loses it quietly at every positional construction.
+            ascriptionWall = leftType.ascriptionWall || rightType.ascriptionWall,
         )
 
         val updatedMappings = mutableMapOf<TypeVar, MezzeType>()
-        if (originalConstraint.left is MezzeType.VarType) {
-            updatedMappings[(originalConstraint.left as MezzeType.VarType).variable] = mergedVariant
-        }
-        if (originalConstraint.right is MezzeType.VarType) {
-            updatedMappings[(originalConstraint.right as MezzeType.VarType).variable] = mergedVariant
+        for (side in attachTo) {
+            if (side is MezzeType.VarType) {
+                updatedMappings[side.variable] = mergedVariant
+            }
         }
         for ((typeVar, mappedType) in substitution.mappings) {
             if (mappedType == leftType || mappedType == rightType) {
@@ -1457,6 +1504,47 @@ class ConstraintSolver(
             }
 
             val result = unify(actualFieldType, expectedFieldType, registry)
+            if (result is UnificationResult.Failure && constraint.isPatternContext) {
+                // Two match ARMS meeting at one payload field. The scrutinee's own
+                // groups union (mergeVariantConstructors, via isMatchCaseContext);
+                // a payload field is reconciled here, so the same union has to be
+                // available or the arms-define-the-group rule would hold at the top
+                // level and not one level down.
+                val l = currentSubst.apply(actualFieldType)
+                val r = currentSubst.apply(expectedFieldType)
+                // BOTH groups must be ARM-INVENTED, which is what keeps this to the
+                // inferred case. A `let`-bound scrutinee's payload group came from a
+                // VALUE -- `let v = Some { val = Red }` builds a closed `| Red |` --
+                // and 4.1 fixes a bound value's group at its binding, so an arm
+                // naming another tag is an EXTRA arm, not a widening (5.5). Without
+                // this test the fix for the inferred case silently widened that one
+                // too and the two rules contradict.
+                //
+                // Asked TWO ways, because the answer depends on when this runs.
+                // While the row is still open, `patternBasedRowVars` knows. But this
+                // HasField is usually DEFERRED past the end of a solve, and
+                // `closePatternBasedVariants` has by then closed the row AND set
+                // `ascriptionWall` on it -- erasing the evidence the first test needs.
+                //
+                // That pinning is the ONLY producer of `ascriptionWall`, so on an
+                // ANONYMOUS variant the flag means exactly "a pattern-invented group
+                // pinned closed". A value-derived group is anonymous and NOT walled,
+                // which is precisely the let-bound case (measured: inferred arms give
+                // wall=true on both sides, the binding gives wall=false on one).
+                fun armInvented(t: MezzeType.VariantType) =
+                    (t.rowVar != null && patternBasedRowVars.contains(t.rowVar)) ||
+                        (t.rowVar == null && t.ascriptionWall &&
+                            t.identity.displayNameOrNull() == null)
+                if (l is MezzeType.VariantType && r is MezzeType.VariantType &&
+                    armInvented(l) && armInvented(r)
+                ) {
+                    val merged = mergeVariantPair(
+                        l, r, currentSubst,
+                        attachTo = listOf(actualFieldType, expectedFieldType),
+                    )
+                    if (merged != null) return ConstraintResult.Success(merged)
+                }
+            }
             return when (result) {
                 is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                 // NOT the absent-field failure: the field is THERE and its type has

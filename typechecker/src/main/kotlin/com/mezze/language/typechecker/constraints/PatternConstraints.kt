@@ -449,7 +449,10 @@ class PatternConstraintGenerator {
                     fieldName = entry.name,
                     fieldType = fieldType,
                     context = "Record pattern field ${entry.name}",
-                    loc = sourceLoc
+                    loc = sourceLoc,
+                    // The arms of one match meet at this field, so their groups
+                    // UNION here exactly as they do on the scrutinee itself.
+                    isPatternContext = true,
                 )
             )
 

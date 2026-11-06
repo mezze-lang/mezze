@@ -143,6 +143,20 @@ sealed interface Constraint {
         override val loc: Loc? = null,
         val strictFieldCheck: Boolean = false,
         /**
+         * This field read is a PATTERN's, so the groups arriving at it come from
+         * different match ARMS and must be UNIONED rather than unified.
+         *
+         * `Some { val = Red }` and `Some { val = Pink }` are two arms of one
+         * match. At the top level the arms union, because the solver's
+         * `Equality` path consults `mergeVariantConstructors` when the
+         * constraint carries `isMatchCaseContext`. A nested payload is
+         * reconciled by `solveHasField`, which unifies the two field types
+         * directly -- so without this flag the second arm's group met the
+         * first's as a plain mismatch and the arms-define-the-group rule (5.9)
+         * stopped at the top level.
+         */
+        val isPatternContext: Boolean = false,
+        /**
          * Global COMPLETION pass: succeed where the receiver is now a concrete
          * record carrying the field, and defer everywhere else — invent nothing,
          * reject nothing.
