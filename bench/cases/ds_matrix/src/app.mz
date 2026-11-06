@@ -1,15 +1,29 @@
 # Phase G0 (#481) baseline bench matrix.
 #
-# Per-op × per-collection × per-N. Captures current numbers so every downstream
-# Phase G ticket (G1-G12 storage rewrites, G3-G8 Iter migration) has a hard
-# regression gate.
+# Per-op × per-collection. The regression gate for the Phase G storage and Iter
+# tickets, which is why how it reports matters as much as what it measures.
 #
-# Kept small (N=10K) because list::map + list::filter are 100-644x slower
-# than seq counterparts (see project_list_mezze_batches_perf memory) — larger
-# N hangs. Once List chunked backing (#483) lands, bump to N=1M.
+# EVERY NUMBER IS A RATIO TO A CONTROL MEASURED IN THIS SAME PROCESS, and that
+# is the whole design. A bare counted loop over the same arithmetic is timed
+# alongside the collection ops; each op prints `xNNN` against it, hundredths.
+# Absolute nanoseconds cannot be compared between two builds of the compiler on
+# a machine that drifts — tried repeatedly, and every cross-build figure taken
+# that way turned out to be wrong, by factors up to 500x. A ratio to a control
+# that the change under test cannot affect does survive, because the drift
+# divides out.
 #
-# Reference: seq::fold is the fastest fused path today. Every non-seq op is
-# measured as a multiplier of the seq counterpart.
+# IT ALSO REFUSES TO BE MISREAD. When a median sits more than twice its own
+# minimum the row is marked `UNDER-WARMED`, because that is what a measurement
+# short of steady state looks like and it reads exactly like a real regression.
+# At N=10 000 every row here was under-warmed and the figures were ~500x the
+# steady-state cost: `seq::filter+size` read 117-151 ns/elem where it actually
+# costs well under one. A target was picked off those numbers that did not
+# exist.
+#
+# N defaults high for the same reason. The old default of 10 000 was kept
+# because `list::map`/`filter` were "100-644x slower than seq counterparts" and
+# larger N hung; neither holds — list is comparable or faster, and both are
+# sub-nanosecond per element once warm.
 use std::effects::log::{println, Console}
 use std::effects::time::{Time, SystemTime, monotonic}
 use std::datetime::{duration_to_nanos, sub_duration}
@@ -36,19 +50,38 @@ let time_k_go = {thunk, k, acc} -> if k == 0
     then acc
     else time_k_go {thunk = thunk, k = k - 1, acc = seq::push {xs = acc, x = time_one {thunk = thunk}}}
 
-let report = {label, thunk} -> perform Console in perform SystemTime in do
-    # warmup 3, measured 10
-    let _w = time_k_go {thunk = thunk, k = 3, acc = []}
-    let times = time_k_go {thunk = thunk, k = 10, acc = []}
-    let sorted = seq::sort {xs = times}
-    let n_times = seq::size {xs = sorted}
-    let min_ns = match seq::get {xs = sorted, i = 0} is
-        Some {val} -> val
-        None -> 0
-    let med_ns = match seq::get {xs = sorted, i = n_times / 2} is
-        Some {val} -> val
-        None -> 0
-    println { msg = "  $(label): min=$(min_ns.to_str{}) med=$(med_ns.to_str{})" }
+# The FLOOR: visit n values and add them, with no collection in the way. Timed
+# by the same path as every op below, so the ratio is apples to apples.
+let control_loop = {i, acc} -> if i <= 0 then acc else control_loop {i = i - 1, acc = acc + i}
+
+# Pulled out so `min_of` can end on a record literal: a trailing `match` arm
+# swallows the do-block's result expression.
+let nth_or_zero = {xs, i} -> match seq::get {xs = xs, i = i} is
+    Some {val} -> val
+    None -> 0
+
+let min_of = {thunk, warm, k} -> do
+    let _w = time_k_go {thunk = thunk, k = warm, acc = []}
+    let sorted = seq::sort {xs = time_k_go {thunk = thunk, k = k, acc = []}}
+    let half = seq::size {xs = sorted} / 2
+    { min = nth_or_zero {xs = sorted, i = 0}, med = nth_or_zero {xs = sorted, i = half} }
+
+# ONE OP PER PROCESS when `sel` says so, and that is not a convenience.
+# Building a 1M cons list and a 1M seq in the same process GCs while the timer
+# runs: the control stayed flagged UNDER-WARMED at every N, and `seq::count`
+# swung 149 -> 4465 ps/elem between two runs of the same binary. A seq-only
+# bench in a fresh process was stable to within 40% over eight reps. So the
+# driver below runs each row on its own, and `sel = 0` keeps the old
+# all-in-one-process behaviour for a quick look.
+let report = {idx, sel, label, thunk, floor_ns, n, warm, k} -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of {thunk = thunk, warm = warm, k = k}
+    let ps_per_elem = (t.min * 1000) / n
+    let ratio_x100 = if floor_ns == 0 then 0 else (t.min * 100) / floor_ns
+    # A median past twice the minimum is not a slow op, it is an unfinished
+    # measurement. Say so on the row rather than leaving a reader to divide.
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise N or passes)" else ""
+    println { msg = "  $(label): $(ps_per_elem.to_str{}) ps/elem  x$(ratio_x100.to_str{})/100 floor$(warn)" }
 
 # --- main ---
 
@@ -58,6 +91,12 @@ let report = {label, thunk} -> perform Console in perform SystemTime in do
 # hung; list is now comparable, so the per-element cost is worth seeing at a
 # size where per-call overhead and warmup do not dominate. At 10 000 the median
 # runs 2-10x the min, which is what an under-warmed measurement looks like.
+let arg_at_i = { args, i, def } -> match seq::get { xs = args, i = i } is
+    Some { val } -> match int::from_str { s = val } is
+        Some { val = v } -> v
+        None -> def
+    None -> def
+
 let arg_n = { args, def } -> match seq::get { xs = args, i = 0 } is
     Some { val } -> match int::from_str { s = val } is
         Some { val = v } -> v
@@ -65,31 +104,41 @@ let arg_n = { args, def } -> match seq::get { xs = args, i = 0 } is
     None -> def
 
 let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
-    let n = arg_n { args = argv {}, def = 10000 }
-    println { msg = "Phase G0 baseline (N=$(n.to_str{})): 3 warmup + 10 measured runs, min/med ns" }
+    let n = arg_n { args = argv {}, def = 200000 }
+    let sel = arg_at_i { args = argv {}, i = 1, def = 0 }
+    let warm = 5
+    let k = 12
+    let floor = min_of {thunk = {} -> control_loop {i = n, acc = 0}, warm = warm, k = k}
+    let floor_ps = (floor.min * 1000) / n
+    println { msg = "Phase G0 baseline (N=$(n.to_str{})): $(warm.to_str{}) warmup + $(k.to_str{}) measured, MIN per row" }
+    println { msg = "control: a counted loop, no collection = $(floor_ps.to_str{}) ps/elem. Every row below is xNNN/100 of it." }
+    if floor.med > (floor.min * 2) then
+        println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise N" }
+    else
+        println { msg = "" }
     let seq_ns = seq::range {start = 0, end = n}
     let list_ns = build_list {n = n, acc = list::empty {}}
 
     # SEQ (native fused, reference)
     println { msg = "" }
     println { msg = "-- SEQ (reference) --" }
-    report {label = "seq::fold        (sum)", thunk = {} -> seq::fold {xs = seq_ns, init = 0, f = {acc, x} -> acc + x}}
-    report {label = "seq::sum         (native)", thunk = {} -> seq::sum {xs = seq_ns}}
-    report {label = "seq::map+size    (alloc)", thunk = {} -> seq::size {xs = seq::map {xs = seq_ns, f = {x} -> x + 1}}}
-    report {label = "seq::filter+size (alloc)", thunk = {} -> seq::size {xs = seq::filter {xs = seq_ns, p = {x} -> x % 2 == 0}}}
-    report {label = "seq::any (miss)", thunk = {} -> if seq::any {xs = seq_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
-    report {label = "seq::count", thunk = {} -> seq::count {xs = seq_ns, p = {x} -> x % 2 == 0}}
+    report {idx = 1, sel = sel, label = "seq::fold        (sum)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> seq::fold {xs = seq_ns, init = 0, f = {acc, x} -> acc + x}}
+    report {idx = 2, sel = sel, label = "seq::sum         (native)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> seq::sum {xs = seq_ns}}
+    report {idx = 3, sel = sel, label = "seq::map+size    (alloc)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> seq::size {xs = seq::map {xs = seq_ns, f = {x} -> x + 1}}}
+    report {idx = 4, sel = sel, label = "seq::filter+size (alloc)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> seq::size {xs = seq::filter {xs = seq_ns, p = {x} -> x % 2 == 0}}}
+    report {idx = 5, sel = sel, label = "seq::any (miss)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> if seq::any {xs = seq_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
+    report {idx = 6, sel = sel, label = "seq::count", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> seq::count {xs = seq_ns, p = {x} -> x % 2 == 0}}
 
     # LIST (Mezze recursion for HOFs, native storage)
     println { msg = "" }
     println { msg = "-- LIST (Mezze HOFs) --" }
-    report {label = "list::fold_left  (sum)", thunk = {} -> list::fold_left {xs = list_ns, init = 0, f = {acc, x} -> acc + x}}
-    report {label = "list::map+size   (alloc)", thunk = {} -> list::size {xs = list::map {xs = list_ns, f = {x} -> x + 1}}}
-    report {label = "list::filter+size(alloc)", thunk = {} -> list::size {xs = list::filter {xs = list_ns, p = {x} -> x % 2 == 0}}}
-    report {label = "list::any (miss)", thunk = {} -> if list::any {xs = list_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
-    report {label = "list::count", thunk = {} -> list::count {xs = list_ns, p = {x} -> x % 2 == 0}}
+    report {idx = 7, sel = sel, label = "list::fold_left  (sum)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::fold_left {xs = list_ns, init = 0, f = {acc, x} -> acc + x}}
+    report {idx = 8, sel = sel, label = "list::map+size   (alloc)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::size {xs = list::map {xs = list_ns, f = {x} -> x + 1}}}
+    report {idx = 9, sel = sel, label = "list::filter+size(alloc)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::size {xs = list::filter {xs = list_ns, p = {x} -> x % 2 == 0}}}
+    report {idx = 10, sel = sel, label = "list::any (miss)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> if list::any {xs = list_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
+    report {idx = 11, sel = sel, label = "list::count", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::count {xs = list_ns, p = {x} -> x % 2 == 0}}
 
     # RANGE fusion
     println { msg = "" }
     println { msg = "-- RANGE.fold (fusion target) --" }
-    report {label = "range.fold direct", thunk = {} -> seq::fold {xs = seq::range {start = 0, end = n}, init = 0, f = {acc, x} -> acc + x}}
+    report {idx = 12, sel = sel, label = "range.fold direct", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> seq::fold {xs = seq::range {start = 0, end = n}, init = 0, f = {acc, x} -> acc + x}}

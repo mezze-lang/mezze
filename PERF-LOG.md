@@ -6374,3 +6374,58 @@ builds or session windows was wrong: the 10-20x seq target, the 2-6x floor gap,
 "sum 360 -> 137". The only ones that held were interleaved, same-binary, with a
 quantity the change cannot affect carried alongside. A ledger floor measured any
 other way is a guess with a number on it.
+
+## The instrument, fixed — and it names List, which reverses my own correction
+
+`ds_matrix` now reports every row as **ps/elem plus a ratio to a control
+measured in that same process** — a counted loop over the same arithmetic with
+no collection in it — and it flags its own bad measurements: `UNDER-WARMED` on a
+row whose median exceeds twice its minimum, and a louder line when the CONTROL
+itself is unstable, in which case no ratio below it means anything. Ratios are
+what survive between two builds on a drifting machine; absolute nanoseconds are
+what produced every wrong number in this session.
+
+`scripts/ds-matrix.sh` runs it ONE ROW PER PROCESS, which is not tidiness. All
+twelve rows in one process build a 1M cons list and a 1M seq and then time
+against them, so the collector runs while the timer does. Same binary, same N:
+
+```
+  seq::filter+size   4 852 ps/elem all-in-one   ->   718  one-per-process
+  seq::count         4 465                      ->   781
+```
+
+a 6x measurement artefact, larger than most gaps anyone would chase. In
+one-per-process mode no row flags at all.
+
+### What it says, N=1e6
+
+```
+  range.fold direct      136 ps/elem   x0.49 floor
+  seq::sum               347           x1.37
+  seq::fold              387           x0.92
+  seq::map+size          390           x1.56
+  seq::any (miss)        486           x1.64
+  seq::filter+size       718           x2.59
+  seq::count             781           x2.84
+  list::count          1 819           x4.05
+  list::fold_left      1 511           x5.01
+  list::any            1 665           x5.26
+  list::map+size       1 667           x5.31
+  list::filter+size    1 963           x6.32
+```
+
+**LIST is the gap**: 4-6.3x the floor against seq's 0.9-2.8x, and
+`list::fold_left` 1 511 against `seq::fold` 387 is **3.9x on the same
+operation** — same N, same regime, one structure against another.
+
+### And that reverses a correction I made four hours ago
+
+This file's header claimed `list::map`/`filter` were "100-644x slower than seq
+counterparts". From the N=10 000 numbers I wrote that down as stale and
+"corrected" it to *List is FASTER*. With an instrument that works, List is
+2-5x SLOWER. The header's DIRECTION was right all along; only its magnitude was
+wrong. I replaced a stale number with a wrong one, which is worse, and did it
+while explicitly complaining about stale numbers.
+
+So the next target is List's per-element cost, and the instrument that picks it
+is now the one being committed rather than the one that produced 500x phantoms.
