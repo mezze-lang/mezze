@@ -3008,6 +3008,18 @@ public final class BytecodeCompiler {
                     emitNode(f.getValue(), b, argCount, localMap);
                 }
                 b.endMakeRecord2();
+            } else if (fieldNames.length == 3) {
+                b.beginMakeRecord3(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord3();
+            } else if (fieldNames.length == 4) {
+                b.beginMakeRecord4(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord4();
             } else {
                 b.beginMakeRecord(fieldNames);
                 for (FieldIR f : m.getFields()) {

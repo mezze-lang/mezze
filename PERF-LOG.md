@@ -7177,3 +7177,237 @@ bytes of payload. Inline fields on a small-arity record collapse that to one
 object — and unlike the `to_upper` attempt, the mechanism is an object layout
 rather than a hoped-for vectorization, which is the kind of change that has
 actually paid this session.
+
+### LEDGER UPDATE 2026-11-07 — where the allocation thread stops, and why each remaining byte is expensive
+
+Four allocation commits landed. This entry records the floor each one reached
+and, for the two obvious "next steps", the evidence that they are worth less
+than they look. Both are CLOSED with a reason rather than left as inviting
+TODOs.
+
+#### The instrument validated itself
+
+The pause-count model can be checked against the object sizes it is being used
+to infer, and it agrees. Row 17 allocates one single-field variant per
+iteration, 1e7 iterations x 17 passes = 1.7e8 variants:
+
+```
+  before   1.7e8 x 64B = 10.88 GB   over (34 - 3) = 31 pauses   ->  351 MB/pause
+  after    1.7e8 x 48B =  8.16 GB   over (27 - 3) = 24 pauses   ->  340 MB/pause
+```
+
+Same young-gen size per pause on both sides, which is what makes the 64 -> 48
+claim a measurement rather than an arithmetic hope.
+
+#### CLOSED: `MezzeVariant` stops at 48 bytes
+
+48 is already 8-aligned, so the next saving has to be EIGHT bytes, not four —
+dropping any single 4-byte field changes nothing after padding. The four
+candidates, and what each costs:
+
+| field | bytes | verdict |
+|---|---|---|
+| `registry` | 4 | Read in exactly ONE place, `registry.getConstructorName(tag)`, and the global registry knows every tag the compiler emits. Removable — but 4 bytes alone buys nothing |
+| `materializedRecord` | 4 | **MUST STAY.** It caches the wrapper record `getPayloadValue()` builds for a fused variant, and that has 19 callers of which several are hot — `MapNatives:403` is `map::get`'s result unwrap. Dropping the cache allocates a `MezzeRecord` per `map::get`, trading 4 bytes per variant for an allocation per lookup |
+| `fusedFieldName` | 4 | Derivable from the tag, but only via a tag -> field-name side table the COMPILER would have to populate. New machinery for 4 bytes |
+| `payload` + `singleValue` merge | 4 | Doable; loses `@CompilationFinal(dimensions = 1)` on the array |
+
+So the only route to 40 bytes is `fusedFieldName` + the payload merge together,
+one of which needs new compiler machinery, and the route to 32 needs the cache
+that `map::get` depends on. Not worth it at this exchange rate.
+
+#### CLOSED: the record class hierarchy is worth less than the bench row suggests
+
+The plan was an abstract `MezzeRecord` with a no-array subclass: `{ r = i }`
+would go from 56 bytes in two objects (a 32-byte record plus a `long[1]`
+spending a 16-byte header on 8 bytes of payload) to 24 in one. 43% fewer bytes,
+and nothing worse for large records since they keep the array-backed subclass.
+
+**Row 9 is why that is narrower than it looks.** It is a two-argument
+self-recursive call, 1e7 iterations, and it costs **3 GC pauses** — the
+harness floor. Argument records are already bypassed on the hot path, so the
+records this refactor would shrink are the explicit `{ … }` literals in user
+code, not every function call. Against that: `MezzeRecord` is `final` today
+with `@ExportLibrary(InteropLibrary.class)` and four `@ExportMessage` methods,
+and the split makes ~10 accessors virtual and has to settle what `withField`
+means when a one-long record is updated with a non-long value — a SHAPE change
+that `withField` cannot currently express, since it keeps `shape`.
+
+A large, interop-touching core-type refactor for a narrower win than the bench
+row implies. Recorded, with the design settled, for when explicit record
+literals are shown to matter — not taken on the strength of a row that
+over-represents them.
+
+#### Where the four commits left things
+
+```
+                                    objects   bytes    (was)
+  `{ r = i }`                          2        56       3 / ~72
+  `{ a = i, b = i }`                   2        72       4 /   96
+  `Circle { r = i }`                   1        48       1 /   64
+  `Tri { b = i, h = i }`               3       ~120      5 / ~160
+```
+
+| row | state |
+|---|---|
+| single-field record storage | **AT FLOOR for this layout.** Unboxed; the residue is the `long[1]` header, and see above |
+| two-field record storage | **AT FLOOR for this layout.** Unboxed, measured 24% with the arithmetic predicting 25% |
+| `MezzeVariant` size | **AT FLOOR at 48 bytes**, next step costs 8 coupled bytes — see above |
+| argument records | **CLOSED — already bypassed.** Row 9, a two-arg self-call, allocates nothing |
+| `str::to_upper` per-character cost | **ABOVE FLOOR, 25x `concat`**, Java-level route CLOSED with a measured regression. Needs a Graal intrinsic |
+| arity 3+ records | **ABOVE FLOOR.** Still the variadic boxed path; a fixed-arity operation per arity would fix it, and the shape of that change is `MakeRecord2` repeated |
+
+**The one that is still open and cheap is the last row.** `MakeRecord3` and
+`MakeRecord4` are `MakeRecord2` again — the same three specializations, the
+same `ShapeCache.getOrCreateAllLong`, the same emitter branch. Arity 3-4
+records are common enough in real code (a point, a span, an HTTP response) and
+every one of them currently boxes every numeric field. That is the next move:
+known mechanism, known measurement method, no new design.
+
+#### Taken immediately: arity 3 and 4, 18% each
+
+The row above called `MakeRecord3` / `MakeRecord4` "the next move: known
+mechanism, known measurement method, no new design". Done, and it is exactly
+`MakeRecord2` twice more — three specializations each, the same
+`ShapeCache.getOrCreateAllLong`, two more emitter branches.
+
+```
+  row                              typed OFF    typed ON    change
+  23  record alloc, 3 fields        45, 42       35, 36      -18%
+  24  record alloc, 4 fields        45, 46       39, 36      -18%
+  15  record alloc, 1 field         29, 30       31, 29      unchanged (control)
+  18  record alloc, 2 fields        33, 33       33, 34      unchanged (control)
+```
+
+The two controls are rows whose arity routes to a different operation, so they
+pin that nothing moved underneath.
+
+**The arithmetic does NOT pin this one down, and the bench is why.** Predicted
+bytes for three `Int` fields:
+
+```
+  before   record 32 + Object[3] 32 + three Long boxes 48  = 112B   -> 36% saving
+  before   record 32 + Object[3] 32 + ONE Long box 16      =  80B   -> 10% saving
+  after    record 32 + long[3] 40                          =  72B
+```
+
+Two predictions, because `l_rec3` stores the SAME value in every field
+(`{ a = i, b = i, c = i }`) and Graal may common up the three identical
+`Long.valueOf(i)` calls into one box. Measured 18% sits between 10% and 36%, so
+the model is consistent but cannot be checked sharply. Distinct values per
+field would settle it, and that is a bench fix worth making before quoting a
+precise figure for this row. Recorded rather than rounded to whichever
+prediction flattered the change.
+
+**The boundary is now five fields**, and it is pinned by a test
+(`five fields still use object storage, which is the documented boundary`) so
+that it reads as a decision rather than as an oversight. Arity 5+ still takes
+the variadic path and still boxes; extending further is the same mechanism
+again, with diminishing frequency in real code.
+
+**A note on the method, from two self-inflicted errors in this step.** The
+script that disabled the typed path to take the "before" reading matched the
+3-arity signature as a PREFIX of the 4-arity one, twice — once in each
+direction. Both times the `assert s.count(old) == 1` fired and nothing was
+patched, which is the only reason the first "before" numbers (identical to the
+after, because nothing had changed) were recognised as bogus instead of
+published as a null result. Patterns for these A/B scripts have to be anchored
+on something that follows the varying part.
+
+### LEDGER UPDATE 2026-11-07 — THE EFFECTS SURFACE HAS NUMBERS, and `resume` costs 11x the implicit form
+
+This is the row the ledger called its own biggest gap: *"the measured surface is
+fast, and the unmeasured surface is most of the concurrency and effects story.
+Not one of the Loom or continuation rows has a number against it."* The effects
+half now does.
+
+`bench/cases/effectsurface` already existed — written to fill exactly these
+cells, and never run. Seven kernels, one per process, n=2e7, and **every kernel
+returns the same checksum (200 000 010 000 000)**, so a kernel that got fast by
+dropping work would read as a different number. Minima across nine readings
+each, because three passes of warmup at this n is marginal and the spread shows
+it (kernel 3 ranged 827 to 5 804 — the minimum is the estimator, the spread is
+the warning).
+
+```
+  kernel                              min ps/iter    minus tier control
+  1  control (fused tail-loop tier)         241
+  2  tier control (off that tier)           452       <- the subtraction base
+  3  one op, handler installed ONCE         827              375
+  7  chain of FOUR handlers                 910              458
+  4  explicit `resume { val = 1 }`        4 692            4 240
+  5  handler INSTALLED PER ITERATION     90 837           90 385
+  6  ABORT per iteration                334 273          333 821
+```
+
+Kernel 2 exists because a `perform` leaves the fused tail-loop tier, so
+measuring against kernel 1 would charge the tier gap (211 ps) to effects. That
+is the bench's own design and it is right.
+
+#### Four findings, in order of size
+
+**1. An operation reaching an installed handler costs 375 ps, and handler DEPTH
+is nearly free.** Four handlers deep costs 458 ps against one handler's 375 —
+83 ps for three extra levels. So reaching a handler is a cached constant, not a
+walk, which is what `PerformD`'s handler-chain-stable assumption claims and now
+has a number behind it. **AT FLOOR**, and the ledger's old lone effect figure
+(~0.38 ns for the fall-through path) is consistent with it.
+
+**2. Explicit `resume { val = 1 }` costs 4 240 ps — ELEVEN TIMES the implicit
+bare-value form's 375.** The bench predicted they would be equal, in writing:
+*"PerformD's comment says resume is fall-through, so this should cost what Ones
+costs; if it does not, the two forms compile differently and that is worth
+knowing."* They do compile differently, and in nine readings kernel 4 never once
+dipped into kernel 3's range.
+
+The cause, read off the code rather than guessed:
+
+  - `EffectBinding.doCachedResumeAbort` resolves the NAME `resume` to a
+    singleton `MezzeFunction` that PE constant-folds, so READING `resume` is
+    free — that part works as advertised.
+  - the COST is the call. `resume { val = 1 }` builds a `{ val = 1 }` argument
+    record and makes an indirect call to that singleton, whose entire body is
+    `return arg.val` (`YieldDispatch`: *"resume is fall-through: calling
+    resume {val = X} returns X"*).
+  - a record allocation measures ~3 ns on this machine and an indirect call
+    ~1 ns, which accounts for the 4.2 ns almost exactly.
+
+So the explicit form allocates an object and performs a call in order to return
+a value the implicit form returns directly. **ABOVE FLOOR, cause named**, and
+the fix has a shape: a tail-position `resume { val = e }` in a handler body
+should lower to `e` under the same handler-stable assumption
+`doCachedResumeAbort` already guards on, with the record-and-call kept as the
+fallback for dispatch mode. Tail position only — fall-through returns `arg.val`,
+so a non-tail `resume` whose result is then used further is NOT the same program.
+
+**3. Installing a handler per iteration costs 90 ns — 240x an already-installed
+op.** The ledger had `perform` in a tier-1 loop marked CLOSED ("that tier runs
+the loop in Java; it cannot call a guest handler") but no number for the cost of
+the install itself. 90 ns per install is the number, and it says plainly that a
+`perform` inside a loop is a different order of magnitude from a `perform`
+outside one. Whether 90 ns is near ITS floor is a separate question and still
+UNKNOWN — it invalidates the chain-stable assumption on every push and pop, so
+it is paying deoptimisation, not just bookkeeping.
+
+**4. Abort costs 333 821 ps — 334 ns, 3.7x the install it sits on top of.** That
+is an exception throw (`AbortPerformException`) per iteration, and the figure is
+what it costs. Whether an abort in a loop is a shape worth optimising is a
+design question; the number is recorded so it can be answered.
+
+#### What is still UNKNOWN in this family
+
+The bench covers the handler surface. It does NOT cover: real continuation
+capture (resume stored, deferred, or invoked twice — every number above is the
+fall-through single-return path), effects once a second thread invalidates
+`singleThreaded` for the life of the process, scoped performers, or any of
+Loom — spawn, join, channels, STM, atoms, parallel map, cancellation,
+structured scope. That remains the largest UNKNOWN block in this ledger.
+
+#### An instrument note
+
+`effectsurface` does 3 warmup passes then reports 3 readings, and at n=2e7 with
+a ~1 ns kernel that is ~20 ms a pass — short enough that the spread between
+readings reached 7x on kernel 3. The minima are stable across processes and are
+what is quoted, but the bench should take a min-of-k internally the way
+`bench/cases/surface` and `ds_matrix` now do. Recorded rather than silently
+relied upon.

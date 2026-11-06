@@ -73,6 +73,53 @@ class RecordUnboxedStorageTest {
         assertEquals(2.5, r.getField("b"))
     }
 
+    @Test
+    fun `three Int fields are stored unboxed in the long array`() {
+        val r = record("{ a = 1, b = 2, c = 3 }")
+        assertEquals(3, r.longFieldCount)
+        assertEquals(0, r.objectFieldCount)
+        assertEquals(1L, r.getField("a"))
+        assertEquals(2L, r.getField("b"))
+        assertEquals(3L, r.getField("c"))
+    }
+
+    @Test
+    fun `four Int fields are stored unboxed in the long array`() {
+        val r = record("{ a = 1, b = 2, c = 3, d = 4 }")
+        assertEquals(4, r.longFieldCount)
+        assertEquals(0, r.objectFieldCount)
+        assertEquals(4L, r.getField("d"))
+    }
+
+    @Test
+    fun `four Float fields are stored unboxed in the double array`() {
+        val r = record("{ a = 1.5, b = 2.5, c = 3.5, d = 4.5 }")
+        assertEquals(4, r.doubleFieldCount)
+        assertEquals(0, r.objectFieldCount)
+        assertEquals(4.5, r.getField("d"))
+    }
+
+    /**
+     * FIVE fields still takes the variadic path, which boxes — the fixed-arity
+     * operations stop at four. This pins that boundary so it is a decision on
+     * the record rather than a surprise.
+     */
+    @Test
+    fun `five fields still use object storage, which is the documented boundary`() {
+        val r = record("{ a = 1, b = 2, c = 3, d = 4, e = 5 }")
+        assertEquals(5, r.objectFieldCount)
+        assertEquals(0, r.longFieldCount)
+        assertEquals(5L, r.getField("e"))
+    }
+
+    @Test
+    fun `a three-field record reads back and computes`() {
+        assertEquals(6L, MezzeTestHelper.run("""
+            let rec = { a = 1, b = 2, c = 3 }
+            rec.a + rec.b + rec.c
+        """.trimIndent()))
+    }
+
     /** Mixed types have no all-primitive layout, so the object one is correct. */
     @Test
     fun `a mixed Int and Str pair uses object storage and stays correct`() {
