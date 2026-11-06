@@ -161,7 +161,10 @@ class AbilityChecker internal constructor(
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
 
                     if (allConcrete) {
-                        val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash, errorLoc)
+                        val hasImpl = checkAbilityImplementation(
+                            abilityName, closedTypeArgs, tracked.abilityHash, errorLoc,
+                            preCloseArgs = concreteTypeArgs,
+                        )
                         if (!hasImpl) {
                             if (deferExistingAbilityImpls && abilityImplExistsForType(abilityName, closedTypeArgs)) {
                                 continue
@@ -626,7 +629,7 @@ class AbilityChecker internal constructor(
      * re-matched the type against every impl of the ability — one more per
      * module checked, so the cost of `==` grew with the size of the project.
      */
-    private val provedImplemented = HashSet<Triple<String, Hash?, List<MezzeType>>>()
+    private val provedImplemented = HashSet<List<Any?>>()
 
     internal fun checkAbilityImplementation(
         abilityName: String,
@@ -635,12 +638,34 @@ class AbilityChecker internal constructor(
         loc: com.mezze.language.parsedast.Loc? = null,
         /** Types already on the derivation path — see [canDeriveOrHasImpl]. */
         seen: MutableSet<Any> = mutableSetOf(),
+        /**
+         * The same arguments BEFORE [closeOpenRecords] ran, when the caller
+         * closed them.
+         *
+         * Impl matching wants the CLOSED shape: an open record unifies by
+         * absorbing fields into its tail, so `{ x: Int, ... }` would match an
+         * impl written for `{ x: Int, y: Str }`. DERIVATION wants the open one,
+         * because whether a record is complete is the whole question for a
+         * structural ability — see [DerivabilityRules.isOpenShape]. Closing
+         * served both and could only answer one.
+         */
+        preCloseArgs: List<MezzeType>? = null,
     ): Boolean {
         val effectiveHash = abilityHash ?: registry.resolveAbilityHash(abilityName)
+        val deriveArgs = preCloseArgs ?: typeArgs
         // Only ground arguments: a type variable may yet be bound to anything.
-        val key = if (typeArgs.all { it.isGround }) Triple(abilityName, effectiveHash, typeArgs) else null
+        //
+        // The key carries the DERIVE args, not the closed ones. `{ x: Int }` and
+        // `{ x: Int, ... }` close to the same shape, so a shared key would let
+        // the closed record's `true` answer be replayed for the open one — the
+        // cache would reintroduce exactly what this parameter exists to stop.
+        val key = if (typeArgs.all { it.isGround } && deriveArgs.all { it.isGround }) {
+            listOf(abilityName, effectiveHash, typeArgs, deriveArgs)
+        } else null
         if (key != null && key in provedImplemented) return true
-        val implemented = checkAbilityImplementationUncached(abilityName, typeArgs, effectiveHash, abilityHash, loc, seen)
+        val implemented = checkAbilityImplementationUncached(
+            abilityName, typeArgs, effectiveHash, abilityHash, loc, seen, deriveArgs,
+        )
         if (implemented && key != null) provedImplemented += key
         return implemented
     }
@@ -652,9 +677,14 @@ class AbilityChecker internal constructor(
         abilityHash: Hash?,
         loc: com.mezze.language.parsedast.Loc?,
         seen: MutableSet<Any>,
+        deriveArgs: List<MezzeType> = typeArgs,
     ): Boolean {
         if (typeArgs.size == 1) {
-            if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash, seen)) {
+            // Derivation is asked of the PRE-CLOSE argument, so an open record
+            // is still open when the structural rule looks at it. The DERIVED
+            // shape impl is registered against the closed one, which is what
+            // runtime dispatch matches on.
+            if (canDeriveAbility(abilityName, deriveArgs.first(), effectiveHash, seen)) {
                 registerDerivedShapeImpl(effectiveHash, typeArgs.first())
                 return true
             }
@@ -1062,7 +1092,15 @@ class AbilityChecker internal constructor(
                 val closedFields = type.fields.mapValues { (_, fieldType) ->
                     closeOpenRecords(fieldType)
                 }
-                MezzeType.RecordType(fields = closedFields, rowVar = null, identity = type.identity)
+                MezzeType.RecordType(
+                    fields = closedFields,
+                    rowVar = null,
+                    identity = type.identity,
+                    // Carried: these are how a generic alias was instantiated and
+                    // are what makes the type print `Box Int` rather than `Box`.
+                    // A positional rebuild that omits them silently un-prints it.
+                    typeArgs = type.typeArgs.map { closeOpenRecords(it) },
+                )
             }
             is MezzeType.TypeApplication -> {
                 if (type.args.none { needsRowClosing(it) }) {

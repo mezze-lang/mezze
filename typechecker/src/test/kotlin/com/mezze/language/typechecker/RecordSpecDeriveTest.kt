@@ -152,46 +152,41 @@ class RecordSpecDeriveTest : VariantSpecBase() {
     }
 
     /**
-     * 11.19, KNOWN GAP -- an ANONYMOUS open record still derives Eq, and should
-     * not. Recorded, not asserted as correct.
+     * 11.19 -- an ANONYMOUS open record does not derive Eq either, and this is
+     * the case that needed the fix at the SEAM rather than in the rule.
      *
-     * MEASURED. By the time derivability is asked, an open record's row is
-     * already gone:
+     * MEASURED, before: derivability was asked of a type whose row had already
+     * been dropped, so it could not tell the two spellings apart.
      *
      *     named      fields=[x] row=null name=Loose  -> open=true
      *     anonymous  fields=[x] row=null name=null   -> open=false
      *
-     * So the named case above is caught by the DECLARATION lookup, not by the
-     * row -- and an anonymous shape has no declaration, so nothing is left to
-     * ask. The openness is live earlier (field resolution rejects `r.y` on the
-     * same type) and lost in between.
+     * The named case was caught by the DECLARATION lookup; an anonymous shape
+     * has no declaration, so nothing was left to ask. `AbilityChecker`'s
+     * `closeOpenRecords` nulls the row UNCONDITIONALLY -- user-written rows
+     * included -- before validating a deferred ability obligation, and that
+     * close is load-bearing for IMPL MATCHING: an open record unifies by
+     * absorbing fields into its tail, so `{ x: Int, ... }` would match an impl
+     * written for `{ x: Int, y: Str }`.
      *
-     * The cause is a documented SEAM, not an oversight:
-     * `closeGeneratedRowVars` closes record and variant tails at every boundary
-     * that produces a STORED or DISPLAYED type, and
-     * `ConstraintGenerator.addAbilityConstraintsToFunctionType` -- the
-     * ability-constraint args -- is explicitly one of them, so signatures and
-     * hover show `{ a: T }` rather than `{ a: T, ... }`. Derivability then reads
-     * a type that has been through a display-oriented close. Fixing it means
-     * asking the ability question of the PRE-close type, which is a change to
-     * that seam rather than to this rule.
-     *
-     * The gap is narrow in practice: an open record is written to be shared, so
-     * it is nearly always declared with a name, and the named case is closed.
+     * So both shapes are now carried. Impl matching keeps the closed argument;
+     * DERIVATION is asked of the pre-close one, because whether a record is
+     * complete is the entire question for a structural ability. One argument
+     * served both purposes and could only answer one.
      */
-    @Test fun `an anonymous open record derives Eq -- KNOWN GAP`() {
-        accepts(
+    @Test fun `an anonymous open record does not derive Eq`() {
+        rejects(
             """
             use std::int
             pub let same: { a: { x: Int, ... }, b: { x: Int, ... } } -> Bool =
               { a, b } -> a == b
             $MAIN
             """,
-            "Records what the compiler DOES, so the gap cannot be forgotten and the " +
-                "day the seam is fixed this test fails and says so. It should be a " +
-                "refusal for the same reason as the named case: the hidden tail is not " +
-                "observable at the type, so an equality that reads it answers from " +
-                "information the type does not expose.",
+            "V0402",
+            "Same reason as the named case: the hidden tail is not observable at the " +
+                "type, so an equality that reads it answers from information the type " +
+                "does not expose. Verified red before the seam fix -- it was accepted, " +
+                "and recorded as a measured gap until it was not.",
         )
     }
 

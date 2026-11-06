@@ -102,13 +102,39 @@ class OrdDerivationSoundnessTest {
         """))
     }
 
-    @Test fun `equality on an OPEN record is still accepted`() {
-        // Eq stays derivable for records (DirectEqualNode's structural fallback),
-        // whether the record is open or closed — closing only strips the row, so
-        // the visible fields (all Eq-able) still derive. Must not over-reject.
-        assertNull(err("""
+    @Test fun `equality on an OPEN record is REJECTED`() {
+        // REVERSED, 2026-11-06. This asserted the opposite, reasoning that
+        // "closing only strips the row, so the visible fields (all Eq-able)
+        // still derive". The visible fields do derive; the VALUE is the problem.
+        //
+        // MezzeRecord.equals compares the RUNTIME shape:
+        //
+        //     if (shape.getFieldCount() != that.shape.getFieldCount()) return false;
+        //     ... then every field by name
+        //
+        // So two values typed `{ a: Int, ... }` that differ only in fields the
+        // type does not list compare FALSE, while nothing reachable at that type
+        // can tell them apart — `r.b` is refused. Equality answered from
+        // information the type does not expose, which is the laundering the
+        // record rules exist to prevent: openness is CARRIED, never closed over.
+        //
+        // The old example could never have caught it: `r == r` is
+        // self-comparison, and `equals` returns true at `this == other` before
+        // reading a single field. Two DIFFERENT values are needed to see it.
+        //
+        // It was also a disagreement between two gates — the derivability rule
+        // asked the fields without asking about the tail, while
+        // DerivedImplGenerator.eqImpl has always refused an open record, so the
+        // constraint was satisfied with no impl to satisfy it.
+        //
+        // HOLE C's close is still right and still here: it is what makes the
+        // obligation concrete so it cannot be dropped, and impl matching needs
+        // the closed shape (an open record unifies by absorbing fields into its
+        // tail, so `{ a: Int, ... }` would match an impl for `{ a: Int, b: Str }`).
+        // Both shapes are now carried, and DERIVATION is asked of the open one.
+        assertNotNull(err("""
             let f: { r: { a: Int, ... } } -> Bool = { r } -> r == r
-        """), "== on an open record stays sound; closing the row must not break it")
+        """), "== on an open record reads fields the type does not expose")
     }
 
     // ── still sound: Eq on a variant works ───────────────────────────────
