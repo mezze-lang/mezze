@@ -5491,12 +5491,48 @@ Total wall time, mandelbrot, min of 2-3 per cell:
 | 2400 | **306 ms** | 1 245 ms | 202 ms |
 | 4800 | **780 ms** | 1 669 ms | 580 ms |
 
-Slopes from those pairs (Δwork = 17 280 000 px): native **27.4**, jar **24.5**,
-kotlin **21.9** ns/px. So AOT-compiled Truffle gives up about 12% of throughput
-against HotSpot's Graal — expected, the host code around the compiler is AOT and
-the inlining budgets are smaller — and buys back a 1 100 ms fixed cost. Native is
-**4.1x faster than the jar in total time at N=2400 and 2.1x at N=4800**, and
-1.5x / 1.34x off kotlin rather than 6.2x / 2.9x.
+Slopes from those pairs (Δwork = 17 280 000 px): native 27.4, jar 24.5, kotlin
+21.9 ns/px. Native is **4.1x faster than the jar in total time at N=2400 and 2.1x
+at N=4800**, and 1.5x / 1.34x off kotlin rather than 6.2x / 2.9x.
+
+### "Native starts fast but runs slow" — NOT TRUE HERE, and the 12% above was noise
+
+That slope pair says native gives up 12% of throughput, which is the textbook
+AOT trade, and I wrote it down as one. It does not survive a bigger window: at
+N=2400/4800 the jar's 1 100 ms fixed cost is a third of t(N), so small jitter in
+either endpoint moves the slope several ns. Measured again at N=6000 → 12000
+(Δwork = 108 000 000 px, the JVM unambiguously at peak for seconds), interleaved,
+three rounds:
+
+```
+            native                jar
+  round 1   26.14 ns/px           25.80
+  round 2   25.82                 27.05
+  round 3   25.94                 27.61
+  mean      25.97  (±0.6%)        26.82  (±3.4%)
+```
+
+**Level — and native is the steadier of the two.** Identical checksums
+(12 306 668).
+
+**Why the textbook rule does not apply.** Compile a normal Java application with
+native-image and every method is AOT code with no profile feedback, which is
+where 20-50% off peak comes from. A TRUFFLE LANGUAGE built with
+`--macro:truffle-svm` is a different animal: the GUEST program is still compiled
+AT RUNTIME, by Graal, through the same partial-evaluation pipeline as on the JVM.
+What native-image compiles ahead of time is the interpreter and the runtime — the
+HOST. For a compute kernel the hot loop is runtime-compiled machine code either
+way, so there is nothing to give up.
+
+That is exactly what #402 bought, and it is worth being precise about: before it,
+the native binary had no runtime compiler at all and the textbook rule applied
+with interest — 32 s against the jar's 1.13 s on hello_perf.
+
+**Where the AOT penalty WOULD show** is a workload dominated by host-side code —
+string formatting, Java-implemented collections, interop, I/O — because that code
+IS ahead-of-time in the image. This kernel is float arithmetic in a guest loop,
+which is the best case for native. One kernel is not a licence to claim parity
+everywhere.
 
 **And it is STABLE, which the jar is not.** Four paired runs:
 
