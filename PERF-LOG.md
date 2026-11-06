@@ -115,6 +115,76 @@ story.** Not one of the Loom or continuation rows has a number against it, and
 the ledger's own rule is that an UNKNOWN row is where wins hide — the 1503x
 `size` win was sitting in an existing bench nobody had run at a realistic N.
 
+### MONO — status, counted 2026-11-06
+
+The question "is mono done?" has a measurable answer, and it is a COMPILE-TIME
+fact so a loaded machine cannot spoil it: **how many compiled functions still
+carry dictionary parameters.** A `__dict_` param is mono having failed to reach
+that function.
+
+Across every built bench, `MEZZE_DUMP_FN='*'`, counting `params=[…__dict…]`:
+
+```
+  bench             total   dict
+  allocsurface         62      0
+  coresurface          37      0
+  defunc               51      2
+  dispatch_probe       67      1
+  dotprobe             28      0
+  effectsurface        48      5
+  floatloop            30      0
+  fuseall              40      0
+  fusecross            31      0
+  fusegaps             67      0
+  letcost              45      0
+  mandelannot          46      0        ← was the 122x case
+  mutabi               57      0
+  mutvsimmut           41      0
+  qsort_pure           25      0
+  recordcost           45      0
+  ---------------------------------
+  TOTAL               720      8   (1%)
+```
+
+**Fourteen of sixteen benches are at zero**, and `mandelannot` — the kernel this
+session opened at 122x off kotlin because of dictionary passing — is one of them.
+
+**All eight named, and they are THREE causes, only two of which are defects:**
+
+| function | cause | defect? |
+|---|---|---|
+| `apply_fold [n, f, __dict_add]` | the GENERIC original, kept beside its specialisation. `k_hof` emits `CallDirectIR` to the spec; this copy is present and uncalled | **no** — another module could call it at a different type |
+| `step_alt [x, __dict_add, __dict_mul]` | same: the generic beside its spec. Kernel 4 improved 99 764 → 49 299 (2.0x) when the spec reference landed, so the spec IS being used; the residual 5x against kernel 3 is a BIMORPHIC indirect call, which is the dispatch row, not a mono row | **no** |
+| `add2 [a, b, __dict_add]` | generic original in `dispatch_probe` | **no** |
+| `go_a` `go_d` `go_n` `go_o` `go_r` — all `[i, acc, __dict_add]` | **arithmetic whose constraint chain bottoms out in an EFFECT OP's return.** `go_a = { i, acc } -> … { i = i - one_aborted {}, acc = acc + i }`: the new improvement rule needs a concrete anchor and an effect op's associated type is not one at that point | **YES — 5 functions, one cause** |
+
+So the live mono defect is a single named shape at the **effects × numerics**
+intersection, and it is the last instance of the "mono refuses a function whose
+type is already concrete" family diagnosed on 2026-11-04. The other two members
+of that family were fixed this session (a known output determines the operands;
+residue no call site can supply).
+
+**What is fixed, with the measurement:** transitive self-call 45x · local lambda
+specialisation 314x · phantom constraint typeParams (0x, recorded because a
+correct fix that moves nothing is a result) · having-out dictionaries 47.5x →
+mandelbrot closed · a function passed as an ARGUMENT now seeded at the type its
+callee declares · a reference to a generic function now resolves to its
+specialisation rather than a dictionary-carrying wrapper, 8.2x.
+
+**What is still open in mono, ranked:**
+
+1. **the effect-op arithmetic row above** — 5 functions, one cause, a bench that
+   already reproduces it.
+2. **`MEZZE_MONO_STRIP=1` crashes the compiler** — the liveness scan counts a
+   capture as dead. Fix written, unapplied. Until then every spec keeps its dead
+   closure params.
+3. **HOF seeding is partial** — a function passed as an ARGUMENT is seeded; a
+   function reached any other way (stored in a record, returned, read from a
+   collection) is not.
+4. **the bimorphic call site** — two callbacks through one HOF costs 5x one
+   callback even with both specialised. Dispatch, not mono, but it is what caps
+   the HOF story.
+
 ### AT FLOOR — verified on this branch, control ~230 ps/iter
 
 | cell | before → after | holding test |
