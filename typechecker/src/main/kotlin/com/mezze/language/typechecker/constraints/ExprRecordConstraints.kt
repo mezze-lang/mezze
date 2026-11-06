@@ -56,6 +56,25 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
     // stay as the correctness backstop.
     val expectedFields = expectedRecordFields(context.expectedType, context)
 
+    // ONE spread, at most (spec 11.8). A spread carries its source's NAME and
+    // its openness, so two sources would have to pick which name the result
+    // wears -- and a union of their fields adds fields to each, which a spread
+    // may not do. `{ ...p }` alone is the identity and is fine.
+    //
+    // Reported here rather than left to the field checks below: with two spreads
+    // the result's shape depends on their order, so every later complaint would
+    // be about a consequence instead of the cause.
+    val spreadCount = expr.entries.count { it is ParsedRecordEntry.Spread }
+    if (spreadCount > 1) {
+        throw com.mezze.language.typechecker.TypeCheckError(
+            "A record may spread at most one source, but this one spreads " +
+                spreadCount + ". A spread carries its source's name and its open " +
+                "tail, so two sources have no single answer for either.",
+            expr.loc,
+            code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0220_RECORD_MULTIPLE_SPREADS,
+        )
+    }
+
     for (entry in expr.entries) {
         when (entry) {
             is ParsedRecordEntry.Field -> {

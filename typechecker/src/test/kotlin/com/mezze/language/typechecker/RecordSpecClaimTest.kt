@@ -170,7 +170,26 @@ class RecordSpecClaimTest : VariantSpecBase() {
         )
     }
 
-    /** 11.15, the mirror — a shape that is NOT an instance coexists. */
+    /**
+     * PROBE: does the shape claim catch the EMPTY record?
+     *
+     * `recordShapeKey` builds its key from the field list, so `{}` keys on the
+     * empty string and two unit types would collide. The validator already
+     * special-cases empty records elsewhere, as ability unit-implementers.
+     */
+    @Test fun `two empty record types`() {
+        accepts(
+            """
+            pub type UnitA = {}
+            pub type UnitB = {}
+            $MAIN
+            """,
+            "PROBE -- if this is refused, 11.5 gives a module ONE unit type, which " +
+                "reads like an accident rather than a decision.",
+        )
+    }
+
+    /** 11.15, the mirror -- a shape that is NOT an instance coexists. */
     @Test fun `a shape that is not an instance coexists with a generic record`() {
         accepts(
             """

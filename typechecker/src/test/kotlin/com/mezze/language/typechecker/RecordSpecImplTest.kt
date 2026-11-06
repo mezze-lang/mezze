@@ -134,14 +134,69 @@ class RecordSpecImplTest : VariantSpecBase() {
             impl Norm for Box Int where { norm = { it } -> 1 }
             $MAIN
             """,
-            "V0701",
+            "V0407",
             "One target being an INSTANCE of the other refuses the pair, even with the " +
                 "right types. The instance test is the same one 11.15 needs for the claim " +
-                "rule, so this is nearly free to enforce.\n\nRED ON PURPOSE. This IS refused today, but with V0705_TYPE_ARITY_MISMATCH — an arity mismatch is not an overlap diagnostic. It says `impl Norm for Box Int` is not EXPRESSIBLE: the checker trips on the instantiated target before coherence is ever consulted, so the rule holds by accident. Asserting V0705 here would pin the accident. The fix is to make an instantiated target parse and then let coherence refuse it.",
+                "rule.\n\nAlready enforced, with a message that names the `['a]` case too. Two things had hidden that: an instantiated target needs PARENTHESES, since `impl Norm for Box Int` parses as TWO targets (`Box` and `Int`) against a one-parameter ability; and V0701 was the wrong code to expect. The stdlib's `impl FromQuery 'a for [{ k: Str, v: Str }]` was the clue — a bracketed instantiated target has always worked.",
         )
     }
 
-    /** 11.18, the mirror — genuinely disjoint targets coexist. */
+    /**
+     * 11.18 control -- an INSTANTIATED target is not the problem in general.
+     *
+     * The stdlib ships one: `impl FromQuery 'a for [{ k: Str, v: Str }]` in
+     * std::codec::query is a Seq of a concrete record. So instantiated targets
+     * are expressible, and whatever refuses `impl Norm for Box Int` is specific
+     * to a USER GENERIC RECORD ALIAS rather than to instantiation.
+     */
+    @Test fun `an instantiated container target is legal`() {
+        accepts(
+            """
+            use std::int
+            ability Norm for 'a where { norm: { it: 'a } -> Int }
+            impl Norm for [Int] where { norm = { it } -> 1 }
+            $MAIN
+            """,
+            "The contrast that locates the gap: if this passes and the Box Int case does " +
+                "not, the fault is in how a user record alias is matched as a target, not " +
+                "in instantiation.",
+        )
+    }
+
+    /** 11.18 -- an instantiated RECORD-ALIAS target, alone. Legal by the same rule. */
+    @Test fun `an instantiated record-alias target is legal`() {
+        accepts(
+            """
+            use std::int
+            type Box 'a = { v: 'a }
+            ability Norm for 'a where { norm: { it: 'a } -> Int }
+            impl Norm for Box Int where { norm = { it } -> it.v }
+            $MAIN
+            """,
+            "Nothing overlaps, so pairwise disjointness has nothing to object to. Today " +
+                "this is refused with T0205/V0705-style ARITY confusion -- the target is not " +
+                "recognised, so coherence is never consulted.",
+        )
+    }
+
+    /** 11.18 -- two disjoint instantiations coexist. */
+    @Test fun `two disjoint instantiations coexist`() {
+        accepts(
+            """
+            use std::int
+            use std::str
+            type Box 'a = { v: 'a }
+            ability Norm for 'a where { norm: { it: 'a } -> Int }
+            impl Norm for Box Int where { norm = { it } -> it.v }
+            impl Norm for Box Str where { norm = { it } -> 0 }
+            $MAIN
+            """,
+            "No value is a Box Int and a Box Str at once, so there is nothing to rank and " +
+                "no specialization involved.",
+        )
+    }
+
+    /** 11.18, the mirror -- genuinely disjoint targets coexist. */
     @Test fun `disjoint named targets coexist`() {
         writeModule(
             "shapes",

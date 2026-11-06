@@ -1612,7 +1612,18 @@ internal val MezzeParser.implTargetTypeAnnotation: Parser<ParsedTypeAnnotation>
                         parseTick(currentStream)  // anti-hang: bounded work per iteration
                         val nextTok = currentStream.current()
                         // Only consume type variables ('a), seq types ([T]), and record types ({fields})
-                        // Do NOT consume capitalized identifiers — those are separate target types
+                        // Do NOT consume capitalized identifiers — those are separate target types.
+                        //
+                        // MEASURED, 2026-11-06: this is a GENUINE ambiguity, not a leftover.
+                        // Making a capitalised name associate as an argument — so that
+                        // `impl X for Box Int` is one applied target — breaks
+                        // `impl Convert for Int Str` for `ability Convert for 'a 'b`, which is
+                        // live in AbilityValidationTest, AbilityMethodCallTest,
+                        // AppliedTypeDispatchTest and ComprehensiveAbilitiesAndEffectsTest, and
+                        // cascades through the stdlib's codec impls. `impl X for (Box Int)` works
+                        // today, as does a bracketed `[{ k: Str, v: Str }]`. Resolving it in
+                        // favour of application needs a SEPARATOR for the multi-target form
+                        // (`for Int, Str`), which is a syntax change to existing code.
                         if (nextTok != null && nextTok.type == TokenType.IDENTIFIER && nextTok.text.startsWith("'")) {
                             val argResult = simpleTypeArgument(currentStream)
                             when (argResult) {

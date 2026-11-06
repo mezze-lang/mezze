@@ -173,6 +173,23 @@ class AbilityParserTest {
         assertEquals("store", operation.name)
     }
 
+    /**
+     * Two capitalised names after `for` are two TARGETS, for a multi-parameter
+     * ability: `impl KVStore for String Int` where `ability KVStore for 'k 'v`.
+     *
+     * MEASURED, and the reason this stands as it is: making a capitalised name
+     * associate as an ARGUMENT instead -- so `impl X for Box Int` is one applied
+     * target -- breaks `impl Convert for Int Str` across AbilityValidationTest,
+     * AbilityMethodCallTest, AppliedTypeDispatchTest and
+     * ComprehensiveAbilitiesAndEffectsTest, and cascades through the stdlib's
+     * codec impls. So the ambiguity is GENUINE, not a leftover.
+     *
+     * An instantiated target is still writable today, parenthesised:
+     * `impl X for (Box Int)`, or bracketed as the stdlib does in
+     * `impl FromQuery 'a for [{ k: Str, v: Str }]`. Resolving juxtaposition in
+     * favour of application would need a SEPARATOR for the multi-target form
+     * (`for Int, Str`) -- a syntax change to existing code.
+     */
     @Test
     fun testImplWithMultipleTypes() {
         val source = """
@@ -190,6 +207,20 @@ class AbilityParserTest {
         assertEquals("String", (impl.targetTypes[0] as ParsedNamedType).name)
         assertEquals("Int", (impl.targetTypes[1] as ParsedNamedType).name)
         assertEquals(1, impl.operations.size)
+    }
+
+    /** And the parenthesised form really is one applied target. */
+    @Test
+    fun testParenthesisedImplTargetIsOneApplication() {
+        val source = """
+            impl Norm for (Box Int) where {
+              norm : {it: Box Int} -> Int = {it} -> 1
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
+        assertEquals(1, impl.targetTypes.size)
     }
 
     // ========================================================================

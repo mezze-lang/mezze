@@ -921,6 +921,18 @@ object DuplicateDeclarationValidator {
      */
     fun recordShapeKey(definition: ParsedRecordDef): String? {
         if (definition.isOpen) return null
+        // The EMPTY shape claims nothing (spec 11.5). The claim exists to keep
+        // adoption decidable -- at most one exact match for a bare literal -- and
+        // `adoptRecordAlias` returns early on an empty field set, so `{}` is the
+        // one shape adoption never considers. Claiming it would forbid something
+        // to protect a property that cannot be threatened.
+        //
+        // And two unit types is a real pattern the other rules make safe:
+        // `type Pending = {}` beside `type Done = {}` are nominal (11.6), so they
+        // do not interchange and the markers mean something; their impls are
+        // disjoint targets (11.18). A bare `{}` reaches neither impl, which is
+        // 11.3's exactness behaving correctly -- write `let p: Done = {}` to pick.
+        if (definition.fields.isEmpty()) return null
         return definition.fields
             .map { it.name to parsedTypeAnnotationToString(it.type) }
             .sortedBy { it.first }

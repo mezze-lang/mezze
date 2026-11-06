@@ -212,6 +212,15 @@ fun ErrorCode.explain(): String = when (this) {
         "A record value is missing fields that the expected type requires. " +
         "Add the missing fields to the record literal."
 
+    ErrorCode.T0220_RECORD_MULTIPLE_SPREADS ->
+        "A record may spread at most one source.\n\n" +
+        "A spread carries its source's NAME and its open tail, so `{ ...p, ...q }` has no " +
+        "single answer for either: which name does the result wear, and whose unknown fields " +
+        "does it carry? A union of their fields would also ADD fields to each source, which a " +
+        "spread may not do.\n\n" +
+        "`{ ...p }` alone is fine and is the identity. To combine two records, name the fields " +
+        "you want from each."
+
     ErrorCode.T0203_RECORD_EXTRA_FIELDS ->
         "A record value has fields that are not in the expected type. " +
         "Remove the extra fields, or use an open record type with `...row`."

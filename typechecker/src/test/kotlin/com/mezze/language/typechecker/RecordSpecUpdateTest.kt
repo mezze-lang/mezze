@@ -79,26 +79,78 @@ class RecordSpecUpdateTest : VariantSpecBase() {
     // ========================================== 11.9 an open record is not spreadable
 
     /**
-     * 11.9 — the rule, and the one I would point a reader at first.
+     * 11.9 — openness is CARRIED, not closed over.
      *
-     * `r` is open: all that is known is that it has an Int `x`. A literal must be
-     * closed, and the unknown fields cannot be named, so there is no result type
-     * to give this expression.
+     * This test asserted the opposite: that spreading an open record is
+     * refused, because a literal is always closed and you cannot close over
+     * fields you cannot name. That conflated a design choice with the
+     * invariant. The unsound case is giving the spread a CLOSED result --
+     * a value carrying fields its type does not list, which would then satisfy
+     * a closed position while secretly carrying more.
+     *
+     * So the spread is legal and the result shares the parameter's row: hand
+     * `bump` a `{ x: Int, y: Str }` and it returns one.
      */
-    @Test fun `an open record may not be spread`() {
-        rejects(
+    @Test fun `an open record may be spread, carrying its row`() {
+        accepts(
             """
             use std::int
             pub let bump = { r } -> { ...r, x = r.x + 1 }
+            pub let u = {} -> bump { r = { x = 1, y = 2 } }
             $MAIN
             """,
-            "T0201",
-            "You may READ an unknown record, but you may not REBUILD one. Reported at the " +
-                "spread, not at some later use, and the message has to name the cause: the " +
-                "parameter's type is open, so the result's fields are not known.\n\n" +
-                "Row-polymorphic update is the road not taken here. The cost is that a " +
-                "spreading helper must annotate its parameter, and so works for one named " +
-                "type rather than any record with an `x`.",
+            "The runtime copies the unknown fields and the type says so. Refusing this " +
+                "would rule out row-polymorphic update, which is a feature choice rather " +
+                "than a soundness wall -- and the caller here passes a record with a field " +
+                "`bump` never named.",
+        )
+    }
+
+    /** 11.9 — and a NAMED open source gives its name back, by 11.8. */
+    @Test fun `spreading a declared-open record keeps its name`() {
+        accepts(
+            """
+            use std::int
+            type Loose = { x: Int, ... }
+            pub let bump2 = { r: Loose } -> { ...r, x = r.x + 1 }
+            $MAIN
+            """,
+            "`Loose` names the row, so 11.8 carries it and the result IS a Loose. The " +
+                "difference from the unnamed case is only that there is a name to carry.",
+        )
+    }
+
+    /** 11.8 — two spreads are refused outright, whatever their shapes. */
+    @Test fun `two spreads are refused`() {
+        rejects(
+            """
+            use std::int
+            type Point2 = { x: Int, y: Int }
+            pub let p: Point2 = { x = 1, y = 2 }
+            pub let q: Point2 = { x = 3, y = 4 }
+            pub let bad = {} -> { ...p, ...q }
+            $MAIN
+            """,
+            "T0220",
+            "One source, one name to carry. Two would have to pick, and a union of their " +
+                "fields adds fields to each -- which a spread may not do. `{ ...p }` alone " +
+                "is fine and is the identity.",
+        )
+    }
+
+    /** 11.8 — a single spread with no overrides is the identity. */
+    @Test fun `a spread with no overrides is the identity`() {
+        accepts(
+            """
+            use std::int
+            type Point2 = { x: Int, y: Int }
+            pub let p: Point2 = { x = 1, y = 2 }
+            pub let takes_point = { q: Point2 } -> q.x
+            pub let u = {} -> takes_point { q = { ...p } }
+            $MAIN
+            """,
+            "The control for the rejection above: one spread is always fine, so that rule " +
+                "is about the SECOND spread and not about spreading.",
         )
     }
 
