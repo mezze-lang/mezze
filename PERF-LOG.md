@@ -6345,7 +6345,32 @@ script as well as the two suites — a change that is fast on the JVM and slower
 on native would be a regression this ledger's own floors would not catch,
 because they are measured on the jar.
 
-Expected: ~340-400 to roughly the ~190 the count path already demonstrates, on
-the two most common collection operations. NOT claimed until measured: the
-count path vectorises a compare-and-increment, and a sum carries an accumulate
-dependency, so it may land short of 190.
+**TRIED, MEASURED, REVERTED — and the measurement is the point.** Routing the
+scalar node to the existing vector peer behind a `FlpSimd`-style probe works and
+is never slower. Interleaved in ONE binary, 8 reps, min per cell:
+
+```
+  op                          SIMD   SCALAR   change
+  seq sum                      122      133    1.09x
+  seq fold (+)                 117      132    1.13x
+  seq filter+size (CONTROL)    156      131    0.84x   <- the control MOVED 16%
+```
+
+The control is an op this change cannot touch, and it moved 16% in the WRONG
+direction, which swamps the 1.09-1.13x. So the gain is not measurable here, and
+an unmeasurable change that adds a SIMD path plus a crash-surface guard is not
+worth shipping. The node's own reasoning survives intact: on this machine the
+scalar loop is already within ~10% of the vector path.
+
+**And this retracts the "2-6x above floor" number above.** Those readings came
+from comparing across BUILDS. Within one binary everything in this family sits
+at 117-164 ps/elem, i.e. ~1.4-1.9x the declared ~85 ps/elem floor, not 2-6x.
+The wiring gap is still real and still worth recording — `mapToSimdOpLong` has
+no callers, so #417's "a fold and a sum run the exact same vectorized code" is
+not what happens — but closing it buys ~1.1x, not 2x.
+
+**The rule this day earned.** Every number I produced today by comparing across
+builds or session windows was wrong: the 10-20x seq target, the 2-6x floor gap,
+"sum 360 -> 137". The only ones that held were interleaved, same-binary, with a
+quantity the change cannot affect carried alongside. A ledger floor measured any
+other way is a guess with a number on it.
