@@ -192,9 +192,42 @@ with the machinery that owns them. `viaop` reports `having 'out = 'a` and keeps
 its `<*>`.
 
 RECOUNTED from clean caches across the same 16 benches: **2 dictionary-carrying
-functions out of 293, and neither is a defect** — `apply_fold` and `step_alt` are
-generic originals kept beside their specializations, which another module could
-still call at another type. `effectsurface` went 5 to 0. (Totals moved 720 to 293
+functions out of 293**. I wrote here that neither was a defect — that
+`apply_fold` and `step_alt` were generic originals kept beside their
+specializations. **That was wrong, and asserted without checking.** Printing
+each function's OWN hash beside its params settles it:
+
+```
+  apply_fold hash=6f0d48f2 params=[n, f, __dict_add]
+  step_alt   hash=e351b6ea params=[x, __dict_add, __dict_mul]
+```
+
+and then grepping for calls to those hashes:
+
+```
+  6f0d48f2  <- CallDirectIR from main, and TWICE from k_hof2 (under one ADD)
+  e351b6ea  <- MakeLambdaIR only, through dict_wrapper_step_alt
+```
+
+`k_hof2` and `k_hof` CALL the generic. Both remaining carriers are one cause,
+and it is the annotation rule failing:
+
+| the callback at the site | `apply_fold` specialised? |
+|---|---|
+| inline lambda (`k_closure`) | yes, dict-free (`3f76640a`) |
+| **annotated** top-level fn (`step_mono`) | yes, dict-free (`6865275d`) |
+| un-annotated top-level fn (`step`, `step_alt`) | **no — generic + `__dict_add`** |
+
+Kernels 3 and 7 differ ONLY by an annotation and only the annotated one
+monomorphises. `step` escaped a dictionary by luck: `k_named` calls it
+directly, and that direct call seeded a spec. `step_alt` is never called
+directly, only passed, so nothing seeded it and it needs a wrapper.
+
+The dictionaries themselves are RIGHT, and type-driven — the same two-type
+probe shows `at_int` passing Int's `add#b015652c` and `at_float` passing
+Float's `add#60ed70d3`. So this residue is a missed specialisation, not
+unsoundness. A dictionary is the FALLBACK representation; every one left in
+compiled IR is a function mono did not reach. `effectsurface` went 5 to 0. (Totals moved 720 to 293
 because more is specialised, so fewer functions are compiled separately at all.)
 Checksums hold: effectsurface 200000010000000 on kernels 1/5/6, defunc
 400000040000000 on 3 and 6, mandelannot 4431371.
@@ -5879,3 +5912,22 @@ boot mark reading 0-1 ms).
   GC and AppCDS. `java -jar` read 21 ns/px where the launcher read 10, and a fused
   fold over a flat arithmetic body dies outright with `NoClassDefFoundError:
   jdk/incubator/vector/Vector`.
+
+
+## A probe that changes a format breaks the greps that read it
+
+`MEZZE_DUMP_FN` now prints `hash=<8 hex>` between the name and the params,
+because the question "is this the generic or its specialization?" cannot be
+answered from a name — two functions in one dump share the name `apply_fold`
+and differ only in whether a `__dict_add` is on the end. Finding which ones
+are CALLED needs the hash as well, matched against `targetHash=`.
+
+The cost: every saved recount script matching `dump-fn\] [^ ]* params=` now
+matches NOTHING, silently, and reads as "zero dictionary-carrying functions".
+A grep over this dump must tolerate the hash field.
+
+`MEZZE_DUMP_FN` also dumps a function that `supports()` REJECTED, as
+`[dump-fn-rejected]`. The probe lives inside `BytecodeCompiler`, which never
+runs for a rejected function — exactly the case where the body is what you
+need, since the rejection names a node type and, for a dangling callee, a
+hash, and finding which call that is takes the tree.

@@ -3516,54 +3516,7 @@ class TypedASTCompiler(
         val parentCaptureCount = currentCaptureCount
         val parentParamNames = currentParamNames
 
-        // #195 B3: scan the lambda body for VarType ability method calls
-        // (e.g. `x.encode { config = config }` inside a `seq::fold` callback). The
-        // lambda needs its own dict params for each method whose receiver is
-        // a TyVar. These dicts can't come through the indirect-call signature
-        // (it's `f : {acc, x} -> 'b`, no room for extra args), so we capture
-        // them from the PARENT's dict-param slots. The parent already gained
-        // those slots via the B2 scanner-descent fix.
-        val lambdaDictMethods = sortedSetOf<String>()
-        // The lambda's own arrow might not carry `with <Ability>` constraints,
-        // but the PARENT scope may (e.g. `{ a, b } with Ord 'a -> ({ x, y } -> x <= y)…`).
-        // If the parent has dict params, the lambda body may reference VarType ops
-        // that need those dicts captured. Derive arrowIsConstrained from both the
-        // lambda's own type AND whether the parent scope carries dicts.
-        val parentHasDicts = currentParamNames.any { it.startsWith("__dict_") }
-        val lambdaConstrained = parentHasDicts || arrowHasAbilityConstraint(expr.type)
-        // A lambda with its OWN dictionary parameters captures none: its callers
-        // supply every dictionary it needs.
-        if (ownDicts.isEmpty()) scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
-        // Only keep dicts the parent actually has — otherwise we'd try to
-        // capture a slot that doesn't exist.
-        val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
-            // Raw `method@var` keys resolve to whichever slot the PARENT holds for
-            // that (method, var) — per-var when it has one, else the plain one.
-            // C.5: no unqualified-name fallback. This used to drop the type var
-            // and retry under the bare `__dict_<method>` name when the per-var
-            // lookup missed — a name-keyed guess of exactly the kind C.2
-            // replaced. Measured dead: zero hits across a full forced rerun of
-            // the interpreter suite (8m38s, no caching), because
-            // `enclosingDictSlotIn` already matches an ability-qualified slot for
-            // an unqualified request. A dict we cannot locate is not captured.
-            val dictName = enclosingDictSlotIn(
-                parentParamNames,
-                parentCaptureNames,
-                com.mezze.language.ast.MagicParams.methodOfKey(method),
-                com.mezze.language.ast.MagicParams.typeVarOfKey(method),
-                // S-11: without the ability segment this misses the exact per-variable
-                // slot, and the PREFIX scan below answers with whichever comes first —
-                // two keys from one lambda collapsing onto ONE captured dictionary.
-                com.mezze.language.ast.MagicParams.abilityOfKey(method),
-            ) ?: return@mapNotNull null
-            val parentParamIdx = parentParamNames.indexOf(dictName)
-            if (parentParamIdx >= 0) {
-                dictName to (parentCaptureCount + parentParamIdx)
-            } else {
-                val parentCaptureIdx = parentCaptureNames[dictName]
-                if (parentCaptureIdx != null) dictName to parentCaptureIdx else null
-            }
-        }.distinctBy { it.first }
+        val dictsToCapture = dictCapturesFor(expr, ownDicts)
         // Register the lambda's dict needs so compileFunctionBody adds them as
         // captures (not params — params are fixed by the indirect-call ABI).
         // We DON'T put them in dictMethodsForHash here because that would make
@@ -3699,13 +3652,20 @@ class TypedASTCompiler(
                     // Registered BEFORE the body compiles, so a recursive call inside
                     // it injects (forwards) its own dictionaries too.
                     val ownDicts = ownDictMethodsOf(stmtValue)
+                    // The SAME dict-capture list the emission will fold into the
+                    // hash — see `dictCapturesFor`. Predicting it as empty here is
+                    // what made a recursive local lambda call a hash that is never
+                    // emitted.
+                    val letDictCaptures = (stmtValue as? TypedLambda)
+                        ?.let { dictCapturesFor(it, ownDicts) } ?: emptyList()
                     if (ownDicts.isNotEmpty()) {
-                        localConstrainedLambdas[stmt.name] = saltedLambdaHash(stmtValue, ownDicts = ownDicts)
+                        localConstrainedLambdas[stmt.name] =
+                            saltedLambdaHash(stmtValue, letDictCaptures, ownDicts)
                     } else {
                         localConstrainedLambdas.remove(stmt.name)
                     }
                     if (stmt.isRecursive && stmtValue is TypedLambda) {
-                        val lambdaHash = saltedLambdaHash(stmtValue, ownDicts = ownDicts)
+                        val lambdaHash = saltedLambdaHash(stmtValue, letDictCaptures, ownDicts)
                         val captureKinds = stmtValue.captures.map { typeToSlotKind(it.type) }
                         recursiveLetLambdas[stmt.name] = RecursiveLetInfo(lambdaHash, captureKinds)
                     }

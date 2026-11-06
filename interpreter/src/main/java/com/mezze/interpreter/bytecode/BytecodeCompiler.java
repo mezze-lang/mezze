@@ -807,7 +807,13 @@ public final class BytecodeCompiler {
                 if (ct != null) {
                     compiledCallTargets.put(c.getTargetHash(), ct);
                 } else if (existing == null) {
-                    markReject(node, "target-not-compiled"); return false;
+                    // Name the hash. A target that resolves NOWHERE — not the
+                    // context, not the prelowered stdlib, not the store — is a
+                    // dangling reference from lowering, and the node type alone
+                    // gives no way to find which callee went missing.
+                    markReject(node, "target-not-compiled:"
+                            + c.getTargetHash().getHex().substring(0, 8));
+                    return false;
                 }
                 // If existing was an unattached trampoline and we couldn't
                 // upgrade it (stub not mintable — e.g., language null in
@@ -910,7 +916,8 @@ public final class BytecodeCompiler {
                 if (ct != null) {
                     compiledCallTargets.put(ml.getFunctionHash(), ct);
                 } else if (existingMl == null) {
-                    markReject(node, "target-not-compiled");
+                    markReject(node, "target-not-compiled:"
+                            + ml.getFunctionHash().getHex().substring(0, 8));
                     return false;
                 }
                 // Same as CallDirect: keep unattached trampoline if we
@@ -1392,6 +1399,7 @@ public final class BytecodeCompiler {
             for (String want : dumpWanted.split(",")) {
                 if (want.trim().equals("*") || want.trim().equals(ir.getName())) {
                     System.err.println("[dump-fn] " + ir.getName()
+                            + " hash=" + ir.getHash().getHex().substring(0, 8)
                             + " params=" + ir.getParamNames()
                             + "\n  body=" + ir.getBody());
                     break;

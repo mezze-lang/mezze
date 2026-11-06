@@ -408,6 +408,78 @@ internal fun TypedASTCompiler.normalizeDictKeys(raw: Set<String>): Set<String> =
 /** The dict slot NAME an enclosing function holds for [method] at type var
  *  [typeVar]: the per-var slot when it has one, else the plain slot, else any
  *  per-var slot of that method (a caller that only holds one). Null if none. */
+/**
+ * The dictionaries [expr] has to capture from the enclosing frame, as
+ * (name, parent slot index).
+ *
+ * ONE computation, because TWO callers have to agree on it EXACTLY. A
+ * recursive do-block `let` lambda registers the hash its self-calls will
+ * target before its body compiles, and the emission computes the hash it is
+ * actually stored under; `saltedLambdaHash` folds the dict-capture list into
+ * both. While the registration predicted that list as EMPTY, any recursive
+ * local lambda whose arithmetic dictionary comes from the ENCLOSING
+ * function's dict parameter emitted under one hash and called itself at
+ * another — a target resolvable nowhere, so BDSL rejected the lambda and the
+ * program died with `CallDirectIR:target-not-compiled`, having type-checked
+ * clean. `bench/cases/hofcapture` is the 20-line reproducer.
+ *
+ * Reads the CURRENT frame, so it is only valid while the parent's frame is
+ * still installed — true at both call sites.
+ */
+internal fun TypedASTCompiler.dictCapturesFor(
+expr: TypedLambda,
+ownDicts: Set<String>,
+): List<Pair<String, Int>> {
+        // #195 B3: scan the lambda body for VarType ability method calls
+        // (e.g. `x.encode { config = config }` inside a `seq::fold` callback). The
+        // lambda needs its own dict params for each method whose receiver is
+        // a TyVar. These dicts can't come through the indirect-call signature
+        // (it's `f : {acc, x} -> 'b`, no room for extra args), so we capture
+        // them from the PARENT's dict-param slots. The parent already gained
+        // those slots via the B2 scanner-descent fix.
+        val lambdaDictMethods = sortedSetOf<String>()
+        // The lambda's own arrow might not carry `with <Ability>` constraints,
+        // but the PARENT scope may (e.g. `{ a, b } with Ord 'a -> ({ x, y } -> x <= y)…`).
+        // If the parent has dict params, the lambda body may reference VarType ops
+        // that need those dicts captured. Derive arrowIsConstrained from both the
+        // lambda's own type AND whether the parent scope carries dicts.
+        val parentHasDicts = currentParamNames.any { it.startsWith("__dict_") }
+        val lambdaConstrained = parentHasDicts || arrowHasAbilityConstraint(expr.type)
+        // A lambda with its OWN dictionary parameters captures none: its callers
+        // supply every dictionary it needs.
+        if (ownDicts.isEmpty()) scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
+        // Only keep dicts the parent actually has — otherwise we'd try to
+        // capture a slot that doesn't exist.
+        return lambdaDictMethods.mapNotNull { method ->
+            // Raw `method@var` keys resolve to whichever slot the PARENT holds for
+            // that (method, var) — per-var when it has one, else the plain one.
+            // C.5: no unqualified-name fallback. This used to drop the type var
+            // and retry under the bare `__dict_<method>` name when the per-var
+            // lookup missed — a name-keyed guess of exactly the kind C.2
+            // replaced. Measured dead: zero hits across a full forced rerun of
+            // the interpreter suite (8m38s, no caching), because
+            // `enclosingDictSlotIn` already matches an ability-qualified slot for
+            // an unqualified request. A dict we cannot locate is not captured.
+            val dictName = enclosingDictSlotIn(
+                currentParamNames,
+                currentCaptureNames,
+                com.mezze.language.ast.MagicParams.methodOfKey(method),
+                com.mezze.language.ast.MagicParams.typeVarOfKey(method),
+                // S-11: without the ability segment this misses the exact per-variable
+                // slot, and the PREFIX scan below answers with whichever comes first —
+                // two keys from one lambda collapsing onto ONE captured dictionary.
+                com.mezze.language.ast.MagicParams.abilityOfKey(method),
+            ) ?: return@mapNotNull null
+            val parentParamIdx = currentParamNames.indexOf(dictName)
+            if (parentParamIdx >= 0) {
+                dictName to (currentCaptureCount + parentParamIdx)
+            } else {
+                val parentCaptureIdx = currentCaptureNames[dictName]
+                if (parentCaptureIdx != null) dictName to parentCaptureIdx else null
+            }
+        }.distinctBy { it.first }
+}
+
 internal fun TypedASTCompiler.enclosingDictSlotIn(
     params: List<String>,
     captures: Map<String, Int>,

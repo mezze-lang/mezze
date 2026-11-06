@@ -1,0 +1,49 @@
+## A RECURSIVE local lambda that captures a dictionary from the ENCLOSING
+## function — the shape that compiled to a call resolving nowhere.
+##
+## `zero` is the whole trigger. It makes `apply` polymorphic in the
+## accumulator, so `apply` takes a `__dict_add` parameter and the recursive
+## `go` CAPTURES it. Drop `zero` and the literal pins the accumulator, no
+## dictionary reaches `go`, and nothing goes wrong.
+##
+## A recursive do-block `let` lambda has its hash computed TWICE: the
+## registration predicts it before the body compiles, so a self-reference can
+## lower to `CallDirectIR(targetHash = …)`, and the emission computes the hash
+## the lambda is actually stored under. `saltedLambdaHash` folds the
+## dict-capture LIST into both, and the registration passed it as EMPTY — so
+## the lambda emitted under one hash and called itself at another:
+##
+##   [BDSL] compile failed for lambda (hash=bb46f8cc)
+##       reason=unsupported (node=CallDirectIR:target-not-compiled:e26b4019)
+##
+## `mez check` passes; the binary never runs. There is no AST interpreter to
+## fall back to (#391), so a rejection is fatal.
+##
+## Both callers now go through one `dictCapturesFor` (DictEvidence.kt).
+## `RecursiveLetDictCaptureTest` is the regression test.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let step = { x } -> x * 2 + 1
+
+let apply = { n, f, zero } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + f { x = i } }
+  go { i = n, acc = zero }
+
+let k = { n } -> apply { n = n, f = step, zero = 0 }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 10 }
+  ## n=10 is 120: the sum of 2i+1 over i = 1..10.
+  println { msg = int::to_str { n = k { n = n } } }
