@@ -166,7 +166,42 @@ class ContextBuilder {
                 }
             }
         }
-        DuplicateDeclarationValidator.validateDecls(allDeclsForValidation, importedClaims)
+        // The record counterpart of `importedClaims` (11.5). Same `importedByName`
+        // gate and the same reason for it: a shape reachable only through an
+        // imported function's signature claims nothing here.
+        val importedRecordShapes: Map<String, String> = buildMap {
+            for ((typeName, decl) in importedTypes) {
+                if (typeName !in importedByName) continue
+                val def = decl.definition
+                if (def is ParsedRecordDef) {
+                    val key = DuplicateDeclarationValidator.recordShapeKey(def) ?: continue
+                    // Two IMPORTED names for one shape is the same clash as two
+                    // declared ones (11.5) and has to be caught HERE: the
+                    // validator's collision check runs while walking LOCAL
+                    // declarations, so a module that imports both names and
+                    // declares no record of its own never compares them.
+                    //
+                    // A type re-imported by two routes is not a clash; only a
+                    // second, DIFFERENT name for one shape is.
+                    val held = this[key]
+                    if (held != null && held != typeName) {
+                        throw com.mezze.language.typechecker.TypeCheckError(
+                            "Record types '" + held + "' and '" + typeName + "' have the " +
+                                "same fields, so they are one shape wearing two names. A " +
+                                "shape belongs to one named record per module, however the " +
+                                "name arrived — import only one of them, or reach the other " +
+                                "through a function in its signature.",
+                            decl.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                        )
+                    }
+                    put(key, typeName)
+                }
+            }
+        }
+        DuplicateDeclarationValidator.validateDecls(
+            allDeclsForValidation, importedClaims, importedRecordShapes,
+        )
 
         val allEffectDecls = effectDecls + importedEffects
         currentEffectDecls = allEffectDecls

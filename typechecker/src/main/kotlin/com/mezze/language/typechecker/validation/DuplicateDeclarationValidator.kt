@@ -11,10 +11,11 @@ object DuplicateDeclarationValidator {
         fun validateModule(
             module: ParsedModule,
             alreadyClaimed: Map<String, String> = emptyMap(),
+            alreadyShaped: Map<String, String> = emptyMap(),
         ) {
         validateReservedTypeNames(module)
         validateDuplicateTypes(module)
-        validateDuplicateConstructors(module, alreadyClaimed)
+        validateDuplicateConstructors(module, alreadyClaimed, alreadyShaped)
         validateNewtypeConstructors(module)
         validateFreeTypeVariables(module)
         validateDuplicateEffects(module)
@@ -81,9 +82,10 @@ object DuplicateDeclarationValidator {
         fun validateDecls(
             decls: List<ParsedDecl>,
             alreadyClaimed: Map<String, String> = emptyMap(),
+            alreadyShaped: Map<String, String> = emptyMap(),
         ) {
         val syntheticModule = ParsedModule("<validation>", decls)
-        validateModule(syntheticModule, alreadyClaimed)
+        validateModule(syntheticModule, alreadyClaimed, alreadyShaped)
     }
 
     /**
@@ -214,6 +216,7 @@ object DuplicateDeclarationValidator {
         private fun validateDuplicateConstructors(
             module: ParsedModule,
             alreadyClaimed: Map<String, String> = emptyMap(),
+            alreadyShaped: Map<String, String> = emptyMap(),
         ) {
         val constructorToTypeMap = mutableMapOf<String, String>()
         // Every locally-declared type/newtype name. A variant constructor may
@@ -230,6 +233,13 @@ object DuplicateDeclarationValidator {
         // second, mirroring the variant duplicate-constructor rule. The nominal
         // "two distinct single-field types" case is what `newtype` is for.
         val recordShapeToType = mutableMapOf<String, String>()
+        // A claim arriving by `use` is the same claim as a declared one (11.5),
+        // so the imported shapes go in FIRST and a local declaration colliding
+        // with one is refused naming the imported type. Only names imported BY
+        // NAME are in here: a record inside an imported function's signature
+        // travels as structure and claims nothing, which is the escape that lets
+        // two libraries sharing a shape still compose.
+        recordShapeToType.putAll(alreadyShaped)
         // Imported claims come first, so a local declaration colliding with
         // one is refused with the imported group named (spec 8.3).
         constructorToTypeMap.putAll(
@@ -302,11 +312,8 @@ object DuplicateDeclarationValidator {
                     // Only CLOSED records collide by shape — an OPEN record
                     // (`{ a, b, ... }`) admits extra fields, so two open aliases
                     // with the same declared fields are genuinely different types.
-                    if (!definition.isOpen) {
-                        val shapeKey = definition.fields
-                            .map { it.name to parsedTypeAnnotationToString(it.type) }
-                            .sortedBy { it.first }
-                            .joinToString(",") { "${it.first}:${it.second}" }
+                    val shapeKey = recordShapeKey(definition)
+                    if (shapeKey != null) {
                         val existingType = recordShapeToType[shapeKey]
                         if (existingType != null && existingType != typeDecl.name) {
                             throw TypeCheckError(
@@ -898,6 +905,26 @@ object DuplicateDeclarationValidator {
             val n = name(item)
             if (!seen.add(n)) throw TypeCheckError(message(n), loc(item), code = code)
         }
+    }
+
+    /**
+     * The structural key a CLOSED record alias claims, or null for an open one.
+     *
+     * Records are structural, so two closed aliases with the same field-name +
+     * field-type set are one type wearing two names. An OPEN record claims
+     * nothing: `{ a, b, ... }` admits extra fields, so two open aliases with the
+     * same declared fields really are different types.
+     *
+     * Shared with [ContextBuilder], which seeds this map from the module's
+     * BY-NAME imports so that a claim arriving by `use` is the same claim as a
+     * declared one (spec 11.5, the record counterpart of 8.3).
+     */
+    fun recordShapeKey(definition: ParsedRecordDef): String? {
+        if (definition.isOpen) return null
+        return definition.fields
+            .map { it.name to parsedTypeAnnotationToString(it.type) }
+            .sortedBy { it.first }
+            .joinToString(",") { "${it.first}:${it.second}" }
     }
 
     fun parsedTypeAnnotationToString(annotation: ParsedTypeAnnotation): String = when (annotation) {
