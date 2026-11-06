@@ -66,6 +66,55 @@ applies · raw array-write cost where materialising is unavoidable · otherwise
 nice-to-have: a pass that emits `SlotKind.OBJECT` without looking up the type is
 a defect, not a conservative default.
 
+### LEDGER UPDATE 2026-11-06 — what moved, and the honest shape of what is left
+
+Nine commits of dictionary and fusion work. Rows that changed STATE, each with
+the evidence rather than the intention:
+
+| row | was | now |
+|---|---|---|
+| unresolved `having out` dictionaries (mandelbrot) | ABOVE FLOOR, 47.5x | **CLOSED.** 2 212.5 → 25.84 ns/unit published figure; 1.13-1.22x kotlin at a scale where warmup does not dominate |
+| a polymorphic fn passed as a VALUE to a HOF | ABOVE FLOOR, 57x | **ABOVE FLOOR, 13x.** The DICTIONARY half is closed (82 873 → 10 131 ps/iter, 8.2x); what is left is the indirect call itself, 10 131 against 779 for calling the same function directly |
+| HOF call-site seeding | zero specialisations | **PARTIAL.** A function passed as an ARGUMENT is now seeded at the type the callee's signature declares for that parameter. A function reached any other way still is not |
+| a fold whose folder calls anything | not a row — the chain was silently declined | **CLOSED.** `AccumulateCall`: 67 → 45 ns/px on the grid kernel; the lazy-vs-handwritten gap fell from 29 ns/px to 9 |
+| **Float arithmetic** | UNKNOWN | **AT FLOOR.** 803 ps/iter against JAVA's 806 on the identical two-parameter loop — parity. The 3.5x Int/Float spread is the CPU's FP dependency latency, which Java shows identically |
+| native binary JIT | believed interpreter-only (a 64-day-old note) | **AT FLOOR.** `SubstrateTruffleRuntime` installed; peak 25.84 against the jar's 26.82, and STEADIER (±0.6% vs ±3.4%) |
+| **startup** | UNKNOWN | **MEASURED, three artifacts.** `--native -O2` 19 ms · `--native` (-O1 shell+append) 78 ms · jar 820 ms, of which ~253 ms is irreducible (213 Engine.build + 40 JVM). Jar floor ~550-620 ms with the parallelism below |
+| **a loop whose arithmetic involves an EFFECT OP result** | not a row | **ABOVE FLOOR, cause named.** `effectsurface`'s `go_a/d/n/o/r` still compile as `[i, acc, __dict_add]` — five of 48 dumped functions. `go_a = { i, acc } -> … { i = i - one_aborted {}, acc = acc + i }`: the chain bottoms out in an effect op's return, so it never gets the concrete anchor the new improvement rule needs. The effects × numerics intersection, and the last live instance of the "mono refuses a concrete function" family |
+| startup parallelism | not a row | **LOCATED, NOT LANDED.** ~168 ms of class init (`MezzeBytecodeRootNodeGen` 141, `BytecodeCompiler` 27) that needs no Engine, Context or app, sitting behind 317 ms of work it shares nothing with. 15 lines; needs an idle box to validate |
+
+**And the two measurement rules that cost the most this session**, because they
+invalidate rows rather than add them: *interleave an A/B, never block it* (the
+machine warms across a session: five runs of ONE unchanged setting read 32.8,
+29.3, 25.4, 17.7, 16.7 ns/unit), and *run `.build/<app>/<app>`, not
+`java -jar`* (different flags, 2x different numbers, and a crash on one shape).
+Three single-sample claims were published and retracted inside this session.
+
+**The shape of what is left, counted rather than felt.** Of the areas a language
+has to be fast at, this is where the evidence stands:
+
+- **AT FLOOR with a test**: records, variants, `let`s, tail loops, direct calls,
+  single-impl ability methods, `seq` fold/sum/any, `bytes`, Int and now Float
+  arithmetic, the fused pipeline, the native binary.
+- **ABOVE FLOOR with a named cause**: indirect calls (~8-13x), `map`/`set` walks
+  (a LAYOUT problem — primitive-specialised storage is the lever), `List` against
+  `Seq` (3-5x), string interpolation (1.8x), the record-ABI natives still
+  unported, the effect-op arithmetic row above.
+- **UNKNOWN — never measured, and this is the biggest category**: all of Loom
+  and async (spawn, join, channels, STM, atoms, parallel map, cancellation,
+  structured scope) · real continuation capture (the 0.38 ns figure is the
+  single-return fall-through ONLY) · handler install/uninstall, chain depth,
+  scoped performers, the abort path, handlers in a loop, effects once a second
+  thread invalidates `singleThreaded` · all of strings · pattern matching in
+  every form · Frac, Nat, Char · most ops on Map/Set/SortedMap/SortedSet/Deque/
+  NonEmptyList · codec · polyglot crossing · failure paths · comptime.
+
+That last bullet is the answer to "where are we overall": **the measured surface
+is fast, and the unmeasured surface is most of the concurrency and effects
+story.** Not one of the Loom or continuation rows has a number against it, and
+the ledger's own rule is that an UNKNOWN row is where wins hide — the 1503x
+`size` win was sitting in an existing bench nobody had run at a realistic N.
+
 ### AT FLOOR — verified on this branch, control ~230 ps/iter
 
 | cell | before → after | holding test |
