@@ -5557,6 +5557,56 @@ variance that makes every mezze row in that table unreadable at the default scal
 
 Not changed here — it is another repo's methodology, and the call is the user's.
 
+## "Why can't we have both" — we do, and it is one artifact
+
+The ask was a jar that starts like kotlin and a native binary that peaks higher
+than the jar. The second half is already true and the first is not reachable; but
+the thing behind the ask exists, measured today:
+
+| artifact | startup | peak (Δwork=108M px, 3 rounds) | spread |
+|---|---|---|---|
+| **`--native -O2`** | **19 ms** | **25.84 ns/px** | **±0.6%** |
+| `--native` (`-O1`) | 78 ms | 25.97 | ±0.6% |
+| jar launcher | 820 ms | 26.82 | ±3.4% |
+| kotlin | 78 ms | 21.9 | ±1% |
+
+**`mez build --native -O2` starts in 19 ms — four times faster than kotlin — and
+peaks slightly ahead of the jar, with the tightest spread of anything here.** Its
+`MEZZE_TIMING` reads 0 ms for the decode, 0 ms for the Engine, 1 ms to Context:
+the app and the engine are baked into the image heap, so there is nothing to
+decode and nothing to initialise. Checksum 12 306 668, same as every other row.
+
+mez's `-O1` is not native-image's `-O1` — it is a prebuilt `-O2` shell with the
+app's IR appended as a footer and decoded at startup, which is what the 78 ms
+mostly is. `-O2` is the full image with the app baked in.
+
+### The jar cannot have kotlin's startup, and here is the floor
+
+Of the 820 ms, **253 ms is gone before any of our code runs**: ~213 ms for
+`Engine.build()` (Truffle runtime + the JVMCI compiler interface, unchanged by
+every option we set — 211/213/213) and ~40 ms of JVM start. That is 3.2x kotlin's
+total, and it is the price of being a guest language on a JVM that has to bring up
+a language runtime first. Kotlin is bytecode the JVM already knows.
+
+What IS available is parallelism: the 104 ms CBOR decode and the ~116 ms first
+BDSL emission are both independent of the engine build, so up to ~220 ms could
+hide behind the 213 ms. A realistic jar floor is **~550-620 ms**, not 78.
+
+### And native peak cannot pull far ahead of the jar either
+
+Both run the SAME Graal-compiled guest code. With `--macro:truffle-svm` the guest
+program is compiled at runtime by Graal through the same partial-evaluation
+pipeline; only the host is ahead-of-time. So native-vs-jar peak is a wash by
+construction (25.84 against 26.82, and the jar's gap is mostly its own variance),
+and the remaining **1.19x against kotlin is our code generation** — equally
+present in both, and the thing actually worth working on.
+
+So the answer is not two artifacts with complementary strengths. It is that
+`--native -O2` already dominates on both axes, and the jar exists for build speed
+and portability rather than for performance. Worth noting: `--native` defaults to
+`-O1` for build time, so the 4x-better-startup artifact is the one users do not
+get unless they ask. That is a product call, not a perf finding.
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
