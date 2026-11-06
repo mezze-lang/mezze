@@ -3814,3 +3814,84 @@ and I read the structural type as a defect because it was inconvenient for the
 program I happened to be writing. "Inference produced a type I did not want" is
 not evidence of a bug; the first question is whether the type is the most
 general one the system can express.
+
+## BUG 37 — FIXED 2026-11-06: case conversion read the HOST's locale, so `str::to_upper` and every HTTP header lookup were machine-dependent
+
+### Symptom
+
+Twelve call sites used `String.toUpperCase()` / `toLowerCase()` — the overloads
+that read `Locale.getDefault()`. Demonstrated on this machine with the default
+locale set to Turkish:
+
+```
+  str::to_upper { s = "i" }     elsewhere: I  (U+0049)     tr: İ  (U+0130)
+
+  header name folding
+    IF-MATCH             -> if-match              tr -> ıf-match              (U+0131)
+    X-API-KEY            -> x-api-key             tr -> x-apı-key
+    CONTENT-DISPOSITION  -> content-disposition   tr -> content-dısposıtıon
+    ACCEPT               -> accept                tr -> accept      (unaffected, no I)
+```
+
+Two distinct failures came out of one mistake.
+
+**The language primitives were not deterministic.** `str::to_upper`,
+`str::to_lower` and the `Char` pair returned a different string depending on
+the machine the program ran on. A language primitive cannot do that.
+
+**HTTP header lookup silently missed.** `HttpServerNatives` and `IONatives`
+lower-case an incoming header NAME to key the map the guest looks it up in. On
+a Turkish host a request's `If-Match` landed in that map under `ıf-match`, so
+`headers.get { k = "if-match" }` found nothing — no error, no warning, just a
+header that was present on the wire and absent to the program. Header names are
+ASCII and RFC 9110 folds them with ASCII rules, which is exactly what
+`Locale.ROOT` does and exactly what the default locale does not.
+
+### Why it was invisible
+
+Every development and CI machine involved runs an English locale, where the
+default and `Locale.ROOT` agree for ASCII. Nothing in the test suite set the
+default locale, so no test could tell the two overloads apart. The bug is
+reachable only by running the compiler on a host whose locale has different
+casing rules — which is to say, by a user rather than by us.
+
+### The fix
+
+`Locale.ROOT` at all twelve sites: the two primitives in
+`MezzeBytecodeRootNode`'s `InlineStringUnary`, their peers in
+`PrimitiveNatives` and `CharNatives`, the three header-folding sites in
+`HttpServerNatives` and `IONatives`, the wire-identifier switch in
+`HttpServerNatives`, an exception-message classifier in `IONatives`, and
+`NativeDispatch`'s SCREAMING_SNAKE_CASE conversion. Every one of them folds
+ASCII — an identifier, a protocol token, or a user string that must behave the
+same everywhere.
+
+Non-ASCII casing is unaffected and still works: `école` -> `ÉCOLE`, `αβγ` ->
+`ΑΒΓ`. This is about dropping the HOST's locale, not about restricting the
+primitives to ASCII.
+
+### The test
+
+`CaseConversionLocaleTest`: four tests that set the default locale to Turkish,
+assert ASCII results, and restore it in a `finally`. It discriminates —
+reverting one site to the default overload fails
+`strToUpperIgnoresTheHostLocale` and nothing else.
+
+Two details that matter in it. It carries a PREMISE GUARD: it asserts the JDK
+really does apply Turkish casing before testing anything, so that if a future
+JDK stopped doing so the test would fail loudly rather than pass for the wrong
+reason. And it is annotated `@ResourceLock(Resources.LOCALE)`, because the
+default locale is process-global — without that it could flip the locale out
+from under a test running in parallel.
+
+The three header-folding sites are not unit-testable without a live request, so
+they are covered by the protocol tests plus the mechanism this test
+demonstrates.
+
+### Found by
+
+Chasing `str::to_upper`, which the PERF-LOG surface bench had measured at 262x
+the control and whose cause I expected to be the char-at-a-time conversion. It
+is, but reading the call site to confirm that turned up the missing `Locale`
+argument instead. The perf question is still open and is the smaller of the
+two findings.

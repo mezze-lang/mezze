@@ -2686,7 +2686,8 @@ public final class NativeDispatch extends MezzeNode {
 
     @TruffleBoundary
     private static String toScreamingSnakeCase(String s) {
-        return toSnakeCase(s).toUpperCase();
+        // Locale.ROOT: SCREAMING_SNAKE_CASE of an identifier is ASCII folding.
+        return toSnakeCase(s).toUpperCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary

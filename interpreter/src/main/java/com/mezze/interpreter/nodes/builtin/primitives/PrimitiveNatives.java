@@ -355,12 +355,16 @@ public final class PrimitiveNatives {
 
     @TruffleBoundary
     public static String stringToLowerCase(String s) {
-        return s.toLowerCase();
+        // Locale.ROOT: a language primitive must not vary by host locale.
+        // See MezzeBytecodeRootNode's TO_UPPER case for the Turkish-locale
+        // demonstration.
+        return s.toLowerCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary
     public static String stringToUpperCase(String s) {
-        return s.toUpperCase();
+        // Locale.ROOT — same reason as strToLower above.
+        return s.toUpperCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary

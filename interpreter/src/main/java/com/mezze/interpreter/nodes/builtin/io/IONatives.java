@@ -1025,7 +1025,9 @@ public final class IONatives {
             cause = cause.getCause();
         }
         String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-        String lower = msg.toLowerCase();
+        // Locale.ROOT: this classifies an ASCII exception message, so the
+        // host locale must not decide which branch a failure takes.
+        String lower = msg.toLowerCase(java.util.Locale.ROOT);
         if (lower.contains("timeout") || lower.contains("timed out")) {
             return timeout(urlString, timeoutMs);
         }
@@ -1168,7 +1170,9 @@ public final class IONatives {
                 timeoutMs);
 
             Map<Object, Object> headersOut = new HashMap<>();
-            response.headers().forEach(h -> headersOut.put(h.name().toLowerCase(), h.get()));
+            // Locale.ROOT — see HttpServerNatives: an ASCII header name must
+            // fold with ASCII rules or a Turkish host loses `if-match`.
+            response.headers().forEach(h -> headersOut.put(h.name().toLowerCase(java.util.Locale.ROOT), h.get()));
 
             MezzeDownload download = new MezzeDownload(
                 response, response.inputStream(), owned, urlString);
@@ -1291,7 +1295,8 @@ public final class IONatives {
     private static MezzeRecord responseToMezze(HttpClientResponse response, String url) {
         Map<Object, Object> headersOut = new HashMap<>();
         response.headers().forEach(h ->
-            headersOut.put(h.name().toLowerCase(), h.get())
+            // Locale.ROOT — ASCII header name, ASCII folding.
+            headersOut.put(h.name().toLowerCase(java.util.Locale.ROOT), h.get())
         );
 
         // Helidon: response.as(byte[].class) reads the entire body.

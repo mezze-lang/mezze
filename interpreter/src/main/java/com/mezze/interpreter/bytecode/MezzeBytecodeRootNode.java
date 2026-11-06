@@ -460,8 +460,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static String doOp(int op, String s) {
             return switch (op) {
                 case TRIM       -> s.trim();
-                case TO_UPPER   -> s.toUpperCase();
-                case TO_LOWER   -> s.toLowerCase();
+                // Locale.ROOT, not the default locale. `str::to_upper` is a
+                // LANGUAGE PRIMITIVE and must return the same string on every
+                // host; the no-arg overload does not. Demonstrated on a
+                // Turkish locale: "i".toUpperCase() is U+0130 "İ" there and
+                // U+0049 "I" everywhere else, so the same program produced
+                // different output depending on the machine it ran on.
+                case TO_UPPER   -> s.toUpperCase(java.util.Locale.ROOT);
+                case TO_LOWER   -> s.toLowerCase(java.util.Locale.ROOT);
                 case REVERSE    -> new StringBuilder(s).reverse().toString();
                 case TRIM_START -> s.stripLeading();
                 case TRIM_END   -> s.stripTrailing();

@@ -446,7 +446,13 @@ public final class HttpServerNatives {
 
     private static MezzeRecord requestRecord(ServerRequest req, boolean withBody) {
         Map<Object, Object> headers = new HashMap<>();
-        req.headers().forEach(h -> headers.put(h.name().toLowerCase(), h.get()));
+        // Locale.ROOT is REQUIRED here, not merely tidier. Header names are
+        // ASCII and are matched case-insensitively, so they must fold with
+        // ASCII rules. Under a Turkish locale the default overload maps I to
+        // the dotless U+0131: "IF-MATCH" became "\u0131f-match", "X-API-KEY"
+        // became "x-ap\u0131-key", and every guest lookup by the real name
+        // silently missed.
+        req.headers().forEach(h -> headers.put(h.name().toLowerCase(java.util.Locale.ROOT), h.get()));
 
         Object body = MezzeVariant.none();
         if (withBody) {
@@ -499,7 +505,8 @@ public final class HttpServerNatives {
      * method.
      */
     private static MezzeVariant methodVariant(String wireName) {
-        String constructor = switch (wireName.toUpperCase()) {
+        // Locale.ROOT: this folds a WIRE identifier, which is ASCII.
+        String constructor = switch (wireName.toUpperCase(java.util.Locale.ROOT)) {
             case "GET" -> "Get";
             case "POST" -> "Post";
             case "PUT" -> "Put";
