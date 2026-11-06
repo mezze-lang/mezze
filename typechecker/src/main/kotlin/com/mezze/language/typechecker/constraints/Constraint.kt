@@ -97,7 +97,27 @@ sealed interface Constraint {
         // receiver `'l = Float`, so matching the receiver alone picks the wrong
         // impl's `'out`. Matching the whole tuple resolves it. Empty for
         // single-param abilities (primaryTypeVar alone suffices).
-        val classArgTypeVars: List<TypeVar> = emptyList(),
+        /**
+         * The ability's FULL positional tuple, in the order an impl stores its
+         * `targetTypeAnnotations` (`AbilityImplFactory` builds those as
+         * `abilityTypeArgs + targetTypes`).
+         *
+         * TYPES, not vars, because a position is routinely CONCRETE and the
+         * tuple is what disambiguates impls that differ only in a non-receiver
+         * position. This was `List<TypeVar>` and both call-site emitters built
+         * it with `.mapNotNull { it as? VarType }`, so every concrete position
+         * was DROPPED: `NumAdd Int Float` arrived as the 1-tuple `[Int]`, which
+         * matches no 2-annotation impl, reads as a single-parameter ability (so
+         * the B1 multi-param guard does not apply), and falls through to
+         * receiver-only matching on whichever var survived — picking
+         * `impl NumAdd Int for Int`, whose `out = Int`, and reporting
+         *
+         *     'out': expected Int but got Float
+         *
+         * on `let direct = { n } -> 0.5 + n` called at Int. `bench/cases/hetero`
+         * is the reproducer.
+         */
+        val classArgTypes: List<MezzeType> = emptyList(),
         /** Content hash of the ability this resolution belongs to. A NAME is not an
          *  identity — two abilities in scope may declare the same one — so matching
          *  a body's resolution to an annotation's constraint goes through

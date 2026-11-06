@@ -199,13 +199,15 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
                             (bound as? MezzeType.VarType)?.let { name.removePrefix("'") to it.variable }
                         }.toMap()
                         if (assocVars.isEmpty()) return@mapNotNull null
-                        val classArgVars = (listOf(MezzeType.VarType(freshConstraint.typeVar)) + freshConstraint.typeArgs)
-                            .mapNotNull { (it as? MezzeType.VarType)?.variable }
+                        // The WHOLE tuple, concrete positions included — see
+                        // `Constraint.AssociatedTypeResolution.classArgTypes`.
+                        val classArgs =
+                            listOf(MezzeType.VarType(freshConstraint.typeVar)) + freshConstraint.typeArgs
                         Constraint.AssociatedTypeResolution(
                             abilityName = freshConstraint.abilityName,
                             primaryTypeVar = freshConstraint.typeVar,
                             associatedTypeVars = assocVars,
-                            classArgTypeVars = classArgVars,
+                            classArgTypes = classArgs,
                             abilityHash = context.abilityDeclarations[freshConstraint.abilityName]?.contentHash,
                             context = "Call-site associated type resolution for ${freshConstraint.abilityName}",
                             loc = expr.loc

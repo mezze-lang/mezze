@@ -1,0 +1,48 @@
+## HETEROGENEOUS `+` — `impl NumAdd Int for Float`, shipped by
+## "feat(abilities): class-parameter NumAdd for heterogeneous `+`".
+##
+## `NumAdd Float for Float` and `NumAdd Int for Float` share a receiver and
+## differ ONLY in the operand, so the full positional tuple is the only thing
+## that can choose between them. Both call-site emitters built that tuple by
+## keeping just the VARIABLE positions, so `NumAdd Int Float` arrived as the
+## 1-tuple `[Int]`: too short to match a 2-annotation impl, and short enough to
+## read as a single-parameter ability, which switched off the B1 guard that
+## exists to stop receiver-only matching. What was left matched on whichever
+## var survived — the OPERAND here — picking `impl NumAdd Int for Int`:
+##
+##   error[T0201]: Type mismatch for associated type 'out':
+##                 expected Int but got Float
+##
+## The direction matters, and it is the evidence for the diagnosis:
+##
+##   n + 0.5    `NumAdd Float 'a`   first var IS the receiver   -> right, by luck
+##   0.5 + n    `NumAdd 'a Float`   first var is the OPERAND    -> wrong impl
+##
+## `HeterogeneousNumericDispatchTest` is the regression test.
+##
+## STILL OPEN, and this file does not cover it: the same choice is made a
+## SECOND time during lowering, to pick the dictionary. `resolveDictOp` →
+## `resolveOpHashFromConcreteTypes` matches ONE type at a time, so a
+## heterogeneous add reached through a dictionary (a polymorphic HOF, see
+## `bench/cases/hofcapture`) still gets Float's HOMOGENEOUS `add` handed a
+## Long, and dies with
+##
+##   UnsupportedSpecializationException … CallNativeDDD [FloatOps$$Lambda, 0.5, 21]
+##
+## `resolveOpFromObligation` is the tuple-aware resolver that already exists
+## there.
+use std::effects::log::{ println, Console }
+use std::float
+
+## Receiver CONCRETE (Float), operand a VAR the call site pins to Int.
+let direct = { n } -> 0.5 + n
+
+## The other direction: receiver a var, operand concrete.
+let other = { n } -> n + 0.5
+
+pub let main = {} -> perform Console in do
+  ## Both 21.5. The CONSUMER is the trigger: `float::to_str` pins `out` to
+  ## Float before the resolution runs. Without it `out` stays open, nothing
+  ## conflicts, and the wrong impl goes unnoticed.
+  println { msg = float::to_str { n = direct { n = 21 } } }
+  println { msg = float::to_str { n = other { n = 21 } } }

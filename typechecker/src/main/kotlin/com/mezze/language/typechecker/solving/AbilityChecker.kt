@@ -455,11 +455,11 @@ class AbilityChecker internal constructor(
         currentSubst: Substitution,
     ): Map<TypeVar, MezzeType>? {
         if (!improvementPhase || !bindingKnown) return null
-        val tupleVars = constraint.classArgTypeVars
+        val tuple = constraint.classArgTypes
         // A single-param ability has no operand to determine: its one class arg IS
         // the receiver, and a receiver is what the CALLER chooses.
-        if (tupleVars.size < 2) return null
-        val resolved = tupleVars.map { currentSubst.apply(MezzeType.VarType(it)) }
+        if (tuple.size < 2) return null
+        val resolved = tuple.map { currentSubst.apply(it) }
         val open = resolved.indices.filter { resolved[it] is MezzeType.VarType }
         if (open.isEmpty()) return null
 
@@ -624,9 +624,9 @@ class AbilityChecker internal constructor(
         }
 
         // Resolve the full class-arg tuple (e.g. [ 'r, 'l ] for NumAdd) so we can
-        // disambiguate impls that share a receiver type (see classArgTypeVars).
-        val resolvedTupleArgs = constraint.classArgTypeVars
-            .map { currentSubst.apply(MezzeType.VarType(it)) }
+        // disambiguate impls that share a receiver type (see classArgTypes).
+        val resolvedTupleArgs = constraint.classArgTypes
+            .map { currentSubst.apply(it) }
         val tupleFullyConcrete = resolvedTupleArgs.isNotEmpty() &&
             resolvedTupleArgs.none { it is MezzeType.VarType }
 
@@ -641,7 +641,7 @@ class AbilityChecker internal constructor(
         // (ExprFunctionConstraints re-emits the AssociatedTypeResolution there).
         // Single-param abilities have no co-operand to disambiguate, so receiver-only
         // matching (`primaryType` IS the receiver) stays correct for them.
-        val isMultiParam = constraint.classArgTypeVars.size > 1
+        val isMultiParam = constraint.classArgTypes.size > 1
         if (isMultiParam && !tupleFullyConcrete) {
             // B1 containment (case B): the tuple isn't concrete, so we normally defer.
             // But if the `out` var has been pinned to a CONCRETE type EXTERNALLY (e.g.
@@ -675,8 +675,21 @@ class AbilityChecker internal constructor(
         }
 
         val matchingImplPair = if (tupleFullyConcrete) {
+            // For a MULTI-parameter ability the full tuple is the only thing that
+            // can choose: `NumAdd Float for Float` and `NumAdd Int for Float`
+            // share a receiver and differ only in the operand. If no impl matches
+            // the whole concrete tuple then no impl applies, and matching one
+            // position instead does not find a weaker answer — it finds a
+            // DIFFERENT operation. That is how a `Float + Int` ended up holding
+            // Float's homogeneous `add` and handing it a Long:
+            //
+            //     UnsupportedSpecializationException … CallNativeDDD
+            //         [FloatOps$$Lambda, 0.0, 21]      ← Double, Double, Long
+            //
+            // A missing impl is reported by the unchanged AbilityRequired check,
+            // which is the honest outcome; this constraint only RESOLVES.
             findMatchingAbilityImplByArgs(abilityName, resolvedTupleArgs)
-                ?: findMatchingAbilityImpl(abilityName, primaryType)
+                ?: if (isMultiParam) null else findMatchingAbilityImpl(abilityName, primaryType)
         } else {
             findMatchingAbilityImpl(abilityName, primaryType)
         }
