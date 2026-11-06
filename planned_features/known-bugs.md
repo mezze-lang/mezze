@@ -3738,101 +3738,79 @@ body turns out to need is not reflected back into it. Related:
 Writing `bench/cases/effectsurface` to fill the effects rows of the PERF-LOG
 ledger — kernels that install a handler per iteration. Not by a test.
 
-## BUG 36 — OPEN 2026-11-06: an inherent method on a value whose type the CALLER pins cannot be resolved, and the structural fallback it falls back to is unsatisfiable
+## BUG 36 — WITHDRAWN 2026-11-06, SAME DAY. Not a bug: that IS the most general type
 
-### Symptom
+Filed as "an inherent method on a value whose type the caller pins cannot be
+resolved, and the structural fallback is unsatisfiable". Withdrawn after the
+user pointed out the thing I had not checked.
 
-Three spellings of one gap. All three are rejected; none should be.
-
-    let report = { n, d } -> do
-      let q = n / d
-      let ratio = q * 100
-      println { msg = "$(ratio.to_str{})" }
-
-    pub let main = {} -> perform Console in report { n = 7000, d = 13 }
-
-    error[V0408]: No implementation of ability 'NumMul' produces the required
-    result type '{ to_str: {} -> Str, ... }'. The result was forced to that type
-    externally ...
-
-Bind the same receiver from a CALL instead of an operator and the error moves
-but does not go away:
-
-    let mul = { a, b } -> a * b
-    ...  let ratio = mul { a = q, b = 100 }
-
-    error[T0206]: Cannot resolve inherent method 'to_str': the receiver's type
-    could not be determined. Annotate the receiver or call the method on a value
-    of a known type.
-
-And the root cause on its own, with no arithmetic anywhere near it:
+### What I filed
 
     let show = { x } -> x.to_str {}
-    pub let main = {} -> perform Console in println { msg = show { x = 5 } }
 
-    error[T0201]: Type mismatch for argument 'x' in call to 'show':
-    expected { x: { to_str: {} -> 'a } } -> 'a but got { x: Int } -> 'b
+infers `{ x: { to_str: {} -> 'a } } -> 'a`, and so cannot be called with an
+`Int`. I called the structural refinement a wrong branch that inference should
+not have taken.
 
-### Cause
+### Why it is not a bug
 
-`.to_str {}` on a receiver whose static type is a type variable takes one of two
-paths, chosen by `receiverHasSolvableType` in `ExprMethodConstraints.kt`:
+`to_str` IS NOT AN ABILITY. It is an inherent impl method —
+`stdlib/std/int.mz:179`, `impl Int where { to_str = { it } -> … }` — one per
+type, and an inherent impl is not something a signature can abstract over.
+There is no `ability ToStr`, so for an unknown `x` there is nothing the type
+system can say about it EXCEPT "has a `to_str` member", and the only form that
+says that is a structural record.
 
-  - RECEIVER IS "SOLVABLE" (a call, a parenthesised expression, a macro call, or
-    an identifier bound to one of those) — defer the impl pick to emit. At emit
-    the receiver is still a variable, because what pins it is the CALL SITE of
-    the enclosing function and dispatch is resolved once per definition. T0206.
+So `{ x: { to_str: {} -> 'a } }` is not a guess and not a fallback. With no
+context it is the most general type expressible, which is exactly what
+inference is supposed to produce. That it cannot then be satisfied by `Int` is
+not inference failing — it is inherent impls not being abstractable, which is
+what abilities are for.
 
-  - OTHERWISE — refine the receiver structurally to `{ to_str: {} -> 'a, ... }`.
-    That is the third spelling above, and T0201 is the whole problem: a
-    structural member requirement is NEVER satisfied by a nominal type. `Int`
-    has `to_str`, and `Int` does not unify with `{ to_str: … }`.
+The other two spellings in the original report follow from the same fact and
+are also correct: `(n / d * 100).to_str {}` cannot be typed (V0408 — no
+`NumMul` impl produces a record), and the deferred path's T0206 is the honest
+answer when nothing determines the receiver.
 
-So the structural fallback is not a conservative approximation of the right
-answer. It is unsatisfiable for every nominal receiver, which is every receiver
-anyone writes. The first spelling is that same dead end reached one step later:
-the refinement lands on an ability's `having out` variable, and `NumMul` is then
-asked for an impl that produces a RECORD.
+### The abstraction exists and works
 
-`ParsedBinaryOp` being absent from the solvable set is why spelling 1 and
-spelling 2 differ, but adding it only converts V0408 into T0206 — it does not
-fix anything, because both paths are blocked.
+`ability Inspect for 'a where { to_dbg: { it: 'a } -> Str }`
+(`stdlib/std/abilities/inspect.mz`), auto-derived for all types. `to_dbg` is an
+ability op, so it abstracts:
 
-### What would fix it
+    let show = { x } -> x.to_dbg {}
 
-Either half is a real change, not a patch:
+    pub let main = {} -> perform Console in do
+      println { msg = show { x = 5 } }       # 5
+      println { msg = show { x = "hi" } }    # "hi"
+      println { msg = show { x = 2.5 } }     # 2.5
 
-  - make inherent-method dispatch a per-SPECIALIZATION decision, so the receiver
-    is pinned by the caller before the impl is picked (full mono already
-    specializes per call site; dispatch is resolved before it runs), or
-  - let a nominal type satisfy a structural member requirement — `Int` unifies
-    with `{ to_str: {} -> Str, ... }` when `Int` has that inherent method.
+One definition, three types, no annotation. Verified running, 2026-11-06.
 
-The second is the smaller change and the one that matches what a reader of the
-error expects. It is adjacent to the record-adoption work in
-`project_bare_record_needs_adoption_at_resolution`.
+### The one thing that IS wrong, and it is a comment
 
-### Not a regression
+`stdlib/std/abilities/inspect.mz:2` says: *"Used for string interpolation:
+`"value is $(x)"` calls `x.to_dbg {}`"*. It does not. Interpolation requires
+`Str`:
 
-Identical output from the installed (stale) `mez` and from the dev build in
-`feat/perf-obsession`, so this predates the mono and call-site-arrow work.
+    let n = 42
+    println { msg = "int=$(n)" }
 
-### The workaround, and why it is visible in the benches
+    error[T0201]: String interpolation requires String type, but expression has
+    type Int
 
-Call the stdlib function instead of the method: `int::to_str { n = ratio }`
-resolves by the function's own signature, which also pins `ratio` to `Int`.
-`bench/cases/surface` uses that form in its interpolation rows for exactly this
-reason, and `bench/cases/ds_matrix` does too.
+Whether the comment is stale or describes intent that was never implemented is
+a design question for the author, not something to decide from here. It is also
+what misled me: `bench/cases/surface` uses `int::to_str { n = x }` in its
+interpolations, and I attributed that to this non-bug when it is simply how
+interpolation works.
 
-### Why it matters
+### The lesson, which is the reason this entry stays instead of being deleted
 
-It is the "no annotation should ever be needed" rule failing in the ordinary
-case: a helper that takes two unannotated numbers, divides them, scales the
-result and prints it. Nothing about that program is polymorphic in a way the
-user asked for.
-
-### Found by
-
-Writing the string/pattern-matching rows of `bench/cases/surface` — adding a
-second, arithmetic use of a binding that was already being stringified. Not by a
-test.
+I filed a typechecker bug without checking whether the member I was abstracting
+over was an ability. The error message even told me — `Available impls: impl
+NumMul Int for Int …` lists abilities, and `to_str` was not among anything —
+and I read the structural type as a defect because it was inconvenient for the
+program I happened to be writing. "Inference produced a type I did not want" is
+not evidence of a bug; the first question is whether the type is the most
+general one the system can express.

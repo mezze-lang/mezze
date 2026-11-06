@@ -6865,3 +6865,46 @@ Checked before touching anything:
 
 Expected on the measured rows: `{ r = i }` goes from 3 allocations to 2, and
 `Tri { b = i, h = i }` from 5 to 3 once the multi-field step follows.
+
+### CORRECTION 2026-11-06 — BUG 36 is WITHDRAWN. `to_str` is not an ability, so that structural type is right
+
+Filed earlier today off these same bench rows, and wrong. `let show = { x } ->
+x.to_str {}` inferring `{ x: { to_str: {} -> 'a } } -> 'a` is **the most general
+type expressible**, not a wrong branch:
+
+`to_str` is an INHERENT IMPL METHOD (`stdlib/std/int.mz:179`, `impl Int where {
+to_str = … }`), one per type. There is no `ability ToStr`, and an inherent impl
+is not something a signature can abstract over — so for an unknown `x` the only
+thing the type system can say is "has a `to_str` member", and a structural
+record is the only form that says it. That `Int` cannot then satisfy it is not
+inference failing; it is inherent impls not being abstractable, which is what
+abilities are for.
+
+The abstraction exists and works. `ability Inspect for 'a where { to_dbg: { it:
+'a } -> Str }`, auto-derived for all types, and `to_dbg` IS an ability op:
+
+```
+  let show = { x } -> x.to_dbg {}
+  show { x = 5 }  ->  5        show { x = "hi" }  ->  "hi"        show { x = 2.5 }  ->  2.5
+```
+
+One definition, three types, no annotation, verified running. The V0408 on
+`(n / d * 100).to_str {}` is correct for the same reason — no `NumMul` impl
+produces a record.
+
+**The one real defect found here is a COMMENT.**
+`stdlib/std/abilities/inspect.mz:2` says *"Used for string interpolation:
+`"value is $(x)"` calls `x.to_dbg {}`"*. It does not — interpolation requires
+`Str`, and `"int=$(n)"` on an `Int` is `T0201: String interpolation requires
+String type`. Whether that comment is stale or describes intent never
+implemented is the author's call, so it is left alone and raised instead. It is
+also what misled the bench comment, which blamed the non-bug for what is simply
+how interpolation works; that comment is corrected.
+
+**Why this is in the ledger rather than quietly deleted.** The rule this day
+already earned was about measurement — every number produced by comparing across
+builds was wrong. This is the same error in the type system: I read an inferred
+type as a defect because it was inconvenient for the program I was writing, and
+never checked whether the member I wanted to abstract over was an ability. The
+first question about an unwanted inferred type is whether it is the most general
+one the system can express, and only then whether inference erred.
