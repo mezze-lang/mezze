@@ -169,12 +169,29 @@ class ContextBuilder {
         // The record counterpart of `importedClaims` (11.5). Same `importedByName`
         // gate and the same reason for it: a shape reachable only through an
         // imported function's signature claims nothing here.
+        // Which DECLARATION each claiming name stands for. Two names for ONE
+        // declaration are not a clash: macro hygiene hands a name over under a
+        // hidden spelling (`~SyntaxDecl` beside `SyntaxDecl`), and a renamed
+        // import does the same in user code. Comparing SPELLINGS reported them as
+        // two records of one shape and broke every macro test — the identical
+        // mistake the variant claim rule made, where the fix was to compare the
+        // group rather than the name.
+        //
+        // Shapes cannot distinguish them (the shapes ARE equal, that is the
+        // premise), so the discriminator has to be the declaration's identity.
+        val shapeDecl = mutableMapOf<String, com.mezze.language.typedast.Hash>()
         val importedRecordShapes: Map<String, String> = buildMap {
             for ((typeName, decl) in importedTypes) {
                 if (typeName !in importedByName) continue
                 val def = decl.definition
                 if (def is ParsedRecordDef) {
                     val key = DuplicateDeclarationValidator.recordShapeKey(def) ?: continue
+                    val heldDecl = shapeDecl[key]
+                    val thisDecl = decl.contentHash
+                    // Both hashes present AND equal: one declaration seen under a
+                    // second name, not a rival. A MISSING hash is not evidence of
+                    // sameness, so it falls through and is judged as a clash.
+                    if (heldDecl != null && thisDecl != null && heldDecl == thisDecl) continue
                     // Two IMPORTED names for one shape is the same clash as two
                     // declared ones (11.5) and has to be caught HERE: the
                     // validator's collision check runs while walking LOCAL
@@ -196,6 +213,7 @@ class ContextBuilder {
                         )
                     }
                     put(key, typeName)
+                    decl.contentHash?.let { shapeDecl[key] = it }
                 }
             }
         }

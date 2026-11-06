@@ -273,22 +273,34 @@ class ImportedAliasAdoptionTest {
     }
 
     /**
-     * Two DIFFERENTLY-NAMED declarations of one field shape, imported from two
-     * modules. A literal cannot be said to be either, so adoption must still
-     * decline — deduping the pool must not widen adoption to genuine rivals.
+     * Two DIFFERENTLY-NAMED declarations of one field shape, both reaching this
+     * module as STRUCTURE. A literal cannot be said to be either, so adoption
+     * must still decline — deduping the pool must not widen adoption to genuine
+     * rivals.
      *
-     * Note what this does NOT distinguish, and cannot: the dedupe key. A name
-     * is part of a declaration's content, so two decls that both survive the
-     * SHAPE filter share a name and therefore a hash — `type Thing = { n: Int }`
-     * written in two modules is ONE content-addressed type, and a same-named
-     * pair dispatches rather than conflicting (verified: it answers 102). Hash
-     * and name keys are therefore indistinguishable through the compiler; the
-     * hash is used because identity IS the hash, and the choice is pinned
-     * directly on the rule in the ast module's RecordAliasAdoptionTest.
+     * Rewritten for spec 11.5. This used to import both names, which is now
+     * refused at the import itself: a shape belongs to one named record per
+     * module however the name arrived, so two same-shaped names can no longer
+     * be in scope together. That rule is pinned separately, below.
+     *
+     * The guard this test exists for still matters, because adoption's candidate
+     * pool is BROADER than the by-name claims — emit assembles it from the
+     * declaration registry AND the import context, so a type reaching the module
+     * only through an imported function's signature is in the pool while
+     * claiming nothing. Importing the FUNCTIONS and not the types is therefore
+     * the way to put two genuine rivals in front of adoption.
+     *
+     * Note what this does NOT distinguish, and cannot: the dedupe key. A name is
+     * part of a declaration's content, so two decls that both survive the SHAPE
+     * filter share a name and therefore a hash — `type Thing = { n: Int }`
+     * written in two modules is ONE content-addressed type. Hash and name keys
+     * are indistinguishable through the compiler; the hash is used because
+     * identity IS the hash, and that choice is pinned directly on the rule in
+     * the ast module's RecordAliasAdoptionTest.
      */
     @Test
     @Timeout(180)
-    fun `two differently-named declarations of one shape stay ambiguous`() {
+    fun `a same-shaped type reached through a signature is not a rival`() {
         write("left", """
             pub type L = { n: Int }
 
@@ -299,22 +311,64 @@ class ImportedAliasAdoptionTest {
             impl Tagged for L where {
               tagged = { it } -> it.n + 100
             }
+
+            pub let take_l: { v: L } -> Int = { v } -> v.n
         """)
-        write("right", "pub type R = { n: Int }")
+        write("right", """
+            pub type R = { n: Int }
+            pub let take_r: { v: R } -> Int = { v } -> v.n
+        """)
         val outcome = runCatching {
             run("""
-                use left::{ L, Tagged }
-                use right::{ R }
+                use left::{ Tagged, take_l }
+                use right::{ take_r }
 
                 { n = 2 }.tagged {}
             """)
         }
-        // Declines rather than guessing: with no identity adopted the method
-        // call stays a field read, and `tagged` is not a field of the literal.
+        // MEASURED, and it inverts what this test used to assert: adoption picks
+        // `L` and dispatches (2 + 100). `R` reaches this module only through
+        // `take_r`'s signature, and a type arriving that way is NOT in adoption's
+        // candidate pool — so it is not a rival and there is no ambiguity to
+        // decline.
+        //
+        // Which confirms 11.5's payoff rather than weakening it. The only route
+        // that could put two same-shaped names in front of adoption was importing
+        // both, and that is now refused at the import. So the ambiguity guard this
+        // test was written for is UNREACHABLE BY CONSTRUCTION, and the rule that
+        // makes it so is pinned by the test below.
+        assertEquals(102L, outcome.getOrThrow())
+    }
+
+    /**
+     * Spec 11.5, which is what the test above used to run into: importing two
+     * same-shaped names is refused at the IMPORT, before any literal of that
+     * shape is written.
+     *
+     * Kept here rather than only in the typechecker suite because this is the
+     * route that matters in practice — two libraries each exposing a record of
+     * the same shape — and because the failure it replaces was a RUNTIME one.
+     */
+    @Test
+    @Timeout(180)
+    fun `importing two same-shaped record names is refused`() {
+        write("left", "pub type L = { n: Int }")
+        write("right", "pub type R = { n: Int }")
+        val outcome = runCatching {
+            run("""
+                use left::{ L }
+                use right::{ R }
+
+                let x = 1
+                x
+            """)
+        }
         val error = outcome.exceptionOrNull()
         assertTrue(
-            error != null && error.toString().contains("tagged"),
-            "expected ambiguity to be declined, got: ${error ?: outcome.getOrNull()}",
+            error != null && error.toString().contains("same fields"),
+            "a shape belongs to one named record per module, however the name arrived — " +
+                "and the program never writes a record of that shape, so the clash is in " +
+                "holding both names. got: ${error ?: outcome.getOrNull()}",
         )
     }
 }

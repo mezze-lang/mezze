@@ -1287,7 +1287,27 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // receiver to the representative candidate's `it` type — that would
             // force e.g. Bool. The receiver's real type is fixed by OTHER
             // constraints, and emit picks the impl accordingly.
-            if (methodInfo.isImported && !deferImplByReceiver) {
+            // The receiver IS the `it`, whether the impl is local or imported.
+            //
+            // This was gated on `isImported`, which left a LOCAL impl's `it`
+            // unbound. An impl that writes its receiver generically --
+            // `impl Rule where { step = { it: 'it } -> { n = it.n } }` -- then
+            // never learned what `'it` was, so `step`'s result came out as
+            // `{ n: 'd62 }` instead of `{ n: Int }`.
+            //
+            // An anonymous record with a VARIABLE field matches no alias
+            // exactly, so adoption correctly declines and the result keeps no
+            // name. On a CHAIN that lands on the next call: with more than one
+            // candidate for `.finish`, the identity and name filters have
+            // nothing to match, generation bails to a structural field access,
+            // and the program compiles to a field read that fails at RUNTIME
+            // with `Field not found: finish` -- while `mez check` passed. A
+            // direct call survived because nothing consumed the result's type.
+            //
+            // `deferImplByReceiver` still suppresses it, deliberately: when impl
+            // selection is deferred (#160) the receiver must not be pinned to a
+            // representative candidate's `it`.
+            if (!deferImplByReceiver) {
                 val itType = fullParams[Keywords.IT]
                 if (itType != null) {
                     constraints.add(Constraint.Equality(
