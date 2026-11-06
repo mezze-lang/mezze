@@ -6079,3 +6079,101 @@ So the guard is `scripts/hof-dict-e2e.sh`, in the style of
 `scripts/aot-parity-e2e.sh` and for the same reason. It asserts the values and
 says in its own text what it does not assert. Measured to discriminate: without
 the fix `hofpoly` dies with the exception above.
+
+## Full mono: it works, it is free, and it is not correct yet
+
+Wiring mono to the same per-site arrow the dictionary path now uses —
+`MonoDriver.run(callSiteArrows = …)`, preferred over `fn.type` in
+`deriveTypeArgs`, because the arrow differs from it ONLY where `fn.type` is
+still open — does produce what full mono is supposed to:
+
+```
+  hofpoly   apply -> TWO dict-free specs [n, f, zero]; __dict_add gone
+  defunc    apply_fold's dict gone, 4 dict-free [n, f] specs
+            dictionary carriers 2 -> 1 (only step_alt, never called directly)
+```
+
+and the values are right everywhere, including the heterogeneous accumulator.
+
+**It costs nothing at compile time.** Measured interleaved, with `mez check` as
+a built-in control: check runs `checkParsedModule` and never lowers or runs
+mono, so whatever spread IT shows is the noise floor.
+
+| | mono on | mono off |
+|---|---|---|
+| defunc `check` | 1754 | 1782 |
+| defunc `build` | 5804 | 6139 |
+| mandelannot `check` | 1719 | 1789 |
+| mandelannot `build` | 5726 | 5725 |
+| functions compiled (defunc) | 54 | 53 |
+| jar | identical | identical |
+
+Recording the arrow is free too, isolated with its own toggle: ≤1.1% on medians
+across three benches with the sign flipping. The stdlib precompile is below
+resolution — two runs disagreed in SIGN (+9.1% then −2.1% on min) against a 21%
+within-config spread, so no number is quoted.
+
+Structurally the cost is one map insert per call expression, one `putAll` per
+merge (the same pattern `callReturnTypes` already pays, and the only part that
+could go superlinear on a deep tree), and one `substitution.apply` plus a
+`holdsTypeVar` walk per recorded arrow per module.
+
+### Why it is NOT shipped: four failures, all caused by the mono consumer
+
+Isolated — disabling just that one argument makes all four pass.
+
+**1. A spec's body is not re-typed, so receiver-taking dispatch falls back to a
+field read.** Three shapes, one error class:
+
+```
+  Field not found: speak           DualAbilityParamTest     (two Speak constraints, one per param)
+  Field not found: conv            AliasImplTargetTest
+  Field not found: into_response   HttpIntoResponseTest
+```
+
+`let both = { a, b } -> "$(a.speak {}) | $(b.speak {})"` specialised at
+(Dog, Cat): inside the spec `a`'s type is still the VARIABLE, so the receiver is
+not concrete, ability dispatch misses, and `recv.op {}` falls back to reading a
+field named `op` off the record. `Monomorphizer.buildSubstitution` is
+name-keyed. THIS IS THE REAL ONE, and the other two sit on top of it.
+
+**2. A receiver-less op has no dict slot inside a spec**, so
+`abilityOpDictSlot` THROWS during LOWERING on a program that type-checked:
+
+```
+  'mk7' takes no receiver, so the type it produces is what chooses the implementation
+```
+
+Solved in the attempt, and worth keeping when this is retried: resolve from the
+spec's own `specTypeArgs`, ability-filtered, else from the produced type when
+that type IS the class type. **DO NOT search the produced type's nested parts** —
+that picks whichever impl claims any part first and the order is incidental; it
+produced the same `Field not found` errors in another form. With the narrow
+version all seven of `ReceiverlessOpFunctionReturnTest` pass, including "an
+unpinned receiver-less op is still refused", so an honest refusal stays one.
+
+The class type can be NESTED (`mk7: {} -> ({} -> 'a)` at `'a = P` produces
+`({} -> P)`, which no impl targets), and comparisons must go through
+`resolveOpHashFromConcreteTypes` rather than structural equality, because the
+impl targets nominal `P` while the produced type carries the expanded
+`{ x: Int }`.
+
+**3. A fold reached as a VALUE loses its long-pipeline guard.**
+`ListFoldElementKindFusionTest` wants `IsLongBacked?FusedLongPipeline:FusedLoop`
+and full mono emits `[FusedLoop, FusedLoop, FusedLoop]`. The specs ARE dict-free
+(checked through `loweredFunctions`), but the fold spec keeps `f` as a
+PARAMETER, so the fuser cannot prove the element is LONG. The BUILT artifact is
+unaffected — that whole program inlines to 8 functions with no fold left — so
+this is the interpreter path, which is what `mez dev` runs. Needs the folder
+spliced in (`closureArgsAt` / Piece 3) across the two levels
+`apply -> tf -> fold_left`.
+
+### Method notes from this attempt
+
+- A `--tests` filter with the WRONG PACKAGE matches nothing and the task still
+  reports BUILD SUCCESSFUL, which read as "fixed". Three of these classes live
+  in `regression/`, `stdlib/` and `bytecode/`; I claimed 3 of 4 fixed off a run
+  that had executed one of them.
+- Block-wise cost runs gave a 1.7x "difference" on `mez check`, which the mono
+  consumer cannot affect at all. Interleave, and keep a quantity in the
+  measurement that the change provably cannot touch.
