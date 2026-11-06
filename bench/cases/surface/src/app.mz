@@ -91,11 +91,13 @@ let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console
     # both halves of that are the language working as designed:
     #   - interpolation requires `Str` ("String interpolation requires String
     #     type, but expression has type Int"), so a number has to be converted;
-    #   - `x.to_str{}` on a value whose type is still an unresolved `having out`
-    #     refines x STRUCTURALLY to `{ to_str: {} -> Str, ... }`, because
-    #     `to_str` is an inherent impl method and not an ability — so a member
-    #     requirement is the only thing expressible. The arithmetic below is
-    #     then refused (V0402 on `ps_per_op * 100`), correctly.
+    #   - `ps_per_op.to_str{}` TOGETHER WITH `ps_per_op * 100` refines
+    #     ps_per_op structurally to `{ to_str: {} -> Str }` and then refuses
+    #     the multiply (V0402). Drop the multiply and the SAME stringification
+    #     types fine with `out` left abstract, so this is not "a member
+    #     requirement is all that is expressible" — the two uses are jointly
+    #     satisfiable at out = Int and the checker has a better answer when
+    #     only one of them is present. Narrow defect, raised 2026-11-06.
     # The stdlib function resolves by its own signature, which pins it to Int.
     # For a GENERIC value the abstraction is `Inspect`: `x.to_dbg{}` is an
     # ability op and does abstract.
