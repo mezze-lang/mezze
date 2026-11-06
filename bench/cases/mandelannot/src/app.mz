@@ -106,6 +106,51 @@ let pixel_mono: { p: Int, side: Int, span: Float } -> Int = { p, side, span } ->
 ## (node=CallDirectIR:target-not-compiled)`. That is its own bug — a shape that
 ## type-checks and does not compile — and it is recorded rather than chased,
 ## because it is not what this bench is for.
+## ── 3. THE SAME LOOP, SINGLE EXIT — AND THE HYPOTHESIS IT DISPROVES.
+##
+## `MEZZE_TRACE_SELFTAIL` reports `params=5 tier=not-fused` for kernels 1 and 2.
+## Their recursing branch is a `do` block ending in a NESTED `if`, and the
+## direct-while tier accepts only a block ending in the self call itself, so the
+## obvious reading is that both fall to the flag-based fallback — ~27 BDSL ops an
+## iteration against direct-while's ~13 — and that the remaining gap to Scala is
+## the tier.
+##
+## This kernel folds the two exits into one condition, so the else branch IS the
+## self call: the shape the tier accepts. It does slightly MORE arithmetic (the
+## squares are computed in the guard and again in the update), so a win would have
+## been the tier's.
+##
+## MEASURED at side 1800: all three kernels 62 ns/px, identical checksums. **The
+## tier is not the cause.** Whatever the remaining 3.2x against Scala is, it is not
+## self-tail-loop dispatch, and `tier=not-fused` in the trace is not evidence of a
+## slow loop — the diagnostic prints BEFORE the direct-while attempt, so it reports
+## only on the three fused-LONG tiers.
+let escape_one: { cr: Float, ci: Float, zr: Float, zi: Float, i: Int } -> Int =
+  { cr, ci, zr, zi, i } ->
+    if i >= limit || zr * zr + zi * zi > 4.0 then i
+    else escape_one {
+      cr = cr,
+      ci = ci,
+      zr = zr * zr - zi * zi + cr,
+      zi = 2.0 * zr * zi + ci,
+      i = i + 1,
+    }
+
+let pixel_one: { p: Int, side: Int, span: Float } -> Int = { p, side, span } -> do
+  let px = float::from_int { n = p % side }
+  let py = float::from_int { n = p / side }
+  escape_one {
+    cr = px * 3.0 / span - 2.0,
+    ci = py * 3.0 / span - 1.5,
+    zr = 0.0,
+    zi = 0.0,
+    i = 0,
+  }
+
+let grid_one = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> acc + pixel_one { p = x, side = side, span = span } }
+
 let grid_poly = { side, span } ->
   iter::range { start = 0, end = side * side }
     .fold { init = 0, f = { acc, x } -> acc + pixel_poly { p = x, side = side, span = span } }
@@ -127,7 +172,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     grid_poly { side = 40, span = float::from_int { n = 40 } }
     report { name = "1 escape POLY (no annot)", px = px, r = time_it { f = {} -> grid_poly { side = side, span = span } } }
     report { name = "1 escape POLY (no annot)", px = px, r = time_it { f = {} -> grid_poly { side = side, span = span } } }
-  else do
+  else if k == 2 then do
     grid_mono { side = 40, span = float::from_int { n = 40 } }
     report { name = "2 escape MONO (annot)   ", px = px, r = time_it { f = {} -> grid_mono { side = side, span = span } } }
     report { name = "2 escape MONO (annot)   ", px = px, r = time_it { f = {} -> grid_mono { side = side, span = span } } }
+  else do
+    grid_one { side = 40, span = float::from_int { n = 40 } }
+    report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
+    report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
