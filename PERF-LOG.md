@@ -5469,6 +5469,58 @@ a decoder behind the field. That object exists to be snapshotted by native-image
 100 ms on the JVM path is the wrong trade. ~12% of startup to whoever finds a way
 that leaves the contract alone.
 
+## The native binary is not slow and it DOES jit — measured 2026-11-06
+
+The question was "why is the native binary slow and why doesn't it jit". Both
+halves were true once and neither is now; #402 landed in August 2026 and the
+notes describing the old state are what keep the question alive.
+
+```
+  $ MEZZE_DIAG=1 ./mandelbrot-native 2
+  [mezze] Truffle runtime: com.oracle.svm.truffle.api.SubstrateTruffleRuntime (GraalVM CE)
+```
+
+`SubstrateTruffleRuntime`, not `DefaultTruffleRuntime` — runtime compilation is
+installed and the binary JITs. **Startup is 78 ms, which is kotlin's 78 ms to the
+millisecond**, against the jar's 820.
+
+Total wall time, mandelbrot, min of 2-3 per cell:
+
+| N | mezze native | mezze jar | kotlin |
+|---|---|---|---|
+| 2400 | **306 ms** | 1 245 ms | 202 ms |
+| 4800 | **780 ms** | 1 669 ms | 580 ms |
+
+Slopes from those pairs (Δwork = 17 280 000 px): native **27.4**, jar **24.5**,
+kotlin **21.9** ns/px. So AOT-compiled Truffle gives up about 12% of throughput
+against HotSpot's Graal — expected, the host code around the compiler is AOT and
+the inlining budgets are smaller — and buys back a 1 100 ms fixed cost. Native is
+**4.1x faster than the jar in total time at N=2400 and 2.1x at N=4800**, and
+1.5x / 1.34x off kotlin rather than 6.2x / 2.9x.
+
+**And it is STABLE, which the jar is not.** Four paired runs:
+
+```
+  t2400=316 t4800=778      26.74 ns/px
+  t2400=323 t4800=776      26.21
+  t2400=338 t4800=765      24.71
+  t2400=323 t4800=781      26.50
+```
+
+±4%. The jar's figure on the same kernel spans 8.8-31.3 ns/unit because its
+measurement window is mostly JIT warmup; the native binary has almost none to do.
+
+### Which means the published numbers measure the wrong artifact
+
+`mezze-benchmark`'s harness runs `.build/<app>/<app>` — the JAR launcher. That is
+the artifact carrying a 1 100 ms fixed cost and a 3.5x warmup spread, and it is
+not what a user ships. The native binary starts in 78 ms, holds ±4%, and is 120 MB
+self-contained against kotlin's small jar plus a JDK. Measuring both would say
+something true; measuring only the jar understates the product and imports the
+variance that makes every mezze row in that table unreadable at the default scale.
+
+Not changed here — it is another repo's methodology, and the call is the user's.
+
 ## Method notes
 
 - **Report a slope**, `(t(2N) − t(N)) / (work(2N) − work(N))`, so fixed startup
