@@ -563,36 +563,6 @@ class Monomorphizer(
         is com.mezze.language.typedast.TypedRecordEntry.Spread -> entry.copy(expr = go(entry.expr))
     }
 
-    /** Collect closure-param names that are still referenced in [body].
-     *  A param is "still live" if any TypedVar with a Param/Local binding
-     *  and a name in [candidates] exists anywhere in the body tree.
-     *  This lets Piece 5 strip only the params that Piece 3 actually
-     *  made dead (beta-reduced away), leaving native-delegated params
-     *  (e.g. `p` in seq::filter → __native_seq_filter) untouched. */
-    private fun referencedClosureParams(
-        body: TypedExpr,
-        candidates: Set<String>,
-    ): Set<String> {
-        val found = HashSet<String>()
-        fun walk(e: TypedExpr) {
-            if (found.size == candidates.size) return
-            if (e is TypedVar
-                && e.name in candidates
-                && (e.binding is BindingRef.Param || e.binding is BindingRef.Local)
-            ) {
-                found.add(e.name)
-                return
-            }
-            e.forEachChild { walk(it) }
-        }
-        if (body is com.mezze.language.typedast.TypedLambda) {
-            walk(body.body)
-        } else {
-            walk(body)
-        }
-        return found
-    }
-
     /** Post-pass: rewrite `TypedVar(BindingRef.ByHash(h), …)` inside a
      *  specialization body to point at the specialized-callee hash when
      *  the callee's `(h, derivedTypeArgs, closureArgs)` is in
@@ -1433,6 +1403,108 @@ class Monomorphizer(
     }
 
     companion object {
+        /**
+         * Collect closure-param names that are still referenced in [body].
+         *
+         * A param is "still live" if anything in the body tree RESOLVES TO IT —
+         * decided by binding IDENTITY, never by matching a name. This lets Piece 5
+         * strip only the params Piece 3 actually made dead (beta-reduced away),
+         * leaving native-delegated ones (`p` in seq::filter → __native_seq_filter)
+         * untouched.
+         *
+         * THE CAPTURE LIST IS WHAT WAS MISSING, and it is why `MEZZE_MONO_STRIP=1`
+         * crashed the compiler rather than merely stripping too much. A nested
+         * lambda records what it closes over in `captures: List<TypedCapture>` — a
+         * STRUCTURAL field, not an expression child — and after Piece 3 splices,
+         * that list is the ONLY remaining record: nothing in the body mentions the
+         * parameter any more. No walk over expressions can see it, and
+         * `TypedASTCompiler` consumes exactly that list. So the parameter was
+         * counted dead, removed from the outer parameter list, and lowering hit
+         *
+         *     lambda captures 'f', which is neither a local, a parameter nor a
+         *     capture of the enclosing function. Enclosing params=[xs]
+         *
+         * reproduced on `bench/cases/defunc` from a clean cache. The A/B is the
+         * evidence: with the capture-list half removed the crash returns unchanged;
+         * with it restored the build succeeds.
+         *
+         * AND IT IS KEYED ON IDENTITY, NOT ON NAMES. `TypedCapture` carries
+         * `source: BindingRef`, so a capture says WHICH binding it came from.
+         * Reading that instead of comparing a name costs nothing and removes a real
+         * shadowing hazard: an inner lambda with its OWN parameter called `f` would
+         * otherwise mark the outer `f` live and silently disable the strip. Entering
+         * a lambda RE-INDEXES what is visible — a candidate reachable outside is
+         * reachable inside only through a capture, as `Capture(j)` — so the walk
+         * carries that mapping down rather than a set of strings. Names cross the
+         * boundary only because the caller's contract is names: `closureArgs` is
+         * keyed by arg-record field and `stripLambdaParams` filters by param name.
+         *
+         * A NON-LAMBDA BODY RETURNS NOTHING. Such a specialization has no
+         * parameters to strip and `stripLambdaParams` already refuses it, so
+         * "nothing is live" is the honest answer rather than a walk with no frame
+         * of reference.
+         */
+        internal fun referencedClosureParams(
+            body: TypedExpr,
+            candidates: Set<String>,
+        ): Set<String> {
+            val lambda = body as? com.mezze.language.typedast.TypedLambda
+                ?: return emptySet()
+            // A parameter is addressed TWO ways, and both have to be in the map.
+            // `Param(i)` is how the body names it directly; from inside a `do`
+            // block it is a FRAME SLOT instead, because the layout is
+            // `[captures…, params…, locals…]` and a block addresses the enclosing
+            // params as locals. MEASURED on `bench/cases/defunc`: `apply_fold =
+            // { n, f } -> do { let go = …f… }` gives `go`'s capture list as
+            // `[go<-Local(depth=1, index=2), f<-Local(depth=1, index=1)]` — `f` is
+            // params[1] and arrives as `Local(1, 1)`, `go` is the block's own
+            // binding at index 2, after the two params.
+            val wanted = HashMap<BindingRef, String>(candidates.size * 2)
+            lambda.params.forEachIndexed { i, prm ->
+                if (prm.name in candidates) {
+                    wanted[BindingRef.Param(i)] = prm.name
+                    wanted[BindingRef.Local(1, i)] = prm.name
+                }
+            }
+            if (wanted.isEmpty()) return emptySet()
+            val found = HashSet<String>()
+            fun walk(e: TypedExpr, alias: Map<BindingRef, String>) {
+                if (found.size == wanted.size || alias.isEmpty()) return
+                if (e is TypedVar) {
+                    alias[e.binding]?.let { found.add(it) }
+                    return
+                }
+                if (e is com.mezze.language.typedast.TypedLambda) {
+                    // Entering a lambda RE-INDEXES what is visible: a candidate
+                    // reachable out here is reachable in there only through a
+                    // capture, and inside it is `Capture(j)`, not what it was.
+                    val inner = HashMap<BindingRef, String>(e.captures.size)
+                    e.captures.forEachIndexed { j, c ->
+                        // Identity first. The NAME is accepted as well, and only
+                        // for a CAPTURE, because an under-approximation here does
+                        // not merely strip too little — it CRASHES the emitter
+                        // ("lambda captures 'f', which is neither a local, a
+                        // parameter nor a capture"). A capture's name IS the name
+                        // of the binding it closes over, so this cannot be fooled
+                        // by shadowing: an inner lambda's own parameter of the same
+                        // name is a PARAMETER, not a capture, and is matched by
+                        // identity alone below. Over-approximating keeps a dead
+                        // parameter; under-approximating loses the build.
+                        val nm = alias[c.source]
+                            ?: c.name.takeIf { it in candidates }
+                            ?: return@forEachIndexed
+                        found.add(nm)
+                        inner[BindingRef.Capture(j)] = nm
+                    }
+                    walk(e.body, inner)
+                    return
+                }
+                e.forEachChild { walk(it, alias) }
+            }
+            walk(lambda.body, wanted)
+            return found
+        }
+
         /**
          * Tag byte for specialization hashes. Distinct from any HashTag in
          * `HashTags` so there's no collision between a generic decl and its

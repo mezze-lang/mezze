@@ -175,9 +175,43 @@ specialisation rather than a dictionary-carrying wrapper, 8.2x.
 
 1. **the effect-op arithmetic row above** — 5 functions, one cause, a bench that
    already reproduces it.
-2. **`MEZZE_MONO_STRIP=1` crashes the compiler** — the liveness scan counts a
-   capture as dead. Fix written, unapplied. Until then every spec keeps its dead
-   closure params.
+2. **`MEZZE_MONO_STRIP=1`: the liveness scan is FIXED and the pass still cannot
+   be enabled.** Three layered defects, peeled one at a time against
+   `bench/cases/defunc` from a clean cache:
+   - *the capture LIST was invisible.* A nested lambda records what it closes
+     over in `captures: List<TypedCapture>`, a structural field no walk over
+     expressions reaches — and after Piece 3 splices, that list is the ONLY
+     record left, because nothing in the body mentions the parameter any more.
+     A/B: remove the read, the crash returns; restore it, the build succeeds.
+   - *it compared NAMES.* `TypedCapture` carries `source: BindingRef`, so a
+     capture already says which binding it came from. Keyed on identity now, and
+     the shadowing case is pinned: an inner lambda with its own parameter of the
+     same name must NOT keep the outer one alive, or the strip silently never
+     fires.
+   - *a parameter is addressed TWO ways.* `Param(i)` directly, and from inside a
+     `do` block as a FRAME SLOT, because the layout is
+     `[captures…, params…, locals…]`. MEASURED: `apply_fold = { n, f } -> do {
+     let go = …f… }` gives `go`'s captures as `[go<-Local(1,2), f<-Local(1,1)]`
+     — `f` is params[1] and arrives as `Local(1,1)`. Mapping only `Param(i)`
+     brought the crash back on a DIFFERENT function, which is how this was found.
+
+   **What is left is structural and is what the emitter's own error always
+   said**: "Dropping it would shift every later capture's slot." With the scan
+   correct, the build succeeds and the RUN fails —
+   `FrameSlotTypeException: Frame slot kind Object expected, but got Illegal at
+   frame slot index 4`. Removing a parameter from the middle of that layout
+   shifts every later slot and nothing renumbers the `Local(depth, index)`
+   references. So the flag stays off, now for a single named reason.
+
+   **And measure the payoff BEFORE building the renumbering.** The pass removes
+   dead closure parameters from specializations — one fewer argument per call —
+   and nobody has ever priced it. `bench/cases/defunc` kernel 3 is the shape that
+   would benefit and reads 7 947 ps/iter with the pass off; the renumbering is
+   real work and should not be done on the assumption that it is worth something.
+
+   Three tests pin the scan (`ClosureParamLivenessTest`), built by hand because
+   the shape that matters is one the typechecker never emits — written from
+   source it passed with AND without the fix, verified, so it pinned nothing.
 3. **HOF seeding is partial** — a function passed as an ARGUMENT is seeded; a
    function reached any other way (stored in a record, returned, read from a
    collection) is not.
