@@ -424,7 +424,14 @@ object TrivialWrapperInliner {
                 // Recursively rewrite the args first (the caller's
                 // arguments may themselves contain wrappable calls), so
                 // we don't have to re-walk after substitution.
-                val rewrittenArgs = node.args.map { rewrite(it, wrappers, stats, self) }
+                // mapIfChanged, not `map`: a plain map always returns a NEW list, so
+                // every `node.copy(args = …)` below allocated even when no argument
+                // had changed. The caller tests `newBody === fn.body`, so an
+                // unchanged body looked changed, `changedThisPass` never reached
+                // zero, and the fixpoint burned all MAX_INLINE_PASSES passes on
+                // every run — MEASURED: 0 call sites inlined across the stdlib and
+                // still 8 passes, reporting 744 functions "changed".
+                val rewrittenArgs = mapIfChanged(node.args) { rewrite(it, wrappers, stats, self) }
                 // Closure-capture gate: a `MakeLambdaIR` arg that captures values
                 // (`__dict_<m>` closures like a `cmp = {a,b}-> a<b`) reads those from
                 // the CALLER's frame slots. Substituting it into the wrapper body
@@ -433,7 +440,7 @@ object TrivialWrapperInliner {
                 // primitive op (`Cannot compare MezzeRecord`). Never inline such a site.
                 if (rewrittenArgs.any { it is MakeLambdaIR && it.captures.isNotEmpty() }) {
                     stats.sitesSkippedHeavyArg++
-                    return node.copy(args = rewrittenArgs)
+                    return if (rewrittenArgs !== node.args) node.copy(args = rewrittenArgs) else node
                 }
                 // Multi-read gate: any param the wrapper reads more than
                 // once must have a cheap-to-duplicate arg here, because
@@ -475,6 +482,9 @@ object TrivialWrapperInliner {
                 }
                 // Fall through: leave the call alone, but keep the args
                 // rewritten (nested inlining still applies).
+                // This guard was always HERE and always true, because the plain
+                // `map` above handed it a fresh list every time. With
+                // mapIfChanged it finally means what it says.
                 if (rewrittenArgs !== node.args) {
                     return node.copy(args = rewrittenArgs)
                 }
