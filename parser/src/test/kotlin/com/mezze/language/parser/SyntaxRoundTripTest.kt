@@ -152,6 +152,32 @@ class SyntaxRoundTripTest {
     }
 
     @Test
+    fun `per-alternative guards round-trip`() {
+        // `|` scopes a guard to its own alternative, so one arm can carry
+        // several. The CORPUS cannot cover this -- the stdlib and examples were
+        // written before the form existed -- so the lossless claim above said
+        // nothing about it, and the decoder did in fact drop them while the
+        // encoder wrote them. Encoded and not decoded is indistinguishable from
+        // never encoded until a macro passes an arm through and the guards are
+        // gone.
+        val module = parse(
+            """
+            let f = { c, n } -> match c is
+              Red if n > 0 | Pink if n < 5 -> 1
+              Blue | Green if n > 2 -> 2
+              _ -> 0
+            """.trimIndent(),
+        )
+        module.decls.forEach { assertRoundTrips(it, "${it.loc}") }
+
+        // …and the guards are really THERE to be lost, so a vacuous pass is not
+        // what just happened.
+        val match = ((module.decls.single() as ParsedLetDecl).value as ParsedLambda).body as ParsedMatch
+        assertEquals(listOf(true, true), match.cases[0].altGuards.map { it != null })
+        assertEquals(listOf(false, true), match.cases[1].altGuards.map { it != null })
+    }
+
+    @Test
     fun `trailing comments on entries, statements and arms stay trailing`() {
         // The parser attaches a trailing comment only to a declaration today; the
         // tree holds one on these too, and the encoding must keep it apart from

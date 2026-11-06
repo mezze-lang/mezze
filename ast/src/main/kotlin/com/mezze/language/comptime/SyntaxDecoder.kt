@@ -92,6 +92,27 @@ class SyntaxDecoder(
 
         fun <T> optOf(name: String, f: (HostValue, String) -> T): T? = opt(name)?.let { f(it, at(name)) }
 
+        /**
+         * Is this field PRESENT at all?
+         *
+         * [get] throws on a missing field, which is right for the shape's
+         * required parts. A field added to the encoder later is not required: a
+         * macro may build the record by hand, and values encoded before the
+         * field existed do not carry it. Reading such a field through [get]
+         * turns "an older arm" into a hard Malformed error.
+         */
+        fun has(name: String): Boolean = fields.containsKey(name)
+
+        /** A `Seq` of `Opt`, decoded to a list with nulls for the empty ones. */
+        fun <T> seqOfOpt(name: String, f: (HostValue, String) -> T): List<T?> =
+            seq(name).mapIndexed { i, item ->
+                val where = "${at(name)}[$i]"
+                when (item) {
+                    is HostValue.Opt -> item.value?.let { f(it, where) }
+                    else -> throw Malformed("$where: expected Option, found ${describe(item)}")
+                }
+            }
+
         fun seq(name: String): List<HostValue> = when (val v = get(name)) {
             is HostValue.Seq -> v.items
             else -> wrong(name, "a list", v)
@@ -483,6 +504,12 @@ class SyntaxDecoder(
         return ParsedMatchCase(
             patterns = r.seqOf("patterns", ::pattern),
             guard = r.optOf("guard", ::expr),
+            // Decoded, or a macro that received an arm with per-alternative
+            // guards and emitted it back would silently LOSE them -- the same
+            // way the formatter did. Tolerant of absence, because an arm record
+            // built by hand in a macro will not carry a field the encoder gained
+            // later.
+            altGuards = if (r.has("alt_guards")) r.seqOfOpt("alt_guards", ::expr) else emptyList(),
             ifLetBindings = r.seqOf("if_lets") { b, bat ->
                 val il = record(b, bat)
                 ParsedIfLetGuard(pattern(il["pattern"], il.at("pattern")), expr(il["value"], il.at("value")), il.loc())
