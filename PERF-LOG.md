@@ -156,13 +156,50 @@ session opened at 122x off kotlin because of dictionary passing — is one of th
 | `apply_fold [n, f, __dict_add]` | the GENERIC original, kept beside its specialisation. `k_hof` emits `CallDirectIR` to the spec; this copy is present and uncalled | **no** — another module could call it at a different type |
 | `step_alt [x, __dict_add, __dict_mul]` | same: the generic beside its spec. Kernel 4 improved 99 764 → 49 299 (2.0x) when the spec reference landed, so the spec IS being used; the residual 5x against kernel 3 is a BIMORPHIC indirect call, which is the dispatch row, not a mono row | **no** |
 | `add2 [a, b, __dict_add]` | generic original in `dispatch_probe` | **no** |
-| `go_a` `go_d` `go_n` `go_o` `go_r` — all `[i, acc, __dict_add]` | **arithmetic whose constraint chain bottoms out in an EFFECT OP's return.** `go_a = { i, acc } -> … { i = i - one_aborted {}, acc = acc + i }`: the new improvement rule needs a concrete anchor and an effect op's associated type is not one at that point | **YES — 5 functions, one cause** |
+| ~~`go_a` `go_d` `go_n` `go_o` `go_r`~~ | **CLOSED** — see below | fixed |
 
-So the live mono defect is a single named shape at the **effects × numerics**
-intersection, and it is the last instance of the "mono refuses a function whose
-type is already concrete" family diagnosed on 2026-11-04. The other two members
-of that family were fixed this session (a known output determines the operands;
-residue no call site can supply).
+**CLOSED, and it was not what the row said.** The cause was not "an effect op's
+associated type is not a concrete anchor", and it had nothing to do with literal
+defaulting — the first diagnosis was reasoned from a mono-time probe instead of
+asking the typechecker, which answers plainly:
+
+```
+  lit_int : Int          lit_nat : Nat          lit_float : Float
+```
+
+A bare `0` IS an Int. The real difference shows in two loops identical but for
+where the subtrahend comes from:
+
+```
+  plain = { i, acc } -> … plain { i = i - 1,      acc = acc + i }
+  viaop = { i, acc } -> … viaop { i = i - one {}, acc = acc + i }
+
+  plain : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = 'a -> 'a
+  viaop : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = out -> 'a <*>
+```
+
+`'out = 'a` against a FREE variable named `out`, tied to nothing. And the cause
+was written down in `ConstraintGenerator` already: the recursive self-reference
+equality ran for **pure bodies only**, because equating the whole arrow equates
+the effect ROW, and `<*>` then reports "declared `<*>` … but this body performs
+none" (`RecursiveArbitraryDerivationTest`). That comment called the rest "the
+narrower follow-up, and it needs the row question answered first".
+
+The row question's answer is to leave the row out of the equation: an effectful
+recursive binding now gets the same equality with `effects = null` on the right,
+so param, return and every ability-constraint variable unify while the rows stay
+with the machinery that owns them. `viaop` reports `having 'out = 'a` and keeps
+its `<*>`.
+
+RECOUNTED from clean caches across the same 16 benches: **2 dictionary-carrying
+functions out of 293, and neither is a defect** — `apply_fold` and `step_alt` are
+generic originals kept beside their specializations, which another module could
+still call at another type. `effectsurface` went 5 to 0. (Totals moved 720 to 293
+because more is specialised, so fewer functions are compiled separately at all.)
+Checksums hold: effectsurface 200000010000000 on kernels 1/5/6, defunc
+400000040000000 on 3 and 6, mandelannot 4431371.
+
+`:typechecker:test` 4 826/0, `:interpreter:test` 7 471/0 (11 skipped).
 
 **What is fixed, with the measurement:** transitive self-call 45x · local lambda
 specialisation 314x · phantom constraint typeParams (0x, recorded because a
@@ -173,9 +210,7 @@ specialisation rather than a dictionary-carrying wrapper, 8.2x.
 
 **What is still open in mono, ranked:**
 
-1. **the effect-op arithmetic row above** — 5 functions, one cause, a bench that
-   already reproduces it.
-2. **`MEZZE_MONO_STRIP=1`: the liveness scan is FIXED and the pass still cannot
+1. **`MEZZE_MONO_STRIP=1`: the liveness scan is FIXED and the pass still cannot
    be enabled.** Three layered defects, peeled one at a time against
    `bench/cases/defunc` from a clean cache:
    - *the capture LIST was invisible.* A nested lambda records what it closes

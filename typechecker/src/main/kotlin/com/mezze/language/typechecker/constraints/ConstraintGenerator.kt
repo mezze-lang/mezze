@@ -237,24 +237,56 @@ class ConstraintGenerator(
                             as? TypingContext.LookupResult.Found
                         val placeholder =
                             (found?.binding as? TypingContext.Binding.Monomorphic)?.type
-                        // PURE bodies only. Unifying the self-reference unifies the
-                        // whole arrow, effect row included, and a row is not a set to
-                        // be equated through a recursive reference: `<*>` says "the
-                        // body performs effects and handles them itself", so equating
-                        // it with the row the self-call site produced reports
-                        // "declared `<*>` … but this body performs none"
-                        // (RecursiveArbitraryDerivationTest). The leak this equation
-                        // closes is an ability constraint, which an effectful
-                        // recursive function can still carry; that is the narrower
-                        // follow-up, and it needs the row question answered first.
-                        val valueRow = (result.type as? MezzeType.FunctionType)?.effects
-                        val pureBody = valueRow == null ||
-                            (!valueRow.performed && valueRow.allEffectNames.isEmpty())
-                        if (placeholder is MezzeType.VarType && annotationTypes[item] == null && pureBody) {
+                        // EQUATE THE TYPES, NEVER THE ROW.
+                        //
+                        // This used to run for PURE bodies only, because unifying
+                        // the self-reference unifies the whole arrow, row included,
+                        // and a row is not a set to be equated through a recursive
+                        // reference: `<*>` says "the body performs effects and
+                        // handles them itself", so equating it with the row the
+                        // self-call site produced reports "declared `<*>` … but this
+                        // body performs none" (RecursiveArbitraryDerivationTest).
+                        // The note here called the rest "the narrower follow-up,
+                        // and it needs the row question answered first".
+                        //
+                        // The answer is to drop the row from the equation and keep
+                        // the types: an effectful recursive function gets the same
+                        // equality with `effects = null` on the right, so param,
+                        // return and every ability-constraint variable unify while
+                        // the rows are left to the effect machinery that owns them.
+                        //
+                        // WHAT IT FIXES, and it is the last live mono defect. Two
+                        // loops identical but for where the subtrahend comes from:
+                        //
+                        //   plain = { i, acc } -> … plain { i = i - 1,       acc = acc + i }
+                        //   viaop = { i, acc } -> … viaop { i = i - one {},  acc = acc + i }
+                        //
+                        //   plain : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = 'a -> 'a
+                        //   viaop : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = out -> 'a
+                        //
+                        // `'out = 'a` against a FREE `out`. With no self-reference
+                        // equality nothing ties the accumulator's associated output
+                        // back to the accumulator, so no call site can resolve it,
+                        // the decl stays generic, and mono refuses it: `go_a` and
+                        // four siblings in `bench/cases/effectsurface` compiled as
+                        // `[i, acc, __dict_add]` — five of the eight
+                        // dictionary-carrying functions left in the bench suite.
+                        //
+                        // (It was NOT literal defaulting. `mez check` reports a bare
+                        // `0` as `Int`, and `plain` resolves to Int at its call site.
+                        // The binding was being dropped, not the literal's type.)
+                        val valueType = result.type
+                        if (placeholder is MezzeType.VarType && annotationTypes[item] == null) {
+                            val rowFree = when (valueType) {
+                                is MezzeType.FunctionType ->
+                                    if (valueType.effects == null) valueType
+                                    else valueType.copy(effects = null)
+                                else -> valueType
+                            }
                             listOf(
                                 Constraint.Equality(
                                     left = placeholder,
-                                    right = result.type,
+                                    right = rowFree,
                                     context = "`${item.variableName}` refers to itself, so that reference " +
                                         "has this binding's own type",
                                     loc = item.loc,
