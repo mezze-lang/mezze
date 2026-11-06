@@ -529,9 +529,16 @@ internal fun TypedASTCompiler.dictSlotIndex(name: String): Int? {
  *  loud failure: the reference exists only because the enclosing function
  *  declared the constraint that supplies it, so a miss is a compiler defect,
  *  never something to paper over. */
+/** The frame slot holding this receiver-less op's dictionary, or null when the
+ *  frame has none — which inside a mono SPECIALIZATION is the ordinary case, not
+ *  a defect: the spec's types are concrete, so the op can be resolved outright
+ *  instead of being handed over. See `receiverlessOpRef`. */
+internal fun TypedASTCompiler.abilityOpDictSlotOrNull(binding: BindingRef.AbilityOp): Int? =
+    enclosingDictSlot(binding.opName, binding.typeVarName, binding.abilityHash.hex)
+        ?.let { dictSlotIndex(it) }
+
 internal fun TypedASTCompiler.abilityOpDictSlot(binding: BindingRef.AbilityOp): Int {
-    val name = enclosingDictSlot(binding.opName, binding.typeVarName, binding.abilityHash.hex)
-    val index = name?.let { dictSlotIndex(it) }
+    val index = abilityOpDictSlotOrNull(binding)
     return index ?: throw com.mezze.language.typechecker.TypeCheckError(
         message = "'${binding.opName}' takes no receiver, so the type it produces is what " +
             "chooses the implementation — and nothing here determines that type. Say what " +

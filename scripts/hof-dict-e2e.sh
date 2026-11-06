@@ -50,6 +50,15 @@ run_case() {
   if [ "$got" != "$expect" ]; then
     echo "❌ $name: expected [$expect], got [$got]"; fail=1; return
   fi
+  # And no dictionary may reach a HOF that takes the callback as a PARAMETER:
+  # mono reads the same per-site arrow and specialises the HOF per call site.
+  local dicts
+  dicts=$( cd "$dir" && MEZZE_HOME= MEZZE_DUMP_FN='*' ./.build/"$name" $args 2>&1 \
+    | grep -oE "dump-fn\] [^ ]* hash=[0-9a-f]{8} params=\[[^]]*\]" | sort -u \
+    | grep "__dict" | grep -E "params=\[n, f" )
+  if [ -n "$dicts" ]; then
+    echo "❌ $name: a HOF still takes a dictionary:"; echo "$dicts"; fail=1; return
+  fi
   echo "✅ $name: $got"
 }
 
@@ -87,7 +96,7 @@ run_case "$ROOT/bench/cases/hofpoly" "120 120.5" "10"
 # dictionaries are resolved, and the parameter stays until mono can be given
 # the same answer without everyone else seeing a different type.
 if [ "$fail" = "0" ]; then
-  echo "✅ hof-dict: every case runs and resolves the right dictionary"
+  echo "✅ hof-dict: every case runs, resolves the right dictionary, and carries none"
 else
   echo "❌ hof-dict: FAILURES above — a defect the JVM suites cannot see"
 fi

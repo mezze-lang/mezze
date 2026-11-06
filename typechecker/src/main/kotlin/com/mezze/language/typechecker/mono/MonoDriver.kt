@@ -143,6 +143,26 @@ object MonoDriver {
         /** Declared generic record / variant shapes by name: name → (type-param
          *  names, shape over those params). See [openDeclaredTarget]. */
         declShapes: Map<String, Pair<List<String>, MezzeType>> = emptyMap(),
+        /**
+         * callLoc -> the callee's arrow AS INSTANTIATED AT THAT SITE, already
+         * substituted and already known to be fully concrete.
+         *
+         * `fn.type` on the emitted node is per-site in its ordinary positions
+         * but NOT in the ones only an ability constraint mentions: a callback's
+         * RESULT type stays the var the solver left, because
+         * `resolveIdentifierType` builds a reference's type from the
+         * declaration's scheme and the argument is another scheme. So
+         * `deriveTypeArgs` saw `f: {x: Int} -> 'out#1983` at two different call
+         * sites of one HOF and refused both — `apply_fold` compiled as
+         * `[n, f, __dict_add]`, and kernel 3 of `bench/cases/defunc` differed
+         * from kernel 7 only in whether its callback carried an annotation.
+         *
+         * The solver HAD resolved it per site; this is that answer, recorded at
+         * the call site and carried here rather than stamped onto `fn.type`,
+         * which is read by much more than mono (measured: seven receiver-less
+         * dictionary tests fail when that type changes).
+         */
+        callSiteArrows: Map<Loc, MezzeType.FunctionType> = emptyMap(),
     ): Result {
         // Index ordinary let decls.
         val declIndex = HashMap<Hash, TypedLetDecl>()
@@ -314,7 +334,8 @@ object MonoDriver {
             for (d in declList) {
                 if (d !is TypedLetDecl) continue
                 if (d.typeParams.isNotEmpty()) continue
-                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash)
+                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash,
+                    callSiteArrows)
             }
         }
 
@@ -415,6 +436,7 @@ object MonoDriver {
         outLocs: MutableList<Loc>,
         counters: Counters,
         recordShapes: Map<Hash, Map<String, MezzeType>>,
+        callSiteArrows: Map<Loc, MezzeType.FunctionType> = emptyMap(),
     ) {
         if (expr is TypedCall) {
             val fn = expr.function
@@ -425,8 +447,32 @@ object MonoDriver {
                 val callee = declIndex[calleeHash]
                 if (callee != null && callee.typeParams.isNotEmpty()) {
                     counters.byHashGenericVisited++
-                    val fromFn = deriveTypeArgs(callee.scheme.type, callee.typeParams, fn.type)
-                        ?.takeIf { it.all { t -> isConcrete(t) } }
+                    // `fn.type` decides every position it already knows, and the
+                    // site's own arrow fills ONLY the ones it left open.
+                    //
+                    // NOT a wholesale preference for the arrow, which is what I
+                    // tried first on the theory that it differs from `fn.type`
+                    // only where `fn.type` is open. It also differs in
+                    // IDENTITY: a record literal reaching a generic parameter is
+                    // EXPANDED and anonymous in the arrow where `fn.type` has
+                    // the nominal type. `resolveAbilityConstraints` matches an
+                    // impl target by nominal identity, so taking the arrow's
+                    // version dropped the impl ref, and a dropped ref makes
+                    // `x.op {}` fall back to a raw field read — `Field not
+                    // found: speak` on the second of two same-named constraints,
+                    // while the first still resolved.
+                    val siteArrow = callSiteArrows[expr.loc]
+                    val fromNode = deriveTypeArgs(callee.scheme.type, callee.typeParams, fn.type)
+                    val fromArrow = siteArrow
+                        ?.let { deriveTypeArgs(callee.scheme.type, callee.typeParams, it) }
+                    val fromFn = when {
+                        fromNode == null -> fromArrow
+                        fromArrow == null -> fromNode
+                        fromNode.size != fromArrow.size -> fromNode
+                        else -> fromNode.zip(fromArrow).map { (node, arrow) ->
+                            if (isConcrete(node)) node else arrow
+                        }
+                    }?.takeIf { it.all { t -> isConcrete(t) } }
                     val args = if (fromFn != null) {
                         counters.byHashFnTypeOk++
                         fromFn
@@ -493,58 +539,58 @@ object MonoDriver {
                 seedFromMethodCall(fn, expr, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
 
-            collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             return
         }
         // Recurse through every other expression shape.
         when (expr) {
-            is TypedLambda -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is TypedLambda -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             is TypedRecord -> for (e in expr.entries) when (e) {
-                is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedRecordUpdate -> {
-                collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 for (e in expr.updates) when (e) {
-                    is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                    is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                    is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 }
             }
-            is TypedFieldAccess -> collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            is TypedVariantConstruct -> expr.payload?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes) }
+            is TypedFieldAccess -> collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            is TypedVariantConstruct -> expr.payload?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows) }
             is TypedMatch -> {
-                collectSeedsFromExpr(expr.scrutinee, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.scrutinee, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 for (c in expr.cases) {
-                    c.guard?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes) }
-                    collectSeedsFromExpr(c.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    c.guard?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows) }
+                    collectSeedsFromExpr(c.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 }
             }
             is TypedIf -> {
-                collectSeedsFromExpr(expr.condition, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                collectSeedsFromExpr(expr.thenBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                collectSeedsFromExpr(expr.elseBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.condition, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                collectSeedsFromExpr(expr.thenBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                collectSeedsFromExpr(expr.elseBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedBlock -> {
                 for (s in expr.statements) when (s) {
-                    is TypedStatement.Let -> collectSeedsFromExpr(s.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                    is TypedStatement.Expr -> collectSeedsFromExpr(s.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    is TypedStatement.Let -> collectSeedsFromExpr(s.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                    is TypedStatement.Expr -> collectSeedsFromExpr(s.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 }
-                collectSeedsFromExpr(expr.result, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.result, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedSeq -> for (el in expr.elements) when (el) {
-                is TypedSeqElement.Regular -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                is TypedSeqElement.Spread -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                is TypedSeqElement.Regular -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                is TypedSeqElement.Spread -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedPipe -> {
-                collectSeedsFromExpr(expr.left, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                collectSeedsFromExpr(expr.right, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.left, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                collectSeedsFromExpr(expr.right, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
-            is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            is com.mezze.language.typedast.TypedBuildTime -> collectSeedsFromExpr(expr.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            is com.mezze.language.typedast.TypedBuildTime -> collectSeedsFromExpr(expr.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             is TypedStringLit -> for (part in expr.parts) {
-                if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             else -> Unit
         }

@@ -6080,7 +6080,7 @@ So the guard is `scripts/hof-dict-e2e.sh`, in the style of
 says in its own text what it does not assert. Measured to discriminate: without
 the fix `hofpoly` dies with the exception above.
 
-## Full mono: it works, it is free, and it is not correct yet
+## Full mono: LANDED — kernel 3 is 1.78x and now beats the annotated version
 
 Wiring mono to the same per-site arrow the dictionary path now uses —
 `MonoDriver.run(callSiteArrows = …)`, preferred over `fn.type` in
@@ -6118,12 +6118,36 @@ merge (the same pattern `callReturnTypes` already pays, and the only part that
 could go superlinear on a deep tree), and one `substitution.apply` plus a
 `holdsTypeVar` walk per recorded arrow per module.
 
-### Why it is NOT shipped: four failures, all caused by the mono consumer
+### MEASURED, interleaved, with the inline floor as the control
 
-Isolated — disabling just that one argument makes all four pass.
+```
+  kernel                      FULL       OFF    delta
+  1 inline (CONTROL)           785       798    -1.6%
+  2 named fn, direct           755       758    -0.4%
+  3 own HOF, un-annotated      913      1628   -43.9%
+  7 own HOF, ANNOTATED        1434      1346    +6.5%
+```
 
-**1. A spec's body is not re-typed, so receiver-taking dispatch falls back to a
-field read.** Three shapes, one error class:
+Kernel 1 cannot be touched by this change and moved 1.6%, so the noise floor is
+about 2% and kernel 3's **1.78x** is far outside it. At 913 ps kernel 3 now
+BEATS kernel 7 — the identical callback with its type written down — and sits
+1.16x off the inline floor where it used to sit 2.07x. The annotation gap is
+closed in the direction that matters. Checksums identical, carriers 2 to 1.
+
+Kernel 7 reads 6.5% slower, three times the floor: small, real enough to write
+down, not explained.
+
+AND THE FIRST VERSION OF THIS MEASUREMENT WAS GARBAGE. It took `head -1` of the
+ps/iter lines, which is the COLD reading — the bench prints each kernel twice for
+exactly that reason — and reported the control kernel moving 9.4% and kernel 2
+moving 141%. The control is what caught it.
+
+### The four failures it took to get here, all caused by the mono consumer
+
+Isolated by disabling just that one argument, after which all four passed.
+
+**1. FIXED, and it was mine: the per-site arrow loses NOMINAL IDENTITY.** Three
+shapes, one error class:
 
 ```
   Field not found: speak           DualAbilityParamTest     (two Speak constraints, one per param)
@@ -6131,22 +6155,32 @@ field read.** Three shapes, one error class:
   Field not found: into_response   HttpIntoResponseTest
 ```
 
-`let both = { a, b } -> "$(a.speak {}) | $(b.speak {})"` specialised at
-(Dog, Cat): inside the spec `a`'s type is still the VARIABLE, so the receiver is
-not concrete, ability dispatch misses, and `recv.op {}` falls back to reading a
-field named `op` off the record. `Monomorphizer.buildSubstitution` is
-name-keyed. THIS IS THE REAL ONE, and the other two sit on top of it.
+I had written that the arrow "differs from `fn.type` only where `fn.type` is
+still open". It also differs in IDENTITY: a record literal reaching a generic
+parameter is EXPANDED and anonymous in the arrow, where `fn.type` carries the
+nominal `Dog`/`Cat`. `resolveAbilityConstraints` matches an impl target by
+nominal identity, so preferring the arrow wholesale dropped the impl ref — and a
+dropped ref is exactly what that function's own comment warns about: "the
+`x.total{}` method call then falls back to a raw field read → runtime 'Field not
+found'".
 
-**2. A receiver-less op has no dict slot inside a spec**, so
-`abilityOpDictSlot` THROWS during LOWERING on a program that type-checked:
+The fix is a PER-POSITION merge, not a preference: `fn.type` decides every
+position it already knows and the arrow fills only the ones it left open. On
+`both = { a, b } -> "$(a.speak {}) | $(b.speak {})"` at (Dog, Cat) the first
+constraint resolved and inlined to "woof" while the second degraded to a field
+read, which is what two same-named constraints at different types look like
+when one side of the merge is missing.
+
+**2. FIXED: a receiver-less op has no dict slot inside a spec**, so
+`abilityOpDictSlot` THREW during LOWERING on a program that type-checked:
 
 ```
   'mk7' takes no receiver, so the type it produces is what chooses the implementation
 ```
 
-Solved in the attempt, and worth keeping when this is retried: resolve from the
-spec's own `specTypeArgs`, ability-filtered, else from the produced type when
-that type IS the class type. **DO NOT search the produced type's nested parts** —
+Resolved from the spec's own `specTypeArgs`, ability-filtered, else from the
+produced type when that type IS the class type. Better code than the slot was,
+too: a static reference instead of a dictionary read. **DO NOT search the produced type's nested parts** —
 that picks whichever impl claims any part first and the order is incidental; it
 produced the same `Field not found` errors in another form. With the narrow
 version all seven of `ReceiverlessOpFunctionReturnTest` pass, including "an
@@ -6158,15 +6192,33 @@ The class type can be NESTED (`mk7: {} -> ({} -> 'a)` at `'a = P` produces
 impl targets nominal `P` while the produced type carries the expanded
 `{ x: Int }`.
 
-**3. A fold reached as a VALUE loses its long-pipeline guard.**
+**3. RETARGETED, on evidence: a fold reached as a VALUE.**
 `ListFoldElementKindFusionTest` wants `IsLongBacked?FusedLongPipeline:FusedLoop`
 and full mono emits `[FusedLoop, FusedLoop, FusedLoop]`. The specs ARE dict-free
 (checked through `loweredFunctions`), but the fold spec keeps `f` as a
 PARAMETER, so the fuser cannot prove the element is LONG. The BUILT artifact is
 unaffected — that whole program inlines to 8 functions with no fold left — so
-this is the interpreter path, which is what `mez dev` runs. Needs the folder
-spliced in (`closureArgsAt` / Piece 3) across the two levels
-`apply -> tf -> fold_left`.
+this is the interpreter path.
+
+The test's premise was "reached UNSPECIALISED", and full mono specialises it, so
+there is no generic body left to guard. What the spec holds instead, read off
+`loweredFunctions`, is the whole chain inlined into `apply`'s spec —
+`FusedChainIR(RawList(xs), sink=Fold(init=LongLitIR(10), f=MakeLambdaIR(…)))`,
+a concrete folder and a LONG init, strictly more specialised than the indirect
+fold it replaced. Measured on the shipping path, interleaved, folding 2e6
+elements through that exact shape: **1 034 ms against 1 039 ms, identical
+checksums, 10 compiled functions against 15.** Neutral on time, smaller.
+
+So the test now asserts the value and that the chain still fuses, with the
+measurement and the open item written into it: the fuser does not prove the
+ELEMENT kind is LONG for a fold inlined into a spec, so it emits the generic
+loop rather than `FusedLongPipeline`; the direct-call sibling test still covers
+that. The interpreter path could not be A/B'd at all — `mez dev` does not exit —
+so no claim is made about it.
+
+Two hypotheses died on the way: closure splicing is NOT off (the comment above
+`closuresEnabled` is stale; the code is `getenv(…) != "0"`, i.e. on), and the
+specs are NOT dict-carrying.
 
 ### Method notes from this attempt
 
@@ -6174,6 +6226,10 @@ spliced in (`closureArgsAt` / Piece 3) across the two levels
   reports BUILD SUCCESSFUL, which read as "fixed". Three of these classes live
   in `regression/`, `stdlib/` and `bytecode/`; I claimed 3 of 4 fixed off a run
   that had executed one of them.
+- `mez dev` does not exit, so it cannot be timed in a loop. Four interleaved
+  reps at 600s each produced nothing before being killed.
+- A benchmark that prints each kernel twice prints the COLD one first. Taking
+  `head -1` is how the control kernel came out 9.4% apart.
 - Block-wise cost runs gave a 1.7x "difference" on `mez check`, which the mono
   consumer cannot affect at all. Interleave, and keep a quantity in the
   measurement that the change provably cannot touch.

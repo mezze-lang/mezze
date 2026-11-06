@@ -61,6 +61,9 @@ class TypedASTCompiler(
      * Float's `impl NumAdd Float for Float` the callback's Long:
      * `CallNativeDDD [FloatOps$$Lambda, 0.5, 21]`.
      *
+     * Substituted and filtered to fully-concrete by the caller, which makes
+     * that one decision for mono and for here alike.
+     *
      * DELIBERATELY NOT stamped over `fn.type` in emit, which was tried and
      * reverted: that type is read by much more than dictionary resolution, and
      * replacing a scheme with a concrete arrow changed who was judged to need a
@@ -68,7 +71,7 @@ class TypedASTCompiler(
      * supplied for ability operation `default`", the receiver-less family. A
      * per-site side table changes one decision instead of everyone's view.
      */
-    private val callSiteArrows: Map<com.mezze.language.parsedast.Loc, MezzeType> = emptyMap(),
+    private val callSiteArrows: Map<com.mezze.language.parsedast.Loc, MezzeType.FunctionType> = emptyMap(),
     /** callLoc -> `decode` op hash of the derived codec impl matching that
      *  `from_json` call's USAGE-inferred target (DecodeTargetResolver). Wires the
      *  right decoder per call site where the target is a bare var in the type. */
@@ -335,12 +338,8 @@ class TypedASTCompiler(
      *  resolved arrow is offered: `holdsTypeVar` walks a FunctionType's ability
      *  constraints too, so one whose constraint operand is still a var is no
      *  improvement on the scheme and is withheld. */
-    internal fun callSiteArrow(loc: com.mezze.language.parsedast.Loc): MezzeType.FunctionType? {
-        val raw = callSiteArrows[loc] ?: return null
-        val applied = substitution.apply(raw)
-        if (applied !is MezzeType.FunctionType || applied.holdsTypeVar()) return null
-        return applied
-    }
+    internal fun callSiteArrow(loc: com.mezze.language.parsedast.Loc): MezzeType.FunctionType? =
+        callSiteArrows[loc]
 
     fun getDeclaredDictMethodsForHash(): Map<Hash, Set<String>> = declaredDictMethodsForHash.toMap()
 
@@ -1330,7 +1329,15 @@ class TypedASTCompiler(
                 // Referenced without being called — hand back the function the
                 // dictionary slot holds. Named directly because an operation with no
                 // receiver has no value whose type could point at the slot.
-                ReadLocalIR(abilityOpDictSlot(binding), SlotKind.OBJECT, src)
+                //
+                // No slot inside a specialization, where the op's output is
+                // concrete and it can be resolved outright. `expr.type` here is
+                // the op's ARROW, so what chooses the impl is its return.
+                abilityOpDictSlotOrNull(binding)
+                    ?.let { ReadLocalIR(it, SlotKind.OBJECT, src) }
+                    ?: receiverlessOpRef(
+                        binding, (expr.type as? MezzeType.FunctionType)?.returnType, src)
+                    ?: ReadLocalIR(abilityOpDictSlot(binding), SlotKind.OBJECT, src)
             }
             is BindingRef.Local -> {
                 // Names contributed by the effect-handler runtime inside op
@@ -1992,7 +1999,17 @@ class TypedASTCompiler(
                     // it computes — the only difference is that the argument record is
                     // passed through unchanged, there being no receiver to fold in.
                     census.methodDictCallee++
-                    DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src)
+                    val slot = abilityOpDictSlotOrNull(binding)
+                    if (slot != null) {
+                        DictMethodCallIR(slot, compileExpr(expr.arg), src)
+                    } else {
+                        // No slot: inside a specialization the result type is
+                        // concrete, and for a receiver-less op that IS the
+                        // dispatch. `expr.type` is the call's result here.
+                        val ref = receiverlessOpRef(binding, expr.type, src)
+                        if (ref != null) CallIndirectIR(ref, compileExpr(expr.arg), false, src)
+                        else DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src)
+                    }
                 }
                 is BindingRef.ByHash -> {
                     val calleeHash = binding.hash
@@ -3478,6 +3495,56 @@ class TypedASTCompiler(
     private fun elementFirst(types: List<MezzeType>): List<MezzeType> = types.flatMap { t ->
         val e = containerElementType(t)
         if (e != null && e !is VarType) listOf(e, t) else listOf(t)
+    }
+
+    /**
+     * A receiver-less operation resolved from the type the call PRODUCES.
+     *
+     * Such an op has no receiver to dispatch on, so its impl is chosen by its
+     * output — which is exactly what the refusal in [abilityOpDictSlot] says.
+     * Outside a specialization that output is usually a variable and a caller
+     * has to hand the dictionary over in a frame slot.
+     *
+     * INSIDE A SPECIALIZATION IT IS CONCRETE, and that is the whole point of
+     * specializing: the spec carries no dictionary parameters, so a body that
+     * still reaches for a slot finds none. Before this, mono specializing such a
+     * caller turned a working program into
+     *
+     *     'mk7' takes no receiver, so the type it produces is what chooses the
+     *     implementation — and nothing here determines that type
+     *
+     * thrown during LOWERING, which is how it surfaced as a TypeCheckError on a
+     * program that had already type-checked. Resolving it here is also better
+     * code than the slot was: a static reference rather than a dictionary read.
+     *
+     * Goes through [refToDictedOp], so an op that needs dictionaries OF ITS OWN
+     * still gets them wrapped.
+     */
+    private fun receiverlessOpRef(
+        binding: BindingRef.AbilityOp,
+        produced: MezzeType?,
+        src: SourceInfo,
+    ): NodeIR? {
+        // THE SPEC'S OWN TYPE ARGUMENTS first, which is what the enclosing
+        // specialization was keyed on and so the only thing here that says which
+        // impl this body was specialized FOR. Ability-filtered, unlike
+        // `resolveDictFromSpecTypeArgs`, so an op name two abilities share
+        // cannot cross over.
+        specTypeArgs?.let { args ->
+            val deeper = elementFirst(args)
+            resolveOpHashFromConcreteTypes(binding.opName, deeper, binding.abilityHash)
+                ?.let { return refToDictedOp(it, deeper, src) }
+        }
+        // Then the type the call produces, when that type IS the class type.
+        //
+        // NOT its nested parts. Searching them picks whichever impl claims any
+        // part first, and the order is incidental: it resolved the wrong impl and
+        // handed back a record where a function was expected.
+        val resolved = produced?.let { substitution.apply(it) } ?: return null
+        if (resolved is VarType || containsVarTypeDeep(resolved)) return null
+        val types = elementFirst(listOf(resolved))
+        return resolveOpHashFromConcreteTypes(binding.opName, types, binding.abilityHash)
+            ?.let { refToDictedOp(it, types, src) }
     }
 
     /** Last-resort dict resolution inside a mono-spec compile (see [specTypeArgs]). */

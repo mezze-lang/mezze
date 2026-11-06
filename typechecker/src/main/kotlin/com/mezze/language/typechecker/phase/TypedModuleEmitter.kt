@@ -395,11 +395,23 @@ private fun compileModule(
             }
         }
     }
+    // ONE decision about what counts as a usable per-site arrow, for both
+    // consumers. Only a FULLY resolved arrow is kept: `holdsTypeVar` walks a
+    // FunctionType's ability constraints too, so one whose constraint operand is
+    // still open says no more than the scheme does.
+    val resolvedCallSiteArrows: Map<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType.FunctionType> =
+        callSiteArrows.mapNotNull { (loc, ty) ->
+            val applied = substitution.apply(ty)
+            if (applied is com.mezze.language.ast.MezzeType.FunctionType &&
+                !applied.holdsTypeVar()
+            ) loc to applied else null
+        }.toMap()
     val monoResult = MonoDriver.run(
         entry = wrapped,
         imported = importedModules,
         resolutionOnly = stdlibModulesForMono,
         recordShapes = recordShapesForMono,
+        callSiteArrows = resolvedCallSiteArrows,
         declShapes = declShapesForMono,
     )
 
@@ -417,7 +429,7 @@ private fun compileModule(
         preloweredFunctions = stdlibFns,
         preloweredDictMethods = stdlibDictMethods,
         substitution = substitution,
-        callSiteArrows = callSiteArrows,
+        callSiteArrows = resolvedCallSiteArrows,
         decodeOpBySite = decodeOpBySite,
         abilityOpNames = abilityOpNames,
     )
