@@ -5830,6 +5830,15 @@ boot mark reading 0-1 ms).
   8.8-31.3 ns/unit run to run while kotlin's holds to ±1%; only the per-run ratio
   against a reference measured beside it means anything, and only at a scale where
   the compute window dwarfs warmup (`--scale 6`: ±4%).
+- **An experimental compiler flag used to POISON the build cache.** `mez build`
+  invalidated on sources, missing blobs and stdlib drift, and not on the
+  compiler's own configuration — so a build with `MEZZE_MONO_STRIP=1` wrote its
+  IR into `.mez` and every later build, without the flag, got a cache hit and ran
+  it. `bench/cases/defunc` kernel 6 answered `sum=<function:>` long after the flag
+  left the command line. FIXED: `BuildCache` now keys on a digest of the eight
+  env flags that change lowered IR, trace-only flags deliberately excluded so a
+  diagnostic run keeps its cache. Still: when an A/B needs two builds, `rm -rf
+  .mez .build` between them costs nothing and removes a whole class of doubt.
 - **Run the LAUNCHER, not `java -jar`.** `mez build` writes
   `.build/<app>/<app>`, which adds `--add-modules=jdk.incubator.vector,…`, Serial
   GC and AppCDS. `java -jar` read 21 ns/px where the launcher read 10, and a fused

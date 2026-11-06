@@ -181,7 +181,7 @@ class BuildCommand {
             // the same way consumers import it.
             val modulePath = com.mezze.language.cli.`package`.packageNameToModule(manifest.`package`.name)
 
-            val cached = BuildCache.tryLoad(store, appConfig.name)
+            val cached = BuildCache.tryLoad(store, appConfig.name, currentDir)
             val compiledFunctions: List<FunctionIR>
             val performerRecords: List<Array<String>>
             // typedModule available only on the recompile path. The only
@@ -213,6 +213,9 @@ class BuildCommand {
                 compiledFunctions = compiled.loweredFunctions
                 performerRecords = compiled.performerRecords
                 typedModuleForValidation = compiled.typedModule
+                // Stamp the configuration this IR was produced under, so a later
+                // build with a different one misses instead of reusing it.
+                BuildCache.recordLoweringConfig(currentDir)
                 metadataForValidation = compiled.metadataByHash
                 warningCount = compiled.warningCount
             }
