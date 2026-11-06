@@ -372,7 +372,7 @@ class AbilityEffectComprehensiveTest {
                     convert: {it: 'a} -> 'b
                 }
 
-                impl Convert for Str Int where {
+                impl Convert Str for Int where {
                     convert = {it} -> "converted"
                 }
 
@@ -866,11 +866,11 @@ class AbilityEffectComprehensiveTest {
                     convert: {it: 'a} -> 'b
                 }
 
-                impl Convert for Str Int where {
+                impl Convert Str for Int where {
                     convert = {it} -> "converted"
                 }
 
-                impl Convert for Int Str where {
+                impl Convert Int for Str where {
                     convert = {it} -> 0
                 }
 
@@ -1085,7 +1085,7 @@ class AbilityEffectComprehensiveTest {
                 type Fahrenheit = | Fahrenheit { degrees: Float } |
 
                 # Valid: both types are local
-                impl Convert for Fahrenheit Celsius where {
+                impl Convert Fahrenheit for Celsius where {
                     convert = {it} ->
                         match it is
                             Celsius { degrees } -> Fahrenheit { degrees = degrees * 1.8 + 32.0 }
@@ -1223,11 +1223,11 @@ class AbilityEffectComprehensiveTest {
                     convert: {it: 'a} -> 'b
                 }
 
-                impl Convert for Str Int where {
+                impl Convert Str for Int where {
                     convert = {it} -> "first"
                 }
 
-                impl Convert for Str Int where {
+                impl Convert Str for Int where {
                     convert = {it} -> "second"
                 }
             """.trimIndent()

@@ -107,8 +107,9 @@ class AbilityImplParserErrorTest {
 
     @Test
     fun `multi-type ability impl missing comma between methods gives helpful error`() {
-        // Using multi-type impl syntax to bypass the effect impl parser
-        // and trigger the ability impl parser's own comma error.
+        // An APPLIED impl target (`String Int`, one type) to bypass the effect
+        // impl parser and trigger the ability impl parser's own comma error.
+        // What matters here is only which parser the header reaches.
         val source = """
             impl KVStore for String Int where {
                 store: {key: String, value: Int} -> {} = {key, value} -> {}

@@ -41,7 +41,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               convert : {it: 'a} -> 'b
             }
 
-            impl MyConvert for Str Int where {
+            impl MyConvert Str for Int where {
               convert = {it} -> int::to_str {n = it}
             }
 

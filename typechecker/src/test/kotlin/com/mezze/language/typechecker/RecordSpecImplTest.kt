@@ -137,7 +137,7 @@ class RecordSpecImplTest : VariantSpecBase() {
             "V0407",
             "One target being an INSTANCE of the other refuses the pair, even with the " +
                 "right types. The instance test is the same one 11.15 needs for the claim " +
-                "rule.\n\nAlready enforced, with a message that names the `['a]` case too. Two things had hidden that: an instantiated target needs PARENTHESES, since `impl Norm for Box Int` parses as TWO targets (`Box` and `Int`) against a one-parameter ability; and V0701 was the wrong code to expect. The stdlib's `impl FromQuery 'a for [{ k: Str, v: Str }]` was the clue — a bracketed instantiated target has always worked.",
+                "rule.\n\nAlready enforced, with a message that names the `['a]` case too. What had hidden it was the GRAMMAR: `impl Norm for Box Int` used to parse as two targets (`Box` and `Int`) against a one-parameter ability, so the ARITY check (V0705) fired before coherence was ever consulted. Juxtaposition now associates as application, so the pair reaches the disjointness test it was always meant to fail.",
         )
     }
 
@@ -163,7 +163,15 @@ class RecordSpecImplTest : VariantSpecBase() {
         )
     }
 
-    /** 11.18 -- an instantiated RECORD-ALIAS target, alone. Legal by the same rule. */
+    /**
+     * 11.18 -- an instantiated RECORD-ALIAS target, alone. Legal by the same rule.
+     *
+     * UNPARENTHESISED, because juxtaposition is application in an impl target as
+     * it is in every other type position. `Box Int` therefore needs no help to
+     * read as one applied target, and a multi-parameter ability fills its other
+     * slots before the `for` (`impl Convert Int for Str`) -- the same tuple it
+     * always built. See DeclarationParsers.implTargetTypeAnnotation.
+     */
     @Test fun `an instantiated record-alias target is legal`() {
         accepts(
             """

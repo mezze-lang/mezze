@@ -157,7 +157,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               convert : {it: 'a} -> 'b
             }
 
-            impl Convert for Str Int where {
+            impl Convert Str for Int where {
               convert = {it} -> int::to_str {n = it}
             }
 
@@ -174,10 +174,22 @@ class ComprehensiveAbilitiesAndEffectsTest {
         assertNotNull(convertDecl)
         assertEquals(listOf("'b", "'a"), convertDecl.typeParams)
 
-        // Verify implementation with multiple target types — from parsed AST
+        // Verify the implementation supplies BOTH slots — from parsed AST.
+        //
+        // One before the `for` and one after, which is where a multi-parameter
+        // ability's arguments live: `ability Convert 'b for 'a` declares them that
+        // way too, and the tuple every consumer builds is
+        // `abilityTypeArgs + targetTypes` with the receiver LAST. This used to be
+        // written `impl Convert for Str Int` and asserted as two targetTypes; the
+        // tuple is the same either way, but juxtaposition after `for` now reads as
+        // application so that `impl Norm for Box Int` is writable.
         val implDecl = parsedModule.decls.find { it is com.mezze.language.parsedast.ParsedImplAbilityDecl } as com.mezze.language.parsedast.ParsedImplAbilityDecl?
         assertNotNull(implDecl)
-        assertEquals(2, implDecl.targetTypes.size)
+        assertEquals(1, implDecl.abilityTypeArgs.size)
+        assertEquals(1, implDecl.targetTypes.size)
+        val tuple = (implDecl.abilityTypeArgs + implDecl.targetTypes)
+            .map { (it as com.mezze.language.parsedast.ParsedNamedType).name }
+        assertEquals(listOf("Str", "Int"), tuple)
     }
 
     @Test

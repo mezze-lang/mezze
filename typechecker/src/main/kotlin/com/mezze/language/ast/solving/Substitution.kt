@@ -312,7 +312,12 @@ data class Substitution(
                 MezzeType.RecordType(
                     fields = fields,
                     rowVar = row,
-                    identity = type.identity
+                    identity = type.identity,
+                    // Carried, like `identity`: a positional rebuild that drops it
+                    // loses how a generic alias was instantiated, so an adopted
+                    // `Box Int` prints as a bare `Box` after the first
+                    // substitution pass (spec 11.16).
+                    typeArgs = type.typeArgs.map { apply(it) },
                 )
             }
 
@@ -603,7 +608,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         MezzeType.RecordType(
             fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType, mustBeOpenRowVars) },
             rowVar = closedRowVar,
-            identity = type.identity
+            identity = type.identity,
+            typeArgs = type.typeArgs.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
         )
     }
     is MezzeType.VariantType -> {

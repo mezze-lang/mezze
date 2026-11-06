@@ -171,7 +171,7 @@ class AbilityOrphanRulesTest {
             type Fahrenheit = | Fahrenheit { degrees: Float } |
 
             # Impl in same module as both Celsius and Fahrenheit - OK
-            impl Convert for Fahrenheit Celsius where {
+            impl Convert Fahrenheit for Celsius where {
                 convert = {it} ->
                     match it is
                         Celsius { degrees } -> Fahrenheit { degrees = degrees * 1.8 + 32.0 }

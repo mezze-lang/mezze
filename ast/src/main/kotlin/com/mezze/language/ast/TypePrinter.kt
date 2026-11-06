@@ -172,7 +172,15 @@ private fun printRecordType(
     typeVarMapping: MutableMap<TypeVar, String>
 ): String {
     val displayName = type.identity.displayNameOrNull()
-    if (displayName != null && !showExpansion) return displayName
+    if (displayName != null && !showExpansion) {
+        // `Box Int`, not a bare `Box` (11.16): a named type prints as the name a
+        // reader wrote, and for a generic one that includes its arguments.
+        if (type.typeArgs.isEmpty()) return displayName
+        val args = type.typeArgs.joinToString(" ") {
+            prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+        }
+        return "$displayName $args"
+    }
     val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
         "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping)}"
     }

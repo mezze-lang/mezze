@@ -269,8 +269,33 @@ sealed interface MezzeType {
     data class RecordType(
         val fields: Map<String, MezzeType>,
         val rowVar: RowVar? = null, // null = closed, non-null = open
-        val identity: TypeIdentity = TypeIdentity.Anonymous
+        val identity: TypeIdentity = TypeIdentity.Anonymous,
+        /**
+         * How a generic alias was instantiated, for PRINTING: `Box Int` rather
+         * than a bare `Box` (spec 11.16).
+         *
+         * Deliberately OUTSIDE `equals`/`hashCode`, unlike a variant's `typeArgs`
+         * (#194). A variant needs them for identity because its constructor
+         * PAYLOADS are substituted, so two instantiations can otherwise look
+         * alike. A record's fields already carry the instantiation -- `Box Int` is
+         * `{ v: Int }` and `Box Str` is `{ v: Str }` -- so including these in
+         * equality would add nothing semantic while making an adopted type unequal
+         * to the same type built from an annotation, and every cache keyed on a
+         * type would see the difference.
+         *
+         * Set by [adoptRecordAlias]; empty everywhere else, which is why 270-odd
+         * construction sites need no change.
+         */
+        val typeArgs: List<MezzeType> = emptyList()
     ) : MezzeType {
+        /** Equality over the SEMANTIC parts only — see [typeArgs]. */
+        override fun equals(other: Any?): Boolean =
+            this === other ||
+                (other is RecordType &&
+                    fields == other.fields &&
+                    rowVar == other.rowVar &&
+                    identity == other.identity)
+
         /** See [MezzeType.isGround]: 0 unknown, 1 ground, 2 not. Not part of the type. */
         @kotlinx.serialization.Transient internal var groundMemo: Byte = 0
         @kotlinx.serialization.Transient private var hashMemo: Int = 0

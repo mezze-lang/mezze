@@ -193,7 +193,7 @@ class AbilityMethodCallTest {
                 convert: {it: 'a} -> 'b
             }
 
-            impl Convert for Str Int where {
+            impl Convert Str for Int where {
                 convert = {it} -> int::to_str {n = it}
             }
 

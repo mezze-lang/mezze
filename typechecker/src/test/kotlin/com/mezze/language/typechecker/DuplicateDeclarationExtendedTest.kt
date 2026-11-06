@@ -338,11 +338,11 @@ class DuplicateDeclarationExtendedTest {
                 convert: {} -> 'to
             }
 
-            impl Convert for Int Str where {
+            impl Convert Int for Str where {
                 convert = {} -> 0
             }
 
-            impl Convert for Int Str where {
+            impl Convert Int for Str where {
                 convert = {} -> 1
             }
         """.trimIndent()
@@ -363,11 +363,11 @@ class DuplicateDeclarationExtendedTest {
                 convert: {} -> 'to
             }
 
-            impl Convert for Int Str where {
+            impl Convert Int for Str where {
                 convert = {} -> 0
             }
 
-            impl Convert for Str Int where {
+            impl Convert Str for Int where {
                 convert = {it} -> int::to_str {n = it}
             }
 

@@ -408,7 +408,7 @@ class ImportResolutionTest {
         @Test
         fun `impl ability with qualified ability name`() {
             val source = """
-                impl codec::Encode for Json Int where {
+                impl codec::Encode Json for Int where {
                     encode = {config} -> {}
                 }
             """.trimIndent()
@@ -436,7 +436,7 @@ class ImportResolutionTest {
         @Test
         fun `impl ability with full path ability name`() {
             val source = """
-                impl std::codec::Encode for Json Int where {
+                impl std::codec::Encode Json for Int where {
                     encode = {config} -> {}
                 }
             """.trimIndent()

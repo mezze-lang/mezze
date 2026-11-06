@@ -240,6 +240,13 @@ object DuplicateDeclarationValidator {
         // travels as structure and claims nothing, which is the escape that lets
         // two libraries sharing a shape still compose.
         recordShapeToType.putAll(alreadyShaped)
+        // The shapes THEMSELVES, for the instance test below. A string key can
+        // only find an exact match, and `{ v: 'a }` is not the same string as
+        // `{ v: Int }` -- so a generic alias and a monomorphic one of its shape
+        // slipped past each other. Local declarations only: an imported generic
+        // alias travels without its parameters bound, and 11.5's escape hatch
+        // (structure claims nothing) should keep widening cheap.
+        val closedRecordShapes = mutableListOf<Pair<String, ParsedRecordDef>>()
         // Imported claims come first, so a local declaration colliding with
         // one is refused with the imported group named (spec 8.3).
         constructorToTypeMap.putAll(
@@ -314,6 +321,31 @@ object DuplicateDeclarationValidator {
                     // with the same declared fields are genuinely different types.
                     val shapeKey = recordShapeKey(definition)
                     if (shapeKey != null) {
+                        // UP TO INSTANTIATION. `type Box 'a = { v: 'a }` beside
+                        // `type Wrap = { v: Int }` are not the same shape, so the
+                        // key test admits both -- and then `{ v = 1 }` matches Wrap
+                        // directly AND Box instantiated, so the ambiguity the claim
+                        // exists to make unreachable comes back through the generic
+                        // door. Asked BOTH ways: either being an instance of the
+                        // other is the clash.
+                        for ((otherName, otherDef) in closedRecordShapes) {
+                            if (otherName == typeDecl.name) continue
+                            if (!shapeInstanceOf(otherDef, definition) &&
+                                !shapeInstanceOf(definition, otherDef)
+                            ) continue
+                            throw TypeCheckError(
+                                "Record alias '${typeDecl.name}' has the same shape as " +
+                                "'$otherName' up to instantiation. One is an instance of the " +
+                                "other, so a record literal of that shape would match both names.",
+                                typeDecl.loc,
+                                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                                hints = listOf(
+                                    "reuse '$otherName' instead, or if you need two DISTINCT " +
+                                    "types with the same fields use a `newtype`"
+                                ),
+                            )
+                        }
+                        closedRecordShapes.add(typeDecl.name to definition)
                         val existingType = recordShapeToType[shapeKey]
                         if (existingType != null && existingType != typeDecl.name) {
                             throw TypeCheckError(
@@ -919,6 +951,81 @@ object DuplicateDeclarationValidator {
      * BY-NAME imports so that a claim arriving by `use` is the same claim as a
      * declared one (spec 11.5, the record counterpart of 8.3).
      */
+    /**
+     * Is [subject]'s shape an INSTANCE of [pattern]'s?
+     *
+     * Same field names, and every field type matched with the pattern's type
+     * variables binding consistently -- so `type Pair 'a = { l: 'a, r: 'a }`
+     * is instanced by `{ l: Int, r: Int }` but not by `{ l: Int, r: Str }`.
+     *
+     * One-way, and asked in both directions by the caller: only the pattern's
+     * variables bind.
+     *
+     * A variable is any `'`-prefixed name, not a lookup in the declaration's
+     * [ParsedTypeDecl.typeParams]. Inside a type declaration's body a
+     * `'`-prefixed name can only BE one of its parameters, and the list is
+     * stored with the apostrophe in some places and without it in others
+     * (DerivedImplGenerator normalises it on read) -- so asking the spelling is
+     * both sufficient and the one form that cannot be wrong.
+     *
+     * Returns false when the pattern has no variable at all: that degenerates
+     * to plain structural equality, which the string key already catches with a
+     * message that does not mention instantiation.
+     */
+    fun shapeInstanceOf(pattern: ParsedRecordDef, subject: ParsedRecordDef): Boolean {
+        if (pattern.isOpen || subject.isOpen) return false
+        if (pattern.fields.isEmpty() || subject.fields.isEmpty()) return false
+        if (pattern.fields.none { hasTypeVar(it.type) }) return false
+        val subjectFields = subject.fields.associate { it.name to it.type }
+        if (pattern.fields.map { it.name }.toSet() != subjectFields.keys) return false
+        val bound = mutableMapOf<String, String>()
+        return pattern.fields.all { f ->
+            val actual = subjectFields[f.name] ?: return@all false
+            annotationInstanceOf(f.type, actual, bound)
+        }
+    }
+
+    private fun hasTypeVar(annotation: ParsedTypeAnnotation): Boolean = when (annotation) {
+        is ParsedNamedType -> annotation.name.startsWith("'")
+        is ParsedTypeApp -> annotation.args.any { hasTypeVar(it) }
+        is ParsedSeqType -> hasTypeVar(annotation.elementType)
+        else -> false
+    }
+
+    /**
+     * Deliberately conservative outside the variables: a non-variable part must
+     * render identically. A loose match would refuse unrelated declarations, and
+     * this rule's reach is already the longest of the record rules -- declaring
+     * `type Wrapper 'a = { value: 'a }` forbids any `{ value: T }` record in the
+     * module, for every T.
+     */
+    private fun annotationInstanceOf(
+        pattern: ParsedTypeAnnotation,
+        subject: ParsedTypeAnnotation,
+        bound: MutableMap<String, String>,
+    ): Boolean {
+        if (pattern is ParsedNamedType && pattern.name.startsWith("'")) {
+            val rendered = parsedTypeAnnotationToString(subject)
+            val held = bound[pattern.name]
+            if (held == null) {
+                bound[pattern.name] = rendered
+                return true
+            }
+            return held == rendered
+        }
+        if (pattern is ParsedTypeApp && subject is ParsedTypeApp) {
+            return pattern.constructor == subject.constructor &&
+                pattern.args.size == subject.args.size &&
+                pattern.args.indices.all {
+                    annotationInstanceOf(pattern.args[it], subject.args[it], bound)
+                }
+        }
+        if (pattern is ParsedSeqType && subject is ParsedSeqType) {
+            return annotationInstanceOf(pattern.elementType, subject.elementType, bound)
+        }
+        return parsedTypeAnnotationToString(pattern) == parsedTypeAnnotationToString(subject)
+    }
+
     fun recordShapeKey(definition: ParsedRecordDef): String? {
         if (definition.isOpen) return null
         // The EMPTY shape claims nothing (spec 11.5). The claim exists to keep

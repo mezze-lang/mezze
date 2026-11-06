@@ -108,7 +108,7 @@ class AbilityValidationTest {
               convert: {it: 'from} -> 'to
             }
 
-            impl Convert for Int Str where {
+            impl Convert Int for Str where {
               convert: {it: Str} -> Int = {it} ->
                 match int::from_str {s = it} is
                   Some {val} -> val
@@ -623,7 +623,7 @@ class AbilityValidationTest {
               convert: {it: 'from} -> 'to
             }
 
-            impl Convert for Int Str where {
+            impl Convert Int for Str where {
               convert = {it} -> 0
             }
 
@@ -710,7 +710,7 @@ class AbilityValidationTest {
               convert: {it: 'from} -> 'to
             }
 
-            impl Convert for Int Str where {
+            impl Convert Int for Str where {
               convert = {it} -> 0
             }
 
@@ -718,7 +718,7 @@ class AbilityValidationTest {
             let parse: {s: 'a} with Convert 'b 'a -> 'b = {s} ->
               s.convert {}
 
-            # Should find impl Convert for Int Str
+            # Should find impl Convert Int for Str
             parse {s = "42"}
         """.trimIndent()
 
@@ -774,7 +774,7 @@ class AbilityValidationTest {
               encode: {} -> 'format
             }
 
-            impl Encode for Json Int where {
+            impl Encode Json for Int where {
               encode = {it} -> { raw = int::to_str {n = it} }
             }
 
@@ -782,7 +782,7 @@ class AbilityValidationTest {
             let toJson: {data: 'a} with Encode Json 'a -> Json = {data} ->
               data.encode {}
 
-            # Should find impl Encode for Json Int
+            # Should find impl Encode Json for Int
             toJson {data = 42}
         """.trimIndent()
 

@@ -174,24 +174,17 @@ class AbilityParserTest {
     }
 
     /**
-     * Two capitalised names after `for` are two TARGETS, for a multi-parameter
-     * ability: `impl KVStore for String Int` where `ability KVStore for 'k 'v`.
+     * JUXTAPOSITION IS APPLICATION in an impl target, as in every other type
+     * position: `impl KVStore for String Int` is ONE applied target.
      *
-     * MEASURED, and the reason this stands as it is: making a capitalised name
-     * associate as an ARGUMENT instead -- so `impl X for Box Int` is one applied
-     * target -- breaks `impl Convert for Int Str` across AbilityValidationTest,
-     * AbilityMethodCallTest, AppliedTypeDispatchTest and
-     * ComprehensiveAbilitiesAndEffectsTest, and cascades through the stdlib's
-     * codec impls. So the ambiguity is GENUINE, not a leftover.
-     *
-     * An instantiated target is still writable today, parenthesised:
-     * `impl X for (Box Int)`, or bracketed as the stdlib does in
-     * `impl FromQuery 'a for [{ k: Str, v: Str }]`. Resolving juxtaposition in
-     * favour of application would need a SEPARATOR for the multi-target form
-     * (`for Int, Str`) -- a syntax change to existing code.
+     * This test used to assert the opposite -- two capitalised names after `for`
+     * being two TARGETS -- and that reading is what made `impl Norm for Box Int`
+     * unwritable: one grammar cannot read `Box Int` as an application and
+     * `Int Str` as a list. A multi-parameter ability has a form that does not
+     * compete with application, pinned in the test below.
      */
     @Test
-    fun testImplWithMultipleTypes() {
+    fun testImplTargetJuxtapositionIsApplication() {
         val source = """
             impl KVStore for String Int where {
               store : {key: String, value: Int} -> {} = {key, value} -> {}
@@ -203,13 +196,49 @@ class AbilityParserTest {
 
         val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("KVStore", impl.abilityName)
-        assertEquals(2, impl.targetTypes.size)
-        assertEquals("String", (impl.targetTypes[0] as ParsedNamedType).name)
-        assertEquals("Int", (impl.targetTypes[1] as ParsedNamedType).name)
+        assertEquals(1, impl.targetTypes.size)
+        val target = impl.targetTypes[0] as ParsedTypeApp
+        assertEquals("String", target.constructor)
+        assertEquals(1, target.args.size)
+        assertEquals("Int", (target.args[0] as ParsedNamedType).name)
         assertEquals(1, impl.operations.size)
     }
 
-    /** And the parenthesised form really is one applied target. */
+    /**
+     * A multi-parameter ability fills its other slots BEFORE the `for`:
+     * `impl KVStore String for Int` for `ability KVStore for 'k 'v`.
+     *
+     * The same tuple the juxtaposed form used to produce. Every consumer builds
+     * `abilityTypeArgs + targetTypes` with the receiver LAST -- AbilityChecker,
+     * ImplValidator, TypedAstBuilder and the coherence check all spell it out --
+     * so this is not a new spelling invented to replace the old one, it is the
+     * one that was always equivalent.
+     */
+    @Test
+    fun testImplWithMultipleTypes() {
+        val source = """
+            impl KVStore String for Int where {
+              store : {key: String, value: Int} -> {} = {key, value} -> {}
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+
+        val impl = module.decls[0] as ParsedImplAbilityDecl
+        assertEquals("KVStore", impl.abilityName)
+        assertEquals(1, impl.abilityTypeArgs.size)
+        assertEquals("String", (impl.abilityTypeArgs[0] as ParsedNamedType).name)
+        assertEquals(1, impl.targetTypes.size)
+        assertEquals("Int", (impl.targetTypes[0] as ParsedNamedType).name)
+        assertEquals(1, impl.operations.size)
+    }
+
+    /**
+     * And the parenthesised form is still one applied target -- no longer the
+     * only way to write one, but it must keep parsing: the stdlib brackets a
+     * structural target in `impl FromQuery 'a for [{ k: Str, v: Str }]`.
+     */
     @Test
     fun testParenthesisedImplTargetIsOneApplication() {
         val source = """

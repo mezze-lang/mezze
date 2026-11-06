@@ -44,9 +44,23 @@ fun adoptRecordAlias(
     // most of what printing types allocated during a check.
     val sameNames = aliases.filter { (_, _, aliasFields) -> aliasFields.keys == record.fields.keys }
     if (sameNames.isEmpty()) return record
-    val rendered = record.fields.mapValues { (_, ty) -> prettyPrintType(ty) }
     val matches = sameNames.filter { (_, _, aliasFields) ->
-        aliasFields.all { (name, ty) -> rendered[name] == prettyPrintType(ty) }
+        // UP TO INSTANTIATION, not by rendered string.
+        //
+        // A generic alias declares its fields in terms of its own type
+        // parameters: `type Box 'a = { v: 'a }` has field `v: 'a`. A literal's
+        // fields are always concrete, so comparing printed forms (`'a` against
+        // `Int`) could never match one -- no generic record was ever adopted, and
+        // so none could reach a nominal impl or print as `Box Int`.
+        //
+        // The alias's field type is the PATTERN and the literal's is the subject.
+        // A type variable in the pattern binds, consistently: `type Pair 'a =
+        // { l: 'a, r: 'a }` adopts `{ l = 1, r = 2 }` but not `{ l = 1, r = "x" }`.
+        val bindings = mutableMapOf<String, MezzeType>()
+        aliasFields.all { (name, declared) ->
+            val actual = record.fields[name] ?: return@all false
+            matchesUpToInstantiation(declared, actual, bindings)
+        }
     }
         // ONE declaration can reach us TWICE. Emit assembles its pool from the
         // declaration registry AND the import context, and a `use`d alias sits in
@@ -67,6 +81,88 @@ fun adoptRecordAlias(
         // a shape keep their distinct hashes and stay ambiguous here, which is what
         // the guard is for.
         .distinctBy { (_, hash, _) -> hash }
-    val (aliasName, hash, _) = matches.singleOrNull() ?: return record
-    return record.copy(identity = TypeIdentity.declared(aliasName, hash))
+    val (aliasName, hash, aliasFields) = matches.singleOrNull() ?: return record
+    // Record HOW it was instantiated, so the type prints `Box Int` and not a bare
+    // `Box` (11.16). The argument order is the order the alias's type variables
+    // first appear across its declared fields, which is the declaration's own
+    // order whenever the parameters are used in the order they are declared --
+    // the ordinary case, and all that a single-parameter alias can mean.
+    val bindings = mutableMapOf<String, MezzeType>()
+    val order = mutableListOf<String>()
+    for ((name, declared) in aliasFields) {
+        val actual = record.fields[name] ?: continue
+        collectVarOrder(declared, actual, bindings, order)
+    }
+    return record.copy(
+        identity = TypeIdentity.declared(aliasName, hash),
+        typeArgs = order.mapNotNull { bindings[it] },
+    )
+}
+
+/**
+ * Does [subject] match [pattern], letting the PATTERN's type variables bind?
+ *
+ * One-way: only the pattern (an alias's declared field type) may contain
+ * variables to bind. A variable binds once and must agree thereafter, so a
+ * two-parameter-shaped alias cannot be satisfied by mismatched fields.
+ *
+ * Recurses through a type application's arguments, so `type Wrap 'a =
+ * { v: Option 'a }` is matched by `{ v = <Option Int> }`. Anything else must be
+ * equal outright -- deliberately conservative: adoption gives a literal a
+ * NOMINAL identity, and a loose match would hand it a name it is not.
+ */
+private fun matchesUpToInstantiation(
+    pattern: MezzeType,
+    subject: MezzeType,
+    bindings: MutableMap<String, MezzeType>,
+): Boolean = when (pattern) {
+    is MezzeType.VarType -> {
+        val held = bindings[pattern.variable.name]
+        if (held == null) {
+            bindings[pattern.variable.name] = subject
+            true
+        } else {
+            held == subject
+        }
+    }
+    is MezzeType.TypeApplication ->
+        subject is MezzeType.TypeApplication &&
+            pattern.constructor == subject.constructor &&
+            pattern.args.size == subject.args.size &&
+            pattern.args.indices.all {
+                matchesUpToInstantiation(pattern.args[it], subject.args[it], bindings)
+            }
+    else -> pattern == subject
+}
+
+
+/**
+ * Walk [pattern] against [subject] recording each of the pattern's type
+ * variables once, in first-appearance order.
+ *
+ * Same traversal as [matchesUpToInstantiation], which has already succeeded by
+ * the time this runs — so this only collects, never judges.
+ */
+private fun collectVarOrder(
+    pattern: MezzeType,
+    subject: MezzeType,
+    bindings: MutableMap<String, MezzeType>,
+    order: MutableList<String>,
+) {
+    when (pattern) {
+        is MezzeType.VarType -> {
+            val n = pattern.variable.name
+            if (n !in bindings) {
+                bindings[n] = subject
+                order.add(n)
+            }
+        }
+        is MezzeType.TypeApplication ->
+            if (subject is MezzeType.TypeApplication && pattern.args.size == subject.args.size) {
+                for (i in pattern.args.indices) {
+                    collectVarOrder(pattern.args[i], subject.args[i], bindings, order)
+                }
+            }
+        else -> {}
+    }
 }

@@ -1418,7 +1418,12 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                         val nextTok = argStream.current()
                                         if (nextTok?.type == TokenType.FOR) break
 
-                                        val typeResult = implTargetTypeAnnotation(argStream)
+                                        // FLAT here, unlike the target after `for`:
+                                        // these arguments fill the ability's parameter
+                                        // SLOTS one atom each, mirroring the ability
+                                        // declaration's own `for 'k 'v` list. See
+                                        // implAbilityArgTypeAnnotation.
+                                        val typeResult = implAbilityArgTypeAnnotation(argStream)
                                         when (typeResult) {
                                             is ParseResult.Success -> {
                                                 abilityTypeArgs.add(typeResult.value)
@@ -1592,12 +1597,99 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
     }
 
 /**
- * Parse a type annotation for impl target types.
- * Like typeApplicationAnnotation, but only consumes type variable args ('a, 'b)
- * and structural types ([T], {fields}) after a capitalized constructor.
- * Capitalized identifiers (String, Int) are NOT consumed as args — they are
- * separate target types for multi-parameter abilities.
+ * Parse the TARGET of an impl -- what comes after `for`.
+ *
+ * JUXTAPOSITION IS APPLICATION here, as in every other type position: after a
+ * capitalised constructor, a type variable (`'a`), a seq type (`[T]`) and a
+ * capitalised name are all consumed as arguments, so `impl Norm for Box Int` is
+ * one applied target and reads the way `Box Int` reads everywhere else.
+ *
+ * The two positions in an impl header are DIFFERENT, and deliberately:
+ *
+ *   impl Convert Int for Box Str
+ *        ^^^^^^^^^^^     ^^^^^^^
+ *        a flat LIST     ONE type
+ *
+ * Before `for` the arguments fill the ability's parameter slots, one atom each,
+ * mirroring the ability declaration's own `ability Convert for 'a 'b` -- see
+ * [implAbilityArgTypeAnnotation]. After `for` there is a single receiver type,
+ * so nothing competes with application and the ordinary reading applies.
+ *
+ * That split is what makes `impl Norm for Box Int` writable. One position
+ * cannot do both: a grammar that reads `Box Int` as an application cannot also
+ * read `Int Str` as two targets. A multi-parameter ability therefore fills its
+ * other slots before the `for` (`impl Convert Int for Str`), which is not a new
+ * spelling -- every consumer builds the tuple `abilityTypeArgs + targetTypes`
+ * with the receiver LAST (AbilityChecker, ImplValidator, TypedAstBuilder and the
+ * coherence check all spell it out), so the two forms were always one tuple.
+ *
+ * Several targets still parse when separated by a NEWLINE, which the caller's
+ * loop skips -- that is how the multiline signature form keeps working.
  */
+/**
+ * Parse ONE of the ability type arguments that precede `for`.
+ *
+ * FLAT: a capitalised name is NOT consumed as an argument, because each atom
+ * here fills a separate ability parameter slot. `impl TryInto Int for Str` fills
+ * `ability TryInto 'to for 'from`; `impl Result Response HttpError where` (an
+ * inherent impl, stdlib std::effects::http) fills two slots of `Result`.
+ *
+ * An APPLIED argument in this position is parenthesised, the way an argument
+ * that is itself an application has to be in any curried position.
+ *
+ * The mirror of [implTargetTypeAnnotation], whose doc comment has the diagram.
+ */
+internal val MezzeParser.implAbilityArgTypeAnnotation: Parser<ParsedTypeAnnotation>
+    get() = { stream ->
+        val first = simpleTypeArgument(stream)
+        when (first) {
+            is ParseResult.Success -> {
+                val firstAnnotation = first.value
+                if (firstAnnotation is ParsedNamedType && firstAnnotation.name[0].isUpperCase()) {
+                    val args = mutableListOf<ParsedTypeAnnotation>()
+                    var currentStream = first.remaining
+                    while (true) {
+                        parseTick(currentStream)  // anti-hang: bounded work per iteration
+                        val nextTok = currentStream.current()
+                        if (nextTok != null && nextTok.type == TokenType.IDENTIFIER &&
+                            nextTok.text.startsWith("'")
+                        ) {
+                            val argResult = simpleTypeArgument(currentStream)
+                            when (argResult) {
+                                is ParseResult.Success -> {
+                                    args.add(argResult.value)
+                                    currentStream = argResult.remaining
+                                }
+                                is ParseResult.Failure -> break
+                            }
+                        } else if (nextTok != null && nextTok.type == TokenType.LBRACKET) {
+                            val argResult = seqTypeAnnotation(currentStream)
+                            when (argResult) {
+                                is ParseResult.Success -> {
+                                    args.add(argResult.value)
+                                    currentStream = argResult.remaining
+                                }
+                                is ParseResult.Failure -> break
+                            }
+                        } else {
+                            break
+                        }
+                    }
+                    if (args.isNotEmpty()) {
+                        val file = currentFile ?: "<unknown>"
+                        val loc = spanLocTo(stream.current()!!, currentStream, file)
+                        ParseResult.Success(ParsedTypeApp(firstAnnotation.name, args, loc), currentStream)
+                    } else {
+                        first
+                    }
+                } else {
+                    first
+                }
+            }
+            is ParseResult.Failure -> first
+        }
+    }
+
 internal val MezzeParser.implTargetTypeAnnotation: Parser<ParsedTypeAnnotation>
     get() = { stream ->
         val first = simpleTypeArgument(stream)
@@ -1611,20 +1703,13 @@ internal val MezzeParser.implTargetTypeAnnotation: Parser<ParsedTypeAnnotation>
                     while (true) {
                         parseTick(currentStream)  // anti-hang: bounded work per iteration
                         val nextTok = currentStream.current()
-                        // Only consume type variables ('a), seq types ([T]), and record types ({fields})
-                        // Do NOT consume capitalized identifiers — those are separate target types.
-                        //
-                        // MEASURED, 2026-11-06: this is a GENUINE ambiguity, not a leftover.
-                        // Making a capitalised name associate as an argument — so that
-                        // `impl X for Box Int` is one applied target — breaks
-                        // `impl Convert for Int Str` for `ability Convert for 'a 'b`, which is
-                        // live in AbilityValidationTest, AbilityMethodCallTest,
-                        // AppliedTypeDispatchTest and ComprehensiveAbilitiesAndEffectsTest, and
-                        // cascades through the stdlib's codec impls. `impl X for (Box Int)` works
-                        // today, as does a bracketed `[{ k: Str, v: Str }]`. Resolving it in
-                        // favour of application needs a SEPARATOR for the multi-target form
-                        // (`for Int, Str`), which is a syntax change to existing code.
-                        if (nextTok != null && nextTok.type == TokenType.IDENTIFIER && nextTok.text.startsWith("'")) {
+                        // A type variable ('a), a capitalised name (Int), a seq type
+                        // ([T]) or a record type ({fields}) are all ARGUMENTS -- see
+                        // the function's doc comment for why the capitalised case
+                        // cannot be the multi-target reading as well.
+                        if (nextTok != null && nextTok.type == TokenType.IDENTIFIER &&
+                            (nextTok.text.startsWith("'") || nextTok.text[0].isUpperCase())
+                        ) {
                             val argResult = simpleTypeArgument(currentStream)
                             when (argResult) {
                                 is ParseResult.Success -> {
