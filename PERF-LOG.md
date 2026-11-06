@@ -6908,3 +6908,102 @@ type as a defect because it was inconvenient for the program I was writing, and
 never checked whether the member I wanted to abstract over was an ability. The
 first question about an unwanted inferred type is whether it is the most general
 one the system can express, and only then whether inference erred.
+
+### LEDGER UPDATE 2026-11-06 — records store numbers UNBOXED, and the arithmetic predicted the measurement
+
+The target the previous entry derived, taken in two steps. Both are measured by
+YOUNG-GC PAUSE COUNT, which is the right instrument for an allocation question
+and — unlike a timing — survives a rebuild. n=1e7, Serial GC, same heap, two
+runs each, and every "before" was taken by guarding the new specialization OFF
+in the same tree rather than by reading an older build.
+
+#### Step 1 — `MakeSingleFieldRecord` takes a primitive operand
+
+```
+  row 15  record alloc, 1 field   `{ r = i }`      37  ->  31, 30     19% less
+  row 13  the same loop building VARIANTS          40  ->  39, 39     unchanged (control)
+```
+
+The control is unchanged because a single-field variant payload takes the fused
+factory and never builds a record at all.
+
+#### Step 2 — `MakeRecord2`, a fixed-arity two-field operation
+
+```
+  row 18  record alloc, 2 fields  `{ a = i, b = i }`   42, 43  ->  33, 32   24% less
+  row 15  record alloc, 1 field              (control)  29, 29  ->  31, 30   unchanged
+  row 13  the same record INSIDE a variant    39, 38  ->  38           unchanged
+```
+
+**The arithmetic predicted it to within 1%**, which is the part worth keeping:
+
+```
+  before:  MezzeRecord 40B + Object[2] 24B + Long 16B + Long 16B  =  96B
+  after:   MezzeRecord 40B + long[2] 32B                          =  72B
+  predicted 72/96 = 0.75        measured 32.5/42.5 = 0.76
+```
+
+#### Why a NEW operation instead of fixing `MakeRecord`
+
+`MakeRecord` is variadic, and a `@Variadic Object[]` is already populated with
+BOXED values by the time the operation body runs — no work inside it can undo
+that. A FIXED-ARITY operation takes each operand as its own child and the
+Bytecode DSL hands primitives over unboxed, the same mechanism `AddLong` uses,
+with `@ForceQuickening` so the interpreter rewrites to the long-only bytecode
+after warmup. So arity 2 gets its own operation and the variadic one stays for
+arity 3+.
+
+Mixed types (one `Int`, one `Str`) fall to the object layout rather than
+multiplying specializations — three storage kinds across two fields is nine
+combinations, and the mixed ones are both rarer and cheaper to leave boxed.
+
+#### What this turned from dead to live
+
+`ShapeCache.getOrCreateSingleLong` had no callers at all. The note in
+`ReadFieldOrMethod.doRecordCached` already recorded it being dead once before,
+for the opposite reason — the read side used to read `objectFields`
+unconditionally. That half was fixed earlier; this is the other half, and the
+two together mean a record's typed storage is now both written and read.
+`BuiltinUnaryNodes.negateLong`, which reads `getLongField` behind
+`isLongRecord(args)` and had never fired, is live too.
+
+`RecordUnboxedStorageTest`, 11 tests, and they discriminate — guarding `doLong`
+off fails "an Int field is stored unboxed in the long array", guarding
+`doLongLong` off fails the two-field pair. They also pin the two things a second
+layout could have broken: a site that sees an `Int` and then a `Str` settles on
+the object layout and keeps working, and records with equal names and values
+compare equal across layouts (`equals` goes by field NAME through `getField`).
+
+#### Row 13 is the honest disappointment, and it names the next target
+
+A two-field record inside a variant shows NO measurable change, because the
+variant itself swamps it. `Tri { b = i, h = i }` is now three objects instead of
+five, but:
+
+```
+  MezzeVariant  ~64B      <- ten fields, whatever the shape
+  MezzeRecord    40B
+  long[2]        32B
+```
+
+The variant is the biggest single object in the chain and carries slots for
+every payload shape at once — `registry`, `tag`, `payloadType`, `payload`
+(`Object[]`), `longValue`, `doubleValue`, `singleValue`, `payloadLength`,
+`fusedFieldName`, and a volatile `materializedRecord` — to hold a tag and two
+longs. An earlier entry called that layout row CLOSED as a target on the
+grounds that cost is per-allocation rather than per-byte; the pause counts here
+say otherwise, because a pause count IS bytes.
+
+**NEXT, in order of measured payoff:**
+
+1. **Small records as ONE object, not two.** `{ a = i, b = i }` is still a
+   `MezzeRecord` plus a `long[2]` that spends a 16-byte header on 16 bytes of
+   payload. Inline fields on a small-arity record would make it a single
+   ~32-40B object — roughly another halving on rows 15 and 18, and the same
+   saving again inside every variant payload.
+2. **The `MezzeVariant` layout**, now that row 13 shows it dominating its own
+   chain. `MezzeRecord` is `final` with only 9 external construction sites, and
+   `MezzeVariant` is `final` too, so both are tractable; the readers all go
+   through accessors that already switch on the shape's storage kind.
+3. Arity 3+ records, which still take the variadic boxed path. Worth doing after
+   (1), because (1) changes what the fixed-arity operations should construct.

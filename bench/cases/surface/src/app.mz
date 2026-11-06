@@ -217,6 +217,14 @@ let l_hold1 = { i, acc, last } -> if i <= 0 then acc
     let v = if i % 3 == 0 then One { a = i } else if i % 3 == 1 then Two { b = i } else Three { c = i }
     l_hold1 { i = i - 1, acc = acc + 1, last = v }
 
+## A TWO-FIELD record, threaded the same way. Read against `record alloc,
+## 1 field`: this is where the two-field record layout shows up undiluted. In
+## row 13 the same record sits inside a variant whose own ~64 bytes swamp it.
+let l_rec2 = { i, acc, last } -> if i <= 0 then acc
+  else do
+    let v = if i % 3 == 0 then { a = i, b = i } else if i % 3 == 1 then { a = i + 1, b = i } else { a = i + 2, b = i }
+    l_rec2 { i = i - 1, acc = acc + 1, last = v }
+
 ## `if let` is a match GUARD here, not a standalone expression — the arm binds
 ## the scrutinee and the guard destructures something else.
 let l_if_let = { i, acc } -> if i <= 0 then acc
@@ -289,3 +297,5 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "1-field only: build+match", thunk = {} -> l_match1 { i = n, acc = 0 } }
   report { idx = 17, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "1-field only: alloc only ", thunk = {} -> l_hold1 { i = n, acc = 0, last = One { a = 0 } } }
+  report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "record alloc, 2 fields", thunk = {} -> l_rec2 { i = n, acc = 0, last = { a = 0, b = 0 } } }

@@ -2998,6 +2998,16 @@ public final class BytecodeCompiler {
                 b.beginMakeSingleFieldRecord(fieldNames);
                 emitNode(m.getFields().get(0).getValue(), b, argCount, localMap);
                 b.endMakeSingleFieldRecord();
+            } else if (fieldNames.length == 2) {
+                // Two-field record: fixed arity, so the operands arrive as
+                // PRIMITIVES when they are numbers. The variadic MakeRecord
+                // below cannot do that — its Object[] is already full of boxes
+                // by the time the operation runs. See MakeRecord2.
+                b.beginMakeRecord2(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord2();
             } else {
                 b.beginMakeRecord(fieldNames);
                 for (FieldIR f : m.getFields()) {

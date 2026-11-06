@@ -56,6 +56,34 @@ class RecordUnboxedStorageTest {
     }
 
     @Test
+    fun `two Int fields are stored unboxed in the long array`() {
+        val r = record("{ a = 7, b = 9 }")
+        assertEquals(2, r.longFieldCount, "both Ints should occupy long[] slots")
+        assertEquals(0, r.objectFieldCount, "neither should be boxed")
+        assertEquals(7L, r.getField("a"))
+        assertEquals(9L, r.getField("b"))
+    }
+
+    @Test
+    fun `two Float fields are stored unboxed in the double array`() {
+        val r = record("{ a = 1.5, b = 2.5 }")
+        assertEquals(2, r.doubleFieldCount)
+        assertEquals(0, r.objectFieldCount)
+        assertEquals(1.5, r.getField("a"))
+        assertEquals(2.5, r.getField("b"))
+    }
+
+    /** Mixed types have no all-primitive layout, so the object one is correct. */
+    @Test
+    fun `a mixed Int and Str pair uses object storage and stays correct`() {
+        val r = record("""{ a = 7, s = "hi" }""")
+        assertEquals(2, r.objectFieldCount)
+        assertEquals(0, r.longFieldCount)
+        assertEquals(7L, r.getField("a"))
+        assertEquals("hi", r.getField("s"))
+    }
+
+    @Test
     fun `a Str field still uses object storage`() {
         val r = record("""{ s = "hi" }""")
         assertEquals(1, r.objectFieldCount, "a Str has no unboxed slot to go in")

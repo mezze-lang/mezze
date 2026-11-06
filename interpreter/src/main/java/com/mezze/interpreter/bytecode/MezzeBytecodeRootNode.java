@@ -989,6 +989,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          * the time the operation body runs.
          */
         @Specialization
+        @ForceQuickening
         public static MezzeRecord doLong(String[] fieldNames, long value,
                 @Cached(value = "resolveLongShape(fieldNames)", allowUncached = true)
                     com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
@@ -997,6 +998,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         /** The `Float` peer of {@link #doLong}. */
         @Specialization
+        @ForceQuickening
         public static MezzeRecord doDouble(String[] fieldNames, double value,
                 @Cached(value = "resolveDoubleShape(fieldNames)", allowUncached = true)
                     com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
@@ -1031,6 +1033,81 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         static com.mezze.interpreter.values.MezzeRecord.Shape resolveDoubleShape(String[] fieldNames) {
             return com.mezze.interpreter.values.ShapeCache.getOrCreateSingleDouble(fieldNames);
+        }
+    }
+
+    /**
+     * Two-field record creation with TYPED OPERANDS.
+     *
+     * <p>Why this exists next to the variadic {@link MakeRecord}: a
+     * {@code @Variadic Object[]} is populated with BOXED values before the
+     * operation body runs, so no amount of work inside {@code MakeRecord} can
+     * avoid the boxes. A fixed-arity operation takes each operand as its own
+     * child and the Bytecode DSL hands primitives over unboxed — the same
+     * mechanism {@link AddLong} uses, with {@code @ForceQuickening} so the
+     * interpreter rewrites to the long-only bytecode after warmup.
+     *
+     * <p>What it removes, measured on {@code Tri { b: Int, h: Int }} — a
+     * two-field variant constructor, the worst case on the board:
+     *
+     * <pre>
+     *   before: MezzeVariant + MezzeRecord + Object[2] + Long + Long  = 5
+     *   after:  MezzeVariant + MezzeRecord + long[2]                  = 3
+     * </pre>
+     *
+     * <p>Arity two covers the shapes that actually recur: {@code { l, r }} for
+     * binary operands, {@code { acc, x }} for folds, and most multi-field
+     * variant payloads. MIXED types (one Int, one Str) fall to the object
+     * layout rather than multiplying specializations — three storage kinds
+     * across two fields is nine combinations, and the mixed ones are both
+     * rarer and cheaper to leave boxed.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class MakeRecord2 {
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doLongLong(String[] fieldNames, long a, long b,
+                @Cached(value = "resolveAllLongShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, new long[]{a, b}, EMPTY_DOUBLES, EMPTY_OBJECTS);
+        }
+
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doDoubleDouble(String[] fieldNames, double a, double b,
+                @Cached(value = "resolveAllDoubleShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, new double[]{a, b}, EMPTY_OBJECTS);
+        }
+
+        /**
+         * Mixed or non-primitive, and the replacement once a site has seen
+         * more than one layout — a site must not thrash between shapes.
+         * Readers are unaffected either way: {@code MezzeRecord.getField} and
+         * {@code ReadFieldOrMethod.doRecordCached} both switch on the shape's
+         * storage kind.
+         */
+        @Specialization(replaces = {"doLongLong", "doDoubleDouble"})
+        public static MezzeRecord doGeneric(String[] fieldNames, Object a, Object b,
+                @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b});
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllLongShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllLong(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllDoubleShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllDouble(fieldNames);
         }
     }
 
