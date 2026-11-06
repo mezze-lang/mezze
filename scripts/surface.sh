@@ -22,6 +22,15 @@
 # need no common n. Ratios are what survive between two builds on a machine that
 # drifts; absolute nanoseconds are not.
 #
+# ROWS 19-22 ARE A SLOPE, not ratios. `to_upper` and `concat` each run over a
+# 15-character and a 131-character string, because a ratio to a control that
+# does ONE add cannot compare an O(1) operation with an O(n) one: `str::size`
+# reads 2x because it reads a field, `str::to_upper` reads 262x because it
+# transforms 64 characters. Subtract the pair and divide by the length
+# difference and the fixed cost cancels, leaving ps per character — 793 for
+# to_upper against 32 for concat copying the same bytes. Read every O(n) string
+# row that way.
+#
 # MATCHING AND ALLOCATION ARE DIFFERENCES, not rows. Four rows share ONE inline
 # selector (`if i % 3 == 0 ... else if i % 3 == 1 ... else ...`) and differ by
 # exactly one thing each, against the `choose-ctor arith only` baseline:
@@ -63,7 +72,8 @@ fi
 # row:n — n sized so one pass is >= ~20ms at that row's measured cost
 ROWS="1:80000000 2:10000000 3:20000000 4:2000000 5:400000 6:5000000 \
 7:10000000 8:10000000 9:40000000 10:10000000 11:10000000 12:10000000 \
-13:10000000 14:10000000 15:10000000 16:10000000 17:10000000 18:10000000"
+13:10000000 14:10000000 15:10000000 16:10000000 17:10000000 18:10000000 \
+19:4000000 20:1000000 21:8000000 22:4000000"
 
 cd "$DIR" || exit 1
 echo "surface: one row per process, two sizes each, control n=$FLOOR_N"

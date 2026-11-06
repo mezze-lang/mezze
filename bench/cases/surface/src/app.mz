@@ -121,6 +121,31 @@ let l_upper = { i, acc, s } -> if i <= 0 then acc
 let l_split = { i, acc, s } -> if i <= 0 then acc
   else l_split { i = i - 1, acc = acc + seq::size { xs = str::split { s = s, delimiter = " " } }, s = s }
 
+## THE SLOPE ROWS. Every ratio above is against a control that does ONE add, so
+## an O(1) operation and an O(n) one are not comparable on it: `str::size` reads
+## 2x the control because it reads a field, and `str::to_upper` reads 262x
+## because it transforms 64 characters. Dividing by 64 is only legitimate if the
+## cost really is linear in the length — so measure it instead of assuming.
+## These two rows run `to_upper` over a SHORT and a LONG string; the difference
+## in cost divided by the difference in length is ps per character, which is the
+## number that can be compared against `str::concat` copying the same bytes.
+let short_s = "the quick brown"
+let long_s = "the quick brown fox jumps over the lazy dog and keeps on running and running and running and running and running and running and on"
+
+let l_upper_short = { i, acc } -> if i <= 0 then acc
+  else l_upper_short { i = i - 1, acc = acc + str::size { s = str::to_upper { s = short_s } } }
+
+let l_upper_long = { i, acc } -> if i <= 0 then acc
+  else l_upper_long { i = i - 1, acc = acc + str::size { s = str::to_upper { s = long_s } } }
+
+## The same pair for concat, which is the thing to_upper should be compared
+## against: it allocates a new string and copies the same bytes.
+let l_concat_short = { i, acc } -> if i <= 0 then acc
+  else l_concat_short { i = i - 1, acc = acc + str::size { s = str::concat { l = short_s, r = "x" } } }
+
+let l_concat_long = { i, acc } -> if i <= 0 then acc
+  else l_concat_long { i = i - 1, acc = acc + str::size { s = str::concat { l = long_s, r = "x" } } }
+
 let l_interp = { i, acc, s } -> if i <= 0 then acc
   else l_interp { i = i - 1, acc = acc + str::size { s = str::concat { l = int::to_str { n = i }, r = s } }, s = s }
 
@@ -299,3 +324,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "1-field only: alloc only ", thunk = {} -> l_hold1 { i = n, acc = 0, last = One { a = 0 } } }
   report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "record alloc, 2 fields", thunk = {} -> l_rec2 { i = n, acc = 0, last = { a = 0, b = 0 } } }
+  report { idx = 19, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "to_upper  15 chars", thunk = {} -> l_upper_short { i = n, acc = 0 } }
+  report { idx = 20, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "to_upper 131 chars", thunk = {} -> l_upper_long { i = n, acc = 0 } }
+  report { idx = 21, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "concat    15 chars", thunk = {} -> l_concat_short { i = n, acc = 0 } }
+  report { idx = 22, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "concat   131 chars", thunk = {} -> l_concat_long { i = n, acc = 0 } }

@@ -7091,3 +7091,89 @@ accessor that already switches on the shape's storage kind, so the surface is
 tractable; `MezzeVariant` has 876 external references but they are nearly all
 to the TYPE, and this entry's change proves the layout is private enough to
 move underneath them.
+
+### LEDGER UPDATE 2026-11-07 — the string ratios were not comparable, and `to_upper` is 25x `concat` PER CHARACTER
+
+#### The instrument was wrong, and it is wrong in a way this ledger warned about
+
+Every string row above is a ratio to a control that performs ONE add. That is
+fine for `str::size`, which is O(1) and reads 2x. It is meaningless for
+`str::to_upper`, which reads 262x — because it transforms 64 characters, and
+the control transforms nothing. Comparing an O(1) row and an O(n) row on the
+same ratio axis is the same category error as comparing two kernels in
+different warmup regimes, and it is why `str::split` at "1 480x" sounded like
+the end of the world and `to_upper` at "262x" sounded like a footnote.
+
+The fix is the one this repo already has a rule for: **measure the slope.** Rows
+19-22 run `to_upper` and `concat` over a 15-character and a 131-character
+string, so the fixed cost cancels and what is left is cost per character.
+
+```
+  op         15 chars   131 chars    ps/CHAR   fixed
+  to_upper     16 253     108 195       793    4.4 ns
+  concat        8 576      12 290        32    8.1 ns
+```
+
+**`to_upper` costs 25x what `concat` costs per character** — 2.6 cycles a
+character against 0.1 — and `concat` is doing strictly more in the fixed part
+(it allocates). So the per-character transformation is the whole story, and the
+262x headline was mostly string length.
+
+That also corrects a guess made an hour earlier in this session: I had reasoned
+that `to_upper` must be near its floor because the JDK already works on
+`byte[]` in a single pass. `concat`'s 32 ps/char says byte-level work on this
+machine runs an order of magnitude faster than that.
+
+#### TRIED, MEASURED WORSE, REVERTED — and the wrong inference is the lesson
+
+The attempt: guard-scan for a non-ASCII character, then
+`getBytes(ISO_8859_1)` -> a `byte[]` loop doing `c >= 'a' && c <= 'z' ? c - 32
+: c` -> `new String(bytes, ISO_8859_1)`, with the JDK kept for anything
+non-ASCII and for the `Locale.ROOT` fallback.
+
+```
+  row                      before    with the change    controls
+  to_upper  15 chars       16 253       22 400  +38%
+  to_upper 131 chars      108 195      120 483  +11%
+  concat    15 chars        8 576        8 608          unchanged
+  concat   131 chars       12 290       12 387          unchanged
+  str::contains             5 068        5 076          unchanged
+```
+
+Slope went 793 -> 846 ps/char and the fixed cost went 4.4 -> 9.7 ns. Reverted,
+and the revert re-measured at 16 439 / 107 229, back where it started.
+
+**The inference that was wrong.** I read `concat`'s 32 ps/char as "byte-level
+work reaches ~10 bytes/cycle here, so a byte loop will too". It does not.
+`concat`'s rate comes from an INTRINSIC array copy — `System.arraycopy` /
+`StringConcatHelper`, which compile to a vectorized block move. A hand-written
+loop with a CONDITIONAL STORE is not that shape, and C2 did not vectorize it.
+On top of that the round trip added two allocations, and the guard scan's early
+exit (`return` on the first non-ASCII char) is itself an unvectorizable loop.
+
+So: a measured rate from an intrinsic is not evidence about what a loop will
+achieve. Same family as the error the SIMD attempt made and the error the
+cross-build comparisons made — reasoning from a number taken under different
+conditions than the one being predicted.
+
+#### Where the row lands
+
+| row | state |
+|---|---|
+| `str::to_upper` / `to_lower` | **ABOVE FLOOR, 25x `concat` per character, cause named.** The JDK converts one character at a time through a `CharacterDataLatin1` lookup plus an encodability check. Real, and worth ~25x if it could be vectorized |
+| the Java-level route to closing it | **CLOSED, with evidence.** An `ISO_8859_1` byte round-trip measures WORSE (above). A vectorized conversion needs the string's own `byte[]`, which Java does not expose, so closing this needs a Graal/Truffle intrinsic rather than guest-side or native-Java code |
+| the string ratio axis | **FIXED.** Rows 19-22 give slope + intercept. Every O(n) string row should be read that way, and the ratios to a one-add control should not be compared against O(1) rows |
+
+#### What this does NOT change
+
+`str::split`'s 1.88x stands — that was a regex compile per call, measured with
+fourteen untouched control rows, and it is a fixed cost removed rather than a
+per-character rate. The allocation work stands too: four commits, each with a
+control the change could not affect.
+
+**NEXT is back to allocation**, which remains the largest closable gap:
+`{ r = i }` is a 32-byte record plus a `long[1]` spending a 16-byte header on 8
+bytes of payload. Inline fields on a small-arity record collapse that to one
+object — and unlike the `to_upper` attempt, the mechanism is an object layout
+rather than a hoped-for vectorization, which is the kind of change that has
+actually paid this session.
