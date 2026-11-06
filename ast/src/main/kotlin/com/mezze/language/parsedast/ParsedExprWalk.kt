@@ -43,7 +43,13 @@ fun ParsedExpr.children(): List<ParsedExpr> = when (this) {
     is ParsedPipe -> listOf(left, right)
     is ParsedIf -> listOf(condition, thenBranch, elseBranch)
     is ParsedMatch -> listOf(scrutinee) +
-        cases.flatMap { case -> listOfNotNull(case.guard) + case.body + case.ifLetBindings.map { it.expr } }
+        // `altGuards` are children too. Leaving them out hid them from every
+        // analysis built on this walker -- used-variable collection, dead-code
+        // scanning, anything that asks "what expressions are in here".
+        cases.flatMap { case ->
+            listOfNotNull(case.guard) + case.altGuards.filterNotNull() +
+                case.body + case.ifLetBindings.map { it.expr }
+        }
     is ParsedDo -> statements.mapNotNull { stmt ->
         when (stmt) {
             is ParsedStatement.Let -> stmt.value
@@ -163,6 +169,11 @@ fun ParsedExpr.mapChildren(f: (ParsedExpr) -> ParsedExpr): ParsedExpr = when (th
     is ParsedMatch -> copy(scrutinee = f(scrutinee), cases = cases.map { c ->
         c.copy(
             guard = c.guard?.let(f),
+            // Mapped, not carried through unchanged: a transform that rebuilt the
+            // case without this returned guards the transform had never seen, so
+            // a rewrite would silently leave them stale -- or drop them, since
+            // `copy` keeps the OLD value and the old value was the point.
+            altGuards = c.altGuards.map { g -> g?.let(f) },
             body = f(c.body),
             ifLetBindings = c.ifLetBindings.map { it.copy(expr = f(it.expr)) },
         )

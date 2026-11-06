@@ -905,6 +905,13 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
                 case.patterns.forEachIndexed { i, p ->
                     if (i > 0) append(" | ")
                     printPattern(p)
+                    // A guard is scoped to ITS alternative, so it prints next to
+                    // that pattern. Printing only `case.guard` below silently
+                    // DELETED every per-alternative guard: `Red if a | Pink if b`
+                    // came back as `Red | Pink`, which still compiles and means
+                    // something else. A formatter that loses code is worse than
+                    // one that formats badly.
+                    case.altGuards.getOrNull(i)?.let { append(" if "); printExpr(it) }
                 }
                 case.guard?.let { append(" if "); printExpr(it) }
                 for (ifLet in case.ifLetBindings) {

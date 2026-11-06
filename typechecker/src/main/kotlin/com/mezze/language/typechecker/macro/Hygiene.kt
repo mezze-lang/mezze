@@ -88,6 +88,19 @@ internal class Hygiene(
                 c.ifLetBindings.flatMap { it.pattern.extractBindings() }
             c.copy(
                 guard = c.guard?.let { expr(it, caseBound) },
+                // Renamed too, or a macro-expanded per-alternative guard keeps
+                // the macro's own names and captures whatever the call site
+                // happens to have bound -- the exact capture hygiene exists to
+                // stop. Each guard is renamed under ITS OWN alternative's
+                // bindings, since that is all it can see.
+                altGuards = c.altGuards.mapIndexed { i, g ->
+                    g?.let {
+                        val altBound = bound +
+                            (c.patterns.getOrNull(i)?.extractBindings() ?: emptyList()) +
+                            c.ifLetBindings.flatMap { b -> b.pattern.extractBindings() }
+                        expr(it, altBound)
+                    }
+                },
                 ifLetBindings = c.ifLetBindings.map { it.copy(expr = expr(it.expr, caseBound)) },
                 body = expr(c.body, caseBound),
             )
