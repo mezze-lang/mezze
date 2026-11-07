@@ -104,6 +104,39 @@ object AbilityValidator {
      * `DerivedImplGenerator` synthesizes `impl Eq for { f1: T1, … }` for an
      * anonymous shape holding a newtype, and that path builds the decl directly.
      */
+    /**
+     * Is [name] a transparent alias whose target has a NAME OF ITS OWN, and so
+     * cannot carry an impl under the alias's name?
+     *
+     * Returns how to spell that target, or null when an impl here is fine.
+     *
+     * The dividing line is whether the type NODE keeps an identity:
+     * `RecordType` and `VariantType` do, which is why `impl Norm for Point2`
+     * dispatches — a bare record literal adopts `Point2` and finds it. A
+     * primitive, a seq and a function type keep none, so the alias name is lost
+     * between the impl and the call.
+     *
+     * Resolved transitively, because `type A = Int; type B = A` hides the
+     * primitive one link further out. Bounded by [seen] so a cyclic alias asks
+     * this question once rather than forever.
+     */
+    private fun aliasOfUnnameableTarget(
+        name: String,
+        registry: DeclarationRegistry,
+        seen: MutableSet<String> = mutableSetOf(),
+    ): String? {
+        if (!seen.add(name)) return null
+        val def = registry.lookupType(name)?.definition as? ParsedTypeAliasDef ?: return null
+        return when (val aliased = def.aliasedType) {
+            is ParsedNamedType ->
+                if (PrimitiveTypes.fromName(aliased.name) != null) aliased.name
+                else aliasOfUnnameableTarget(aliased.name, registry, seen)
+            is ParsedSeqType -> "a seq type"
+            is ParsedFunctionType -> "a function type"
+            else -> null
+        }
+    }
+
     private fun validateTargetIsNamed(
         impl: ParsedImplAbilityDecl,
         loc: Loc,
@@ -129,6 +162,34 @@ object AbilityValidator {
                     // Effect performers are unaffected: `impl Log for Console`
                     // is a ParsedPerformerDecl and never reaches here.
                     val n = target.name
+                    // An impl goes on a type's OWN name. For a record or variant
+                    // the `type` name IS its only name, so an impl there is right
+                    // and stays. For a primitive, a seq or a function type the
+                    // thing already HAS a name — `Int`, `[Int]`, the signature —
+                    // and the alias is a second spelling of it.
+                    //
+                    // Declaring the impl on the spelling is SILENTLY DEAD: those
+                    // type nodes carry no identity, so the alias name never
+                    // reaches dispatch and a use site is told the underlying type
+                    // does not implement the ability. It is also unnecessary — a
+                    // transparent alias INHERITS the aliased type's impls, which
+                    // is what TypeAliasTransparencyTest pins (`type MyInt = Int`
+                    // already has `Eq` and arithmetic, with no impl written).
+                    aliasOfUnnameableTarget(n, registry)?.let { underlying ->
+                        throw TypeCheckError(
+                            "`$n` is a transparent alias of $underlying, so an impl declared for " +
+                            "it can never be found: the alias name does not survive to the use " +
+                            "site. A transparent alias already inherits the impls of the type it " +
+                            "aliases.",
+                            loc,
+                            code = ErrorCode.V0706_PRIMITIVE_TYPE_ALIAS,
+                            hints = listOf(
+                                "to implement for the underlying type: `impl … for $underlying`",
+                                "for a DISTINCT type that carries its own impls: " +
+                                    "`newtype $n = $underlying`",
+                            ),
+                        )
+                    }
                     if (n.isTypeVarName() ||
                         BuiltinTypes.isBuiltinTypeName(n) ||
                         registry.lookupType(n) != null ||

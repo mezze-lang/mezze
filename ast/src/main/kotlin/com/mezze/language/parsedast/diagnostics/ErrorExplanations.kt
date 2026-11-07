@@ -505,6 +505,28 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.V0705_TYPE_ARITY_MISMATCH ->
         "A type constructor was applied with the wrong number of type arguments."
 
+    ErrorCode.V0706_PRIMITIVE_TYPE_ALIAS ->
+
+        "A `type` is a SPELLING, not a new type. It is transparent everywhere, " +
+
+            "so `type Id = Int` lets any `Int` be passed where an `Id` is asked " +
+
+            "for, and back again — it enforces nothing.\n\n" +
+
+            "It also cannot carry an impl. An impl needs its target to keep an " +
+
+            "IDENTITY that a receiver can be matched against. A record or variant " +
+
+            "type keeps one; a primitive has nowhere to record it, so the alias " +
+
+            "name never reaches dispatch and the impl would be silently dead.\n\n" +
+
+            "`newtype Id = Int` is the distinct type: nominal, opaque, erased at " +
+
+            "runtime, and it carries impls. Or write `Int` directly where a plain " +
+
+            "integer is what is meant."
+
     ErrorCode.V0707_CONSTRUCTOR_MUST_BE_UPPERCASE ->
         "Variant constructors must start with an uppercase letter."
 
