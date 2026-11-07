@@ -3957,14 +3957,22 @@ the derived map's value, a one-entry base, and the SortedMap equivalents.
 
 ### What it would take, and why no quick fix was shipped
 
-Making the replace branch clone instead of mutating is three lines and is
-CORRECT, but it makes every replace O(n). That is not a small cost:
-`bench/cases/mapsurface` row 8 measures a chain of replaces at 13 535 ps, and it
-is that fast precisely because of the in-place write — so the honest version of
-the fix is a visible 50-100x regression on a common operation at 1 000 keys.
-Shipping a silent wrong value is worse than shipping a slow correct one, but
-there is a third option that is better than both and already on the perf
-backlog.
+Making the replace branch clone instead of mutating is three lines, and it was
+written and VERIFIED to close this bug — the regression test above passes with
+it. It was not shipped because its cost was then measured rather than guessed:
+
+```
+  map::insert chain, keys already present   250 keys    1 000     4 000
+    HEAD, in-place (unsound)                  13 128   13 702    16 326   O(1)
+    clone on replace (correct)               391 765  1 420 019  5 795 685  O(n)
+    cost of correctness                        29.8x    103.6x     355x
+```
+
+So correctness on this path costs 30x at 250 keys, 104x at 1 000 and 355x at
+4 000, and grows without bound. Shipping a silent wrong value is worse than
+shipping a slow correct one — but there is a third option better than both, and
+it is already on the perf backlog, which is why this is filed OPEN with a repro
+and a disabled regression test rather than patched.
 
 A structure that SHARES rather than copying on branch — a HAMT, path-copying on
 update — gives a correct O(log n) replace and simultaneously closes the other

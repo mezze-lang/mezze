@@ -9323,8 +9323,20 @@ persistent map needs is "no map may observe a mutation it did not make".
 
 **AND IT MEANS A NUMBER IN THIS LEDGER RESTS ON IT.** `mapsurface` row 8, the
 chain of replaces at 13 535 ps, is that fast *because* of the in-place write.
-The three-line correct fix — clone on the replace branch — is a 50-100x
-regression on it at 1 000 keys. A sharing structure (HAMT, path-copying) gives a
+The three-line correct fix was written, verified to close the bug, and then
+MEASURED rather than estimated:
+
+```
+  map::insert chain, keys already present   250 keys    1 000     4 000
+    HEAD, in-place (unsound)                  13 128   13 702    16 326   O(1)
+    clone on replace (correct)               391 765  1 420 019  5 795 685  O(n)
+    cost of correctness                        29.8x    103.6x     355x
+```
+
+Thirty times at 250 keys, a hundred at a thousand, three hundred and fifty at
+four thousand, and unbounded beyond. An earlier line in this entry guessed
+50-100x; the real shape is that the ratio GROWS, because one side is O(1) and
+the other O(n), so no single multiplier describes it. A sharing structure (HAMT, path-copying) gives a
 correct O(log n) replace instead, and closes the shared-base insert cliff
 (5.41 µs at 4 000 keys, unbounded) at the same time, because both are the same
 missing property. **That is now the ranked next item, and the bug makes it
