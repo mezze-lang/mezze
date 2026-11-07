@@ -4917,8 +4917,37 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
         }
 
-        @Specialization(assumptions = "effectStable",
-                        guards = {"cachedHandler != null", "cachedTarget != null",
+        // NO `assumptions` HERE, and that is the point. This specialization
+        // already RE-RESOLVES AND COMPARES on every call —
+        // `resolveHandler(effectHash) == cachedHandler` — which is strictly
+        // stronger than any assumption that the handler has not changed. The
+        // assumption it used to carry (`effectStable`) was therefore redundant
+        // for correctness and did nothing but make this tier UNAVAILABLE at
+        // exactly the moment it is needed.
+        //
+        // WHAT THAT COST, measured. `StabilityAssumption.CHURN_LIMIT` is 8 and
+        // the back-off is permanent, so after eight install/uninstall pairs of
+        // an effect's handler the per-effect assumption is NEVER_VALID for the
+        // life of the process. With `effectStable` on this specialization too,
+        // both cached tiers vanished together and every later perform of that
+        // effect fell to `doGeneric`: `bench/cases/effectsurface` kernel 9
+        // measured 25 118 ps/iter against kernel 3's 826 in a pristine
+        // process — 31x, permanently. Kernel 10 pins it on this axis: churning
+        // a DIFFERENT effect leaves the per-effect assumption intact and costs
+        // 987 against 857, so the 31x is this tier's absence and not the global
+        // assumption that `EffectBinding` uses.
+        //
+        // Now the tiers degrade instead of collapsing:
+        //   - `doCachedSingleThreaded` — assumption only, NO check. Every
+        //     single-threaded program with a stable handler, and it must stay
+        //     free: the check it skips is the ThreadLocal probe the cache
+        //     exists to remove.
+        //   - this one — cache plus a per-call probe and reference compare.
+        //     Reached when a second thread installs handlers OR when the
+        //     effect's handler has churned past the limit.
+        //   - `doGeneric` — only when the handler genuinely is not the cached
+        //     one.
+        @Specialization(guards = {"cachedHandler != null", "cachedTarget != null",
                                   "resolveHandler(effectHash) == cachedHandler"},
                         excludeForUncached = true)
         public static Object doCachedShared(Hash effectHash, String opName, Object arg,
@@ -4926,7 +4955,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
-                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
             return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
         }

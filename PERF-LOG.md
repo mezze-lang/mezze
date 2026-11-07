@@ -7947,3 +7947,103 @@ could resolve `resume`/`abort` the same way, churning one effect's handler would
 cost that effect its per-effect assumption and nothing else, and the
 process-global cliff would disappear. That is the shape to try next, and the
 31x above is what it is worth.
+
+#### FIXED, 2.6x — one redundant `assumptions` clause was making the tiers collapse instead of degrade
+
+The entry above ranked "give `EffectBinding` an assumption that tracks what it
+actually needs" as the next step, worth the 31x. **Kernel 10 re-ranked it before
+any of that was built**, which is what it was added for: churn a DIFFERENT
+effect and then perform, so the global assumption dies while the performed
+effect's per-effect assumption stays intact.
+
+```
+  kernel 3   one op, pristine process               857 ps/iter
+  kernel 10  one op, after churning ANOTHER effect  987        <- global assumption DEAD
+  kernel 9   one op, after churning the SAME effect 24 795     <- per-effect assumption dead
+```
+
+So the global assumption's death costs ~15%, and the entire 31x is the
+PER-EFFECT one. The `EffectBinding` angle was worth a seventh of what the
+previous entry claimed for it. Measured before built.
+
+#### The actual cause: a redundant assumption on a tier that already verifies
+
+`PerformD` has three tiers, and the middle one carried both a guard and an
+assumption:
+
+```java
+  @Specialization(assumptions = "effectStable",
+                  guards = {"cachedHandler != null", "cachedTarget != null",
+                            "resolveHandler(effectHash) == cachedHandler"},   // re-resolves and COMPARES
+                  excludeForUncached = true)
+  public static Object doCachedShared(...)
+```
+
+That guard re-resolves the installed handler and compares it on **every call** —
+strictly stronger than an assumption that it has not changed. The assumption was
+redundant for correctness, and its only effect was to remove this tier at
+exactly the moment it becomes useful: `effectStable` dies after eight churns,
+and both cached tiers vanished together, so every later perform of that effect
+fell to `doGeneric`.
+
+Dropping `assumptions = "effectStable"` from that one specialization makes the
+tiers DEGRADE instead of collapsing:
+
+- `doCachedSingleThreaded` — assumption only, no check. Every single-threaded
+  program with a stable handler, and it must stay free.
+- `doCachedShared` — cache plus a per-call probe and reference compare. Now
+  reached when a second thread installs handlers **or** when the effect's
+  handler has churned past the limit.
+- `doGeneric` — only when the handler genuinely is not the cached one.
+
+#### Measured on a quiet machine, interleaved, minima of nine
+
+```
+  kernel                                  before     after    verdict
+  9  op after churning the SAME effect   24 795     9 521     2.6x
+  5  install a handler per iteration     85 930    64 741     1.33x
+  3  op, pristine                 (ctrl)    826       815     flat
+  10 op after churning another   (ctrl)      987       837     flat
+  7  chain of four handlers      (ctrl)      910       925     flat
+```
+
+Three controls flat, two affected rows improved. Kernel 5 improves as a
+by-product: after its own churn, the performs inside it now take the verify tier
+rather than the generic path.
+
+**An earlier reading of this same change was void and discarded.** A run taken
+at load average 23 — thirteen stray gradle processes — had every row including
+all three controls 2-4x worse than baseline, kernel 5 worse than before the
+change. The controls moving is what said so; the numbers above were retaken
+after `./gradlew --stop` and waiting for load below 4.
+
+#### Two test-method corrections, both caught rather than shipped
+
+`EffectHandlerChurnCorrectnessTest` churns an effect past the limit and then
+alternates two handlers that answer differently — the shape that would read a
+stale cache if the surviving tier's guard were not load-bearing.
+
+1. **The first version ran 32 iterations and passed with the guard REMOVED.** It
+   never reached the tier at all: `excludeForUncached = true` means the uncached
+   path skips these specializations, and a short program never specializes. The
+   identical trap that let nine of ten `ResumeFallThroughSemanticsTest` cases
+   pass earlier the same day. Loops raised to 2000.
+
+2. **Claiming non-vacuity by removing the guard was still wrong**, and remains
+   wrong at 2000 iterations. A SENTINEL settled coverage instead: making
+   `doCachedShared` return a fixed value fails two of the five tests, so those
+   two provably execute the changed tier. Removing the guard does not fail them
+   because without it the DSL has nothing to select a cached instance on — the
+   initializer stops being cached at all, and the result is
+   correct-but-pointless rather than stale. The guard picks the right cached
+   instance; the DSL degrades safely without it.
+
+#### What is left on this row
+
+The verify tier costs ~8.7 ns over the no-check tier (9 521 against 815), which
+is a `ThreadLocal` probe plus `resolveHandler` walking the chain for the
+innermost handler of that effect. That is the remaining gap between a churned
+and a pristine program, and it is 2.6x better than the generic path it replaces
+rather than closed. Narrowing it means making `resolveHandler` cheaper — a
+per-effect slot rather than a scan — which is a separate change with its own
+measurement.

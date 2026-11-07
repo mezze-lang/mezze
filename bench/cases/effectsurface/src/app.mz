@@ -213,6 +213,30 @@ let k_after_churn = { n } -> do
   let _c = churn { i = 32 }
   perform Ones {} in go_o { i = n, acc = 0 }
 
+## 10. WHICH ASSUMPTION COSTS THE 31x? There are two, invalidated together by
+##     every push and pop (`invalidateAssumptions`): a GLOBAL one that
+##     `EffectBinding` caches resume/abort singletons against, and a PER-EFFECT
+##     one that `PerformD` caches the handler against. Kernel 9 churns BOTH,
+##     because it installs and performs the same effect.
+##
+##     This kernel churns a DIFFERENT effect (Pad1) and then performs Unit1. The
+##     global assumption dies either way; Unit1's per-effect assumption is
+##     untouched. So:
+##       kernel 10 fast  -> the global/EffectBinding half is cheap, and the 31x
+##                          belongs to the per-effect/PerformD half
+##       kernel 10 slow  -> the global half is the cost, and giving EffectBinding
+##                          an assumption that tracks what it ACTUALLY needs
+##                          (whether a dispatch fiber is set — which handler
+##                          churn says nothing about) is worth the 31x
+let pad_installed = {} -> perform P1 {} in Pad1.p1 {}
+
+let churn_other = { i } -> if i <= 0 then 0
+  else churn_other { i = i - 1 - pad_installed {} }
+
+let k_churn_other = { n } -> do
+  let _c = churn_other { i = 32 }
+  perform Ones {} in go_o { i = n, acc = 0 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -283,4 +307,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
     report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
     report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
+  else if k == 10 then do
+    k_churn_other { n = n }
+    k_churn_other { n = n }
+    k_churn_other { n = n }
+    report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
+    report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
+    report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
   else println { msg = "unknown kernel" }
