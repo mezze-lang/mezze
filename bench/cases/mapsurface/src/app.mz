@@ -46,6 +46,7 @@ use std::datetime::{ duration_to_nanos, sub_duration }
 use std::collections::seq
 use std::collections::map
 use std::collections::set
+use std::str
 use std::int
 
 let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
@@ -175,6 +176,53 @@ let l_set_insert_chain = { i, acc, s, keys } -> if i <= 0 then acc
   else l_set_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
                             s = set::insert { s = s, x = (i % keys) + 1 } }
 
+## ── 10-13. STRING KEYS, because every number above uses Int keys ───────────
+##
+## The String-specialised table was deleted when BUG 38 forced every storage to
+## become a persistent trie, and nothing measured what that cost: the ledger
+## said so and said a Str-keyed row was the next thing owed. These are it.
+##
+## A `Str` key cannot be built inside the timed loop — `int::to_str` plus a
+## concat would dominate the map operation several times over. So the keys are
+## built ONCE into a seq and indexed, which puts a `seq::get` and an Option
+## match in every iteration. Row 10 is that and nothing else, so rows 11-13
+## minus row 10 is the map operation; without it the overhead would be charged
+## to the map, which is the mistake the tier-control rule exists to prevent.
+let build_strkeys = { i, acc } -> if i <= 0 then acc
+  else build_strkeys { i = i - 1, acc = seq::push { xs = acc, x = "k$(int::to_str { n = i })" } }
+
+let build_strmap = { i, m, ks } -> if i <= 0 then m
+  else build_strmap { i = i - 1, ks = ks,
+                      m = map::insert { m = m, k = key_at_or { ks = ks, i = i - 1 }, v = i } }
+
+let key_at_or = { ks, i } -> match seq::get { xs = ks, i = i } is
+  Some { val } -> val
+  None -> "?"
+
+## 10. THE CONTROL: fetch a key out of the seq and consume it. No map at all.
+let l_str_fetch = { i, acc, ks, keys } -> if i <= 0 then acc
+  else l_str_fetch { i = i - 1, ks = ks, keys = keys,
+                     acc = acc + str::size { s = key_at_or { ks = ks, i = i % keys } } }
+
+## 11. map::get on a Str key, hit.
+let l_str_get = { i, acc, m, ks, keys } -> if i <= 0 then acc
+  else do
+    let v = match map::get { m = m, k = key_at_or { ks = ks, i = i % keys } } is
+      Some { val } -> val
+      None -> 0
+    l_str_get { i = i - 1, acc = acc + v, m = m, ks = ks, keys = keys }
+
+## 12. map::contains_key on a Str key.
+let l_str_contains = { i, acc, m, ks, keys } -> if i <= 0 then acc
+  else l_str_contains { i = i - 1, m = m, ks = ks, keys = keys,
+                        acc = acc + (if map::contains_key { m = m, k = key_at_or { ks = ks, i = i % keys } }
+                                     then 1 else 0) }
+
+## 13. map::insert along a chain, Str keys already PRESENT — a replace.
+let l_str_insert_chain = { i, acc, m, ks, keys } -> if i <= 0 then acc
+  else l_str_insert_chain { i = i - 1, acc = acc + 1, ks = ks, keys = keys,
+                            m = map::insert { m = m, k = key_at_or { ks = ks, i = i % keys }, v = i } }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 1000000 }
@@ -185,6 +233,8 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   let k = 9
   let m = build_map { i = keys, m = map::empty {} }
   let s = build_set { i = keys, s = set::empty {} }
+  let ks = build_strkeys { i = keys, acc = [] }
+  let sm = build_strmap { i = keys, m = map::empty {}, ks = ks }
   let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
   let floor_ps = (floor.min * 1000) / floor_n
   let n_s = int::to_str { n = n }
@@ -215,3 +265,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "map::insert (chain)  ", thunk = {} -> l_insert_chain { i = n, acc = 0, m = m, keys = keys } }
   report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "set::ins PRESENT, chain", thunk = {} -> l_set_insert_chain { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "STR key fetch (control)", thunk = {} -> l_str_fetch { i = n, acc = 0, ks = ks, keys = keys } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str map::get (hit)   ", thunk = {} -> l_str_get { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str map::contains_key", thunk = {} -> l_str_contains { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str map::insert chain", thunk = {} -> l_str_insert_chain { i = n, acc = 0, m = sm, ks = ks, keys = keys } }

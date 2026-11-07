@@ -9670,3 +9670,66 @@ comparator dropped the token and made its in-place paths unreachable — but
 `MezzeDeque` and `MezzeBitSet` have not been probed for the same class of
 defect. That is an open question, not a known bug, and it is recorded here so
 it stays one rather than becoming an assumption.
+
+#### The Str-keyed rows, which the trie commits owed — the cost is the SAME as for Int keys
+
+Two entries ago this was stated as the debt: *"no benchmark covers a `Str`-keyed
+Map, so the cost of replacing the String-specialised table is UNKNOWN …
+reason to expect is not a number."* These are the numbers. `mapsurface` rows
+10-13, interleaved against a CLI built from `31e6fc8dd` — the commit where the
+`long` tries had landed and `StringHashMapStorage` was still there.
+
+```
+  row (1 000 keys)             table      trie     ratio
+  STR key fetch   (control)   10 221    10 256     1.00x
+  str map::get (hit)          21 599    24 381     1.13x
+  str map::contains_key       14 162    17 043     1.20x
+  str map::insert chain       23 450    53 315     2.27x
+```
+
+Converged at n=2M and n=4M, and the control is flat to 0.3% — which matters
+more here than usual, because the control is most of the measurement.
+
+#### A `Str` key cannot be built in the timed loop, so the control is load-bearing
+
+`int::to_str` plus a concat per iteration would cost several times the map
+operation. So the keys are built once into a seq and indexed, which puts a
+`seq::get` and an `Option` match in every iteration. Row 10 is exactly that and
+nothing else, so the map operation is rows 11-13 MINUS row 10:
+
+```
+  operation isolated          table      trie     ratio
+  str map::get (hit)          11 378    14 125     1.24x
+  str map::contains_key        3 941     6 787     1.72x
+  str map::insert chain       13 229    43 059     3.26x
+```
+
+**The subtraction is reliable for two of those three and not for the middle
+one.** `contains_key`'s operation is ~3.9 µs against a ~10.2 µs control, so the
+control is 72% of what is measured and its noise is amplified in the remainder —
+across the two sizes of n the isolated ratio swung 1.27x to 1.72x while the RAW
+ratio stayed 1.10-1.20x. The raw ratios are the stable statement; the isolated
+ones are the right shape with a wide error bar on the smallest row. Recorded
+that way rather than picking the flattering figure.
+
+#### What it settles
+
+The trie costs the same for `Str` keys as for `Int` keys:
+
+```
+  operation            Int keys   Str keys
+  get (hit)              1.27x      1.13-1.24x
+  contains_key           1.46x      1.20-1.72x
+  insert chain (replace) 3.26x      3.26x
+```
+
+So replacing the String-specialised table — which read a cached
+`String.hashCode` and called `String.equals` directly — cost what replacing the
+`long` table cost, and nothing extra for being general. The earlier guess that
+it "should be close" was right, and is now a measurement.
+
+The shared-base side is NOT measured for `Str` keys and does not need to be: the
+trie has no owner concept at all, so an insert from a base somebody else holds
+executes exactly the same code as any other insert. That is structural rather
+than empirical, and it is the reason the `Int` row collapsed from a 95x spread
+to none.

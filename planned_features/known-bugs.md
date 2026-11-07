@@ -4159,9 +4159,10 @@ interpreter. That is not this bug, which was a PERSISTENT value changing
 underneath a program that never asked for mutation. The two `long` storages,
 which had no such excuse, were deleted.
 
-NOT MEASURED: the `long` rows are, in PERF-LOG. A `Str`-keyed Map has no
-benchmark row at all, so the cost of replacing the String-specialised table is
-unknown — expected to be small, which is not a number.
+MEASURED since: `mapsurface` rows 10-13 cover `Str` keys, interleaved against
+the commit where the String table still existed. The trie costs the same for
+`Str` keys as for `long` ones — get 1.13-1.24x, contains_key 1.20x, replace
+chain 3.26x — so being general cost nothing extra. See PERF-LOG.
 
 ### Discovered by
 
