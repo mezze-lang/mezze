@@ -1,10 +1,13 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-11-07: ONE open bug — BUG 35**, a recursive LOCAL lambda that
-calls a function handling its own effect. BUG 38 is FIXED: every persistent Map
-and Set is now a hash-array-mapped trie with structural sharing, for every key
-type, so a derivation can no longer be observed in the structure it came from.
-Everything else below is closed.
+**STATUS 2026-11-07: TWO open bugs — BUG 35 and BUG 39.** BUG 38 is FIXED:
+every persistent Map and Set is now a hash-array-mapped trie with structural
+sharing, for every key type, so a derivation can no longer be observed in the
+structure it came from. BUG 39 is the same defect surviving in `MezzeBitSet`,
+which no Mezze program can reach — it is wired to nothing but its own tests.
+BUG 35 is a recursive LOCAL lambda that calls a function handling its own
+effect. `MezzeDeque` was probed for the same defect and is SOUND; everything
+else below is closed.
 
 **STATUS 2026-10-30: no open bugs at that date.** BUG 34 is fixed in both halves — the
 printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
@@ -4172,3 +4175,71 @@ then failed its own soundness test with `expected: <10> but was: <20>`. That
 change was reverted. The test written to check it is what found the Map bug,
 and the first version of that test PASSED because it used a one-entry base: a
 soundness test at a size that cannot reach the code under test proves nothing.
+
+
+## BUG 39 — OPEN 2026-11-07: `MezzeBitSet.add` mutates in place, so a derivation is observable in the base
+
+The same defect as BUG 38, in the one structure that still had it. Not reachable
+from Mezze — see the severity note below — which is the only reason it is filed
+rather than fixed.
+
+```java
+MezzeBitSet base = MezzeBitSet.empty();
+for (int i = 0; i < 50; i++) base = base.add(i);
+MezzeBitSet derived = base.add(55);
+base.contains(55);   // true. Must be false.
+base.size();         // 50 — so the base is SELF-INCONSISTENT
+```
+
+`add` does `words[wordIndex] |= mask` while it still holds the ownership token
+and hands the token to the result. `cardinality` is per-instance, so the base's
+count does not move while its contents do.
+
+### Why the Deque is SOUND and this is not — the useful part
+
+`MezzeDeque` keeps its in-place writes and was probed at the same time: all five
+of its cases pass. The difference is not care, it is addressability.
+
+- A deque's reads are bounded by an explicit `[head, tail)` window.
+  `pushBack` writes at `tail` and `pushFront` at `head - 1`, both OUTSIDE the
+  base's window, which the base has no way to address. Its pops write nothing
+  at all — they narrow the window, share the buffer and revoke ownership.
+- A bitset has no window. `contains(i)` reads `words[i >>> 6]` for any `i`, so
+  there is nowhere unobservable to write.
+
+That is the same distinction that made the hash map's in-place insert unsafe
+while a sorted array's append was safe: whether the structure's reads are
+bounded away from the slot being written.
+
+### The one-line fix is correct and was reverted
+
+Removing the in-place branch — letting `add` always allocate — makes the two
+tests above pass, and then `:datastructures:test` dies with **Java heap space**
+before finishing the benchmarks. A bitset's words array is one long per 64 bits,
+so cloning per `add` looked cheap, and at the scale a benchmark exercises it is
+not: `DatastructuresBenchmark` builds a bitset by repeated `add` inside its
+timing loop, and every one of those adds now allocates.
+
+So this is the BUG 38 story again in miniature: the cheap fix is correct and
+costs more than it looks, and the real fix is a structure that shares — words
+in a small persistent trie, exactly as the Map and Set now do.
+
+### SEVERITY: not reachable from Mezze
+
+`MezzeBitSet` is referenced only by its own test and two benchmarks. No native
+exposes it, no stdlib module mentions it, and no interpreter code constructs
+it. So no Mezze program can observe this today, which is why it is filed OPEN
+rather than fixed at the cost of the memory profile.
+
+**It is also a deletion candidate** — an unwired data structure carrying a
+soundness defect — but it is ~600 lines of deliberate work that may be staged
+for a future `Set Int` representation, so that is a call for the maintainer
+rather than a cleanup.
+
+### Regression tests
+
+`datastructures/src/test/java/.../bitset/OwnerTokenSoundnessTest.java`. Eight
+tests: five for the Deque, which all pass and pin the property that makes it
+sound, and three for the BitSet. Two of those are `@Disabled` against this
+entry; the third — a base keeping a bit REMOVED from a derived set — passes,
+because `remove` clones.

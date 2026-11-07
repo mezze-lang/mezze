@@ -9733,3 +9733,54 @@ trie has no owner concept at all, so an insert from a base somebody else holds
 executes exactly the same code as any other insert. That is structural rather
 than empirical, and it is the reason the `Int` row collapsed from a 95x spread
 to none.
+
+#### The other owner-token structures, probed: the Deque is SOUND, the BitSet is BUG 39
+
+The cleanup entry above noted that `MezzeDeque` and `MezzeBitSet` still carry
+owner tokens and had never been probed for the defect BUG 38 was, and recorded
+that as an open question rather than an assumption. It is answered.
+
+```
+  MezzeDeque   5 cases   all pass
+  MezzeBitSet  3 cases   2 FAIL  -> BUG 39
+```
+
+#### Why one is sound and the other is not, which is the part worth keeping
+
+Not care — **addressability**.
+
+- A deque's reads are bounded by an explicit `[head, tail)` window.
+  `pushBack` writes at `tail`, `pushFront` at `head - 1`: both OUTSIDE the
+  base's window, which the base has no way to address. Its pops write nothing
+  at all — they narrow the window, share the buffer, and revoke ownership so no
+  later in-place write can reach the shared array.
+- A bitset has no window. `contains(i)` reads `words[i >>> 6]` for any `i`, and
+  `add` does `words[w] |= mask` in place while it owns the array. There is
+  nowhere unobservable to write.
+
+That is the same line that separated the hash map's in-place insert (unsafe —
+the probe follows the hash onto the written slot) from a sorted array's append
+(safe — the search never looks past `length`). **The question to ask of an
+in-place write is not "do I own this?" but "can anyone else address what I am
+about to change?"** The token answers the first and the structures differ on the
+second.
+
+This also means the prediction was right for once before the test ran, and it
+was still written above the test rather than instead of it — reasoning of
+exactly this kind had been wrong twice earlier in the day.
+
+#### The one-line fix, correct and reverted again
+
+Removing the bitset's in-place branch makes both failing cases pass, and then
+`:datastructures:test` dies with **Java heap space** before finishing the
+benchmarks: `DatastructuresBenchmark` builds a bitset by repeated `add` inside
+its timing loop, and every add now allocates. A words array is one long per 64
+bits, so cloning looked cheap, and at benchmark scale it is not.
+
+BUG 38 in miniature, for the third time today: the cheap fix is correct, costs
+more than it looks, and the real fix is a structure that shares. Filed rather
+than forced, because **no Mezze program can reach `MezzeBitSet`** — it is
+referenced only by its own test and two benchmarks, with no native, no stdlib
+module and no interpreter construction. Recorded with the deletion option
+named, since an unwired structure carrying a soundness defect is a candidate
+for removal rather than repair, and that is the maintainer's call.
