@@ -3713,6 +3713,38 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
+                    // map::insert { m, k, v } → InlineMapInsert
+                    if (mr.getFields().size() == 3 && "__native_map_insert".equals(recName)) {
+                        NodeIR iM = null, iK = null, iV = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) iM = fld.getValue();
+                            else if ("k".equals(fld.getName())) iK = fld.getValue();
+                            else if ("v".equals(fld.getName())) iV = fld.getValue();
+                        }
+                        if (iM != null && iK != null && iV != null) {
+                            b.beginInlineMapInsert();
+                            emitNode(iM, b, argCount, localMap);
+                            emitNode(iK, b, argCount, localMap);
+                            emitNode(iV, b, argCount, localMap);
+                            b.endInlineMapInsert();
+                            return;
+                        }
+                    }
+                    // set::insert { s, x } → InlineSetInsert
+                    if (mr.getFields().size() == 2 && "__native_set_insert".equals(recName)) {
+                        NodeIR siS = null, siX = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) siS = fld.getValue();
+                            else if ("x".equals(fld.getName())) siX = fld.getValue();
+                        }
+                        if (siS != null && siX != null) {
+                            b.beginInlineSetInsert();
+                            emitNode(siS, b, argCount, localMap);
+                            emitNode(siX, b, argCount, localMap);
+                            b.endInlineSetInsert();
+                            return;
+                        }
+                    }
                     // map::get { m, k } → InlineMapGet
                     if (mr.getFields().size() == 2 && "__native_map_get".equals(recName)) {
                         NodeIR gContNode = null, gKeyNode = null;
@@ -3935,6 +3967,14 @@ public final class BytecodeCompiler {
                     b.endInlineStringPredicate();
                     return;
                 }
+                // set::insert → InlineSetInsert
+                if ("__native_set_insert".equals(name)) {
+                    b.beginInlineSetInsert();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineSetInsert();
+                    return;
+                }
                 // map::get → InlineMapGet
                 if ("__native_map_get".equals(name)) {
                     b.beginInlineMapGet();
@@ -3950,6 +3990,16 @@ public final class BytecodeCompiler {
                     emitNode(cn.getArgs().get(0), b, argCount, localMap);
                     emitNode(cn.getArgs().get(1), b, argCount, localMap);
                     b.endInlineMapContainsKey();
+                    return;
+                }
+            } else if (arity == 3) {
+                // map::insert → InlineMapInsert
+                if ("__native_map_insert".equals(name)) {
+                    b.beginInlineMapInsert();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(2), b, argCount, localMap);
+                    b.endInlineMapInsert();
                     return;
                 }
             }

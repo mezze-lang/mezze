@@ -489,6 +489,41 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * `MezzeVariant` for the `Some`. The allocation cannot go away — the
      * signature returns `Option v` — so this takes out the one layer that can.
      */
+    /**
+     * {@code map::insert} and {@code set::insert} without the generic native
+     * path — the three- and two-operand members of the family that starts at
+     * {@link InlineMapSize}.
+     *
+     * <p>Both had a scalar `NativeOp` registration and no `BytecodeCompiler`
+     * special case, which is the exact position `contains_key` was in before
+     * {@link InlineMapContainsKey} was worth 1.46x. `map::insert` along the
+     * owner chain measures 16 091 ps and is the most-used map write, so the
+     * ~2-4 ns of dispatch this removes is worth taking on it.
+     *
+     * <p>This does NOT touch the insert cliff. `map::insert` from a base map
+     * somebody else still holds costs 5.41 µs at 4 000 keys because
+     * `LongHashMapStorage.putLong` clones both arrays when it is not the owner.
+     * That is a datastructures problem — a structure that shares instead of an
+     * owner token that copies on branch — and no amount of dispatch removal
+     * touches it.
+     */
+    @Operation
+    public static final class InlineMapInsert {
+        @Specialization
+        public static Object doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k, Object v) {
+            return com.mezze.interpreter.nodes.builtin.collections.MapNatives.insert(m, k, v);
+        }
+    }
+
+    /** The two-operand peer of {@link InlineMapInsert}, for {@code set::insert}. */
+    @Operation
+    public static final class InlineSetInsert {
+        @Specialization
+        public static Object doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
+            return com.mezze.interpreter.nodes.builtin.collections.SetNatives.insert(s, x);
+        }
+    }
+
     @Operation
     public static final class InlineMapGet {
         @Specialization

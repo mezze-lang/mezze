@@ -8318,3 +8318,84 @@ thing left on the map surface by a wide margin — 5.41 µs at 4 000 keys agains
 16 ns along the owner chain, and unbounded in map size. That is a
 datastructures change (a structure that shares, rather than an owner token that
 copies on branch), not a dispatch one, so none of today's levers apply to it.
+
+#### The inserts finish the family — 1.20x and 1.12x, and one of them nearly failed its own bar
+
+`InlineMapInsert` (three operands) and `InlineSetInsert` (two) were the last
+members of the map surface still on the generic native path — a scalar
+`NativeOp` registration with no `BytecodeCompiler` special case, the exact
+position `contains_key` was in.
+
+```
+  row                                 before      after    verdict
+  map::insert, owner chain           16 189     13 535     1.20x
+  set::insert, owner chain            7 072      6 292     1.12x
+  map::insert, SHARED base          1.43 µs    1.46 µs     unchanged
+  map::contains_key       (control)   5 197      5 436     flat
+  map::size               (control)     710        683     flat
+```
+
+**The shared-base row not moving is the prediction holding, not a
+disappointment.** Its cost is `LongHashMapStorage.putLong` cloning both arrays
+when `ownerToken[0] != this`, and no amount of dispatch removal reaches a copy.
+
+#### The first baseline was wrong, and the control said so
+
+The first interleave compared against a jar saved before the LOOKUPS commit, so
+`contains_key` read 5 430 against 7 996 — a difference that belonged to the
+previous change, not this one, which also meant the run had no valid control.
+Both files were restored from HEAD, a proper baseline jar built, and the
+measurement redone. The only reason this was caught is that the control moved
+when it had no business moving.
+
+#### `set::insert` nearly failed its own bar
+
+Two interleaved pairs read 1.05x, which is inside what this bench resolves, and
+the standing rule from the reverted SIMD attempt is that an unmeasurable change
+which adds a code path is not worth shipping. Five pairs settled it:
+
+```
+  ins   6 706  6 292  6 548  6 451  6 661
+  head  7 072  7 327  7 223  7 277  7 352
+```
+
+Every `ins` reading below every `head` reading, no overlap. That is a
+separation, not a mean difference inside the noise, so 1.12x is real and the
+operation stays. Worth recording as the shape of evidence that turns a
+borderline number into a claim: not a tighter average, but two sets that do not
+intersect.
+
+#### Coverage, stated as the sentinel actually supports
+
+`MapInsertInlineTest`, 9 tests: insert-then-get round trip, the value not being
+usable as a key (which a swapped key/value operand order would break), replacing
+an existing key, the storage progression at 64 entries, the owner/branch split
+with a base kept live, two derived maps not seeing each other, `Str` keys, the
+Set path, and a warm loop.
+
+A sentinel making both inserts return the container unchanged fails **7 of 9**.
+The two it does not fail are NEGATIVE assertions — "base does not contain 3",
+"the value is not usable as a key" — which an insert that did nothing also
+satisfies. That is a property of those assertions, not a coverage gap, and the
+other seven prove the operations execute.
+
+#### The map surface, complete for dispatch
+
+```
+  op                    before    now     total
+  map::size              4 022     429     9.4x
+  map::contains_key      7 550   5 166     1.46x
+  set::contains          6 473   4 783     1.35x
+  map::get (miss)        8 388   6 545     1.28x
+  map::get (hit)        13 253  10 827     1.22x
+  map::insert (chain)   16 189  13 535     1.20x
+  set::insert (chain)    7 072   6 292     1.12x
+  map::insert (shared)  5.41 µs at 4k keys — UNTOUCHED
+```
+
+Every map and set operation the bench covers is now off the generic dispatch
+path, and the remaining gap on this surface is a single row: **the shared-base
+insert cliff**, 5.41 µs at 4 000 keys against 16 ns along the owner chain, and
+unbounded in map size. It is a datastructures change — a structure that shares,
+rather than an owner token that copies on branch — and none of the seven wins
+above are a precedent for it.
