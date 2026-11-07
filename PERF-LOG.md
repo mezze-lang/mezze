@@ -8591,3 +8591,137 @@ only kernel 9.
 
 Neither is a precedent for the other, and the first should go first: it ends
 the row rather than narrowing it.
+
+### LEDGER UPDATE 2026-11-07 — a quiet effect gets its free tier back, 3.32x, and a ruled-out class reopened because its CAUSE had changed
+
+The entry above ranked this first and predicted it was worth the whole
+remaining 4.7x. It is worth 3.32x of it, which takes the churned effect
+operation from 3 814 ps to **1 149** against a pristine 814 — and the whole row
+today from 9 719 to 1 149, **8.5x**, or 21.9x against the 25 118 it read before
+`doCachedShared` stopped carrying `effectStable`.
+
+```
+  kernel                                  before     after    verdict
+  9  op after churning the SAME effect    3 814     1 149     3.32x
+  3  op, pristine                 (ctrl)     816       814     flat
+  10 op after churning another    (ctrl)     807       830     flat
+  5  install a handler per iteration     55 218    55 900     flat
+```
+
+Fifteen readings per row for the sub-nanosecond controls, interleaved, against a
+baseline jar rebuilt from the memo commit rather than reused — the previous
+entry's wrong-baseline mistake was one commit old at the time.
+
+#### A ruled-out class, reopened, because the cause it named had stopped being the binding one
+
+The entry before this one closed the door firmly: *"A cool-off on the assumption
+object cannot help a node that has already stopped consulting it. That is a fact
+about the Truffle specialization lifecycle, and it rules out the entire class of
+'make the assumption recover' fixes."*
+
+The fact is true and the ruling-out was still wrong, for a reason worth keeping:
+**the cause it named was no longer the binding constraint, and the fix on this
+very row is what changed that.** `StabilityAssumption.reset()` already existed
+("start over, as if never churned", no callers in `src/main`), and it already
+invalidated the cyclic assumption FIRST precisely so that anything holding it
+would be knocked out. What broke was subtler: `doCachedShared` had deliberately
+stopped carrying any assumption — that is exactly what let it survive churn and
+won 2.6x — so a reset had nothing to dislodge. The tier kept matching, the DSL
+never re-entered its slow path, and `get()` was never re-asked.
+
+**A working cheaper-but-not-cheapest tier was itself the thing blocking
+recovery.** That is not a fact about Truffle's lifecycle; it is a consequence of
+a local design choice, and it was reversible.
+
+The lesson is about ruling-out, not about effects: *a class is only closed as
+tightly as the cause named in the closing argument, and a later fix can
+invalidate that cause without anyone revisiting the conclusion.* This one sat
+closed for exactly one commit.
+
+#### The fix, in two parts, and ATTRIBUTION BY MEASUREMENT not argument
+
+1. `doCachedShared` carries `churnedTier`, a second per-effect assumption that
+   churn never invalidates and `reset()` does. Dropping that tier is what forces
+   the re-specialization that re-asks for a fresh `effectStable`.
+2. The trigger is the memo landed one commit ago: a memo HIT proves depth and
+   generation have not moved, so a run of `RECOVERY_HITS` (65 536) hits proves
+   the chain has been stable for that many operations. One increment on
+   per-thread state already behind a boundary.
+
+The claim in part 1 is the whole argument of this entry, so it was measured
+rather than asserted. A third build kept the trigger and removed ONLY the
+assumption clause:
+
+```
+  kernel 9    memo baseline        3 849
+              trigger ONLY         4 585     WORSE
+              trigger + gate       1 149     3.32x
+```
+
+**Trigger-only is worse than doing nothing.** Without an assumption to
+invalidate, `reset()` dislodges no dispatch and the deoptimization it performs is
+pure cost. So part 1 is not an optimisation of part 2, it is the thing that
+makes part 2 mean anything — and this also retroactively explains the shape of
+the cool-off attempt two entries ago, which measured no recovery AND a
+regression. It was trigger-only.
+
+#### Self-limiting by construction, which is what makes it safe
+
+The reason the churn limit exists is that invalidating assumptions in a loop
+deoptimises compiled code forever — without the limit, kernel 5 is 2.4x worse.
+A recovery mechanism could easily reintroduce exactly that by oscillating.
+This one cannot, and not because a threshold was tuned: a loop that installs a
+handler every iteration moves the generation every iteration, so the memo never
+hits, the counter never arms, and no reset ever happens. Kernel 5 flat at
+55 218 / 55 900 is that prediction holding, and
+`a loop that installs every iteration never arms recovery` is the test for it.
+
+#### Coverage, and the part these tests DO NOT cover
+
+`EffectChurnRecoveryTest`, 4 tests: a quiet effect recovers after churning past
+the limit; a 100-operation quiet phase does NOT arm recovery; a loop installing
+every iteration never arms it; and the answers stay right across the transition
+including when a different handler is installed afterwards.
+
+The loops are long for two separate reasons, both previously learned:
+`invalidate()` returns early unless the assumption was actually handed out, and
+it is handed out at SPECIALIZATION time — so a program that never warms up never
+increments the churn counter and never gives up at all. The churn phase has to
+be warm before it can churn, and the stable phase has to exceed the threshold.
+
+A sentinel disabling the trigger fails **1 of 4** — the load-bearing one. The
+other three are negative or correctness assertions that a disabled trigger also
+satisfies, correctly so.
+
+**And these tests do not cover part 1 at all.** They assert on
+`givenUpCountForTests()`, which part 2 alone is enough to change: with the
+assumption clause removed the reset still happens, the count still drops, and
+all four still pass — while dispatch stays on the churned tier and the program
+is 4 585 instead of 1 149. Recovery is invisible from inside the language; it
+changes which tier runs, never an answer. So part 1's evidence is the
+attribution table above and nothing else, and that is stated here rather than
+left to look like test coverage it does not have.
+
+#### The control-undersampling rule, confirmed a second time the same day
+
+Nine readings put kernels 3 and 10 at **+18% and +17%** — two controls moving,
+which voids the table. Fifteen readings: 816/814 and 807/830, both flat. This is
+the second time today the same thing happened at the same magnitude on the same
+rows, which promotes it from an observation to a property of this bench: **rows
+at ~800 ps need fifteen readings; nine is not enough to resolve 15% there, and
+the first run will offer you a plausible mechanism for the artefact.** Last time
+the available story was cache layout; this time it would have been the extra
+assumption check.
+
+#### What is left on this row
+
+1 149 against 814 is **1.41x**, and it is not fully attributed. Kernel 9 calls
+its churn-then-run body six times, so each call re-churns and must re-earn its
+65 536 hits before recovering; that plus the churn phase itself is the obvious
+candidate but was not separated, and is not claimed. The other known lever is
+the one this entry displaced: the memo's hit path still pays a `ThreadLocal`
+probe, worth about 1.9x on the tier when it is being used, which now matters
+only for the window before recovery and for programs that genuinely churn
+forever. `PerformMutMutateAct` has the same `doCachedShared` shape and has NOT
+been given the gate — deliberately, so that one measured change covers one
+dispatch site; it is the cheapest remaining extension and needs its own number.

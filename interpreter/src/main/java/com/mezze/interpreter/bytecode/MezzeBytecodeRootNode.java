@@ -5067,7 +5067,19 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         //     effect's handler has churned past the limit.
         //   - `doGeneric` — only when the handler genuinely is not the cached
         //     one.
-        @Specialization(guards = {"cachedHandler != null", "cachedTarget != null",
+        // THE ONE ASSUMPTION THIS TIER MAY CARRY, and why it is not the one
+        // that was removed. `effectStable` dies on churn, which is what made
+        // both cached tiers vanish together and cost 31x. `churnedTier` is
+        // invalidated ONLY by StabilityAssumption.reset(), which happens when
+        // a run of memo hits has proved the chain settled again. So churn
+        // leaves this tier in place — the 2.6x that removing `effectStable`
+        // bought is untouched — while recovery can DROP it, which is the only
+        // way to make the DSL re-specialize and re-ask for a fresh
+        // `effectStable`. Without an assumption here a reset had nothing to
+        // dislodge: this tier kept matching and the free tier was unreachable
+        // for the life of the process.
+        @Specialization(assumptions = "churnedTier",
+                        guards = {"cachedHandler != null", "cachedTarget != null",
                                   "resolveHandler(effectHash) == cachedHandler"},
                         excludeForUncached = true)
         public static Object doCachedShared(Hash effectHash, String opName, Object arg,
@@ -5075,6 +5087,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
+                @Cached("getChurnedTierAssumption(effectHash)") com.oracle.truffle.api.Assumption churnedTier,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
             return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
         }
@@ -5142,6 +5155,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         static com.oracle.truffle.api.Assumption getEffectStableAssumption(Hash effectHash) {
             return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .getEffectStableAssumption(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getChurnedTierAssumption(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getChurnedTierAssumption(effectHash);
         }
 
         @TruffleBoundary

@@ -116,6 +116,13 @@ public final class HandlerChainRegistry {
         int memoDepth = -1;
         long memoGeneration = -1;
 
+        // Consecutive hits on the memo above. A hit proves depth and
+        // generation have not moved, so a RUN of them is proof the chain has
+        // been stable for that many operations — which is exactly the
+        // quiescence signal recovery needs, available for the price of one
+        // increment on per-thread state already behind the boundary.
+        int memoHits;
+
         // Reusable ScopedPopResult — avoids one allocation per scoped
         // handler pop. Safe because BDSL PopHandlerChainScoped reads the
         // fields immediately and never stores the reference across pops.
@@ -293,6 +300,57 @@ public final class HandlerChainRegistry {
     @TruffleBoundary
     public static Assumption getEffectStableAssumption(com.mezze.language.typedast.Hash effectHash) {
         return getOrCreateEffectAssumption(effectHash).get();
+    }
+
+    /**
+     * The assumption the churned dispatch tier caches against — see
+     * {@link StabilityAssumption#tierAssumption()}. Churn leaves it alone;
+     * recovery invalidates it to force a re-specialization.
+     */
+    @TruffleBoundary
+    public static Assumption getChurnedTierAssumption(com.mezze.language.typedast.Hash effectHash) {
+        return getOrCreateEffectAssumption(effectHash).tierAssumption();
+    }
+
+    /**
+     * How many consecutive memo hits prove an effect's handler chain has
+     * settled. At a few nanoseconds an operation this is a fraction of a
+     * millisecond of steady running, and it is paid once per churn episode.
+     */
+    private static final int RECOVERY_HITS = 1 << 16;
+
+    /**
+     * A run of stable lookups has proved this effect quiescent, so forgive its
+     * churn and let dispatch return to the tier that needs no check at all.
+     *
+     * <p>Self-limiting by construction: a loop that installs a handler every
+     * iteration changes the generation every iteration, so the memo never hits,
+     * the counter never arms, and there is no tier thrash to pay for. An effect
+     * that never gave up is left alone rather than handed a pointless
+     * deoptimization.
+     */
+    @TruffleBoundary
+    private static void noteStableRun(com.mezze.language.typedast.Hash effectHash) {
+        StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
+        if (ea != null && ea.hasGivenUp()) ea.reset();
+    }
+
+    /** Whether this effect has churned past its limit. Tests only. */
+    public static boolean hasGivenUpForTests(com.mezze.language.typedast.Hash effectHash) {
+        StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
+        return ea != null && ea.hasGivenUp();
+    }
+
+    /**
+     * How many effects have currently churned past their limit. Tests only —
+     * recovery is invisible from inside the language (it changes which
+     * dispatch tier runs, never an answer), so this is the only way a test can
+     * assert that a quiescent effect got its free tier back.
+     */
+    public static int givenUpCountForTests() {
+        int n = 0;
+        for (StabilityAssumption a : EFFECT_ASSUMPTIONS.values()) if (a.hasGivenUp()) n++;
+        return n;
     }
 
     private static StabilityAssumption getOrCreateEffectAssumption(
@@ -629,6 +687,7 @@ public final class HandlerChainRegistry {
         if (effectHash == s.memoHash
                 && s.depth == s.memoDepth
                 && s.generation == s.memoGeneration) {
+            if (++s.memoHits == RECOVERY_HITS) noteStableRun(effectHash);
             return s.memoHandler;
         }
         MezzeRecord found = null;
@@ -644,6 +703,7 @@ public final class HandlerChainRegistry {
         s.memoDepth = s.depth;
         s.memoGeneration = s.generation;
         s.memoHandler = found;
+        s.memoHits = 0;
         return found;
     }
 
