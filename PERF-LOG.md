@@ -9355,3 +9355,84 @@ nothing, and reads exactly like a test that proves something.** The
 storage-progression habit already in use for performance rows (0/1/2/8/64) is
 not a thoroughness flourish; for structures that change representation with
 size, it is the difference between a test and a decoration.
+
+### LEDGER UPDATE 2026-11-07 — BUG 38's blast radius, and the cheap fix family killed by a GC count
+
+Looking at BUG 38 properly made it bigger and then closed off every cheap fix.
+
+#### The filing was wrong about the scope
+
+It said inserting a NEW key was safe even with an in-place write, "because the
+base's own `size` bounds what it can see". That is true of a sorted ARRAY. It is
+false for a hash table: `getLong` probes the shared `keys` array by hash until
+it meets `EMPTY_KEY`, and an in-place insert writes into the first empty slot of
+exactly that probe sequence, so the base's probe walks straight onto it.
+
+```
+  derivation from a 64-entry base       base observes it?
+  replace an existing key               YES
+  insert a NEW key                      YES
+  remove a key                          no
+  size after a derived insert           no   (still 64)
+```
+
+So the base ends up SELF-INCONSISTENT — `size` 64 while `contains_key` says a
+65th key is present. That is worse than one wrong value: the structure's own
+invariants stop holding.
+
+Eight storages carry the pattern — `{Long,String,Double,Object}HashMapStorage`
+and the four Set equivalents. `Empty`/`SingleEntry`/`SmallFlat` allocate per put
+and are correct, **which is why every small-size test of this passes
+vacuously**, and two such tests were already in the tree asserting the right
+thing at a size that cannot reach the code that gets it wrong.
+
+Removal is safe for a reason worth recording: `removeLong` revokes ownership and
+then clones unconditionally. **The two mutators disagree about the contract, and
+the correct one is the one that does not take the fast path.**
+
+#### The diff chain: correct, and dead
+
+A persistent array without rerooting — each superseded storage records the one
+slot the derivation overwrote plus a link to its successor, and a stale storage
+reconstructs its own view once, cached. Implemented for the Long map and set.
+**All twelve soundness tests pass with nothing disabled**, so the tests are
+known satisfiable and not merely asserting a wish. Reads barely notice:
+`map::get` +2%, `map::size` flat, `contains_key` +5.6%.
+
+Then the write path:
+
+```
+  map::insert chain, 1 000 keys, 2M ops      HEAD       diff chain
+    time                                   13 702 ps    66 722 ps   4.9x WORSE
+    young collections                            18           24
+    heap after a young collection             19 MB     2 571 MB
+    young pause                             0.7-0.8 ms   500-590 ms
+```
+
+Nineteen megabytes surviving against two and a half gigabytes. **The base
+retains the entire chain**, because the link points FORWARD: keep any old
+version and you keep every version derived after it. The 4.9x is GC, not the
+volatile write — and **the GC COUNT is what said so**. A timing-only reading of
+this would have sent me hunting the volatile store, which is the plausible
+suspect and the wrong one.
+
+The leak is not an artefact of this encoding. Letting the derived version mutate
+shared arrays obliges the old version to be able to reconstruct, and that needs
+either forward links (retains successors, as measured) or an undo log
+(unbounded, and retained by the CURRENT version, since that is the one
+appending to it). Notifying every live old version instead is O(chain) per
+write. **So the entire family is dead** — which is the useful part of the
+result, because every cheap-looking fix belongs to it.
+
+One candidate remains: **a HAMT**. No version references another, nothing to
+undo, thread-safe by immutability, O(log32 n) everywhere. It also closes the
+shared-base insert cliff (5.41 µs at 4 000 keys, unbounded), because that is the
+same missing property.
+
+#### What this cost and what it bought
+
+Nothing shipped. What is recorded instead: the true blast radius, the fact that
+the tests are satisfiable, a measured reason to stop looking for a cheap fix,
+and the knowledge that `map::insert`'s 13.5 ns is only available to a structure
+that mutates — so a HAMT's insert will be slower than it, and that is the
+correct trade rather than a regression to apologise for.

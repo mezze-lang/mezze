@@ -3925,10 +3925,60 @@ correctly. 64 entries crosses into `LongHashMapStorage`, whose copy-on-write
 ownership token lets a storage that still OWNS its arrays write into them and
 hand the token to the derived storage.
 
-For an INSERT of a NEW key that is safe even when the base is still live,
-because the base's own `size` bounds what it can see and the write lands outside
-it. **A REPLACE writes INSIDE the base's visible extent**, and nothing bounds it
-away.
+**Every small-size test of this behaviour therefore passes vacuously.** Two
+already in the tree did: `MapInsertInlineTest`'s "a base map is unchanged by a
+map derived from it" uses a two-entry base, and the first version of
+`PersistentReplaceSoundnessTest`'s hash-map case used a one-entry base. Both
+assert the right thing at a size that cannot reach the code that gets it wrong.
+
+### BLAST RADIUS — wider than a replace, and wider than Map
+
+The first version of this entry reasoned that inserting a NEW key was safe even
+with an in-place write, "because the base's own `size` bounds what it can see
+and the write lands outside it". **That is false for a hash table.** It is true
+of a sorted ARRAY, whose search never looks past `length`. `getLong` probes the
+shared `keys` array by hash until it meets `EMPTY_KEY`, and an in-place insert
+writes into the first empty slot of exactly that probe sequence — so the base's
+probe walks straight onto it. Measured, not reasoned:
+
+```
+  derivation from a 64-entry base          base observes it?
+  replace an existing key                  YES   (777 for 300)
+  insert a NEW key                         YES   (base contains_key 999 -> true)
+  remove a key                             no
+  size after a derived insert              no    (still 64)
+```
+
+So the base ends up **self-inconsistent**: `map::size` says 64 while
+`contains_key` says the 65th key is present. That is worse than a single wrong
+value — the structure's own invariants no longer hold.
+
+Removal is safe for a reason worth recording: `removeLong` calls
+`revokeOwnership()` and then clones unconditionally. **The two mutators disagree
+about the contract**, and the one that is correct is the one that does not take
+the fast path.
+
+Eight storages use the in-place pattern and all are affected:
+
+```
+  maps  LongHashMapStorage  StringHashMapStorage  DoubleHashMapStorage  HashMapStorage
+  sets  LongHashSetStorage  StringHashSetStorage  DoubleHashSetStorage  HashSetStorage
+```
+
+`EmptyMapStorage`, `SingleEntryMapStorage`, `SmallFlatMapStorage` and their Set
+counterparts hold no owner token and allocate per put, so they are correct —
+which is the whole reason this has stayed invisible.
+
+The Set case is the same program shape:
+
+```mezze
+use std::collections::set
+let fill = { i, s } -> if i <= 0 then s
+  else fill { i = i - 1, s = set::insert { s = s, x = i } }
+let base = fill { i = 64, s = set::empty {} }
+let derived = set::insert { s = base, x = 999 }
+set::contains { s = base, x = 999 }      ## True. Must be False.
+```
 
 ### The design hole, in the design's own words
 
@@ -3950,10 +4000,15 @@ did not make".
 
 ### Regression tests, already written
 
-`interpreter/src/test/kotlin/.../stdlib/PersistentReplaceSoundnessTest.kt`. The
-two failing cases are `@Disabled` with a pointer here so the suite stays green;
-everything else in that file passes and pins the behaviour that IS correct —
-the derived map's value, a one-entry base, and the SortedMap equivalents.
+`interpreter/src/test/kotlin/.../stdlib/PersistentReplaceSoundnessTest.kt`, 12
+tests. Three fail and are `@Disabled` with a pointer here so the suite stays
+green: the Map replace, the Map new-key insert, and the Set new-key insert, each
+at 64 entries. The other nine pass and pin what IS correct — the derived
+structure's own contents, removal, the base's size, and the SortedMap
+equivalents, whose copying path is right today.
+
+All twelve pass under the diff-chain attempt described below, so they are known
+to be satisfiable and are not merely asserting a wish.
 
 ### What it would take, and why no quick fix was shipped
 
@@ -3974,13 +4029,71 @@ shipping a slow correct one — but there is a third option better than both, an
 it is already on the perf backlog, which is why this is filed OPEN with a repro
 and a disabled regression test rather than patched.
 
-A structure that SHARES rather than copying on branch — a HAMT, path-copying on
-update — gives a correct O(log n) replace and simultaneously closes the other
-known defect on this surface: `map::insert` from a base somebody else holds
-costs 5.41 µs at 4 000 keys and is unbounded in map size (PERF-LOG, "a 338x
-cliff when the base map is shared"). Both are the same missing property, so both
-want the same change. **That makes the structure work urgent rather than merely
-valuable, and it is the ranked next item.**
+And the naive fix is worse than those numbers suggest, because the measurement
+above is of a REPLACE chain. Cloning on every put also makes BUILDING a map
+O(n^2): `m = insert(m, k, v)` in a loop is the pattern the owner token exists
+for, and it is what every program that constructs a map does.
+
+#### Why in-place mutation cannot simply be made safe
+
+It needs to know the base is dead, and that is a liveness property the runtime
+cannot see. Ownership as implemented is not that property: it is established at
+construction and dropped only on a READ, so a base that is derived from and
+then read later was never observed to be alive at the moment it mattered.
+Invalidating the base on transfer and failing loudly on a later read would be
+sound, but a `Map` is a pure value and may not stop working because something
+was derived from it.
+
+So the fix is a structure that shares instead of copying.
+
+#### The diff chain was BUILT, was CORRECT, and is dead — measured
+
+The obvious cheap fix is a persistent array without rerooting: each superseded
+storage records the ONE slot the derivation overwrote plus a link to the storage
+that took the arrays, and any operation on a stale storage reconstructs its own
+view once by walking that chain. A derivation changes exactly one slot, and a
+storage can be superseded in place only once (afterwards it no longer holds the
+token, so the next derivation clones), so one diff per storage is the whole
+obligation.
+
+It was implemented for `LongHashMapStorage` and `LongHashSetStorage`, and **it
+works**: all twelve tests above pass with nothing disabled, including the Map
+replace, the Map new-key insert and the Set insert. Reads barely notice it —
+`map::get` +2%, `map::size` flat, `contains_key` +5.6%.
+
+Then the insert chain:
+
+```
+  map::insert chain, 1 000 keys, 2M ops      HEAD       diff chain
+    time                                   13 702 ps    66 722 ps   4.9x WORSE
+    young collections                            18           24
+    heap after a young collection             19 MB     2 571 MB
+    young pause                             0.7-0.8 ms   500-590 ms
+```
+
+**The base retains the entire chain.** `Superseded.by` points FORWARD at the
+successor, so a program that keeps any old version keeps every version derived
+after it: 2.57 GB surviving each collection where HEAD survives 19 MB. The 4.9x
+is that, not the volatile write.
+
+And the leak is not a detail of this encoding. Any scheme that lets the derived
+version mutate shared arrays must leave the old version able to reconstruct,
+which needs either forward links (retains successors, as above) or an undo log
+(unbounded, and retained by the CURRENT version, which is the one that appends
+to it). Notifying every live old version instead is O(chain) per write. **The
+whole family is dead**, which is worth knowing because it is the family every
+cheap fix belongs to.
+
+That leaves one candidate: **a HAMT**, path-copying on update — no version
+references another, nothing to undo, thread-safe by immutability, O(log32 n)
+everywhere. Build becomes slower than the current in-place O(1), and the
+shared-base case becomes dramatically faster.
+
+Either closes the other known defect on this surface at the same time:
+`map::insert` from a base somebody else holds costs 5.41 µs at 4 000 keys and is
+unbounded in map size (PERF-LOG, "a 338x cliff when the base map is shared").
+Both are the same missing property. **That makes the structure work urgent
+rather than merely valuable, and it is the ranked next item.**
 
 ### Discovered by
 

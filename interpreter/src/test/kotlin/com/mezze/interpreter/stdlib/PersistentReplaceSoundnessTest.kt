@@ -67,7 +67,7 @@ class PersistentReplaceSoundnessTest {
      * on this branch (a clone is three lines and correct, and costs 50-100x on
      * a replace chain).
      */
-    @org.junit.jupiter.api.Disabled("BUG 38 — a replace corrupts the base map it was derived from")
+    @org.junit.jupiter.api.Disabled("BUG 38 — a derivation is observable in the base map/set")
     @Test
     fun `hash map - a 64-entry base is unchanged by a replace derived from it`() {
         assertEquals(1L, MezzeTestHelper.run("""
@@ -80,6 +80,75 @@ class PersistentReplaceSoundnessTest {
             let b = option::get_or { opt = map::get { m = base, k = 30 }, def = 0 }
             let d = option::get_or { opt = map::get { m = derived, k = 30 }, def = 0 }
             if b == 300 && d == 777 then 1 else 0
+        """.trimIndent()))
+    }
+
+    /**
+     * BLAST-RADIUS PROBE 1 — a NEW key, not a replace.
+     *
+     * The BUG 38 entry reasoned that inserting a new key is safe even with an
+     * in-place write, because the base's own `size` bounds what it can see.
+     * That is true of a sorted ARRAY, whose search never looks past `length`.
+     * It is NOT obviously true of a hash map: `getLong` probes the shared
+     * `keys` array by hash until it meets `EMPTY_KEY`, and an in-place insert
+     * writes into the first empty slot of exactly that probe sequence.
+     */
+    @org.junit.jupiter.api.Disabled("BUG 38 — a derivation is observable in the base map/set")
+    @Test
+    fun `hash map - a 64-entry base does not acquire a key inserted into a derived map`() {
+        assertEquals(1L, MezzeTestHelper.run("""
+            use std::collections::map
+            let fill = { i, m } -> if i <= 0 then m
+              else fill { i = i - 1, m = map::insert { m = m, k = i, v = i * 10 } }
+            let base = fill { i = 64, m = map::empty {} }
+            let derived = map::insert { m = base, k = 999, v = 1 }
+            let baseHas = map::contains_key { m = base, k = 999 }
+            let derivedHas = map::contains_key { m = derived, k = 999 }
+            if baseHas.not {} && derivedHas then 1 else 0
+        """.trimIndent()))
+    }
+
+    /** BLAST-RADIUS PROBE 2 — the base's reported size must not move either. */
+    @Test
+    fun `hash map - a 64-entry base keeps its size when a derived map grows`() {
+        assertEquals(64L, MezzeTestHelper.run("""
+            use std::collections::map
+            let fill = { i, m } -> if i <= 0 then m
+              else fill { i = i - 1, m = map::insert { m = m, k = i, v = i * 10 } }
+            let base = fill { i = 64, m = map::empty {} }
+            let derived = map::insert { m = base, k = 999, v = 1 }
+            map::size { m = base }
+        """.trimIndent()))
+    }
+
+    /** BLAST-RADIUS PROBE 3 — the Set, which has the same storage family. */
+    @org.junit.jupiter.api.Disabled("BUG 38 — a derivation is observable in the base map/set")
+    @Test
+    fun `hash set - a 64-element base does not acquire an element added to a derived set`() {
+        assertEquals(1L, MezzeTestHelper.run("""
+            use std::collections::set
+            let fill = { i, s } -> if i <= 0 then s
+              else fill { i = i - 1, s = set::insert { s = s, x = i } }
+            let base = fill { i = 64, s = set::empty {} }
+            let derived = set::insert { s = base, x = 999 }
+            let baseHas = set::contains { s = base, x = 999 }
+            let derivedHas = set::contains { s = derived, x = 999 }
+            if baseHas.not {} && derivedHas then 1 else 0
+        """.trimIndent()))
+    }
+
+    /** BLAST-RADIUS PROBE 4 — removal, the other mutating direction. */
+    @Test
+    fun `hash map - a 64-entry base keeps a key removed from a derived map`() {
+        assertEquals(1L, MezzeTestHelper.run("""
+            use std::collections::map
+            let fill = { i, m } -> if i <= 0 then m
+              else fill { i = i - 1, m = map::insert { m = m, k = i, v = i * 10 } }
+            let base = fill { i = 64, m = map::empty {} }
+            let derived = map::remove { m = base, k = 30 }
+            let baseHas = map::contains_key { m = base, k = 30 }
+            let derivedHas = map::contains_key { m = derived, k = 30 }
+            if baseHas && derivedHas.not {} then 1 else 0
         """.trimIndent()))
     }
 
