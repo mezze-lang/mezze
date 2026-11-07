@@ -39,6 +39,22 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
+    /**
+     * The key at a position in sort order — the probe the guest-side binary
+     * search in `std::collections::sorted_map` drives. See
+     * {@link MezzeSortedMap#keyAt}: the search moved out of host code so that
+     * the comparison is a guest call Graal can inline instead of a callback it
+     * cannot.
+     */
+    public static Object keyAt(MezzeSortedMap map, Object index) {
+        return map.keyAt((int) (long) (Long) index);
+    }
+
+    /** The value at a position in sort order. See {@link #keyAt}. */
+    public static Object valueAt(MezzeSortedMap map, Object index) {
+        return map.valueAt((int) (long) (Long) index);
+    }
+
     public static MezzeVariant get(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
         map = map.withComparator(ElementComparator.of(cmpFn));
         Object value = map.getObject(key);
@@ -52,12 +68,6 @@ public final class SortedMapNatives {
     public static MezzeSortedMap remove(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
         map = map.withComparator(ElementComparator.of(cmpFn));
         return map.removeObject(key);
-    }
-
-    @TruffleBoundary
-    public static boolean containsKey(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
-        map = map.withComparator(ElementComparator.of(cmpFn));
-        return map.containsKeyObject(key);
     }
 
     public static long size(MezzeSortedMap map) {

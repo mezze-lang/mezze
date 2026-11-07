@@ -8993,3 +8993,158 @@ comparator for key types whose `Ord` is canonical, decided from the impl's
 identity and never its name — a design change through the monomorphiser, not a
 patch. After that, `sorted_map::insert` at 43x the hash insert is its own
 problem, and the probe proved the comparator is NOT its cause.
+
+### LEDGER UPDATE 2026-11-07 — the ordered lookups, 18-20x, by moving the SEARCH out of the native
+
+The two entries above ranked this first and bounded it with an unsound probe at
+10-13x. It lands at **18.2x and 20.5x** — PAST the bound, which needs
+explaining, and the explanation is the useful part.
+
+```
+  row                            before     after    verdict
+  sorted_map::get (hit)         312 000    17 177     18.2x
+  sorted_map::contains_key      308 500    15 030     20.5x
+  sorted_set::contains (ctrl)   314 182   310 283     flat — STILL NATIVE
+  sorted_map::insert   (ctrl)   583 610   588 176     flat
+  deque::get by index  (ctrl)   219 110   219 360     flat
+```
+
+Both moved rows converged at two sizes of n (17 201/17 153 and 15 159/14 902).
+`sorted_set::contains` is the control that matters most: the SAME operation on
+the same kind of structure, left on the native search, and it did not move.
+
+#### Why it beats the probe it was supposed to be bounded by
+
+The probe skipped the guest callback by comparing Longs natively — but it was
+still a HOST-code binary search, just with a cheap comparator. This change
+moves the search itself into guest Mezze, where the whole loop compiles:
+probes, comparisons, index arithmetic and recursion all become one compiled
+guest method. The probe measured "the native search without callbacks"; this
+measures "no native search at all".
+
+`MezzeSortedMap` is a **sorted array**, so a lookup was always a binary search.
+The 300 ns was never the comparator but WHERE the search ran: in host code
+behind a `@TruffleBoundary`, every comparison had to call back out into guest
+code, and Graal cannot inline a guest function into host code however the call
+is made. Ten comparisons meant ten full Truffle calls plus two allocations
+each.
+
+It also removed two allocations per lookup that had nothing to do with
+comparing: the native installed a fresh comparator on the map first, and
+`withComparator` allocates a whole new map whenever the comparator differs —
+which it always did, being built fresh at every call.
+
+**The indexed probes had to be inline operations, as part of the design rather
+than on top of it.** The search makes ~log2(n) probes per lookup and a probe
+left on the string-keyed `HANDLERS` path costs ~9 ns, which would have exceeded
+the 300 ns being removed.
+
+#### PASSING THE COMPARISON AS AN ARGUMENT COST 45% OF THE WIN
+
+The first working version took `lt` as a parameter so the closure could be
+built where `Ord` was in scope. It measured **10.1x / 11.2x** — exactly the
+probe's bound and no better. Removing that parameter, so the body calls `<`
+directly, took the same rows to **18.2x / 20.5x**.
+
+So nearly half the available win was in the difference between a comparison
+reached through a function-typed parameter and one written inline. A closure
+argument is a value the compiler must still get through; `<` in the body is a
+call site it can see. Worth remembering the next time a helper is given a
+callback "so it stays generic".
+
+#### THE TYPECHECKER REFUSED THIS THREE TIMES, AND EACH REFUSAL TAUGHT SOMETHING
+
+**One — a `do`-block `let` detaches the obligation.** The obvious spelling
+binds the probed key first:
+
+```
+  let mk = key_at { m = m, i = mid }
+  if mk < k then ... else if k < mk then ...
+```
+
+and the annotation is then refused: *"the annotation constrains `with Ord 'k`,
+but the body applies Ord to a type the annotation does not name"*. A `do`-block
+`let` GENERALIZES its binding, so `mk` becomes polymorphic and each use
+instantiates it fresh; the `Ord` the comparison raises lands on that fresh
+variable. Pinned down by reducing it: the same comparison typechecks fine
+without the intermediate binding. So the search is written with `key_at` called
+inside the comparison and `(lo + hi) / 2` spelled out rather than bound.
+
+**Two — dropping the annotations is worse, and a gate said so.** Unannotated,
+the module compiles and inference produces exactly the right type: checked
+through a caller, `get` infers `m: SortedMap 'c Int, … Ord 'c`, identical to
+the rejected annotation. But `ElaborationInvariantGateTest` then reports
+`UNBOUND_TYPE_VAR let:get` — *"a node reached the end of elaboration with an
+open type, so something downstream is guessing"*. The stray variable survives
+to the end of elaboration. **That line was NOT added to the baseline.** The
+gate is right: inferring the correct type and leaving a variable unbound are
+different things, and only the first is safe.
+
+**Three — an unannotated recursive helper returns a numeric VARIABLE.** With
+`find_index` unannotated (annotated and recursive is refused by obstacle one),
+its result is a numeric type variable rather than `Int`. `get` pins it by
+accident, because the helper it feeds declares `idx: Int`; `contains_key` wrote
+`find_index { … } >= 0` and the `>=` raised an Ord obligation on the unpinned
+variable, which its annotation could not name. Fixed by pinning it explicitly.
+
+The final shape is therefore: `find_index` unannotated, `get` and
+`contains_key` annotated as before, and two small helpers whose only job is to
+force `Int`. Every one of those decisions is a typechecker defect worked
+around, documented in place, and none of them changes a public type.
+
+#### Coverage
+
+`SortedMapGuestSearchTest`, 10 tests. A hand-written binary search is wrong at
+the edges if it is wrong anywhere: the empty map, one entry, keys
+below/above/between stored keys, the first and last stored key where `lo` and
+`hi` collapse, insertion over an existing key, `Str` keys, every key of a
+64-entry map looked up individually so no index arithmetic can be off by one
+anywhere in the range, and a warm loop. Two earn their place beyond that:
+
+- **a user-defined DESCENDING `Ord`**, which pins the comparison DIRECTION. A
+  reversed comparison still terminates and still finds keys under a symmetric
+  ordering, so only a key type whose order is not the natural one tells them
+  apart. It also demonstrates that this is not a primitive-only special case —
+  a user comparator inlines like any other, which the unsound probe could never
+  have offered.
+- **the persistence guarantee**: `keyAt` revokes ownership exactly as the old
+  native lookup did, because the caller has now observed the contents and a
+  later insert must copy rather than mutate underneath them. The test reads the
+  base map and THEN derives from it, the order that would corrupt the base if
+  the revoke were dropped.
+
+Two sentinels, both re-run against the final formulation: `find_index` never
+finding fails **9 of 10**; the comparison direction reversed fails **8**, with
+the empty map and the single-entry map surviving — the first because no
+comparison happens, the second because `mid` lands on the key, so direction
+cannot matter. Union **9 of 10**.
+
+#### Old code deleted
+
+`__native_sorted_map_get` and `__native_sorted_map_contains_key` are gone from
+`NativeDispatch`, and `SortedMapNatives.containsKey` with them.
+`SortedMapNatives.get` stays because `__native_sorted_map_update` still calls
+it internally with a null comparator.
+
+#### Where the ordered surface stands
+
+```
+  op                        before      now     total
+  sorted_map::contains_key 308 500   15 030     20.5x
+  sorted_map::size           8 934      416     20.5x
+  deque::size                8 960      420     21.1x
+  sorted_map::get          312 000   17 177     18.2x
+  deque::first              12 276    5 478      2.25x
+  sorted_set::contains     310 000  310 000     next — same fix, now a port
+  sorted_map::insert chain 577 000  577 000     untouched
+  deque::get by index      222 000  222 000     untouched
+```
+
+`sorted_map::get` is now 1.6x the hash `map::get` rather than 30x, which is
+about what an ordered structure should cost. **Next: `sorted_set::contains`**,
+the same operation over the same sorted array — a port, not a design, and the
+patch for it is already written. Then `sorted_map::insert` at 43x the hash
+insert, where the probe already proved the comparator is NOT the cause, so it
+is path copying and a datastructures question. `deque::get by index` at 222 ns
+is likely O(n) by construction rather than dispatch and needs its
+representation checked before anything is claimed.

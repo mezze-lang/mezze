@@ -1687,12 +1687,12 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_empty", (r, c) -> SortedMapNatives.empty());
         HANDLERS.put("__native_sorted_map_size", (r, c) ->
             SortedMapNatives.size(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_key_at", (r, c) ->
+            SortedMapNatives.keyAt(getSortedMap(r, "m"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_map_value_at", (r, c) ->
+            SortedMapNatives.valueAt(getSortedMap(r, "m"), getField(r, "i")));
         HANDLERS.put("__native_sorted_map_is_empty", (r, c) ->
             SortedMapNatives.isEmpty(getSortedMap(r, "m")));
-        HANDLERS.put("__native_sorted_map_contains_key", (r, c) ->
-            SortedMapNatives.containsKey(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
-        HANDLERS.put("__native_sorted_map_get", (r, c) ->
-            SortedMapNatives.get(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_insert", (r, c) ->
             SortedMapNatives.insert(getSortedMap(r, "m"), getField(r, "k"), getField(r, "v"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_remove", (r, c) ->

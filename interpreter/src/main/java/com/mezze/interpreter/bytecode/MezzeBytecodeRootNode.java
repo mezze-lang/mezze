@@ -583,6 +583,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * The indexed probes the guest-side ordered binary search drives.
+     *
+     * <p>These are not an optimisation on top of that search, they are part of
+     * it. The search makes ~log2(n) probes per lookup — ten on a 1 000-key map
+     * — and a probe left on the record-ABI HANDLERS path costs ~9 ns, which
+     * would come to more than the 300 ns of guest callbacks the whole exercise
+     * is removing.
+     */
+    @Operation
+    public static final class InlineSortedKeyAt {
+        @Specialization
+        public static Object doLong(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, long i) {
+            return m.keyAt((int) i);
+        }
+
+        @Specialization
+        public static Object doBoxed(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, Object i) {
+            return m.keyAt((int) (long) (Long) i);
+        }
+    }
+
+    /** The value peer of {@link InlineSortedKeyAt}. */
+    @Operation
+    public static final class InlineSortedValueAt {
+        @Specialization
+        public static Object doLong(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, long i) {
+            return m.valueAt((int) i);
+        }
+
+        @Specialization
+        public static Object doBoxed(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, Object i) {
+            return m.valueAt((int) (long) (Long) i);
+        }
+    }
+
+    /**
      * {@code deque::first} off the string-keyed HANDLERS path.
      *
      * <p>Measured at 12 276 ps in `bench/cases/dsmore` — more than `size`

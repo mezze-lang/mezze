@@ -3800,6 +3800,26 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
+                    // sorted_map key_at / value_at { m, i } — the probes of the
+                    // guest-side ordered binary search, which makes ~log2(n) of
+                    // them per lookup.
+                    if (mr.getFields().size() == 2
+                            && ("__native_sorted_map_key_at".equals(recName)
+                                || "__native_sorted_map_value_at".equals(recName))) {
+                        NodeIR atM = null, atI = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) atM = fld.getValue();
+                            else if ("i".equals(fld.getName())) atI = fld.getValue();
+                        }
+                        if (atM != null && atI != null) {
+                            boolean wantKey = "__native_sorted_map_key_at".equals(recName);
+                            if (wantKey) b.beginInlineSortedKeyAt(); else b.beginInlineSortedValueAt();
+                            emitNode(atM, b, argCount, localMap);
+                            emitNode(atI, b, argCount, localMap);
+                            if (wantKey) b.endInlineSortedKeyAt(); else b.endInlineSortedValueAt();
+                            return;
+                        }
+                    }
                     // ── Single-field { d } Deque natives ──
                     if (mr.getFields().size() == 1
                             && ("__native_deque_size".equals(recName)
@@ -4015,6 +4035,16 @@ public final class BytecodeCompiler {
                     emitNode(cn.getArgs().get(0), b, argCount, localMap);
                     emitNode(cn.getArgs().get(1), b, argCount, localMap);
                     b.endInlineMapGet();
+                    return;
+                }
+                // sorted_map key_at / value_at → the inline probes
+                if ("__native_sorted_map_key_at".equals(name)
+                        || "__native_sorted_map_value_at".equals(name)) {
+                    boolean wantKey = "__native_sorted_map_key_at".equals(name);
+                    if (wantKey) b.beginInlineSortedKeyAt(); else b.beginInlineSortedValueAt();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    if (wantKey) b.endInlineSortedKeyAt(); else b.endInlineSortedValueAt();
                     return;
                 }
                 // map::contains_key / set::contains → InlineMapContainsKey

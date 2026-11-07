@@ -211,6 +211,42 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         return new MezzeSortedMap<>(keys, values, length, cmp, null);
     }
 
+    /**
+     * The key at a position in sort order, for a search driven from OUTSIDE
+     * this class.
+     *
+     * <p>WHY THIS EXISTS. A lookup used to run entirely in here, which meant
+     * the comparison ran in HOST code and therefore called back into guest
+     * code once per comparison — two allocations and an uncached
+     * {@code CallTarget.call} each time, measured at ~30 ns a comparison and
+     * ~300 ns a lookup. Nothing about how that callback is made can fix it:
+     * host code is past the boundary, so Graal can never inline a guest
+     * function into it. Driving the binary search from guest code instead
+     * makes the comparison an ordinary guest call that DOES inline, and
+     * reduces this class's job to an array read.
+     *
+     * <p>Ownership is revoked exactly as {@code getObject} does, and for the
+     * same reason: the caller has now observed these contents, so a later
+     * insert must copy rather than mutate underneath them. The flag makes it
+     * idempotent, so the repeated probes of one search pay it once.
+     */
+    public Object keyAt(int i) {
+        revokeOwnership();
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted map key index " + i + " of " + length);
+        }
+        return keys[i];
+    }
+
+    /** The value at a position in sort order. See {@link #keyAt}. */
+    public Object valueAt(int i) {
+        revokeOwnership();
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted map value index " + i + " of " + length);
+        }
+        return values[i];
+    }
+
     public boolean containsKey(K key) {
         revokeOwnership();
         return binarySearch(key) >= 0;

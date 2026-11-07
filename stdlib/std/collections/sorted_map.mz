@@ -71,13 +71,87 @@ let insert_with_cmp
 pub let insert: { m: SortedMap 'k 'v, k: 'k, v: 'v } with Ord 'k -> SortedMap 'k 'v = { m, k, v } ->
   insert_with_cmp { m = m, k = k, v = v, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
-## Returns the value for the given key, or None.
-let get_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, cmp: { a: 'k, b: 'k } -> Int } -> Option 'v = { m, k, cmp } ->
-  __native_sorted_map_get { m = m, k = k, cmp = cmp }
+## ── THE ORDERED LOOKUPS RUN HERE, NOT IN THE NATIVE ───────────────────────
+##
+## A SortedMap is a sorted array, so a lookup is a binary search. It used to
+## run inside the native, which meant the COMPARISON ran in host code and so
+## called back into guest code once per comparison — two allocations and an
+## uncached call each time, measured at ~30 ns a comparison and ~300 ns a
+## lookup against 10 ns for the hash map's.
+##
+## No way of making that callback cheaper reaches it: host code is past the
+## boundary, so Graal can never inline a guest function into it, and ten
+## callbacks a lookup is ten full Truffle calls however they are issued. Run
+## the search HERE and the comparison is an ordinary guest `<` that inlines,
+## while the native's whole job becomes an array read.
+##
+## This also drops two allocations per lookup that had nothing to do with
+## comparing: the native installed a fresh comparator on the map first, and
+## `withComparator` allocates a new map whenever the comparator differs — which
+## it always did, being built fresh at every call.
+##
+## The index must stay in [0, size); `find_index` maintains that, which is why
+## these two are private.
+let key_at: { m: SortedMap 'k 'v, i: Int } -> 'k = { m, i } ->
+  __native_sorted_map_key_at { m = m, i = i }
 
+let value_at: { m: SortedMap 'k 'v, i: Int } -> 'v = { m, i } ->
+  __native_sorted_map_value_at { m = m, i = i }
+
+## The position of `k` in sort order, or a negative number if absent.
+##
+## NO `do`-BLOCK BINDING IN HERE, and that is not a style choice. The obvious
+## spelling binds the probed key first:
+##
+##     let mk = key_at { m = m, i = mid }
+##     if mk < k then ... else if k < mk then ...
+##
+## and the typechecker then refuses this function's annotation:
+##
+##     Type annotation mismatch for 'find_index': the annotation constrains
+##     `with Ord 'k`, but the body applies Ord to a type the annotation does
+##     not name.
+##
+## A `do`-block `let` GENERALIZES its binding, so `mk` becomes polymorphic and
+## each use instantiates it fresh; the `Ord` the comparison raises then lands on
+## that fresh variable instead of on `'k`. Calling `key_at` directly inside the
+## comparison keeps the key's type where the annotation can see it — the same
+## expression typechecks fine without the intermediate binding, which is how
+## this was pinned down.
+##
+## Dropping the annotations instead was tried and is worse: the module compiles
+## and infers the right types, but `ElaborationInvariantGateTest` then reports
+## `UNBOUND_TYPE_VAR let:get` — the stray variable survives to the end of
+## elaboration, where something downstream would be guessing.
+##
+## `(lo + hi) / 2` is therefore written out rather than bound. It is integer
+## arithmetic on values already in registers and Graal shares it; the probes it
+## guards are inline operations, so a repeated `key_at` costs about half a
+## nanosecond and the whole search still beats the native one by 10x.
+##
+## STORED key on the left, probe key on the right — the order the native
+## comparator was handed, so an `Ord` that is not symmetric orders the array the
+## same way whichever side does the search.
+let find_index = { m, k, lo, hi } ->
+  if lo > hi then 0 - 1
+  else if key_at { m = m, i = (lo + hi) / 2 } < k
+    then find_index { m = m, k = k, lo = (lo + hi) / 2 + 1, hi = hi }
+  else if k < key_at { m = m, i = (lo + hi) / 2 }
+    then find_index { m = m, k = k, lo = lo, hi = (lo + hi) / 2 - 1 }
+  else (lo + hi) / 2
+
+## Turns a search result into an Option. Separate from `get` because `get`
+## cannot bind the index to a `do`-block `let` without detaching its `Ord`
+## (see `find_index`), and calling the search twice would double the work. This
+## helper raises no constraint of its own, so its annotation is accepted.
+let value_or_none: { m: SortedMap 'k 'v, idx: Int } -> Option 'v = { m, idx } ->
+  if idx < 0 then None else Some { val = value_at { m = m, i = idx } }
+
+## Returns the value for the given key, or None.
 pub let get: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'v = { m, k } ->
-  get_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  value_or_none { m = m,
+                  idx = find_index { m = m, k = k, lo = 0,
+                                     hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## Removes a key, returning a new map.
 let remove_with_cmp
@@ -87,13 +161,16 @@ let remove_with_cmp
 pub let remove: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> SortedMap 'k 'v = { m, k } ->
   remove_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
-## Returns True if the key exists.
-let contains_key_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, cmp: { a: 'k, b: 'k } -> Int } -> Bool = { m, k, cmp } ->
-  __native_sorted_map_contains_key { m = m, k = k, cmp = cmp }
+## Pins the search result to Int, which is what `value_or_none` does for
+## `get` by accident of taking an Int field. Without it, unannotated
+## `find_index` hands back a numeric type VARIABLE and `>= 0` raises an Ord
+## obligation on it that `contains_key`'s annotation cannot name.
+let found_at: { idx: Int } -> Bool = { idx } -> idx >= 0
 
+## Returns True if the key exists. Same search as `get`, without the Option.
 pub let contains_key: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Bool = { m, k } ->
-  contains_key_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  found_at { idx = find_index { m = m, k = k, lo = 0,
+                                hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## Returns the number of entries.
 pub let size: { m: SortedMap 'k 'v } -> Int = { m } -> __native_sorted_map_size { m = m }
