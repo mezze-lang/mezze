@@ -71,6 +71,45 @@ class EffectChurnRecoveryTest {
     """.trimIndent()
 
     /**
+     * THE PREMISE, AND WHY IT HAS TO BE CHECKED RATHER THAN ASSUMED.
+     *
+     * An effect only gives up when `StabilityAssumption.invalidate()` actually
+     * counts, and it returns early unless the assumption was HANDED OUT. For an
+     * ordinary effect the only thing that asks for it is
+     * `PerformD.doCachedSingleThreaded`'s `@Cached` initializer — and that
+     * specialization also carries the `singleThreaded` assumption, which is a
+     * plain `Assumption` invalidated FOREVER the moment a second thread touches
+     * handler state. There is no reset for it.
+     *
+     * So in a JVM where any earlier test has used threads, `effectStable` is
+     * never handed out, churn never counts, and NO effect can ever give up.
+     * These tests then have nothing to observe — and the positive one would
+     * pass VACUOUSLY, since "no effect is given up" is exactly what it asserts.
+     * Run alone they all pass; in the full suite two of them failed, which is
+     * how this was found.
+     *
+     * That is also a real fact about the system and not just about the tests:
+     * **the churn cliff is a single-threaded-process phenomenon.** A process
+     * that has ever handled effects on two threads is already on the verify
+     * tier permanently, where the handler-lookup memo is what helps it and
+     * recovery has nothing to recover from.
+     *
+     * This runs the churn phase ALONE and reports whether it registered, so
+     * every test below can state its premise instead of assuming it.
+     */
+    private fun churnRegisters(): Boolean {
+        MezzeTestHelper.run("""
+            $effect
+            let one = {} -> perform Ten in Pick.pick {}
+            let churn = { i, acc } ->
+              if i <= 0 then acc
+              else churn { i = i - 1, acc = acc + one {} }
+            churn { i = 2000, acc = 0 }
+        """.trimIndent())
+        return HandlerChainRegistry.givenUpCountForTests() >= 1
+    }
+
+    /**
      * THE LOAD-BEARING ONE. Warm up, churn past the limit, then run quietly for
      * longer than `RECOVERY_HITS` — and the effect must no longer be given up.
      *
@@ -79,6 +118,8 @@ class EffectChurnRecoveryTest {
      */
     @Test
     fun `a quiet effect recovers its free tier after churning past the limit`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(churnRegisters(),
+            "this JVM has lost single-threaded effects, so nothing can give up — see churnRegisters")
         val answer = MezzeTestHelper.run("""
             $effect
             let one = {} -> perform Ten in Pick.pick {}
@@ -105,6 +146,8 @@ class EffectChurnRecoveryTest {
      */
     @Test
     fun `a short quiet phase does not arm recovery`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(churnRegisters(),
+            "this JVM has lost single-threaded effects, so nothing can give up — see churnRegisters")
         val answer = MezzeTestHelper.run("""
             $effect
             let one = {} -> perform Ten in Pick.pick {}
@@ -131,6 +174,8 @@ class EffectChurnRecoveryTest {
      */
     @Test
     fun `a loop that installs every iteration never arms recovery`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(churnRegisters(),
+            "this JVM has lost single-threaded effects, so nothing can give up — see churnRegisters")
         val answer = MezzeTestHelper.run("""
             $effect
             let one = {} -> perform Ten in Pick.pick {}

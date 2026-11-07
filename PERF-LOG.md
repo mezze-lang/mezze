@@ -8854,3 +8854,62 @@ Second on the surface, and contained: the ~9 ns base cost. `sorted_map::size`,
 `HANDLERS` entries with no special case, which is precisely the lever that paid
 1.2-9.4x seven times on `mapsurface`. It needs no design decision, only the
 same work.
+
+#### A correction to the entry above: the churn cliff is a SINGLE-THREADED-process phenomenon
+
+`EffectChurnRecoveryTest` passed its gate and then failed the NEXT one, with
+nothing about it changed. The only difference was ten unrelated tests added
+elsewhere, which moved the execution order — so the earlier green was luck, and
+the real behaviour is order-dependent through process-global state.
+
+The cause is worth more than the test fix. An effect only gives up when
+`StabilityAssumption.invalidate()` counts, and that returns early unless the
+assumption was **handed out**. For an ordinary effect the only thing that ever
+asks for it is `PerformD.doCachedSingleThreaded`'s `@Cached` initializer — and
+that specialization also carries `singleThreaded`, a plain `Assumption`
+invalidated FOREVER the first time a second thread touches handler state, with
+no reset.
+
+So in any process that has ever handled effects on two threads, `effectStable`
+is never handed out, churn never counts, and **no effect can ever give up.**
+
+That reframes the whole row rather than just the test:
+
+- **a single-threaded process** is the one that hits the cliff, and it is the
+  one the recovery work above returns to the free tier (3.32x, 1 149 against
+  814);
+- **a process that has ever used two threads for effects** is already on the
+  verify tier permanently and can never leave it — for that one the
+  handler-lookup memo is the whole of the win (2.53x), and recovery has nothing
+  to recover from.
+
+Both halves of today's effects work were needed, and they serve different
+processes. Neither entry said so because neither knew it.
+
+#### What that costs the tests, stated rather than papered over
+
+Three of the four recovery tests now guard on the premise — they run the churn
+phase alone, check it registered, and `assumeTrue` on that. Run in a clean JVM
+all four execute and pass; in the full suite they are SKIPPED, because the
+premise genuinely does not hold there.
+
+That means **the gate does not verify the recovery mechanism**; it was verified
+by running the class alone, which is how the 4/4 pass and the trigger sentinel's
+1-of-4 were established. The positive test would otherwise have been worse than
+useless: its assertion is "no effect is given up", which is exactly what a JVM
+with no single-threaded effects satisfies for free — it would have passed
+VACUOUSLY and looked like coverage.
+
+This is the same class as the recorded `MezzeTestHelper`-static-typechecker
+finding, and the same remedy: run the suspect ALONE. Making it gate-verifiable
+would mean a reset for `SINGLE_THREADED_EFFECTS` or a forked JVM for this class,
+and adding a reset for a `final` assumption purely so a test can see it is how
+real invalidation bugs get masked.
+
+**The codebase had already hit this and said so.** Listing the gate's skips to
+check which were the new ones turned up, beside the three recovery tests,
+`ConcurrentHandlerIsolationTest`'s *"a single-threaded program keeps the
+single-threaded-effects assumption"* — skipping itself, in the same run, for
+exactly the same reason. So the conclusion above is not an inference from one
+afternoon's failure; it is a property of this process that an existing test
+already documents by guarding against it.
