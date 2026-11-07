@@ -7674,3 +7674,97 @@ too — `Async.spawn` is registered the same way — confirmed by inspection:
 record-ABI only, boundary lambda, null node, no scalar path. That is still a
 prediction about the SPLIT of the 8 µs, recorded so it can be checked rather
 than assumed.
+
+### RETRACTION 2026-11-07 — the empty scope is ~62 ns, not 7.3 µs. The "28x" finding does not exist
+
+Two entries above are wrong, and the commit titled *"the EMPTY scope is 28x"* is
+wrong in its title. The empty `scoped` row was measured at n=800 only. Measured
+where it actually converges:
+
+```
+  scoped, EMPTY     n=800       7 309 335 ps/op      <- what was published
+                    n=5 000       296 178
+                    n=20 000       66 696
+                    n=80 000       61 861            <- converged, 7% apart
+```
+
+**~62 ns, not 7 309 ns. The published figure was inflated 118x by warmup.**
+
+Everything built on it falls with it:
+
+| claim | status |
+|---|---|
+| "empty scope 7.3 µs" | **WRONG.** ~62 ns |
+| "28x the JVM's 0.26 µs" | **WRONG, and backwards.** 62 ns against `newVirtualThreadPerTaskExecutor()` open+close at 264 ns makes Mezze's empty scope ~4x FASTER than the JVM construct — with the caveat already noted, that they are not equivalent constructs |
+| "the ranked target: runs no user code for its 7.3 µs" | **WITHDRAWN.** There is no target here |
+| "cause named: `@TruffleBoundary` + `IndirectCallNode`, the unported record ABI" | **WITHDRAWN.** It was a causal story for a number that did not exist — and separately refuted by measurement, below |
+| "NEXT: port `scoped` to the scalar ABI" | **WITHDRAWN.** Do not do this on the strength of that entry |
+
+#### The refutation came from testing the cause instead of assuming it
+
+Before porting concurrency code I built a probe — `__native_glue_probe`, a
+record-ABI native with the *same shape* as `__native_async_scoped`
+(`@TruffleBoundary`, resolve the callback, invoke it through an
+`IndirectCallNode`) and nothing else in it. Two hypotheses died:
+
+```
+  native glue only (pure decl)        n=20 000  37 692 ps/op   n=80 000  35 801
+  the same native, `<Async, ...>` row n=20 000  44 785         n=80 000  41 272
+  scoped, EMPTY                       n=20 000  66 696         n=80 000  61 861
+```
+
+- **The glue is ~36 ns**, not microseconds. The boundary-plus-indirect-call
+  story was false by a factor of 200.
+- **The effect row costs nothing** — the same native declared `<Async, ...>` and
+  called inside a handler extent measures the same as the pure declaration.
+- `scoped`'s own bookkeeping is **62 − 36 = ~26 ns** over the glue, which is
+  what four small allocations, a context lookup, three `ThreadLocal` operations
+  and a lambda should cost. The original enumeration was right; the number it
+  was trying to explain was not.
+
+So the probe did its job twice over: it refuted the mechanism, and chasing the
+residue refuted the measurement.
+
+#### How this happened, which is the part worth keeping
+
+Rows 1 and 5 contain a real thread, so they cannot be run millions of times —
+n=800 to 1600 is all they allow in reasonable wall clock. Row 4 was sized to
+match them. **But the empty scope contains no thread**, so it can run a hundred
+times more iterations, and nobody asked it to.
+
+The aggravating detail: the commit immediately before this one records the rule
+that would have caught it — *"the only trustworthy method is to measure at two
+sizes of n and require the per-op figure to converge... the flags are a backstop
+against one failure mode; convergence across n is the test."* That was written,
+committed, and then not applied to row 4 in the same session. A rule recorded is
+not a rule followed.
+
+The `WARMUP-DOMINATED` flag added in that same commit **does** fire on all three
+larger readings (40x, 81x, 27x). At n=800 it did not — that is the third blind
+spot also documented there: when every pass is uniformly slow no spread test can
+see it. So the instrument was honest at every step and the error was entirely in
+how one row was sized.
+
+#### What survives
+
+```
+  native glue (boundary + IndirectCallNode + record)   ~36 ns    converged
+  scoped, EMPTY                                        ~62 ns    converged
+  scoped's own bookkeeping over the glue               ~26 ns
+  Java newVirtualThreadPerTaskExecutor open+close      264 ns    reference
+```
+
+`spawn + await` is **better supported than row 4 was, but not confirmed.** It
+has two sizes that agree — 10.1 µs at n=800 and 12.5/12.95 µs at n=1600 — and
+the figure moved UP with n, which is the opposite of what warmup inflation
+produces. That is weak evidence, not the 118x collapse row 4 suffered. Pushing
+it further is bounded by physics rather than patience: every operation is a real
+thread, so n=5000 means 50 000 thread round trips per row and the warmup passes
+alone exceed a 900 s budget. `join` at n=5000 timed out for the same reason.
+
+So the honest state of the thread-bearing rows: **~10-13 µs for spawn + await,
+from two agreeing sizes, with no third available at this cost.** `scoped + one
+task` (n=800) and `join` (unconverged) stay UNVERIFIED. The JVM baseline
+(`Thread.ofVirtual()` start+join, 4.68 µs) stands — same min-over-k, and a plain
+Java loop with no warmup cliff of this shape — so spawn + await at roughly 2-3x
+the JVM round trip is the surviving claim, and it was never the alarming one.

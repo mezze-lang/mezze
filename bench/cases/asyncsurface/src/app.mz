@@ -18,10 +18,17 @@
 ##     for why that is not tidiness: sharing a process let unrelated work run
 ##     while the timer did, measured as a 6x artefact.
 ##
-## N IS SMALL HERE AND THAT IS DELIBERATE. A spawn is a virtual thread; at
-## thousands of nanoseconds apiece a row needs hundreds, not millions, of
-## iterations to leave warmup. Each row's n is sized so one pass is tens of
-## milliseconds, and the ratio to the control is what survives.
+## N IS PER ROW, AND SIZING EVERY ROW LIKE THE THREAD ROWS IS THE MISTAKE THAT
+## PRODUCED A RETRACTION. A spawn is a real virtual thread, so rows 1/3/5 cannot
+## go past ~1600 iterations in a sane wall clock. Row 4 — `scoped` with an EMPTY
+## body — contains no thread at all, and at n=800 it read 7 309 335 ps/op
+## against 61 861 at n=80 000. A 118x warmup inflation, published as a finding,
+## because one row was sized to match rows that are slow for a reason it does
+## not share.
+##
+## So: EVERY ROW NEEDS TWO SIZES OF n AND MUST CONVERGE. The within-run flags
+## cannot substitute — at n=800 every pass was uniformly slow, so neither the
+## median-over-twice-the-minimum check nor the warmup check could fire.
 ##
 ## EVERY ROW CHECKSUMS. The accumulator is returned and printed, so a row that
 ## got fast by not doing the work reads as a different number.
